@@ -995,23 +995,7 @@ class PatchWatcher(private val project: Project) : Disposable {
     }
 
     private fun nodePatchesJson(nodePatches: List<NodePatch>): String {
-        val array = com.google.gson.JsonArray()
-        for (patch in nodePatches) {
-            val obj = com.google.gson.JsonObject()
-            obj.addProperty("component", patch.component)
-            obj.addProperty("node_key", patch.nodeKey)
-            obj.addProperty("op", patch.op)
-            patch.content?.let { obj.addProperty("content", it) }
-            patch.before?.let { obj.addProperty("before", it) }
-            patch.after?.let { obj.addProperty("after", it) }
-            if (patch.order.isNotEmpty()) {
-                val order = com.google.gson.JsonArray()
-                patch.order.forEach { order.add(it) }
-                obj.add("order", order)
-            }
-            array.add(obj)
-        }
-        return array.toString()
+        return nodePatchesJsonStatic(nodePatches)
     }
 
     private fun applyPatch(patch: IpcPatch): Boolean {
@@ -1911,6 +1895,12 @@ class PatchWatcher(private val project: Project) : Disposable {
                 val normalizedMatches = patch.baselineNormalizedHash != null &&
                     generationFenceContentHash(liveContent) == patch.baselineNormalizedHash
                 if (!rawMatches && !normalizedMatches) {
+                    if (patch.nodePatches.isNotEmpty() && nodePatchTargetsStillCurrent(patch, liveContent)) {
+                        LOG.info(
+                            "[patch-watcher] generation fence: full document drifted but node patch targets are still current for ${patch.file}",
+                        )
+                        return false
+                    }
                     LOG.info(
                         "[patch-watcher] generation fence: baseline drift (live doc moved on from queued baseline) for ${patch.file}",
                     )
@@ -1925,6 +1915,41 @@ class PatchWatcher(private val project: Project) : Disposable {
                 return true
             }
             return false
+        }
+
+        fun nodePatchTargetsStillCurrent(patch: IpcPatch, liveContent: String): Boolean {
+            if (patch.nodePatches.isEmpty()) return false
+            val nodePatchedComponents = patch.nodePatches.map { it.component }.toSet()
+            if (patch.patches.any { it.component !in nodePatchedComponents }) return false
+            if (patch.unmatched.isNotBlank() || !patch.frontmatter.isNullOrBlank() || patch.queueAuto != null) {
+                return false
+            }
+            if (patch.nodePatches.any { it.op != "insert" && it.expectedContent == null }) {
+                return false
+            }
+            return NativePatching.applyNodePatches(liveContent, nodePatchesJsonStatic(patch.nodePatches)) != null
+        }
+
+        fun nodePatchesJsonStatic(nodePatches: List<NodePatch>): String {
+            val array = com.google.gson.JsonArray()
+            for (patch in nodePatches) {
+                val obj = com.google.gson.JsonObject()
+                obj.addProperty("component", patch.component)
+                obj.addProperty("node_key", patch.nodeKey)
+                obj.addProperty("op", patch.op)
+                patch.content?.let { obj.addProperty("content", it) }
+                patch.expectedContent?.let { obj.addProperty("expected_content", it) }
+                patch.expectedContentHash?.let { obj.addProperty("expected_content_hash", it) }
+                patch.before?.let { obj.addProperty("before", it) }
+                patch.after?.let { obj.addProperty("after", it) }
+                if (patch.order.isNotEmpty()) {
+                    val order = com.google.gson.JsonArray()
+                    patch.order.forEach { order.add(it) }
+                    obj.add("order", order)
+                }
+                array.add(obj)
+            }
+            return array.toString()
         }
 
         /** EDT/file-thread variant that reads the live doc content from disk. */
@@ -2055,6 +2080,8 @@ data class NodePatch(
     val nodeKey: String,
     val op: String,
     val content: String? = null,
+    val expectedContent: String? = null,
+    val expectedContentHash: String? = null,
     val before: String? = null,
     val after: String? = null,
     val order: List<String> = emptyList(),
@@ -2672,6 +2699,8 @@ fun parsePatchJson(json: String): IpcPatch? {
                     nodeKey,
                     op,
                     obj.get("content")?.let { if (it.isJsonNull) null else it.asString },
+                    obj.get("expected_content")?.let { if (it.isJsonNull) null else it.asString },
+                    obj.get("expected_content_hash")?.let { if (it.isJsonNull) null else it.asString },
                     obj.get("before")?.let { if (it.isJsonNull) null else it.asString },
                     obj.get("after")?.let { if (it.isJsonNull) null else it.asString },
                     order,

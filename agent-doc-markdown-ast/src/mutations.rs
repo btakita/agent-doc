@@ -14,6 +14,7 @@ pub enum MutationError {
     ItemNotFound { component: String, id: String },
     NodeNotFound { component: String, node_key: String },
     DuplicateNodeKey { component: String, node_key: String },
+    StaleNode { component: String, node_key: String },
     InvalidNodeOrder(String),
     MalformedItem { component: String, node_key: String },
 }
@@ -40,6 +41,13 @@ impl fmt::Display for MutationError {
             } => write!(
                 f,
                 "duplicate node key `{node_key}` in component `{component}`"
+            ),
+            MutationError::StaleNode {
+                component,
+                node_key,
+            } => write!(
+                f,
+                "node `{node_key}` in component `{component}` no longer matches the patch baseline"
             ),
             MutationError::InvalidNodeOrder(message) => write!(f, "{message}"),
             MutationError::MalformedItem {
@@ -93,6 +101,7 @@ pub struct MutationNodePatch {
     pub node_key: String,
     pub op: MutationNodePatchOp,
     pub content: Option<String>,
+    pub expected_content: Option<String>,
     pub before: Option<String>,
     pub after: Option<String>,
     pub order: Vec<String>,
@@ -302,7 +311,7 @@ fn apply_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<S
         MutationNodePatchOp::Remove => remove_node_patch(source, patch),
         MutationNodePatchOp::Replace => replace_node_patch(source, patch),
         MutationNodePatchOp::Move => move_node_patch(source, patch),
-        MutationNodePatchOp::Strike => consume_node(source, &patch.component, &patch.node_key),
+        MutationNodePatchOp::Strike => strike_node_patch(source, patch),
         MutationNodePatchOp::Unstrike => unstrike_node_patch(source, patch),
     }
 }
@@ -326,6 +335,7 @@ fn remove_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<
     let Some(node) = nodes.iter().find(|node| node.node_key == patch.node_key) else {
         return Ok(source.to_string());
     };
+    ensure_expected_node_content(source, node, patch)?;
     let mut out = source.to_string();
     out.replace_range(node.item.start_byte..node.item.end_byte, "");
     Ok(out)
@@ -335,6 +345,7 @@ fn replace_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult
     let content = patch_node_source(patch)?;
     let nodes = item_nodes(source, &patch.component)?;
     let node = find_node(&nodes, &patch.component, &patch.node_key)?;
+    ensure_expected_node_content(source, node, patch)?;
     let mut out = source.to_string();
     out.replace_range(node.item.start_byte..node.item.end_byte, &content);
     Ok(out)
@@ -349,6 +360,7 @@ fn move_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<St
     find_component(source, &patch.component)?;
     let nodes = item_nodes(source, &patch.component)?;
     let node = find_node(&nodes, &patch.component, &patch.node_key)?;
+    ensure_expected_node_content(source, node, patch)?;
     let moved = source[node.item.start_byte..node.item.end_byte].to_string();
 
     let mut without_node = source.to_string();
@@ -366,9 +378,17 @@ fn move_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<St
     Ok(without_node)
 }
 
+fn strike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<String> {
+    let nodes = item_nodes(source, &patch.component)?;
+    let node = find_node(&nodes, &patch.component, &patch.node_key)?;
+    ensure_expected_node_content(source, node, patch)?;
+    consume_node(source, &patch.component, &patch.node_key)
+}
+
 fn unstrike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<String> {
     let nodes = item_nodes(source, &patch.component)?;
     let node = find_node(&nodes, &patch.component, &patch.node_key)?;
+    ensure_expected_node_content(source, node, patch)?;
     if !node.item.struck {
         return Ok(source.to_string());
     }
@@ -398,6 +418,24 @@ fn unstrike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResul
     let mut out = source.to_string();
     out.replace_range(start..end, &unstruck);
     Ok(out)
+}
+
+fn ensure_expected_node_content(
+    source: &str,
+    node: &MutationItemNode,
+    patch: &MutationNodePatch,
+) -> MutationResult<()> {
+    let Some(expected) = patch.expected_content.as_deref() else {
+        return Ok(());
+    };
+    let actual = &source[node.item.start_byte..node.item.end_byte];
+    if actual == expected {
+        return Ok(());
+    }
+    Err(MutationError::StaleNode {
+        component: patch.component.clone(),
+        node_key: patch.node_key.clone(),
+    })
 }
 
 fn anchored_insert_offset(
@@ -605,6 +643,7 @@ mod tests {
             node_key: node_key.to_string(),
             op,
             content: content.map(str::to_string),
+            expected_content: None,
             before: before.map(str::to_string),
             after: after.map(str::to_string),
             order: Vec::new(),
@@ -907,5 +946,44 @@ operator note
 
         assert_eq!(once, twice);
         assert_eq!(once.matches("- do [#gamma]\n").count(), 1);
+    }
+
+    #[test]
+    fn apply_node_patches_rejects_stale_target_node_but_allows_unrelated_drift() {
+        let doc = "\
+operator note
+<!-- agent:queue -->
+- do [#alpha]
+- do [#beta]
+- live buffer addition
+<!-- /agent:queue -->
+";
+        let stale = node_patch(
+            "queue:0:beta:0",
+            MutationNodePatchOp::Strike,
+            None,
+            None,
+            None,
+        );
+        let mut stale = stale;
+        stale.expected_content = Some("- do [#beta] changed elsewhere\n".to_string());
+        let err = apply_node_patches(doc, &[stale]).unwrap_err();
+        assert!(matches!(err, MutationError::StaleNode { .. }));
+
+        let accepted = node_patch(
+            "queue:0:beta:0",
+            MutationNodePatchOp::Strike,
+            None,
+            None,
+            None,
+        );
+        let mut accepted = accepted;
+        accepted.expected_content = Some("- do [#beta]\n".to_string());
+        let updated = apply_node_patches(doc, &[accepted]).unwrap();
+        assert!(
+            updated.contains("- live buffer addition\n"),
+            "unrelated document drift must be preserved:\n{updated}"
+        );
+        assert!(updated.contains("- ~~do [#beta]~~\n"));
     }
 }

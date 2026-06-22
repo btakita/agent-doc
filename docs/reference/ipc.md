@@ -99,7 +99,9 @@ Binary                    Filesystem              Plugin
       "component": "queue",
       "node_key": "queue:0:beta:0",
       "op": "strike",
-      "content": "- ~~do [#beta]~~\n"
+      "content": "- ~~do [#beta]~~\n",
+      "expected_content": "- do [#beta]\n",
+      "expected_content_hash": "sha256-of-expected-node-source"
     }
   ],
   "unmatched": "Content not targeting a specific component.",
@@ -108,7 +110,7 @@ Binary                    Filesystem              Plugin
 ```
 
 Each patch targets a `<!-- agent:name -->...<!-- /agent:name -->` component. The plugin replaces the content between markers with the patch content.
-`node_patches` carries the node-keyed mutation plan for component list items: each entry has a component, `node_key`, and operation such as `insert`, `remove`, `replace`, `strike`, `unstrike`, or `move`. Legacy `patches` remain present during the transition so older receivers can apply the same write.
+`node_patches` carries the node-keyed mutation plan for component list items: each entry has a component, `node_key`, and operation such as `insert`, `remove`, `replace`, `strike`, `unstrike`, or `move`. Existing-node mutations also carry `expected_content` / `expected_content_hash`; the shared native document model rejects a patch when the targeted node no longer matches, while allowing unrelated document drift to remain editor-owned. Legacy `patches` remain present during the transition so older receivers can apply the same write.
 
 Before the plugin mutates the editor-visible buffer or writes an ACK sidecar, it passes the final candidate document through `agent_doc_normalize_template_structure`. That shared FFI guard repairs safe duplicate scaffold shells and rejects ambiguous malformed template structure, preventing a socket/file IPC write from making a bad exchange/scaffold merge visible.
 

@@ -1945,6 +1945,7 @@ struct IpcNodePatchJson {
     node_key: String,
     op: String,
     content: Option<String>,
+    expected_content: Option<String>,
     before: Option<String>,
     after: Option<String>,
     #[serde(default)]
@@ -1978,6 +1979,7 @@ fn parse_node_patches_json(
                 node_key: patch.node_key,
                 op: parse_node_patch_op(&patch.op)?,
                 content: patch.content,
+                expected_content: patch.expected_content,
                 before: patch.before,
                 after: patch.after,
                 order: patch.order,

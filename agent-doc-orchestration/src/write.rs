@@ -6761,6 +6761,8 @@ scratch
                 && patch["content"]
                     .as_str()
                     .is_some_and(|content| content.contains("- ~~do [#beta]~~"))
+                && patch["expected_content"].as_str() == Some("- do [#beta]\n")
+                && patch["expected_content_hash"].as_str().is_some()
         }));
         assert!(patches.iter().any(|patch| {
             patch["component"] == "queue"

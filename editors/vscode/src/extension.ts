@@ -1682,6 +1682,8 @@ interface IpcNodePatch {
     node_key: string;
     op: string;
     content?: string;
+    expected_content?: string;
+    expected_content_hash?: string;
     before?: string;
     after?: string;
     order?: string[];

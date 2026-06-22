@@ -251,6 +251,14 @@ pub fn try_ipc(
             "baseline": baseline.unwrap_or(""),
             "reposition_boundary": true,
         });
+        if let Some(target_baseline) = ipc_before_content.as_deref().or(baseline) {
+            socket_payload["baseline_hash"] =
+                serde_json::Value::String(crate::debounce::content_hash(target_baseline));
+            socket_payload["baseline_normalized_hash"] =
+                serde_json::Value::String(crate::debounce::content_hash(
+                    &crate::git::normalize_transient_agent_doc_markers(target_baseline),
+                ));
+        }
         socket_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
         if let Ok(Some(ref cs)) = crate::cycle_state::load(file) {
             socket_payload["cycle_id"] = serde_json::Value::String(cs.cycle_id.clone());
@@ -728,6 +736,14 @@ pub fn try_ipc(
         "baseline": baseline.unwrap_or(""),
         "reposition_boundary": true,
     });
+    if let Some(target_baseline) = ipc_before_content.as_deref().or(baseline) {
+        ipc_payload["baseline_hash"] =
+            serde_json::Value::String(crate::debounce::content_hash(target_baseline));
+        ipc_payload["baseline_normalized_hash"] =
+            serde_json::Value::String(crate::debounce::content_hash(
+                &crate::git::normalize_transient_agent_doc_markers(target_baseline),
+            ));
+    }
     ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
     if let Ok(Some(ref cs)) = crate::cycle_state::load(file) {
         ipc_payload["cycle_id"] = serde_json::Value::String(cs.cycle_id.clone());
@@ -1879,11 +1895,14 @@ pub(crate) fn build_ipc_node_patches_json(before: Option<&str>, after: Option<&s
 
         for node in &before_nodes {
             if !after_by_key.contains_key(node.node_key.as_str()) {
+                let before_source = ipc_node_source(before, node);
                 node_patches.push(serde_json::json!({
                     "component": component.as_str(),
                     "node_key": node.node_key.as_str(),
                     "op": "remove",
-                    "content": ipc_node_source(before, node),
+                    "content": before_source,
+                    "expected_content": before_source,
+                    "expected_content_hash": crate::debounce::content_hash(&before_source),
                 }));
             }
         }
@@ -1930,6 +1949,8 @@ pub(crate) fn build_ipc_node_patches_json(before: Option<&str>, after: Option<&s
                 "node_key": node.node_key.as_str(),
                 "op": op,
                 "content": after_source,
+                "expected_content": before_source,
+                "expected_content_hash": crate::debounce::content_hash(&before_source),
             }));
         }
 
@@ -1953,6 +1974,12 @@ pub(crate) fn build_ipc_node_patches_json(before: Option<&str>, after: Option<&s
                     "node_key": *node_key,
                     "op": "move",
                 });
+                if let Some(node) = before_by_key.get(*node_key) {
+                    let before_source = ipc_node_source(before, node);
+                    patch["expected_content"] = Value::String(before_source.clone());
+                    patch["expected_content_hash"] =
+                        Value::String(crate::debounce::content_hash(&before_source));
+                }
                 if let Some(anchor) = after_shared[..index].last() {
                     patch["after"] = Value::String((*anchor).to_string());
                 } else if let Some(anchor) = after_shared.get(index + 1) {

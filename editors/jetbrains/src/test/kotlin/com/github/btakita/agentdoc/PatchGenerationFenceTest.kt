@@ -38,12 +38,16 @@ class PatchGenerationFenceTest {
     fun `parses cycle_id and baseline hash tokens`() {
         val json =
             """{"type":"patch","file":"/tmp/plan.md","patches":[],"reposition_boundary":true,
-               "cycle_id":"cycle-123","baseline_hash":"deadbeef","baseline_normalized_hash":"facefeed"}"""
+               "cycle_id":"cycle-123","baseline_hash":"deadbeef","baseline_normalized_hash":"facefeed",
+               "node_patches":[{"component":"queue","node_key":"queue:0:beta:0","op":"strike",
+                 "expected_content":"- do [#beta]\n","expected_content_hash":"cafebabe"}]}"""
         val patch = parsePatchJson(json)
         assertNotNull(patch)
         assertEquals("cycle-123", patch!!.cycleId)
         assertEquals("deadbeef", patch.baselineHash)
         assertEquals("facefeed", patch.baselineNormalizedHash)
+        assertEquals("- do [#beta]\n", patch.nodePatches.single().expectedContent)
+        assertEquals("cafebabe", patch.nodePatches.single().expectedContentHash)
     }
 
     @Test

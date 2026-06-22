@@ -1179,6 +1179,12 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         "unmatched": effective_unmatched,
         "baseline": ipc_baseline.unwrap_or(""),
     });
+    ipc_payload["baseline_hash"] =
+        serde_json::Value::String(crate::debounce::content_hash(&content_at_start));
+    ipc_payload["baseline_normalized_hash"] =
+        serde_json::Value::String(crate::debounce::content_hash(
+            &crate::git::normalize_transient_agent_doc_markers(&content_at_start),
+        ));
     ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
     if let Ok(Some(ref cs)) = crate::cycle_state::load(file) {
         ipc_payload["cycle_id"] = serde_json::Value::String(cs.cycle_id.clone());

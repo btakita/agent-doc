@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -62,7 +62,31 @@ So your reply sat in the mailbox; nothing wrote it to D1; the portal (and the ne
 - Tests (6 new + refactor of the existing inbound tests), full suite green (1089), built, committed (`fbba9eb`), pushed, **deployed** (worker `0ab29102`). It is **inert** until enabled — deploying it changed nothing in prod by itself.
 
 **What's left — operator infra to turn it on (`#msgmail4b`, filed in backlog):** in the Cloudflare dashboard, add an **Email Routing rule** delivering the portal Reply-To address (e.g. `info@briantakita.me` or a dedicated `replies@…`) to **this Worker** (Email Worker binding, not forward-to-address); verify the receiving domain's MX + Email Routing; then set `MESSAGE_EMAIL_INBOUND_ENABLED=true` and `MESSAGE_EMAIL_INBOUND_REPLY_TO` (and `MESSAGE_EMAIL_INBOUND_SECRET` for the HTTP path). Send a test reply and confirm it lands in the thread. I left this to you per the chosen split (it's security-sensitive and needs dashboard/MX access). Plan: `prds/message-email-roundtrip.md`.
-<!-- agent:boundary:1a7744f2 -->
+> **Queue prompt:** do [#f2w8]: Should the reply-to email be an "app email" with a token to enable inbound emails? I don't have a domain attached to the app yet. What domain/subdomain can we use for this staging app? I prefer a dedicated replies@... email.
+
+### Re: reply-to app email + token, and which domain for staging — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#f2w8]: Should the reply-to email be an "app email" with a token to enable inbound emails? I don't have a domain attached to the app yet. What domain/subdomain can we use for this staging app? I prefer a dedicated replies@... email.
+
+
+**Yes — a tokenized app reply-to is exactly the design that's already built.** The Reply-To on each notification is `replies+{TOKEN}@yourdomain`, where `{TOKEN}` is an opaque code that encodes the thread (which party, deal/account, and user). When the recipient replies, Cloudflare delivers the mail to the worker's `email()` handler, which reads the token and drops the message into the right thread. No code change needed for this — `message_reply_to_` already appends the token to whatever address you configure in `MESSAGE_EMAIL_INBOUND_REPLY_TO`. Your `replies@…` preference is fully supported: set it to `EFS Replies <replies@yourdomain>` and the code emits `replies+{TOKEN}@yourdomain`.
+
+**The one real constraint — Cloudflare Email Routing + the `+token` plus-address.** The token rides as a plus-address (`replies+{TOKEN}@…`). Cloudflare Email Routing custom-address rules match the **exact** address only — a rule for `replies@` will **not** match `replies+{TOKEN}@`. So inbound must be delivered via a **catch-all rule → the EFS Email Worker**. That's the gotcha that drives the domain choice.
+
+**Domain options for staging:**
+
+1. **Dedicated subdomain/domain (recommended).** Use a domain or subdomain that carries *no other mail*, point its MX at Cloudflare Email Routing, and set a **catch-all → EFS Worker**. Then `replies+{TOKEN}@<that-domain>` all route to the worker with zero collateral. Since you don't have the real app domain yet, easiest staging paths: a cheap dedicated domain, or a subdomain on a Cloudflare zone you control that isn't used for other email. Set `MESSAGE_EMAIL_INBOUND_REPLY_TO = "EFS Replies <replies@<that-domain>>"`.
+
+2. **Reuse `briantakita.me`** (already your Cloudflare-verified *sender*). Fastest, but a catch-all there would capture **all** mail to `briantakita.me` (including `info@` and anything personal) and hand it to the EFS worker. Only do this if `briantakita.me` receives no mail you care about — otherwise it's risky.
+
+You can keep **sending** from the verified `info@briantakita.me` (From and Reply-To are allowed to differ), so you don't need to re-verify a sender to use a different reply domain.
+
+**If you'd rather avoid a catch-all:** I can add a token-as-local-part scheme so the reply address is `{TOKEN}@replies.<domain>` (no plus) — that still needs a catch-all on the `replies.` subdomain, but it keeps the apex clean and reads better. Say the word and I'll wire it; otherwise the current plus-address scheme is ready.
+
+**My recommendation:** pick a dedicated subdomain on a Cloudflare zone, enable Email Routing with a catch-all → the EFS Worker, and use `replies@<subdomain>`. Once you tell me the exact domain/subdomain, I'll set `MESSAGE_EMAIL_INBOUND_REPLY_TO` (+ flip `MESSAGE_EMAIL_INBOUND_ENABLED=true`) in `wrangler.toml` and deploy; you add the Cloudflare Email Routing catch-all rule (dashboard) and we send a test reply to confirm it lands. That completes `#msgmail4b`/`#f2w8`.
+<!-- agent:boundary:c6a587d3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -74,7 +98,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#f2w8]: Should the reply-to email be an "app email" with a token to enable inbound emails? I don't have a domain attached to the app yet. What domain/subdomain can we use for this staging app? I prefer a dedicated replies@... email.
 <!-- /agent:queue -->
 
 ## Backlog

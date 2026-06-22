@@ -38,7 +38,47 @@ completed
 Compacted content:
 ❯ - Archived 1 response topic(s): admin in-app notification endpoint
 ❯ - Prior summary/context: prior compacted content: Archived 8 response topic(s): post-compaction state + the "queue all gated items" directive;...
-<!-- agent:boundary:3b297ccb -->
+
+### Re: hide wiring instructions until lender selected — gpt-5
+
+> **Queue prompt:**
+>
+> Do not show "Wiring Instructions (Secure Link)" in a deal until a lender is selected.
+
+Done. The admin deal Loan Detail tab now hides the deal/loan-specific `Wiring Instructions (Secure Link)` card until that deal has at least one selected lender. The standalone loan detail path uses the selected lender state from its interested-lender fetch, and the embedded deal tab passes the already-loaded selected-lender count through while keeping the Interested Lenders tab itself suppressed.
+
+Platform Settings can still generate the platform-wide secure share link; this change only gates the deal/loan-specific card.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/deal_detail.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/loan_detail.tsx`
+- `src/equityfundingsource-dev/tests/wire-instruction-links.test.ts`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
+- `src/equityfundingsource-dev` parent submodule pointer
+
+Commands:
+- `bun test tests/wire-instruction-links.test.ts tests/admin-investor-pipeline.test.ts`
+- `bun test tests/wire-instruction-links.test.ts tests/admin-investor-pipeline.test.ts tests/admin-pipeline.test.ts`
+- `git diff --check`
+- `make check`
+- `gh run list --workflow CI --limit 1`
+- `git push origin main` in `src/equityfundingsource-dev`
+- `git push origin main` in the parent repo
+
+Verification: focused suites passed. Full `make check` passed after rebasing on the latest EFS `origin/main`; the digest flags the intentionally logged `d1 down` from the passing non-fatal outbox test, while the command exit code is 0. GitHub still has no workflow named `CI`, so there was no CI run to inspect.
+
+Commits:
+- EFS submodule: `23338d7` (`fix(admin): gate wire links on lender selection`) pushed to `origin/main`.
+- Parent repo: `37b2981a8` (`chore: update efs submodule for wire link gate`) committed locally. Parent push was rejected as non-fast-forward because parent `main` was already divergent (`ahead 50, behind 19`) with unrelated dirty work present; I did not merge/rebase that broader parent history.
+
+Escalation: none.
+
+Next queue head remains `deploy`; I did not deploy in this cycle.
+
+Confidence: high.
+<!-- agent:boundary:fbaed805 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,7 +90,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Do not show "Wiring Instructions (Secure Link)" in a deal until a lender is selected.
+- ~~Do not show "Wiring Instructions (Secure Link)" in a deal until a lender is selected.~~
 - deploy
 <!-- /agent:queue -->
 

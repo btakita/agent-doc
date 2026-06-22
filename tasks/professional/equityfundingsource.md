@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -123,7 +123,29 @@ Sources: [Cloudflare Email Routing — Subdomains](https://developers.cloudflare
 So the chain is bidirectional: a party's email reply lands in the thread *and* notifies admins by email; an admin can then reply (in-app or by email) and the party is emailed — "and so on." Note the admin notification already happens **today** for in-app party messages (outbound notifications are enabled); the email-reply path simply feeds the same notify once `#msgmail4b` is switched on.
 
 **Net:** nothing to flip on my side until the Cloudflare subdomain + catch-all exist. Add those and ping me, and I'll enable + deploy + we test a round-trip. (`#f2w8`/`#msgmail4b`)
-<!-- agent:boundary:a76aff14 -->
+> **Queue prompt:** Enable the bidirectional real-time sync between email replies and messages.
+
+### Re: bidirectional email↔message real-time sync — ENABLED in prod — opus-4-8
+
+> **Queue prompt:**
+>
+> Enable the bidirectional real-time sync between email replies and messages.
+
+
+Done — enabled and deployed. I verified your Cloudflare side is in place first (DNS shows `efs.briantakita.me` MX → `route{1,2,3}.mx.cloudflare.net` + SPF `include:_spf.mx.cloudflare.net`, and the apex `briantakita.me` MX is untouched → still Protonmail), then flipped the gate:
+
+- `MESSAGE_EMAIL_INBOUND_ENABLED = "true"`
+- `MESSAGE_EMAIL_INBOUND_REPLY_TO = "EFS Replies <reply@efs.briantakita.me>"`
+
+Committed (`28300b3`), pushed, **deployed** (worker `addc055c`) — the deploy output confirms both vars are live, and the prod inbound route flipped from **501 (disabled) → 401** (the 401 is just the unset HTTP shared-secret; the Cloudflare `email()` Worker path doesn't use it). Full suite green (1090).
+
+**What's now live (bidirectional, real-time):**
+- Outbound notifications carry `reply+{token}@efs.briantakita.me` as Reply-To.
+- A **party** reply (lender/broker/borrower) → Cloudflare Email Routing → the Worker `email()` handler → writes the message into the right thread, **fires the `#msgrt` realtime tick** (any open portal/admin view updates live), **and emails all active EFS admins**.
+- An **admin** reply → posts to the thread + realtime tick + emails the party. So the loop continues "and so on."
+
+**One thing only you can finish — the live proof (`#f2w8`/`#msgmail4b`, still gated for that reason):** I can't send a real inbound email through Cloudflare, so please send one test reply to a notification and confirm it lands in the thread. If it doesn't appear, the single thing I can't see from here is the **catch-all routing rule action** on `efs.briantakita.me` — in the Cloudflare dashboard it must be **Email Routing → efs.briantakita.me → catch-all → Send to a Worker → `equityfundingsource`** (the MX/SPF are already correct). Tell me how the test goes and I'll close `#f2w8`.
+<!-- agent:boundary:f5343245 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,7 +157,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Enable the bidirectional real-time sync between email replies and messages.
 <!-- /agent:queue -->
 
 ## Backlog

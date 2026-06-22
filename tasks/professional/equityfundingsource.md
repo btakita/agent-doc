@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -94,7 +94,62 @@ Deploy: activated Worker version `41030a3b-218e-41ab-92e1-a73c97715da2` at `http
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:0a737916 -->
+
+### Re: expired sign-in link prefill + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Implemented, pushed, and deployed the email sign-in retry prefill fix.
+
+Security answer: prefilling is OK only when it does not reveal account data from an arbitrary token. The deployed behavior now prefers the DB-backed token-owner lookup when the token row still exists; for future generated email sign-in links, the verify URL also carries the recipient email, and the invalid/expired-token redirect uses that query email only as a fallback after validating it as an email string. A forged or unknown token cannot make the server disclose the account email; it can only echo an email value already present in the URL, and the resend POST remains enumeration-safe.
+
+Important live note: the exact old URL from the queue still redirects without an email because remote D1 has no row for that token hash and the old URL has no `email=` query value. I did not guess or hard-code an address, because that would be the unsafe part. Newly sent sign-in links will include `email=` and will prefill after expiry/invalid use.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/email_login.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/routes.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/user_management/index.ts`
+- `src/equityfundingsource-dev/tests/email-login.test.ts`
+- `src/equityfundingsource-dev` parent submodule pointer
+
+Commands:
+- `curl` pre-deploy check of the exact expired URL: confirmed production still omitted `email=`
+- Remote D1 query for the exact token hash: confirmed no `email_login_tokens` row exists for it
+- `bun test tests/email-login.test.ts tests/auth.test.ts`
+- `bun test tests/email-login.test.ts tests/auth.test.ts tests/admin-dashboard.test.ts`
+- `git diff --check`
+- `make check`
+- `git commit -m "Fix expired email login retry prefill"`
+- `git push origin main` in EFS
+- temporary parent worktree gitlink commit + push
+- `make deploy`
+- `gh run list --workflow CI --limit 1` in EFS and parent repos
+- Live smoke checks for `/`, the exact old expired URL, a future-style invalid verify URL with `email=`, and the redirected `/login/email` page
+
+Verification:
+- Focused suites passed: `66 pass`, `0 fail` across `tests/email-login.test.ts`, `tests/auth.test.ts`, and `tests/admin-dashboard.test.ts`.
+- Full `make check` passed: `1131 pass`, `0 fail`, followed by app and Worker builds. The suite still logs the intentional non-fatal `d1 down` outbox test path while exiting cleanly.
+- Remote D1 reports `No migrations to apply`.
+- Live root returned `200`.
+- Live future-style invalid verify URL returned `303` to `/login/email?...&email=prefill-check%40example.com`.
+- Live redirected email-login page returned `200` and rendered `Sign in by email`, the expiration message, `value="prefill-check@example.com"`, and `Email me a sign-in link`.
+- The exact old URL still returns `303` without `email=` because there is no retained token-owner row for that token and no email query value in the old URL.
+- Both EFS and parent repos report no GitHub workflow named `CI`, so there was no CI run to inspect.
+
+Commits:
+- EFS submodule: `a54155a` (`Fix expired email login retry prefill`) pushed to `origin/main`.
+- Parent gitlink: `3aeff7e92` (`chore: update efs submodule for email login prefill`) pushed to parent `origin/main` from a clean temporary worktree.
+
+Deploy: activated Worker version `6e6f1da2-6dcd-4c56-a54c-9a451d50014f` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Session note: preflight first recovered and committed a stale orphaned response while consuming the prior expired-link queue head, so I treated that prompt as still requiring real verification and handled it in this deploy cycle.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:6bcc3c98 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -106,8 +161,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~https://equityfundingsource.brian-takita.workers.dev/login/email/verify?token=7uyIxPaKpf37j0FrmC4GU3dx59EHj7PCCyMpiRtDUx8&role=admin is an expired link. If I click on it, I'm sent to https://equityfundingsource.brian-takita.workers.dev/login/email?role=admin&error=This+sign-in+link+has+expired+or+was+already+used.+Request+a+new+one+below. without the email field filled out. The email field should be filled out. Is this ok with security?~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

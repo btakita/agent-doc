@@ -281,7 +281,12 @@ Verification after staging/committing:
 
 I added a recommended follow-up to reconcile the superproject `main` divergence and merge the pushed branch without a force-push.
 
-### Re: equityfundingsource sync recovery — gpt-5
+### Re: equityfundingsource sync recovery — gpt-5 (HEAD)
+
+> **Queue prompt:**
+>
+> Why am I unable to sync with equityfundingsource.md? Fix the root cause. I have not been able to connect to equityfundingsource.md since rebooting. There also is no obvious recovery path for the operator. I attempted a recovery with opencode but now it does not sync. `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.`. We need a way to recover that "just works" for individual sessions.
+
 
 > **Queue prompt:** Why am I unable to sync with equityfundingsource.md? Fix the root cause. I have not been able to connect to equityfundingsource.md since rebooting. There also is no obvious recovery path for the operator. I attempted a recovery with opencode but now it does not sync. `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.`. We need a way to recover that "just works" for individual sessions.
 
@@ -324,14 +329,66 @@ GitHub CI for the latest pushed submodule commit was started (`27972775024`) and
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- Why am I unable to sync with equityfundingsource.md? Fix the root cause. I have not been able to connect to equityfundingsource.md since rebooting. There also is no obvious recovery path for the operator. I attempted a recovery with opencode but now it does not sync. `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.`. We need a way to recover that "just works" for individual sessions.
+- ~~Why am I unable to sync with equityfundingsource.md? Fix the root cause. I have not been able to connect to equityfundingsource.md since rebooting. There also is no obvious recovery path for the operator. I attempted a recovery with opencode but now it does not sync. `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.`. We need a way to recover that "just works" for individual sessions.~~
 - Enable incremental compilation to speed up local dev builds + installs. Save full compilations for pre-release + ci. Switch to faster linkers like lld or mold via .cargo/config.toml, which can reduce link time by 27-70%. Use `cargo build --timings` to identify bottlenecks.
+- Can we use incremental compilation for releases as well? Or should we perform a full build? The build time significantly delays development.
 ---
 Still getting too many IPC issues. Repair needs to run too frequently. The AST/semantic merge should resolve without the need to repair.
 ```
 • The repair tool correctly refused to commit the stale buffer. Since that drift was caused by the write-back transport
   and not user-authored work, I’m going to patch the working tree back to the committed session-doc content and re-run
   session-check/status.
+```
+---
+JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
+```
+[route] target tmux session: 0
+[route] Still waiting for codex (1s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (3s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (4s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (6s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (7s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (9s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (11s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (12s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (14s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (15s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (17s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (18s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (20s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (21s)... last line:   reverse-i-search:
+[route] Still waiting for codex (23s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (24s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (26s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (27s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (29s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (30s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (32s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (33s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (35s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (36s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (38s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (39s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (41s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (42s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (44s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (46s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (47s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (49s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (50s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (52s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (53s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+[route] Still waiting for codex (55s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+[route] Still waiting for codex (56s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+[route] Still waiting for codex (58s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+[route] Still waiting for codex (59s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+Error: dispatch-only codex reopen refused to inject into pane %24 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
+```
+---
+JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
+```
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
 ```
 ---
 [#freshqueueauth]: These heads are not stale. I just typed them in.

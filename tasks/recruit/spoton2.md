@@ -145,11 +145,6 @@ Do not invent details. Avoid generic AI chatbot answers. Make me sound practical
 
 Closeout proof: changed path is the session document only. Commands included `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc --version`, local reads of `spoton.md` and the SpotOn transcript, a public check of Interviews Chat, and this `agent-doc finalize`. No code tests were run because no code changed. No escalation was needed. Confidence is high for the prompt framing; exact SpotOn internal systems and funnel data still need confirmation in the interview.
 
-### Re: SpotOn prompt closeout repair — gpt-5
-
-The paste-ready SpotOn Interviews Chat prompt is in the previous response section. I also removed the generated CRDT conflict marker scaffolding from the live working tree and preserved the drained queue state (`queue: stop`, empty inactive queue), so the document now reflects that the request was handled.
-
-Closeout proof: changed path is the session document only. Commands included recovery preflight/session-check, `agent-doc repair --apply-recovery`, a narrow generated-marker cleanup, `agent-doc plan`, and this forced-disk `agent-doc finalize`. No code tests were run because no code changed. No escalation was needed. Confidence is high.
 <!-- agent:boundary:9772a015 -->
 <!-- /agent:exchange -->
 

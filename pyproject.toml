@@ -6,3 +6,7 @@ dependencies = [
     "litellm[proxy]",
     "vllm",
 ]
+
+[tool.uv]
+python-preference = "only-managed"
+package = false

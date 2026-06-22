@@ -473,7 +473,7 @@ Done. Cleaned up `mail/drafts/2026-06-18-virtuousai-forward-note.md` and regener
 **PDF regenerated and verified:** `mail/drafts/2026-06-18-virtuousai-forward-note.pdf` — 1 page, Palatino (P052) to match the resume, "Brian Takita" appears once as the header, apostrophes render clean, full corrected text confirmed via `pdftotext`. `.md` committed in the `mail` submodule (`6feb206`); the `.pdf` stays untracked on disk as before.
 
 **One gotcha worth fixing (`#notecss`, recommended):** `mail/templates/build-pdf.sh` defaults to `proposal.css`, which is Helvetica sans-serif — running the note through it plain swaps the font off Palatino. I rendered with a Palatino stylesheet (resume's font stack) to keep it matching, but it'd be worth adding a proper Palatino letter template so this doesn't bite the next note. Nothing sent.
-<!-- agent:boundary:2968c92c -->
+<!-- agent:boundary:9efb0f82 -->
 <!-- /agent:exchange -->
 
 ## Queue

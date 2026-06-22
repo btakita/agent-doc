@@ -81,13 +81,13 @@
 	url = git@github.com:btakita/agent-kit.git
 [submodule "src/lazily-zig"]
 	path = src/lazily-zig
-	url = git@github.com:btakita/lazily-zig.git
+	url = git@github.com:lazily-hub/lazily-zig.git
 [submodule "src/lazily-py"]
 	path = src/lazily-py
-	url = git@github.com:btakita/lazily-py.git
+	url = git@github.com:lazily-hub/lazily-py.git
 [submodule "src/lazily-rs"]
 	path = src/lazily-rs
-	url = git@github.com:btakita/lazily-rs.git
+	url = git@github.com:lazily-hub/lazily-rs.git
 [submodule "src/agent-resume"]
 	path = src/agent-resume
 	url = git@github.com:btakita/agent-resume.git
@@ -135,4 +135,4 @@
 	url = git@github.com:EqualExperts-Assignments/equal-experts-neat-exhilarating-friendly-inspiration-72a3934e990b.git
 [submodule "src/lazily-spec"]
 	path = src/lazily-spec
-	url = git@github.com:btakita/lazily-spec.git
+	url = git@github.com:lazily-hub/lazily-spec.git

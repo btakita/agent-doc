@@ -23,7 +23,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 
 **Runbooks:** [runbooks/](runbooks/) — harness-invocation, commit, planning-dispatch, pending-ops, model-tier-gate, compact-exchange, streaming-checkpoints, document-format, code-enforced-directives, architecture-first (agent-doc development/dogfooding only), and more.
 
-<!-- tsift:code-navigation v=0.1.70 -->
+<!-- tsift:code-navigation v=0.1.73 -->
 ## Code Navigation
 
 Keep this block self-contained for Codex/OpenCode prompt reuse. If this repository also ships current `.claude/skills/tsift/SKILL.md` or `runbooks/code-navigation.md`, use those deeper runbooks for command detail instead of expanding this block.
@@ -48,7 +48,7 @@ Prefer bounded digest commands over raw transcript, diff, and verbose-log reads:
 - If RTK is installed, digest-runner delegates supported generic command families through `rtk rewrite` and records the chosen compact filter in `report.filter` while preserving tsift artifact handles.
 - Codex, OpenCode, and other harnesses without Claude-style `PreToolUse` hooks should run `tsift rewrite --run '<command>'` before broad `rg`/recursive grep, raw transcript/session/log reads, `git diff`/`git show`/single-patch `git log`, `cargo test`/`pytest`, and cargo build/check/clippy/install commands so the same search, session-digest, diff-digest, and digest-runner rewrites apply manually. OpenCode can install this path as `/tsift-rewrite-run` with `tsift init --opencode`.
 
-For local verification, run `make check` before committing. After local changes, inspect the latest GitHub Actions CI run once with `gh run list --workflow CI --limit 1`; fix any already-failing relevant tests, but if the latest run is queued or in progress, record that status and finish the turn from local verification evidence instead of waiting for CI to complete. Do not use `gh run watch` as a closeout gate unless the user explicitly asks.
+For local verification, run `make check` before committing. After local changes, check the latest GitHub Actions CI run with `gh run list --workflow CI --limit 1` and fix any failing tests before calling the work complete.
 
 Only read full source files when tsift results are insufficient.
 <!-- /tsift:code-navigation -->

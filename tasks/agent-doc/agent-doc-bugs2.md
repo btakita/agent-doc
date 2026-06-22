@@ -34,113 +34,19 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260622-202335.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260622-205008.md`*
 
 Compacted content:
-- Archived 7 response topic(s): editor stale-state rollback and slow Run Agent Doc; build and install status; install closeout repair; 4 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-
-### Re: do [#rtndsync] — gpt-5
-
-> **Queue prompt:**
->
-> JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
-> ```
-> [route] target tmux session: 0
-> [route] Still waiting for codex (1s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (3s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (4s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (6s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (7s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (9s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (11s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (12s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (14s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (15s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (17s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (18s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (20s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (21s)... last line:   reverse-i-search:
-> [route] Still waiting for codex (23s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (24s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (26s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (27s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (29s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (30s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (32s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (33s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (35s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (36s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (38s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-> [route] Still waiting for codex (39s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-> [route] Still waiting for codex (41s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-> [route] Still waiting for codex (42s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-> [route] Still waiting for codex (44s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-> [route] Still waiting for codex (46s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-> [route] Still waiting for codex (47s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-> [route] Still waiting for codex (49s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-> [route] Still waiting for codex (50s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-> [route] Still waiting for codex (52s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-> [route] Still waiting for codex (53s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
-> [route] Still waiting for codex (55s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
-> [route] Still waiting for codex (56s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
-> [route] Still waiting for codex (58s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
-> [route] Still waiting for codex (59s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
-> Error: dispatch-only codex reopen refused to inject into pane %24 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
-> ```
-
-
-Implemented `#rtndsync` for the realtime editor-to-editor broadcast path.
-
-What changed:
-- `realtime_model::broadcast_editor_change` now computes `node_patches` from the target peer buffer to the CRDT-merged buffer instead of queuing component-only peer convergence.
-- Broadcast payloads now include the target peer's raw and transient-normalized baseline hashes, so JetBrains can use the existing generation fence plus target-node proof to allow unrelated live-buffer drift while rejecting stale target nodes before ACK.
-- Legacy component patches remain in the payload as fallback for older receivers; current JetBrains and VS Code receivers already skip component patches for components covered by native node patches.
-- SimWorld two-editor convergence now asserts targeted peer deliveries carry node patches, and the direct realtime payload unit test verifies node patches, baseline hashes, and fallback component patches.
-- Updated `SPEC.md`, `docs/reference/ipc.md`, `docs/reference/node-merge-architecture.md`, and `VERSIONS.md` for the new realtime node-patch contract.
-
-Build/install:
-- `make install-full` completed: `cargo install --path . --force`, release library build, and `agent-doc lib-install`.
-- `agent-doc --version` reports `agent-doc 0.34.35`; the package version was not bumped in this task.
-- `lib-install` installed `libagent_doc-0.34.35.so` and marked 2 controllers for recycle at the next idle boundary.
-- I did not rebuild editor plugin packages because no JetBrains or VS Code plugin source changed; this uses their existing native node-patch support.
-
-Commits/push:
-- `src/agent-doc` submodule: `f9bfb8ed` (`fix: broadcast realtime node patches`) pushed to `btakita/agent-doc main`.
-- Parent repo pointer: `0fb80d06b` (`chore: update agent-doc realtime node patches`) pushed to `btakita/agent-loop main`. I used a clean temporary worktree for this parent push because the current parent checkout has unrelated local commits/dirty files; that avoided pushing unrelated local history.
-
-Verification:
-- `cargo test -p agent-doc-orchestration broadcast_editor_change_writes_targeted_peer_patch_file` passed.
-- `cargo test -p agent-doc multi_editor_crdt_broadcast_converges_without_file_cache_conflict` passed.
-- `make check` passed: clippy, 4,984 tests, doctests, and the ignored medium sim target.
-- Latest `agent-doc` GitHub Actions `CI` for `f9bfb8ed` was still `in_progress` when checked (`27982220170`, started `2026-06-22T20:35:05Z`); the previous CI run was green. The parent `agent-loop` repo does not have a workflow named `CI`.
-
-The two `Run Agent Doc` route complaints bundled after the queue head are separate route/supervisor issues, not the `#rtndsync` node-sync implementation. I left the existing route/operator-verify tracking items untouched.
-
-Escalation: none.
-
-Confidence: high for the realtime node-patch broadcast path and local verification; pending only remote CI completion for the pushed `agent-doc` commit.
-- Latest `agent-doc` GitHub Actions `CI` for `f9bfb8ed` was still `in_progress` when checked (`27982220170`, started `2026-06-22T20:35:05Z`); the previous CI run was green. The parent `agent-loop` repo does not have a workflow named `CI`.
-- `make check` passed: clippy, 4,984 tests, doctests, and the ignored medium sim target.
-- `cargo test -p agent-doc multi_editor_crdt_broadcast_converges_without_file_cache_conflict` passed.
-- `cargo test -p agent-doc-orchestration broadcast_editor_change_writes_targeted_peer_patch_file` passed.
-- Parent repo pointer: `0fb80d06b` (`chore: update agent-doc realtime node patches`) pushed to `btakita/agent-loop main`. I used a clean temporary worktree for this parent push because the current parent checkout has unrelated local commits/dirty files; that avoided pushing unrelated local history.
-- `src/agent-doc` submodule: `f9bfb8ed` (`fix: broadcast realtime node patches`) pushed to `btakita/agent-doc main`.
-- I did not rebuild editor plugin packages because no JetBrains or VS Code plugin source changed; this uses their existing native node-patch support.
-- `lib-install` installed `libagent_doc-0.34.35.so` and marked 2 controllers for recycle at the next idle boundary.
-- `agent-doc --version` reports `agent-doc 0.34.35`; the package version was not bumped in this task.
-- `make install-full` completed: `cargo install --path . --force`, release library build, and `agent-doc lib-install`.
-- Updated `SPEC.md`, `docs/reference/ipc.md`, `docs/reference/node-merge-architecture.md`, and `VERSIONS.md` for the new realtime node-patch contract.
-- SimWorld two-editor convergence now asserts targeted peer deliveries carry node patches, and the direct realtime payload unit test verifies node patches, baseline hashes, and fallback component patches.
-- Legacy component patches remain in the payload as fallback for older receivers; current JetBrains and VS Code receivers already skip component patches for components covered by native node patches.
-- Broadcast payloads now include the target peer's raw and transient-normalized baseline hashes, so JetBrains can use the existing generation fence plus target-node proof to allow unrelated live-buffer drift while rejecting stale target nodes before ACK.
-- `realtime_model::broadcast_editor_change` now computes `node_patches` from the target peer buffer to the CRDT-merged buffer instead of queuing component-only peer convergence.
-<!-- agent:boundary:2a0678e9 -->
+❯ - Archived 1 response topic(s): do [#rtndsync]
+❯ - Prior summary/context: prior compacted content: Archived 7 response topic(s): editor stale-state rollback and slow Run Agent Doc; build and ...
+<!-- agent:boundary:33df318f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- JB `Run Agent Doc` does not submit with Codex or is very slow to submit. The submit retries should be very frequent. At least 1/sec if not more frequent.
+- I'm still seeing JB `Clear Session Cache` dialogs. Is the CPC instance up to date? Are all supervisors instances up to date?
 ---
 JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
 ```

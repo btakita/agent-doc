@@ -71,7 +71,17 @@ Changed paths: no final file-content change from the rebase; the final tree matc
 Verification: `git rev-list --left-right --count main...origin/main` is `0 0`; `git ls-remote origin refs/heads/main` reports `b34635be1ff6b3997e41afc2bfaaf91e8b8be776`; `git log --merges 40bda6d55..main` is empty; `git diff --stat a3700b068..main` is empty. I did not run `make check` because this was a history rewrite with no content delta and the workspace contains unrelated dirty edits. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
 
 Escalation: used a guarded `git push --force-with-lease=main:ad2433059...` because the remote had been pushed to the merge commit during the cycle; the lease ensured the push would fail if origin moved again.
-<!-- agent:boundary:25207836 -->
+
+### Re: Queue Preservation Repair — gpt-5
+
+> **Queue prompt:**
+>
+> rebase agent-loop origin onto the local repo or force push if it is too difficult.
+
+Consumed by the completed rebase/force-push above. `origin/main` was rewritten with `--force-with-lease` from the accidental merge commit `ad2433059` to the rebased linear head `b34635be1`, and the latest remote check reported the expected SHA before the session response commit.
+
+Changed paths: only the session document was repaired in this closeout; no repo content changed for the rebase itself. Verification remains: local and remote were aligned at the rebased head (`git rev-list --left-right --count main...origin/main` returned `0 0` before this document repair commit), the rebased range had no merge commits, and `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
+<!-- agent:boundary:d46bc72b -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -255,48 +255,13 @@ Commits pushed: agent-doc `3d110b3a`, superproject `b1169577d`. I installed loca
 Verified: focused test `cargo test -p agent-doc-orchestration auto_trigger_clear_cooldown_waits_until_timeout_instead_of_terminal_skip`; `make check` green (clippy, 4972 nextest tests, doctests, medium SimWorld). CI status check could not be read: `gh run list --workflow CI --limit 1` returned HTTP 401 bad credentials.
 
 `#qcm1verify` stays open: it is still an operator-verify item requiring a live edit-during-finalize cycle. The partial duplicated free-text queue item is not closed by this patch; I filed `#ftqpartialdup` so that same-node/free-text duplication gets its own regression instead of being hidden under this no-submit fix.
-<!-- agent:boundary:218f7b51 -->
+<!-- agent:boundary:4ee04b31 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - :pushpin: do [#qcm1verify]
----
-JB `Run Agent Doc` on equityfundingsource.md did not submit.
-```
-Press Enter to restart, or 'q' to exit.
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for codex TUI
-[lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.35.so (symlink: libagent_doc.so)
-[lib-install] auto-recycle: 2 controller(s) marked to recycle at next idle boundary, 3 skipped (set AGENT_DOC_RECYCLE_ON_INSTALL=0 to disable)
-[agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
-[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve
-[agent-doc] supervisor binary is stale while a self-draining loop owns the drain; requesting the in-session loop to yield one boundary so the recycle can hot-reload/restart at a clean boundary
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] supervisor auto-install: rebuilding + installing agent-doc from /home/brian/work/btakita/agent-loop/src/agent-doc so the next queue item runs on the freshly-committed source
-   Compiling agent-doc-orchestration v0.1.0 (/home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-orchestration)
-   Compiling agent-doc-markdown-ast v0.34.0 (/home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-markdown-ast)
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] idle_queue_watch: clear cooldown active for tasks/professional/equityfundingsource.md, skipping passive queue dispatch
-   Compiling agent-doc v0.34.35 (/home/brian/work/btakita/agent-loop/src/agent-doc)
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-```
----
-agent-doc partially duplicated free-text queue item in equityfundingsource.md
-```
-- Run through all videos in the corpus. Show the relevant videos to enrich any fishing location page. A video match should kick off the enrichment process on that fishing location page.
-- Run through all videos in the corpus. Show the relevant videos to enrich any fishing location page. A video match should kick off the enrichment process on that 
-```
----
-- JB `Run Agent Doc` on monsterrodholders.md sent prompt but did not submit.
 - :pushpin: [#pendaddorder]
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` does nothing. Subsequent JB `Run Agent Doc` eventually dispatches...it seems there's a delay before working. Please enable JB `Run Agent Doc` to dispatch immediately.
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` sometimes has the dispatch storm (multiple duplicate prompts) and no submit.

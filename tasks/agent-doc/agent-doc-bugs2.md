@@ -76,12 +76,36 @@ The plugin hot-reloads the `.so` on its mtime watch and re-runs `agent_doc_start
 3. **Operator-verify heads at the front** (`#tb4q`, `#k7mf`) need a live editor/pane and can't be agent-drained — drive them yourself, or move them below the agent code items so the drain doesn't stall on them.
 4. **Agent-drainable code items** ready to drain on a healthy transport: `#qheadstrike` (kills the answered-head re-surfacing churn — highest leverage), then `#editorbufwin`, `#hap7`, `#fbwire`, `#j9ja`, `#agentreloadrestart`.
 5. **Done this session:** `#opslogtrack` (live + verified), `#supinstallvis` filed.
-<!-- agent:boundary:17cf09b3 -->
+
+### Re: do [#qheadstrike] — P2 commit-seam strike implemented — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#qheadstrike]
+
+
+Implemented `#qheadstrike` P2 — the root fix for answered free-text heads re-surfacing (the `#rt83`/`#qflood` phantom-pin churn that dominated this session).
+
+**What was already there (P1 + P3):** `strike_answered_free_text_queue_heads` already strikes *all* answered free-text heads regardless of position and is pushpin/fence/baseline-aware, with end-to-end tests. The matching was never the problem.
+
+**The gap (P2):** the strike ran only on the finalize write path (`write.rs`). When `finalize` hit `live_prompt_drift` and the cycle closed out through the standalone `agent-doc commit` recovery path (`git.rs commit_with_outcome`) — exactly what's been happening all session under the wedged IPC — the strike never ran, so the answered head stayed unstruck and re-surfaced every cycle.
+
+**Fix (agent-doc submodule `84a939f7`):** run the strike at the top of `commit_with_outcome`, before staging, sourcing the answered response from the durable capture ledger (`cycle_state.capture_id` → capture `response_body`). Now the strike is a property of reaching `committed` regardless of which path committed — `agent-doc commit`, `reset --from-current` → commit, and `--force-disk` all converge. Idempotent (already-struck heads are skipped), so the finalize path's earlier strike is unaffected; best-effort, never blocks a commit.
+
+**Verification:** new test `commit_seam_strikes_answered_free_text_head_from_capture` (recovery-path parity + negative: unanswered head preserved); `make check` green (**4950** tests). Plan updated.
+
+Marking `#qheadstrike` done. The remaining piece is the live recovery-path proof, filed as `[#qheadstrikeverify]` (operator-verify) — it goes live once the supervisor recycles onto `84a939f7`; ops.log will then show `commit_seam_free_text_strike ... struck=N` and answered heads will stop re-surfacing.
+<!-- agent:boundary:0e099f16 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~:pushpin: do [#qheadstrike]~~
+- :pushpin: do [#hap7]
+- :pushpin: do [#fbwire]
+- :pushpin: do [#j9ja]
+- :pushpin: do [#agentreloadrestart]
 - :pushpin: do [#tb4q]
 - :pushpin: do [#k7mf]
 - :pushpin: Add `Stop Agent` and `Restart Agent` in JB + VSCode menus.
@@ -96,12 +120,8 @@ The plugin hot-reloads the `.so` on its mtime watch and re-runs `agent_doc_start
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` does nothing. Subsequent JB `Run Agent Doc` eventually dispatches...it seems there's a delay before working. Please enable JB `Run Agent Doc` to dispatch immediately.
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` sometimes has the dispatch storm (multiple duplicate prompts) and no submit.
 - :pushpin: do [#arsm]
-- :pushpin: do [#agentreloadrestart]
 - :pushpin: do [#restartagentmenu]
-- :pushpin: do [#j9ja]
 - :pushpin: do [#editorbufwin]
-- :pushpin: do [#hap7]
-- :pushpin: do [#fbwire]
 - :pushpin: do [#qnodemerge4wire]
 - :pushpin: do [#jbdisprecycle]
 - :pushpin: do [#sqedit-race]
@@ -115,8 +135,6 @@ The plugin hot-reloads the `.so` on its mtime watch and re-runs `agent_doc_start
 - :pushpin: do [#gf5n]
 - :pushpin: do [#supinstallvis]
 - :pushpin: do [#1jec]
-- do [#qheadstrike]
-- ~~do [#opslogtrackverify]~~
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -145,6 +163,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#qheadstrikeverify] [operator-verify] #qheadstrike Live-verify the P2 commit-seam free-text strike (agent-doc submodule 84a939f7, superproject 7ef5256e4). Code shipped + make check green (4950); goes live once the supervisor recycles onto the new binary. Proof: answer a free-text queue head in a cycle whose finalize falls into live_prompt_drift/commit-recovery (or reset --from-current -> commit), then confirm ops.log shows `commit_seam_free_text_strike ... struck=N (#qheadstrike)` AND the answered head is struck (~~...~~) with no phantom re-surfacing on the next preflight (queue_drainable_head_count drops).
 - [ ] [#supinstallvis] [recommended] #agent-doc-bug #supinstallfeedback follow-up: the supervisor auto-install status (surface_supervisor_auto_install_status, idle_watch.rs) is surfaced ONLY as a transient tmux display-message on the status line, which is easy to miss while the pane scrollback keeps showing the misleading post-exit "Press Enter to restart" keepalive — so an operator watching the pane body still perceives a ~1-min stall. Residual: make the rebuild state visible in the pane BODY/scrollback (not just the status line) without disturbing the keepalive Enter-to-restart reader, e.g. a pane title set + a single non-input-consuming visible line, or render it through the JB/VSCode plugin notification surface (overlaps #qpauseux notification rendering). Decide the safe pane-write mechanism with the operator before implementing (send-keys risks being consumed by the keepalive). Plan TBD.
 - [ ] [#agentreloadrestart] restart-agent Phase 1: supervisor restart re-resolves harness from current frontmatter (agent claude->opencode takes effect on restart) + boundary auto-restart when resolved harness differs, behind agent_doc_agent_change_restart (default ON). Log harness_change_detected old/new + agent_restart_boundary_gate + agent_restart_performed. SimWorld + make tmux-ci. Plan: tasks/agent-doc/plan-restart-agent.md
 - [ ] [#restartagentmenu] restart-agent Phase 2 (after agentreloadrestart): RestartAgentAction.kt JB menu cmd mirroring RestartSupervisorProcessAction.kt + plugin.xml registration + TerminalUtil restart wiring; bump pluginVersion; build signed+unsigned. Log action invocation + resolved harness. Decide alongside-vs-replace Restart Supervisor Process with operator. Plan: tasks/agent-doc/plan-restart-agent.md
@@ -152,7 +171,6 @@ What are #next-steps to fix bugs?
 - [ ] [#editorbufwin] merge-core: P1 the #pcwc post-commit reconcile must preserve unconsumed user queue additions on disk (do NOT overwrite the disk addition with HEAD); P2 auto-recover the commit (automate the manual reset --from-current); P4 refresh the stale supervisor CRDT enabling the drift. Plan: tasks/agent-doc/plan-editor-buffer-wins-queue-merge.md
 - [ ] [#hap7] merge-core: scope the CRDT/semantic merge to per-structural-node (not whole-component) so a concurrent operator edit to one queue item cannot duplicate adjacent structure; when operator deletes structure agent content targets, note it in agent:exchange instead of merging. Plan: tasks/agent-doc/plan-scoped-crdt-merge-no-structural-duplication.md
 - [ ] [#fbwire] Phase 2: wire convergence_gate_decision into the supervisor idle-queue-watch inter-item dispatch (gather committed/editor-converged/ipc-inflight==0/actor-idle; defer next trigger until Dispatch; on ForceDiskFallback do real --force-disk + record_force_disk_fallback). SimWorld + make tmux-ci. Plan: tasks/agent-doc/plan-fullboundary-convergence-gate.md
-- [ ] [#qheadstrike] strike ALL answered free-text queue heads (not just one/cycle), move the strike onto the committed seam so force-disk/reset->commit recovery paths converge it, and normalize head matching (pushpin glyph + item split). Plan: tasks/agent-doc/plan-freetext-queue-head-autostrike.md
 - [ ] [#qnodemerge4wire] Phase 4: thin JB DocumentListener.documentChanged + VS Code onDidChangeTextDocument reporters that split a replacement into delete+insert and call the agent_doc_record_editor_op FFI; verify byte-offset/Yrs unicode-offset semantics on non-ASCII edits. Needs plugin build. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 4)
 - [ ] [#jbdisprecycle] OPERATOR-TEST (code R1-R4 shipped submodule d21079b7): at a recycle boundary fire JB Run Agent Doc on a 2nd doc during the hot-reload burst; confirm a single dispatch_start_proof WITH submit and no stranded start_session failed. ops.log marker: route_dispatch_submit_recycle_settle.
 - [ ] [#sqedit-race] OPERATOR-TEST Phase 4 (Phases 1-3 shipped 3c4c8bbb): after make install + admin recycle, queue prune-noise this doc; confirm queue_stale_noise_lines drops to 0 and sticks across a later preflight. Plan: tasks/agent-doc/plan-supervisor-direct-queue-edit-race.md

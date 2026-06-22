@@ -166,7 +166,42 @@ fix(auth): allow same-user email login links (#email-login-signed-in-notice)
 
 Keep email-login links single-use while allowing a still-valid link opened by the same signed-in user to consume the token and continue to the normal portal destination. Different signed-in users still get the logout notice before token consumption; docs and auth route tests cover both branches.
 ```
-<!-- agent:boundary:3b53fb13 -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Deployed the current EFS `main` commit, including the same-user email login link fix from `e43d99a`.
+
+Changed paths: none in the EFS repo for this deploy-only cycle. The EFS submodule is clean after deployment.
+
+Commands:
+- `git status -sb` in EFS
+- `git ls-remote origin main` in EFS
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`
+- `make deploy`
+- Post-deploy `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`
+- Live smoke `curl` checks for `/`, `/login/email?role=admin&email=deploy-smoke@example.com`, and invalid `/login/email/verify?...&email=deploy-smoke@example.com`
+- `gh run list --workflow CI --limit 1` in EFS and parent repos
+
+Verification:
+- Pre-deploy EFS branch was clean and aligned with `origin/main` at `e43d99a`.
+- Remote D1 reported `No migrations to apply` before deploy.
+- `make deploy` rebuilt the Worker, applied remote D1 migrations, and deployed successfully.
+- Deployed Worker version: `d0717747-5d10-471c-bc31-a8b344ce1fd1` at `https://equityfundingsource.brian-takita.workers.dev`; cron remains `0 * * * *`.
+- Post-deploy D1 migration check again reported `No migrations to apply`.
+- Live `/` returned `200`.
+- Live `/login/email?role=admin&email=deploy-smoke%40example.com` returned `200`.
+- Live invalid verify URL returned `303` to `/login/email?role=admin&error=This+sign-in+link+has+expired+or+was+already+used.+Request+a+new+one+below.&email=deploy-smoke%40example.com`.
+- Both EFS and parent repos still report no GitHub workflow named `CI`, so there was no CI run to inspect.
+
+Repo state note: the parent working tree still has unrelated local divergence/drift, including the EFS submodule pointer relative to the local parent HEAD. I left that untouched; the EFS submodule itself is clean.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:c305b6b1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -178,7 +213,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Clicking on an email login link while logged in as the same user still goes to https://equityfundingsource.brian-takita.workers.dev/?notice=You%E2%80%99re%20already%20signed%20in.%20Please%20log%20out%2C%20then%20open%20your%20email%20sign-in%20link%20again. I seems that GWT would still be beneficial to cover this case. Can we relax the 1 time token and just use an expiration instead? Will this be insecure? It will be more usable.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -114,7 +114,7 @@ Proof:
 - Commits pushed: EFS submodule `d6f37dc` (`fix(admin): clarify lender proposal terms (#cmtsec)`), parent pointer `d24137b9b` (`chore: update efs submodule for cmtsec`).
 - Escalation: none. Preflight still warns that the installed `agent-doc` binary/cdylib are stale relative to source; I left that build/recycle work out of this product-code cycle.
 - Confidence: high.
-<!-- agent:boundary:c065c53d -->
+<!-- agent:boundary:997f4e82 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,7 +128,7 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - do [#cmtsec]
 - [#5q7z-ship]: confirmed
-- [#67v2-aa-local]: auto-advance confirmed
+- ~~[#67v2-aa-local]: auto-advance confirmed~~
 <!-- /agent:queue -->
 
 ## Backlog

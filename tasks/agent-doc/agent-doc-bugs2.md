@@ -351,7 +351,23 @@ Verification:
 - `make check` passed: clippy, 4,980 nextest tests, doctests, and the medium SimWorld test.
 
 Per the latest operator instruction, I did not wait for CI.
-<!-- agent:boundary:94d570fa -->
+
+### Re: incremental compilation for releases — gpt-5
+
+> **Queue prompt:** Can we use incremental compilation for releases as well? Or should we perform a full build? The build time significantly delays development.
+
+Use incremental compilation for local development and dogfood installs; keep official release artifacts on the full `release` profile.
+
+The reason is that release builds should optimize for reproducibility, final binary quality, and fewer cache-dependent surprises. Rust incremental compilation is a local build accelerator; it relies on compiler cache state and can trade off some optimization/benchmark cleanliness. That is acceptable for `make install` while iterating, but it is the wrong default for tag/CI/published artifacts.
+
+The current split is the intended one:
+
+- `make install`: fast local path using `release-local`, incremental compilation, reusable `target/local-install`, and local `mold`/`lld` linker flags when available.
+- `make install-full`: full release-profile local install for pre-release parity.
+- CI/release workflows: keep `cargo build --release` / full release-profile builds.
+
+So the development loop should not wait on full release builds anymore. Use `make install` repeatedly while developing, then run `make install-full` only when validating the pre-release artifact path. If CI build time becomes the bottleneck, optimize CI with dependency/target caching or `sccache`, but keep the final release profile itself full.
+<!-- agent:boundary:1700affb -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -34,125 +34,18 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260622-014427.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260622-042851.md`*
 
 Compacted content:
-❯ - Archived 5 response topic(s): JB Run Agent Doc "stalled without feedback" during auto-install; clear all gated review items → actionable backlog replacements; JB `Run Agent Doc` stalled without feedback; 2 more
-❯ - Prior summary/context: prior compacted content: Archived 1 response topic(s): do [#pcwcwarn]
-
-### Re: #opslogtrack verified live — opus-4-8
-
-The supervisor recycled onto the new binary, so `#opslogtrack` is now live in `.agent-doc/logs/ops.log`. Confirmed directly from the log — two documents interleaved, each attributable:
-
-```
-[2026-06-22T01:46:32Z] queue_dispatch_skipped file=tasks/agent-doc/agent-doc-bugs2.md … doc=agent-doc-bugs2 session=b26b9957-… turn=cycle-1782092736424
-[2026-06-22T01:46:32Z] queue_dispatch_skipped file=tasks/professional/equityfundingsource.md … doc=equityfundingsource session=62fe1f41-… turn=cycle-1782092755072
-```
-
-Every line carries the ISO timestamp plus the appended ` doc=<stem> session=<id> turn=<cycle_id>` suffix, and the `agent-doc-bugs2` vs `equityfundingsource` lines are now distinguishable by `doc=`/`session=` — the multi-document tracking you asked for. Marking `#opslogtrackverify` done.
-
-Note: those same lines show `reason=queue_control_paused` / `queue_dispatch_skipped`, i.e. the supervisor is correctly respecting the halt — the frontmatter shows `queue: start` flipped back, but `admin queue pause` is still active so the supervisor isn't auto-dispatching. If you want the drain to actually resume, run `agent-doc admin queue resume tasks/agent-doc/agent-doc-bugs2.md` (and confirm the JB editor IPC is reconnected). The head is still operator-verify `#tb4q`.
-❯ Make the transport healthy. The end part of the response that guides me on how to advance the queue should have been placed in this document.
-
-### Re: make the transport healthy + advance the queue — opus-4-8
-
-> **Queue prompt:** Make the transport healthy. The end part of the response that guides me on how to advance the queue should have been placed in this document.
-
-**Transport repair (agent-side, done this cycle):** the wedge is the JetBrains plugin's editor-IPC listener socket (a supervisor recycle alone didn't fix it — `admin inspect` showed `supervisor:fresh` but `projection_lag=true`). The agent-side lever is refreshing the cdylib the plugin hot-reloads:
-
-1. `cargo build --release` (picks up the `#opslogtrack` source too)
-2. `agent-doc lib-install` → `libagent_doc-0.34.35.so` refreshed; 2 controllers marked to recycle
-3. `agent-doc admin recycle` → controller marked to recycle at the next idle boundary
-
-The plugin hot-reloads the `.so` on its mtime watch and re-runs `agent_doc_start_ipc_listener`, which should re-establish the listener. If this very response committed through a clean editor-IPC path (no `live_prompt_drift`), the transport is healthy again. If `projection_lag`/`live_prompt_drift` persists, the plugin hasn't picked up the reload — then the reliable fix is an **IDE-side restart** (close/reopen the doc tab or restart IntelliJ); that is the one step I cannot perform from here.
-
-### How to advance the queue (kept in the document, as requested)
-
-1. **Clear the transport** (above) — confirm a clean closeout with no `live_prompt_drift`.
-2. **Resume dispatch:** the queue is `admin queue pause`d (the `#qflood` flood-guard). Frontmatter is already `queue: start`. To let the supervisor auto-dispatch again:
-   ```
-   agent-doc admin queue resume tasks/agent-doc/agent-doc-bugs2.md
-   ```
-3. **Operator-verify heads at the front** (`#tb4q`, `#k7mf`) need a live editor/pane and can't be agent-drained — drive them yourself, or move them below the agent code items so the drain doesn't stall on them.
-4. **Agent-drainable code items** ready to drain on a healthy transport: `#qheadstrike` (kills the answered-head re-surfacing churn — highest leverage), then `#editorbufwin`, `#hap7`, `#fbwire`, `#j9ja`, `#agentreloadrestart`.
-5. **Done this session:** `#opslogtrack` (live + verified), `#supinstallvis` filed.
-
-### Re: do [#qheadstrike] — P2 commit-seam strike implemented — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: do [#qheadstrike]
-
-
-Implemented `#qheadstrike` P2 — the root fix for answered free-text heads re-surfacing (the `#rt83`/`#qflood` phantom-pin churn that dominated this session).
-
-**What was already there (P1 + P3):** `strike_answered_free_text_queue_heads` already strikes *all* answered free-text heads regardless of position and is pushpin/fence/baseline-aware, with end-to-end tests. The matching was never the problem.
-
-**The gap (P2):** the strike ran only on the finalize write path (`write.rs`). When `finalize` hit `live_prompt_drift` and the cycle closed out through the standalone `agent-doc commit` recovery path (`git.rs commit_with_outcome`) — exactly what's been happening all session under the wedged IPC — the strike never ran, so the answered head stayed unstruck and re-surfaced every cycle.
-
-**Fix (agent-doc submodule `84a939f7`):** run the strike at the top of `commit_with_outcome`, before staging, sourcing the answered response from the durable capture ledger (`cycle_state.capture_id` → capture `response_body`). Now the strike is a property of reaching `committed` regardless of which path committed — `agent-doc commit`, `reset --from-current` → commit, and `--force-disk` all converge. Idempotent (already-struck heads are skipped), so the finalize path's earlier strike is unaffected; best-effort, never blocks a commit.
-
-**Verification:** new test `commit_seam_strikes_answered_free_text_head_from_capture` (recovery-path parity + negative: unanswered head preserved); `make check` green (**4950** tests). Plan updated.
-
-Marking `#qheadstrike` done. The remaining piece is the live recovery-path proof, filed as `[#qheadstrikeverify]` (operator-verify) — it goes live once the supervisor recycles onto `84a939f7`; ops.log will then show `commit_seam_free_text_strike ... struck=N` and answered heads will stop re-surfacing.
-
-### Re: do [#qheadstrikeverify] — verification status — opus-4-8
-
-`#qheadstrike` (P2 commit-seam free-text strike) is **code-complete but not yet live-provable** — this stays `[operator-verify]`.
-
-- **Shipped**: submodule HEAD `84a939f7` ("qheadstrike P2: strike answered free-text heads at the commit seam"), make check green (4950). Superproject pin `7ef5256e4`.
-- **Not live**: the installed `agent-doc` (0.34.35) predates `84a939f7` — preflight raises `stale_install`. The strike code path isn't running in any tmux/JB supervisor yet.
-- **No proof in ops.log**: `grep commit_seam_free_text_strike .agent-doc/ops.log` → empty. Expected while the binary is stale.
-- **Why it can't be agent-completed**: the proof needs (a) the new binary live via `make install` + supervisor recycle, and (b) a live finalize cycle that falls into `live_prompt_drift`/commit-recovery while answering a free-text queue head — both require a live editor/pane. Mid-session `make install` is also contraindicated (finalize client would outrun the running supervisor → exit-75 churn + dropped queue edits), so I did **not** install this turn.
-
-**Operator steps to close it**: from `src/agent-doc`, `make install` (or `cargo install --path . && cargo build --release && agent-doc lib-install`), `agent-doc admin recycle`, then drive one cycle that answers a free-text queue head through a drift/commit-recovery finalize. Confirm ops.log shows `commit_seam_free_text_strike ... struck=N (#qheadstrike)`, the answered head is `~~struck~~`, and `queue_drainable_head_count` drops with no phantom re-surfacing.
-
-(Two unpushed submodule commits `50d8f021`/`84a939f7` and stray `cargo fmt`-only edits in `merge.rs`/`decisions.rs`/`queue_consume.rs` are out of scope here — left untouched per the release-hold + scope discipline.)
-
-### Re: do [#hap7] — per-structural-node CRDT merge wired into the orchestration path — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: do [#hap7]
-
-
-Done. `#hap7` (`#qcellmerge1`) is implemented, tested, and committed.
-
-**Root cause found:** the per-component / per-keyed-child merge machinery (`merge_by_component` → `merge_aligned_nodes` → `reconcile_component_body`) already existed and was already used by the **FFI/editor** merge path — but the **orchestration** production path (`merge_contents_crdt` / `merge_contents_crdt_with_ops`, used by run/finalize/stream/realtime) still called the **whole-document** `crdt::merge`. That whole-doc blob merge is what let a concurrent operator edit to one queue item duplicate/splice adjacent structure (the virtuousai + efs queue-prompt duplication).
-
-**Fix (submodule `33e1eee1`, superproject `68290edf7`):**
-- Routed `merge_contents_crdt` / `merge_contents_crdt_with_ops` (diff-guess branch) through `crdt::merge_by_component`, so each `agent:*` component — and each keyed child inside list/exchange components — reconciles against its own base. The op-replay branch stays whole-doc (captured ops carry whole-document offsets).
-- **Structural safety net:** if the per-node merged result no longer round-trips to the same top-level component-name sequence as `ours`, fall back to the proven whole-doc merge — never emits a malformed framing that would trip the exchange-tail repair.
-- **Operator-order spine (`#qauthorder`):** list components (queue/backlog/review/done) use `theirs` (the live editor/disk side) as the order-union spine so an operator reorder survives the merge; `exchange` keeps `ours` (append-only history).
-
-**Verification:** `make check` green — **4951 passed**, clippy clean. Added `crdt_merge_concurrent_queue_insert_no_structural_duplication` (a concurrent operator queue-insert during an agent response: the new item appears exactly once, no splice into the queue).
-
-Committed locally only (no push/install — per the release-freeze; you're driving install+recycle). Goes live after `make install` + `admin recycle`. Filed `#hap7verify` `[operator-verify]` for the live no-duplication eyeball.
-
-### Re: do the install+recycle (not publish) — opus-4-8
-
-> **Queue prompt:**
->
-> I want you to do the install+recycle. Just don't release + publish yet.
-
-
-> **Queue prompt:** I want you to do the install+recycle. Just don't publish.
-
-Done — `#hap7` is now **live locally**.
-
-- **`make install`** (in `src/agent-doc`): rebuilt + installed the binary and refreshed the cdylib via `lib-install` onto submodule HEAD `33e1eee1` (the per-structural-node CRDT merge). `cargo build --release` ran as part of it.
-- **`agent-doc admin recycle`**: controller marked to recycle at its next idle boundary; `admin inspect` now reports `freshness=controller:fresh,supervisor:fresh`. The supervisor adopts the new binary when this turn ends (idle boundary).
-- **Not published** (per your instruction) — no `cargo publish`, tag, or GitHub release. Commits remain **local** (submodule `33e1eee1`, superproject `68290edf7` / `bc5dc05d4`); say the word and I'll push to origin (push ≠ publish), but I did not push unprompted given the freeze.
-
-**`#jpmt` (`#hap7verify`)** — gated, not done. The install+recycle unblock is complete, so the per-component merge is live; the remaining proof is genuinely operator-gated: in a live editor, insert/edit ONE `agent:queue` item while an agent exchange response is in flight (the virtuousai/efs repro) and confirm the queue item appears exactly once with no adjacent-structure duplication. `ops.log` should show multiple short `[crdt] merge:` lines (per-component) rather than one whole-doc merge.
-<!-- agent:boundary:efc4cebb -->
+- Archived 6 response topic(s): #opslogtrack verified live; make the transport healthy + advance the queue; do [#qheadstrike]; 3 more
+- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
+<!-- agent:boundary:bcbcc8b1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#hap7]~~
-- ~~I want you to do the install+recycle. Just don't release + publish yet.~~
+- Use the logs to validate or invalidate any operator verify items in the queue.
 - :pushpin: do [#fbwire]
 - :pushpin: do [#j9ja]
 - :pushpin: do [#qnodemerge4wire]
@@ -187,7 +80,7 @@ Done — `#hap7` is now **live locally**.
 - :pushpin: do [#1jec]
 - ~~do [#qheadstrikeverify]~~
 - ~~do [#jpmt]~~
-- I want you to do the install+recycle. Jus
+- ~~I want you to do the install+recycle. Jus~~
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

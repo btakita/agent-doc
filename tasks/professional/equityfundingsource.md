@@ -498,7 +498,44 @@ What I verified:
 - Every locally available Cloudflare token, including the email-sending-specific token I found, returned Cloudflare Email Sending auth errors.
 
 I made one controlled send attempt with a fresh Robert login token and did not print the token or link. Since delivery failed, I invalidated that token and verified production D1 now has `0` active unused login tokens for Robert. The remaining unblocker is a working `CLOUDFLARE_EMAIL_API_TOKEN`/Cloudflare Email Sending credential for this account, or explicit confirmation to use an alternate sender with the exact body.
-<!-- agent:boundary:d009e12f -->
+
+### Re: Robert admin scenario analysis — gpt-5
+
+> **Queue prompt:**
+>
+> Why are we still using Resend? We should be using CF email sending API.
+
+
+Robert's production account is currently present and cleanly provisioned, but it is still a first-password account:
+- user: `rwaldman100+admin@gmail.com` / Robert Waldman
+- role/status: `admin` / `active`
+- personal password: not set (`password_hash` is empty)
+- SSO identity: not linked
+- `last_login_at`: `null`
+- active unused invite/login/reset tokens right now: `0`
+
+Issues and root causes:
+
+1. Invite link opened but Robert was prompted to set a password. This is expected for a first-time invite/admin account when the account has no password yet. The invite/email-login verification signs the user in, then routes accounts with no `password_hash` to `/account/complete` so they can set their first password. The thing that would be a bug is failing to land in the admin portal after account completion.
+
+2. Invite/sign-in link opened while another account is already signed in. The old risk was silent session switching or an unclear redirect. The current code checks for an existing session before consuming either invite or email-login tokens and shows an "already signed in, log out and reopen the link" notice. The token remains unconsumed so it can still be used after logout.
+
+3. Forgot password did not send email for Robert. Root cause: invite-provisioned admins can be active users with an empty password hash, and the previous forgot/reset flow only handled users that already had a password. That made Robert's first-password reset path silently no-op. Fixed in EFS `3423507` (`fix(auth): allow invite password reset`): any active user can receive a reset token and set the first password. Regression coverage: `tests/auth.test.ts` includes Robert's exact empty-password admin case.
+
+4. "Email me a sign-in link" sent two emails, one already expired. Root cause: double-submit minted two tokens, and the second token superseded the first while both emails could be delivered. Fixed in EFS `31487e0` (`fix(auth): suppress duplicate email login links`): immediate duplicate requests are suppressed when a recent unused token already exists, so the first link remains valid.
+
+5. Admins needed a way to send a login link from User Management. Fixed and deployed in EFS `73b7ee3` (`feat(admin): send user login links`): active user rows now have a `Send login link` action backed by `POST /api/admin/users/:id/login-link`, with one-minute duplicate suppression and the shared login-link email body. Suspended users are blocked until reactivated.
+
+6. Sending Robert's admin login link to `btak.dev+admin@gmail.com` is still blocked. `btak.dev+admin@gmail.com` is already another active admin account, so I did not temporarily swap Robert's email to that address. I also tried a controlled one-token send without printing the token; Cloudflare Email Sending auth failed for every local token, both stored Resend keys are suspended, and I invalidated the generated token. A gated backlog item now tracks this remaining delivery blocker.
+
+What to test manually:
+- Best Robert first-password test: ask Robert to use Forgot Password from `/admin/login` with `rwaldman100+admin@gmail.com`. He should receive one reset email, set a password, then be redirected back to admin login and be able to sign in.
+- Invite/link signed-in test: while you are signed in as a different account, open a Robert invite/sign-in link. You should see the "already signed in" notice; the token should not be consumed. After logout, reopening the same still-valid link should continue.
+- Admin User Management test: as an admin, open User Management and click `Send login link` for an active user. It should show a success message and send one email. Clicking again within about a minute should report that a recent link already exists instead of sending a second conflicting link.
+- Robert production-state check after he completes setup: `has_password` should become true and `last_login_at` should be populated for `rwaldman100+admin@gmail.com`.
+
+Current deployed Worker version is `5b5151d9-0fc2-4176-ae3f-1af4761456ff`, which includes the prior auth fixes plus the User Management login-link action. I did not change code in this analysis cycle.
+<!-- agent:boundary:340a83f8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -512,6 +549,7 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~The admin users page should have a button to send a login by email link to a user.~~
 - ~~I want to test the rwaldman100+admin@gmail.com scenario. Please send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com. I want to manually test his scenario so next time I have a call with him, I will have confidence that the fixes work.~~
+- ~~Why are we still using Resend? We should be using CF email sending API.~~
 - Please give an analysis of all issues that rwaldman100+admin@gmail.com, their root causes, how they are fixed, and what I can do to test these scenarios.
 - deploy
 <!-- /agent:queue -->

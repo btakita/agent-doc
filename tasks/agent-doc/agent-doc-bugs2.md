@@ -135,13 +135,12 @@ Confidence: high for the realtime node-patch broadcast path and local verificati
 - Legacy component patches remain in the payload as fallback for older receivers; current JetBrains and VS Code receivers already skip component patches for components covered by native node patches.
 - Broadcast payloads now include the target peer's raw and transient-normalized baseline hashes, so JetBrains can use the existing generation fence plus target-node proof to allow unrelated live-buffer drift while rejecting stale target nodes before ACK.
 - `realtime_model::broadcast_editor_change` now computes `node_patches` from the target peer buffer to the CRDT-merged buffer instead of queuing component-only peer convergence.
-<!-- agent:boundary:24c22d80 -->
+<!-- agent:boundary:2a0678e9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#rtndsync]~~
 ---
 JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
 ```
@@ -194,13 +193,13 @@ JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The se
 Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
 ```
 ---
-- ~~:pushpin: do [#arsm]~~
 - :pushpin: do [#1jec]
 - :pushpin: do [#fbwireverify]
 - :pushpin: do [#qnodemerge4verify]
 - :pushpin: do [#tb4q]
 - do [#cancelturnverify]
 - do [#qcm1verify]
+- do [#arsm]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

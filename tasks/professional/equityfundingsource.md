@@ -535,7 +535,38 @@ What to test manually:
 - Robert production-state check after he completes setup: `has_password` should become true and `last_login_at` should be populated for `rwaldman100+admin@gmail.com`.
 
 Current deployed Worker version is `5b5151d9-0fc2-4176-ae3f-1af4761456ff`, which includes the prior auth fixes plus the User Management login-link action. I did not change code in this analysis cycle.
-<!-- agent:boundary:340a83f8 -->
+
+### Re: Robert analysis + Cloudflare Email cleanup — gpt-5
+
+> **Queue prompt:**
+>
+> Please give an analysis of all issues that rwaldman100+admin@gmail.com, their root causes, how they are fixed, and what I can do to test these scenarios.
+
+
+The previous recovered section contains the Robert account analysis, but it was attached under the Resend queue prompt by the retained-response repair. Closing this queue head explicitly:
+
+Robert's production account is active admin but still first-password only: `password_hash` is empty, no SSO identity is linked, `last_login_at` is null, and there are no active unused invite/login/reset tokens right now. The expected path is therefore either a fresh forgot-password/reset flow or a fresh sign-in/invite link that routes him to `/account/complete` before entering the admin portal.
+
+Root causes already fixed:
+- Forgot password failed for invite-provisioned admins because the reset flow previously assumed an existing password hash. Fixed in EFS `3423507`.
+- Duplicate sign-in-link emails came from double-submit minting two tokens and superseding the first. Fixed in EFS `31487e0`.
+- Admins needed a User Management action to send login links. Fixed in EFS `73b7ee3` and deployed as Worker version `5b5151d9-0fc2-4176-ae3f-1af4761456ff`.
+
+Manual tests:
+- Ask Robert to use Forgot Password from `/admin/login`; he should get one reset email, set a password, then sign in as admin.
+- Open a Robert link while signed into another account; it should show the log-out notice and not consume the token. After logout, reopening the same still-valid link should work.
+- From User Management, `Send login link` should send one email for an active user and suppress immediate duplicate sends.
+- After Robert completes setup, production should show `has_password=true` and a populated `last_login_at`.
+
+For the Resend/Cloudflare concern: the runtime email sender was already Cloudflare Email Sending (`email_send_direct_` / `email_send_or_capture_`). I removed the stale Resend secret surface and stale provider wording from EFS code/docs/tests, including `RESEND_API_KEY` env typing and `cf:secret:resend` scripts. I also updated stale review items in this session document to use Cloudflare Email Sending / verified EFS sender language.
+
+Verification and commits:
+- Focused tests: `bun test tests/borrower-message-notify.test.ts tests/investor-portal-e2e.test.ts tests/email-local-capture.test.ts tests/application-leads.test.ts`
+- Full check: `make check` passed with 1122 tests plus app and Worker builds.
+- `gh run list --workflow CI --limit 1` still reports no workflow named `CI`.
+- EFS commit pushed: `d6f8fd8` (`chore(email): remove stale resend config`).
+- Parent pointer pushed to `origin/main`: `5b43587ad` (`chore: update efs submodule for cloudflare email cleanup`).
+<!-- agent:boundary:37eb8026 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -550,7 +581,7 @@ After 20:30
 - ~~The admin users page should have a button to send a login by email link to a user.~~
 - ~~I want to test the rwaldman100+admin@gmail.com scenario. Please send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com. I want to manually test his scenario so next time I have a call with him, I will have confidence that the fixes work.~~
 - ~~Why are we still using Resend? We should be using CF email sending API.~~
-- Please give an analysis of all issues that rwaldman100+admin@gmail.com, their root causes, how they are fixed, and what I can do to test these scenarios.
+- ~~Please give an analysis of all issues that rwaldman100+admin@gmail.com, their root causes, how they are fixed, and what I can do to test these scenarios.~~
 - deploy
 <!-- /agent:queue -->
 
@@ -563,10 +594,10 @@ After 20:30
 ## Review
 
 <!-- agent:review -->
-- [/] [#mcme] [recommended] #msg-read-status Email-open-based read receipts on messages — DEFERRED: gated by the operator on "only if we can detect email reads", which EFS cannot today (sends via Cloudflare Email, no open tracking). Needs a ~3-5 day greenfield subsystem: switch message notifications to Resend with open-tracking, add a signed Resend event webhook (email.opened), an email_events table, and message<->email linking, then surface email_opened_at in the message DTO/UI. In-app portal read cursors already exist for borrower chat (chat_sessions.*_last_read_at) but are not email reads.
+- [/] [#mcme] [recommended] #msg-read-status Email-open-based read receipts — DEFERRED: Cloudflare Email Sending has no open-tracking webhook, and transactional mail should stay on Cloudflare Email Sending. If email-open receipts become mandatory, design a Cloudflare-compatible tracking-pixel/event subsystem or accept portal-only read cursors. In-app portal read cursors already exist for borrower chat (`chat_sessions.*_last_read_at`) but are not email reads.
 - [/] [#msg-unify4] [gated: awaiting dual-write prod soak] Lender cutover — dual-write (best-effort mirror into messages, both lender sources) + backfill (migration 0098) SHIPPED (EFS b5a6a55). Remaining: after soak, switch the inbox to read lender data from messages (dual-read), then drop deal_interest_lender_messages + lender_account_messages. Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [/] [#msg-unify3] [gated: awaiting dual-write prod soak] Borrower cutover — dual-write (best-effort mirror into messages) + backfill (migration 0097) SHIPPED (EFS 411a4da). Remaining: after the dual-write soaks live, switch the unified inbox to read borrower data from messages (dual-read), then drop chat_messages. Plan: src/equityfundingsource-dev/prds/message-unification.md.
-- [/] [#lender-card-msg-email] [recommended] Email-to-lender parity for #lender-card-msg account messages (mirror notify_lender_deal_message_): notify the lender by email when an admin posts an account message, like the deal-interest thread does. Rides the verified EFS Resend sending domain gate (#f4rq). Plan: src/equityfundingsource-dev/prds/lender-card-messaging.md.
+- [/] [#lender-card-msg-email] [recommended] Email-to-lender parity for #lender-card-msg account messages (mirror notify_lender_deal_message_): notify the lender by email when an admin posts an account message, like the deal-interest thread does. Rides the Cloudflare Email Sending / verified EFS sender gate (#f4rq). Plan: src/equityfundingsource-dev/prds/lender-card-messaging.md.
 - [/] [#proprate] Lender proposal persists a DEFAULT interest rate never finalized. investor/deal_detail.tsx:362 pre-fills proposal_rate from deal.monthly_interest when deal.proposal_interest_rate==null; submit (:425-435) sends it whenever an amount is present; :421 requires a finite rate, so a lender cannot commit an amount with rate TBD — the pre-filled default (6.5% on d6b78994) persists as if finalized. Duration NOT affected (no proposal_term_months column). DATA CLEANUP DONE 2026-06-20: nulled proposal_interest_rate on the d6b78994/b8ccaa76 row (kept proposal_amount=100000 + proposal_submitted_at; D1 changes=1). CODE FIX still pending operator go: do NOT pre-fill the rate with the deal default; allow proposal_interest_rate=null ("amount committed, rate TBD"); relax :421 validation + admin LoanTermProposalSummary display.
 - [/] [#nthc] [operator-verify] DEPLOYED 2026-06-20 (worker version 17b06176-fc91-44b6-b35d-1cd61beed01b; EFS 8889a4c). Remaining = operator live-verify only: open the Lender Bros group Edit overlay on deal d6b78994, bump lender2 from 0%, confirm the split saves and the "60% confirmed (partial)" badge reconciles.
 - [/] [#pmhf] [recommended] Reuse the rebalancing share editor (lib/ui--browser--efs/portal/shared/lending_groups_alloc.ts: rebalance_stakes_/distribute_evenly_/lock pins) in the per-deal split UI (deal_detail allocations) so per-deal % editing gets the same 100%-balanced, lockable inputs.

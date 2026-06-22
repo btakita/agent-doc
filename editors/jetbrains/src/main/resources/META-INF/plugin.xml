@@ -116,6 +116,14 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.RestartAgent"
+                class="com.github.btakita.agentdoc.RestartAgentAction"
+                text="Restart Agent"
+                description="Restart the agent harness for this document (reloads a changed `agent:` frontmatter)">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
         <action id="AgentDoc.ClearSessionContext"
                 class="com.github.btakita.agentdoc.ClearSessionContextAction"
                 text="Clear Session Context"

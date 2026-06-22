@@ -1837,7 +1837,9 @@ enum QueueAction {
     /// this turn's response(s). Use when a single cycle answered multiple
     /// free-text heads (the strike heuristic only consumes one head per
     /// finalize), to drain the answered stragglers instead of re-serving them.
-    /// Scoped to free-text heads; id-backed heads must be reaped via `--done`.
+    /// Scoped to free-text heads; id-backed heads must be reaped via `--done`
+    /// / `--pending-gate`, unless `--ack-id` is explicitly acknowledging a
+    /// correction head while leaving its open backlog item in place.
     Consume {
         /// Path to the session document
         file: PathBuf,
@@ -1851,14 +1853,20 @@ enum QueueAction {
         /// when the id still names an OPEN backlog item (use `--done` instead).
         #[arg(long, conflicts_with = "count")]
         id: Option<String>,
+        /// Explicit acknowledgement (#freshqueueauth): strike an exact id-backed
+        /// correction head while preserving the still-open backlog item. Do not
+        /// use for runnable work; leave live `do [#id]` heads queued until done,
+        /// gated, or intentionally acknowledged as a correction.
+        #[arg(long, conflicts_with = "count", conflicts_with = "id")]
+        ack_id: Option<String>,
     },
     /// Strike every non-drainable NOISE queue head at any position (#goqstall2):
     /// pasted console output, agent-response fragments, and bare observations that
     /// carry no `#id`, question mark, or directive verb, so they can never drain
     /// and only churn the go-mode loop (surfaced as `queue_stale_noise_lines=N` by
-    /// session-check). Unlike `consume`, clears noise interleaved behind id-backed
-    /// `do [#id]` heads; id-backed directives and genuinely drainable free-text
-    /// heads are preserved.
+    /// session-check for compatibility). Unlike `consume`, clears predicate-proven
+    /// noise interleaved behind id-backed `do [#id]` heads; id-backed directives
+    /// and genuinely drainable free-text heads are preserved.
     #[command(name = "prune-noise")]
     PruneNoise {
         /// Path to the session document
@@ -3522,9 +3530,16 @@ fn main() -> anyhow::Result<()> {
                 max_git_versions,
             } => queue_recovery::run(&file, json, max_git_versions),
             QueueAction::Sync { file } => agent_doc_orchestration::queue_cmd::sync(&file),
-            QueueAction::Consume { file, count, id } => {
+            QueueAction::Consume {
+                file,
+                count,
+                id,
+                ack_id,
+            } => {
                 if let Some(id) = id {
                     agent_doc_orchestration::queue_cmd::consume_orphan_id(&file, &id)
+                } else if let Some(id) = ack_id {
+                    agent_doc_orchestration::queue_cmd::acknowledge_open_id(&file, &id)
                 } else {
                     agent_doc_orchestration::queue_cmd::consume(&file, count)
                 }

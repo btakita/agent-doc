@@ -9,6 +9,9 @@
 //! - `agent-doc queue consume <FILE> --id <id>` — escape hatch (#orphanqhead)
 //!   that strikes an orphaned id-backed head whose backing backlog item was
 //!   already reaped (or is gone), so it stops re-firing the auto-loop.
+//! - `agent-doc queue consume <FILE> --ack-id <id>` — explicit acknowledgement
+//!   (#freshqueueauth) for an id-backed correction head while leaving the open
+//!   backlog item unresolved.
 
 use anyhow::{Context, Result, bail};
 use std::path::Path;
@@ -121,6 +124,24 @@ pub fn consume_orphan_id(file: &Path, id: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn acknowledge_open_id(file: &Path, id: &str) -> Result<()> {
+    let normalized = pending::normalize_pending_id(id);
+    if crate::write::acknowledge_open_id_backed_queue_head(file, id)? {
+        println!(
+            "{}: acknowledged id-backed correction head [#{}] while preserving the open backlog item (#freshqueueauth).",
+            file.display(),
+            normalized
+        );
+    } else {
+        println!(
+            "{}: no change — id-backed correction head [#{}] was already acknowledged or drained.",
+            file.display(),
+            normalized
+        );
+    }
+    Ok(())
+}
+
 pub fn consume(file: &Path, count: usize) -> Result<()> {
     // #sqedit-race Phase 2: hold the queue-edit lease for the whole strike loop so
     // preflight queue maintenance and the supervisor idle-watch defer instead of
@@ -141,8 +162,11 @@ pub fn consume(file: &Path, count: usize) -> Result<()> {
                 if struck.is_empty() {
                     bail!(
                         "{}: queue head is an id-backed directive, not a free-text prompt. \
-                         Reap it through the normal closeout with `--done <id>` / `--pending-gate <id>` \
-                         so the backlog item stays in sync — `queue consume` only strikes free-text heads.",
+                        If it represents completed or gated work, reap it through the normal closeout with \
+                        `--done <id>` / `--pending-gate <id>` so the backlog item stays in sync. \
+                        If it is only an acknowledgement/correction for still-open work, use \
+                        `agent-doc queue consume <FILE> --ack-id <id>` to strike the head without closing \
+                        the backlog item. Otherwise leave it queued.",
                         file.display()
                     );
                 }
@@ -195,6 +219,8 @@ pub fn consume(file: &Path, count: usize) -> Result<()> {
 /// `queue consume` from reaching answered free-text heads behind it. Preserves
 /// id-backed directives whose id is still open backlog work (including deferred
 /// `[operator-verify]` / `[focused-cycle]` items) and drainable free-text heads.
+/// The prune set is predicate-proven; fresh operator prompts that remain
+/// drainable are never removed by this command.
 /// Supervisor-safe: routes through the same editor-IPC-converged write path the
 /// closeout strikes use.
 pub fn prune_noise(file: &Path) -> Result<()> {
@@ -204,12 +230,12 @@ pub fn prune_noise(file: &Path) -> Result<()> {
     let struck = crate::write::prune_noise_queue_heads(file)?;
     if struck == 0 {
         println!(
-            "{}: no non-drainable noise queue heads to prune (queue inactive, empty, or all heads drainable).",
+            "{}: no predicate-proven queue heads to prune (queue inactive, empty, or all heads are drainable/live).",
             file.display()
         );
     } else {
         println!(
-            "{}: pruned {} non-drainable noise queue head(s).",
+            "{}: pruned {} predicate-proven queue head(s) (noise/orphan only).",
             file.display(),
             struck
         );

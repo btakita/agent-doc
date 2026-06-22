@@ -278,11 +278,12 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 // surface a one-line deferred-heads note so the idle queue reads
                 // as deferred work, not a silent stall.
                 let deferred = crate::queue_continuation::deferred_head_count(file);
-                // #goqstall2: pre-materialized bulleted free-text lines that are not
-                // actionable drain targets (pasted bug-report observations / stale
-                // console evidence) are inert noise — counted so the idle queue reads
-                // as "deferred + N stale lines to clear", not a silent stall. Never
-                // auto-deleted (the live IPC supervisor races on direct queue edits).
+                // #goqstall2/#freshqueueauth: pre-materialized bulleted free-text
+                // lines that match the exact non-drainable noise predicate (pasted
+                // bug-report observations / console evidence) are counted so the idle
+                // queue reads as "deferred + N predicate-proven lines to clear", not a
+                // silent stall. Fresh drainable operator prompts remain authoritative
+                // and are never classified through this path.
                 let noise = crate::queue_continuation::queue_stale_noise_lines(file);
                 // #qfocsup: the in-session loop has no drainable head, but a
                 // `[focused-cycle]` head may still remain that the SUPERVISOR
@@ -319,7 +320,7 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                         deferred, noise, outcome_fields
                     );
                     eprintln!(
-                        "[session-check] queue idle: {} head(s) deferred (operator-verify), {} stale noise line(s) — operator-gated heads need a human / the noise lines need clearing ({}; #goqueuestall/#goqstall2). {}",
+                        "[session-check] queue idle: {} head(s) deferred (operator-verify), {} predicate-proven noise line(s) — operator-gated heads need a human / predicate-proven noise can be cleared with `agent-doc queue prune-noise` ({}; #goqueuestall/#goqstall2/#freshqueueauth). {}",
                         deferred,
                         noise,
                         file.display(),

@@ -1247,15 +1247,17 @@ pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
         snapshot::save(file, &snap)?;
     }
 
+    let base_hash = crate::ops_log::content_hash(&content);
     eprintln!(
-        "[queue] pruned {struck} non-drainable head(s): noise + orphan id-backed (#goqstall2/#orphanqhead)"
+        "[queue] pruned {struck} predicate-proven head(s): noise + orphan id-backed (#goqstall2/#orphanqhead)"
     );
     crate::ops_log::log_op(
         file,
         &format!(
-            "queue_noise_prune file={} struck={}",
+            "queue_noise_prune file={} struck={} base_hash={} source_component=queue operation=prune proof=predicate_noise_or_orphan_id",
             file.display(),
-            struck
+            struck,
+            base_hash
         ),
     );
     Ok(struck)
@@ -1386,6 +1388,7 @@ pub fn strike_orphan_id_backed_queue_head(file: &Path, id: &str) -> Result<bool>
         }
         None => None,
     };
+    let base_hash = crate::ops_log::content_hash(&content);
     converge_document_or_disk(file, &new_document, &content, "orphan_id_head_strike")
         .context("orphan strike: failed to write document")?;
     if let Some(snap) = new_snapshot {
@@ -1398,10 +1401,85 @@ pub fn strike_orphan_id_backed_queue_head(file: &Path, id: &str) -> Result<bool>
     crate::ops_log::log_op(
         file,
         &format!(
-            "orphan_id_head_strike file={} id={} struck={}",
+            "orphan_id_head_strike file={} id={} struck={} base_hash={} source_component=queue operation=strike_head proof=orphan_id_no_open_backlog",
             file.display(),
             target_id,
-            keys.len()
+            keys.len(),
+            base_hash
+        ),
+    );
+    Ok(true)
+}
+
+/// Acknowledge an exact id-backed queue head whose id still names open backlog
+/// work, without marking that backlog item done or gated (#freshqueueauth).
+///
+/// This is intentionally separate from [`strike_orphan_id_backed_queue_head`]:
+/// `--id` proves the head is an orphan, while `--ack-id` proves the operator is
+/// acknowledging a correction/reminder head and wants the underlying backlog work
+/// to remain open. The command still refuses prose that merely mentions `#id`;
+/// those are free-text heads and should be answered + consumed through the
+/// normal free-text path.
+pub fn acknowledge_open_id_backed_queue_head(file: &Path, id: &str) -> Result<bool> {
+    let _lock = acquire_doc_lock(file)?;
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("open-id ack: failed to read {}", file.display()))?;
+    let target_id = crate::pending::normalize_pending_id(id).to_ascii_lowercase();
+    if target_id.is_empty() {
+        anyhow::bail!("open-id ack: empty id");
+    }
+    if !head_id_names_open_backlog_item(&content, &target_id) {
+        anyhow::bail!(
+            "{}: [#{target_id}] does not name an OPEN backlog item. Use \
+            `agent-doc queue consume {} --id {target_id}` for orphan id-backed heads, \
+            or leave the head queued.",
+            file.display(),
+            file.display()
+        );
+    }
+    let keys = id_backed_head_node_keys(&content, &target_id)?;
+    if keys.is_empty() {
+        anyhow::bail!(
+            "{}: no exact id-backed queue head matching [#{target_id}] to acknowledge \
+            (already struck/drained, or the head is prose that merely mentions the id; \
+            answer prose heads and use `agent-doc queue consume {} --count 1`).",
+            file.display(),
+            file.display()
+        );
+    }
+    let new_document = consume_queue_nodes_by_key(&content, &keys)?;
+    if new_document == content {
+        return Ok(false);
+    }
+    let new_snapshot = match snapshot::load(file)? {
+        Some(snap) => {
+            let snap_keys = id_backed_head_node_keys(&snap, &target_id)?;
+            if snap_keys.is_empty() {
+                None
+            } else {
+                Some(consume_queue_nodes_by_key(&snap, &snap_keys)?)
+            }
+        }
+        None => None,
+    };
+    let base_hash = crate::ops_log::content_hash(&content);
+    converge_document_or_disk(file, &new_document, &content, "open_id_head_ack")
+        .context("open-id ack: failed to write document")?;
+    if let Some(snap) = new_snapshot {
+        snapshot::save(file, &snap)?;
+    }
+    eprintln!(
+        "[queue] acknowledged id-backed correction head [#{target_id}] ({} node(s); backlog left open; #freshqueueauth)",
+        keys.len()
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "open_id_head_ack file={} id={} struck={} base_hash={} source_component=queue operation=strike_head proof=operator_acknowledged_correction_preserve_open_backlog",
+            file.display(),
+            target_id,
+            keys.len(),
+            base_hash
         ),
     );
     Ok(true)
@@ -3835,6 +3913,88 @@ Old.
             prune_noise_queue_heads(&doc).unwrap(),
             0,
             "second prune must be a no-op"
+        );
+    }
+
+    #[test]
+    fn acknowledge_open_id_head_strikes_queue_only_and_preserves_backlog_item() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- [#freshqueueauth]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#freshqueueauth] preserve fresh operator queue heads\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        assert!(
+            acknowledge_open_id_backed_queue_head(&doc, "freshqueueauth").unwrap(),
+            "open-backlog acknowledgement should strike the queue head"
+        );
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("~~[#freshqueueauth]~~"),
+            "exact id-backed correction head must be struck:\n{result}"
+        );
+        assert!(
+            result.contains("- [ ] [#freshqueueauth] preserve fresh operator queue heads"),
+            "underlying backlog item must remain open:\n{result}"
+        );
+        let snap = snapshot::load(&doc).unwrap().expect("snapshot saved");
+        assert!(
+            snap.contains("~~[#freshqueueauth]~~"),
+            "snapshot must converge on acknowledged queue head:\n{snap}"
+        );
+        assert!(
+            snap.contains("- [ ] [#freshqueueauth] preserve fresh operator queue heads"),
+            "snapshot must preserve open backlog item:\n{snap}"
+        );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("open_id_head_ack")
+                && ops_log.contains("proof=operator_acknowledged_correction_preserve_open_backlog")
+                && ops_log.contains("base_hash=")
+                && ops_log.contains("source_component=queue")
+                && ops_log.contains("operation=strike_head"),
+            "acknowledgement must be auditable:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn acknowledge_open_id_head_refuses_prose_that_mentions_open_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- Please keep [#freshqueueauth] open until the implementation lands\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#freshqueueauth] preserve fresh operator queue heads\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let err = acknowledge_open_id_backed_queue_head(&doc, "freshqueueauth")
+            .expect_err("prose correction heads stay on the free-text consume path");
+        assert!(
+            err.to_string()
+                .contains("prose that merely mentions the id"),
+            "error should route prose heads to answer+consume guidance: {err}"
+        );
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("Please keep [#freshqueueauth] open"),
+            "prose queue head must be left intact:\n{result}"
         );
     }
 

@@ -1059,6 +1059,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `guard_`/`reason=` tokens are tracked against the new submodules,
         // not added anew.
         ("agent-doc-orchestration/src/write/queue_consume.rs", "guard_") => 1,
+        // +4 (#freshqueueauth): direct queue-head removals now log explicit
+        // proof fields for prune/orphan/acknowledgement paths, and the new
+        // acknowledgement regression asserts that proof marker. The operations
+        // stay routed through the existing queue-consume/converge write boundary.
+        ("agent-doc-orchestration/src/write/queue_consume.rs", "proof=") => 4,
         // 1 -> 4 (#editorbufwin Fix A): the queue-consume head-equality check now
         // reconciles a benign live-buffer head divergence instead of hard-bailing,
         // mirroring the existing remaining-queue `reason=crdt_merge_authoritative`

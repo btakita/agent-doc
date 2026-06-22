@@ -919,7 +919,7 @@ fn leads_with_markdown_bold_report(text: &str) -> bool {
 /// Whether a queue `Prompt` head is auto-drainable in go-mode (`#goqstall2`).
 ///
 /// A pre-materialized `## Queue` block can carry bulleted free-text lines that are
-/// not actionable drain targets — pasted bug-report observations or stale console
+/// not actionable drain targets — pasted bug-report observations or console
 /// evidence the agent already triaged into backlog items. Those churn no-op
 /// closeouts because the continuation walk treats every `Prompt` as a ready head.
 ///
@@ -929,7 +929,8 @@ fn leads_with_markdown_bold_report(text: &str) -> bool {
 /// in a preset-bearing queue where the preset supplies the directive verb.
 /// Everything else (a bare observation) is inert **noise**: excluded from the
 /// continuation head set and surfaced as `queue_stale_noise_lines`, never
-/// auto-deleted (the live IPC supervisor races on direct queue edits).
+/// auto-deleted (the live IPC supervisor races on direct queue edits). Fresh
+/// operator prompts that remain drainable are authoritative queue heads.
 pub(crate) fn is_drainable_queue_head(text: &str) -> bool {
     is_drainable_queue_head_with_context(text, false)
 }
@@ -940,7 +941,7 @@ pub(crate) fn is_drainable_queue_head(text: &str) -> bool {
 /// churns the go-mode loop. Centralized so `queue prune-noise` strikes exactly the
 /// entries [`queue_stale_noise_lines`] counts (`#goqstall2`). `preset_supplies_directive`
 /// must match the active queue's `preset` attribute so a preset-bearing queue
-/// classifies noise identically to the stale-noise counter.
+/// classifies predicate-proven noise identically to the counter.
 pub(crate) fn is_noise_queue_head(text: &str, preset_supplies_directive: bool) -> bool {
     !is_drainable_queue_head_with_context(text, preset_supplies_directive)
 }
@@ -1002,7 +1003,9 @@ fn is_drainable_queue_head_with_context(text: &str, preset_supplies_directive: b
 /// (`#goqstall2`): not a `#id` head, not a directive, not a question. Used by
 /// `session-check` to surface a `queue_stale_noise_lines=N` diagnostic so the
 /// operator can clear pasted bug-report / console-evidence lines that would
-/// otherwise churn the go-mode drain.
+/// otherwise churn the go-mode drain. The field name is retained for
+/// compatibility; the predicate is exact noise, not a license to delete fresh
+/// operator queue edits.
 pub fn queue_stale_noise_lines(file: &Path) -> usize {
     let Ok(content) = std::fs::read_to_string(file) else {
         return 0;
@@ -2178,7 +2181,8 @@ mod tests {
     #[test]
     fn detect_quiesces_when_only_noise_heads_remain() {
         // #goqstall2: a queue of only bare bug-report observations is NOT a stall —
-        // continuation is not required and the lines are counted as stale noise.
+        // continuation is not required and the lines are counted as predicate-proven
+        // noise.
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(
             dir.path(),

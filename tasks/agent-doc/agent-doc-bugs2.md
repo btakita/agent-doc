@@ -426,7 +426,29 @@ I stalled in the agent-doc closeout path, not because I was waiting on CI.
 What happened: the implementation and local verification were done, but the first finalize call failed its editor-IPC proof and retained the pending response. I then had to run preflight/repair/commit recovery, reset the sidecars back to the visible document, and push the recovered session commits without touching unrelated worktree changes. That made the turn look stuck even though the code path had already landed.
 
 I will not wait for CI. For future code-changing cycles here I will run local verification, do at most a non-blocking `gh run list --workflow CI --limit 1` status check, then close the cycle. This current cycle only records that instruction; no source change is needed.
-<!-- agent:boundary:707e3c78 -->
+> **Queue prompt:**
+> I typed into monsterrodholders.md queue but agent-doc reverted to an old snapshot and I lost everything that I typed.
+
+This loss mode is covered by the shipped queue-loss fixes when the queue edit reaches disk or is observed by the binary.
+
+Shipped coverage:
+- `#qdurcrash`: queue items observed by the binary are recorded in the crash-durable queue journal and replayed after supervisor/pane restart instead of disappearing with an old snapshot.
+- `#qdispatchloss`: route now defers an inactive queue head unless it is backed by the committed snapshot, so an uncommitted editor-synced queue line is not consumed into a prompt and lost.
+- `#editorbufwin`: queue-consume head divergence treats live editor-buffer additions as authoritative only when dropped-queue evidence proves that path, preserving real operator additions instead of clobbering them.
+- `#freshqueueauth`: fresh operator queue heads now require an explicit removal proof path; they are not dismissed as stale/noise by inference.
+
+The remaining known boundary is narrower: if a queue edit exists only in the editor buffer and is lost before any cycle observes it or the plugin flushes it to disk, the binary cannot journal it. That is already documented in `tasks/agent-doc/plan-qdurcrash-queue-edit-crash-durability.md` as the plugin-side buffer-flush-on-edit gap.
+
+Changed paths: none for source code in this cycle.
+
+Commands: `rg` over the queue-loss/version notes, `nl` on `src/agent-doc/VERSIONS.md` and `tasks/agent-doc/plan-qdurcrash-queue-edit-crash-durability.md`, `agent-doc preflight`, `agent-doc plan`.
+
+Verification: documentation/source evidence only; no tests were run because this cycle did not change code. I did not wait for CI.
+
+Escalation: none.
+
+Confidence: high for the already-shipped coverage; medium for live editor-only loss until plugin buffer-flush-on-edit is implemented and live-verified.
+<!-- agent:boundary:c02a4a30 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -520,8 +542,8 @@ These heads are not stale. I just typed them in.
     46  <!-- /agent:queue -->
 ```
 - ~~JB `Run Agent Doc` on monsterrodholders.md stalls (no prompt) and does not submit (prompt sent but no submit).~~
-- do [#cancelturnverify]
-- I typed into monsterrodholders.md queue but agent-doc reverted to an old snapshot and I lost everything that I typed.
+- ~~do [#cancelturnverify]~~
+- ~~I typed into monsterrodholders.md queue but agent-doc reverted to an old snapshot and I lost everything that I typed.~~ — auto-struck: answered this cycle (#ftstrike)
 - Figure out how to make AGENTS.md lean & reliable so agents follow the directives. Should we treat AGENTS.md as a menu that defers to runbooks? Would that be more reliable?
 - :pushpin: do [#qcm1verify]
 - :pushpin: do [#arsm]

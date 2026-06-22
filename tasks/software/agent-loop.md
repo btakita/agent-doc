@@ -52,7 +52,26 @@ Pushed newly committed submodules: `mail` `8c1f562`, `resume` `ee14f8f`, `src/ag
 Pushed the `agent-loop` superproject through `72f21a392` after rebasing over `origin/main`. I intentionally left `tasks/professional/equityfundingsource.md` untouched because preflight reported it foreign-owned by pane `%24`.
 
 Verification: `make check` passed at the root after fixing the `agent-doc` install-profile call sites; `uv run pytest` passed for Equal Experts (`34 passed, 7 skipped`); `cargo test` passed for `eval-runner`; `cargo test` passed for `webmaster` after pinning its skill install wrapper to the Claude Code layout. `src/session-share` had a broken local pre-commit hook pointing at missing `scripts/doc-lint.sh`, so that artifact commit used `--no-verify`; I checked for >100 MB untracked blobs before committing. GitHub workflow check: `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
-<!-- agent:boundary:a56ee557 -->
+
+### Re: Rebase agent-loop origin — gpt-5
+
+> **Queue prompt:**
+>
+> rebase agent-loop origin onto the local repo or force push if it is too difficult.
+
+
+> **Queue prompt:**
+>
+> rebase agent-loop origin onto the local repo.
+
+Completed. I rebased the `agent-loop` root `main` history onto the pre-merge remote head `40bda6d55`, skipped obsolete `src/boost-client` pointer-only commits that were already contained by the rebased base, and force-updated `origin/main` with a lease from the accidental merge commit `ad2433059` to the rebased linear head `b34635be1`.
+
+Changed paths: no final file-content change from the rebase; the final tree matches the pre-merge local tree. Existing unrelated dirty work remains in `src/equityfundingsource-dev`, `tasks/agent-doc/agent-doc-bugs2.md`, and `tasks/professional/equityfundingsource.md`; I left those intact.
+
+Verification: `git rev-list --left-right --count main...origin/main` is `0 0`; `git ls-remote origin refs/heads/main` reports `b34635be1ff6b3997e41afc2bfaaf91e8b8be776`; `git log --merges 40bda6d55..main` is empty; `git diff --stat a3700b068..main` is empty. I did not run `make check` because this was a history rewrite with no content delta and the workspace contains unrelated dirty edits. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
+
+Escalation: used a guarded `git push --force-with-lease=main:ad2433059...` because the remote had been pushed to the merge commit during the cycle; the lease ensured the push would fail if origin moved again.
+<!-- agent:boundary:25207836 -->
 <!-- /agent:exchange -->
 ###
 <!--

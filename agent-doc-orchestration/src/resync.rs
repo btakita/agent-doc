@@ -22,7 +22,8 @@
 //!   `WrongProcess` → deregister only (foreign process is not killed); target-scoped
 //!   `NoLiveOwner` → refresh the recovered registry binding, otherwise deregister only
 //!   (pane left intact for route/later manual recovery);
-//!   `InStash` → deregister only (pane left intact for potential manual recovery);
+//!   `InStash` → promote live owner panes back into `agent-doc` and refresh
+//!   registry runtime metadata; deregister only unproven stashed panes;
 //!   `WrongWindow` → stash the outlier pane so the next route consolidates it.
 //! - Stash management: `return_stashed_panes` moves registered active panes back to
 //!   their original window (or first non-stash window of the frontmatter session);
@@ -72,8 +73,8 @@
 //!   `WrongSession` issue → entry removed from registry, pane kill attempted.
 //! - `fix_wrong_process_deregisters_without_kill`: `WrongProcess` issue →
 //!   registry entry removed, foreign process pane untouched.
-//! - `fix_in_stash_deregisters_entry`: `InStash` issue → registry entry removed,
-//!   stash pane left alive.
+//! - `fix_in_stash_promotes_live_owner`: `InStash` issue with live owner proof →
+//!   pane promoted back into `agent-doc`, registry entry retained and refreshed.
 //! - `stash_window_purged_when_all_idle`: stash window with only idle shell panes
 //!   older than 30 s → `purge_stash_windows` kills the window.
 //! - `stash_window_spared_when_agent_active`: stash window containing a `claude`
@@ -695,8 +696,8 @@ fn detect_issues_in_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) 
         };
 
         // Check 0: Is the pane in a stash window?
-        // Stash panes are alive but not in the active workspace — deregister them
-        // so that sync/route can auto-start a fresh pane in the correct window.
+        // Stash panes are alive but not in the active workspace. Fix promotes
+        // live owners back into agent-doc and only deregisters unproven panes.
         if let Some(ref wname) = pane_window_name(tmux, &entry.pane)
             && is_stash_window_name(wname)
         {
@@ -1085,6 +1086,25 @@ fn refresh_target_no_live_owner_registry_entry(
     true
 }
 
+fn refresh_registry_runtime_for_pane(
+    tmux: &Tmux,
+    registry: &mut sessions::SessionRegistry,
+    key: &str,
+    pane: &str,
+) -> bool {
+    let Some(entry) = registry.get_mut(key) else {
+        return false;
+    };
+    entry.pane = pane.to_string();
+    if let Ok(pid) = sessions::pane_pid_with_mux(tmux, pane) {
+        entry.pid = pid;
+    }
+    if let Ok(window) = sessions::pane_window_with_mux(tmux, pane) {
+        entry.window = window;
+    }
+    true
+}
+
 fn apply_fixes_with_base(
     tmux: &Tmux,
     issues: &[Issue],
@@ -1136,6 +1156,7 @@ fn apply_fixes_to_registry(
     target_scope: Option<TargetFixScope<'_>>,
 ) -> usize {
     let mut fixed = 0;
+    let proof_cache = crate::sync::SyncProofCache::default();
 
     for issue in issues {
         match issue {
@@ -1309,10 +1330,48 @@ fn apply_fixes_to_registry(
                 eprintln!("  fixed: {}", issue);
                 fixed += 1;
             }
-            Issue::InStash { key, pane, .. } => {
-                // Deregister — the pane is in the stash, not the active workspace.
-                // Don't kill it; just remove the registry entry so auto-start can
-                // create a fresh pane in the correct window.
+            Issue::InStash {
+                key, file, pane, ..
+            } => {
+                let proves_live_owner =
+                    registry.get(key).is_some_and(|entry| {
+                        crate::sync::registered_pane_proves_live_owner(
+                            tmux,
+                            std::path::Path::new(file),
+                            registry_entry_session_id(key, entry),
+                            pane,
+                            &proof_cache,
+                        )
+                    }) || registered_pane_still_owns_file(tmux, key, file, pane);
+                if proves_live_owner {
+                    match crate::sync::promote_pane_to_agent_doc_window(tmux, pane) {
+                        Ok(true) => {
+                            refresh_registry_runtime_for_pane(tmux, registry, key, pane);
+                            eprintln!(
+                                "  promoted live owner pane {} for {} from stash into agent-doc",
+                                pane, file
+                            );
+                            eprintln!("  fixed: {}", issue);
+                            fixed += 1;
+                        }
+                        Ok(false) => {
+                            eprintln!(
+                                "  preserving live owner pane {} for {} in stash; promotion was not possible",
+                                pane, file
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "  preserving live owner pane {} for {} in stash; promotion failed: {}",
+                                pane, file, e
+                            );
+                        }
+                    }
+                    continue;
+                }
+
+                // Deregister only when the stashed pane no longer proves
+                // ownership; live bound sessions must be promoted or preserved.
                 eprintln!(
                     "  [resync] pane {} for {} is in stash window, deregistering",
                     pane, key

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -78,7 +78,40 @@ Preflight note: preflight warned that the installed `agent-doc` binary/cdylib ar
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:56b375b6 -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Deploy is complete. The current clean EFS commit was redeployed with `make deploy` after the expired password-reset redirect verification.
+
+Changed paths: none.
+
+Deploy proof:
+- `make deploy` succeeded.
+- Worker version: `f0f55798-0463-4fec-ae6d-724d3ef9d2f8`.
+- Deployed URL: `https://equityfundingsource.brian-takita.workers.dev`.
+- Remote D1 reports `No migrations to apply`.
+
+Live smoke checks after deploy:
+- `/` returned `200`.
+- `/reset-password?token=bad&role=admin` returned `303` to `/login/email?role=admin&error=This+password+reset+link+is+invalid+or+has+expired.+Request+a+new+sign-in+link+below.`
+- `/login/email?role=admin&email=expired-reset%40example.com&error=...` returned `200` and rendered `Sign in by email`, the reset-link expiration message, `value="expired-reset@example.com"`, and `Email me a sign-in link`.
+
+Related verification from the immediately preceding queue item:
+- `bun test tests/auth.test.ts` passed: `21 pass`, `0 fail`.
+- Both EFS and parent repos report no GitHub workflow named `CI`, so there was no CI run to inspect.
+
+Commits: none in this deploy-only closeout; EFS remains clean at `fc6801f` on `origin/main`.
+
+Preflight note: the route-owned agent-doc supervisor is stale relative to the installed binary and may keep producing file-cache/IPC drift warnings until it is recycled. This did not block the deploy closeout.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:2ebf542d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -90,8 +123,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~If a password reset link has expired, it should go to "Sign in by email." with the expiration error message with instructions to send another email link and the email address prefilled in the email input. This flow current goes to th set password form which cannot succeed with an expired email login link.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

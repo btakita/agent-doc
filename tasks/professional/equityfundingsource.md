@@ -224,7 +224,35 @@ Commands: `tsift status`; `agent-doc plan`; inspected `app/equityfundingsource/l
 Verification: static inspection only; no tests were run because no code changed.
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:606392c6 -->
+
+### Re: email hint without indefinite hash history — gpt-5
+
+> **Queue prompt:**
+>
+> The advantage is we have the email without having to store the hash history in the db indefinately.
+
+Yes, that is a real advantage, but we can get it without making the JWT the login authority.
+
+The clean split is:
+
+- auth authority: short-lived DB row keyed by a hash of the random login token, with `expires_at` and `used_at`
+- retry hint: email/role carried in the link for prefill only, not trusted for login
+- retention: purge expired/used token rows after the chosen retention window
+
+That gives us the email after the token row is gone, while still avoiding permanent token-hash history. The current implementation already moved in that direction: generated email-login URLs can include `email=...`, and the invalid-link route uses DB-backed owner lookup first, then falls back to the query email only after validating it as an email string. That fallback is safe because it is only a form prefill; it does not authenticate anyone and the resend POST remains enumeration-safe.
+
+A JWT can be useful as a signed retry hint if we want tamper evidence, for example a separate `hint=` token containing `email`, `role`, `purpose=email-login-retry`, and its own `exp`. But it should still be treated as display/prefill data, not as authority to sign in. Also, a normal signed JWT does not hide the email; it is base64url-encoded, not encrypted. If the concern is email exposure in URLs/logs, JWT does not solve that unless we use encryption or avoid carrying the email at all.
+
+So the practical recommendation is: keep the opaque random login token plus DB hash for authentication, do not store hash history indefinitely, and use either the current `email=` fallback or a signed non-auth retry hint if we want tamper-evident prefill after cleanup. I would fold that into the existing retention-cleanup backlog item rather than redesigning the login token around JWT.
+
+Session note: the exchange is large, but the queue is active, so I continued this cycle without compacting.
+
+Changed paths: session document only.
+Commands: `tsift status`; `agent-doc plan`; inspected `app/equityfundingsource/lib/auth/email_login.ts` and `app/equityfundingsource/lib/auth/routes.ts`.
+Verification: static inspection only; no tests were run because no code changed.
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:1ce3959b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -236,7 +264,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- How about a hybrid where we generate JWT but store the only valid JWT?
+- The advantage is we have the email without having to store the hash history in the db indefinately.
 <!-- /agent:queue -->
 
 ## Backlog

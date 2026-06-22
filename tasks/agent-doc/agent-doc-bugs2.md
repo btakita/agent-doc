@@ -175,19 +175,19 @@ The source commits remain the same.
 The package version still prints `agent-doc 0.34.35` because `Cargo.toml` was not version-bumped in this fix; the local binary and library are nevertheless rebuilt from the current checkout containing the editor integration changes and current source tree.
 
 Verification already completed in this session includes `npm test`, JetBrains targeted test, JetBrains `test buildPlugin`, the focused Rust IPC/route tests, `make check`, and the latest GitHub Actions `CI` run reporting success.
-<!-- agent:boundary:c9984f33 -->
+<!-- agent:boundary:1bc8d226 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
----
+~~~done
 equityfundingsource.md has MCP preflight error without diagnostics.
 ```
 • The MCP preflight retry failed without diagnostics, so I’m invoking the CLI preflight directly to get the recovery
   detail and avoid guessing at the next step.
 ```
----
+~~~
 JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
 ```
 [route] target tmux session: 0
@@ -244,16 +244,11 @@ Error: authoritative actor record for tasks/software/agent-loop.md is bound to h
 - :pushpin: do [#qcm1verify]
 - :pushpin: do [#arsm]
 - :pushpin: do [#1jec]
-- do [#fbwireverify]
-- do [#qnodemerge4verify]
-- do [#tb4q]
-- :pushpin: do [#qnodemerge4verify]
 - :pushpin: do [#fbwireverify]
+- :pushpin: do [#qnodemerge4verify]
 - :pushpin: do [#tb4q]
 - do [#cancelturnverify]
-- do [#arsm]
-- do [#qcm1verify]
-- do [#1jec]
+- do [#mrh-response-loss-stalled-queue]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

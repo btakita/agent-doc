@@ -2429,15 +2429,22 @@ fn repair_clean_head_if_only_transient_worktree_drift(
 ///   is authoritative and the tree is safe to reconcile back to it → `true`.
 /// - **legitimate carry-forward / ambiguous** — the tree preserves every committed
 ///   line (a superset: all of HEAD plus new uncommitted user edits), OR it added a
-///   carry-forward signal (real next-cycle user work). Either way the tree must be
-///   preserved, never clobbered → `false`.
+///   carry-forward signal (real next-cycle user work). Added-work detection uses
+///   the raw document text because replay normalization deliberately neutralizes
+///   queue maintenance. Either way the tree must be preserved, never clobbered →
+///   `false`.
 ///
 /// Conservative by construction: a false `false` only defers to the existing
 /// detect-and-warn path; a false `true` would clobber a user edit, so every
 /// uncertain shape (any added directive, or no proven content loss) returns
 /// `false`. Shares [`crate::write::line_is_carry_forward_signal`] with the
 /// `#fintol` finalize-tolerance gate so both paths classify user work the same way.
-fn postcommit_worktree_lost_committed_content(head_norm: &str, tree_norm: &str) -> bool {
+fn postcommit_worktree_lost_committed_content(
+    head_norm: &str,
+    tree_norm: &str,
+    head_raw: &str,
+    tree_raw: &str,
+) -> bool {
     use std::collections::HashSet;
     let tree_lines: HashSet<&str> = tree_norm
         .lines()
@@ -2453,12 +2460,12 @@ fn postcommit_worktree_lost_committed_content(head_norm: &str, tree_norm: &str) 
         // Worktree preserves all committed content → carry-forward superset → preserve.
         return false;
     }
-    let head_lines: HashSet<&str> = head_norm
+    let head_lines: HashSet<&str> = head_raw
         .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty())
         .collect();
-    let added_user_work = tree_norm
+    let added_user_work = tree_raw
         .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !head_lines.contains(l))
@@ -2690,7 +2697,7 @@ fn emit_postcommit_worktree_check(file: &Path) {
         // the tree is left untouched on the detect-and-warn path below. After
         // repairing disk, push the committed blob back through editor IPC with a
         // stale-buffer hash guard so the IDE stops writing the stale content back.
-        if postcommit_worktree_lost_committed_content(&head_norm, &tree_norm) {
+        if postcommit_worktree_lost_committed_content(&head_norm, &tree_norm, &head_doc, &working) {
             // #pcwcdiskfree: when a JB editor listener is active, skip the disk
             // write only after `send_postcommit_editor_refresh` proves the live
             // buffer accepted HEAD content via editor IPC (`refresh_content`).
@@ -6359,6 +6366,66 @@ Duplicate replay should stay live.
             "ambiguous drift with new user work must be preserved"
         );
     }
+
+    #[test]
+    fn postcommit_worktree_preserves_when_content_lost_but_queue_work_added() {
+        // A markdown queue mirror is real next-cycle work too. If the editor
+        // buffer lost committed content and gained a pinned queue item, the
+        // post-commit check must preserve the buffer instead of reconciling it
+        // back to HEAD and deleting the queue addition.
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+
+        let head_doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: first\n\
+            first body\n\n\
+            ### Re: second\n\
+            second body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:queue priority go -->\n\
+            - do [#existing]\n\
+            <!-- /agent:queue -->\n\
+            <!-- agent:backlog priority queue -->\n\
+            - [ ] [#existing] existing task\n\
+            <!-- /agent:backlog -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+        commit_file(root, "session.md", head_doc, "agent-doc: commit response");
+        let doc = root.join("session.md");
+
+        let drifted = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: first\n\
+            first body\n\
+            second body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:queue priority go -->\n\
+            - do [#existing]\n\
+            - :pushpin: do [#advance-review]\n\
+            <!-- /agent:queue -->\n\
+            <!-- agent:backlog priority queue -->\n\
+            - [ ] [#existing] existing task\n\
+            <!-- /agent:backlog -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+        fs::write(&doc, drifted).unwrap();
+
+        emit_postcommit_worktree_check(&doc);
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            !log.contains("postcommit_worktree_auto_reconciled"),
+            "content loss WITH pinned queue work must not be auto-reconciled:\n{log}"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            drifted,
+            "ambiguous drift with pinned queue work must be preserved"
+        );
+    }
+
     #[test]
     fn commit_already_current_repairs_transient_working_tree_churn() {
         use std::fs;

@@ -128,13 +128,31 @@ Done. `#hap7` (`#qcellmerge1`) is implemented, tested, and committed.
 **Verification:** `make check` green — **4951 passed**, clippy clean. Added `crdt_merge_concurrent_queue_insert_no_structural_duplication` (a concurrent operator queue-insert during an agent response: the new item appears exactly once, no splice into the queue).
 
 Committed locally only (no push/install — per the release-freeze; you're driving install+recycle). Goes live after `make install` + `admin recycle`. Filed `#hap7verify` `[operator-verify]` for the live no-duplication eyeball.
-<!-- agent:boundary:7b7ae30b -->
+
+### Re: do the install+recycle (not publish) — opus-4-8
+
+> **Queue prompt:**
+>
+> I want you to do the install+recycle. Just don't release + publish yet.
+
+
+> **Queue prompt:** I want you to do the install+recycle. Just don't publish.
+
+Done — `#hap7` is now **live locally**.
+
+- **`make install`** (in `src/agent-doc`): rebuilt + installed the binary and refreshed the cdylib via `lib-install` onto submodule HEAD `33e1eee1` (the per-structural-node CRDT merge). `cargo build --release` ran as part of it.
+- **`agent-doc admin recycle`**: controller marked to recycle at its next idle boundary; `admin inspect` now reports `freshness=controller:fresh,supervisor:fresh`. The supervisor adopts the new binary when this turn ends (idle boundary).
+- **Not published** (per your instruction) — no `cargo publish`, tag, or GitHub release. Commits remain **local** (submodule `33e1eee1`, superproject `68290edf7` / `bc5dc05d4`); say the word and I'll push to origin (push ≠ publish), but I did not push unprompted given the freeze.
+
+**`#jpmt` (`#hap7verify`)** — gated, not done. The install+recycle unblock is complete, so the per-component merge is live; the remaining proof is genuinely operator-gated: in a live editor, insert/edit ONE `agent:queue` item while an agent exchange response is in flight (the virtuousai/efs repro) and confirm the queue item appears exactly once with no adjacent-structure duplication. `ops.log` should show multiple short `[crdt] merge:` lines (per-component) rather than one whole-doc merge.
+<!-- agent:boundary:54e80ad7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: do [#hap7]~~
+- ~~I want you to do the install+recycle. Just don't release + publish yet.~~
 - :pushpin: do [#fbwire]
 - :pushpin: do [#j9ja]
 - :pushpin: do [#qnodemerge4wire]
@@ -167,7 +185,9 @@ Committed locally only (no push/install — per the release-freeze; you're drivi
 - :pushpin: do [#gf5n]
 - :pushpin: do [#supinstallvis]
 - :pushpin: do [#1jec]
-- do [#qheadstrikeverify]
+- ~~do [#qheadstrikeverify]~~
+- ~~do [#jpmt]~~
+- I want you to do the install+recycle. Jus
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -196,7 +216,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#jpmt] [operator-verify] #hap7verify #agent-doc-bug Live-verify #hap7 per-structural-node CRDT merge (agent-doc submodule 33e1eee1, superproject 68290edf7). Code shipped + make check green (4951). Goes live after make install + admin recycle. Proof: in a live session, edit/insert ONE agent:queue item while an agent exchange response is in flight (the virtuousai/efs repro) and confirm the queue item appears exactly once with no adjacent-structure duplication; ops.log shows per-component merges (multiple short '[crdt] merge:' lines), not one whole-doc merge.
 - [ ] [#supinstallvis] [recommended] #agent-doc-bug #supinstallfeedback follow-up: the supervisor auto-install status (surface_supervisor_auto_install_status, idle_watch.rs) is surfaced ONLY as a transient tmux display-message on the status line, which is easy to miss while the pane scrollback keeps showing the misleading post-exit "Press Enter to restart" keepalive — so an operator watching the pane body still perceives a ~1-min stall. Residual: make the rebuild state visible in the pane BODY/scrollback (not just the status line) without disturbing the keepalive Enter-to-restart reader, e.g. a pane title set + a single non-input-consuming visible line, or render it through the JB/VSCode plugin notification surface (overlaps #qpauseux notification rendering). Decide the safe pane-write mechanism with the operator before implementing (send-keys risks being consumed by the keepalive). Plan TBD.
 - [ ] [#agentreloadrestart] restart-agent Phase 1: supervisor restart re-resolves harness from current frontmatter (agent claude->opencode takes effect on restart) + boundary auto-restart when resolved harness differs, behind agent_doc_agent_change_restart (default ON). Log harness_change_detected old/new + agent_restart_boundary_gate + agent_restart_performed. SimWorld + make tmux-ci. Plan: tasks/agent-doc/plan-restart-agent.md
 - [ ] [#restartagentmenu] restart-agent Phase 2 (after agentreloadrestart): RestartAgentAction.kt JB menu cmd mirroring RestartSupervisorProcessAction.kt + plugin.xml registration + TerminalUtil restart wiring; bump pluginVersion; build signed+unsigned. Log action invocation + resolved harness. Decide alongside-vs-replace Restart Supervisor Process with operator. Plan: tasks/agent-doc/plan-restart-agent.md
@@ -228,6 +247,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#jpmt] [operator-verify] #hap7verify #agent-doc-bug Live-verify #hap7 per-structural-node CRDT merge (agent-doc submodule 33e1eee1, superproject 68290edf7). Code shipped + make check green (4951). Goes live after make install + admin recycle. Proof: in a live session, edit/insert ONE agent:queue item while an agent exchange response is in flight (the virtuousai/efs repro) and confirm the queue item appears exactly once with no adjacent-structure duplication; ops.log shows per-component merges (multiple short '[crdt] merge:' lines), not one whole-doc merge.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

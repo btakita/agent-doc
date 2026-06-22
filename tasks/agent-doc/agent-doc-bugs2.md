@@ -26,7 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-completed
+done
 <!-- /agent:status -->
 
 ## Exchange
@@ -225,6 +225,11 @@ I left the unrelated open operator-verify backlog items alone, including the exi
 
 > **Queue prompt:**
 >
+> Stop using a JB `File Cache Conflict` to delete all my work. You should never use JB `File Cache Conflict` while the editor is open ever again. We must fix all issues where JB `File Cache Conflict` was used as a band aid...bese it results in drastic changes to delete my work. We need realtime document syncing. There should be a document sync plugin<->cpc workflow to gracefully recover from drift. The sync should compare the nodes that are out of sync, then apply rules to merge the state. The user editing/adding/deleting a node should be the highest precedence, then mtime. Add and delete clean nodes should also be part of the sync workflow. Add/delete/modify a dirty node needs to be reconciled with the rules of precedence. If a node is in sync, both mtimes should be ensured to be in sync. If the mtimes for the same node between the cpc document model and the editor model are out of sync, the latest mtime should be applied. The editor buffer mtime then document file mtime is the baseline for the plugin side when starting the process. Modifications on the editor side buffer should only affect the node that was modified. Any in-memory modifications to the cpc document model should set the mtime in the document model. Please sanity check this logic to ensure it is sound. If there are ambiguities or the logic is not sound, please notify me with a prompt of options to move forward. There should be 0 JB `File Cache Conflict` dialogs. The operator should never lose work as well. Make sure these operations do not result in lost operator work. The previous turn deleted these recently added queue items...lost work. There should be a continuous stream of bidirectional cpc<->plugin operations to ensure the document model on both ends remain in sync. Ensure any races between the editor buffer and the ffi plugin document model resolve before comparing cpc<->plugin document models. The document model node must be up to date with ack before a merge occurs. Keep on retrying until the document model node is acked as in sync. We should never write directly to the disk unless forced. Force should only occur in exceptional emergency circumstances while the plugin is running. Even IPC drift should have a sync workflow. Even if the entire document model is not in sync but a specific document node is in sync, a merge can occur on the in sync document node.
+
+
+> **Queue prompt:**
+>
 > If I am typing a queue item, JB `File Cache Conflict` should not occur. This causes me to lose the last few words that I typed.
 
 
@@ -251,11 +256,11 @@ Verification completed in this session includes the VS Code test suite, JetBrain
 
 > **Queue prompt:**
 >
-> Stop using a JB `File Cache Conflict` to delete all my work. You should never use JB `File Cache Conflict` while the editor is open ever again. We must fix all issues where JB `File Cache Conflict` was used as a band aid...bese it results in drastic changes to delete my work. We need realtime document syncing. There should be a document sync plugin<->cpc workflow to gracefully recover from drift. The sync should compare the nodes that are out of sync, then apply rules to merge the state. The user editing/adding/deleting a node should be the highest precedence, then mtime. Add and delete clean nodes should also be part of the sync workflow. Add/delete/modify a dirty node needs to be reconciled with the rules of precedence. If a node is in sync, both mtimes should be ensured to be in sync. If the mtimes for the same node between the cpc document model and the editor model are out of sync, the latest mtime should be applied. The editor buffer mtime then document file mtime is the baseline for the plugin side when starting the process. Modifications on the editor side buffer should only affect the node that was modified. Any in-memory modifications to the cpc document model should set the mtime in the document model. Please sanity check this logic to ensure it is sound. If there are ambiguities or the logic is not sound, please notify me with a prompt of options to move forward. There should be 0 JB `File Cache Conflict` dialogs. The operator should never lose work as well. Make sure these operations do not result in lost operator work. The previous turn deleted these recently added queue items...lost work. There should be a continuous stream of bidirectional cpc<->plugin operations to ensure the document model on both ends remain in sync. Ensure any races between the editor buffer and the ffi plugin document model resolve before comparing cpc<->plugin document models. The document model node must be up to date with ack before a merge occurs. Keep on retrying until the document model node is acked as in sync. We should never write directly to the disk unless forced. Force should only occur in exceptional emergency circumstances while the plugin is running. Even IPC drift should have a sync workflow. Even if the entire document model is not in sync but a specific document node is in sync, a merge can occur on the in sync document node.
+❯ > Stop using a JB `File Cache Conflict` to delete all my work. You should never use JB `File Cache Conflict` while the editor is open ever again. We must fix all issues where JB `File Cache Conflict` was used as a band aid...bese it results in drastic changes to delete my work. We need realtime document syncing. There should be a document sync plugin<->cpc workflow to gracefully recover from drift. The sync should compare the nodes that are out of sync, then apply rules to merge the state. The user editing/adding/deleting a node should be the highest precedence, then mtime. Add and delete clean nodes should also be part of the sync workflow. Add/delete/modify a dirty node needs to be reconciled with the rules of precedence. If a node is in sync, both mtimes should be ensured to be in sync. If the mtimes for the same node between the cpc document model and the editor model are out of sync, the latest mtime should be applied. The editor buffer mtime then document file mtime is the baseline for the plugin side when starting the process. Modifications on the editor side buffer should only affect the node that was modified. Any in-memory modifications to the cpc document model should set the mtime in the document model. Please sanity check this logic to ensure it is sound. If there are ambiguities or the logic is not sound, please notify me with a prompt of options to move forward. There should be 0 JB `File Cache Conflict` dialogs. The operator should never lose work as well. Make sure these operations do not result in lost operator work. The previous turn deleted these recently added queue items...lost work. There should be a continuous stream of bidirectional cpc<->plugin operations to ensure the document model on both ends remain in sync. Ensure any races between the editor buffer and the ffi plugin document model resolve before comparing cpc<->plugin document models. The document model node must be up to date with ack before a merge occurs. Keep on retrying until the document model node is acked as in sync. We should never write directly to the disk unless forced. Force should only occur in exceptional emergency circumstances while the plugin is running. Even IPC drift should have a sync workflow. Even if the entire document model is not in sync but a specific document node is in sync, a merge can occur on the in sync document node.
 
 
-> **Queue prompt:**
->
+❯ > **Queue prompt:**
+❯ >
 > The document model node must be up to date with ack before a merge occurs. Keep on retrying until the document model node is acked as in sync. We should never write directly to the disk unless forced. Force should only occur in exceptional emergency circumstances while the plugin is running. Even IPC drift should have a sync workflow. Even if the entire document model is not in sync but a specific document node is in sync, a merge can occur on the in sync document node.
 
 Implemented and shipped the targeted node-ACK merge guard.
@@ -290,7 +295,7 @@ Verification:
 - GitHub Actions CI for `c232455e` completed successfully: run `27980324845` (`make check` and `make tmux-ci`).
 
 I left the newer broader bidirectional document-sync workflow prompt queued; this turn only implemented the concrete in-sync node merge/ACK contract.
-<!-- agent:boundary:2ad0ae30 -->
+<!-- agent:boundary:9452c783 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -356,6 +361,7 @@ Error: authoritative actor record for tasks/software/agent-loop.md is bound to h
 - :pushpin: do [#tb4q]
 - do [#cancelturnverify]
 - ~~do [#mrh-response-loss-stalled-queue]~~
+- do [#qcm1verify]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

@@ -145,7 +145,7 @@ Done — `#hap7` is now **live locally**.
 - **Not published** (per your instruction) — no `cargo publish`, tag, or GitHub release. Commits remain **local** (submodule `33e1eee1`, superproject `68290edf7` / `bc5dc05d4`); say the word and I'll push to origin (push ≠ publish), but I did not push unprompted given the freeze.
 
 **`#jpmt` (`#hap7verify`)** — gated, not done. The install+recycle unblock is complete, so the per-component merge is live; the remaining proof is genuinely operator-gated: in a live editor, insert/edit ONE `agent:queue` item while an agent exchange response is in flight (the virtuousai/efs repro) and confirm the queue item appears exactly once with no adjacent-structure duplication. `ops.log` should show multiple short `[crdt] merge:` lines (per-component) rather than one whole-doc merge.
-<!-- agent:boundary:54e80ad7 -->
+<!-- agent:boundary:efc4cebb -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -247,7 +247,6 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
-- [/] [#jpmt] [operator-verify] #hap7verify #agent-doc-bug Live-verify #hap7 per-structural-node CRDT merge (agent-doc submodule 33e1eee1, superproject 68290edf7). Code shipped + make check green (4951). Goes live after make install + admin recycle. Proof: in a live session, edit/insert ONE agent:queue item while an agent exchange response is in flight (the virtuousai/efs repro) and confirm the queue item appears exactly once with no adjacent-structure duplication; ops.log shows per-component merges (multiple short '[crdt] merge:' lines), not one whole-doc merge.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

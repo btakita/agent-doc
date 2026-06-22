@@ -280,14 +280,32 @@ Verification after staging/committing:
 - The superproject does not have a workflow named `CI`, so `gh run list --workflow CI --limit 1` had no matching workflow there.
 
 I added a recommended follow-up to reconcile the superproject `main` divergence and merge the pushed branch without a force-push.
-<!-- agent:boundary:03330adf -->
+<!-- agent:boundary:2940bd5e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~commit + push all uncommitted agent-doc files.~~
 - Why am I unable to sync with equityfundingsource.md? Fix the root cause. I have not been able to connect to equityfundingsource.md since rebooting. There also is no obvious recovery path for the operator. I attempted a recovery with opencode but now it does not sync. `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.`. We need a way to recover that "just works" for individual sessions.
+---
+These heads are not stale. I just typed them in.
+```
+• The doctor confirms the stale queue heads are why the document is still blocked. I’m removing only those two queue
+  lines, leaving the newly added backlog rows and the review history intact.
+
+• Edited tasks/monsterrodholders.md (+0 -2)
+    45  <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+    46 -- [#rotate-exposed-secrets]: There was no livestream. Make sure the token is scrubbed from the logs. Apply this
+         same logic for any "livestream" concerns. I don't livestream this.
+    47 -- Add actionable items to advance gated backlog items.
+    46  <!-- /agent:queue -->
+```
+```
+• Doctor now classifies the remaining MRH closeout as an editor-convergence/operator-proof issue, with a stale
+  supervisor recovery suggested. I’ll run the non-mutating preflight probe once; if it still blocks, this is an
+  explicit closeout blocker rather than a code/document task blocker.
+```
+---
 - do [#cancelturnverify]
 - I typed into monsterrodholders.md queue but agent-doc reverted to an old snapshot and I lost everything that I typed.
 - Figure out how to make AGENTS.md lean & reliable so agents follow the directives. Should we treat AGENTS.md as a menu that defers to runbooks? Would that be more reliable?
@@ -325,6 +343,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#freshqueueauth] #agent-doc-bug Preserve fresh operator queue heads during recovery/finalize and support acknowledging correction heads tied to open backlog ids without closing the underlying work. Plan: tasks/agent-doc/plan-fresh-queue-head-authority.md. Do not implement until scheduled.
 - [ ] [#cancelturnverify] [operator-verify] #agent-doc-bug Live-verify Cancel Turn (agent-doc submodule b4471d05; committed+pushed, make check green, JB 0.2.176 + VS Code 0.2.31 built, NOT installed). After installing the plugins: (1) while a turn is RUNNING, invoke Cancel Turn (JB menu / VS Code command) and confirm the turn is interrupted (ops.log cancel_turn_performed action=interrupt_active_turn) and the agent stays open; (2) while the agent is IDLE, invoke Cancel Turn (even repeatedly) and confirm it is a NO-OP (ops.log cancel_turn_noop reason=idle_no_active_turn) and the agent is NOT closed — the core safety requirement. Verify per harness: Codex/OpenCode (Escape/C-c, never raw Ctrl+C that would close on idle) and Claude.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.

@@ -39,7 +39,23 @@ done
 Compacted content:
 - Archived 4 response topic(s): queued blockers after repair; live-verification queue gating; closeout write repair; 1 more
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): Codex Run Agent Doc submit retries - gpt-5; strict closeout an...
-<!-- agent:boundary:3325c10d -->
+
+### Re: stale-supervisor materialization queue head — gpt-5
+
+> **Queue prompt:**
+>
+> Fix the root cause of this issue that occurred in this document.
+>
+> The write recovery path hit the same stale-supervisor proof guard: the patch was delivered, but the materialized content was missing the response body.
+
+I rechecked this queue head against the current `src/agent-doc` tree rather than adding a duplicate repair path. The root fixes are already present at the submodule head: `daf5e727` rejects strict template closeouts that lack a real `### Re:` heading before response capture or visible mutation, and the repair regression `repair_materialization_requires_captured_response_block` proves repair cannot accept a materialized document that is missing the captured response body. The related JB/Codex route symptoms in the archived duplicate response are also covered: `ddf454d7` carries the direct-pane submit retry cadence, and `2e450aaf` refreshed the installed agent-doc skill surface to the current binary version.
+
+Changed paths: none in the agent-doc source tree; this cycle only persists the session response through `agent-doc finalize`. I did not build/install/push because there was no new source/spec change to ship; the referenced fixes are already committed in the current submodule history.
+
+Verification: `cargo test -p agent-doc-orchestration repair_materialization_requires_captured_response_block`, `cargo test -p agent-doc-orchestration ready_prompt_candidate_accepts_codex_context_use_footer_without_prompt`, and `cargo test -p agent-doc-orchestration direct_pane_enter_resubmit_retries_at_least_once_per_second` all passed. Latest GitHub Actions CI is green: run `27987503460`, `completed/success`, pushed on 2026-06-22T22:11:42Z.
+
+Escalation: none. Confidence: high that this queue head is stale duplicated queue text from the interrupted closeout, not an unfixed materialization path in the current tree.
+<!-- agent:boundary:aa9b55e8 -->
 <!-- /agent:exchange -->
 
 ## Queue

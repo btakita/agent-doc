@@ -172,25 +172,17 @@ Implemented the full feature you scoped (Stop Agent option 1 + a separate Kill S
 **Three distinct semantics, as you asked:** *Restart Agent* (restart harness, re-resolving `agent:`) · *Stop Agent* (stop harness, keep supervisor) · *Kill Supervisor* (stop the whole supervisor).
 
 **Closeout.** Gating `#s81q` on the operator live verify: install JB `0.2.175` + VS Code `0.2.30`, confirm all three commands appear, and that **Stop Agent** kills the harness and lands on the keepalive while the supervisor stays up (then **Restart Agent** brings it back). Needs a live IDE this session can't drive. Backend + both editors delegated to clean-context agents; I reviewed the `post_child_exit_action` inertness + CLI wiring + builds before committing.
-<!-- agent:boundary:f203029e -->
+<!-- agent:boundary:fba2be95 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Use the logs to validate or invalidate any operator verify items in the queue.~~
-- ~~:pushpin: do [#fbwire]~~
-- ~~:pushpin: do [#j9ja]~~
-- ~~:pushpin: do [#qnodemerge4wire]~~
-- :pushpin: do [#tb4q]
-- ~~:pushpin: do [#agentreloadrestart]~~
-- ~~:pushpin: do [#restartagentmenu]~~
-- ~~:pushpin: Add `Stop Agent` and `Restart Agent` in JB + VSCode menus.~~
+- Add `Cancel Turn` in JB + VSCode menus...which cancels the current turn. Do this in a safe manner where multiple calls to `Cancel Turn` do not close the agent. In Codex + Opencode Ctrl+C will stop the running turn but Ctrl+C while idle will close the agent. In Claude Code pressing Ctrl+C twice while idle will close the agent.
 - :pushpin: JB `Run Agent Doc` on monsterrodholders.md stalled after restarting the agent in both Claude Code + Codex.
 - :pushpin: `agent-doc tasks/monsterrodholders.md` was added to the codex input but not submitted. Whatever wrote the prompt should also loop to check the input and submit it if not submitted.
 - :pushpin: As I was writing queue items during a turn, an extra `/clear\n/agent-doc tasks/agent-doc/agent-doc-bugs2.md\n/clear` was written into the input and submitted.
 - :pushpin: do [#qcm1verify]
-- ~~:pushpin: do [#s81q]: Rename "Restart Supervisor" to "Recycle Supervisor". Add Restart command alongside "Recycle Supervisor"~~
 - :pushpin: do [#qstrikenote]
 - :pushpin: [#pendaddorder]
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` does nothing. Subsequent JB `Run Agent Doc` eventually dispatches...it seems there's a delay before working. Please enable JB `Run Agent Doc` to dispatch immediately.
@@ -213,6 +205,7 @@ Implemented the full feature you scoped (Stop Agent option 1 + a separate Kill S
 - do [#qnodemerge4verify]
 - do [#arrkillguard]
 - do [#arrcodexproof]
+- do [#tb4q]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

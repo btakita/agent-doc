@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -96,7 +96,29 @@ Session note: the exchange is large, but the queue is active, so I continued thi
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:27d2e496 -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Deploy was already completed as part of the auth token retention cleanup cycle.
+
+Deployed Worker version: `1b094331-7f91-4b96-8209-ea17515ea70d` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Verification already completed:
+- `make deploy` succeeded and reported `No migrations to apply`.
+- Live `/` returned `200`.
+- Live `/login/email?role=admin&email=retention-smoke%40example.com` returned `200` and rendered the prefilled email value.
+- Live invalid verify URL redirected with the email prefill preserved.
+
+Changed paths: none in this drain-only deploy closeout.
+Commands: `agent-doc preflight`; prior deploy/smoke commands from the implementation cycle.
+Verification: session drain closeout only; deploy evidence is from the immediately preceding cycle.
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:77619c32 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -108,8 +130,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Implement your recommnedation.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

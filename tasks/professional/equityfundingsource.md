@@ -202,7 +202,60 @@ Deploy completed with `make deploy`.
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:83e2ef52 -->
+
+### Re: email login resend/prefill + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> In the email login email, add a link to resend another email login link in case the login link is expired. If the user clicks on an expired login link, go to the email login form with the error message and the email address prefilled.
+
+
+> **Queue prompt:**
+> In the email login email, add a link to resend another email login link in case the login link is expired. If the user clicks on an expired login link, go to the email login form with the error message and the email address prefilled.
+>
+> **Queue prompt:**
+> deploy
+
+Implemented and deployed.
+
+Changes:
+
+- Added a `/login/email` request URL helper in `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/email_login.ts`.
+- Updated email-login email text and HTML to include a `request a new sign-in link` retry link with the recipient email and role prefilled.
+- Added `email_login_token_owner_id_R_`, which resolves the token owner by hash without accepting expired, used, or superseded tokens for login.
+- Updated `GET /login/email/verify` in `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/routes.ts` so expired/used/invalid-known email-login links redirect to `/login/email` with an error message and, when the token maps to an active user, prefilled `email` and `role`.
+- Updated the email-login form GET handler to render `error=` query messages.
+- Added focused coverage in `src/equityfundingsource-dev/tests/email-login.test.ts`.
+- Updated `src/equityfundingsource-dev/prds/admin-provisioning-spec.md` with the resend/prefill contract.
+- Updated the parent repo submodule pointer for `src/equityfundingsource-dev`.
+
+Verification:
+
+- `bun test tests/email-login.test.ts` passed: 15 tests, 68 expects, 0 failures.
+- `make check` passed: 1127 tests, 7513 expects, 0 failures; app and Worker builds completed. The known non-fatal `d1 down` log in the outbox failure test appeared again while the test passed.
+- `git diff --check` passed.
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI` in the EFS repo.
+- `bun run cf:d1:migrations:list:remote` reported no migrations to apply before and after deploy.
+- `make deploy` succeeded.
+- Live smoke checks after deploy:
+  - `/` returned 200.
+  - `/admin` returned 303 to `/login?role=admin&next=%2Fadmin`.
+  - `/login/email?role=admin&email=jane.admin%40example.com&error=...` returned 200 and rendered the error message, prefilled email, and `Email me a sign-in link` submit button.
+  - `/login/email/verify?token=bad&role=admin` returned 303 to `/login/email?role=admin&error=...`; no email is prefilled for an unknown token.
+
+Deploy:
+
+- Worker version: `7bb7f783-6798-4f80-9d13-71908a3ef2dd`.
+- EFS commit pushed: `313a651 feat(auth): prefill expired email login retries`.
+- Parent local pointer commit: `61c9369fd chore: update efs submodule for email login retries`.
+- Parent `origin/main` pointer commit: `99b8ba2b1 chore: update efs submodule for email login retries`.
+
+Session note: exchange size is in the warning range, but the active queue is still drainable, so I continued the queue loop.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:58636599 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -216,7 +269,7 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~From /admin, I did a Forgot Password. I received an email. Clicking on the reset password link I got an error "Something went wrong" "This password reset link is invalid or has expired.".~~
 - ~~Make any email login links expire based on time. Use best security practice to set the expiration time. Is 1 day reasonable? The email should explain when the login link will expire.~~
-- In the email login email, add a link to resend another email login link in case the login link is expired. If the user clicks on an expired login link, go to the email login form with the error message and the email address prefilled.
+- ~~In the email login email, add a link to resend another email login link in case the login link is expired. If the user clicks on an expired login link, go to the email login form with the error message and the email address prefilled.~~
 - deploy
 <!-- /agent:queue -->
 

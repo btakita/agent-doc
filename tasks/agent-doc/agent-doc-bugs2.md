@@ -92,14 +92,59 @@ Preflight notes:
 Escalation: none.
 
 Confidence: high for the retry cadence and local install/test verification; remote CI was still running at closeout.
-<!-- agent:boundary:a4cc04a9 -->
+
+### Re: strict closeout and stale supervisor recycle — gpt-5
+
+> **Queue prompt:**
+>
+> Instead of blindly continuing while the supervisor is stale, you should recycle the supervisor then continue.
+
+
+> **Queue prompt:**
+> Instead of blindly continuing while the supervisor is stale, you should recycle the supervisor then continue.
+
+Implemented this as a product fix and deployed it locally.
+
+Root cause addressed: strict `finalize` / session-document `write --commit` could still accept a non-empty body-only `patch:exchange` in a stale-supervisor or IPC retry path, so bullets/status text could materialize without a `### Re:` assistant heading. The write path now rejects that shape before mutation, after the existing empty-body proof so empty shells still get the old “no real response-body write” error. The only body-delta exception is the legitimate streaming case where the live exchange tail already proves a streamed `### Re:` heading after the current prompt, which avoids duplicating the heading during orchestrate finalization.
+
+Stale-supervisor guidance is now aligned across `queue_continuation`, the bundled/installable skill text, and `runbooks/commit.md`: degraded IPC/semantic warnings do not stop a queue drain, but a stale-binary supervisor should recycle/yield at the boundary and then continue on the fresh binary. `make install-full` installed `agent-doc 0.34.36` and auto-marked 2 controllers to recycle at their next idle boundary.
+
+Changed in `src/agent-doc`:
+- `agent-doc-orchestration/src/write/materialize.rs`
+- `agent-doc-orchestration/src/write/run_entry.rs`
+- `agent-doc-orchestration/src/write/normalize.rs`
+- `agent-doc-orchestration/src/queue_continuation.rs`
+- `src/skill.rs`
+- `.claude/skills/agent-doc/SKILL.md`
+- `runbooks/commit.md`
+- `specs/07-closeout-commands.md`
+- `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `VERSIONS.md`
+- `.github/workflows/release.yml` after the first release run exposed the missing path-dependency checkout.
+
+Verification:
+- `cargo test -p agent-doc-orchestration strict_template_response_heading`
+- `cargo test orchestrate_streams_step_patchback_before_finalize`
+- `cargo test finalize_stream_rejects_empty_exchange_shell_before_commit`
+- `make check` passed after the version bump.
+- `make install-full` passed; `agent-doc --version` reports `agent-doc 0.34.36`.
+- Latest CI on `main` is running for `29d4f41e`; the previous latest CI was green before this push.
+- The first `v0.34.36` Release run failed because the Release workflow did not clone sibling path dependencies. I fixed the workflow, pushed `29d4f41e`, repointed `v0.34.36` to it, and the superseding Release run has passed the path-dependency checkout steps and is compiling.
+
+Commits pushed in `src/agent-doc`:
+- `daf5e727` `fix: require strict closeout response headings`
+- `29d4f41e` `ci: checkout path deps in release workflow`
+
+The superproject `src/agent-doc` pointer is included as a sibling closeout commit.
+<!-- agent:boundary:fbbac828 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~JB `Run Agent Doc` does not submit with Codex or is very slow to submit. The submit retries should be very frequent. At least 1/sec if not more frequent.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Instead of blindly continuing while the supervisor is stale, you should recycle the supervisor then continue.~~
 - I'm still seeing JB `Clear Session Cache` dialogs. Is the CPC instance up to date? Are all supervisors instances up to date? If this is still possible with the current codebase, these cases should use our node merge workflow.
+- It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.
+- JB `Run Agent Doc` still does not submit. The submit retry poll should be 500ms and attempt for 30s...only if the input contents are the prompt itself. Other automated additions to the prompt should be forbidden. If the user modifies the agent prompt, stop the retry polling.
 ---
 Fix the root cause of this issue that occurred in this document.
 ```
@@ -123,6 +168,16 @@ Fix the root cause of this issue that occurred in this document.
 • The repair command will not auto-apply this state; it needs the response finished first. I’m going to use the agent-
   doc component patcher to replace only the malformed exchange component with the complete response text while
   preserving the newly added queue item.
+```
+```
+• The partial IPC apply inserted only the body bullets and auto-struck the head, without the ### Re: header or queue
+  prompt. A new queue item was also added while I was closing out; I’m going to repair the malformed closeout first,
+  then the loop can move to the next queue head.
+```
+```
+• Session-check still fails because the exchange tail ends with the compacted Session Summary, not the response. I’m
+  reordering the exchange so the Session Summary stays first and the completed ### Re: response is the final exchange
+  entry.
 ```
 ---
 JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
@@ -180,6 +235,31 @@ Error: authoritative actor record for tasks/software/agent-loop.md is bound to h
 - :pushpin: do [#fbwireverify]
 - :pushpin: do [#qnodemerge4verify]
 - :pushpin: do [#tb4q]
+---
+:round_pushpin: Fix the root cause of this issue that occurred in this document.
+```
+• The write recovery path hit the same stale-supervisor proof guard: the patch was delivered, but the materialized
+  content was missing the response body. I’m checking the admin/session controls for a non-destructive way to get the
+  supervisor onto the installed binary without interrupting this turn.
+```
+```
+• Because the malformed response is already in the exchange, I’m checking whether agent-doc repair --apply-recovery can
+  normalize the interrupted cycle itself before I touch the component through a lower-level patch.
+
+• Ran agent-doc repair --apply-recovery /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+  └ [repair] recovery [open_cycle] not auto-applied: auto-apply withheld — recovery requires a preserved response body
+    or open-cycle resolution, not a metadata operation
+    [repair] run: finish the response, then `agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+    agent-doc-bugs2.md` (or `agent-doc write --commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+    agent-doc-bugs2.md` to absorb an already-visible response)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• The repair command will not auto-apply this state; it needs the response finished first. I’m going to use the agent-
+  doc component patcher to replace only the malformed exchange component with the complete response text while
+  preserving the newly added queue item.
+```
+---
 - do [#cancelturnverify]
 - do [#qcm1verify]
 - do [#arsm]
@@ -211,6 +291,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#jjds] [operator-verify] Confirm in a live editor/pane that a stale-binary supervisor recycles at the next idle boundary and resumes queue drain on agent-doc 0.34.36.
 - [ ] [#cancelturnverify] [operator-verify] #agent-doc-bug Live-verify Cancel Turn (agent-doc submodule b4471d05; committed+pushed, make check green, JB 0.2.176 + VS Code 0.2.31 built, NOT installed). After installing the plugins: (1) while a turn is RUNNING, invoke Cancel Turn (JB menu / VS Code command) and confirm the turn is interrupted (ops.log cancel_turn_performed action=interrupt_active_turn) and the agent stays open; (2) while the agent is IDLE, invoke Cancel Turn (even repeatedly) and confirm it is a NO-OP (ops.log cancel_turn_noop reason=idle_no_active_turn) and the agent is NOT closed — the core safety requirement. Verify per harness: Codex/OpenCode (Escape/C-c, never raw Ctrl+C that would close on idle) and Claude.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.

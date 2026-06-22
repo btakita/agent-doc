@@ -320,7 +320,21 @@ Verification: the previously recorded focused auth test and full `make check` re
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:14d74844 -->
+
+### Re: forgot-password email queue head — gpt-5
+
+This is already covered by the earlier auth reset fix: invite-provisioned active admins with an empty `password_hash` can request the forgot-password email and use the reset link to set their first password.
+
+Changed paths: none in this acknowledgment cycle.
+
+Commands: `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`; `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`; `rg -n "Available Deal|dialog_deal_id=d6b78994|advance the deal|accredidation|accreditation|Remove Google|Google" tasks/professional/equityfundingsource.md src/equityfundingsource-dev`.
+
+Verification: confirmed the Available Deal prompt had already been answered in the document and that this forgot-password email queue head is covered by the prior auth tests/full `make check`; no new code verification was required for this acknowledgment.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:19cf9d15 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -338,6 +352,7 @@ After 20:30
 - ~~[#admin-invite-password-flow]~~
 - ~~Why is https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=loan still an Available Deal? We need to have messaging in the dialog/page to instruct the admin on how to advance the deal. If it is due to a lender not having their accredidation approved by the admin, then provide a message with a button to approve the lender accredidation.~~
 - ~~Once a lender is selected, EFS sends a "Due Diligence Package" to the lender. The lender will request documents.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Somehow, Robert Waldman was presented with a Google Login from admin. Remove all lingering Google Login buttons.~~
 - deploy
 - do [#due-diligence-package]
 <!-- /agent:queue -->

@@ -375,7 +375,25 @@ Commits:
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:86f7d287 -->
+
+### Re: #ftstrike — gpt-5
+
+`#ftstrike` is an internal agent-doc queue marker, not an EFS backlog id and not a completed-work anchor. It abbreviates the free-text queue auto-strike path: agent-doc believed a free-text queue line had already been answered by the current response, so it struck the queue line and appended `— auto-struck: answered this cycle (#ftstrike)` as bookkeeping.
+
+That is why you do not see `#ftstrike` in this document's backlog or in `equityfundingsource.done.md`: it is diagnostic metadata explaining why a queue line was struck, not a user-tracked task.
+
+In this case, the marker exposed a real problem: the due-diligence item had been auto-struck/reaped before it was implemented. I corrected that by implementing and deploying `#due-diligence-package`, then marking that tracked item done.
+
+Changed paths: none in this explanation-only cycle.
+
+Commands: `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`.
+
+Verification: explanation-only; no code verification required beyond the due-diligence verification recorded in the previous response.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:7a837876 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -388,7 +406,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
  - ~~queue items are being auto-struck without work being done on them. Please unstrike items that were not worked on and work on those items.~~
-- Please explain #ftstrike. I don't see it anywhere in this document or in equityfundingsource.done.md
+- ~~Please explain #ftstrike. I don't see it anywhere in this document or in equityfundingsource.done.md~~
 - ~~rwaldman100+admin@gmail.com clicked the invite link but was not logged in and prompted to set pasword.~~
 - ~~rwaldman100+admin@gmail.com forgot password "did not work". Gave an account already existed error.~~ 
 - ~~Forgot password email was not sent when rwaldman100+admin@gmail.com clicked "Forgot password" link.~~ — auto-struck: answered this cycle (#ftstrike)

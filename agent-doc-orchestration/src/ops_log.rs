@@ -3,6 +3,13 @@
 //! ## Spec
 //! - `log_op(file, message)` appends a timestamped text line to
 //!   `.agent-doc/logs/ops.log`. Best-effort: silently returns on I/O errors.
+//!   Each line is `[<iso-ts>] <message> doc=<stem>[ session=<id>][ turn=<cycle_id>]`
+//!   (`#opslogtrack`): the doc/session/turn attribution suffix is **appended**
+//!   (never prepended) so interleaved entries from multiple documents in one
+//!   project ops.log are traceable without disturbing positional message
+//!   parsers or `contains()`-based marker scans. `doc` is derived from the path
+//!   (no I/O); `session` (cached per process from `agent_doc_session`
+//!   frontmatter) and `turn` (cycle-state `cycle_id`) are best-effort.
 //! - `log_cycle(file, entry)` appends a structured JSON line to
 //!   `.agent-doc/logs/cycles.jsonl` for reproducible operation tracking.
 //!   Each entry records the operation type, git commit hash, snapshot content
@@ -25,10 +32,74 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 
 use crate::graph::RunContext;
+
+/// Process-local cache of `agent_doc_session` keyed by canonical document path
+/// (`#opslogtrack`). The session id is immutable for a document's lifetime, so
+/// parsing the frontmatter once and caching it avoids a YAML parse on every
+/// best-effort `ops.log` line.
+static SESSION_ID_CACHE: LazyLock<Mutex<HashMap<PathBuf, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Best-effort `agent_doc_session` for `file`, cached per process
+/// (`#opslogtrack`). Prefers a cached [`RunContext`] document body to avoid a
+/// re-read; falls back to reading the file. Returns `None` when the document has
+/// no `agent_doc_session` frontmatter (or cannot be read).
+fn cached_session_id(file: &Path, rc: Option<&RunContext>) -> Option<String> {
+    let key = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    if let Ok(cache) = SESSION_ID_CACHE.lock()
+        && let Some(sid) = cache.get(&key)
+    {
+        return Some(sid.clone());
+    }
+    let content = match rc {
+        Some(rc) => rc.doc_content(),
+        None => std::fs::read_to_string(file).ok()?,
+    };
+    let session = agent_doc_core::frontmatter::parse(&content).ok()?.0.session?;
+    if session.is_empty() {
+        return None;
+    }
+    if let Ok(mut cache) = SESSION_ID_CACHE.lock() {
+        cache.insert(key, session.clone());
+    }
+    Some(session)
+}
+
+/// Build the `ops.log` tracking suffix (`#opslogtrack`) appended to each line so
+/// interleaved entries from multiple documents in one project `ops.log` are
+/// attributable: ` doc=<stem> session=<id> turn=<cycle_id>`.
+///
+/// Appended (not prepended) so it never disturbs positional message parsers
+/// (for example `gate_verify`'s `strip_prefix("s760 clear-decision ")`) and so
+/// `contains()`-based ops.log marker scans keep matching. `doc` is always
+/// present (derived from the path, no I/O); `session` and `turn` are best-effort
+/// and omitted when unavailable.
+fn ops_log_tracking_suffix(file: &Path, rc: Option<&RunContext>) -> String {
+    let mut suffix = String::new();
+    if let Some(stem) = file.file_stem().and_then(|n| n.to_str()) {
+        suffix.push_str(" doc=");
+        suffix.push_str(stem);
+    }
+    if let Some(session) = cached_session_id(file, rc) {
+        suffix.push_str(" session=");
+        suffix.push_str(&session);
+    }
+    let turn = match rc {
+        Some(rc) => rc.cycle_state().map(|cs| cs.cycle_id.clone()),
+        None => crate::cycle_state::load(file).ok().flatten().map(|cs| cs.cycle_id),
+    };
+    if let Some(turn) = turn.filter(|t| !t.is_empty()) {
+        suffix.push_str(" turn=");
+        suffix.push_str(&turn);
+    }
+    suffix
+}
 
 /// Append a timestamped log line to `.agent-doc/logs/ops.log`.
 ///
@@ -170,7 +241,10 @@ fn try_log_op(file: &Path, message: &str, rc: Option<&RunContext>) -> Option<()>
         .append(true)
         .open(&log_path)
         .ok()?;
-    writeln!(f, "[{}] {}", format_log_timestamp(ts), message).ok()
+    // `#opslogtrack`: append doc/session/turn attribution so interleaved entries
+    // from multiple documents in one project ops.log are traceable.
+    let suffix = ops_log_tracking_suffix(file, rc);
+    writeln!(f, "[{}] {}{}", format_log_timestamp(ts), message, suffix).ok()
 }
 
 #[cfg(test)]
@@ -292,6 +366,48 @@ mod tests {
         let entry2: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
         assert_eq!(entry1["op"], "write_inline");
         assert_eq!(entry2["op"], "commit");
+    }
+
+    #[test]
+    fn log_op_appends_doc_and_session_tracking_suffix() {
+        // `#opslogtrack`: each ops.log line gains a ` doc=<stem> session=<id>`
+        // suffix so interleaved multi-document project logs are attributable.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let project_root = tmp.path();
+        fs::create_dir_all(project_root.join(".agent-doc")).unwrap();
+        let doc_path = project_root.join("plan.md");
+        fs::write(
+            &doc_path,
+            "---\nagent_doc_session: sess-abc-123\n---\n\nbody\n",
+        )
+        .unwrap();
+
+        // Cache must start empty so the first call exercises the frontmatter parse.
+        SESSION_ID_CACHE.lock().unwrap().clear();
+        log_op(&doc_path, "write_authority action=routed file=plan.md");
+
+        let log_path = project_root.join(".agent-doc/logs/ops.log");
+        let content = fs::read_to_string(&log_path).unwrap();
+        let line = content.lines().next().unwrap();
+
+        // doc + session are appended.
+        assert!(line.contains("doc=plan"), "must carry doc stem: {line:?}");
+        assert!(
+            line.contains("session=sess-abc-123"),
+            "must carry session id: {line:?}"
+        );
+        // The original message stays at the FRONT of the body (after `] `) so
+        // positional parsers (e.g. gate_verify strip_prefix) and contains()
+        // marker scans keep working.
+        let body = line.split_once("] ").map(|(_, m)| m).unwrap();
+        assert!(
+            body.starts_with("write_authority action=routed"),
+            "message must precede the tracking suffix: {body:?}"
+        );
+        assert!(
+            body.contains("write_authority action=routed"),
+            "marker scan substring must survive: {line:?}"
+        );
     }
 
     #[test]

@@ -32,6 +32,59 @@ done
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+### Re: Codex Run Agent Doc submit retries - gpt-5
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` does not submit with Codex or is very slow to submit. The submit retries should be very frequent. At least 1/sec if not more frequent.
+
+Implemented the routed direct-pane submit retry fix.
+
+What changed:
+- The direct-pane submit acceptance timeout is now 1 second instead of 5 seconds.
+- The acceptance budget is now 1.5 seconds, keeping polling slack without delaying the next resend.
+- The default ENTER resubmit cap is now 30 attempts, so the default recovery window remains about 30 seconds while retrying at least once per second while the `agent-doc <FILE>` trigger remains visibly drafted.
+- Added a regression test that enforces the <=1s acceptance timeout and >=30s default retry budget.
+- Updated `specs/11-debounce.md` and `VERSIONS.md` with the Codex/Claude/OpenCode direct-pane retry contract.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/flow/routed_reopen.rs`
+- `src/agent-doc/agent-doc-orchestration/src/route/dispatch.rs`
+- `src/agent-doc/agent-doc-orchestration/src/route.rs`
+- `src/agent-doc/specs/11-debounce.md`
+- `src/agent-doc/VERSIONS.md`
+- parent `src/agent-doc` submodule pointer
+
+Verification:
+- `cargo fmt` passed.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p agent-doc-orchestration direct_pane'` passed (`tart-8a15cae551`).
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` passed (`tart-18ea110685`).
+- `tsift --envelope digest-runner --kind log --path . --shell-command 'make install-full'` passed (`tart-e049c3ac37`).
+- `agent-doc --version` reports `agent-doc 0.34.35`.
+
+Commits/push:
+- agent-doc submodule `ddf454d7` (`fix: retry routed submits every second`) pushed to `btakita/agent-doc main`.
+- parent local pointer `3e248c681` (`chore: update agent-doc submit retries`) committed in the current divergent parent checkout.
+- parent remote pointer `e98fd76e4` (`chore: update agent-doc submit retries`) pushed to `btakita/agent-loop main` from a clean temporary worktree, so unrelated parent local history and dirty files were not pushed.
+
+Closeout recovery:
+- `agent-doc reset --from-current /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` rebuilt stale sidecars after the stream snapshot guard refused the first write.
+- CLI `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` then succeeded and committed snapshot recovery as `52f071c90`.
+- `agent-doc admin recycle` marked the controller to recycle at the next idle boundary because preflight reported the route-owned supervisor was still mapping an older binary.
+- `agent-doc session restart-supervisor /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` refused safely because the current pane is alive-busy, so I did not force-interrupt the running turn.
+- The stale-supervisor IPC retry materialized a body-only response without the `### Re:` heading; I repaired that malformed exchange through `agent-doc patch`, then reset sidecars from the repaired current file before committing.
+
+CI:
+- Latest `btakita/agent-doc` GitHub Actions `CI` run for `ddf454d7` was `in_progress` when checked (`27983797253`, started `2026-06-22T21:02:40Z`).
+- The parent `agent-loop` repo still reports no workflow named `CI`.
+
+Preflight notes:
+- Preflight reported semantic-completion ambiguity warnings for unrelated backlog/review IDs; I left those untouched.
+
+Escalation: none.
+
+Confidence: high for the retry cadence and local install/test verification; remote CI was still running at closeout.
+
 ### Session Summary
 
 ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260622-205008.md`*
@@ -39,14 +92,38 @@ done
 Compacted content:
 ❯ - Archived 1 response topic(s): do [#rtndsync]
 ❯ - Prior summary/context: prior compacted content: Archived 7 response topic(s): editor stale-state rollback and slow Run Agent Doc; build and ...
-<!-- agent:boundary:33df318f -->
+<!-- agent:boundary:5b151629 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- JB `Run Agent Doc` does not submit with Codex or is very slow to submit. The submit retries should be very frequent. At least 1/sec if not more frequent.
+- ~~JB `Run Agent Doc` does not submit with Codex or is very slow to submit. The submit retries should be very frequent. At least 1/sec if not more frequent.~~ — auto-struck: answered this cycle (#ftstrike)
 - I'm still seeing JB `Clear Session Cache` dialogs. Is the CPC instance up to date? Are all supervisors instances up to date?
+---
+Fix the root cause of this issue that occurred in this document.
+```
+• The write recovery path hit the same stale-supervisor proof guard: the patch was delivered, but the materialized
+  content was missing the response body. I’m checking the admin/session controls for a non-destructive way to get the
+  supervisor onto the installed binary without interrupting this turn.
+```
+```
+• Because the malformed response is already in the exchange, I’m checking whether agent-doc repair --apply-recovery can
+  normalize the interrupted cycle itself before I touch the component through a lower-level patch.
+
+• Ran agent-doc repair --apply-recovery /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+  └ [repair] recovery [open_cycle] not auto-applied: auto-apply withheld — recovery requires a preserved response body
+    or open-cycle resolution, not a metadata operation
+    [repair] run: finish the response, then `agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+    agent-doc-bugs2.md` (or `agent-doc write --commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+    agent-doc-bugs2.md` to absorb an already-visible response)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• The repair command will not auto-apply this state; it needs the response finished first. I’m going to use the agent-
+  doc component patcher to replace only the malformed exchange component with the complete response text while
+  preserving the newly added queue item.
+```
 ---
 JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
 ```

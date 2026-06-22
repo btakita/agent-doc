@@ -426,7 +426,62 @@ Verification: queue-state cleanup only; product verification is recorded in the 
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:0145d544 -->
+
+### Re: admin user login links + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> The admin users page should have a button to send a login by email link to a user.
+
+
+> **Queue prompt:**
+>
+> The admin users page should have a button to send a login link to a user.
+
+> **Queue prompt:**
+>
+> deploy
+
+Implemented and deployed the admin User Management login-link action. Each active user row now has a `Send login link` icon action. The button calls a new admin-only `POST /api/admin/users/:id/login-link` endpoint, which reuses the existing passwordless email-login token TTL, one-minute duplicate-send suppression, and shared sign-in email body. Suspended users cannot receive links until they are reactivated.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/routes.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/user_management/index.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/email_login.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/routes.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/user_management.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/table_actions.tsx`
+- `src/equityfundingsource-dev/tests/admin-dashboard.test.ts`
+- `src/equityfundingsource-dev/tests/email-login.test.ts`
+- `src/equityfundingsource-dev` parent submodule pointer
+
+Commands:
+- `tsift status` in `src/equityfundingsource-dev`
+- targeted `tsift --envelope search/source-read/symbol-read` for admin users and email-login code
+- `bun test tests/email-login.test.ts tests/admin-dashboard.test.ts`
+- `git diff --check`
+- `make check`
+- `gh run list --workflow CI --limit 1`
+- `git push origin main` in `src/equityfundingsource-dev`
+- `git push origin main` in the parent repo
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before and after deploy
+- `make deploy`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
+
+Verification: focused email-login/admin-dashboard tests passed. Full `make check` passed with 1122 tests plus app and Worker builds. The known intentional `d1 down` and app-error test logs appeared inside passing tests. `git diff --check` passed. GitHub still has no workflow named `CI`, so there was no CI run to inspect. Remote D1 reported `No migrations to apply` before and after deploy. The live Worker root returned HTTP `200` after deploy.
+
+Commits:
+- EFS submodule: `73b7ee3` (`feat(admin): send user login links`) pushed to `origin/main`.
+- Parent repo: `8989e30a5` (`chore: update efs submodule for login links`) pushed to `origin/main`.
+
+Deploy: activated Worker version `5b5151d9-0fc2-4176-ae3f-1af4761456ff` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Escalation: none.
+
+Notes: the parent repo still has unrelated local drift in `src/agent-doc`, `src/boost-client`, and task documents, plus an unrelated local `agent-doc(monsterrodholders)` commit ahead of `origin/main`; I left those untouched. Preflight still reports a large exchange while the queue is active and semantic-completion warnings on existing review items; I did not compact or change those review items in this implementation cycle.
+
+Confidence: high.
+<!-- agent:boundary:779f5220 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -438,8 +493,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~complete [#msg-unify3]~~
-- ~~complete [#msg-unify4]~~
+- ~~The admin users page should have a button to send a login by email link to a user.~~
+- I want to test the rwaldman100+admin@gmail.com scenario. Please send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com. I want to manually test his scenario so next time I have a call with him, I will have confidence that the fixes work.
 - deploy
 <!-- /agent:queue -->
 

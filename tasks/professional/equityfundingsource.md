@@ -114,7 +114,20 @@ Proof:
 - Commits pushed: EFS submodule `d6f37dc` (`fix(admin): clarify lender proposal terms (#cmtsec)`), parent pointer `d24137b9b` (`chore: update efs submodule for cmtsec`).
 - Escalation: none. Preflight still warns that the installed `agent-doc` binary/cdylib are stale relative to source; I left that build/recycle work out of this product-code cycle.
 - Confidence: high.
-<!-- agent:boundary:aa52f818 -->
+
+### Re: queued #67v2-aa-local while queue is paused — gpt-5
+
+`#67v2-aa-local` is present in the go queue, but this cycle did not start implementation because the agent-doc queue is still paused and preflight reports `queue_continuation_required=false` with `queue_drainable_head_count=0`. The current pause reason is the qflood guard / no-op closeout protection; the binary is explicitly telling this session not to auto-drain until the operator adds new work or unblocks the gated path.
+
+I left the backlog and review state unchanged. `#67v2-aa-local` remains queued/open, but its own backlog text still depends on the `#67v2` Kanban stage work being built first, while the TMO replay side remains gated on `#dzmm`.
+
+Proof:
+- Changed paths: none outside the agent-doc session document closeout.
+- Commands: `tsift status`; `agent-doc --version`; `agent-doc preflight`; `agent-doc read`; `agent-doc plan`.
+- Verification: preflight and plan completed; no product code changed, so no app tests were run.
+- Escalation: none.
+- Confidence: high.
+<!-- agent:boundary:95babf25 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -126,6 +139,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- [#67v2-aa-local]
 <!-- /agent:queue -->
 
 ## Backlog

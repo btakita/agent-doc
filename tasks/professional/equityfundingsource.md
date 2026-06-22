@@ -86,7 +86,7 @@ You can keep **sending** from the verified `info@briantakita.me` (From and Reply
 **If you'd rather avoid a catch-all:** I can add a token-as-local-part scheme so the reply address is `{TOKEN}@replies.<domain>` (no plus) — that still needs a catch-all on the `replies.` subdomain, but it keeps the apex clean and reads better. Say the word and I'll wire it; otherwise the current plus-address scheme is ready.
 
 **My recommendation:** pick a dedicated subdomain on a Cloudflare zone, enable Email Routing with a catch-all → the EFS Worker, and use `replies@<subdomain>`. Once you tell me the exact domain/subdomain, I'll set `MESSAGE_EMAIL_INBOUND_REPLY_TO` (+ flip `MESSAGE_EMAIL_INBOUND_ENABLED=true`) in `wrangler.toml` and deploy; you add the Cloudflare Email Routing catch-all rule (dashboard) and we send a test reply to confirm it lands. That completes `#msgmail4b`/`#f2w8`.
-<!-- agent:boundary:6fc91a58 -->
+<!-- agent:boundary:65707792 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -112,7 +112,6 @@ After 20:30
 ## Review
 
 <!-- agent:review -->
-- [/] [#f2w8] #msgmail4b [operator-verify] Enable inbound email→portal in prod: add a Cloudflare Email Routing rule delivering the portal Reply-To address to the worker's email() handler (Email Worker binding), verify MX/Email Routing on the receiving domain, set MESSAGE_EMAIL_INBOUND_ENABLED=true + MESSAGE_EMAIL_INBOUND_REPLY_TO (+ MESSAGE_EMAIL_INBOUND_SECRET for the HTTP path), then send a test reply and confirm it lands in the thread. Code half #msgmail4a shipped (worker 0ab29102). Plan: src/equityfundingsource-dev/prds/message-email-roundtrip.md
 - [/] [#msgmail4] [recommended] Enable email round-trip in prod (ops, operator-gated): configure Cloudflare Email Routing to POST inbound mail to the worker w/ the shared secret; set MESSAGE_EMAIL_INBOUND_ENABLED/_SECRET/_REPLY_TO; verify sending domain (#f4rq). Do not enable blind. Plan: src/equityfundingsource-dev/prds/message-email-roundtrip.md
 - [/] [#mcme] [recommended] #msg-read-status Email-open-based read receipts on messages — DEFERRED: gated by the operator on "only if we can detect email reads", which EFS cannot today (sends via Cloudflare Email, no open tracking). Needs a ~3-5 day greenfield subsystem: switch message notifications to Resend with open-tracking, add a signed Resend event webhook (email.opened), an email_events table, and message<->email linking, then surface email_opened_at in the message DTO/UI. In-app portal read cursors already exist for borrower chat (chat_sessions.*_last_read_at) but are not email reads.
 - [/] [#msg-unify4] [gated: awaiting dual-write prod soak] Lender cutover — dual-write (best-effort mirror into messages, both lender sources) + backfill (migration 0098) SHIPPED (EFS b5a6a55). Remaining: after soak, switch the inbox to read lender data from messages (dual-read), then drop deal_interest_lender_messages + lender_account_messages. Plan: src/equityfundingsource-dev/prds/message-unification.md.

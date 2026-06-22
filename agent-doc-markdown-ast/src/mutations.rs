@@ -374,17 +374,27 @@ fn unstrike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResul
     }
     let (start, end) = raw_range(source, &patch.component, node)?;
     let raw = &source[start..end];
-    let Some(unstruck) = raw
-        .strip_prefix("~~")
-        .and_then(|body| body.strip_suffix("~~"))
-    else {
+    // Strip both the `~~…~~` wrapper and any `#qstrikenote` annotation appended
+    // outside it (`~~text~~ — auto-struck: …`). The annotated shape closes the
+    // wrapper before the deterministic separator, so split there first.
+    let body_after_open = raw.strip_prefix("~~").ok_or_else(|| MutationError::MalformedItem {
+        component: patch.component.clone(),
+        node_key: patch.node_key.clone(),
+    })?;
+    let annotated_needle = format!("~~{}", crate::overlay::STRUCK_ANNOTATION_SEPARATOR);
+    let unstruck = if let Some(close) = body_after_open.find(&annotated_needle) {
+        &body_after_open[..close]
+    } else if let Some(inner) = body_after_open.strip_suffix("~~") {
+        inner
+    } else {
         return Err(MutationError::MalformedItem {
             component: patch.component.clone(),
             node_key: patch.node_key.clone(),
         });
     };
+    let unstruck = unstruck.to_string();
     let mut out = source.to_string();
-    out.replace_range(start..end, unstruck);
+    out.replace_range(start..end, &unstruck);
     Ok(out)
 }
 
@@ -821,6 +831,32 @@ operator note
         assert_eq!(lines[0], "- :round_pushpin: do [#gamma]");
         assert_eq!(lines[1], "- do [#alpha]");
         assert_eq!(lines[2], "- do [#beta]");
+    }
+
+    #[test]
+    fn unstrike_strips_qstrikenote_annotation_and_wrapper() {
+        // An annotated struck free-text head (#qstrikenote) must unstrike back to
+        // its bare text, dropping both the `~~…~~` wrapper and the note.
+        let doc = "\
+<!-- agent:queue -->
+- ~~answered free-text head~~ — auto-struck: answered this cycle (#ftstrike)
+<!-- /agent:queue -->
+";
+        let nodes = item_nodes(doc, "queue").unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert!(nodes[0].item.struck);
+        let key = nodes[0].node_key.clone();
+        let patches = [node_patch(&key, MutationNodePatchOp::Unstrike, None, None, None)];
+        let updated = apply_node_patches(doc, &patches).unwrap();
+        assert!(
+            updated.contains("- answered free-text head\n"),
+            "unstrike must restore bare text:\n{updated}"
+        );
+        assert!(!updated.contains("~~"), "no strike wrapper remains:\n{updated}");
+        assert!(
+            !updated.contains("auto-struck"),
+            "the note must be removed:\n{updated}"
+        );
     }
 
     #[test]

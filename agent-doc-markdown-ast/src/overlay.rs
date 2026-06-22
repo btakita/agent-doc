@@ -38,6 +38,43 @@ const AGENT_PIN_MARKERS: [&str; 6] = [
     "📍",
 ];
 
+/// Deterministic, visible separator that introduces the auto-struck explanation
+/// note appended *outside* the `~~…~~` strike wrapper (`#qstrikenote`). A struck
+/// free-text queue head renders as `~~foo~~ — auto-struck: …`; the separator lets
+/// the overlay recognize the line as struck even though it no longer *ends* with
+/// `~~`, and lets the consumer detect "already annotated" for idempotency.
+pub const STRUCK_ANNOTATION_SEPARATOR: &str = " — auto-struck: ";
+
+/// Split a trimmed item body into `(struck, inner)` where `struck` is true when the
+/// body is strikethrough-wrapped. Recognizes both the bare `~~text~~` shape and the
+/// annotated `~~text~~ — auto-struck: …` shape (`#qstrikenote`): the trailing note
+/// lives outside the wrapper so the line stays readable, but the item is still a
+/// struck node whose text is the inner content. Returns `(false, body)` unchanged
+/// when the body is not strike-wrapped.
+fn split_struck_body(body: &str) -> (bool, &str) {
+    let inner_with_tail = match body.strip_prefix("~~") {
+        Some(rest) => rest,
+        None => return (false, body),
+    };
+    // Bare wrapper: `~~text~~`.
+    if let Some(inner) = inner_with_tail.strip_suffix("~~")
+        && !inner.is_empty()
+    {
+        return (true, inner.trim());
+    }
+    // Annotated wrapper: `~~text~~ — auto-struck: …`. The closing `~~` is followed
+    // by the deterministic annotation separator, so split on the first
+    // `~~<separator>` boundary.
+    let needle = format!("~~{STRUCK_ANNOTATION_SEPARATOR}");
+    if let Some(close) = inner_with_tail.find(&needle) {
+        let inner = inner_with_tail[..close].trim();
+        if !inner.is_empty() {
+            return (true, inner);
+        }
+    }
+    (false, body)
+}
+
 /// What a component item *is*, independent of its surface text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ItemKind {
@@ -205,10 +242,12 @@ fn parse_item(raw_line_content: &str, start_byte: usize, end_byte: usize) -> Ite
     let raw = raw_line_content.trim().to_string();
     let mut body = raw.as_str();
 
-    // Strikethrough wrapper.
-    let struck = body.starts_with("~~") && body.ends_with("~~") && body.len() >= 4;
+    // Strikethrough wrapper. Tolerates an `#qstrikenote` annotation appended
+    // outside the `~~…~~` wrapper (`~~text~~ — auto-struck: …`): the line is still
+    // a struck node whose text is the inner content.
+    let (struck, inner) = split_struck_body(body);
     if struck {
-        body = body[2..body.len() - 2].trim();
+        body = inner;
     }
 
     // Pins (may stack, e.g. operator + agent).
@@ -323,6 +362,38 @@ mod tests {
             .into_iter()
             .find(|c| c.name == "queue")
             .unwrap()
+    }
+
+    #[test]
+    fn split_struck_body_handles_annotated_and_bare_and_unstruck() {
+        // Bare strike wrapper.
+        assert_eq!(split_struck_body("~~foo~~"), (true, "foo"));
+        // Annotated wrapper (#qstrikenote): note lives outside the closing `~~`.
+        assert_eq!(
+            split_struck_body("~~foo bar~~ — auto-struck: answered this cycle (#ftstrike)"),
+            (true, "foo bar")
+        );
+        // Not struck.
+        assert_eq!(split_struck_body("foo"), (false, "foo"));
+        // Empty wrapper is not a real strike.
+        assert_eq!(split_struck_body("~~~~"), (false, "~~~~"));
+    }
+
+    #[test]
+    fn annotated_struck_free_text_head_parses_as_struck() {
+        let doc = "\
+<!-- agent:queue -->
+- ~~answered free-text head~~ — auto-struck: answered this cycle (#ftstrike)
+<!-- /agent:queue -->
+";
+        let q = components(doc)
+            .into_iter()
+            .find(|c| c.name == "queue")
+            .unwrap();
+        assert_eq!(q.items.len(), 1);
+        assert!(q.items[0].struck, "annotated head stays struck");
+        assert_eq!(q.items[0].text, "answered free-text head");
+        assert_eq!(q.items[0].kind, ItemKind::FreeText);
     }
 
     #[test]

@@ -334,7 +334,7 @@ Verification: confirmed the Available Deal prompt had already been answered in t
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:19cf9d15 -->
+<!-- agent:boundary:8135e1b1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -347,14 +347,13 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~rwaldman100+admin@gmail.com clicked the invite link but was not logged in and prompted to set password.~~
-- ~~rwaldman100+admin@gmail.com forgot password "did not work". Gave an account already existed error.~~ 
-- ~~Forgot password email was not sent when rwaldman100+admin@gmail.com clicked "Forgot password" link.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~rwaldman100+admin@gmail.com forgot password "did not work". Gave an account already existed error.~~
+- ~~~~Forgot password email was not sent when rwaldman100+admin@gmail.com clicked "Forgot password" link.~~ — auto-struck: answered this cycle (#ftstrike)~~
 - ~~[#admin-invite-password-flow]~~
 - ~~Why is https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=loan still an Available Deal? We need to have messaging in the dialog/page to instruct the admin on how to advance the deal. If it is due to a lender not having their accredidation approved by the admin, then provide a message with a button to approve the lender accredidation.~~
 - ~~Once a lender is selected, EFS sends a "Due Diligence Package" to the lender. The lender will request documents.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~Somehow, Robert Waldman was presented with a Google Login from admin. Remove all lingering Google Login buttons.~~
 - deploy
-- do [#due-diligence-package]
 <!-- /agent:queue -->
 
 ## Backlog

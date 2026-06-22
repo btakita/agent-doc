@@ -60,7 +60,8 @@ pub fn apply_targeted_fix_for_route(
     let scoped_registry = filter_registry_for_target(&sessions::load_in(&base_dir)?, &target);
     let issues = detect_issues_in_registry(tmux, &scoped_registry);
     if !issues.is_empty() {
-        outcome.fixed_issues = apply_fixes_with_base(tmux, &issues, None, Some(&base_dir))?;
+        outcome.fixed_issues =
+            apply_fixes_with_base(tmux, &issues, None, Some(&base_dir), Some(&target))?;
     }
     Ok(outcome)
 }

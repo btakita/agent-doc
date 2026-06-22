@@ -19,8 +19,9 @@
 //!   across multiple non-stash windows, determined by majority-window vote).
 //! - Fix application (`apply_fixes`): `WrongSession` → kill pane + deregister entry (default),
 //!   or when `relocate_session = Some(target)` → `join-pane` to target session (registry kept);
-//!   `WrongProcess` → deregister only (foreign process is not killed); `NoLiveOwner`
-//!   → deregister only (pane left intact for route/later manual recovery);
+//!   `WrongProcess` → deregister only (foreign process is not killed); target-scoped
+//!   `NoLiveOwner` → refresh the recovered registry binding, otherwise deregister only
+//!   (pane left intact for route/later manual recovery);
 //!   `InStash` → deregister only (pane left intact for potential manual recovery);
 //!   `WrongWindow` → stash the outlier pane so the next route consolidates it.
 //! - Stash management: `return_stashed_panes` moves registered active panes back to
@@ -279,6 +280,30 @@ fn same_document_path(target: &Path, candidate: &str) -> bool {
     canonical == target
 }
 
+fn candidate_matches_target(target: &Path, base_dir: &Path, candidate: &str) -> bool {
+    if same_document_path(target, candidate) {
+        return true;
+    }
+    if candidate.is_empty() {
+        return false;
+    }
+    let path = Path::new(candidate);
+    if path.is_absolute() {
+        return false;
+    }
+    let resolved = base_dir.join(path);
+    let canonical = resolved.canonicalize().unwrap_or(resolved);
+    canonical == target
+}
+
+fn registry_file_for_target(target: &Path, base_dir: &Path) -> String {
+    target
+        .strip_prefix(base_dir)
+        .unwrap_or(target)
+        .to_string_lossy()
+        .to_string()
+}
+
 fn filter_registry_for_target(
     registry: &sessions::SessionRegistry,
     target: &Path,
@@ -290,6 +315,14 @@ fn filter_registry_for_target(
         })
         .map(|(key, entry)| (key.clone(), entry.clone()))
         .collect()
+}
+
+fn registry_entry_session_id<'a>(key: &'a str, entry: &'a sessions::SessionEntry) -> &'a str {
+    if entry.session_id.is_empty() {
+        key
+    } else {
+        entry.session_id.as_str()
+    }
 }
 
 fn format_associated_pane_fix_error(
@@ -430,7 +463,11 @@ fn recover_target_document_pane_in(
     let preferred_window = config::project_tmux_session()
         .as_deref()
         .and_then(|session| tmux.active_window(session));
-    let candidates = crate::sync::find_associated_panes(tmux, target, &session_id);
+    let candidates = crate::sync::filter_associated_panes_for_document(
+        tmux,
+        target,
+        crate::sync::find_associated_panes(tmux, target, &session_id),
+    );
     match crate::sync::resolve_associated_panes(candidates, preferred_window.as_deref()) {
         crate::sync::AssociatedPaneResolution::None => Ok(TargetDocumentFixOutcome::default()),
         crate::sync::AssociatedPaneResolution::Selected { winner, redundant } => {
@@ -641,6 +678,7 @@ struct PaneInfo {
 /// Detect issues in a given registry (testable without disk I/O).
 fn detect_issues_in_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) -> Vec<Issue> {
     let mut issues = Vec::new();
+    let proof_cache = crate::sync::SyncProofCache::default();
 
     // Collect alive panes with their window info for cross-entry analysis
     let mut alive_panes: Vec<PaneInfo> = Vec::new();
@@ -687,9 +725,18 @@ fn detect_issues_in_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) 
             continue; // Can't check frontmatter without a file path
         }
 
-        let live_owner =
-            crate::sync::find_live_owner_pane(tmux, std::path::Path::new(&entry.file), key);
-        if live_owner.as_deref() != Some(entry.pane.as_str()) {
+        let session_id = registry_entry_session_id(key, entry);
+        let entry_file = std::path::Path::new(&entry.file);
+        let registered_owner = crate::sync::registered_pane_proves_live_owner(
+            tmux,
+            entry_file,
+            session_id,
+            &entry.pane,
+            &proof_cache,
+        );
+        let live_owner = crate::sync::find_live_owner_pane(tmux, entry_file, session_id).as_deref()
+            == Some(entry.pane.as_str());
+        if !registered_owner && !live_owner {
             issues.push(Issue::NoLiveOwner {
                 key: key.clone(),
                 file: label.to_string(),
@@ -835,8 +882,9 @@ fn registered_pane_still_owns_file(tmux: &Tmux, key: &str, file: &str, pane: &st
     if file.is_empty() {
         return false;
     }
-    crate::sync::find_live_owner_pane(tmux, std::path::Path::new(file), key).as_deref()
-        == Some(pane)
+    let file_path = std::path::Path::new(file);
+    let session_id = frontmatter::read_session_id(file_path).unwrap_or_else(|| key.to_string());
+    crate::sync::find_live_owner_pane(tmux, file_path, &session_id).as_deref() == Some(pane)
 }
 
 /// Close a tmux session that has been superseded by a newly-canonical session.
@@ -993,7 +1041,48 @@ pub fn close_superseded_drift_sessions(
 
 /// Apply fixes for detected issues: kill wrong-session panes, deregister wrong-process panes.
 fn apply_fixes(tmux: &Tmux, issues: &[Issue], relocate_session: Option<&str>) -> Result<usize> {
-    apply_fixes_with_base(tmux, issues, relocate_session, None)
+    apply_fixes_with_base(tmux, issues, relocate_session, None, None)
+}
+
+#[derive(Clone, Copy)]
+struct TargetFixScope<'a> {
+    target: &'a Path,
+    base_dir: &'a Path,
+}
+
+fn refresh_target_no_live_owner_registry_entry(
+    tmux: &Tmux,
+    registry: &mut sessions::SessionRegistry,
+    scope: TargetFixScope<'_>,
+    key: &str,
+    file: &str,
+    pane: &str,
+) -> bool {
+    if !candidate_matches_target(scope.target, scope.base_dir, file)
+        && !candidate_matches_target(scope.target, scope.base_dir, key)
+    {
+        return false;
+    }
+    if !tmux.pane_alive(pane) {
+        return false;
+    }
+
+    let Some(entry) = registry.get_mut(key) else {
+        return false;
+    };
+    entry.pane = pane.to_string();
+    entry.pid = sessions::pane_pid_with_mux(tmux, pane).unwrap_or_else(|_| std::process::id());
+    entry.window = sessions::pane_window_with_mux(tmux, pane).unwrap_or_default();
+    entry.cwd = scope.base_dir.to_string_lossy().to_string();
+    if entry.file.is_empty() {
+        entry.file = registry_file_for_target(scope.target, scope.base_dir);
+    }
+    if entry.session_id.is_empty()
+        && let Some(session_id) = frontmatter::read_session_id(scope.target)
+    {
+        entry.session_id = session_id;
+    }
+    true
 }
 
 fn apply_fixes_with_base(
@@ -1001,6 +1090,7 @@ fn apply_fixes_with_base(
     issues: &[Issue],
     relocate_session: Option<&str>,
     base_dir: Option<&Path>,
+    target_file: Option<&Path>,
 ) -> Result<usize> {
     if issues.is_empty() {
         return Ok(0);
@@ -1018,7 +1108,12 @@ fn apply_fixes_with_base(
     let registry_path = sessions::registry_path_in(effective_base);
     let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
     let mut registry = sessions::load_in(effective_base)?;
-    let fixed = apply_fixes_to_registry(tmux, issues, &mut registry, relocate_session);
+    let target_scope = target_file.map(|target| TargetFixScope {
+        target,
+        base_dir: effective_base,
+    });
+    let fixed =
+        apply_fixes_to_registry(tmux, issues, &mut registry, relocate_session, target_scope);
 
     if fixed > 0 {
         sessions::save_in(effective_base, &registry)?;
@@ -1038,6 +1133,7 @@ fn apply_fixes_to_registry(
     issues: &[Issue],
     registry: &mut sessions::SessionRegistry,
     relocate_session: Option<&str>,
+    target_scope: Option<TargetFixScope<'_>>,
 ) -> usize {
     let mut fixed = 0;
 
@@ -1195,7 +1291,20 @@ fn apply_fixes_to_registry(
                 eprintln!("  fixed: {}", issue);
                 fixed += 1;
             }
-            Issue::NoLiveOwner { key, .. } => {
+            Issue::NoLiveOwner { key, file, pane } => {
+                if let Some(scope) = target_scope
+                    && refresh_target_no_live_owner_registry_entry(
+                        tmux, registry, scope, key, file, pane,
+                    )
+                {
+                    eprintln!(
+                        "  refreshed recovered owner pane {} for {} instead of deregistering",
+                        pane, file
+                    );
+                    eprintln!("  fixed: {}", issue);
+                    fixed += 1;
+                    continue;
+                }
                 registry.remove(key);
                 eprintln!("  fixed: {}", issue);
                 fixed += 1;
@@ -1342,8 +1451,13 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
                     issues.len(),
                     target.display()
                 );
-                let fixed =
-                    apply_fixes_with_base(&tmux, &issues, relocate_session, Some(&base_dir))?;
+                let fixed = apply_fixes_with_base(
+                    &tmux,
+                    &issues,
+                    relocate_session,
+                    Some(&base_dir),
+                    Some(&target),
+                )?;
                 eprintln!("\nFixed {} of {} issue(s).", fixed, issues.len());
             } else {
                 eprintln!(
@@ -1965,6 +2079,38 @@ mod tests {
         assert!(filtered.contains_key("sess-a"));
         assert!(!filtered.contains_key("sess-b"));
     }
+
+    #[test]
+    fn registry_entry_session_id_prefers_explicit_session_uuid() {
+        let mut entry = test_entry("%1", "test.md");
+        entry.session_id = "session-uuid".to_string();
+
+        assert_eq!(
+            registry_entry_session_id("/abs/path/test.md", &entry),
+            "session-uuid"
+        );
+
+        entry.session_id.clear();
+        assert_eq!(
+            registry_entry_session_id("/abs/path/test.md", &entry),
+            "/abs/path/test.md"
+        );
+    }
+
+    #[test]
+    fn target_candidate_matches_relative_base_dir_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("tasks").join("test.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# Test\n").unwrap();
+        let target = doc.canonicalize().unwrap();
+
+        assert!(candidate_matches_target(
+            &target,
+            dir.path(),
+            "tasks/test.md"
+        ));
+    }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn detect_wrong_session_pane() {
@@ -2093,7 +2239,7 @@ mod tests {
             expected_session: "correct".to_string(),
         }];
 
-        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None);
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None, None);
         assert_eq!(fixed, 1);
         assert!(
             !registry.contains_key("sess-fix"),
@@ -2120,7 +2266,7 @@ mod tests {
             process: "corky".to_string(),
         }];
 
-        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None);
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None, None);
         assert_eq!(fixed, 1);
         assert!(
             !registry.contains_key("sess-proc"),
@@ -2149,7 +2295,7 @@ mod tests {
             pane: pane.clone(),
         }];
 
-        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None);
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None, None);
         assert_eq!(fixed, 1);
         assert!(
             !registry.contains_key("sess-no-owner"),
@@ -2160,6 +2306,53 @@ mod tests {
             "pane should remain alive after NoLiveOwner deregister"
         );
     }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn target_fix_no_live_owner_refreshes_recovered_registry_entry() {
+        let iso = IsolatedTmux::new("resync-test-target-no-owner");
+        let cwd = std::env::current_dir().unwrap();
+
+        let pane = iso.auto_start("test", &cwd).unwrap();
+        assert!(iso.pane_alive(&pane));
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc_path = tmp.path().join("tasks").join("test.md");
+        std::fs::create_dir_all(doc_path.parent().unwrap()).unwrap();
+        std::fs::write(&doc_path, "---\nsession: recovered-session\n---\n# Test\n").unwrap();
+        let target = doc_path.canonicalize().unwrap();
+        let key = target.to_string_lossy().to_string();
+
+        let mut entry = test_entry(&pane, "tasks/test.md");
+        entry.pid = 0;
+        entry.window.clear();
+        entry.cwd.clear();
+        entry.session_id.clear();
+        let mut registry = SessionRegistry::new();
+        registry.insert(key.clone(), entry);
+
+        let issues = vec![Issue::NoLiveOwner {
+            key: key.clone(),
+            file: "tasks/test.md".to_string(),
+            pane: pane.clone(),
+        }];
+        let scope = TargetFixScope {
+            target: &target,
+            base_dir: tmp.path(),
+        };
+
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None, Some(scope));
+
+        assert_eq!(fixed, 1);
+        let refreshed = registry.get(&key).expect("registry entry should remain");
+        assert_eq!(refreshed.pane, pane);
+        assert_ne!(refreshed.pid, 0, "pane PID should be refreshed");
+        assert!(!refreshed.window.is_empty(), "window should be refreshed");
+        assert_eq!(refreshed.cwd, tmp.path().to_string_lossy());
+        assert_eq!(refreshed.session_id, "recovered-session");
+        assert!(iso.pane_alive(&pane), "pane should remain alive");
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn no_fix_without_flag() {
@@ -2370,7 +2563,7 @@ mod tests {
             expected_window: w1.clone(),
         }];
 
-        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None);
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None, None);
         assert_eq!(fixed, 1);
         assert!(
             iso.pane_alive(&pane2),
@@ -2421,7 +2614,7 @@ mod tests {
         }];
 
         // No relocate_session — uses the new auto-detect path
-        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None);
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None, None);
         assert_eq!(fixed, 1);
         assert!(
             !registry.contains_key("sess-shell"),
@@ -2457,7 +2650,7 @@ mod tests {
             expected_session: "nonexistent-session".to_string(),
         }];
 
-        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None);
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None, None);
         assert_eq!(fixed, 1);
         assert!(
             !registry.contains_key("sess-agent"),
@@ -2538,7 +2731,7 @@ mod tests {
             expected_session: "correct".to_string(),
         }];
 
-        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None);
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None, None);
         assert_eq!(fixed, 1);
         // Agent pane should be alive (relocated, not killed)
         assert!(

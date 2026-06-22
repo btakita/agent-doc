@@ -39,18 +39,20 @@
 //!   no live owner left for the document.
 //! - `run_with_tmux(col_args, window, focus, tmux)` injects a custom `Tmux` instance
 //!   (test hook); auto-start is enabled.
-//! - `repair_layout(tmux, session_name, target_window_name)` runs three phases:
+//! - `repair_layout(tmux, session_name, target_window_name)` runs four phases:
 //!   1. **Stash consolidation** — merges `stash-*` and duplicate `stash` panes into
 //!      the primary stash window via `join-pane` while preserving any overflow
 //!      windows that cannot be joined.
 //!   2. **Target window rescue** — if the target window is missing, breaks a live
 //!      registered pane out of the stash and renames the new window.
-//!   3. **Index normalisation** — moves or swaps the target window to index 0,
+//!   3. **Target window consolidation** — merges duplicate target windows back into
+//!      the canonical target window so repair does not leave split-brain layouts.
+//!   4. **Index normalisation** — moves or swaps the target window to index 0,
 //!      using `swap-window` when index 0 is occupied to avoid data loss, then
 //!      renames and packs stash windows as `1:stash`, `2:stash`, and so on.
 //!
 //!   Phases 1 and 2 are skipped when the layout is already correct (target exists,
-//!   single stash). Phase 3 always runs.
+//!   single stash). Phases 3 and 4 always run.
 //! - `repair_file_state_with_tmux` is the tmux-layout portion of the doctor repair
 //!   path used by both `agent-doc session doctor <FILE> --repair` and full sync.
 //! - The `resolve_file` closure reads each file's frontmatter session UUID and
@@ -811,7 +813,10 @@ fn rescue_missing_agent_doc_window_from_candidates(
 /// Phase 2: Ensure the target window exists — if missing, break a registered
 /// alive pane out of the stash to recreate it.
 ///
-/// Phase 3: Window index normalization — keep `agent-doc` at `0`, then pack
+/// Phase 3: Target consolidation — merge duplicate target windows into the
+/// canonical target window.
+///
+/// Phase 4: Window index normalization — keep `agent-doc` at `0`, then pack
 /// stash windows as `1:stash`, `2:stash`, and so on.
 pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) -> Result<()> {
     tracing::debug!(
@@ -870,7 +875,7 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
     let skip_phase_1_2 = has_target && stash_count == 1 && has_exact_stash;
     if skip_phase_1_2 {
         // Target exists and stash is consolidated. Skip Phases 1+2,
-        // but still run Phase 3 (index normalization) below.
+        // but still run target consolidation and index normalization below.
     } else {
         eprintln!(
             "[repair] layout needs repair: target={} stash_count={}",
@@ -1060,7 +1065,10 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
         }
     } // end skip_phase_1_2 else
 
-    // ── Phase 3: Normalize window indices (always runs) ──
+    // ── Phase 3: Consolidate duplicate target windows (always runs) ──
+    consolidate_duplicate_target_windows(tmux, session_name, target_window_name);
+
+    // ── Phase 4: Normalize window indices (always runs) ──
     // agent-doc should be at index 0, stash windows should directly follow it.
     let windows = list_session_windows(tmux, session_name);
     if let Some((_, target_window_id, _)) = windows
@@ -1084,6 +1092,80 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
     }
 
     Ok(())
+}
+
+fn consolidate_duplicate_target_windows(tmux: &Tmux, session_name: &str, target_window_name: &str) {
+    let mut target_windows: Vec<(usize, String)> = list_session_windows(tmux, session_name)
+        .into_iter()
+        .filter_map(|(index, id, name)| {
+            if name != target_window_name {
+                return None;
+            }
+            let parsed_index = index.parse::<usize>().unwrap_or(usize::MAX);
+            Some((parsed_index, id))
+        })
+        .collect();
+    target_windows.sort_by_key(|(index, id)| (*index, id.clone()));
+    let Some((_, canonical_window)) = target_windows.first().cloned() else {
+        return;
+    };
+    if target_windows.len() <= 1 {
+        return;
+    }
+
+    for (_, duplicate_window) in target_windows.into_iter().skip(1) {
+        let panes = tmux
+            .list_window_panes(&duplicate_window)
+            .unwrap_or_default();
+        for pane in panes {
+            if !tmux.pane_alive(&pane) {
+                continue;
+            }
+            let target = tmux.largest_pane_in_window(&canonical_window).or_else(|| {
+                tmux.list_window_panes(&canonical_window)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .next()
+            });
+            let Some(target) = target.filter(|pane_id| !pane_id.is_empty()) else {
+                continue;
+            };
+            sync_log(&format!(
+                "target_window_consolidate_action=join-pane src={} dst={} duplicate_window={} canonical_window={}",
+                pane, target, duplicate_window, canonical_window
+            ));
+            match PaneMoveOp::new(tmux, &pane, &target).join("-dh") {
+                Ok(()) => {
+                    eprintln!(
+                        "[repair] joined duplicate {} pane {} into {}",
+                        target_window_name, pane, canonical_window
+                    );
+                    sync_log(&format!(
+                        "target_window_consolidate_result=join-pane ok=true src={} dst={}",
+                        pane, target
+                    ));
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[repair] join duplicate {} pane {} → {} failed: {}",
+                        target_window_name, pane, target, e
+                    );
+                    sync_log(&format!(
+                        "target_window_consolidate_result=join-pane ok=false src={} dst={} err={}",
+                        pane, target, e
+                    ));
+                }
+            }
+        }
+
+        if tmux
+            .list_window_panes(&duplicate_window)
+            .unwrap_or_default()
+            .is_empty()
+        {
+            let _ = tmux.raw_cmd(&["kill-window", "-t", &duplicate_window]);
+        }
+    }
 }
 
 fn planned_stash_window_indices(windows: &[(String, String, String)]) -> Vec<(String, usize)> {
@@ -2478,7 +2560,11 @@ fn run_with_options_internal(
             // alive pane in the target session is already running agent-doc
             // for this file (registry may have been pruned or stale).
             // This prevents creating duplicate panes.
-            let associated_candidates = find_associated_panes(tmux, file_path, &session_id);
+            let associated_candidates = filter_associated_panes_for_document(
+                tmux,
+                file_path,
+                find_associated_panes(tmux, file_path, &session_id),
+            );
             match resolve_associated_panes(associated_candidates.clone(), window) {
                 AssociatedPaneResolution::Selected { winner, redundant } => {
                     let detail = std::iter::once(&winner)
@@ -3583,6 +3669,17 @@ pub fn find_associated_panes(
 
     associated.sort_by(|left, right| left.pane_id.cmp(&right.pane_id));
     associated
+}
+
+pub fn filter_associated_panes_for_document(
+    tmux: &Tmux,
+    file: &Path,
+    candidates: Vec<AssociatedPaneCandidate>,
+) -> Vec<AssociatedPaneCandidate> {
+    candidates
+        .into_iter()
+        .filter(|candidate| !pane_runs_other_document_owner(tmux, &candidate.pane_id, file))
+        .collect()
 }
 
 pub fn resolve_associated_panes(
@@ -5724,6 +5821,66 @@ mod tests {
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn repair_layout_consolidates_duplicate_target_windows() {
+        let iso = IsolatedTmux::new("sync-repair-duplicate-agent-doc");
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        let pane0 = iso.new_session("test", tmp.path()).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let pane1 = iso
+            .raw_cmd(&[
+                "new-window",
+                "-t",
+                "test:",
+                "-n",
+                "agent-doc",
+                "-d",
+                "-P",
+                "-F",
+                "#{pane_id}",
+            ])
+            .unwrap()
+            .trim()
+            .to_string();
+
+        let windows_before = list_windows(&iso, "test");
+        assert_eq!(
+            windows_before
+                .iter()
+                .filter(|(_, name)| name == "agent-doc")
+                .count(),
+            2,
+            "test setup should start with duplicate agent-doc windows"
+        );
+
+        repair_layout(&iso, "test", "agent-doc").unwrap();
+
+        let windows_after = list_windows(&iso, "test");
+        assert_eq!(
+            windows_after
+                .iter()
+                .filter(|(_, name)| name == "agent-doc")
+                .count(),
+            1,
+            "repair should consolidate duplicate agent-doc windows"
+        );
+        assert_eq!(
+            windows_after
+                .iter()
+                .find(|(_, name)| name == "agent-doc")
+                .unwrap()
+                .0,
+            "0",
+            "the consolidated agent-doc window should be normalized to index 0"
+        );
+        assert_eq!(
+            iso.pane_window(&pane0).unwrap(),
+            iso.pane_window(&pane1).unwrap(),
+            "both panes should remain alive in the same agent-doc window"
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_moves_stash_directly_after_agent_doc() {
         let iso = IsolatedTmux::new("sync-repair-stash-index");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -5977,8 +6134,9 @@ mod tests {
 
         // Note: repair_layout uses sessions::load() which reads from CWD.
         // In tests without CWD override, Phase 2 rescue may not find the pane
-        // in the registry. But Phase 1 (stash consolidation) and Phase 3 (index
-        // normalization) still run. The key assertion is that repair doesn't error.
+        // in the registry. But stash consolidation, target consolidation, and
+        // index normalization still run. The key assertion is that repair doesn't
+        // error.
         let result = repair_layout(&iso, "test", "agent-doc");
         assert!(result.is_ok(), "repair_layout should not error");
 

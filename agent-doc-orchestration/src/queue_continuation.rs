@@ -51,10 +51,12 @@ pub struct QueueContinuation {
 /// the editor/CRDT path is retried and proven. The normal closeout states that
 /// stop the loop are a FAILED closeout, an unproven IPC/delivery retry
 /// condition, a `session-check` interruption, or a `lint-gate` block. Degraded
-/// / file-IPC-fallback IPC after proof, a stale or wedged supervisor, high
-/// session-accretion, a `semantic_completion_match` warning, and a
-/// `[clean-session]` head wanting "fresh context" are NOT stop reasons.
-pub const CONTINUATION_NO_STALL_GUIDANCE: &str = "queue continuation required — keep draining after a proven closeout. A closeout that reached committed + session-check ok is successful even via a proven file-IPC editor fallback (socket degraded / stale supervisor): the in-session loop does not depend on the socket itself. IPC timeout, missing response proof, recovery=retry_without_disk_write, or recovery=direct_write_fallback are not successful closeouts for an active editor buffer; retry the editor/CRDT path instead of using a direct session-document disk write. Only a failed closeout, unproven IPC/delivery retry condition, session-check interruption, or lint-gate block stops the loop. Degraded IPC after proof, a stale/wedged supervisor, high session-accretion, and semantic_completion_match warnings are NOT stop reasons.";
+/// / file-IPC-fallback IPC after proof, high session-accretion, a
+/// `semantic_completion_match` warning, and a `[clean-session]` head wanting
+/// "fresh context" are NOT stop reasons. A stale-binary supervisor is not a
+/// passive keep-going condition either: recycle/yield at the boundary, then
+/// continue on the fresh binary.
+pub const CONTINUATION_NO_STALL_GUIDANCE: &str = "queue continuation required — keep draining after a proven closeout. A closeout that reached committed + session-check ok is successful even via a proven file-IPC editor fallback (socket degraded): the in-session loop does not depend on the socket itself. IPC timeout, missing response proof, recovery=retry_without_disk_write, or recovery=direct_write_fallback are not successful closeouts for an active editor buffer; retry the editor/CRDT path instead of using a direct session-document disk write. Only a failed closeout, unproven IPC/delivery retry condition, session-check interruption, or lint-gate block stops the loop. Degraded IPC after proof, high session-accretion, and semantic_completion_match warnings are NOT stop reasons. A stale-binary supervisor is a recycle/yield concern: follow recycle-yield or stale_install guidance so the supervisor recycles, then continue the drain on the fresh binary.";
 
 /// `#wd40` / `#staleloop-recycle-restart` — guidance surfaced when the route-owned
 /// supervisor is running a stale binary and has asked the in-session loop to YIELD

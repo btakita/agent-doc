@@ -51,6 +51,108 @@ pub fn ensure_template_response_write_proof(
     );
 }
 
+pub fn ensure_strict_template_response_heading(
+    patches: &[template::PatchBlock],
+    unmatched: &str,
+) -> Result<()> {
+    if template_response_has_heading(patches, unmatched) {
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "strict template closeout response must include a `### Re:` response heading in `patch:exchange` or unmatched response body"
+    );
+}
+
+pub fn ensure_strict_template_response_heading_for_current_doc(
+    current_content: &str,
+    patches: &[template::PatchBlock],
+    unmatched: &str,
+) -> Result<()> {
+    match ensure_strict_template_response_heading(patches, unmatched) {
+        Ok(()) => Ok(()),
+        Err(_)
+            if live_exchange_tail_proves_streamed_response_heading(
+                current_content,
+                patches,
+                unmatched,
+            ) =>
+        {
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn template_response_has_heading(patches: &[template::PatchBlock], unmatched: &str) -> bool {
+    response_text_has_heading(unmatched)
+        || patches.iter().any(|patch| {
+            patch.name == "exchange"
+                && !patch.content.trim().is_empty()
+                && response_text_has_heading(&patch.content)
+        })
+}
+
+fn live_exchange_tail_proves_streamed_response_heading(
+    current_content: &str,
+    patches: &[template::PatchBlock],
+    unmatched: &str,
+) -> bool {
+    if !unmatched.trim().is_empty() {
+        return false;
+    }
+
+    let mut non_empty = patches
+        .iter()
+        .filter(|patch| !patch.content.trim().is_empty());
+    let Some(patch) = non_empty.next() else {
+        return false;
+    };
+    if non_empty.next().is_some() || patch.name != "exchange" {
+        return false;
+    }
+
+    let Ok(components) = crate::component::parse(current_content) else {
+        return false;
+    };
+    let Some(exchange) = components
+        .iter()
+        .rev()
+        .find(|component| component.name == "exchange")
+    else {
+        return false;
+    };
+    let exchange_content = exchange.content(current_content);
+    let Some(tail_start) = offset_after_last_prompt_line(exchange_content) else {
+        return false;
+    };
+
+    response_text_has_heading(&exchange_content[tail_start..])
+}
+
+fn offset_after_last_prompt_line(text: &str) -> Option<usize> {
+    let mut offset = 0usize;
+    let mut last = None;
+    for line in text.split_inclusive('\n') {
+        if line.trim_start().starts_with('❯') {
+            last = Some(offset + line.len());
+        }
+        offset += line.len();
+    }
+    last
+}
+
+fn response_text_has_heading(text: &str) -> bool {
+    text.lines().any(|line| {
+        let trimmed = line.trim_start();
+        trimmed.starts_with("### Re:")
+            || trimmed.starts_with("#### Re:")
+            || trimmed.starts_with("##### Re:")
+            || trimmed.starts_with("###### Re:")
+            || trimmed.starts_with("## Re:")
+    })
+}
+
 pub(crate) fn pending_replace_escape_hatch_enabled() -> bool {
     std::env::var("AGENT_DOC_ALLOW_REPLACE_PENDING")
         .map(|v| v == "1")

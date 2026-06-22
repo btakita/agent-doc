@@ -1498,6 +1498,89 @@ mod verify_sidecar_normalization_tests {
         let err = super::ensure_template_response_write_proof(&patches, "").unwrap_err();
         assert!(err.to_string().contains("no real response-body write"));
     }
+
+    #[test]
+    fn strict_template_response_heading_accepts_exchange_patch_heading() {
+        let patches = vec![crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: queue head — gpt-5\n\nAnswered.\n",
+        )];
+        super::ensure_strict_template_response_heading(&patches, "").unwrap();
+    }
+
+    #[test]
+    fn strict_template_response_heading_accepts_unmatched_heading() {
+        super::ensure_strict_template_response_heading(
+            &[],
+            "### Re: queue head — gpt-5\n\nAnswered.\n",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn strict_template_response_heading_rejects_body_only_exchange_patch() {
+        let patches = vec![crate::template::PatchBlock::new(
+            "exchange",
+            "- changed paths\n- verification\n",
+        )];
+        let err = super::ensure_strict_template_response_heading(&patches, "").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("strict template closeout response")
+        );
+    }
+
+    #[test]
+    fn strict_template_response_heading_rejects_non_exchange_patch_only() {
+        let patches = vec![crate::template::PatchBlock::new(
+            "status",
+            "### Re: misplaced — gpt-5\n\nWrong component.\n",
+        )];
+        let err = super::ensure_strict_template_response_heading(&patches, "").unwrap_err();
+        assert!(err.to_string().contains("patch:exchange"));
+    }
+
+    #[test]
+    fn strict_template_response_heading_accepts_streamed_visible_prefix() {
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #stream. spec-test-build-install-commit-push\n",
+            "<!-- patch:exchange -->\n",
+            "### Re: streamed — gpt-5\n",
+            "<!-- agent:boundary:streamed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let patches = vec![crate::template::PatchBlock::new(
+            "exchange",
+            "\nImplemented and verified.\n",
+        )];
+
+        super::ensure_strict_template_response_heading_for_current_doc(current, &patches, "")
+            .unwrap();
+    }
+
+    #[test]
+    fn strict_template_response_heading_rejects_prior_heading_before_live_prompt() {
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "❯ do #new. spec-test-build-install-commit-push\n",
+            "<!-- agent:boundary:new -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let patches = vec![crate::template::PatchBlock::new(
+            "exchange",
+            "\nImplemented and verified.\n",
+        )];
+        let err =
+            super::ensure_strict_template_response_heading_for_current_doc(current, &patches, "")
+                .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("strict template closeout response")
+        );
+    }
 }
 
 #[cfg(test)]

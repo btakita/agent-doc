@@ -226,6 +226,13 @@ pub fn run_template(
     if !flags.allow_replace_pending && !pending_replace_escape_hatch_enabled() {
         ensure_template_response_write_proof(&patches, &unmatched)?;
     }
+    if flags.strict_closeout {
+        ensure_strict_template_response_heading_for_current_doc(
+            &current_content,
+            &patches,
+            &unmatched,
+        )?;
+    }
     prewrite_pending_capture_check(file, &response, &flags)?;
     auto_apply_pending_done_if_enabled(file, &response, &flags, &mut current_content)?;
     prewrite_pending_done_check(file, &response, &flags)?;
@@ -519,6 +526,13 @@ pub fn run_stream(
     }
     if !flags.allow_replace_pending && !pending_replace_escape_hatch_enabled() {
         ensure_template_response_write_proof(&patches, &unmatched)?;
+    }
+    if flags.strict_closeout {
+        ensure_strict_template_response_heading_for_current_doc(
+            &current_content,
+            &patches,
+            &unmatched,
+        )?;
     }
     prewrite_pending_capture_check(file, &response, &flags)?;
     auto_apply_pending_done_if_enabled(file, &response, &flags, &mut current_content)?;
@@ -1113,6 +1127,13 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     }
     if !flags.allow_replace_pending && !pending_replace_escape_hatch_enabled() {
         ensure_template_response_write_proof(&patches, &unmatched)?;
+    }
+    if flags.strict_closeout {
+        ensure_strict_template_response_heading_for_current_doc(
+            &current_content,
+            &patches,
+            &unmatched,
+        )?;
     }
     prewrite_pending_capture_check(file, &response, &flags)?;
     auto_apply_pending_done_if_enabled(file, &response, &flags, &mut current_content)?;

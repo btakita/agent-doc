@@ -1,6 +1,6 @@
 # Plan: free-text queue heads must auto-strike after a proven closeout (`#qheadstrike`)
 
-**Status:** PLAN ONLY — do not implement (filed via `#agent-doc-bug`).
+**Status:** P1 + P3 shipped previously; **P2 implemented 2026-06-21** (agent-doc submodule `84a939f7`): the strike now runs at the commit seam (`commit_with_outcome`, before staging) sourcing the answered response from the durable capture ledger, so the `agent-doc commit` / `reset --from-current` → commit / auto-recovery paths converge on the same strike the finalize path does. `make check` green (4950); test `commit_seam_strikes_answered_free_text_head_from_capture`. Remaining: the LIVE recovery-path proof (operator-verify — needs the supervisor on the new binary), tracked as `#qheadstrikeverify`.
 
 ## Symptom (operator-reported 2026-06-19, equityfundingsource.md)
 
@@ -43,3 +43,17 @@ All four heads were fully completed + deployed and the cycle reached a **proven 
 ## Acceptance
 
 `make check` + `make tmux-ci` green; new SimWorld cases above pass; on the repro shape a proven closeout leaves `queue_drainable_head_count: 0` with no manual `queue consume`. This is merge/commit/queue-core behavior (the strike moves onto the commit seam) — **not** safe to rush inside an in-session loop; needs a focused operator-driven cycle.
+
+## Implementation seam (located 2026-06-21, agent-doc-bugs2 churn repro)
+
+P1+P3 are **already shipped**: `strike_answered_free_text_queue_heads(file, response_body, force_disk)` in `agent-doc-orchestration/src/write/queue_consume.rs:872` already strikes *all* answered free-text heads regardless of position, is pushpin/fence/baseline-aware (`free_text_head_match_prose` strips code fences; `free_text_head_present_in_baseline` ignores pin/dash cosmetics), and has end-to-end tests (`strike_answered_free_text_heads_strikes_behind_id_head_end_to_end`, queue_consume.rs:3224).
+
+**The remaining gap is purely P2.** The strike is called from exactly one site — `write.rs:2139`, inside the finalize/`run_write` path, gated on `commit_mode != CommitMode::None` and given the in-memory `response_body`. When `finalize` hits `live_prompt_drift_after_preflight` and the cycle is closed out through the **standalone `agent-doc commit` recovery path** (`git::commit` → `commit_with_outcome`, `git.rs:586`), the strike never runs — `commit_with_outcome` has no `response_body` and no strike call. That is exactly why the agent-doc-bugs2 "JB Run Agent Doc stalled without feedback" head stayed unstruck after its answer committed (cycle reached `committed` via `agent-doc commit`, but the strike lives only on the finalize path → phantom-pin churn).
+
+Focused-cycle change:
+1. In `commit_with_outcome` (git.rs), at the **post-commit success** point (after the new commit lands, before VCS-refresh signalling), load the freshly-committed cycle's captured `response_body` via `capture::load_by_id` / latest capture for the doc-hash (the capture ledger already persists `response_body`).
+2. Call `strike_answered_free_text_queue_heads(file, &response_body, force_disk=false)` there, best-effort (a missed strike must never fail an otherwise-clean commit — mirror the `Ok(0)/Ok(n)/Err` handling at write.rs:2139).
+3. Reuse `converge_document_or_disk(.., "free_text_strike")` (queue_consume.rs:924) so the strike write goes through the same IPC/disk path. NOTE: when the live editor IPC is wedged (`ack_mismatch`), this converge can still fail — that is the **operator-verify** portion; the deterministic test below covers the recovery-path wiring itself.
+4. SimWorld test: a captured cycle whose `finalize` was driven into `live_prompt_drift` and closed via `agent-doc commit` strikes the answered free-text head identically to the finalize path (the "Recovery-path parity" case above), assertable without live tmux/IPC.
+
+**Precondition for the focused cycle:** run it on a HEALTHY supervisor/editor (recycle first to clear any `ack_mismatch` IPC wedge), so the live strike-write is actually provable rather than blocked.

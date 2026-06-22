@@ -69,7 +69,19 @@ Done — the review is empty and the plan no longer carries any gates. Committed
 **JB plugin updates you'll need to install** (for the items whose proof needs plugin code): `#qpauseux` (paused-queue notification render), `#8bfz` (single-owner lease), `#restartagentmenu` (Restart Agent menu), `#qnodemerge4wire` P4 (DocumentListener reporters). I'll flag the exact build when each lands; none are shipped yet.
 
 **Also this cycle:** noted your `#1jec` strike (resolved) and preserved the `:pushpin:` position-locks (`#qauthorder`). The answered JB-stall head (`#supinstallfeedback`, shipped `cf7347a9`) stays at the queue head only because last cycle's `content_ours` drift recovery reverted its strike — no re-work needed.
-<!-- agent:boundary:e0c134a4 -->
+
+### Re: JB `Run Agent Doc` stalled without feedback — opus-4-8
+
+> **Queue prompt:** :round_pushpin: JB `Run Agent Doc` stalled without feedback — pane showed the post-exit `Press Enter to restart` keepalive while the supervisor auto-install was `Compiling agent-doc v0.34.35`.
+
+This specific stall is already addressed by shipped code (`#supinstallfeedback`). On the idle-watch auto-install path (`agent-doc-orchestration/src/start/idle_watch.rs`), `surface_supervisor_auto_install_status` fires a `Started` phase message — *"agent-doc: rebuilding the freshly-committed binary (~1 min) — do NOT press Enter; the supervisor auto-restarts when the build finishes"* — at the moment the `cargo build --release` / `cargo install` / `lib-install` rebuild begins, plus `Succeeded`/`Failed` terminal phases. It's unit-tested (`supervisor_auto_install_pane_message_started_warns_against_keypress`).
+
+Why your captured log still looks feedback-less: it's pane **scrollback**, and the feedback is a transient `tmux display-message` on the **status line** (bottom bar), so it doesn't appear in the captured body — and the scrollback itself keeps showing the misleading `Press Enter to restart` keepalive for the whole ~1-min compile. So the stall is fixed in principle but the indicator is easy to miss.
+
+**Residual gap captured** as `[#supinstallvis]` (`[recommended]`): make the rebuild state visible in the pane **body/scrollback** (or via the JB/VSCode plugin notification surface, overlapping `#qpauseux`) rather than only the status line — without disturbing the keepalive's Enter-to-restart reader. The safe pane-write mechanism needs an operator decision (a raw `send-keys` line risks being consumed by the keepalive), so I did not implement a blind pane-write change this cycle.
+
+No build/install/push this turn: STOP-cutting-releases is in effect, and the supervisor already auto-installs from source at its idle boundary (exactly what your log shows). Stopping the loop here — the remaining queue heads are dominated by `[operator-verify]`/operator-capture items on a queue paused for `#qflood` churn; those need a live editor/pane and can't be agent-drained.
+<!-- agent:boundary:2c78d560 -->
 <!-- /agent:exchange -->
 
 ## Queue

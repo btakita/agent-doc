@@ -65,14 +65,13 @@ That is the behavior this queue item asks for: after Clear Session Context, an e
 Triaged this as the existing route/dispatch storm cluster, with one piece already fixed. The no-submit after clear-cooldown path is covered by agent-doc `3d110b3a`: explicit startup auto-trigger now waits through clear cooldown instead of treating it as a terminal skip.
 
 The duplicate-prompt/storm part is not a new standalone item here; it remains covered by the existing route/dispatch capture and recycle-settle work already in the queue/backlog (`#jbrundispatch`, `#jbdisprecycle`, and related no-submit/retry items). No additional backlog item is needed for this pasted report because it does not add a distinct repro beyond that tracked cluster.
-<!-- agent:boundary:4d797e77 -->
+<!-- agent:boundary:8627e1cc -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - :pushpin: do [#qcm1verify]
-- ~~:pushpin: JS `Clear Session Context` then JB `Run Agent Doc` sometimes has the dispatch storm (multiple duplicate prompts) and no submit.~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: do [#arsm]
 - :pushpin: do [#editorbufwin]
 - :pushpin: do [#jbdisprecycle]

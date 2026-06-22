@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -63,7 +63,30 @@ So rather than flood, tell me which you want and I'll do it in one pass:
 The queue is currently **paused** (stale qflood guard), so nothing auto-drains while we settle this.
 
 **Separately — heads-up that affects this whole session:** preflight warns the installed `agent-doc` binary + cdylib **predate source commit `fefc5f2a`**, so the live tmux/JetBrains supervisor is running older code. That's the likely cause of the repeated finalize IPC socket wedges and the go-mode queue churn this session. Recommend `make install` in `src/agent-doc` (rebuilds binary + cdylib) then an `admin recycle` to pick it up — I held off doing it unprompted since it's a build on a live session.
-<!-- agent:boundary:e2cfc3e3 -->
+> **Queue prompt:** Option A
+
+### Re: Option A — gated-item triage applied — opus-4-8
+
+> **Queue prompt:**
+>
+> Option A
+
+
+Done. Triaged all 30 gated items (4 backlog + 26 review) per Option A:
+
+**Closed (committed `5c1168133`):**
+- `#cftk` — already marked RESOLVED 2026-06-20 (D1 token confirmed active).
+- `#msgmail4` — "enable email round-trip in prod" is exactly what shipped this session: inbound enabled, apex `efs@briantakita.me → worker` rule live, sender verified, round-trip live-tested.
+
+**Un-gated to actionable (now drainable):**
+- `#cmtsec` — small UI tweak (gate the "Committed amount" block on `proposal_amount != null` or relabel "Proposed terms").
+- `#cutover-checklist` — write (not execute) the custom-domain + Workspace-SSO cutover checklist doc.
+- `#pmhf` is the third agent-actionable one (reuse the rebalancing share editor in the per-deal split UI) but sits in `agent:review`; say "promote #pmhf" and I'll move + do it.
+
+**Left gated (genuinely operator/externally blocked, ~22):** TMO writeback chain (`#dzmm`/`#dzmm-writeback-replay`/`#67v2`/`#67v2-auto-advance`/`#67v2-aa-local`/`#zwws*`) needs `#7a4d`+`#k2xg`; cutover/SSO (`#efs-cutover-sso-plan`/`#next-steps`/`#214f`) and `#xcvg*` need `#m6ch` creds / a comms-path decision; `#jnzs*` await Judith; `#msg-unify3/4` await dual-write soak; `#dropbox-sync-adapter` needs Dropbox access; `#5eq8` is design-blocked; `#nthc`/`#dealtab500`/`#5q7z*`/`#proprate` are operator-verify or need a business-rule decision. These correctly stay in review rather than churning the go-queue.
+
+**Two blockers before the un-gated items can auto-drain:** the queue is still **paused** (stale qflood guard — say "unpause" and I'll clear it), and the installed binary is **stale vs `fefc5f2a`** (every `finalize` this session wedged the IPC socket and recovered via `--force-disk`). Recommend `make install` in `src/agent-doc` + `admin recycle` before resuming the drain.
+<!-- agent:boundary:8e1cf15c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -75,7 +98,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Option A
 <!-- /agent:queue -->
 
 ## Backlog

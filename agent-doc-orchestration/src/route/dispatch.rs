@@ -49,14 +49,15 @@ fn log_dispatch_inject(file: &Path, pane: &str, harness: &HarnessConfig, transpo
 }
 
 /// Default bare-Enter resubmit cap when the routed trigger stays drafted in the
-/// composer (not yet submitted).
-const DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT: usize = 6;
+/// composer (not yet submitted). With the 1s submit-acceptance window, this
+/// preserves a roughly 30s recovery budget while nudging at least once/second.
+const DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT: usize = 30;
 
 /// Max bare-Enter resubmits while the trigger is still visible (drafted, not
 /// submitted) — the supervisor "retry until the prompt is submitted" budget
-/// (`#jbclaudesubmit`). Each resubmit re-polls for a full acceptance window, so the
-/// wall-clock budget is roughly this count times `direct_pane_submit_acceptance_timeout`.
-/// Raised from 3 → 6 (and made env-tunable via
+/// (`#jbclaudesubmit`). Each resubmit re-polls for the 1s acceptance window, so
+/// a visibly drafted trigger gets another submit key at least once/second.
+/// Raised from 3 → 30 (and made env-tunable via
 /// `AGENT_DOC_DIRECT_PANE_MAX_ENTER_RESUBMITS`) because a slow-to-ready Claude Code
 /// composer — which has no submit-proof hook, so dispatch is accepted-only — could
 /// exhaust the old 3-nudge budget before the pane focused and consumed the Enter,
@@ -1998,6 +1999,23 @@ mod tests {
             0,
         ));
     }
+
+    #[test]
+    fn direct_pane_enter_resubmit_retries_at_least_once_per_second() {
+        let timeout = direct_pane_submit_acceptance_timeout();
+        assert!(
+            timeout <= Duration::from_secs(1),
+            "visible drafted triggers should earn another submit key at least once/second; timeout={timeout:?}"
+        );
+
+        let default_total_ms =
+            timeout.as_millis() * u128::from(DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT as u64);
+        assert!(
+            default_total_ms >= 30_000,
+            "default retry budget should preserve a roughly 30s recovery window"
+        );
+    }
+
     #[test]
     fn direct_pane_existing_draft_detection_enters_only_current_codex_draft() {
         let harness = HarnessConfig::codex();

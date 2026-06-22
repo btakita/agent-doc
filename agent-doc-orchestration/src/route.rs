@@ -7000,16 +7000,16 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     fn direct_pane_submit_budget_allows_acceptance_poll_slack() {
         assert_eq!(
             direct_pane_submit_acceptance_timeout(),
-            Duration::from_secs(5)
+            Duration::from_secs(1)
         );
         assert_eq!(
             direct_pane_submit_acceptance_budget(),
-            Duration::from_secs(6)
+            Duration::from_millis(1500)
         );
 
         let message = route_latency_message(
             "direct_pane_submit",
-            Duration::from_millis(5180),
+            Duration::from_millis(1180),
             direct_pane_submit_acceptance_budget(),
             "%1",
             &HarnessConfig::codex(),

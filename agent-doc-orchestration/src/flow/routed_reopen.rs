@@ -9,14 +9,14 @@ pub enum DirectPaneSubmitStatus {
 }
 
 pub fn direct_pane_submit_acceptance_timeout() -> Duration {
-    Duration::from_secs(5)
+    Duration::from_secs(1)
 }
 
 pub fn direct_pane_submit_acceptance_budget() -> Duration {
     // tmux/control-mode delivery can spend the whole acceptance window plus a
     // final capture poll before pane input disappears. Keep the budget above
     // that window so "over_budget" means slower than the path can observe.
-    Duration::from_secs(6)
+    Duration::from_millis(1500)
 }
 
 pub fn routed_dispatch_start_timeout(test_mode: bool) -> Duration {

@@ -72,9 +72,13 @@ captures first and sleeps after on a tightened
 `DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL` (150ms), but an empty first
 capture is not enough to prove acceptance: route waits for the empty capture to
 remain stable before accepting so a delayed Codex composer draft can still be
-seen and re-submitted with bounded harness submit-key retries. If Codex later
-reaches accepted-only dispatch proof and the same prompt is visibly drafted,
-route sends one late submit-key retry and rechecks dispatch-start proof.
+seen and re-submitted with bounded harness submit-key retries. The
+submit-acceptance window is 1s, so a visibly drafted `agent-doc <FILE>` prompt
+gets another submit key at least once per second; the default retry cap is 30
+attempts and remains env-tunable through
+`AGENT_DOC_DIRECT_PANE_MAX_ENTER_RESUBMITS`. If Codex later reaches
+accepted-only dispatch proof and the same prompt is visibly drafted, route sends
+one late submit-key retry and rechecks dispatch-start proof.
 3. **Ready-prompt poll cadence tightened.** `wait_for_agent_ready_outcome` polled
    every 500ms and requires a 2-poll ready streak to debounce a transient prompt
    flicker, giving a ~500-1000ms ready floor. The poll interval is now
@@ -85,7 +89,8 @@ route sends one late submit-key retry and rechecks dispatch-start proof.
 (JB `TerminalUtilTest`, asserts `--debounce 0`);
 `direct_pane_acceptance_waits_for_stable_empty_capture` and
 `direct_pane_acceptance_accepts_after_visible_draft_disappears` cover the
-empty-input acceptance state machine; the capture/poll cadence changes are
+empty-input acceptance state machine; `direct_pane_enter_resubmit_retries_at_least_once_per_second`
+locks the submit retry cadence; the capture/poll cadence changes are
 exercised by the live-tmux `send_command_checked_*` and
 `wait_for_agent_ready*` integration tests (`make tmux-ci`).
 

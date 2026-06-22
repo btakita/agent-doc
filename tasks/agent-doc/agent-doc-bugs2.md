@@ -421,7 +421,12 @@ Verification:
 Commits:
 - `src/agent-doc`: `05c03ca7 fix: preserve fresh queue head authority` (pushed)
 - root pointer: `8a4834142 agent-doc: update fresh queue authority fix` (pushed)
-<!-- agent:boundary:813f8dd2 -->
+I stalled in the agent-doc closeout path, not because I was waiting on CI.
+
+What happened: the implementation and local verification were done, but the first finalize call failed its editor-IPC proof and retained the pending response. I then had to run preflight/repair/commit recovery, reset the sidecars back to the visible document, and push the recovered session commits without touching unrelated worktree changes. That made the turn look stuck even though the code path had already landed.
+
+I will not wait for CI. For future code-changing cycles here I will run local verification, do at most a non-blocking `gh run list --workflow CI --limit 1` status check, then close the cycle. This current cycle only records that instruction; no source change is needed.
+<!-- agent:boundary:20e65741 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -514,10 +519,8 @@ These heads are not stale. I just typed them in.
     47 -- Add actionable items to advance gated backlog items.
     46  <!-- /agent:queue -->
 ```
----
----
 - ~~JB `Run Agent Doc` on monsterrodholders.md stalls (no prompt) and does not submit (prompt sent but no submit).~~
-- do [#cancelturnverify]
+- ~~do [#cancelturnverify]~~
 - I typed into monsterrodholders.md queue but agent-doc reverted to an old snapshot and I lost everything that I typed.
 - Figure out how to make AGENTS.md lean & reliable so agents follow the directives. Should we treat AGENTS.md as a menu that defers to runbooks? Would that be more reliable?
 - :pushpin: do [#qcm1verify]
@@ -530,10 +533,7 @@ These heads are not stale. I just typed them in.
 - do [#mrh-response-loss-stalled-queue]
 - do [#qnodemerge4verify]
 - do [#fbwireverify]
-- do [#arsm]
 - do [#tb4q]
-- do [#qcm1verify]
-- do [#1jec]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

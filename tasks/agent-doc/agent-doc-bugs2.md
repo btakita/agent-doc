@@ -101,13 +101,12 @@ I located the exact root cause for why the answered "JB Run Agent Doc stalled wi
 **Recommended next step:** recycle the supervisor/editor to clear the `ack_mismatch` IPC wedge, then run `do [#qheadstrike]` as a focused cycle on the healthy session — the plan now makes it a targeted ~1-file change plus one test, not a re-investigation. If you'd rather halt the re-fire churn first, set `queue: stop` in frontmatter (an `admin queue pause` only suppresses unattended supervisor injection, not the head re-surfacing).
 
 Not auto-looping: the answered head will keep re-surfacing until P2 lands (it can't strike while IPC is wedged), so looping would only churn.
-<!-- agent:boundary:afc9f6f7 -->
+<!-- agent:boundary:c697560d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: do [#qheadstrike]
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
 - ~~The end part of the response that breaks down churn with tips shows up in the Claude Code console but not in the document. That part of the response should be in the document.~~
 - :pushpin: All log output should include a timestamp...especially ops.log. ops.log could also include the name of the agent document, the session id, and turn id for easier tracking when working with multiple documents.
 - :pushpin: do [#tb4q]
@@ -142,7 +141,8 @@ Not auto-looping: the answered head will keep re-surfacing until P2 lands (it ca
 - :pushpin: do [#runexitrestart]
 - :pushpin: do [#gf5n]
 - :pushpin: do [#supinstallvis]
-- do [#1jec]
+- :pushpin: do [#1jec]
+- do [#qheadstrike]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

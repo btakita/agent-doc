@@ -107,7 +107,30 @@ Audited the four proof sites #j9ja names; two were actionable, two are blocked o
 - restart-agent menu-invoke marker — `#restartagentmenu` (`RestartAgentAction.kt`) isn't built.
 
 I gated `#j9ja` rather than closing it: the two remaining markers belong inside `#agentreloadrestart` Phase 1b and `#restartagentmenu` and should be added when those features are implemented. Un-gates when they land.
-<!-- agent:boundary:3e5ad1a2 -->
+
+### Re: do [#qnodemerge4wire] — editor-op reporters Phase 4 (JB + VS Code) — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#qnodemerge4wire]
+
+
+Implemented the full Phase 4 reporter wiring. The Rust FFI `agent_doc_record_editor_op` already existed; the missing pieces were a base-hash keystone and the two plugin reporters.
+
+**Base-hash keystone** (submodule `649df845`): captured ops must be stamped with the hash of the *exact* base text the write-time merge resolves, or the merge's `editor_ops_for_base` gate rejects every op and the feature silently no-ops. Added `op_capture::current_base_hash` (mirrors `merge::merge_contents_crdt_with_ops`: snapshot → `crdt_merge_base_state` → `CrdtDoc::decode_state` → `to_text` → `content_hash`) + the `agent_doc_document_base_hash` FFI. 2 keystone tests prove stamped ops pass the gate.
+
+**Reporters** (submodule `4650054c`):
+- **JB** (`TypingTracker.reportEditorOp`, plugin 0.2.173): byte offset from the post-change text prefix (edit-invariant), delete bytes from `event.oldFragment`; JNA bindings in `NativeLib.kt`.
+- **VS Code** (`extension.ts` + `native.ts`, 0.2.29): a per-document text **shadow** (VS Code events carry only `rangeLength` in UTF-16, not the old fragment) supplies the deleted byte length; pure exported `utf16RangeToUtf8Bytes` for the conversion.
+
+Both convert the editor's **UTF-16** offsets to the **UTF-8 byte** units `EditorOp` requires (the non-ASCII correctness crux) and split a replacement into delete-then-insert at the same offset.
+
+**Verification**: `make check` green (clippy clean); JB gradle build green; `tsc` compile green; 3 new VS Code tests for ASCII / multibyte (`café 日本`) / astral-plane (`😀` surrogate pair) offset semantics pass. **Safety**: a missed/misaligned op fails the merge's replay-equals-`theirs` gate → diff-guess fallback, never worse than today.
+
+**Build + install** (per your directive): cdylib rebuilt + `lib-install`ed (the new FFI symbols are hot-reloaded live for the JB plugin). JB signed/unsigned zips (0.2.173) and the VS Code `.vsix` (0.2.29) are built. I did **not** `cargo install` the binary — the supervisor's behavior is unchanged (only the cdylib FFI moved), so this avoids the mid-session finalize-client-newer drift.
+
+The agent-doable work is complete, so I'm closing `#qnodemerge4wire`. The operator-gated remainder is filed as `#qnodemerge4verify`: install the JB plugin zip + VS Code `.vsix` (the Kotlin/TS reporters need a plugin reinstall) and do one live non-ASCII edit-during-merge to confirm the ops are recorded with byte offsets and accepted by the merge gate.
+<!-- agent:boundary:5793b7f3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -116,7 +139,7 @@ I gated `#j9ja` rather than closing it: the two remaining markers belong inside 
 - ~~Use the logs to validate or invalidate any operator verify items in the queue.~~
 - ~~:pushpin: do [#fbwire]~~
 - ~~:pushpin: do [#j9ja]~~
-- :pushpin: do [#qnodemerge4wire]
+- ~~:pushpin: do [#qnodemerge4wire]~~
 - :pushpin: do [#tb4q]
 - :pushpin: do [#agentreloadrestart]
 - :pushpin: do [#restartagentmenu]
@@ -173,12 +196,12 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.
 - [ ] [#supinstallvis] [recommended] #agent-doc-bug #supinstallfeedback follow-up: the supervisor auto-install status (surface_supervisor_auto_install_status, idle_watch.rs) is surfaced ONLY as a transient tmux display-message on the status line, which is easy to miss while the pane scrollback keeps showing the misleading post-exit "Press Enter to restart" keepalive — so an operator watching the pane body still perceives a ~1-min stall. Residual: make the rebuild state visible in the pane BODY/scrollback (not just the status line) without disturbing the keepalive Enter-to-restart reader, e.g. a pane title set + a single non-input-consuming visible line, or render it through the JB/VSCode plugin notification surface (overlaps #qpauseux notification rendering). Decide the safe pane-write mechanism with the operator before implementing (send-keys risks being consumed by the keepalive). Plan TBD.
 - [ ] [#agentreloadrestart] restart-agent Phase 1: supervisor restart re-resolves harness from current frontmatter (agent claude->opencode takes effect on restart) + boundary auto-restart when resolved harness differs, behind agent_doc_agent_change_restart (default ON). Log harness_change_detected old/new + agent_restart_boundary_gate + agent_restart_performed. SimWorld + make tmux-ci. Plan: tasks/agent-doc/plan-restart-agent.md
 - [ ] [#restartagentmenu] restart-agent Phase 2 (after agentreloadrestart): RestartAgentAction.kt JB menu cmd mirroring RestartSupervisorProcessAction.kt + plugin.xml registration + TerminalUtil restart wiring; bump pluginVersion; build signed+unsigned. Log action invocation + resolved harness. Decide alongside-vs-replace Restart Supervisor Process with operator. Plan: tasks/agent-doc/plan-restart-agent.md
 - [ ] [#editorbufwin] merge-core: P1 the #pcwc post-commit reconcile must preserve unconsumed user queue additions on disk (do NOT overwrite the disk addition with HEAD); P2 auto-recover the commit (automate the manual reset --from-current); P4 refresh the stale supervisor CRDT enabling the drift. Plan: tasks/agent-doc/plan-editor-buffer-wins-queue-merge.md
-- [ ] [#qnodemerge4wire] Phase 4: thin JB DocumentListener.documentChanged + VS Code onDidChangeTextDocument reporters that split a replacement into delete+insert and call the agent_doc_record_editor_op FFI; verify byte-offset/Yrs unicode-offset semantics on non-ASCII edits. Needs plugin build. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 4)
 - [ ] [#jbdisprecycle] OPERATOR-TEST (code R1-R4 shipped submodule d21079b7): at a recycle boundary fire JB Run Agent Doc on a 2nd doc during the hot-reload burst; confirm a single dispatch_start_proof WITH submit and no stranded start_session failed. ops.log marker: route_dispatch_submit_recycle_settle.
 - [ ] [#sqedit-race] OPERATOR-TEST Phase 4 (Phases 1-3 shipped 3c4c8bbb): after make install + admin recycle, queue prune-noise this doc; confirm queue_stale_noise_lines drops to 0 and sticks across a later preflight. Plan: tasks/agent-doc/plan-supervisor-direct-queue-edit-race.md
 - [ ] [#qpauseux] OPERATOR-TEST (plugin render; needs JB plugin build): install updated plugin, verify a paused-queue block renders as an info/action notification with a Resume button, and the churn-stop/no-submit variant surfaces a restart-supervisor/resume action instead of silence (not a raw red Error toast).

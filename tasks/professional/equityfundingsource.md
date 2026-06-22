@@ -171,7 +171,36 @@ Commands: `tsift status`; `rg` for token retention references; inspected `app/eq
 Verification: static inspection only; no tests were run because no code changed.
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:e61a0af3 -->
+
+### Re: JWTs for email login links — gpt-5
+
+> **Queue prompt:**
+>
+> Instead of storing the token in the database, can we use JWT?
+
+Technically yes, but I would not replace the current DB-backed opaque token with a purely stateless JWT for these email sign-in links.
+
+A JWT can carry `sub`, `iat`, `exp`, `aud`, and a `jti`, and the server can verify the signature without looking up a token row. That removes the token-hash table lookup, but it also removes the main protections we currently rely on unless we add state back somewhere else.
+
+Current DB-backed hash rows give us useful security behavior:
+
+- single-use links: `used_at IS NULL` is required and `email_login_token_use_` consumes the link
+- supersession: issuing a new link marks older unused links used
+- resend throttling: `email_login_recent_token_exists_` suppresses repeated sends
+- active-user validation: the route still checks the current user record before login
+- expired/used retry prefill: old token hash can map to an active user without trusting arbitrary query claims
+- bounded future cleanup: we can purge spent/expired rows after a retention window
+
+A stateless JWT link is a bearer credential that remains replayable until `exp`. If someone forwards it, a mail scanner opens it in a real browser context, or it leaks from logs/history, the server cannot know it was already used. To make JWTs single-use, revocable, supersedable, and auditable, we would need to store a used/denied `jti` or per-user token version. At that point we still have state, just with a more complex token format.
+
+My recommendation for EFS: keep the current opaque random token plus SHA-256 hash row, and implement the retention cleanup already added to backlog. If we ever use JWT here, use it only as a signed envelope and still store a hashed `jti`/nonce server-side for one-time use. Do not put email or role authority in trusted JWT claims unless the current user row is still fetched and validated before login.
+
+Changed paths: session document only.
+Commands: `tsift status`; `agent-doc plan`; `agent-doc read --component exchange`; inspected `app/equityfundingsource/lib/auth/email_login.ts`, `app/equityfundingsource/lib/auth/routes.ts`, and `prds/admin-provisioning-spec.md`.
+Verification: static inspection only; no tests were run because no code changed.
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:ce49dd26 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -183,7 +212,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Should we store the email login link hashes indefinately?
+- Instead of storing the token in the database, can we use JWT?
 <!-- /agent:queue -->
 
 ## Backlog

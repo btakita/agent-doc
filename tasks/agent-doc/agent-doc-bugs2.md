@@ -421,7 +421,7 @@ Verification:
 Commits:
 - `src/agent-doc`: `05c03ca7 fix: preserve fresh queue head authority` (pushed)
 - root pointer: `8a4834142 agent-doc: update fresh queue authority fix` (pushed)
-<!-- agent:boundary:d7a2250b -->
+<!-- agent:boundary:813f8dd2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -502,18 +502,7 @@ Error: authoritative actor record for tasks/software/agent-loop.md is bound to h
   supervisor recovery suggested. I’ll run the non-mutating preflight probe once; if it still blocks, this is an
   explicit closeout blocker rather than a code/document task blocker.
 ```
----
-- ~~JB `Run Agent Doc` on monsterrodholders.md stalls (no prompt) and does not submit (prompt sent but no submit).~~
-- do [#cancelturnverify]
-- I typed into monsterrodholders.md queue but agent-doc reverted to an old snapshot and I lost everything that I typed.
-- Figure out how to make AGENTS.md lean & reliable so agents follow the directives. Should we treat AGENTS.md as a menu that defers to runbooks? Would that be more reliable?
-- :pushpin: do [#qcm1verify]
-- :pushpin: do [#arsm]
-- :pushpin: do [#1jec]
-- do [#fbwireverify]
-- do [#qnodemerge4verify]
-- do [#tb4q]
----
+- ~~:round_pushpin: do [#freshqueueauth]~~
 These heads are not stale. I just typed them in.
 ```
 • The doctor confirms the stale queue heads are why the document is still blocked. I’m removing only those two queue
@@ -526,7 +515,18 @@ These heads are not stale. I just typed them in.
     46  <!-- /agent:queue -->
 ```
 ---
-- do [#freshqueueauth]
+---
+- ~~JB `Run Agent Doc` on monsterrodholders.md stalls (no prompt) and does not submit (prompt sent but no submit).~~
+- do [#cancelturnverify]
+- I typed into monsterrodholders.md queue but agent-doc reverted to an old snapshot and I lost everything that I typed.
+- Figure out how to make AGENTS.md lean & reliable so agents follow the directives. Should we treat AGENTS.md as a menu that defers to runbooks? Would that be more reliable?
+- :pushpin: do [#qcm1verify]
+- :pushpin: do [#arsm]
+- :pushpin: do [#1jec]
+- do [#fbwireverify]
+- do [#qnodemerge4verify]
+- do [#tb4q]
+---
 - do [#mrh-response-loss-stalled-queue]
 - do [#qnodemerge4verify]
 - do [#fbwireverify]

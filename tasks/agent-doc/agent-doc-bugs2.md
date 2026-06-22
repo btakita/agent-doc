@@ -352,7 +352,7 @@ Verification:
 
 Per the latest operator instruction, I did not wait for CI.
 
-### Re: incremental compilation for releases — gpt-5 (HEAD)
+### Re: incremental compilation for releases — gpt-5
 
 > **Queue prompt:**
 >
@@ -372,7 +372,7 @@ The current split is the intended one:
 - CI/release workflows: keep `cargo build --release` / full release-profile builds.
 
 So the development loop should not wait on full release builds anymore. Use `make install` repeatedly while developing, then run `make install-full` only when validating the pre-release artifact path. If CI build time becomes the bottleneck, optimize CI with dependency/target caching or `sccache`, but keep the final release profile itself full.
-<!-- agent:boundary:98738e71 -->
+<!-- agent:boundary:14ccc36b -->
 <!-- /agent:exchange -->
 
 ## Queue

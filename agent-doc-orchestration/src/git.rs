@@ -577,6 +577,49 @@ pub fn commit(file: &Path) -> Result<bool> {
     Ok(commit_with_outcome(file)?.did_commit)
 }
 
+/// `#qheadstrike` P2 — strike answered free-text queue heads at the commit seam.
+///
+/// Sources the answered response from the durable capture ledger (the
+/// cycle-state sidecar records the `capture_id`; the capture holds the
+/// `response_body`) and runs the same [`crate::write::strike_answered_free_text_queue_heads`]
+/// the finalize write path uses. This makes the strike a property of reaching
+/// `committed` regardless of which path committed, so a recovery-path closeout
+/// (`agent-doc commit` / `reset --from-current` then commit / `--force-disk`) no
+/// longer leaves an answered head unstruck. Best-effort: a missing capture, an
+/// inactive queue, or a strike error never blocks the commit.
+fn strike_answered_free_text_heads_at_commit_seam(file: &Path) {
+    let Some(response_body) = capture_response_body_for(file) else {
+        return;
+    };
+    if response_body.trim().is_empty() {
+        return;
+    }
+    match crate::write::strike_answered_free_text_queue_heads(file, &response_body, false) {
+        Ok(0) => {}
+        Ok(n) => crate::ops_log::log_op(
+            file,
+            &format!(
+                "commit_seam_free_text_strike file={} struck={} (#qheadstrike)",
+                file.display(),
+                n
+            ),
+        ),
+        Err(e) => eprintln!(
+            "[commit] warning: commit-seam free-text head strike failed: {e} (non-fatal)"
+        ),
+    }
+}
+
+/// Load the captured `response_body` for `file`'s current cycle, if any
+/// (`#qheadstrike`). Returns `None` when there is no cycle state, no recorded
+/// `capture_id`, or no readable capture record.
+fn capture_response_body_for(file: &Path) -> Option<String> {
+    let state = crate::cycle_state::load(file).ok().flatten()?;
+    let capture_id = state.capture_id?;
+    let record = crate::capture::load_by_id(file, &capture_id).ok().flatten()?;
+    Some(record.response_body)
+}
+
 /// Commit a file and report whether the VCS refresh signal was written.
 ///
 /// `vcs_refresh_signaled` is:
@@ -611,6 +654,18 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     // Without this, two different docs in the same repo can still interleave on
     // one shared index even if their document hashes differ.
     let _commit_lock = CommitLock::acquire(&git_root);
+
+    // `#qheadstrike` P2 — strike answered free-text queue heads at the COMMIT
+    // seam, BEFORE staging, so the struck state lands in this same commit. The
+    // finalize write path strikes before its commit, but the standalone
+    // `agent-doc commit` recovery path (used by `reset --from-current` → commit
+    // and `live_prompt_drift` auto-recovery) never ran the strike, leaving an
+    // answered free-text head unstruck so it re-surfaced as a phantom queue head
+    // (`#rt83`/`#qflood` churn). Idempotent (already-struck heads are skipped),
+    // so the finalize path's earlier strike is unaffected; best-effort, never
+    // blocks the commit.
+    strike_answered_free_text_heads_at_commit_seam(file);
+
     let timestamp = chrono_timestamp();
     let doc_name = file
         .file_stem()
@@ -5086,6 +5141,65 @@ Duplicate replay should stay live.
             "out-of-component local edits should be classified as working-tree drift:\n{log}"
         );
     }
+    #[test]
+    fn commit_seam_strikes_answered_free_text_head_from_capture() {
+        // `#qheadstrike` P2: the recovery commit seam must strike an answered
+        // free-text queue head sourced from the durable capture — the gap that
+        // let answered heads re-surface (`#rt83`/`#qflood` churn) after a
+        // recovery-path closeout (`agent-doc commit` / `reset --from-current`).
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        let doc = root.join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue: start\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "- fix the parser bug in the lexer\n",
+            "- another unanswered task left alone\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: parser\n",
+            "> **Queue prompt:** fix the parser bug in the lexer\n\n",
+            "Fixed.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+        // The `#qstrikeexplain` gate only strikes heads present in the pre-turn
+        // baseline, so seed it.
+        let baseline = crate::snapshot::baseline_path_for(&doc).unwrap();
+        fs::create_dir_all(baseline.parent().unwrap()).unwrap();
+        fs::write(&baseline, content).unwrap();
+
+        // Capture a response that answers the first free-text head (quoted in a
+        // blockquote, as the strike matcher requires).
+        let response = "### Re: parser\n> **Queue prompt:** fix the parser bug in the lexer\n\nFixed.\n";
+        crate::capture::capture_response(&doc, response).unwrap();
+
+        strike_answered_free_text_heads_at_commit_seam(&doc);
+
+        let after = fs::read_to_string(&doc).unwrap();
+        assert!(
+            after.contains("~~fix the parser bug in the lexer~~"),
+            "answered free-text head must be struck at the commit seam:\n{after}"
+        );
+        assert!(
+            after.contains("- another unanswered task left alone")
+                && !after.contains("~~another unanswered task left alone~~"),
+            "an unanswered free-text head must be preserved (not over-struck):\n{after}"
+        );
+        // The snapshot must converge on the struck state too, so the staged
+        // commit captures it.
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("~~fix the parser bug in the lexer~~"),
+            "snapshot must also carry the strike:\n{snap}"
+        );
+    }
+
     #[test]
     fn commit_blocks_head_current_noop_when_active_capture_response_missing() {
         use std::fs;

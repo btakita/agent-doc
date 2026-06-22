@@ -105,14 +105,30 @@ wiring (same pattern the operator accepted for `#agentreloadrestart` Phase 1a/1b
   live runtime path, so they are safe to land from a drifting session and change no
   supervisor behavior until Phase 2 wires them in. SPEC + VERSIONS updated.
 
-- **Phase 2 — live wiring (REMAINING, live-supervisor-critical).** Call
-  `convergence_gate_decision` inside the supervisor idle-queue-watch / drain
-  inter-item dispatch decision (`start/idle_watch.rs` → `start.rs` dispatch path):
-  gather the four facts (cycle committed via `cycle_state`, editor convergence via the
-  `git::emit_postcommit_worktree_check` match ground-truth, `ipc_socket::inflight_connection_handlers()`,
-  actor idle from the controller/route readiness), defer the next `do [#id]` /
-  `agent-doc <FILE>` trigger until `Dispatch`, and on `ForceDiskFallback` perform the
-  real `--force-disk` write + `record_force_disk_fallback`. Add the SimWorld acceptance
-  tests (slow-ACK drain never piles inflight > 1; wedged-editor timeout → force-disk +
-  loadable playback). Requires `make check` + `make tmux-ci` across two live panes —
-  cannot run from the live driving session.
+- **Phase 2 — live wiring (CODE SHIPPED, agent-doc submodule `85b173fb`).** Wired
+  `convergence_gate_decision` into the supervisor idle-queue-watch drain at the
+  `IdleQueueDrainDecision::Dispatch` arm (`start/idle_watch.rs`). Gathers the four
+  facts from live state — cycle committed via `cycle_state::load` (defaults `true`
+  when no cycle state so a fresh drain is never blocked), editor convergence via a
+  disk-worktree-vs-`HEAD` compare reusing the `#pcwc` `normalize_for_replay_hash`
+  ground truth (non-git / unreadable `HEAD` defaults `true`),
+  `ipc_socket::inflight_connection_handlers()`, and
+  `!actor_state_is_busy_or_starting()`. `Defer` starts/keeps a per-boundary timer +
+  logs `convergence_gate_defer` and skips the tick (caps inflight at ~1);
+  `ForceDiskFallback` (editor IPC wedged past `CONVERGENCE_GATE_TIMEOUT_MS` = 30s/~60
+  ticks) persists the `ConvergencePlayback` + emits the LOUD ERROR line, then proceeds
+  so the drain is never permanently stuck (disk reconcile stays owned by the existing
+  postcommit `disk_after_failed_editor_refresh` path — the idle watch does not author a
+  document write). A wrong `editor_converged` fact can at worst cause a bounded 30s
+  defer + loud fallback, never a permanent deadlock. 5 new tests
+  (editorless/non-git default-true; disk-vs-`HEAD` tracking; slow-ACK never dispatches
+  while inflight > 0; wedged-editor trips force-disk after timeout; loud-error +
+  loadable-playback artifact). `make check` green (4956 tests), clippy clean. SPEC L36
+  already documents this consumer.
+
+  **REMAINING (operator-gated, `#fbwireverify`):** the live two-pane `make tmux-ci`
+  acceptance — a real slow-ACK editor drain never piling inflight > 1, and a wedged
+  (no-ACK) editor tripping the bounded timeout → force-disk + loadable playback —
+  cannot run from the live driving session. Per STOP-cutting-releases the binary is
+  committed + pushed but NOT installed; goes live after `make install` +
+  `agent-doc admin recycle` at a recycle boundary.

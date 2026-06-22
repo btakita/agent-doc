@@ -158,7 +158,39 @@ Proof remains: focused `bun test tests/admin-pipeline.test.ts` passed, full `mak
 This is the same already-completed queue head. The implementation, verification, submodule commit, parent pointer commit, push, and prior repair response are already recorded; this closeout only converges the live editor buffer so the dangling prompt is no longer treated as unresolved.
 
 No product code changed in this convergence write.
-<!-- agent:boundary:a041c137 -->
+
+### Re: admin secure-message email endpoint — gpt-5
+
+> **Queue prompt:**
+>
+> In the admin email, do not CC all admins. Only send to the configured admin endpoint email btak.dev+efs@gmail.com.
+
+Done. Admin-facing secure-message email notifications now route to one configured endpoint instead of the active admin account list. In-app admin notifications still fan out to the owner/all-admin recipients as before; only the outbound admin email `to` list changed.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/borrower/messages/notify.ts`
+- `src/equityfundingsource-dev/tests/borrower-message-notify.test.ts`
+- `src/equityfundingsource-dev/wrangler.toml`
+- `src/equityfundingsource-dev/.dev.vars.example`
+- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
+- `src/equityfundingsource-dev/prds/message-email-roundtrip.md`
+- `src/equityfundingsource-dev` parent submodule pointer
+
+Commands:
+- `bun test tests/borrower-message-notify.test.ts`
+- `git diff --check`
+- `make check`
+- `gh run list --workflow CI --limit 1`
+- `gh workflow list`
+
+Verification: focused notification test passed. Full `make check` passed with 1099 tests plus app and worker builds. GitHub has no workflow named `CI`, and `gh workflow list` returned no workflows, so there was no remote CI run to inspect.
+
+Commits pushed: EFS submodule `b1e614a` (`fix(messages): route admin emails to endpoint`) and parent pointer `b5e34dc55` (`chore: update efs submodule for admin email endpoint`).
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:140db6d2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -169,7 +201,8 @@ After 20:30
 - TMO Sync
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- In the admin email, do not CC all admins. Only send to the configured admin endpoint email btak.dev+efs@gmail.com.
 <!-- /agent:queue -->
 
 ## Backlog

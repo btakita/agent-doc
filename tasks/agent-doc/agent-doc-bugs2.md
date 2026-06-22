@@ -95,7 +95,20 @@ Implemented `#qheadstrike` P2 — the root fix for answered free-text heads re-s
 **Verification:** new test `commit_seam_strikes_answered_free_text_head_from_capture` (recovery-path parity + negative: unanswered head preserved); `make check` green (**4950** tests). Plan updated.
 
 Marking `#qheadstrike` done. The remaining piece is the live recovery-path proof, filed as `[#qheadstrikeverify]` (operator-verify) — it goes live once the supervisor recycles onto `84a939f7`; ops.log will then show `commit_seam_free_text_strike ... struck=N` and answered heads will stop re-surfacing.
-<!-- agent:boundary:0e099f16 -->
+
+### Re: do [#qheadstrikeverify] — verification status — opus-4-8
+
+`#qheadstrike` (P2 commit-seam free-text strike) is **code-complete but not yet live-provable** — this stays `[operator-verify]`.
+
+- **Shipped**: submodule HEAD `84a939f7` ("qheadstrike P2: strike answered free-text heads at the commit seam"), make check green (4950). Superproject pin `7ef5256e4`.
+- **Not live**: the installed `agent-doc` (0.34.35) predates `84a939f7` — preflight raises `stale_install`. The strike code path isn't running in any tmux/JB supervisor yet.
+- **No proof in ops.log**: `grep commit_seam_free_text_strike .agent-doc/ops.log` → empty. Expected while the binary is stale.
+- **Why it can't be agent-completed**: the proof needs (a) the new binary live via `make install` + supervisor recycle, and (b) a live finalize cycle that falls into `live_prompt_drift`/commit-recovery while answering a free-text queue head — both require a live editor/pane. Mid-session `make install` is also contraindicated (finalize client would outrun the running supervisor → exit-75 churn + dropped queue edits), so I did **not** install this turn.
+
+**Operator steps to close it**: from `src/agent-doc`, `make install` (or `cargo install --path . && cargo build --release && agent-doc lib-install`), `agent-doc admin recycle`, then drive one cycle that answers a free-text queue head through a drift/commit-recovery finalize. Confirm ops.log shows `commit_seam_free_text_strike ... struck=N (#qheadstrike)`, the answered head is `~~struck~~`, and `queue_drainable_head_count` drops with no phantom re-surfacing.
+
+(Two unpushed submodule commits `50d8f021`/`84a939f7` and stray `cargo fmt`-only edits in `merge.rs`/`decisions.rs`/`queue_consume.rs` are out of scope here — left untouched per the release-hold + scope discipline.)
+<!-- agent:boundary:5208b01d -->
 <!-- /agent:exchange -->
 
 ## Queue

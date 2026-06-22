@@ -2433,6 +2433,79 @@ fn finalize_pending_add_appends_to_active_go_backlog_queue_after_consuming_head(
 }
 
 #[test]
+fn finalize_pending_add_multiple_flags_keep_cli_order_in_active_go_queue() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\nqueue: start\n---\n\n<!-- agent:exchange -->\n❯ do [#head]\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue priority go -->\n- do [#head]\n- do [#tail]\n<!-- /agent:queue -->\n\n<!-- agent:backlog priority queue -->\n- [ ] [#head] current queue head\n- [ ] [#tail] next queue head\n<!-- /agent:backlog -->\n";
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    let baseline_content = fs::read_to_string(&doc).unwrap();
+    let baseline = write_baseline(tmp.path(), &baseline_content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+            "--done",
+            "head",
+            "--pending-add",
+            "[#first] first follow-up",
+            "--pending-add",
+            "[#second] second follow-up",
+            "--pending-add",
+            "[#third] third follow-up",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nDone.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success()
+        .stderr(predicates::str::contains(
+            "[write] queue: appended 3 same-cycle pending-add id(s)",
+        ));
+
+    let committed = head_blob(tmp.path());
+    let backlog = committed
+        .split("<!-- agent:backlog priority queue -->\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n<!-- /agent:backlog -->").next())
+        .unwrap();
+    let backlog_first = backlog.find("[#first] first follow-up").unwrap();
+    let backlog_second = backlog.find("[#second] second follow-up").unwrap();
+    let backlog_third = backlog.find("[#third] third follow-up").unwrap();
+    let backlog_tail = backlog.find("[#tail] next queue head").unwrap();
+    assert!(
+        backlog_first < backlog_second
+            && backlog_second < backlog_third
+            && backlog_third < backlog_tail,
+        "pending-add flags must keep CLI order at the backlog front:\n{backlog}"
+    );
+
+    let queue = committed
+        .split("<!-- agent:queue priority go -->\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n<!-- /agent:queue -->").next())
+        .unwrap();
+    let tail = queue.find("do [#tail]").unwrap();
+    let first = queue.find("do [#first]").unwrap();
+    let second = queue.find("do [#second]").unwrap();
+    let third = queue.find("do [#third]").unwrap();
+    assert!(
+        tail < first && first < second && second < third,
+        "same-cycle queue mirror must preserve pending-add CLI order after the existing tail:\n{queue}"
+    );
+}
+
+#[test]
 fn finalize_consumes_first_queue_prompt_after_commit() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();

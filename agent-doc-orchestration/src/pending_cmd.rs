@@ -229,10 +229,16 @@ pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     Ok(())
 }
 
-/// Add multiple new items while preserving the caller's sequence order at the
-/// beginning of the pending list.
+/// Add multiple new items while preserving the caller's flag order, top-down, at
+/// the beginning of the pending list: the first item lands topmost ("what you
+/// read is what you get"). Each individual add prepends to the front, so to keep
+/// flag order top-down we apply the batch in reverse (`#pendaddorder`); the last
+/// item is prepended first and the first item is prepended last, ending up on top.
 pub fn add_many(file: &Path, items: &[String], gated: bool) -> Result<Vec<String>> {
     let mut ids = Vec::with_capacity(items.len());
+    // Iterate in reverse so that prepend-each-to-front yields the caller's flag
+    // order top-down (first flag topmost). Do NOT change to forward iteration —
+    // that reverses N-flag `--pending-add` batches (`#pendaddorder`).
     for item in items.iter().rev() {
         let (full_content, comp) = find_pending_component(file)?;
         reject_colliding_explicit_id(&full_content, item)?;

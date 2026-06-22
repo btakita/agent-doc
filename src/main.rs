@@ -206,6 +206,9 @@ struct WriteArgs {
     #[arg(long)]
     origin: Option<String>,
     /// Add a new pending item at the beginning of the list (repeatable).
+    /// Multiple flags in one invocation land in flag order, top-down: the first
+    /// `--pending-add` is topmost (what you read is what you get). For a specific
+    /// interleave with existing items, use `--pending-add-after`/`--pending-add-before`.
     /// Prefix with canonical `id=<custom> ` to preserve a custom id instead of generating one.
     /// Leading `[#custom] ` is also accepted as compatibility input.
     #[arg(long = "pending-add")]
@@ -215,6 +218,7 @@ struct WriteArgs {
     #[arg(long = "pending-add-to", num_args = 2, value_names = ["FILE", "TEXT"])]
     pending_add_to: Vec<String>,
     /// Add a new gated pending item at the beginning of the list (repeatable).
+    /// Like `--pending-add`, multiple flags land in flag order, top-down (first flag topmost).
     /// Prefix with canonical `id=<custom> ` to preserve a custom id instead of generating one.
     /// Leading `[#custom] ` is also accepted as compatibility input.
     #[arg(long = "pending-add-gated")]

@@ -89,7 +89,34 @@ Commit/push: EFS submodule commit `36b621a` was pushed to `origin/main`. Parent 
 Confidence: high. The new `audit_logs` table is intentionally not FK-cascaded from `loans`, deletion paths write audit rows before deleting, observed TMO-cache/local loan orphaning is deduped, and the due-diligence sender is pinned by test as non-destructive.
 
 Escalation: none.
-<!-- agent:boundary:74110572 -->
+
+### Re: were the two Available Deals deleted? — gpt-5
+
+> **Queue prompt:**
+>
+> So what happened to the 2 Available Deals there were on the site yesterday? Were they deleted?
+
+Yes, in the EFS-local sense: the two rows that backed those Available Deal cards are gone from production D1's `loans` table, and there are no `investment_deals` rows either. They do not appear to be deleted from TMO itself: the TMO cache still has two active, non-deleted loan records with former EFS loan ids, and both are still `Application Received`, which is the status the admin pipeline displays as Available Deals.
+
+The two orphaned cache records are:
+
+- `FTM631` -> former EFS loan id `bbd437b0-913f-4a6f-960b-901c72a410c9`, `LoanStatus=Application Received`, `LoanAmount=100000.00`, last synced June 22, 2026 4:00:23 PM EDT.
+- `GQI751` -> former EFS loan id `45ddae53-3e7f-43b1-a627-17b79b06fa3f`, `LoanStatus=Application Received`, `LoanAmount=600000.00`, last synced June 22, 2026 4:00:15 PM EDT.
+
+So the best current answer is: the site lost the local EFS `loans` rows for those two deals, which made the Available Deals lane empty. The TMO/cache side still knows about them, so this looks like local D1 deletion/orphaning, not TMO deleting the loans.
+
+I could not prove who or what deleted them from the current database because production did not yet have the new durable `audit_logs` table, and `loan_activity_logs` is empty. Existing `loan_activity_logs` also FK-cascades from `loans`, so it would not survive loan deletion anyway. D1 time-travel bookmarks are available for June 21 and June 22, but I did not run a destructive restore.
+
+Changed paths: none outside the agent-doc session document.
+
+Commands: `agent-doc preflight`; `agent-doc plan`; `tsift status`; remote D1 queries for `loans`, `investment_deals`, `loan_activity_logs`, table presence, migrations, TMO cache summaries, orphaned EFS cache loans, and the two cached TMO loan payloads; `wrangler d1 time-travel info` for current and timestamp bookmarks; code sweep with `rg` for destructive loan/deal paths.
+
+Verification: current remote D1 returned `loans=0`, `investment_deals=0`, `loan_activity_logs=0`, no deployed `audit_logs` table, and exactly two active orphaned cache rows with EFS ids: `FTM631` and `GQI751`. Code sweep found destructive routes only in expected admin/borrower/TMO-delete paths and old `investment_deals` rebuild migrations, not in due-diligence send or pipeline read code.
+
+Confidence: high that the two visible cards disappeared because their local EFS loan rows are gone; medium on the exact actor/mechanism because the pre-audit production schema does not preserve deletion evidence after loan rows are removed.
+
+Escalation: none.
+<!-- agent:boundary:04802e54 -->
 <!-- /agent:exchange -->
 ###
 <!--

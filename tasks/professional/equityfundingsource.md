@@ -145,7 +145,29 @@ Committed (`28300b3`), pushed, **deployed** (worker `addc055c`) — the deploy o
 - An **admin** reply → posts to the thread + realtime tick + emails the party. So the loop continues "and so on."
 
 **One thing only you can finish — the live proof (`#f2w8`/`#msgmail4b`, still gated for that reason):** I can't send a real inbound email through Cloudflare, so please send one test reply to a notification and confirm it lands in the thread. If it doesn't appear, the single thing I can't see from here is the **catch-all routing rule action** on `efs.briantakita.me` — in the Cloudflare dashboard it must be **Email Routing → efs.briantakita.me → catch-all → Send to a Worker → `equityfundingsource`** (the MX/SPF are already correct). Tell me how the test goes and I'll close `#f2w8`.
-<!-- agent:boundary:43129297 -->
+> **Queue prompt:** Switch the efs email from info@briantakita.me to btak.dev+efs@gmail.com
+
+> **Queue prompt:** deploy
+
+### Re: switching the EFS sender to btak.dev+efs@gmail.com — blocked (can't send *from* Gmail) — opus-4-8
+
+> **Queue prompt:**
+>
+> Switch the efs email from info@briantakita.me to btak.dev+efs@gmail.com
+
+
+I held off on this one (and the deploy) because, as written, it would **break all outbound app email**. Here's why, and what I'd recommend instead.
+
+**The constraint:** the app sends through the **Cloudflare Email Sending API** (`/accounts/.../email/sending/send`). It requires the `From` to be on a **domain you've verified in Cloudflare** (DKIM-signed). `btak.dev+efs@gmail.com` is a Gmail address — you don't own/can't verify `gmail.com`, so Cloudflare would reject the send (or it would fail SPF/DKIM and bounce/land in spam). This applies to every app email: messaging notifications, the contact form, lead/investor notifications, lending-group invites. (Resend isn't wired as a send path here, and it has the same domain-verification requirement anyway.)
+
+So you can't make a Gmail address the *sender*. But there are good options depending on what you're actually after:
+
+1. **Just decouple from the personal `info@`** → use another address on the already-verified `briantakita.me`, e.g. `EFS <efs@briantakita.me>` or `noreply@briantakita.me`. Works immediately, no new verification. **(My recommended default.)**
+2. **A dedicated app identity on the new subdomain** → `efs@efs.briantakita.me`. Cleanest separation, but `efs.briantakita.me` needs to be **verified for Email *Sending*** (DKIM) in Cloudflare first — right now the subdomain is only set up for Email *Routing* (receiving). I can switch the var the moment you confirm sending is verified.
+3. **You want that Gmail to *receive* EFS mail / test the round-trip** → that's a *recipient*, not a sender. Replies can come **from** `btak.dev+efs@gmail.com` just fine — to test inbound, add that Gmail as an admin (or party) user email and reply from it; or point the notification-recipient vars (`CONTACT_NOTIFICATION_TO`, etc.) at it.
+
+**Tell me which (1, 2, or 3 — or something else) and I'll make the change + deploy.** I didn't touch anything this cycle, so the current verified `info@briantakita.me` sender keeps working in the meantime.
+<!-- agent:boundary:74860ba2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -157,7 +179,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Switch the efs email from info@briantakita.me to btak.dev+efs@gmail.com
+- ~~Switch the efs email from info@briantakita.me to btak.dev+efs@gmail.com~~
 - deploy
 <!-- /agent:queue -->
 

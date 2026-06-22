@@ -246,14 +246,50 @@ I did the passive CI check you asked for. The latest CI run for `25df5810` was `
 I agree with the AGENTS.md concern. The file is carrying too many operational directives inline, which makes it easy for agents to miss the small number of mandatory rules. The better shape is probably a short top-level menu: hard invariants and stop conditions up front, then links to focused runbooks for agent-doc, tsift, CI, and commit/push behavior. That keeps the prompt load small while preserving the detailed procedures where agents can deliberately open them.
 
 I did not edit AGENTS.md in this cycle. The document queue now has an explicit AGENTS.md simplification prompt, so that should be handled as its own focused item.
-<!-- agent:boundary:7e869213 -->
+
+### Re: commit + push all uncommitted agent-doc files — gpt-5
+
+> **Queue prompt:**
+>
+> commit + push all uncommitted agent-doc files.
+
+
+> **Queue prompt:** commit + push all uncommitted agent-doc files.
+
+Done for the agent-doc-owned changes, with one important main-branch caveat.
+
+Committed and pushed `src/agent-doc` to `origin/main`:
+
+- `24fc23e4 fix: harden agent-doc queue recovery`
+- Rebased first; Git skipped duplicate local commit `9054c02e` because the equivalent patch was already upstream as `25df5810`.
+- Verification: `make check` passed before rebase and again after rebase. The rebased run covered 4,976 tests plus the medium SimWorld seed.
+
+Committed the superproject agent-doc docs and submodule pointer:
+
+- `ba2223153 agent-doc: commit pending recovery plans`
+- Staged only agent-doc-owned paths: `src/agent-doc`, `tasks/agent-doc-bugs2.done.md`, `tasks/agent-doc/plan-freetext-queue-head-autostrike.md`, and the new `tasks/agent-doc/plan-*.md` files.
+- Left unrelated dirty files alone and left this live session doc for finalize to own.
+- `git push origin main` was rejected as non-fast-forward because the superproject branch was already `ahead 28, behind 19`; I did not force-push over remote `main`.
+- Pushed the committed superproject state to `origin/agent-doc/pending-recovery-plans-ba2223153` instead.
+
+Verification after staging/committing:
+
+- `git diff --check --cached` passed before the superproject commit.
+- Root `make check` passed, including `instruction-files`, `src/agent-doc`, and `src/corky`.
+- Latest `src/agent-doc` GitHub Actions CI run was still `in_progress` for run `27968861488` when checked.
+- The superproject does not have a workflow named `CI`, so `gh run list --workflow CI --limit 1` had no matching workflow there.
+
+I added a recommended follow-up to reconcile the superproject `main` divergence and merge the pushed branch without a force-push.
+<!-- agent:boundary:03330adf -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Fix the root cause of the stall of auto-starting agent-doc sessions after I rebooted my machine.~~
+- ~~commit + push all uncommitted agent-doc files.~~
 - Why am I unable to sync with equityfundingsource.md? Fix the root cause. I have not been able to connect to equityfundingsource.md since rebooting. There also is no obvious recovery path for the operator. I attempted a recovery with opencode but now it does not sync. `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.`. We need a way to recover that "just works" for individual sessions.
+- do [#cancelturnverify]
+- I typed into monsterrodholders.md queue but agent-doc reverted to an old snapshot and I lost everything that I typed.
 - Figure out how to make AGENTS.md lean & reliable so agents follow the directives. Should we treat AGENTS.md as a menu that defers to runbooks? Would that be more reliable?
 - :pushpin: do [#qcm1verify]
 - :pushpin: do [#arsm]
@@ -261,8 +297,6 @@ I did not edit AGENTS.md in this cycle. The document queue now has an explicit A
 - do [#fbwireverify]
 - do [#qnodemerge4verify]
 - do [#tb4q]
-- do [#cancelturnverify]
-- ~~do [#agentfrontpersist]~~
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

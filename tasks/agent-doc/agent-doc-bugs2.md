@@ -154,13 +154,34 @@ Commits pushed in `src/agent-doc`:
 - `29d4f41e` `ci: checkout path deps in release workflow`
 
 The superproject `src/agent-doc` pointer is included as a sibling closeout commit.
-<!-- agent:boundary:5fdadceb -->
+
+### Re: strict closeout commit evidence — gpt-5
+
+> **Queue prompt:**
+>
+> The restart recycle did not restart the agent. `/clear` is in the agent input and was not submitted. `agent-doc tasks/agent-doc/agent-doc-bugs2.md` should have been submitted instead. A warning to not press enter is too brittle. If the user cannot add anything or press enter, there should be no way to do so in the ui.
+
+
+I’m treating `❯ `daf5e727` `fix: require strict closeout response headings`` as a commit-evidence annotation for the preceding strict-closeout response, not as a new implementation request.
+
+That commit is already listed under “Commits pushed in `src/agent-doc`,” so the added line is normalized as HEAD-side proof for the same shipped fix. The two `(HEAD)` heading suffixes are boundary markers from the edited exchange; I incorporated them as document-state signals rather than separate prompts.
+
+Changed paths: session document only.
+
+Commands: `tsift status`, `agent-doc preflight`, `agent-doc plan`, `agent-doc finalize`.
+
+Verification: no repo tests were needed because no code changed; preflight and plan succeeded before this finalize.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:524a4b87 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- The restart recycle did not restart the agent. `/clear` is in the agent input and was not submitted. `agent-doc tasks/agent-doc/agent-doc-bugs2.md` should have been submitted instead. A warning to not press enter is too brittle. If the user cannot add anything or press enter, there should be no way to do so in the ui.
+- ~~The restart recycle did not restart the agent. `/clear` is in the agent input and was not submitted. `agent-doc tasks/agent-doc/agent-doc-bugs2.md` should have been submitted instead. A warning to not press enter is too brittle. If the user cannot add anything or press enter, there should be no way to do so in the ui.~~
 - I'm still seeing JB `Clear Session Cache` dialogs. Is the CPC instance up to date? Are all supervisors instances up to date? If this is still possible with the current codebase, these cases should use our node merge workflow.
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.
 - JB `Run Agent Doc` still does not submit. The submit retry poll should be 500ms and attempt for 30s...only if the input contents are the prompt itself. Other automated additions to the prompt should be forbidden. If the user modifies the agent prompt, stop the retry polling.

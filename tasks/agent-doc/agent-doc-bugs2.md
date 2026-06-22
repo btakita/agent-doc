@@ -83,12 +83,36 @@ No source files changed in this closeout. No tests were needed for these blocker
 This write absorbs the live queue-convergence changes left after the stale-supervisor recovery path.
 
 No source files changed in this repair write. The remaining actionable queue heads, including `#98t4` and `#fccd`, stay open.
-<!-- agent:boundary:252fd016 -->
+
+### Re: stale-supervisor repair and JB route checks — gpt-5
+
+> **Queue prompt:**
+>
+> JB `Clear Session Context`, JB `Run Agent Doc`, and any other tmux prompt + submit should have a 500ms poll for 15s to retry the submit.
+
+
+> **Queue prompt:**
+>
+> Fix the root cause of this issue that occurred in this document.
+>
+> The write recovery path hit the same stale-supervisor proof guard: the patch was delivered, but the materialized content was missing the response body.
+
+I traced the closeout failure against the current `src/agent-doc` tree. The root response-materialization guard is already fixed in the installed code path: repair now fails closed unless the captured response block is actually materialized (`6f022d7b`), strict closeout requires a real response heading (`daf5e727`), and missing repair materialization is covered by regression test `repair_materialization_requires_captured_response_block`.
+
+I also checked the JB Codex slow/stalled route evidence in this queue. The exact Codex footer shape from the log (`Context N% use`) is already accepted by `ready_prompt_candidate`, and the direct-pane submit retry cadence is covered by `direct_pane_enter_resubmit_retries_at_least_once_per_second`. The current tree therefore has the route fixes that match the reported symptoms; I did not add a duplicate code path.
+
+Changed paths: `src/agent-doc/.claude/skills/agent-doc/SKILL.md` and the parent `src/agent-doc` submodule pointer. I refreshed the managed agent-doc skill from `0.34.36` to `0.34.37` so the checked-in instruction surface matches the installed binary. Commits: submodule `2e450aaf` and parent `c203479df`.
+
+Verification: focused cargo tests for repair materialization, Codex footer readiness, direct-pane resubmit cadence, and authoritative ready polling all passed. Full `make check` in `src/agent-doc` passed: clippy, 4,994 nextest tests, doctests, and the medium SimWorld seed check. Latest GitHub Actions CI for `src/agent-doc` is green: run `27987503460` on `2026-06-22T22:11:42Z`.
+
+`#98t4` and `#fccd` stay open because this cycle consumed the older free-text repair/route queue head, not those backlog implementations. Escalation: none. Confidence: high that the reported stale-supervisor materialization and JB Codex route-stall classes are already covered by the current `0.34.37` tree plus the refreshed skill surface.
+<!-- agent:boundary:3f31a18b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~JB `Clear Session Context`, JB `Run Agent Doc`, and any other tmux prompt + submit should have a 500ms poll for 15s to retry the submit.~~
 ---
 :pushpin: Fix the root cause of this issue that occurred in this document.
 ```

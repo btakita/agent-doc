@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -255,7 +255,42 @@ Session note: exchange size is in the warning range, but the active queue is sti
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:58636599 -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+> deploy
+
+The latest EFS changes were already deployed during the immediately preceding queue cycle, after the `313a651` EFS commit was pushed and after the parent submodule pointer was updated.
+
+Changed paths in this deploy-only cycle: none.
+
+Deploy proof:
+
+- `make deploy` succeeded.
+- Worker version: `7bb7f783-6798-4f80-9d13-71908a3ef2dd`.
+- Deployed URL: `https://equityfundingsource.brian-takita.workers.dev`.
+- `bun run cf:d1:migrations:list:remote` reported no migrations to apply after deploy.
+
+Live smoke checks after deploy:
+
+- `/` returned 200.
+- `/admin` returned 303 to `/login?role=admin&next=%2Fadmin`.
+- `/login/email?role=admin&email=jane.admin%40example.com&error=...` returned 200 and rendered the error message, prefilled email, and `Email me a sign-in link` submit button.
+- `/login/email/verify?token=bad&role=admin` returned 303 to `/login/email?role=admin&error=...`.
+
+Related commits already pushed:
+
+- EFS: `313a651 feat(auth): prefill expired email login retries`.
+- Parent local pointer: `61c9369fd chore: update efs submodule for email login retries`.
+- Parent `origin/main` pointer: `99b8ba2b1 chore: update efs submodule for email login retries`.
+
+Session note: exchange size is in the warning range, but the active queue required continued draining.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:49c4aabd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -267,10 +302,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~From /admin, I did a Forgot Password. I received an email. Clicking on the reset password link I got an error "Something went wrong" "This password reset link is invalid or has expired.".~~
-- ~~Make any email login links expire based on time. Use best security practice to set the expiration time. Is 1 day reasonable? The email should explain when the login link will expire.~~
-- ~~In the email login email, add a link to resend another email login link in case the login link is expired. If the user clicks on an expired login link, go to the email login form with the error message and the email address prefilled.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

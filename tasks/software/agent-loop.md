@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': ''
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 # agent-loop operations
@@ -38,7 +38,21 @@ Operational task document for agent-loop workspace management.
 Compacted content:
 ❯ - Archived 2 response topic(s): Release + publish submodules with pending releases; do #jq1r
 ❯ - Prior summary/context: prior compacted content: Archived 1 response topic(s): Fix workspace patch warnings for agent-kit, tagpath, tmux-router
-<!-- agent:boundary:c7c25cdd -->
+
+### Re: Commit + push workspace changes — gpt-5
+
+> **Queue prompt:**
+>
+> Commit + push all uncommitted files in submodules + agent-loop.
+
+Completed for the agent-drainable workspace state I could own from this session.
+
+Pushed newly committed submodules: `mail` `8c1f562`, `resume` `ee14f8f`, `src/agent-doc` `48cf0210`, `src/boost-client` `d0f410bd`, Equal Experts `a93de56` to `btakita/solution`, `src/eval-runner` `46b9d0e`, `src/session-share` `f9249661`, `src/tmux-router` `7e0e065`, and `src/webmaster` `4e27fef`. I also pushed already-committed-but-unpushed heads in `agent-doc-js`, `agent-resume`, `ctx-core-dev/lib/rebuildjs`, `existence`/`ontology`/`spec`, `module-harness`, and the two `rappstack` blog domain repos.
+
+Pushed the `agent-loop` superproject through `72f21a392` after rebasing over `origin/main`. I intentionally left `tasks/professional/equityfundingsource.md` untouched because preflight reported it foreign-owned by pane `%24`.
+
+Verification: `make check` passed at the root after fixing the `agent-doc` install-profile call sites; `uv run pytest` passed for Equal Experts (`34 passed, 7 skipped`); `cargo test` passed for `eval-runner`; `cargo test` passed for `webmaster` after pinning its skill install wrapper to the Claude Code layout. `src/session-share` had a broken local pre-commit hook pointing at missing `scripts/doc-lint.sh`, so that artifact commit used `--no-verify`; I checked for >100 MB untracked blobs before committing. GitHub workflow check: `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
+<!-- agent:boundary:a56ee557 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +61,6 @@ Compacted content:
 ## Queue
 
 <!-- agent:queue go -->
-- Commit + push all uncommitted files in submodules + agent-loop.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -209,6 +209,11 @@ Tell me A, B, or C and I'll finish it + verify a live send end-to-end. I'd go wi
 
 ### Re: #efssubsend — efs@efs.briantakita.me via Resend (path A) — opus-4-8
 
+> **Queue prompt:**
+>
+> do [#g6d0]
+
+
 You said "if this only touches the existing EFS app email, it's ok — test/staging only," so I went with **A (Resend)**. It's **code- and infra-complete and shipped**, but the final live-send proof is **blocked on Resend auth** — handing that one external step to you.
 
 **Done this cycle (committed `2e31631`, pushed to EFS main; worker deployed `a184ba84`):**
@@ -226,7 +231,7 @@ You said "if this only touches the existing EFS app email, it's ok — test/stag
 **Heads-up:** since the worker now prefers Resend and Resend is 401'ing, **EFS outbound email is failing right now** (contact inquiries still persist to D1; notifications/login emails don't send). It's test/staging so I left the cutover in place per your goal — but if you want working email immediately, say the word and I'll revert the `*_FROM` vars to `info@briantakita.me` + drop the Resend secret (one deploy) to restore Cloudflare apex sending while Resend gets sorted.
 
 Gating `#g6d0`/`#efssubsend` as code-complete, awaiting the Resend-auth live-send proof.
-<!-- agent:boundary:1f2c6922 -->
+<!-- agent:boundary:cbfd5eb6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -238,15 +243,11 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Make the from email address efs@efs.briantakita.me. How do I verify for email sending? Please automate whatever you can via the api or chromium-bridge. Have efs@efs.briantakita.me route to btak.dev+efs@gmail.com~~
-- ~~Verify the email sending works.~~
-- do [#g6d0]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#g6d0] #efssubsend [recommended] Outbound from efs@efs.briantakita.me is blocked: Cloudflare Email Service (current EFS sender) only sends from onboarded ZONES, and efs.briantakita.me is a subdomain of the briantakita.me zone (zone picker returns no results; live test returned 400 email.invalid). Pick a path: (A) Resend — RESEND_API_KEY already in env, supports subdomain senders, aligns with #f4rq; needs efs.briantakita.me verified in Resend (DNS) + wiring email_send to Resend; (B) make efs.briantakita.me its own Cloudflare zone then onboard it (risks the inbound efs routing/#msgmail4b reply worker that lives on the subdomain); (C) send from efs@briantakita.me apex (works now, zero infra). Inbound efs@efs.briantakita.me -> btak.dev+efs@gmail.com is already live.
 - [/] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
 - [/] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
@@ -256,6 +257,7 @@ After 20:30
 ## Review
 
 <!-- agent:review -->
+- [/] [#g6d0] #efssubsend [recommended] Outbound from efs@efs.briantakita.me is blocked: Cloudflare Email Service (current EFS sender) only sends from onboarded ZONES, and efs.briantakita.me is a subdomain of the briantakita.me zone (zone picker returns no results; live test returned 400 email.invalid). Pick a path: (A) Resend — RESEND_API_KEY already in env, supports subdomain senders, aligns with #f4rq; needs efs.briantakita.me verified in Resend (DNS) + wiring email_send to Resend; (B) make efs.briantakita.me its own Cloudflare zone then onboard it (risks the inbound efs routing/#msgmail4b reply worker that lives on the subdomain); (C) send from efs@briantakita.me apex (works now, zero infra). Inbound efs@efs.briantakita.me -> btak.dev+efs@gmail.com is already live.
 - [/] [#msgmail4] [recommended] Enable email round-trip in prod (ops, operator-gated): configure Cloudflare Email Routing to POST inbound mail to the worker w/ the shared secret; set MESSAGE_EMAIL_INBOUND_ENABLED/_SECRET/_REPLY_TO; verify sending domain (#f4rq). Do not enable blind. Plan: src/equityfundingsource-dev/prds/message-email-roundtrip.md
 - [/] [#mcme] [recommended] #msg-read-status Email-open-based read receipts on messages — DEFERRED: gated by the operator on "only if we can detect email reads", which EFS cannot today (sends via Cloudflare Email, no open tracking). Needs a ~3-5 day greenfield subsystem: switch message notifications to Resend with open-tracking, add a signed Resend event webhook (email.opened), an email_events table, and message<->email linking, then surface email_opened_at in the message DTO/UI. In-app portal read cursors already exist for borrower chat (chat_sessions.*_last_read_at) but are not email reads.
 - [/] [#msg-unify4] [gated: awaiting dual-write prod soak] Lender cutover — dual-write (best-effort mirror into messages, both lender sources) + backfill (migration 0098) SHIPPED (EFS b5a6a55). Remaining: after soak, switch the inbox to read lender data from messages (dual-read), then drop deal_interest_lender_messages + lender_account_messages. Plan: src/equityfundingsource-dev/prds/message-unification.md.

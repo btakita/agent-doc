@@ -2113,6 +2113,24 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             );
                             match crate::convergence_gate::convergence_gate_decision(&facts) {
                                 crate::convergence_gate::ConvergenceGateDecision::Dispatch => {
+                                    // `#j9ja` / `#optverify`: distinctive SUCCESS marker so the
+                                    // `#fbwireverify` slow-ACK live test auto-verifies. Emit it
+                                    // ONLY when the gate had been deferring (the meaningful
+                                    // "the boundary converged after waiting on the editor/IPC"
+                                    // signal) — a steady-state quiescent dispatch needs no marker,
+                                    // keeping ops.log quiet on the common path.
+                                    if let Some(since) = convergence_gate_deferring_since {
+                                        crate::ops_log::log_op(
+                                            &path,
+                                            &format!(
+                                                "convergence_gate_converged_dispatch file={} waited_ms={} inflight={} editor_converged={} (#fbwire #j9ja)",
+                                                path.display(),
+                                                since.elapsed().as_millis(),
+                                                facts.inflight,
+                                                facts.editor_converged
+                                            ),
+                                        );
+                                    }
                                     convergence_gate_deferring_since = None;
                                     // fall through to the existing dispatch path below
                                 }

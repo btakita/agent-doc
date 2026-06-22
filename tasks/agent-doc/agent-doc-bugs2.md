@@ -126,7 +126,15 @@ I cannot perform that multi-window IDE verification from this CLI-only turn. The
 I gated `#cyh0`. The remaining task is `OPERATOR-CAPTURE`: reproduce a live File Cache Conflict and capture the exact triggering action plus the adjacent ops.log marker. That requires the operator’s IDE/dialog context and cannot be completed from this CLI turn.
 
 The queue item remains as a gated capture task for the next live FCC occurrence.
-<!-- agent:boundary:e2ce5bcc -->
+
+### Re: do [#1vhn] — gpt-5
+
+> **Queue prompt:** :pushpin: do [#1vhn]
+
+Closed `#1vhn` as already shipped in the current route/dispatch code. The code now has the positive harness dispatch-ready gate and dead-shell fail-closed path: `send_command_unchecked` blocks a bare shell with no harness prompt, auto-start dispatch re-verifies readiness before sending, and restart drains inject zero triggers while not-ready and exactly one after readiness.
+
+Coverage is present in `route_refuses_dispatch_into_dead_bare_shell` for the live tmux path, plus SimWorld tests for auto-start dispatch readiness and restart-drain duplicate-injection prevention. Today’s full `make check` included the non-ignored SimWorld coverage. If a live pane still reproduces a dead-shell dispatch, that should be filed as a new operator capture with supervisor stderr and scrollback.
+<!-- agent:boundary:8e054ea6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -140,7 +148,7 @@ The queue item remains as a gated capture task for the next live FCC occurrence.
 - ~~:pushpin: do [#qpauseux]~~
 - ~~:pushpin: do [#8bfz]~~
 - ~~:pushpin: do [#cyh0]~~
-- :pushpin: do [#1vhn]
+- ~~:pushpin: do [#1vhn]~~
 - :pushpin: do [#jbrundispatch]
 - :pushpin: do [#docdriftgrace]
 - :pushpin: do [#runexitrestart]
@@ -192,7 +200,6 @@ What are #next-steps to fix bugs?
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.
 - [ ] [#supinstallvis] [recommended] #agent-doc-bug #supinstallfeedback follow-up: the supervisor auto-install status (surface_supervisor_auto_install_status, idle_watch.rs) is surfaced ONLY as a transient tmux display-message on the status line, which is easy to miss while the pane scrollback keeps showing the misleading post-exit "Press Enter to restart" keepalive — so an operator watching the pane body still perceives a ~1-min stall. Residual: make the rebuild state visible in the pane BODY/scrollback (not just the status line) without disturbing the keepalive Enter-to-restart reader, e.g. a pane title set + a single non-input-consuming visible line, or render it through the JB/VSCode plugin notification surface (overlaps #qpauseux notification rendering). Decide the safe pane-write mechanism with the operator before implementing (send-keys risks being consumed by the keepalive). Plan TBD.
-- [ ] [#1vhn] route dead-shell: positively identify a HARNESS dispatch-ready prompt and treat a bare shell prompt as NOT-ready -> fail closed with claim/restart guidance (or auto-restart) instead of typing into the shell; re-verify the prompt immediately before send; add dead-harness diagnostic + SimWorld. Operator capture supervisor-stderr + scrollback if it recurs. Plan: tasks/agent-doc/plan-route-dispatch-into-crashed-harness.md
 - [ ] [#jbrundispatch] OPERATOR-CAPTURE live repro at stall (admin detect for cross-doc pane contamination + ops.log route trace + which pane state failed) to distinguish a real new route/submit bug from already-fixed behavior. Overlaps jbrunstart / startup-miss supersession / qdispatchloss; cannot be fixed blind in route.rs.
 - [ ] [#docdriftgrace] OPERATOR-WATCH one live re-baseline cycle: binary should classify mid/between-turn drift by component and silently auto-rebase snapshot/CRDT for unrelated changes, surfacing only structural conflicts on the in-flight prompt/response. Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md
 - [ ] [#runexitrestart] route/idle-watch should detect a cleanly-exited harness pane (Press Enter to restart) with prompt-bearing work, restart the harness, wait for dispatch-ready, then submit, so a cleanly-exited harness never drops a Run Agent Doc. Two-pane live verify. NOTE the originally-reported silent loss was already fixed in 0.34.18.

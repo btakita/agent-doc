@@ -201,7 +201,79 @@ Repo state note: the parent working tree still has unrelated local divergence/dr
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:c305b6b1 -->
+
+### Re: neutral portal login links + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> If the user clicks on a login link of the same user that is currently logged in, even if the link is expired, redirect the user to the portal. Add a /portal page that redirects to the login user's portal or login page without any hints as far as what type of login it is. If the user logs in, then redirect the person to the correct portal page.
+
+> **Queue prompt:**
+>
+> deploy
+
+Implemented, pushed, and deployed the neutral `/portal` login flow and same-user expired email-link handling.
+
+What changed:
+- Added `URLS.portal` and `GET /portal` as a role-neutral dispatcher: signed-in active users redirect to their own portal root; signed-out users redirect to `/login?next=/portal` with no role or email query hints.
+- Changed no-role password login so `/login?next=/portal` authenticates any active user by email/password, then returns through `/portal` so the final portal is chosen from the authenticated account role.
+- Changed no-role email-link request pages to preserve the neutral `/portal` entry mode.
+- For expired, used, or superseded email-login links, if the current session already belongs to the active token owner, the app redirects to that user's portal without consuming the expired token. Valid same-user links still consume once; different-user valid links still show the logout notice before consumption.
+- Suppressed role-specific portal hints on the neutral login page, including the public header/footer role links, while keeping role-specific login pages unchanged.
+- Updated the provisioning/auth spec and added regression tests for `/portal`, neutral login dispatch, no role-hint rendering, valid same-user tokens, different-user tokens, and expired same-user tokens.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/routes.ts`
+- `src/equityfundingsource-dev/lib/ui--server--efs/auth/{login.ts,email_login.ts,layout.ts}`
+- `src/equityfundingsource-dev/lib/ui--server--efs/{header/index.ts,footer/index.ts,urls/index.ts}`
+- `src/equityfundingsource-dev/tests/auth.test.ts`
+- `src/equityfundingsource-dev/prds/admin-provisioning-spec.md`
+- `src/equityfundingsource-dev` parent gitlink
+
+Commands:
+- `git diff --check`
+- `bun test tests/auth.test.ts tests/email-login.test.ts`
+- `make check`
+- `gh run list --workflow CI --limit 1` in EFS and parent repos
+- `git push origin main` in EFS
+- Parent gitlink commits/pushes from clean temporary worktrees based on parent `origin/main`
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`
+- `make deploy`
+- Live smoke checks for `/`, `/portal`, and `/login?next=%2Fportal`
+
+Verification:
+- Focused auth tests passed.
+- Full `make check` passed with exit code `0`; the digest still reports the existing intentional `error: d1 down` failure-path log while the suite exits cleanly.
+- Remote D1 reported `No migrations to apply` before and after deployment.
+- Live `/` returned `200`.
+- Live `/portal` returned `303` to `https://equityfundingsource.brian-takita.workers.dev/login?next=%2Fportal`.
+- Live `/login?next=%2Fportal` returned `200`, rendered `Portal Login`, `Secure Portal`, and `action="/login?next=%2Fportal"`.
+- Live neutral login page had no matches for `role=lender`, `role=borrower`, `role=broker`, `role=admin`, `Admin portal`, `Borrower Portal`, `Broker Portal`, or `Lender Portal`.
+- Both EFS and parent repos still report no GitHub workflow named `CI`, so there was no CI run to inspect.
+
+Commits:
+- EFS submodule: `a5054a0` (`fix(auth): add role-neutral portal login`) pushed to EFS `origin/main`.
+- EFS submodule: `81c2a6a` (`fix(auth): hide role hints on neutral login`) pushed to EFS `origin/main`.
+- Parent gitlink: `31ecd2677` (`chore: update efs submodule for portal login`) pushed to parent `origin/main`.
+- Parent gitlink: `bf24e3216` (`chore: update efs submodule for neutral portal login`) pushed to parent `origin/main`.
+
+Deploy: final Worker version `ba1c25ae-969e-4cc9-bd2a-9d1652329bcc` is active at `https://equityfundingsource.brian-takita.workers.dev`; cron remains `0 * * * *`.
+
+Repo state note: the EFS submodule worktree is clean. The parent worktree remains locally divergent/dirty with unrelated existing changes, including a local EFS gitlink difference relative to the local parent HEAD; I left that unrelated local parent state untouched and pushed the parent gitlink through clean temporary worktrees.
+
+Preflight notes: agent-doc reported one legacy gated backlog item and several semantic-completion advisory warnings unrelated to this work; I did not mutate those backlog/review items. The exchange is large, but the queue is active, so I continued without compacting.
+
+Escalation: none.
+Confidence: high.
+
+Suggested commit message:
+
+```txt
+fix(auth): add role-neutral portal login (#portal-login)
+
+Add /portal as a generic auth dispatcher, let no-role password login return through it, redirect expired same-user email-login links with the existing session only, and keep the neutral login page free of role-specific hints. Includes PRD coverage, auth route tests, and deployment verification.
+```
+<!-- agent:boundary:406c5ad0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -213,6 +285,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- If the user clicks on a login link of the same user that is currently logged in, even if the link is expired, redirect the user to the portal. Add a /portal page that redirects to the login user's portal or login page without any hints as far as what type of login it is. If the user logs in, then redirect the person to the correct portal page.
 - deploy
 <!-- /agent:queue -->
 

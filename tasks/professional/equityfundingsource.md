@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -123,7 +123,7 @@ Sources: [Cloudflare Email Routing — Subdomains](https://developers.cloudflare
 So the chain is bidirectional: a party's email reply lands in the thread *and* notifies admins by email; an admin can then reply (in-app or by email) and the party is emailed — "and so on." Note the admin notification already happens **today** for in-app party messages (outbound notifications are enabled); the email-reply path simply feeds the same notify once `#msgmail4b` is switched on.
 
 **Net:** nothing to flip on my side until the Cloudflare subdomain + catch-all exist. Add those and ping me, and I'll enable + deploy + we test a round-trip. (`#f2w8`/`#msgmail4b`)
-<!-- agent:boundary:7f4089ff -->
+<!-- agent:boundary:a76aff14 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,6 +135,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Enable the bidirectional real-time sync between email replies and messages.
 <!-- /agent:queue -->
 
 ## Backlog

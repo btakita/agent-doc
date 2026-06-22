@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -240,18 +240,63 @@ Implemented Phase 1 of #qstrikeexplain (agent-doc submodule `639035e3`, superpro
 **Verified.** `make check` green + `cargo build --release` green; 5 new tests (idempotent annotation, annotated-line-parses-as-struck, unstrike-strips-annotation) + the e2e strike test asserts the annotated line appears once in the queue and never in exchange.
 
 Id-head (`do [#id]`) strikes are intentionally left unannotated — those are expected directives, not surprising disappearances. Delegated to a clean-context agent; I reviewed the overlay struck-detection change + the no-exchange-write proof before committing.
-<!-- agent:boundary:8dd8eea0 -->
+
+### Re: Run Agent Doc no-submit / clear-cooldown startup skip — gpt-5
+
+> **Queue prompt:** JB `Run Agent Doc` on equityfundingsource.md did not submit.
+> **Queue prompt:** Run through all videos in the corpus. Show the relevant videos to enrich any fishing location page. A video match should kick off the enrichment process on that fishing location page.
+> **Queue prompt:** Run through all videos in the corpus. Show the relevant videos to enrich any fishing location page. A video match should kick off the enrichment process on that
+> **Queue prompt:** JB `Run Agent Doc` on monsterrodholders.md sent prompt but did not submit.
+
+Implemented and shipped one concrete fix from the no-submit evidence: startup auto-trigger no longer treats a clear-cooldown marker as a terminal skip. It now keeps polling under the existing 30s startup timeout and only fails with `auto_trigger_timeout reason=clear_cooldown_after_30s` if the cooldown never clears. This closes the `Run Agent Doc` opens/starts but never submits because clear cooldown was present failure mode behind the equityfundingsource / Clear Session Context reports.
+
+Commits pushed: agent-doc `3d110b3a`, superproject `b1169577d`. I installed locally from a clean sibling worktree at `3d110b3a` because `src/agent-doc` has unrelated dirty files; that is why the source-tree `target/release` stale warning can still appear even though the installed binary and cdylib came from the fixed commit. `lib-install` marked 2 controllers for recycle; explicit `agent-doc admin recycle` for this doc reported no running controller for the project root.
+
+Verified: focused test `cargo test -p agent-doc-orchestration auto_trigger_clear_cooldown_waits_until_timeout_instead_of_terminal_skip`; `make check` green (clippy, 4972 nextest tests, doctests, medium SimWorld). CI status check could not be read: `gh run list --workflow CI --limit 1` returned HTTP 401 bad credentials.
+
+`#qcm1verify` stays open: it is still an operator-verify item requiring a live edit-during-finalize cycle. The partial duplicated free-text queue item is not closed by this patch; I filed `#ftqpartialdup` so that same-node/free-text duplication gets its own regression instead of being hidden under this no-submit fix.
+<!-- agent:boundary:218f7b51 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Add `Cancel Turn` in JB + VSCode menus...which cancels the current turn. Do this in a safe manner where multiple calls to `Cancel Turn` do not close the agent. In Codex + Opencode Ctrl+C will stop the running turn but Ctrl+C while idle will close the agent. In Claude Code pressing Ctrl+C twice while idle will close the agent.~~
-- ~~:pushpin: JB `Run Agent Doc` on monsterrodholders.md stalled after restarting the agent in both Claude Code + Codex.~~
-- ~~:pushpin: `agent-doc tasks/monsterrodholders.md` was added to the codex input but not submitted. Whatever wrote the prompt should also loop to check the input and submit it if not submitted.~~
-- ~~:pushpin: As I was writing queue items during a turn, an extra `/clear\n/agent-doc tasks/agent-doc/agent-doc-bugs2.md\n/clear` was written into the input and submitted.~~
 - :pushpin: do [#qcm1verify]
-- ~~:pushpin: do [#qstrikenote]~~
+---
+JB `Run Agent Doc` on equityfundingsource.md did not submit.
+```
+Press Enter to restart, or 'q' to exit.
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for codex TUI
+[lib-install] /home/brian/work/btakita/agent-loop/src/agent-doc/target/release/libagent_doc.so -> /home/brian/.cargo/bin/libagent_doc-0.34.35.so (symlink: libagent_doc.so)
+[lib-install] auto-recycle: 2 controller(s) marked to recycle at next idle boundary, 3 skipped (set AGENT_DOC_RECYCLE_ON_INSTALL=0 to disable)
+[agent-doc] supervisor auto-install succeeded; recycling onto the freshly-installed binary
+[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve
+[agent-doc] supervisor binary is stale while a self-draining loop owns the drain; requesting the in-session loop to yield one boundary so the recycle can hot-reload/restart at a clean boundary
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (idle); preserving the live agent child via execve
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary (next_queue_item); preserving the live agent child via execve
+[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] supervisor auto-install: rebuilding + installing agent-doc from /home/brian/work/btakita/agent-loop/src/agent-doc so the next queue item runs on the freshly-committed source
+   Compiling agent-doc-orchestration v0.1.0 (/home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-orchestration)
+   Compiling agent-doc-markdown-ast v0.34.0 (/home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-markdown-ast)
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+[agent-doc] idle_queue_watch: clear cooldown active for tasks/professional/equityfundingsource.md, skipping passive queue dispatch
+   Compiling agent-doc v0.34.35 (/home/brian/work/btakita/agent-loop/src/agent-doc)
+[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
+```
+---
+agent-doc partially duplicated free-text queue item in equityfundingsource.md
+```
+- Run through all videos in the corpus. Show the relevant videos to enrich any fishing location page. A video match should kick off the enrichment process on that fishing location page.
+- Run through all videos in the corpus. Show the relevant videos to enrich any fishing location page. A video match should kick off the enrichment process on that 
+```
+---
+- JB `Run Agent Doc` on monsterrodholders.md sent prompt but did not submit.
 - :pushpin: [#pendaddorder]
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` does nothing. Subsequent JB `Run Agent Doc` eventually dispatches...it seems there's a delay before working. Please enable JB `Run Agent Doc` to dispatch immediately.
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` sometimes has the dispatch storm (multiple duplicate prompts) and no submit.
@@ -276,6 +321,7 @@ Id-head (`do [#id]`) strikes are intentionally left unannotated — those are ex
 - do [#tb4q]
 - do [#cancelturnverify]
 - do [#recyclerename]
+- do [#ftqpartialdup]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -304,6 +350,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#ftqpartialdup] #agent-doc-bug Investigate partial free-text queue item duplication in equityfundingsource.md: pasted repro shows a full queue prompt duplicated as a truncated second line ending "... on that". Confirm whether the #hap7/#gf5n structural-node merge fixes cover same-node partial duplication; if not, add a same-node/free-text conflict guard and regression.
 - [ ] [#cancelturnverify] [operator-verify] #agent-doc-bug Live-verify Cancel Turn (agent-doc submodule b4471d05; committed+pushed, make check green, JB 0.2.176 + VS Code 0.2.31 built, NOT installed). After installing the plugins: (1) while a turn is RUNNING, invoke Cancel Turn (JB menu / VS Code command) and confirm the turn is interrupted (ops.log cancel_turn_performed action=interrupt_active_turn) and the agent stays open; (2) while the agent is IDLE, invoke Cancel Turn (even repeatedly) and confirm it is a NO-OP (ops.log cancel_turn_noop reason=idle_no_active_turn) and the agent is NOT closed — the core safety requirement. Verify per harness: Codex/OpenCode (Escape/C-c, never raw Ctrl+C that would close on idle) and Claude.
 - [ ] [#recyclerename] #agent-doc-bug Rename the JB + VS Code "Restart Supervisor Process" menu action to "Recycle Supervisor", and ensure a distinct "Restart" command sits alongside it (operator request attached to #s81q, struck when #s81q was gated but NOT implemented — this re-files it honestly). Restart Agent already exists as the harness-restart command; this is specifically renaming the supervisor-process action to "Recycle Supervisor" (matching the admin recycle semantics) + confirming Restart sits alongside. JB: plugin.xml text rename of AgentDoc.RestartSupervisorProcess (action IDs stay stable, only text changes per the convention) + VS Code command title. Confirm alongside-vs-replace with operator. Plan: tasks/agent-doc/plan-restart-agent.md
 - [ ] [#arrkillguard] #agent-doc-bug #agentreloadrestart Phase 1 kill-guard (the real-harm item): route/sync/start must NOT cold-start a replacement pane / evict an in-flight turn solely because frontmatter agent: changed — defer to the graceful boundary restart (#agentreloadrestart Phase 1b, shipped 603ce7a2). Root harm 2026-06-18: agent: claude->opencode on equityfundingsource.md killed the live claude turn (route migrated [claude] %83 -> [opencode] %90 mid-turn). Add a guard in route.rs/sync.rs that refuses to replace a BUSY same-session pane when the only difference is agent:; verify with make tmux-ci across two panes (one mid-turn) that the switch waits for the boundary and never kills the running turn. Plan: tasks/agent-doc/plan-restart-agent.md

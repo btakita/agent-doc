@@ -526,6 +526,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 crate::project_controller::agent_change_restart_enabled(&path);
             let launch_harness_binary = harness.binary.clone();
             let mut agent_change_logged_for: Option<String> = None;
+            // `#agentreloadrestart` Phase 1b — dedup the actual restart TRIGGER
+            // separately from the per-harness detection log: a change can be
+            // detected mid-turn (`WaitForBoundary`, logged once) and only later
+            // reach a quiet boundary (`Restart`), so the trigger must not be
+            // suppressed by the logging dedup.
+            let mut agent_change_restart_requested_for: Option<String> = None;
             let auto_install_enabled =
                 crate::project_controller::supervisor_auto_install_enabled(&path);
             let install_crate_root = if auto_install_enabled {
@@ -653,39 +659,80 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     let global = crate::config::load().unwrap_or_default();
                     let resolved = crate::harness::HarnessConfig::from_context(&fm, &global);
                     let harness_changed = resolved.binary != launch_harness_binary;
-                    let already_logged =
-                        agent_change_logged_for.as_deref() == Some(resolved.binary.as_str());
-                    if harness_changed && !already_logged {
+                    if harness_changed {
                         let decision = crate::start::decisions::agent_change_restart_decision(
                             harness_changed,
                             agent_change_restart_enabled,
                             prompt_visible,
                             turn_active,
                         );
-                        crate::ops_log::log_op(
-                            &path,
-                            &format!(
-                                "harness_change_detected file={} old={} new={} gate={:?}",
-                                path.display(),
-                                launch_harness_binary,
-                                resolved.binary,
-                                decision,
-                            ),
-                        );
-                        log_event(
-                            &mut session_log,
-                            &format!(
-                                "agent_restart_boundary_gate old={} new={} decision={:?} prompt_visible={} turn_active={} note=phase1b_execution_pending",
-                                launch_harness_binary,
-                                resolved.binary,
-                                decision,
-                                prompt_visible,
-                                turn_active,
-                            ),
-                        );
-                        // Dedupe: only re-log when the resolved harness changes
-                        // again (avoid per-tick spam for a standing change).
-                        agent_change_logged_for = Some(resolved.binary.clone());
+                        let already_logged =
+                            agent_change_logged_for.as_deref() == Some(resolved.binary.as_str());
+                        if !already_logged {
+                            crate::ops_log::log_op(
+                                &path,
+                                &format!(
+                                    "harness_change_detected file={} old={} new={} gate={:?}",
+                                    path.display(),
+                                    launch_harness_binary,
+                                    resolved.binary,
+                                    decision,
+                                ),
+                            );
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "agent_restart_boundary_gate old={} new={} decision={:?} prompt_visible={} turn_active={} note=phase1b_restart_triggered",
+                                    launch_harness_binary,
+                                    resolved.binary,
+                                    decision,
+                                    prompt_visible,
+                                    turn_active,
+                                ),
+                            );
+                            // Dedupe logging: only re-log when the resolved harness
+                            // changes again (avoid per-tick spam for a standing change).
+                            agent_change_logged_for = Some(resolved.binary.clone());
+                        }
+
+                        // `#agentreloadrestart` Phase 1b execution: at a quiet
+                        // dispatch-ready boundary the policy returns `Restart` — fire
+                        // the SAME restart signal the IPC restart uses. The supervisor
+                        // restart loop (run.rs) then re-reads current frontmatter,
+                        // re-resolves the harness spec, sees the changed binary, and
+                        // spawns the new harness FRESH (`agent_restart_performed`).
+                        // Never interrupt an in-flight turn: `WaitForBoundary` waits
+                        // for the next idle tick. Deduped so a standing change cannot
+                        // re-request a restart every tick.
+                        let already_requested = agent_change_restart_requested_for.as_deref()
+                            == Some(resolved.binary.as_str());
+                        if decision == crate::start::decisions::AgentChangeRestartAction::Restart
+                            && !already_requested
+                        {
+                            shared.restart_reexec.store(false, Ordering::Relaxed);
+                            // A harness change has no prior session in the NEW harness:
+                            // request a FRESH restart (no `--continue`/`resume` args)
+                            // rather than the default continue mode.
+                            *shared.restart_mode.lock().unwrap() = "fresh".to_string();
+                            shared.restart_requested.store(true, Ordering::Relaxed);
+                            agent_change_restart_requested_for = Some(resolved.binary.clone());
+                            crate::ops_log::log_op(
+                                &path,
+                                &format!(
+                                    "agent_restart_triggered file={} old={} new={} action=request_fresh_restart",
+                                    path.display(),
+                                    launch_harness_binary,
+                                    resolved.binary,
+                                ),
+                            );
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "agent_restart_triggered old={} new={} action=request_fresh_restart",
+                                    launch_harness_binary, resolved.binary,
+                                ),
+                            );
+                        }
                     }
                 }
                 let route_submit_in_flight =

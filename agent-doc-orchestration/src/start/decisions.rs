@@ -572,6 +572,17 @@ pub fn agent_change_restart_decision(
     AgentChangeRestartAction::Restart
 }
 
+/// `#agentreloadrestart` Phase 1b — does a re-resolved harness binary force a FRESH
+/// spawn of the new harness? True exactly when the binary the running supervisor
+/// launched with differs from the one re-resolved from CURRENT frontmatter. A
+/// harness change must spawn the new harness fresh (and must NOT adopt the old
+/// child preserved across a supervisor reexec). Pure so the restart loop's
+/// re-resolution branch is unit-testable, and so the INERTNESS invariant — same
+/// binary ⇒ no fresh-spawn swap — is asserted directly.
+pub fn harness_change_forces_fresh_spawn(running_binary: &str, resolved_binary: &str) -> bool {
+    running_binary != resolved_binary
+}
+
 /// `#supautoinstall` — what the idle supervisor watch should do about agent-doc's OWN
 /// source being newer than the installed binary (the dogfood "a finalize just committed
 /// a source edit but nobody built+installed it" state). Pure so the policy is
@@ -913,6 +924,48 @@ mod tests {
     }
 
     #[test]
+    fn harness_change_forces_fresh_spawn_predicate() {
+        // INERTNESS: same binary ⇒ no fresh-spawn swap (the common same-harness
+        // restart path is byte-identical — run.rs leaves harness/base_args/env and
+        // `pending_adopt` untouched).
+        assert!(!harness_change_forces_fresh_spawn("claude", "claude"));
+        assert!(!harness_change_forces_fresh_spawn("codex", "codex"));
+        assert!(!harness_change_forces_fresh_spawn("opencode", "opencode"));
+        // A real harness change ⇒ force a fresh spawn of the new harness.
+        assert!(harness_change_forces_fresh_spawn("claude", "opencode"));
+        assert!(harness_change_forces_fresh_spawn("claude", "codex"));
+        assert!(harness_change_forces_fresh_spawn("codex", "claude"));
+    }
+
+    #[test]
+    fn restart_action_is_the_phase1b_trigger_value() {
+        // `#agentreloadrestart` Phase 1b wiring contract, modelable WITHOUT a live
+        // PTY: the idle-watch sets `restart_requested` exactly when the pure policy
+        // returns `Restart` (changed + knob on + quiet dispatch-ready boundary).
+        // Every other policy outcome must NOT trigger a restart.
+        use AgentChangeRestartAction as A;
+        let should_request_restart =
+            |d: A| matches!(d, A::Restart);
+        // The boundary case that triggers.
+        assert!(should_request_restart(agent_change_restart_decision(
+            true, true, true, false
+        )));
+        // Mid-turn / no prompt / unchanged / knob-off must NOT trigger.
+        assert!(!should_request_restart(agent_change_restart_decision(
+            true, true, true, true
+        )));
+        assert!(!should_request_restart(agent_change_restart_decision(
+            true, true, false, false
+        )));
+        assert!(!should_request_restart(agent_change_restart_decision(
+            false, true, true, false
+        )));
+        assert!(!should_request_restart(agent_change_restart_decision(
+            true, false, true, false
+        )));
+    }
+
+    #[test]
     fn clean_session_head_forces_context_reset_policy() {
         // #cleandrainsup: a clean-session head forces a /clear, except during a
         // clear cooldown (never clear into an in-flight clear). A non-clean-session
@@ -1130,12 +1183,9 @@ mod tests {
         //    a fresh binary — no longer a silent no-op).
         let would_recycle_at_boundary = !matches!(
             supervisor_recycle_action(
-                /* stale */ false,
-                /* auto_recycle */ true,
-                /* turn_boundary */ true,
-                /* head_pending */ false,
-                /* explicit_admin */ true,
-                /* write_wedged */ false,
+                /* stale */ false, /* auto_recycle */ true,
+                /* turn_boundary */ true, /* head_pending */ false,
+                /* explicit_admin */ true, /* write_wedged */ false,
                 /* reexec_failed */ false,
             ),
             SupervisorRecycleAction::None | SupervisorRecycleAction::Detect
@@ -1158,7 +1208,11 @@ mod tests {
             SupervisorRecycleAction::None | SupervisorRecycleAction::Detect
         );
         assert!(!no_admin_recycle);
-        assert!(!stale_drain_recycle_yield_requested(no_admin_recycle, true, false));
+        assert!(!stale_drain_recycle_yield_requested(
+            no_admin_recycle,
+            true,
+            false
+        ));
     }
 
     #[test]

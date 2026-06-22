@@ -38,6 +38,111 @@ fn child_launch_plan(first_run: bool, auto_trigger_next_launch: bool) -> ChildLa
     }
 }
 
+/// `#agentreloadrestart` Phase 1b — the harness launch spec assembled from the
+/// CURRENT frontmatter: the resolved harness, its `base_args` (model flag,
+/// workspace-access args, `--no-mcp`), and the resolved child env (including any
+/// codex network-access mutations). Built once before the supervisor loop, and
+/// re-built at the top of a restart iteration so a frontmatter `agent:` change
+/// (e.g. claude→opencode) can bring up the NEW harness fresh.
+///
+/// INERTNESS INVARIANT: for an unchanged `agent:`, re-invoking
+/// [`build_harness_launch_spec`] yields byte-identical `harness` / `base_args` /
+/// `resolved_env` / `capability_proof_required`, so the common same-harness
+/// restart path is unaffected — only a real harness change exercises the new
+/// fresh-spawn branch.
+struct HarnessLaunchSpec {
+    harness: crate::harness::HarnessConfig,
+    base_args: Vec<String>,
+    resolved_env: std::collections::HashMap<String, String>,
+    capability_proof_required: bool,
+}
+
+/// Assemble the harness launch spec from current frontmatter + global config.
+///
+/// Pure refactor of the inline pre-loop assembly: resolves the harness, the
+/// per-harness `agent_args`, the model flag, workspace-access args, `--no-mcp`,
+/// the child env (with codex network access), and whether a managed capability
+/// proof is required. Keeps ALL existing side effects intact (codex network
+/// status console line, `*_capability_proof status=not_required` log event,
+/// fail-closed `bail!` on a codex network mismatch) so calling it once before the
+/// loop is behaviorally identical to the original inline code.
+fn build_harness_launch_spec(
+    fm: &frontmatter::Frontmatter,
+    global_config: &config::Config,
+    canonical: &Path,
+    session_log: &mut Option<std::fs::File>,
+    route_owned: bool,
+) -> Result<HarnessLaunchSpec> {
+    // Resolve harness config from frontmatter agent > config default_agent > claude
+    let harness = crate::harness::HarnessConfig::from_context(fm, global_config);
+    let resolved_agent_args = resolve_agent_args(fm, global_config, &harness);
+
+    // Resolve env — reused across all restarts for determinism within a spec.
+    let env_spec = EnvSpec::from_frontmatter(fm);
+    let mut resolved_env = env_spec.resolve()?;
+    if harness.supports_enable_tool_search && fm.enable_tool_search.unwrap_or(false) {
+        resolved_env.insert("ENABLE_TOOL_SEARCH".into(), "true".into());
+    }
+
+    // Build base args (resolved once per spec).
+    let mut base_args: Vec<String> = Vec::new();
+    if let Some(ref args) = resolved_agent_args {
+        base_args.extend(args.split_whitespace().map(String::from));
+    }
+    // Inject --model from harness-specific model frontmatter when not already in args.
+    if !base_args.iter().any(|a| a == "--model") {
+        let harness_key = agent_doc_core::model_tier::harness_key_for_agent_name(&harness.binary);
+        if let Some(model) = fm.resolve_harness_model(&harness_key) {
+            base_args.push("--model".into());
+            base_args.push(agent_doc_core::model_tier::canonical_model_name(
+                model,
+                &harness_key,
+                &global_config.model,
+            ));
+        }
+    }
+    crate::agent::append_workspace_access_args(&harness.binary, &mut base_args, canonical);
+    if harness.supports_no_mcp && fm.no_mcp.unwrap_or(false) {
+        base_args.push("--no-mcp".into());
+    }
+    if harness.binary == "codex" {
+        let codex_network_access = crate::agent::resolve_codex_network_access(fm, global_config);
+        crate::agent::apply_codex_network_access_env_map(&mut resolved_env, codex_network_access);
+        let status = crate::agent::codex_network_status_from_env_map(
+            &base_args,
+            codex_network_access,
+            &resolved_env,
+        );
+        start_console_status(
+            session_log,
+            route_owned,
+            format!("[start] codex network access: {}", status.summary()),
+        );
+        if let Some(err) = status.mismatch_error() {
+            anyhow::bail!(err);
+        }
+    }
+    let capability_proof_required = crate::agent::codex::managed_capability_contract_required(
+        &base_args,
+        fm,
+        global_config,
+        &harness.binary,
+    );
+    if !capability_proof_required {
+        log_event(
+            session_log,
+            &format!("{}_capability_proof status=not_required", harness.binary),
+        );
+    }
+
+    Ok(HarnessLaunchSpec {
+        harness,
+        base_args,
+        resolved_env,
+        capability_proof_required,
+    })
+}
+
 pub fn run_with_reap_policy(
     file: &Path,
     force: bool,
@@ -135,7 +240,6 @@ pub fn run_with_reap_policy(
 
     // Resolve harness config from frontmatter agent > config default_agent > claude
     let harness = crate::harness::HarnessConfig::from_context(&fm, &global_config);
-    let resolved_agent_args = resolve_agent_args(&fm, &global_config, &harness);
     {
         let (source, _resolved_name) = if fm.agent.is_some() {
             ("frontmatter", fm.agent.as_deref().unwrap_or("?"))
@@ -525,63 +629,18 @@ pub fn run_with_reap_policy(
         ),
     );
 
-    // Resolve env once at startup — reused across all restarts for determinism
-    let env_spec = EnvSpec::from_frontmatter(&fm);
-    let mut resolved_env = env_spec.resolve()?;
-    if harness.supports_enable_tool_search && fm.enable_tool_search.unwrap_or(false) {
-        resolved_env.insert("ENABLE_TOOL_SEARCH".into(), "true".into());
-    }
-
-    // Build base args (resolved once, reused across restarts)
-    let mut base_args: Vec<String> = Vec::new();
-    if let Some(ref args) = resolved_agent_args {
-        base_args.extend(args.split_whitespace().map(String::from));
-    }
-    // Inject --model from harness-specific model frontmatter when not already in args.
-    if !base_args.iter().any(|a| a == "--model") {
-        let harness_key = agent_doc_core::model_tier::harness_key_for_agent_name(&harness.binary);
-        if let Some(model) = fm.resolve_harness_model(&harness_key) {
-            base_args.push("--model".into());
-            base_args.push(agent_doc_core::model_tier::canonical_model_name(
-                model,
-                &harness_key,
-                &global_config.model,
-            ));
-        }
-    }
-    crate::agent::append_workspace_access_args(&harness.binary, &mut base_args, &canonical);
-    if harness.supports_no_mcp && fm.no_mcp.unwrap_or(false) {
-        base_args.push("--no-mcp".into());
-    }
-    if harness.binary == "codex" {
-        let codex_network_access = crate::agent::resolve_codex_network_access(&fm, &global_config);
-        crate::agent::apply_codex_network_access_env_map(&mut resolved_env, codex_network_access);
-        let status = crate::agent::codex_network_status_from_env_map(
-            &base_args,
-            codex_network_access,
-            &resolved_env,
-        );
-        start_console_status(
-            &mut session_log,
-            route_owned,
-            format!("[start] codex network access: {}", status.summary()),
-        );
-        if let Some(err) = status.mismatch_error() {
-            anyhow::bail!(err);
-        }
-    }
-    let capability_proof_required = crate::agent::codex::managed_capability_contract_required(
-        &base_args,
-        &fm,
-        &global_config,
-        &harness.binary,
-    );
-    if !capability_proof_required {
-        log_event(
-            &mut session_log,
-            &format!("{}_capability_proof status=not_required", harness.binary),
-        );
-    }
+    // `#agentreloadrestart` Phase 1b — assemble the harness launch spec from
+    // current frontmatter. Built once here; re-built at the top of a restart
+    // iteration to bring up a freshly-resolved harness on an `agent:` change.
+    // `harness` was already resolved above for the early recursive-guard / shared
+    // state; the spec re-resolves it (identical inputs ⇒ identical harness) and
+    // also carries `base_args`/`resolved_env`/`capability_proof_required`.
+    let HarnessLaunchSpec {
+        mut harness,
+        mut base_args,
+        mut resolved_env,
+        capability_proof_required,
+    } = build_harness_launch_spec(&fm, &global_config, &canonical, &mut session_log, route_owned)?;
 
     // Query initial terminal size
     let initial_size = {
@@ -780,6 +839,79 @@ pub fn run_with_reap_policy(
                 "supervisor",
                 restart_reason,
             );
+
+            // `#agentreloadrestart` Phase 1b — this iteration is serving a restart.
+            // Re-read CURRENT frontmatter and re-resolve the harness launch spec. If
+            // the operator changed `agent:` (e.g. claude→opencode) the resolved
+            // binary now DIFFERS from the running one: swap in the new spec and force
+            // a FRESH spawn (a harness change must never adopt the old child).
+            //
+            // INERT for an unchanged `agent:`: the re-resolved binary matches, so we
+            // skip the swap entirely and the same-harness restart path is byte-for-
+            // byte unchanged (no spec swap, `pending_adopt` untouched, no marker).
+            let restart_fm = std::fs::read_to_string(file)
+                .ok()
+                .and_then(|content| frontmatter::parse(&content).ok().map(|(fm, _)| fm));
+            match restart_fm {
+                Some(restart_fm) => {
+                    match build_harness_launch_spec(
+                        &restart_fm,
+                        &global_config,
+                        &canonical,
+                        &mut session_log,
+                        route_owned,
+                    ) {
+                        Ok(restart_spec)
+                            if crate::start::decisions::harness_change_forces_fresh_spawn(
+                                &harness.binary,
+                                &restart_spec.harness.binary,
+                            ) =>
+                        {
+                            let old_harness = harness.binary.clone();
+                            let new_harness = restart_spec.harness.binary.clone();
+                            harness = restart_spec.harness;
+                            base_args = restart_spec.base_args;
+                            resolved_env = restart_spec.resolved_env;
+                            // A harness change must spawn the NEW harness fresh — never
+                            // adopt the OLD harness child preserved across a reexec.
+                            pending_adopt = None;
+                            crate::ops_log::log_op(
+                                file,
+                                &format!(
+                                    "agent_restart_performed file={} old_harness={} new_harness={} action=spawn_fresh_harness",
+                                    file.display(),
+                                    old_harness,
+                                    new_harness
+                                ),
+                            );
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "agent_restart_performed old_harness={} new_harness={} action=spawn_fresh_harness",
+                                    old_harness, new_harness
+                                ),
+                            );
+                        }
+                        // Unchanged harness (the common case) — INERT, no swap.
+                        Ok(_) => {}
+                        Err(e) => {
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "agent_restart_respec_failed error={} note=keeping_running_harness",
+                                    e
+                                ),
+                            );
+                        }
+                    }
+                }
+                None => {
+                    log_event(
+                        &mut session_log,
+                        "agent_restart_respec_skipped reason=frontmatter_unreadable note=keeping_running_harness",
+                    );
+                }
+            }
         }
         // Build args for this iteration. A restart can be "fresh" (base args,
         // no resume/continue flags) while still needing the document trigger

@@ -226,7 +226,68 @@ Verification: preflight and planning passed. No app tests were run because no so
 Escalation: none.
 
 Confidence: medium; the product interpretation is straightforward, but closeout required the force-disk recovery path after repeated IPC no-ack failures.
-<!-- agent:boundary:72443f2a -->
+
+### Re: admin invite password reset + duplicate sign-in links — gpt-5
+
+> **Queue prompt:**
+>
+> rwaldman100+admin@gmail.com forgot password "did not work". Gave an account already existed error.
+
+> **Queue prompt:**
+>
+> Forgot password email was not sent when rwaldman100+admin@gmail.com clicked "Forgot password" link.
+
+> **Queue prompt:**
+>
+> Email me a sign in link flow sent 2 emails. It should only send 1 email. 1 of the 2 emails had an expired link. The first one worked.
+
+> **Queue prompt:**
+>
+> [#admin-invite-password-flow]
+
+> **Queue prompt:**
+>
+> deploy
+
+Fixed and deployed both auth issues.
+
+Root cause for forgot password: invite-provisioned admins can be active users with an empty `password_hash`. The forgot-password route only emailed reset links when `password_hash` already existed, and reset submission also rejected empty-hash users. That made the flow silently no-op for a first-password admin invite. The reset flow now allows any active user to receive a reset token and set the first password.
+
+Root cause for duplicate sign-in-link emails: each POST to `Email me a sign-in link` minted a new token and superseded the previous unused token. A double submit could therefore send two emails while making one link immediately invalid. The route now suppresses immediate duplicate sends when a recent unused token already exists, keeping the first link valid and sending only one email.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/routes.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/email_login.ts`
+- `src/equityfundingsource-dev/tests/auth.test.ts`
+- `src/equityfundingsource-dev/tests/email-login.test.ts`
+- `src/equityfundingsource-dev` parent submodule pointer
+
+Commands:
+- `bun test tests/auth.test.ts`
+- `bun test tests/email-login.test.ts tests/auth.test.ts`
+- `git diff --check`
+- `make check` after each auth fix
+- `gh run list --workflow CI --limit 1`
+- `git push origin main` in `src/equityfundingsource-dev`
+- `git push origin main` in the parent repo
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before and after deploy
+- `make deploy`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
+
+Verification: focused auth/email-login suites passed. Final full `make check` passed with 1119 tests plus app and worker builds; the suite still logs the intentional non-fatal `d1 down` outbox test. GitHub still has no workflow named `CI`, so there was no CI run to inspect. Remote D1 reported `No migrations to apply`, and the live Worker root returned HTTP `200` after deploy.
+
+Commits:
+- EFS submodule: `3423507` (`fix(auth): allow invite password reset`) pushed to `origin/main`.
+- EFS submodule: `31487e0` (`fix(auth): suppress duplicate email login links`) pushed to `origin/main`.
+- Parent repo: `c68d3c49b` (`chore: update efs submodule for auth reset fix`) pushed to `origin/main`.
+- Parent repo: `f06cca831` (`chore: update efs submodule for email login fix`) pushed to `origin/main`.
+
+Deploy: latest Worker version `b5683da6-1389-4aaf-8eeb-94eb82e7513c` is active at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:27ed5fa6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -239,8 +300,8 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~rwaldman100+admin@gmail.com clicked the invite link but was not logged in and prompted to set password.~~
-- rwaldman100+admin@gmail.com forgot password "did not work". Gave an account already existed error.
-- Forgot password email was not sent when rwaldman100+admin@gmail.com clicked "Forgot password" link.
+- ~~rwaldman100+admin@gmail.com forgot password "did not work". Gave an account already existed error. ~~
+- ~~Forgot password email was not sent when rwaldman100+admin@gmail.com clicked "Forgot password" link.~~ — auto-struck: answered this cycle (#ftstrike)
 - [#admin-invite-password-flow]
 - Why is https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=loan still an Available Deal? We need to have messaging in the dialog/page to instruct the admin on how to advance the deal. If it is due to a lender not having their accredidation approved by the admin, then provide a message with a button to approve the lender accredidation.
 - ~~Once a lender is selected, EFS sends a "Due Diligence Package" to the lender. The lender will request documents.~~ — auto-struck: answered this cycle (#ftstrike)
@@ -251,7 +312,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#admin-invite-password-flow] Verify rwaldman100+admin@gmail.com invite acceptance: unauthenticated invite-link password setup should create/login the invited admin and land in the admin portal with the correct role; fix any loop/lost-invite failure.
 - [ ] [#due-diligence-package] After a lender is selected, send the lender a Due Diligence Package and support lender document requests with deal-dialog status/audit visibility.
 <!-- /agent:backlog -->
 

@@ -127,7 +127,25 @@ Proof:
 - Verification: preflight and plan completed; no product code changed, so no app tests were run.
 - Escalation: none.
 - Confidence: high.
-<!-- agent:boundary:95babf25 -->
+
+### Re: #67v2-aa-local admin pipeline auto-advance — gpt-5
+
+Done. Shipped the local half of the #67v2 admin pipeline auto-advance work.
+
+Implemented:
+- Pure stage requirement rules in `app/equityfundingsource/lib/admin/repo.ts`: selected lender, borrower intent, processing/underwriting completion signals, final-doc notarization, and funding completion.
+- `POST /api/admin/pipeline/auto-advance`: scans all loans or one `loan_id`, supports `dry_run`, advances one stage per eligible loan, writes a `loan_status_auto_advance` activity log, and enqueues a pending `tmo_cache_outbox` `update_loan_status` row.
+- Replay remains gated on `#7a4d/#dzmm`: the auto-advance route does not call `tmo_loan_status_sync_` and does not add a replay worker.
+- Updated the #67v2 PRD Phase C and added focused pipeline tests for the rules, decision gating, route wiring, write/audit/outbox order, and no-direct-TMO-sync guard.
+
+Proof:
+- Changed paths: `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/repo.ts`, `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/loan_management/index.ts`, `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/routes.ts`, `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`, `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`, plus the parent submodule pointer.
+- Commands: `tsift status`; focused `bun test tests/admin-pipeline.test.ts`; `git diff --check`; full `make check`; `gh run list --workflow CI --limit 1`; `gh workflow list`; commits and pushes for the EFS submodule and parent repo.
+- Verification: focused pipeline suite passed; full `make check` passed with 1098 tests plus app and worker builds. GitHub has no workflow named `CI`, and `gh workflow list` returned no workflows, so there was no remote CI run to inspect.
+- Commits pushed: EFS submodule `0454e1a` (`feat(admin): add pipeline auto-advance rules (#67v2)`), parent pointer `6219fc4b5` (`chore: update efs submodule for 67v2 auto-advance`).
+- Escalation: none.
+- Confidence: high.
+<!-- agent:boundary:5d11c9bb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -139,13 +157,12 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- [#67v2-aa-local]
+- ~~[#67v2-aa-local]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#67v2-aa-local] [recommended] Admin pipeline auto-advance local half (advances #67v2-auto-advance): define stage-requirement checks from the TMO-aligned Kanban and enqueue audited status updates to tmo_cache_outbox; replay stays gated on #dzmm. Depends on the #67v2 Kanban stages being built first.
 <!-- /agent:backlog -->
 
 ## Review

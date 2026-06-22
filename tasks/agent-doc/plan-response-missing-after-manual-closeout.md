@@ -136,6 +136,58 @@ Relates to `#write-closeout-response-shape`, `#adoc-queue-ipc-buffer-divergence`
 `#duplicate-response-after-commit`, and the JB `File Cache Conflict` snapshot-revert
 report queued alongside this item.
 
+## Additional Evidence: MRH SERP closeout response loss + stalled queue
+
+On 2026-06-22, `agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md`
+was invoked from an owned Codex pane. The self-invocation guard correctly refused to
+reroute and exposed the live queue head `#serpfx-frh-recover`; the agent then ran
+that head manually in the pane.
+
+The work completed and was committed:
+
+- `src/boost-client/tasks/monsterrodholders.md` was updated with the 2026-06-22
+  "fishing rod holders" GSC/SERP recovery findings, `#serpfx-frh-recover` was
+  removed from the active queue, and the next queue head became
+  `#convfix-automation-deploy`.
+- The boost-client submodule reached commit `77c971c3`; the superproject pointer
+  reached `c15d92bbc`.
+- Local verification showed a clean boost-client worktree; `make check` was
+  unavailable in that repo and `gh run list --workflow CI --limit 1` found no
+  workflow named `CI`.
+
+The closeout path did not preserve the assistant response:
+
+1. `agent-doc finalize` / `agent-doc write --commit` initially returned empty-response
+   failures.
+2. A manually added `### Re:` exchange block caused session-check to complain about
+   direct response patchback, so it was removed.
+3. `agent-doc compact ... --commit` then committed a clean-looking cycle and archived
+   the attempted exchange, but the live exchange tail became empty.
+4. Final checks showed `agent-doc session-check` returning ok for
+   `cycle-1782150007029` as `committed`, while also reporting
+   `queue_continuation_required=true` and next queue prompt
+   `#convfix-automation-deploy`.
+5. `tsift --envelope session-review ... --next-context` reported
+   `live_exchange_tail_total=0`, so the visible document contained no assistant
+   closeout response even though the task state advanced.
+
+A follow-up repair attempt reproduced the failure in a tighter form:
+`agent-doc write --commit --origin codex-repair tasks/monsterrodholders.md` exited
+successfully, but printed `rejecting late fallback patch: cycle ... already committed`,
+did not append the response body, and reintroduced the stale queue body as
+uncommitted drift. The queue had to be restored manually and committed as
+boost-client `3969eaa` with parent pointer `1fcb39a13`. Regression coverage should
+treat a zero-exit write with no visible response body as failure, and should verify
+that missing-response repair cannot resurrect stale queue snapshots.
+
+This variant differs from a prompt-only exchange: the response was generated in chat,
+the document mutations and commits succeeded, and the queue state advanced, but the
+response body was later compacted/normalized away. The closeout contract needs a
+post-commit invariant that proves the current turn's response body is present in the
+visible document or in a declared archive with an in-document summary. If the response
+is missing, session-check must fail closed and name a binary-owned recovery command
+that writes the missing response without rerunning already-completed side effects.
+
 ## Exit Criteria
 
 - A completed direct Codex `agent-doc <FILE>` turn cannot silently exit with a prompt-only exchange.

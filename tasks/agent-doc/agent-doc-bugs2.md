@@ -280,19 +280,64 @@ Verification after staging/committing:
 - The superproject does not have a workflow named `CI`, so `gh run list --workflow CI --limit 1` had no matching workflow there.
 
 I added a recommended follow-up to reconcile the superproject `main` divergence and merge the pushed branch without a force-push.
-<!-- agent:boundary:2940bd5e -->
+
+### Re: equityfundingsource sync recovery — gpt-5
+
+> **Queue prompt:** Why am I unable to sync with equityfundingsource.md? Fix the root cause. I have not been able to connect to equityfundingsource.md since rebooting. There also is no obvious recovery path for the operator. I attempted a recovery with opencode but now it does not sync. `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.`. We need a way to recover that "just works" for individual sessions.
+
+Root cause was a stack of recovery bugs, not one bad pane:
+
+- The installed binary/library was stale, so the editor path could still emit the old deferred-sync behavior until `make install` refreshed both the CLI and cdylib.
+- `resync` treated normalized registry keys as session ids, which created false `NoLiveOwner` diagnoses for valid rows.
+- Targeted repair could recover a pane and then remove that same row during `NoLiveOwner` fix application.
+- Stale association evidence from `equityfundingsource.md` could point at another live document pane and let repair steal it.
+- Exact-visible recovery could create duplicate `agent-doc` windows.
+- Global `resync --fix` treated every registered pane in `stash` as disposable, which could deregister a live supervisor-backed session.
+
+Fixed in `src/agent-doc` and pushed to `agent-doc/main`:
+
+- `6c50f37f fix: recover document sessions without stealing panes`
+- `921b0c49 fix: preserve stashed live session owners`
+
+Root pointer commits were created locally on the divergent superproject branch: `26ba5856b` and `a7d180880`. I did not push the root branch because it is `ahead 54, behind 19` with many unrelated edits.
+
+Verification performed:
+
+- `cargo test -p agent-doc-orchestration registry_entry_session_id_prefers_explicit_session_uuid -- --nocapture`
+- `cargo test -p agent-doc-orchestration target_fix_no_live_owner_refreshes_recovered_registry_entry -- --ignored --nocapture`
+- `cargo test -p agent-doc-orchestration repair_layout_consolidates_duplicate_target_windows -- --ignored --nocapture`
+- `make check` in `src/agent-doc` after the final stash-owner fix: 4,978 tests passed, doctests passed, closeout simulation passed.
+- Installed the fixed CLI and shared library with `make install`.
+
+Live recovery verification:
+
+- `agent-doc sync --col ...equityfundingsource.md --focus ...equityfundingsource.md --exact-visible` recovered the existing equity pane `%24` instead of stealing `%3` or starting a duplicate.
+- `agent-doc resync --fix` promoted the stashed live owner `%3` back into `agent-doc` instead of deregistering it.
+- Final `agent-doc resync` reports no session/process issues and two active sessions:
+  - `tasks/agent-doc/agent-doc-bugs2.md -> pane %3`
+  - `tasks/professional/equityfundingsource.md -> pane %24`
+
+GitHub CI for the latest pushed submodule commit was started (`27972775024`) and was still in progress; per your instruction, I did not wait for CI.
+<!-- agent:boundary:0bd5dab6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - Why am I unable to sync with equityfundingsource.md? Fix the root cause. I have not been able to connect to equityfundingsource.md since rebooting. There also is no obvious recovery path for the operator. I attempted a recovery with opencode but now it does not sync. `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.`. We need a way to recover that "just works" for individual sessions.
+- Enable incremental compilation to speed up local dev builds + installs. Save full compilations for pre-release + ci. Switch to faster linkers like lld or mold via .cargo/config.toml, which can reduce link time by 27-70%. Use `cargo build --timings` to identify bottlenecks.
 ---
-These heads are not stale. I just typed them in.
+Still getting too many IPC issues. Repair needs to run too frequently. The AST/semantic merge should resolve without the need to repair.
+```
+• The repair tool correctly refused to commit the stale buffer. Since that drift was caused by the write-back transport
+  and not user-authored work, I’m going to patch the working tree back to the committed session-doc content and re-run
+  session-check/status.
+```
+---
+[#freshqueueauth]: These heads are not stale. I just typed them in.
 ```
 • The doctor confirms the stale queue heads are why the document is still blocked. I’m removing only those two queue
   lines, leaving the newly added backlog rows and the review history intact.
-
 • Edited tasks/monsterrodholders.md (+0 -2)
     45  <!-- agent:queue preset="#spec-test-commit-push" priority go -->
     46 -- [#rotate-exposed-secrets]: There was no livestream. Make sure the token is scrubbed from the logs. Apply this
@@ -306,6 +351,7 @@ These heads are not stale. I just typed them in.
   explicit closeout blocker rather than a code/document task blocker.
 ```
 ---
+- JB `Run Agent Doc` on monsterrodholders.md stalls (no prompt) and does not submit (prompt sent but no submit).
 - do [#cancelturnverify]
 - I typed into monsterrodholders.md queue but agent-doc reverted to an old snapshot and I lost everything that I typed.
 - Figure out how to make AGENTS.md lean & reliable so agents follow the directives. Should we treat AGENTS.md as a menu that defers to runbooks? Would that be more reliable?
@@ -315,6 +361,20 @@ These heads are not stale. I just typed them in.
 - do [#fbwireverify]
 - do [#qnodemerge4verify]
 - do [#tb4q]
+---
+These heads are not stale. I just typed them in.
+```
+• The doctor confirms the stale queue heads are why the document is still blocked. I’m removing only those two queue
+  lines, leaving the newly added backlog rows and the review history intact.
+• Edited tasks/monsterrodholders.md (+0 -2)
+    45  <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+    46 -- [#rotate-exposed-secrets]: There was no livestream. Make sure the token is scrubbed from the logs. Apply this
+         same logic for any "livestream" concerns. I don't livestream this.
+    47 -- Add actionable items to advance gated backlog items.
+    46  <!-- /agent:queue -->
+```
+---
+- do [#freshqueueauth]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -344,6 +404,7 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#freshqueueauth] #agent-doc-bug Preserve fresh operator queue heads during recovery/finalize and support acknowledging correction heads tied to open backlog ids without closing the underlying work. Plan: tasks/agent-doc/plan-fresh-queue-head-authority.md. Do not implement until scheduled.
+- [ ] [#mrh-response-loss-stalled-queue] #agent-doc-bug Response patchback loss plus queue stall from the 2026-06-22 `src/boost-client/tasks/monsterrodholders.md` SERP closeout: the MRH work was completed and committed, compact/recovery left `live_exchange_tail_total=0`, `agent-doc session-check` still reported the cycle committed with `queue_continuation_required=true`, and the visible document had no assistant response block. Plan: tasks/agent-doc/plan-response-missing-after-manual-closeout.md. DO NOT IMPLEMENT until scheduled.
 - [ ] [#cancelturnverify] [operator-verify] #agent-doc-bug Live-verify Cancel Turn (agent-doc submodule b4471d05; committed+pushed, make check green, JB 0.2.176 + VS Code 0.2.31 built, NOT installed). After installing the plugins: (1) while a turn is RUNNING, invoke Cancel Turn (JB menu / VS Code command) and confirm the turn is interrupted (ops.log cancel_turn_performed action=interrupt_active_turn) and the agent stays open; (2) while the agent is IDLE, invoke Cancel Turn (even repeatedly) and confirm it is a NO-OP (ops.log cancel_turn_noop reason=idle_no_active_turn) and the agent is NOT closed — the core safety requirement. Verify per harness: Codex/OpenCode (Escape/C-c, never raw Ctrl+C that would close on idle) and Claude.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.

@@ -138,7 +138,58 @@ Verification: EFS submodule is clean and synced with `origin/main`; remote D1 ha
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:55d89ab7 -->
+
+### Re: available deal guidance + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> Why is https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=loan still an Available Deal? We need to have messaging in the dialog/page to instruct the admin on how to advance the deal. If it is due to a lender not having their accredidation approved by the admin, then provide a message with a button to approve the lender accredidation.
+
+> **Queue prompt:**
+>
+> deploy
+
+The live reason is data drift, not an unapproved lender. Production D1 shows deal `d6b78994-0970-498f-9e10-6f0035902c0d` is `reserved` with selected interest `cc15d2fa-a98d-43c2-8451-d389c77cde9c` for `btak.dev+investor@gmail.com` / Dude Lender, lender account `123`, and accreditation verification `732ad783-91fd-43eb-a694-2dc186eb14f0` already `verified`. The loan is still in the Available Deals lane because loan `FTM631` remains `tmo_loan_status='Application Received'`.
+
+Implemented and deployed an admin guidance panel at the top of the Available Deal Loan Detail tab. When the loan is still `Application Received`, it now explains the next action:
+- no selected lender: review Interested Lenders and select a funding proposal;
+- under-review accreditation: show an `Approve accreditation` button wired to the existing admin accreditation decision endpoint;
+- selected lender with old status drift: show `Move to Loan Estimate`, wired to the existing loan status endpoint.
+
+I did not mutate the production loan status directly; the deployed UI now gives the admin the explicit action to advance it.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/investor_management/index.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/shared.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/deal_detail.tsx`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
+- `src/equityfundingsource-dev` parent submodule pointer
+
+Commands:
+- `bun run --cwd app/equityfundingsource cf:d1:query:remote -- "SELECT ... WHERE d.id = 'd6b78994-0970-498f-9e10-6f0035902c0d' ..."`
+- `bun test tests/admin-investor-pipeline.test.ts`
+- `git diff --check`
+- `make check`
+- `gh run list --workflow CI --limit 1`
+- `git push origin main` in `src/equityfundingsource-dev`
+- `git push origin main` in the parent repo
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before and after deploy
+- `make deploy`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
+
+Verification: focused admin-investor tests passed; full `make check` passed (1117 tests plus app build and worker build). The passing suite still logs the intentional `d1 down` non-fatal outbox test. GitHub has no workflow named `CI`, so there was no CI run to inspect. Remote D1 has no pending migrations. The deployed Worker root returned HTTP `200`.
+
+Commits:
+- EFS submodule: `4a1211c` (`fix(admin): explain available deal advancement`) pushed to `origin/main`.
+- Parent repo: `f0539492f` (`chore: update efs submodule for deal guidance`) pushed to `origin/main`.
+
+Deploy: activated Worker version `e7a2b801-1a89-44e4-857f-d0db5da38aa5` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:8da8e1fd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -150,7 +201,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- I still see "Wiring Instructions (Secure Link)" in https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=loan which is an Available Deal with no lender selected. Did you implement hiding Wiring Instructions until a lender is selected?
+- Why is https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=loan still an Available Deal? We need to have messaging in the dialog/page to instruct the admin on how to advance the deal. If it is due to a lender not having their accredidation approved by the admin, then provide a message with a button to approve the lender accredidation.
 - deploy
 <!-- /agent:queue -->
 

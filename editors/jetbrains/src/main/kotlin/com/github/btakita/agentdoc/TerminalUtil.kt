@@ -682,6 +682,49 @@ object TerminalUtil {
     }
 
     /**
+     * #s81q: Stop Agent — `agent-doc session stop-agent <relPath>`. Stops the
+     * harness agent child while keeping the supervisor alive at its keepalive
+     * prompt. Mirrors [restartSession]'s session-subcommand shape; the supervisor
+     * stays running so "Restart Agent" can bring the harness back.
+     */
+    fun stopAgent(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        runSessionCommand(
+            project = project,
+            file = file,
+            args = listOf("stop-agent"),
+            startedMessage = "Stopping agent for ${file.name}",
+            onSuccess = { relativePath, output ->
+                showHint(project, output.ifBlank { "Stopped agent for $relativePath (supervisor still running)." })
+            },
+            onComplete = onComplete,
+        )
+    }
+
+    /**
+     * #s81q: Kill Supervisor — `agent-doc admin kill-supervisor <relPath>`. Stops
+     * the whole route-owned supervisor process for this document. The CLI refuses
+     * to kill the caller's own ancestor, so this runs from the editor's project
+     * root (not the supervisor's own pane). Unlike [stopAgent] this is an `admin`
+     * subcommand, not a `session` one, so it builds the command directly rather
+     * than through [buildSessionCommand].
+     */
+    fun killSupervisor(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        val (cwd, relativePath) = resolveProject(project, file)
+        val agentDoc = resolveAgentDoc(cwd)
+        val cmd = listOf(agentDoc, "admin", "kill-supervisor", relativePath)
+        runDocumentCommand(
+            project = project,
+            file = file,
+            command = cmd,
+            startedMessage = "Killing supervisor for ${file.name}",
+            onSuccess = { relPath, output ->
+                notifyInfo(project, output.ifBlank { "Killed supervisor for $relPath." })
+            },
+            onComplete = onComplete,
+        )
+    }
+
+    /**
      * #plugin-cleanup-menu-command: resolve the project root for a project-level
      * cleanup command. These commands operate on the whole session registry, not
      * a single document, so they run in the focused .md file's project root when

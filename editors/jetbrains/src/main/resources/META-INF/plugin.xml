@@ -124,6 +124,22 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.StopAgent"
+                class="com.github.btakita.agentdoc.StopAgentAction"
+                text="Stop Agent"
+                description="Stop the agent harness for this document (the supervisor stays running; use Restart Agent to bring it back)">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
+        <action id="AgentDoc.KillSupervisor"
+                class="com.github.btakita.agentdoc.KillSupervisorAction"
+                text="Kill Supervisor"
+                description="Kill the supervisor process for this document">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
         <action id="AgentDoc.ClearSessionContext"
                 class="com.github.btakita.agentdoc.ClearSessionContextAction"
                 text="Clear Session Context"

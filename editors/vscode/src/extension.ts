@@ -860,6 +860,58 @@ async function restartSessionAction(): Promise<void> {
     );
 }
 
+// #s81q: Restart Agent — runs the same `session restart-supervisor` path as
+// "Restart Supervisor Process" but with a distinct operator-facing intent (bring
+// the agent harness back up, re-resolving a changed `agent:` frontmatter).
+// Mirrors the JetBrains RestartAgentAction.
+async function restartAgentAction(): Promise<void> {
+    await runSessionCommandForActiveFile(
+        'restart-supervisor',
+        (output, rel) => {
+            showHint(buildSessionSuccessHint('restart-supervisor', rel, output));
+        },
+        'agent restart failed',
+    );
+}
+
+// #s81q: Stop Agent — `agent-doc session stop-agent <rel>`. Stops the harness
+// agent child while keeping the supervisor alive at its keepalive prompt; the
+// operator can bring it back with "Restart Agent".
+async function stopAgentAction(): Promise<void> {
+    await runSessionCommandForActiveFile(
+        'stop-agent',
+        (output, rel) => {
+            showHint(buildSessionSuccessHint('stop-agent', rel, output));
+        },
+        'stop agent failed',
+    );
+}
+
+// #s81q: Kill Supervisor — `agent-doc admin kill-supervisor <rel>`. Stops the
+// whole route-owned supervisor process for this document. The CLI refuses to
+// kill the caller's own ancestor, so this runs from the editor's project root.
+// Unlike the session commands this is an `admin` subcommand, so it builds args
+// directly rather than through buildSessionCommandArgs.
+async function killSupervisorAction(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !isMarkdown(editor)) return;
+
+    const root = getWorkspaceRoot(editor.document.uri);
+    if (!root) {
+        showError('File is not in a workspace');
+        return;
+    }
+
+    try {
+        await editor.document.save();
+        const { cwd, relativePath } = resolveProject(root, editor.document.uri.fsPath);
+        const output = await runCli(['admin', 'kill-supervisor', relativePath], cwd);
+        showHint(output.trim() || `Killed supervisor for ${relativePath}`);
+    } catch (err: any) {
+        showError(`kill supervisor failed: ${err.message}`);
+    }
+}
+
 // #plugin-cleanup-menu-command: project-level session-hygiene commands. Unlike
 // the file-scoped session commands, `resync --fix` and `gc` operate on the whole
 // session registry, so they run in the project root (the focused .md file's root
@@ -2566,6 +2618,17 @@ export function activate(context: vscode.ExtensionContext): void {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.restartSession', restartSessionAction)
+    );
+
+    // #s81q: Restart Agent / Stop Agent / Kill Supervisor menu commands.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.restartAgent', restartAgentAction)
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.stopAgent', stopAgentAction)
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.killSupervisor', killSupervisorAction)
     );
 
     context.subscriptions.push(

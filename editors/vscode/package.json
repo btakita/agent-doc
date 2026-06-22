@@ -2,7 +2,7 @@
   "name": "agent-doc",
   "displayName": "Agent Doc",
   "description": "Submit markdown documents to AI agents via agent-doc",
-  "version": "0.2.29",
+  "version": "0.2.30",
   "publisher": "btakita",
   "icon": "icon.png",
   "license": "MIT",
@@ -55,6 +55,18 @@
         "title": "Agent Doc: Restart Supervisor Process"
       },
       {
+        "command": "agentDoc.restartAgent",
+        "title": "Agent Doc: Restart Agent"
+      },
+      {
+        "command": "agentDoc.stopAgent",
+        "title": "Agent Doc: Stop Agent"
+      },
+      {
+        "command": "agentDoc.killSupervisor",
+        "title": "Agent Doc: Kill Supervisor"
+      },
+      {
         "command": "agentDoc.clearSessionContext",
         "title": "Agent Doc: Clear Session Context"
       },
@@ -96,7 +108,40 @@
         "key": "alt+enter",
         "when": "editorTextFocus && editorLangId == markdown"
       }
-    ]
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "agentDoc.restartAgent",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "agentDoc.stopAgent",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "agentDoc.killSupervisor",
+          "when": "editorLangId == markdown"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "agentDoc.restartAgent",
+          "when": "editorLangId == markdown",
+          "group": "agentDoc@1"
+        },
+        {
+          "command": "agentDoc.stopAgent",
+          "when": "editorLangId == markdown",
+          "group": "agentDoc@2"
+        },
+        {
+          "command": "agentDoc.killSupervisor",
+          "when": "editorLangId == markdown",
+          "group": "agentDoc@3"
+        }
+      ]
+    }
   },
   "scripts": {
     "compile": "tsc -p ./",

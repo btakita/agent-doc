@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -407,7 +407,26 @@ Verification: queue-state cleanup only; product verification is recorded in the 
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:a483a3a8 -->
+
+### Re: due-diligence queue residue — gpt-5
+
+> **Queue prompt:**
+>
+> ~~Once a lender is selected, EFS sends a "Due Diligence Package" to the lender. The lender will request documents.~~ — auto-struck: answered this cycle (#ftstrike)
+
+
+This remaining struck queue head is already handled. The Due Diligence Package behavior was implemented, verified, deployed, and `#due-diligence-package` was reaped to done in the prior cycle.
+
+Changed paths: none in this cleanup-only cycle.
+
+Commands: `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`.
+
+Verification: queue-state cleanup only; product verification is recorded in the due-diligence implementation response.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:accba7d1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -419,16 +438,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
- - ~~queue items are being auto-struck without work being done on them. Please unstrike items that were not worked on and work on those items.~~
-- ~~Please explain #ftstrike. I don't see it anywhere in this document or in equityfundingsource.done.md~~
-- ~~rwaldman100+admin@gmail.com clicked the invite link but was not logged in and prompted to set pasword.~~
-- ~~rwaldman100+admin@gmail.com forgot password "did not work". Gave an account already existed error.~~
-- ~~~~Forgot password email was not sent when rwaldman100+admin@gmail.com clicked "Forgot password" link.~~ — auto-struck: answered this cycle (#ftstrike)~~
-- ~~[#admin-invite-password-flow]~~
-- ~~Why is https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=loan still an Available Deal? We need to have messaging in the dialog/page to instruct the admin on how to advance the deal. If it is due to a lender not having their accredidation approved by the admin, then provide a message with a button to approve the lender accredidation.~~
-- ~~Once a lender is selected, EFS sends a "Due Diligence Package" to the lender. The lender will request documents.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Somehow, Robert Waldman was presented with a Google Login from admin. Remove all lingering Google Login buttons.~~
-- ~~deploy~~
 <!-- /agent:queue -->
 
 ## Backlog

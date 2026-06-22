@@ -426,7 +426,7 @@ I stalled in the agent-doc closeout path, not because I was waiting on CI.
 What happened: the implementation and local verification were done, but the first finalize call failed its editor-IPC proof and retained the pending response. I then had to run preflight/repair/commit recovery, reset the sidecars back to the visible document, and push the recovered session commits without touching unrelated worktree changes. That made the turn look stuck even though the code path had already landed.
 
 I will not wait for CI. For future code-changing cycles here I will run local verification, do at most a non-blocking `gh run list --workflow CI --limit 1` status check, then close the cycle. This current cycle only records that instruction; no source change is needed.
-<!-- agent:boundary:20e65741 -->
+<!-- agent:boundary:c14811a5 -->
 <!-- /agent:exchange -->
 
 ## Queue

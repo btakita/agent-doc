@@ -200,7 +200,31 @@ Commands: `tsift status`; `agent-doc plan`; `agent-doc read --component exchange
 Verification: static inspection only; no tests were run because no code changed.
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:ce49dd26 -->
+
+### Re: hybrid JWT plus single valid token row — gpt-5
+
+> **Queue prompt:**
+>
+> How about a hybrid where we generate JWT but store the only valid JWT?
+
+A hybrid can work, but only if we are careful about what is stored.
+
+I would not store the raw JWT as the “only valid JWT” in D1. A login-link JWT is still a bearer credential: anyone who has that exact string can use it until it is consumed or expired. If the database ever leaks, storing the raw JWT leaks active login links. That is worse than the current design, where D1 only has a SHA-256 hash of a random token.
+
+The safe version of the hybrid is: generate a signed JWT with a random `jti`, store only a hash of the `jti` or a hash of the full compact JWT, and require a matching unconsumed DB row before login. On use, set `used_at`; when issuing a new link, supersede older unused rows for that user. That preserves single-use, supersession, revocation, resend throttling, and audit behavior.
+
+But once we do that, JWT is not buying much for this flow. The server still has to hit D1 before login to enforce one-time use and “only latest link is valid.” The current opaque-token design is simpler and at least as secure: 32 random bytes in the emailed URL, SHA-256 hash in D1, `expires_at`, `used_at`, and current user validation at consumption time.
+
+So my recommendation stays: keep the current opaque random token plus stored hash. If we want a more structured token later, use a JWT only as a signed envelope and store a hashed `jti`/nonce server-side, never the raw JWT. The route should still fetch the current user row before login and should not trust role/email claims from the email URL as authority.
+
+Session note: the exchange is large, but the queue is active, so I continued this cycle without compacting.
+
+Changed paths: session document only.
+Commands: `tsift status`; `agent-doc plan`; inspected `app/equityfundingsource/lib/auth/email_login.ts` and `app/equityfundingsource/lib/auth/routes.ts`.
+Verification: static inspection only; no tests were run because no code changed.
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:606392c6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -212,7 +236,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Instead of storing the token in the database, can we use JWT?
+- How about a hybrid where we generate JWT but store the only valid JWT?
 <!-- /agent:queue -->
 
 ## Backlog

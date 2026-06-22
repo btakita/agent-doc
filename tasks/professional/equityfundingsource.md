@@ -246,7 +246,21 @@ So to send *from* `efs@efs.briantakita.me` via Cloudflare, `efs.briantakita.me` 
 **Test-first plan once you pick the approach:** stand up the new sending domain, send a test from `efs@efs.briantakita.me` and confirm SPF/DKIM/DMARC pass + delivery, and only then flip the worker's `*_FROM` vars. Prod stays on `info@briantakita.me` until that test passes.
 
 Asking you to confirm the path before I make the zone change — re-scoped `#g6d0` accordingly.
-<!-- agent:boundary:f513641b -->
+
+### Re: CF-on-efs.briantakita.me is blocked by plan tier — opus-4-8
+
+Went to set up the CF zone for `efs.briantakita.me` and hit a hard wall: **Cloudflare won't let `efs.briantakita.me` be a zone on this plan.** The zone-create API rejects it (`error 1116: provide the root domain, not a subdomain`), because turning a subdomain into its own Cloudflare zone is **"Subdomain Setup," an Enterprise-plan feature** — and `briantakita.me` is on the **Free** plan. No zone ⇒ CF Email Sending (which is zone-scoped) can't send from `efs.briantakita.me`. Nothing was created; the attempt failed cleanly.
+
+So sending specifically from `efs@`**`efs.briantakita.me`** has only these real options:
+
+1. **Resend** — the *only* free way to get the `efs.briantakita.me` subdomain as the From. Resend verifies subdomains directly. I already built + tested this (now reverted); the domain is still verified in Resend and the DNS records are still in place. The one snag was Resend returning `401` on send — almost certainly an anti-abuse hold on the fresh account from my rapid test sends; you'd check the Resend dashboard / refresh the key, then I re-apply (≈10 min) and test.
+2. **`efs@briantakita.me` (apex)** via Cloudflare — works **today**, free, no plan change, no zone surgery. Identical to your CF intent except the visible From domain is the apex, not the `efs` subdomain. Inbound to `efs@efs.briantakita.me` still forwards to your Gmail.
+3. **Upgrade `briantakita.me` to CF Enterprise** — unlocks Subdomain Setup → CF on the subdomain. Not realistic for a test/staging app.
+
+My read: if the **`efs.briantakita.me` From specifically** matters, it's **Resend** (option 1) — CF simply can't do it here without Enterprise. If "send from an EFS-branded CF address" is the real goal, **`efs@briantakita.me` apex** (option 2) is the clean, free, works-now choice.
+
+Which way? Prod stays on `info@briantakita.me` (working) until you pick and a live test passes. `#g6d0` holds this.
+<!-- agent:boundary:f9bf5b35 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -933,7 +933,10 @@ fn artifact_mtime_secs(path: &Path) -> Option<u64> {
 }
 
 fn newest_artifact_mtime(paths: &[PathBuf]) -> Option<u64> {
-    paths.iter().filter_map(|path| artifact_mtime_secs(path)).max()
+    paths
+        .iter()
+        .filter_map(|path| artifact_mtime_secs(path))
+        .max()
 }
 
 /// `~/.cargo/bin` (honoring `CARGO_HOME`), or `None` when unresolvable.
@@ -3217,7 +3220,9 @@ mod tests {
     fn newest_artifact_mtime_uses_freshest_existing_path() {
         let dir = TempDir::new().unwrap();
         let old = dir.path().join("target/release/agent-doc");
-        let fresh = dir.path().join("target/local-install/release-local/agent-doc");
+        let fresh = dir
+            .path()
+            .join("target/local-install/release-local/agent-doc");
         std::fs::create_dir_all(old.parent().unwrap()).unwrap();
         std::fs::create_dir_all(fresh.parent().unwrap()).unwrap();
         std::fs::write(&old, "old").unwrap();

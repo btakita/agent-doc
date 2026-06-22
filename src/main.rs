@@ -3026,9 +3026,7 @@ fn main() -> anyhow::Result<()> {
             source,
             profile,
             target_dir,
-        } => {
-            lib_install::run(source.as_deref(), target_dir.as_deref(), &profile)
-        }
+        } => lib_install::run(source.as_deref(), target_dir.as_deref(), &profile),
         Commands::SelfInstall {
             source_root,
             target_dir,

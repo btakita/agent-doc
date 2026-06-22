@@ -31,7 +31,7 @@ release: check
 	echo "Releasing v$$version..."; \
 	git tag "v$$version" && git push origin main "v$$version" && \
 	echo "Tag v$$version pushed. CI handles GitHub Release + PyPI."; \
-	cargo install --path .
+	$(MAKE) install-full
 
 # Run tests (unset git hook env vars so temp-repo tests are not confused by GIT_DIR).
 # Prefer cargo-nextest when installed; it runs test binaries concurrently while

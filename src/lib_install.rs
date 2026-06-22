@@ -282,7 +282,11 @@ mod tests {
                 .join(platform_lib_name())
         );
         assert_eq!(
-            profile_lib_path(&cwd, Some(Path::new("target/local-install")), "release-local"),
+            profile_lib_path(
+                &cwd,
+                Some(Path::new("target/local-install")),
+                "release-local"
+            ),
             PathBuf::from("target/local-install")
                 .join("release-local")
                 .join(platform_lib_name())

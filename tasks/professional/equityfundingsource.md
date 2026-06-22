@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -206,7 +206,7 @@ Half done, and I hit a real wall on the other half. Here's the honest status.
 Tell me A, B, or C and I'll finish it + verify a live send end-to-end. I'd go with **A**.
 
 (Queue note: this doc's queue was operator-paused for flood earlier; these two prompts are the new work that unblocked it. Not auto-looping — this needs your decision.)
-<!-- agent:boundary:0ae44dce -->
+<!-- agent:boundary:f0608a36 -->
 <!-- /agent:exchange -->
 ###
 <!--

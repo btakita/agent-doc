@@ -370,17 +370,63 @@ The current split is the intended one:
 - `make install`: fast local path using `release-local`, incremental compilation, reusable `target/local-install`, and local `mold`/`lld` linker flags when available.
 - `make install-full`: full release-profile local install for pre-release parity.
 - CI/release workflows: keep `cargo build --release` / full release-profile builds.
+- root pointer: `8a4834142 agent-doc: update fresh queue authority fix` (pushed)
+- `src/agent-doc`: `05c03ca7 fix: preserve fresh queue head authority` (pushed)
+- Non-waiting CI status check only: latest CI run was already `completed success` for `chore: align agent-doc install docs` (`27973710291`). I did not wait for CI.
+- `make install`
+- `make check`
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
+- `cargo test -p agent-doc --no-run`
+- `cargo test -p agent-doc-orchestration strike_orphan_id_backed_queue_head -- --nocapture`
+- `cargo test -p agent-doc-orchestration prune_noise -- --nocapture`
+- `cargo test -p agent-doc-orchestration acknowledge_open_id_head -- --nocapture`
+- Documented the behavior in `specs/07-orchestration-commands.md` and `VERSIONS.md`.
+- Added queue-removal ops-log proof fields: `base_hash`, `source_component=queue`, `operation=...`, and `proof=...`.
+- Changed `session-check` / `prune-noise` wording from broad stale/noise language to predicate-proven noise/orphan wording, so fresh drainable operator queue edits remain authoritative unless explicit proof exists.
+- Updated `queue consume` guidance to name the safe operations for id-backed heads: done/gate, `--ack-id`, or leave queued.
+- Kept `queue consume --id <id>` strict for orphan heads only; it still refuses ids that name open backlog work.
+- Added `agent-doc queue consume <FILE> --ack-id <id>` for the explicit correction/acknowledgement case: it strikes an exact id-backed queue head while preserving the still-open backlog item.
 
 So the development loop should not wait on full release builds anymore. Use `make install` repeatedly while developing, then run `make install-full` only when validating the pre-release artifact path. If CI build time becomes the bottleneck, optimize CI with dependency/target caching or `sccache`, but keep the final release profile itself full.
-<!-- agent:boundary:14ccc36b -->
+Implemented `#freshqueueauth` in `src/agent-doc` and pushed it.
+
+> **Queue prompt:**
+>
+> Still getting too many IPC issues. Repair needs to run too frequently. The AST/semantic merge should resolve without the need to repair.
+> ```
+> • The repair tool correctly refused to commit the stale buffer. Since that drift was caused by the write-back transport
+>   and not user-authored work, I’m going to patch the working tree back to the committed session-doc content and re-run
+>   session-check/status.
+> ```
+
+
+What changed:
+- Added `agent-doc queue consume <FILE> --ack-id <id>` for the explicit correction/acknowledgement case: it strikes an exact id-backed queue head while preserving the still-open backlog item.
+- Kept `queue consume --id <id>` strict for orphan heads only; it still refuses ids that name open backlog work.
+- Updated `queue consume` guidance to name the safe operations for id-backed heads: done/gate, `--ack-id`, or leave queued.
+- Changed `session-check` / `prune-noise` wording from broad stale/noise language to predicate-proven noise/orphan wording, so fresh drainable operator queue edits remain authoritative unless explicit proof exists.
+- Added queue-removal ops-log proof fields: `base_hash`, `source_component=queue`, `operation=...`, and `proof=...`.
+- Documented the behavior in `specs/07-orchestration-commands.md` and `VERSIONS.md`.
+
+Verification:
+- `cargo test -p agent-doc-orchestration acknowledge_open_id_head -- --nocapture`
+- `cargo test -p agent-doc-orchestration prune_noise -- --nocapture`
+- `cargo test -p agent-doc-orchestration strike_orphan_id_backed_queue_head -- --nocapture`
+- `cargo test -p agent-doc --no-run`
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
+- `make check`
+- `make install`
+- Non-waiting CI status check only: latest CI run was already `completed success` for `chore: align agent-doc install docs` (`27973710291`). I did not wait for CI.
+
+Commits:
+- `src/agent-doc`: `05c03ca7 fix: preserve fresh queue head authority` (pushed)
+- root pointer: `8a4834142 agent-doc: update fresh queue authority fix` (pushed)
+<!-- agent:boundary:d7a2250b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Why am I unable to sync with equityfundingsource.md? Fix the root cause. I have not been able to connect to equityfundingsource.md since rebooting. There also is no obvious recovery path for the operator. I attempted a recovery with opencode but now it does not sync. `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.`. We need a way to recover that "just works" for individual sessions.~~
-- ~~Enable incremental compilation to speed up local dev builds + installs. Save full compilations for pre-release + ci. Switch to faster linkers like lld or mold via .cargo/config.toml, which can reduce link time by 27-70%. Use `cargo build --timings` to identify bottlenecks.~~
-- ~~Can we use incremental compilation for releases as well? Or should we perform a full build? The build time significantly delays development.~~
 ---
 Still getting too many IPC issues. Repair needs to run too frequently. The AST/semantic merge should resolve without the need to repair.
 ```
@@ -457,7 +503,7 @@ Error: authoritative actor record for tasks/software/agent-loop.md is bound to h
   explicit closeout blocker rather than a code/document task blocker.
 ```
 ---
-- JB `Run Agent Doc` on monsterrodholders.md stalls (no prompt) and does not submit (prompt sent but no submit).
+- ~~JB `Run Agent Doc` on monsterrodholders.md stalls (no prompt) and does not submit (prompt sent but no submit).~~
 - do [#cancelturnverify]
 - I typed into monsterrodholders.md queue but agent-doc reverted to an old snapshot and I lost everything that I typed.
 - Figure out how to make AGENTS.md lean & reliable so agents follow the directives. Should we treat AGENTS.md as a menu that defers to runbooks? Would that be more reliable?
@@ -481,6 +527,13 @@ These heads are not stale. I just typed them in.
 ```
 ---
 - do [#freshqueueauth]
+- do [#mrh-response-loss-stalled-queue]
+- do [#qnodemerge4verify]
+- do [#fbwireverify]
+- do [#arsm]
+- do [#tb4q]
+- do [#qcm1verify]
+- do [#1jec]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -509,7 +562,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#freshqueueauth] #agent-doc-bug Preserve fresh operator queue heads during recovery/finalize and support acknowledging correction heads tied to open backlog ids without closing the underlying work. Plan: tasks/agent-doc/plan-fresh-queue-head-authority.md. Do not implement until scheduled.
 - [ ] [#mrh-response-loss-stalled-queue] #agent-doc-bug Response patchback loss plus queue stall from the 2026-06-22 `src/boost-client/tasks/monsterrodholders.md` SERP closeout: the MRH work was completed and committed, compact/recovery left `live_exchange_tail_total=0`, `agent-doc session-check` still reported the cycle committed with `queue_continuation_required=true`, and the visible document had no assistant response block. Plan: tasks/agent-doc/plan-response-missing-after-manual-closeout.md. DO NOT IMPLEMENT until scheduled.
 - [ ] [#cancelturnverify] [operator-verify] #agent-doc-bug Live-verify Cancel Turn (agent-doc submodule b4471d05; committed+pushed, make check green, JB 0.2.176 + VS Code 0.2.31 built, NOT installed). After installing the plugins: (1) while a turn is RUNNING, invoke Cancel Turn (JB menu / VS Code command) and confirm the turn is interrupted (ops.log cancel_turn_performed action=interrupt_active_turn) and the agent stays open; (2) while the agent is IDLE, invoke Cancel Turn (even repeatedly) and confirm it is a NO-OP (ops.log cancel_turn_noop reason=idle_no_active_turn) and the agent is NOT closed — the core safety requirement. Verify per harness: Codex/OpenCode (Escape/C-c, never raw Ctrl+C that would close on idle) and Claude.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.

@@ -38,7 +38,52 @@ completed
 Compacted content:
 ❯ - Archived 18 response topic(s): hide wiring instructions until lender selected; deploy; wiring instructions still visible + deploy; 15 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:eb3ee9cf -->
+
+### Re: optional admin-created passwords + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> The admin create user flow should make the temporary password optional. The new user should set their own password.
+
+> **Queue prompt:**
+>
+> deploy
+
+Implemented and deployed. The admin Create user dialog now labels `Temporary Password` as optional. If an admin leaves it blank, the backend creates the user with an empty `password_hash`, sends the existing one-time sign-in link, and the existing first-time account-completion gate forces the new user to set their own password before entering the portal. If the setup email cannot be sent, the user is still created, the unsent token is expired, and the admin gets a warning to use `Send login link` later.
+
+The manual `Send login link` action now uses the same helper and also expires an unsent token on delivery failure, so a failed email does not leave a recent inactive setup link blocking retry.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/user_management/index.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/user_management.tsx`
+- `src/equityfundingsource-dev/tests/admin-dashboard.test.ts`
+- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
+- `src/equityfundingsource-dev` parent submodule pointer
+
+Commands:
+- `bun test tests/admin-dashboard.test.ts`
+- `bun test tests/admin-dashboard.test.ts tests/email-login.test.ts tests/invite-autologin-wiring.test.ts tests/auth.test.ts`
+- `git diff --check`
+- `make check`
+- `gh run list --workflow CI --limit 1`
+- `git push origin main` in `src/equityfundingsource-dev`
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before and after deploy
+- `make deploy`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
+
+Verification: focused admin/auth suites passed. Full `make check` passed with 1122 tests plus app and Worker builds; the suite still logs the intentional non-fatal `d1 down` outbox test. GitHub still has no workflow named `CI`, so there was no CI run to inspect. Remote D1 reported `No migrations to apply` before and after deployment, and the live Worker root returned HTTP `200`.
+
+Commits:
+- EFS submodule: `fed7c2f` (`fix(admin): make created-user passwords optional`) pushed to `origin/main`.
+- Parent local pointer: `df101d29d` (`chore: update efs submodule for optional passwords`) committed in the current divergent parent worktree.
+- Parent remote pointer: `40bda6d55` (`chore: update efs submodule for optional passwords`) pushed to parent `origin/main` from a clean temporary worktree, so unrelated parent local divergence/dirty files were not touched.
+
+Deploy: activated Worker version `5b272145-5b9a-4bca-aa37-22a392c49670` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:9fd44a5f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,7 +95,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The admin create user flow should make the temporary password optional. The new user should set their own password.
+- ~~The admin create user flow should make the temporary password optional. The new user should set their own password.~~
 - deploy
 <!-- /agent:queue -->
 

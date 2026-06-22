@@ -287,7 +287,26 @@ Deploy: latest Worker version `b5683da6-1389-4aaf-8eeb-94eb82e7513c` is active a
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:27ed5fa6 -->
+
+### Re: closeout recovery — gpt-5
+
+> **Queue prompt:**
+>
+> ~~Forgot password email was not sent when rwaldman100+admin@gmail.com clicked "Forgot password" link.~~ — auto-struck: answered this cycle (#ftstrike)
+
+
+This cycle only reconciles the editor/bookkeeping drift after the prior closeout. No additional product or code work was performed after the admin invite password reset and duplicate email-login fixes already recorded above.
+
+Changed paths: none in this recovery-only cycle.
+
+Commands: `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`; `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`; `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`.
+
+Verification: confirmed the prior closeout response is already committed in `HEAD`; no new code verification was required for this recovery-only cycle.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:72998b45 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -300,9 +319,9 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~rwaldman100+admin@gmail.com clicked the invite link but was not logged in and prompted to set password.~~
-- ~~rwaldman100+admin@gmail.com forgot password "did not work". Gave an account already existed error. ~~
+- ~~rwaldman100+admin@gmail.com forgot password "did not work". Gave an account already existed error.~~ 
 - ~~Forgot password email was not sent when rwaldman100+admin@gmail.com clicked "Forgot password" link.~~ — auto-struck: answered this cycle (#ftstrike)
-- [#admin-invite-password-flow]
+- ~~[#admin-invite-password-flow]~~
 - Why is https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=loan still an Available Deal? We need to have messaging in the dialog/page to instruct the admin on how to advance the deal. If it is due to a lender not having their accredidation approved by the admin, then provide a message with a button to approve the lender accredidation.
 - ~~Once a lender is selected, EFS sends a "Due Diligence Package" to the lender. The lender will request documents.~~ — auto-struck: answered this cycle (#ftstrike)
 - deploy

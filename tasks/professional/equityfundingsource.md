@@ -149,7 +149,29 @@ Session note: preflight first recovered and committed a stale orphaned response 
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:6bcc3c98 -->
+
+### Re: email login token hash retention — gpt-5
+
+> **Queue prompt:**
+>
+> Should we store the email login link hashes indefinately?
+
+No. We should not store email-login link hashes indefinitely.
+
+The current auth behavior is safe from a login-validity standpoint: the raw token is never stored, only a SHA-256 hash is stored, and a row only authenticates while `used_at IS NULL` and `expires_at > now`. After use, supersession, or expiry, the retained hash does not let someone sign in.
+
+But indefinite retention still has little upside. The row maps a historical login-link hash back to a user, so keeping it forever widens the audit/privacy surface without improving authentication. The useful reasons to keep it are short-term: resend prefill for recently expired links, debugging, abuse investigation, and rate-limit forensics.
+
+My recommendation: retain spent/expired `email_login_tokens` for a bounded window, preferably 30 days. Seven days would also be defensible; 30 days is easier operationally and still avoids permanent retention. Purge rows where both login validity is impossible and the retention window has passed, for example expired rows older than the window and used/superseded rows whose `used_at` is older than the window. Future links already carry an `email=` fallback, so once a very old token row is purged, the only behavior lost is DB-backed prefill for old links.
+
+I added a recommended backlog item to implement that cleanup and align password-reset / invite-login token retention unless there is a specific compliance reason to retain those longer.
+
+Changed paths: session document only.
+Commands: `tsift status`; `rg` for token retention references; inspected `app/equityfundingsource/lib/auth/email_login.ts`, `app/equityfundingsource/lib/auth/routes.ts`, `app/equityfundingsource/migrations/0093_email_login_tokens.sql`, and `prds/admin-provisioning-spec.md`.
+Verification: static inspection only; no tests were run because no code changed.
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:e61a0af3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -161,6 +183,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Should we store the email login link hashes indefinately?
 <!-- /agent:queue -->
 
 ## Backlog

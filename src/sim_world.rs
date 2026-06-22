@@ -5676,6 +5676,10 @@ fn multi_editor_crdt_broadcast_converges_without_file_cache_conflict() {
     assert_eq!(deliveries.len(), 1);
     assert_eq!(deliveries[0].editor_id, "editor-B");
     assert!(
+        deliveries[0].node_patch_count > 0,
+        "targeted peer delivery should carry node patches"
+    );
+    assert!(
         !editor_a
             .apply_targeted_patch_file(&deliveries[0].patch_file)
             .unwrap()
@@ -5710,6 +5714,10 @@ fn multi_editor_crdt_broadcast_converges_without_file_cache_conflict() {
             .unwrap();
     assert_eq!(rebroadcast.len(), 1);
     assert_eq!(rebroadcast[0].editor_id, "editor-A");
+    assert!(
+        rebroadcast[0].node_patch_count > 0,
+        "rebroadcast peer delivery should carry node patches"
+    );
     assert!(
         !editor_b
             .apply_targeted_patch_file(&rebroadcast[0].patch_file)
@@ -5746,7 +5754,8 @@ fn multi_editor_crdt_broadcast_converges_without_file_cache_conflict() {
     assert!(
         ops_log.contains("realtime_broadcast_queued")
             && ops_log.contains("origin_editor_id=editor-A target_editor_id=editor-B")
-            && ops_log.contains("origin_editor_id=editor-B target_editor_id=editor-A"),
+            && ops_log.contains("origin_editor_id=editor-B target_editor_id=editor-A")
+            && ops_log.contains("node_patches="),
         "ops.log must prove targeted two-way broadcast delivery:\n{ops_log}"
     );
     drop(dir);

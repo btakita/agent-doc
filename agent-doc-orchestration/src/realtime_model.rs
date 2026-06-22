@@ -294,6 +294,15 @@ pub struct BroadcastDelivery {
     pub patch_id: String,
     pub patch_file: std::path::PathBuf,
     pub merged_len: usize,
+    pub node_patch_count: usize,
+    pub component_patch_count: usize,
+}
+
+#[derive(Debug, Clone)]
+struct BroadcastDelta {
+    patches: Vec<serde_json::Value>,
+    node_patches: Vec<serde_json::Value>,
+    frontmatter: Option<String>,
 }
 
 /// `#rtwbcast` Option C — the MERGE-ONLY multi-editor broadcast seam.
@@ -512,7 +521,7 @@ pub fn broadcast_editor_change(
     let doc_hash = crate::snapshot::doc_hash(&canonical)?;
     let mut deliveries = Vec::new();
     for target in targets {
-        let Some((patches, frontmatter)) =
+        let Some(delta) =
             broadcast_component_delta_for_peer(file, &target.merged, &target.editor_id, &peers)?
         else {
             continue;
@@ -534,20 +543,34 @@ pub fn broadcast_editor_change(
             "editor_id": target.editor_id.clone(),
             "origin_editor_id": originator_editor_id,
             "patch_id": patch_id.clone(),
-            "patches": patches,
-            "node_patches": [],
+            "patches": delta.patches,
+            "node_patches": delta.node_patches,
             "unmatched": "",
             "baseline": peer_baseline,
+            "baseline_hash": crate::debounce::content_hash(peer_baseline),
+            "baseline_normalized_hash": crate::debounce::content_hash(
+                &crate::git::normalize_transient_agent_doc_markers(peer_baseline),
+            ),
             "reposition_boundary": false,
         });
-        if let Some(frontmatter) = frontmatter {
+        let node_patch_count = payload
+            .get("node_patches")
+            .and_then(|value| value.as_array())
+            .map(|items| items.len())
+            .unwrap_or(0);
+        let component_patch_count = payload
+            .get("patches")
+            .and_then(|value| value.as_array())
+            .map(|items| items.len())
+            .unwrap_or(0);
+        if let Some(frontmatter) = delta.frontmatter {
             payload["frontmatter"] = serde_json::Value::String(frontmatter);
         }
         crate::write::atomic_write_pub(&patch_file, &serde_json::to_string_pretty(&payload)?)?;
         crate::ops_log::log_op(
             file,
             &format!(
-                "realtime_broadcast_queued file={} origin_editor_id={} target_editor_id={} patch_id={} merged_len={}",
+                "realtime_broadcast_queued file={} origin_editor_id={} target_editor_id={} patch_id={} merged_len={} node_patches={} component_patches={}",
                 file.display(),
                 originator_editor_id,
                 payload
@@ -555,7 +578,9 @@ pub fn broadcast_editor_change(
                     .and_then(|value| value.as_str())
                     .unwrap_or("-"),
                 patch_id,
-                target.merged.len()
+                target.merged.len(),
+                node_patch_count,
+                component_patch_count,
             ),
         );
         deliveries.push(BroadcastDelivery {
@@ -567,6 +592,8 @@ pub fn broadcast_editor_change(
             patch_id,
             patch_file,
             merged_len: target.merged.len(),
+            node_patch_count,
+            component_patch_count,
         });
     }
     Ok(deliveries)
@@ -577,18 +604,19 @@ fn broadcast_component_delta_for_peer(
     merged: &str,
     peer_editor_id: &str,
     peers: &[BroadcastPeer],
-) -> anyhow::Result<Option<(Vec<serde_json::Value>, Option<String>)>> {
+) -> anyhow::Result<Option<BroadcastDelta>> {
     let Some(peer) = peers.iter().find(|peer| peer.editor_id == peer_editor_id) else {
         return Ok(None);
     };
     if peer.content == merged {
         return Ok(None);
     }
+    let node_patches = crate::write::build_ipc_node_patches_json(Some(&peer.content), Some(merged));
     let patches = broadcast_convergence_patches(&peer.content, merged)?;
     let frontmatter = raw_frontmatter_yaml(merged)
         .filter(|merged_fm| raw_frontmatter_yaml(&peer.content) != Some(*merged_fm))
         .map(ToString::to_string);
-    if patches.is_empty() && frontmatter.is_none() {
+    if patches.is_empty() && node_patches.is_empty() && frontmatter.is_none() {
         crate::ops_log::log_op(
             file,
             &format!(
@@ -599,7 +627,11 @@ fn broadcast_component_delta_for_peer(
         );
         return Ok(None);
     }
-    Ok(Some((patches, frontmatter)))
+    Ok(Some(BroadcastDelta {
+        patches,
+        node_patches,
+        frontmatter,
+    }))
 }
 
 fn broadcast_convergence_patches(
@@ -917,12 +949,18 @@ mod tests {
     fn broadcast_editor_change_writes_targeted_peer_patch_file() {
         let disk = concat!(
             "# Doc\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "base\n",
-            "<!-- /agent:exchange -->\n"
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#base] existing\n",
+            "<!-- /agent:backlog -->\n"
         );
-        let origin = disk.replace("base\n", "base\norigin edit\n");
-        let peer = disk.replace("base\n", "base\npeer edit\n");
+        let origin = disk.replace(
+            "- [ ] [#base] existing\n",
+            "- [ ] [#base] existing\n- [ ] [#edit-A] queued in editor A\n",
+        );
+        let peer = disk.replace(
+            "- [ ] [#base] existing\n",
+            "- [ ] [#base] existing\n- [ ] [#edit-B] queued in editor B\n",
+        );
         let (_dir, file, canonical) = temp_doc(disk);
         std::fs::create_dir_all(file.parent().unwrap().join(".agent-doc/patches")).unwrap();
 
@@ -957,11 +995,34 @@ mod tests {
         assert_eq!(payload["editor_id"], "editor-B");
         assert_eq!(payload["origin_editor_id"], "editor-A");
         assert_eq!(payload["file"], canonical);
-        assert_eq!(payload["patches"][0]["component"], "exchange");
+        assert_eq!(
+            payload["baseline_hash"],
+            crate::debounce::content_hash(&peer)
+        );
+        assert_eq!(
+            payload["baseline_normalized_hash"],
+            crate::debounce::content_hash(&crate::git::normalize_transient_agent_doc_markers(
+                &peer
+            ))
+        );
+        assert_eq!(payload["patches"][0]["component"], "backlog");
         assert_eq!(payload["patches"][0]["op"], "replace");
         let body = payload["patches"][0]["content"].as_str().unwrap();
-        assert!(body.contains("origin edit"));
-        assert!(body.contains("peer edit"));
+        assert!(body.contains("#edit-A"));
+        assert!(body.contains("#edit-B"));
+        let node_patches = payload["node_patches"].as_array().unwrap();
+        assert!(
+            node_patches
+                .iter()
+                .any(|patch| patch["component"] == "backlog"
+                    && patch["op"] == "insert"
+                    && patch["content"]
+                        .as_str()
+                        .is_some_and(|content| content.contains("#edit-A"))),
+            "targeted broadcast must carry node-keyed insert for peer apply:\n{payload:#?}"
+        );
+        assert_eq!(deliveries[0].node_patch_count, node_patches.len());
+        assert_eq!(deliveries[0].component_patch_count, 1);
     }
 
     #[test]

@@ -173,12 +173,13 @@ here); per-component merge means a unicode glyph in `queue` never disables op-re
 `exchange` prose. `merge` delegates to `merge_with_editor_ops(.., None)`, so the existing path is
 byte-identical until ops are supplied.
 
-**Status.** The consumer (above) is shipped and unit-tested. The **supply** side is
-`#qnodemerge4wire`: a per-document op-capture sidecar (record/load/clear/GC), an FFI ingestion
-entry point (`agent_doc_record_editor_op`, FFI-first so plugins stay thin), wiring the live
-`merge_contents_crdt` path to consume + clear the sidecar, and the thin JetBrains
-`DocumentListener` / VS Code `onDidChangeTextDocument` reporters. The zero-duplication live
-eyeball (a concurrent live edit + agent write) is `[operator-verify]`.
+**Status.** The op-capture consumer and supply side are shipped: a per-document op-capture sidecar
+(record/load/clear/GC), FFI ingestion (`agent_doc_record_editor_op`), live `merge_contents_crdt`
+consume+clear wiring, and thin JetBrains `DocumentListener` / VS Code `onDidChangeTextDocument`
+reporters. Realtime editor-to-editor convergence now delivers the merged result with node-keyed IPC
+patches (plus legacy component fallback), so peer buffers can apply targeted node inserts/replaces
+under the same ACK proof used by CPC-to-editor writes. The zero-duplication live eyeball (a
+concurrent live edit + agent write) remains `[operator-verify]`.
 
 ## Roadmap — recursive AST-node merge
 

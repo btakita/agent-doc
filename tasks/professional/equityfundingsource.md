@@ -157,7 +157,52 @@ Deploy: activated Worker version `4b8e8114-a823-4765-9510-98dbaef4297c` at `http
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:a71234ea -->
+
+### Re: email login link expiration + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> Make any email login links expire based on time. Use best security practice to set the expiration time. Is 1 day reasonable? The email should explain when the login link will expire.
+
+
+> **Queue prompt:**
+> Make any email login links expire based on time. Use best security practice to set the expiration time. Is 1 day reasonable? The email should explain when the login link will expire.
+>
+> **Queue prompt:**
+> deploy
+
+Email login links were already time-bound in the application: passwordless email-login tokens are SHA-256 hashed, single-use, stored with `expires_at`, and only accepted when `expires_at > now`. The default TTL is 30 minutes. `EMAIL_LOGIN_TTL_MINUTES` can configure the TTL, but it is clamped to a maximum of 24 hours, so 1 day is reasonable as an upper bound, not as the default security posture.
+
+This cycle added regression/spec evidence around that policy rather than changing the runtime behavior:
+
+- Updated `src/equityfundingsource-dev/tests/email-login.test.ts` to assert the 24-hour configured upper bound and verify that email text/html bodies state the exact expiration and single-use behavior.
+- Updated `src/equityfundingsource-dev/prds/admin-provisioning-spec.md` to document passwordless sign-in links: default 30 minutes, configurable maximum 24 hours, single-use, hashed token storage, and expiration language in the email.
+- Updated the parent repo submodule pointer for `src/equityfundingsource-dev`.
+
+Verification completed:
+
+- `bun test tests/email-login.test.ts` passed: 14 tests, 54 expects, 0 failures.
+- `make check` passed: 1126 tests, 7499 expects, 0 failures; app and Worker builds completed.
+- `git diff --check` passed.
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI` in the EFS repo.
+- `bun run cf:d1:migrations:list:remote` reported no migrations to apply before and after deploy.
+- Live smoke checks passed after deploy:
+  - `/` returned 200.
+  - `/admin` returned 303 to `/login?role=admin&next=%2Fadmin`.
+  - `/login/email?role=admin` returned 200.
+  - `/login/email/verify?token=bad` returned 303 to the expired/used-token message.
+
+Deploy completed with `make deploy`.
+
+- Worker version: `b0858f09-3c40-48b7-88ed-69c5ebe7b0db`.
+- EFS commit pushed: `47583d2 test(auth): document email login expiry policy`.
+- Parent local pointer commit: `7041e6608 chore: update efs submodule for email login expiry`.
+- Parent `origin/main` pointer commit: `b513cc096 chore: update efs submodule for email login expiry`.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:83e2ef52 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -170,7 +215,8 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~From /admin, I did a Forgot Password. I received an email. Clicking on the reset password link I got an error "Something went wrong" "This password reset link is invalid or has expired.".~~
-- Make any email login links expire based on time. Use best security practice to set the expiration time. Is 1 day reasonable? The email should explain when the login link will expire.
+- ~~Make any email login links expire based on time. Use best security practice to set the expiration time. Is 1 day reasonable? The email should explain when the login link will expire.~~
+- In the email login email, add a link to resend another email login link in case the login link is expired. If the user clicks on an expired login link, go to the email login form with the error message and the email address prefilled.
 - deploy
 <!-- /agent:queue -->
 

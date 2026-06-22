@@ -273,7 +273,29 @@ Yes — done. EFS now sends from **`efs@briantakita.me`** via Cloudflare Email S
 No Resend, no plan change, no zone surgery. Inbound `efs@efs.briantakita.me → btak.dev+efs@gmail.com` is untouched and still live.
 
 The only thing you don't get this way is the literal `efs.briantakita.me` *subdomain* in the From — that needs CF Enterprise (Subdomain Setup) or Resend, both of which we set aside. Closing `#g6d0` as done.
-<!-- agent:boundary:1337e779 -->
+
+Incoming emails to efs@briantakita.me go to the app. The admin email should remain btak.dev+efs@gmail.com. So the email from efs is from efs@briantakita.me...and a reply is processed by the app via a worker on efs@briantakita.me...and the app sends the notification message to btak.dev+efs@gmail.com.
+### Re: full round-trip on efs@briantakita.me — hybrid inbound shipped — opus-4-8
+
+Confirmed your model and built the missing half. First a correction that makes this easy: the apex `briantakita.me` MX is **already on Cloudflare** (`route1/2/3.mx.cloudflare.net`, CF SPF) — the old wrangler comment saying it "forwards to Protonmail" was stale. So no MX surgery, no blast radius beyond one address.
+
+**Where each piece stood vs. your model:**
+- **From `efs@briantakita.me`** — already live. ✓
+- **Reply round-trip** — runs on the plus-token address `reply+{token}@efs.briantakita.me` (subdomain catch-all → Worker). You picked **Hybrid**: keep this as-is because the plus-token is the reliable way to match a reply back to its exact thread; the apex can't catch-all `efs+*@briantakita.me` to the Worker without hijacking *all* apex mail (`info@`, `brian@`, …).
+- **Mail sent directly to `efs@briantakita.me`** — was the gap. It had no Worker rule, and worse, the Worker *bounced* any tokenless mail back to the sender.
+- **Admin notify `btak.dev+efs@gmail.com`** — note that Gmail delivers `btak.dev+efs@` and `btak.dev@` to the **same inbox**, so the existing admin destination already lands there; the `+efs` is just a filter label.
+
+**What I shipped (#emfwd, EFS `bbdcaea`, pushed; superproject `b750fa674`):**
+- The Worker now **forwards** a tokenless direct-to-brand email to the admin inbox (`MESSAGE_EMAIL_INBOUND_FALLBACK_TO`, default `btak.dev+efs@gmail.com`) instead of bouncing it. The plus-token reply round-trip is untouched. A failed forward (unverified destination) degrades safely to the old reject — no regression.
+- Added 4 tests (forward happy-path, display-name address form, no-fallback reject, failed-forward fallback). Full suite **1095 green**.
+- **Deployed** (version `33619914`); the live env shows `MESSAGE_EMAIL_INBOUND_FALLBACK_TO=btak.dev+efs@gmail.com`.
+
+**Two operator steps remain — they need a Cloudflare Email Routing scope my D1-scoped token doesn't have (got `Authentication error` on the routing API):**
+1. In CF dashboard → Email Routing → **verify `btak.dev+efs@gmail.com`** as a destination address (so `forward()` is allowed to deliver there).
+2. Add an apex **custom-address rule: `efs@briantakita.me` → Send to Worker `equityfundingsource`**. That's the one rule that makes "incoming emails to efs@briantakita.me go to the app." No catch-all, no MX change.
+
+Then the live test: email `efs@briantakita.me` from any address → it should land in `btak.dev+efs@gmail.com`. Reply to an app notification → still threads via `reply@efs.briantakita.me` as before.
+<!-- agent:boundary:5b2c22da -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -214,7 +214,19 @@ These three are the **same already-tracked route/dispatch cluster** — `#jbrund
 The supervisor driving this session (and the monsterrodholders one) keeps using its launch binary until recycled, so you're most likely observing **pre-fix behavior on a stale binary**. The single highest-value next step is to **install the batch** (`make install` + `agent-doc admin recycle`, JB plugin `0.2.176`, VS Code `0.2.31`), then re-test — that is `#routeretest`'s live re-verify on the fresh binary. If any symptom persists *after* install+recycle, that's a genuine residual and I'll dig into `route.rs` with the captured trace.
 
 Striking these as duplicates of the existing tracking. **Stopping the loop here:** the remaining near-head items are operator-capture (these), operator-verify (`#qcm1verify`), and a couple of agent-drainable items (`#qstrikenote`, `#pendaddorder`) that deserve fresh context after this very long run. Re-dispatch and I'll take `#qstrikenote` / `#pendaddorder` — but installing the batch first will resolve most of what you're reporting.
-<!-- agent:boundary:6a14c992 -->
+
+### Re: file + implement #autoinstallretry — opus-4-8
+
+Done — filed and implemented (agent-doc submodule `69762f5f`, superproject `3ed0c65b9`; committed, pushed, **installed live**).
+
+**Root cause (your pasted log nailed it).** The auto-install `cargo build --release` failed with real compile errors — `missing field stop_agent_requested` / `IpcMethod::StopAgent not covered` — because the supervisor built from the **live working tree mid-edit**: the Stop Agent change was part-way applied (struct field/variant added, initializer + match arm not yet) at the instant the auto-install fired. Not a code bug — a **transient** window. The old `run_supervisor_auto_install` gave up after that single failure (`fallback=operator_refresh`), which stalled the installed binary at the last good commit and produced exactly the "stale binary, install manually" handoffs you flagged.
+
+**Fix.** `run_supervisor_auto_install_with_retry` wraps the step sequence in a bounded retry — **3 attempts, 20s backoff**. By the next attempt the edit has committed (edits land atomically) and any build/target-lock contention with a concurrent `make check` has cleared, so it self-heals. The `cargo install` / `lib-install` steps are idempotent, so retrying the whole sequence is safe; after exhausting retries it still falls back to operator refresh. Pure `auto_install_should_retry(attempt, max_attempts)` + unit test.
+
+**Verified.** `make check` green (4966) **and** `cargo build --release` green (the step that was failing — `make check`'s debug nextest doesn't run it, which is how the break slipped through). Installed: binary + cdylib current; the next supervisor start runs with the retry.
+
+This also closes the loop on the earlier confusion: the CPC+Supervisor auto-install *was* driving `make install` + recycle all session (I was wrong to frame it as manual) — it just needed this retry so one transient build hiccup stops stalling it.
+<!-- agent:boundary:d6b00f24 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -352,7 +352,12 @@ Verification:
 
 Per the latest operator instruction, I did not wait for CI.
 
-### Re: incremental compilation for releases — gpt-5
+### Re: incremental compilation for releases — gpt-5 (HEAD)
+
+> **Queue prompt:**
+>
+> Can we use incremental compilation for releases as well? Or should we perform a full build? The build time significantly delays development.
+
 
 > **Queue prompt:** Can we use incremental compilation for releases as well? Or should we perform a full build? The build time significantly delays development.
 
@@ -375,7 +380,7 @@ So the development loop should not wait on full release builds anymore. Use `mak
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~Why am I unable to sync with equityfundingsource.md? Fix the root cause. I have not been able to connect to equityfundingsource.md since rebooting. There also is no obvious recovery path for the operator. I attempted a recovery with opencode but now it does not sync. `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.`. We need a way to recover that "just works" for individual sessions.~~
 - ~~Enable incremental compilation to speed up local dev builds + installs. Save full compilations for pre-release + ci. Switch to faster linkers like lld or mold via .cargo/config.toml, which can reduce link time by 27-70%. Use `cargo build --timings` to identify bottlenecks.~~
-- Can we use incremental compilation for releases as well? Or should we perform a full build? The build time significantly delays development.
+- ~~Can we use incremental compilation for releases as well? Or should we perform a full build? The build time significantly delays development.~~
 ---
 Still getting too many IPC issues. Repair needs to run too frequently. The AST/semantic merge should resolve without the need to repair.
 ```

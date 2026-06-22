@@ -39,20 +39,45 @@ completed
 Compacted content:
 - Archived 6 response topic(s): #opslogtrack verified live; make the transport healthy + advance the queue; do [#qheadstrike]; 3 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-<!-- agent:boundary:bcbcc8b1 -->
+
+### Re: Validate/invalidate operator-verify items from the logs — opus-4-8
+
+> **Queue prompt:**
+>
+> Use the logs to validate or invalidate any operator verify items in the queue.
+
+
+> **Queue prompt:** Use the logs to validate or invalidate any operator verify items in the queue.
+
+Grepped `.agent-doc/logs/ops.log` (3.0M lines) for each item's declared proof marker, separating real timestamp-prefixed **event** lines from backlog **prose** that merely names a marker. Results:
+
+**VALIDATED (closing):**
+
+- **#k7mf / #g9d7verify** — `run_ipc_editorless_disk_fallback transport=disk_fallback editor_endpoint=absent` fired 3× (2026-06-21 18:05/18:18/18:51Z) with `recovery=editorless_disk_write` — exactly the required fields, and crucially **not** `recovery=retry_without_disk_write`. Editorless (no live editor) is the operator-gated scenario; the marker proves the run_ipc no-delivery bail routes content_ours to the guarded disk write. `--done`.
+- **#routeretest** — 115 real `dispatch_inject … attempt=1` events (incl. this doc, 2026-06-22 04:28:58Z, `transport=direct_pane attempt=1`), **zero** `attempt=2+` restacks, and the dispatches drove committed turns. No escalating re-send loop, no stray `/clear`. The reported stall/no-submit/storm symptoms do not reproduce on the fresh binary in the logs. `--done` (log-based; re-file if a *live* JB pane still stalls).
+
+**NOT validated from logs (genuinely operator-gated — stay open):**
+
+- **#1jec / #yzerverify** — `reconnect_buffer_decision` path is live (110 events) and the `decision=keep_buffer` branch fired 1× (the "preserve genuine unsaved edits" half), but `decision=reread_disk` **never** fired — the stale-buffer-vs-HEAD repro (kill supervisor while plugin disconnected) wasn't exercised. Mechanism wired; reread branch unproven.
+- **#arsm / #pcwcwarnverify** — `postcommit_exchange_reconciled reason=stale_editor_exchange` fired 2× (mechanism confirmed) but both `transport=disk` (editorless), not via a live JB/VS Code buffer; and one transient `postcommit_worktree_check match=false` (04:20:39Z) still appeared before self-healing to `match=true` 1s later. The live-editor stale-blockquote proof is unmet.
+- **#tb4q / #qfocsupverify** — zero real `go_drain_dispatch` events and zero `deferred_for_supervisor_drain` session-check outcomes (only backlog prose matched). The [focused-cycle] supervisor clear-and-continue path was never exercised; needs make install + recycle + a [focused-cycle] head.
+- **#qcm1verify** — no live edit-during-finalize cycle in the logs to evaluate cross-component splice; operator-gated.
+
+Net: 2 closed from log evidence, 4 remain operator-verify (need a live editor/pane the logs can't substitute for).
+<!-- agent:boundary:46726ea9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- Use the logs to validate or invalidate any operator verify items in the queue.
+- ~~Use the logs to validate or invalidate any operator verify items in the queue.~~
 - :pushpin: do [#fbwire]
 - :pushpin: do [#j9ja]
 - :pushpin: do [#qnodemerge4wire]
 - :pushpin: do [#tb4q]
 - :pushpin: do [#agentreloadrestart]
 - :pushpin: do [#restartagentmenu]
-- :pushpin: do [#k7mf]
+- ~~:pushpin: do [#k7mf]~~
 - :pushpin: Add `Stop Agent` and `Restart Agent` in JB + VSCode menus.
 - :pushpin: JB `Run Agent Doc` on monsterrodholders.md stalled after restarting the agent in both Claude Code + Codex.
 - :pushpin: `agent-doc tasks/monsterrodholders.md` was added to the codex input but not submitted. Whatever wrote the prompt should also loop to check the input and submit it if not submitted.
@@ -60,7 +85,7 @@ Compacted content:
 - :pushpin: do [#qcm1verify]
 - :pushpin: do [#s81q]: Rename "Restart Supervisor" to "Recycle Supervisor". Add Restart command alongside "Recycle Supervisor"
 - :pushpin: do [#qstrikenote]
-- :pushpin: do [#routeretest]
+- ~~:pushpin: do [#routeretest]~~
 - :pushpin: [#pendaddorder]
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` does nothing. Subsequent JB `Run Agent Doc` eventually dispatches...it seems there's a delay before working. Please enable JB `Run Agent Doc` to dispatch immediately.
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` sometimes has the dispatch storm (multiple duplicate prompts) and no submit.
@@ -128,10 +153,8 @@ What are #next-steps to fix bugs?
 - [ ] [#gf5n] verification check under hap7: confirm numbered/ordered-list order survives a merge-during-finalize cycle (the reversed-list symptom was a CRDT merge-corruption artifact, not an independent render bug; resolves when hap7 scoped-merge lands).
 - [ ] [#arsm] [operator-verify] #pcwcwarnverify #agent-doc-bug Live-verify the #pcwcwarn post-commit stale-exchange reconcile (agent-doc submodule 5f3fc07d, superproject db7fc3594). Code shipped+pushed+make-check-green (4947). Runs in the binary commit path + editor IPC, so it goes live once the supervisor adopts the new build (admin recycle done). REMAINING (operator-gated, needs a live editor): drive one edit-during-finalize cycle with a stale > Queue prompt blockquote left inside the exchange in a live JB/VS Code buffer; confirm ops.log shows postcommit_exchange_reconciled reason=stale_editor_exchange AND zero recurring postcommit_worktree_check match=false drift on the next cycle (no manual git checkout HEAD needed).
 - [ ] [#pendaddorder] Repeatable `--pending-add` block-prepends in flag order instead of composing as the documented "at the beginning (repeatable)" per-item prepends, so ONE `agent-doc write` with N `--pending-add` flags lands items REVERSED vs N sequential writes, and the agent:queue mirror inherits the reversal. Live repro 2026-06-21 equityfundingsource.md: `--pending-add [#msgmail4] --pending-add [#msgmail3] --pending-add [#msgmail2] --pending-add [#msgmail1]` -> backlog AND queue top-down = msgmail4,3,2,1 (caller expected 1,2,3,4 per the per-item-prepend mental model). Plan (DO NOT IMPLEMENT): (1) define ONE semantics for repeatable --pending-add and document it (recommend preserve flag order as final top-down order = what you read is what you get; route strict-order callers to --pending-add-after chains); (2) update help text + SKILL.md/pending-ops "put new items at the beginning" to state the multi-flag order; (3) make the agent:queue mirror order deterministically match the backlog order; (4) add a test asserting multi-flag --pending-add order + queue-mirror parity.
-- [ ] [#routeretest] [operator-verify] #agent-doc-bug Live re-test the route/dispatch/stall reports on the POST-RECYCLE fresh binary (06933b72, installed + admin-recycled 2026-06-21). The reported symptoms — JB Run Agent Doc stalled without feedback; agent-doc trigger typed into the Codex/Claude input but not submitted; stray /clear+trigger injected — are ALREADY implemented in shipped code: route/dispatch.rs not_dispatched full-trigger re-send (while acceptance.not_dispatched, ~L856, #jbrundispatch directive 2), send_direct_pane_enter_resubmit_until_stable Enter-resubmit loop (~L779/895), and the dispatch_inject attempt=N ops.log marker (#rdypoll). The operator was most likely observing these on the STALE pre-06933b72 supervisor binary replaced this session. Verify on the fresh binary: drive a JB/Codex Run Agent Doc dispatch and confirm ops.log shows a single dispatch_inject attempt=1 + a submitted trigger (no stacked un-submitted copies, no stray /clear). If a symptom persists on the fresh binary, it is a genuine residual gap to dig into.
 - [ ] [#qstrikenote] [recommended] #agent-doc-bug #qstrikeexplain Phase 1 follow-up: explicit deterministic explanation note when #ftstrike auto-strikes a free-text queue head. Phase 2 (do not strike in-flight/mid-typed heads; baseline-gated) SHIPPED agent-doc submodule 06933b72. The strike already requires the response to quote the struck head in a blockquote; add a binary-injected one-line auto-struck note so the operator sees an explicit statement. Decide deterministic-injection vs a finalize-field per all-deterministic-in-binary. Plus a SimWorld case that a strike emits the note. Plan: tasks/agent-doc/plan-queue-strike-explanation.md (Phase 1 + Phase 3 SimWorld).
 - [ ] [#s81q] [recommended] #agent-doc-bug #stopvscodemenu Extend #restartagentmenu (JB Restart Agent; plan tasks/agent-doc/plan-restart-agent.md) per operator request to also add a Stop Agent command and mirror BOTH Stop+Restart into the VSCode extension menus. Delta beyond #restartagentmenu: (1) StopAgentAction.kt + plugin.xml registration on the JB side; (2) VSCode command-palette + editor/title menu contributions for stop+restart wired to the same TerminalUtil/route paths. Decide alongside-vs-replace the existing Restart Supervisor Process action; do not remove without operator confirmation. Bump pluginVersion + build signed/unsigned zips (gated by STOP-cutting-releases). Confirm scope before implementing.
-- [ ] [#k7mf] [operator-verify] #g9d7verify #agent-doc-bug Live editor-less repro of #g9d7/#6b5hprimary (agent-doc submodule 260d61b3). Code shipped+pushed: the run_ipc no-delivery bail routes content_ours to the guarded controller-host disk write when there is no plugin-owner lease (live_editor_endpoint_attached=false), reusing decide_editorless_disk_fallback; a live editor still fails closed. After a make install, run agent-doc finalize in a Claude Code pane with NO JB IDE attached and confirm ops.log shows run_ipc_editorless_disk_fallback transport=disk_fallback editor_endpoint=absent plus a committed cycle, with no --force-disk and no recovery=retry_without_disk_write. Operator-gated: needs a real CLI pane.
 - [ ] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.
 - [ ] [#qcm1verify] [operator-verify] #agent-doc-bug Install + live-verify the #qnodemerge1 component-scoped merge (agent-doc submodule 52458f47). Code shipped+pushed, make check green (4853). Operator-gated remainder (mid-session install causes finalize-client-newer drift; STOP-cutting-releases gate): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then drive one edit-during-finalize cycle (type into a queue item while the agent writes an exchange response) and confirm ZERO cross-component splice + no console-output-in-queue corruption.
 - [ ] [#1jec] [operator-verify] #yzerverify #agent-doc-bug Live-verify the #yzer/#evmhplugin plugin reconnect re-read (agent-doc 0.34.28 / submodule f6b8ae17, plugin 0.2.172). Code shipped+pushed: binary FFI agent_doc_reconnect_buffer_decision (disk==HEAD via ffi_show_head + buffer==prior-commit via ffi_show_prior_blobs) + pure decide_reconnect_buffer + PatchWatcher.registerRoot reconcile-on-connect (applyReconnectReread) + SimWorld coverage; make check green (4832). Operator-gated remainder (install is unsafe mid-session = finalize-client-newer drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), reinstall plugin 0.2.172, agent-doc admin recycle. Then repro: open a session doc in JB, kill/restart the supervisor so the binary commits while the plugin is disconnected, and on reconnect confirm ops.log shows 'reconnect_buffer_decision decision=reread_disk #yzer' and the editor buffer == HEAD with NO File Cache Conflict; a buffer holding genuine unsaved user edits must instead log decision=keep_buffer and be preserved (editor wins).

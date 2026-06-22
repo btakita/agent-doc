@@ -306,7 +306,21 @@ Verification: confirmed the prior closeout response is already committed in `HEA
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:72998b45 -->
+
+### Re: forgot-password email queue head — gpt-5
+
+This queue head is already covered by the auth reset fix recorded above: invite-provisioned active admins with an empty `password_hash` can now request a forgot-password email and set their first password through the reset link.
+
+Changed paths: none in this acknowledgment cycle.
+
+Commands: `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`; `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`.
+
+Verification: the previously recorded focused auth test and full `make check` remain the verification for this item; no new code verification was required for this queue-head acknowledgment.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:14d74844 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -322,7 +336,7 @@ After 20:30
 - ~~rwaldman100+admin@gmail.com forgot password "did not work". Gave an account already existed error.~~ 
 - ~~Forgot password email was not sent when rwaldman100+admin@gmail.com clicked "Forgot password" link.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~[#admin-invite-password-flow]~~
-- Why is https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=loan still an Available Deal? We need to have messaging in the dialog/page to instruct the admin on how to advance the deal. If it is due to a lender not having their accredidation approved by the admin, then provide a message with a button to approve the lender accredidation.
+- ~~Why is https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=loan still an Available Deal? We need to have messaging in the dialog/page to instruct the admin on how to advance the deal. If it is due to a lender not having their accredidation approved by the admin, then provide a message with a button to approve the lender accredidation.~~
 - ~~Once a lender is selected, EFS sends a "Due Diligence Package" to the lender. The lender will request documents.~~ — auto-struck: answered this cycle (#ftstrike)
 - deploy
 - do [#due-diligence-package]

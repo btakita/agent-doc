@@ -744,7 +744,7 @@ mod tests {
             IpcMethod::Inject { .. } | IpcMethod::Clear { .. } => IpcResponse::ok_empty(),
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 

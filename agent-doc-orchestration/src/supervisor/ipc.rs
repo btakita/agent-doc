@@ -151,6 +151,17 @@ pub enum IpcMethod {
         #[serde(default)]
         graceful: bool,
     },
+    /// "Stop Agent": kill the harness child while keeping the supervisor process
+    /// alive at its restart-or-quit keepalive prompt, so the operator can then
+    /// restart the agent manually (e.g. press Enter). This is DISTINCT from
+    /// [`IpcMethod::Stop`] (which exits the whole supervisor) and from
+    /// `admin kill-supervisor` (which kills the supervisor process). The
+    /// supervisor never auto-restarts after a `StopAgent`, regardless of the
+    /// harness `clean_exit_behavior`.
+    StopAgent {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
 }
 
 fn default_restart_mode() -> String {
@@ -436,6 +447,9 @@ mod tests {
             })),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
             IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+            IpcMethod::StopAgent { reason } => {
+                IpcResponse::ok(serde_json::json!({ "reason": reason }))
+            }
             IpcMethod::Restart { mode } => {
                 IpcResponse::ok(serde_json::json!({ "pid": 99999, "mode": mode }))
             }
@@ -502,6 +516,62 @@ mod tests {
         assert_eq!(resp.data.unwrap()["mode"], "fresh");
 
         ipc.stop();
+    }
+
+    #[test]
+    fn roundtrip_stop_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let mut ipc = start_echo_handler(root, "test-stop-agent");
+        std::thread::sleep(Duration::from_millis(50));
+
+        let sock = socket_path(root, "test-stop-agent");
+        let resp = send_command(
+            &sock,
+            &IpcMethod::StopAgent {
+                reason: Some("operator menu".to_string()),
+            },
+        )
+        .unwrap();
+        assert!(resp.ok);
+        assert_eq!(resp.data.unwrap()["reason"], "operator menu");
+
+        ipc.stop();
+    }
+
+    #[test]
+    fn stop_agent_serde_roundtrips_and_is_distinct_from_stop() {
+        // Wire-format round-trips both with and without a reason.
+        let with_reason = IpcMethod::StopAgent {
+            reason: Some("menu".to_string()),
+        };
+        let json = serde_json::to_string(&with_reason).unwrap();
+        assert_eq!(json, r#"{"method":"stop_agent","reason":"menu"}"#);
+        assert_eq!(
+            serde_json::from_str::<IpcMethod>(&json).unwrap(),
+            with_reason
+        );
+
+        let no_reason = IpcMethod::StopAgent { reason: None };
+        let json = serde_json::to_string(&no_reason).unwrap();
+        assert_eq!(json, r#"{"method":"stop_agent"}"#);
+        assert_eq!(serde_json::from_str::<IpcMethod>(&json).unwrap(), no_reason);
+        // `reason` defaults to None when absent on the wire.
+        assert_eq!(
+            serde_json::from_str::<IpcMethod>(r#"{"method":"stop_agent"}"#).unwrap(),
+            IpcMethod::StopAgent { reason: None }
+        );
+
+        // StopAgent must be a DISTINCT method from Stop (Kill Supervisor).
+        assert_ne!(
+            IpcMethod::StopAgent { reason: None },
+            IpcMethod::Stop { graceful: false }
+        );
+        let stop_json = serde_json::to_string(&IpcMethod::Stop { graceful: false }).unwrap();
+        assert!(stop_json.contains(r#""method":"stop""#));
+        assert!(!stop_json.contains("stop_agent"));
     }
 
     #[test]

@@ -2213,6 +2213,10 @@ pub(crate) struct SupervisorShared {
     binary_stale: AtomicBool,
     /// Flag: IPC requested a stop.
     stop_requested: AtomicBool,
+    /// Flag: IPC requested a "Stop Agent" — kill the harness child but keep the
+    /// supervisor alive at the restart-or-quit keepalive prompt (never exit, never
+    /// auto-restart). Distinct from `stop_requested` (which exits the supervisor).
+    stop_agent_requested: AtomicBool,
     /// Restart mode requested via IPC ("fresh" or "continue").
     restart_mode: Mutex<String>,
     /// Flag: stdin→pty writer forwarded \x04 (Ctrl+D) to the pty.
@@ -2272,6 +2276,7 @@ impl SupervisorShared {
             restart_reexec: AtomicBool::new(false),
             binary_stale: AtomicBool::new(false),
             stop_requested: AtomicBool::new(false),
+            stop_agent_requested: AtomicBool::new(false),
             restart_mode: Mutex::new("continue".to_string()),
             ctrl_d_forwarded: AtomicBool::new(false),
             ctrl_c_forwarded: AtomicBool::new(false),

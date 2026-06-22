@@ -1001,7 +1001,8 @@ mod tests {
                     crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
                 crate::supervisor::ipc::IpcMethod::Restart { .. }
-                | crate::supervisor::ipc::IpcMethod::Stop { .. } => {
+                | crate::supervisor::ipc::IpcMethod::Stop { .. }
+                | crate::supervisor::ipc::IpcMethod::StopAgent { .. } => {
                     crate::supervisor::ipc::IpcResponse::ok_empty()
                 }
             },
@@ -1063,7 +1064,8 @@ mod tests {
                     crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
                 crate::supervisor::ipc::IpcMethod::Restart { .. }
-                | crate::supervisor::ipc::IpcMethod::Stop { .. } => {
+                | crate::supervisor::ipc::IpcMethod::Stop { .. }
+                | crate::supervisor::ipc::IpcMethod::StopAgent { .. } => {
                     crate::supervisor::ipc::IpcResponse::ok_empty()
                 }
             },

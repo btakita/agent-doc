@@ -426,6 +426,44 @@ pub fn restart(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
     Ok(())
 }
 
+/// "Stop Agent": kill the harness child while keeping the supervisor alive at its
+/// restart-or-quit keepalive prompt. Distinct from `restart` (which auto-restarts)
+/// and `admin kill-supervisor` (which kills the supervisor process). The operator
+/// can restart the agent manually at the keepalive (press Enter).
+pub fn stop_agent(file: &Path, reason: Option<String>) -> Result<()> {
+    let ctx = build_context(file)?;
+    let authorization = agent_doc_orchestration::project_controller::authorize_operator_command(
+        &ctx.base_dir,
+        &ctx.canonical_file,
+        "session_stop_agent",
+    )?;
+    ensure_supervisor_socket(&ctx)?;
+    let response = agent_doc_orchestration::supervisor::ipc::send_command(
+        &ctx.supervisor_socket,
+        &IpcMethod::StopAgent { reason },
+    )
+    .with_context(|| {
+        format!(
+            "failed to contact supervisor for {}",
+            ctx.canonical_file.display()
+        )
+    })?;
+    if !response.ok {
+        anyhow::bail!(
+            "{}",
+            response
+                .error
+                .unwrap_or_else(|| "supervisor stop-agent request failed".to_string())
+        );
+    }
+    println!(
+        "Stopped agent for {} (supervisor stays alive at the restart prompt; controller stage {}).",
+        ctx.canonical_file.display(),
+        authorization.accepted_stage
+    );
+    Ok(())
+}
+
 fn prepare_restart_live_busy_pane(ctx: &SessionContext, tmux: &Tmux, force: bool) -> Result<()> {
     let evidence = live_pane_evidence(ctx, tmux);
     // #hj7s: refuse if a terminal editor (e.g. Claude Code `ctrl+g` edit-in-nvim)

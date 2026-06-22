@@ -1968,6 +1968,16 @@ enum SessionAction {
         #[arg(long)]
         force: bool,
     },
+    /// Stop the harness agent child while keeping the supervisor alive at its
+    /// restart-or-quit keepalive prompt (the operator can then restart the agent)
+    #[command(name = "stop-agent")]
+    StopAgent {
+        /// Path to the session document
+        file: PathBuf,
+        /// Optional human-readable reason recorded for observability
+        #[arg(long)]
+        reason: Option<String>,
+    },
     /// Clear the configured tmux session when no file is provided, or clear the bound harness session when FILE is provided
     Clear {
         /// Optional path to the session document
@@ -3020,6 +3030,9 @@ fn main() -> anyhow::Result<()> {
                 },
                 force,
             ),
+            Some(SessionAction::StopAgent { file, reason }) => {
+                session_actor_cmd::stop_agent(&file, reason)
+            }
             Some(SessionAction::Clear { file: Some(file) }) => session_actor_cmd::clear(&file),
             Some(SessionAction::Clear { file: None }) => session_cmd::clear(),
             Some(SessionAction::InterruptClear { file, force }) => {

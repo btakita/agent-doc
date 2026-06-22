@@ -677,6 +677,57 @@ pub fn supervisor_restart_action(
     }
 }
 
+/// Post-child-exit dispatch for the `start` supervisor run loop. After the
+/// harness child exits, the loop checks the IPC-requested flags in a fixed
+/// priority order before falling back to the normal crash-policy / clean-exit
+/// classification. This pure enum models that decision so the "Stop Agent"
+/// keepalive contract can be unit-tested without a live PTY.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PostChildExitAction {
+    /// Route-owned single-cycle completion: exit the supervisor.
+    RouteOwnedComplete,
+    /// `IpcMethod::Stop` / `stop_requested`: exit the whole supervisor.
+    ExitSupervisor,
+    /// `IpcMethod::StopAgent` / `stop_agent_requested`: keep the supervisor alive
+    /// and land on the restart-or-quit keepalive prompt — never exit, never
+    /// auto-restart, regardless of the harness `clean_exit_behavior`.
+    StopAgentKeepalive,
+    /// `restart_requested`: auto-restart (continue the loop) per the IPC restart.
+    AutoRestart,
+    /// Fall through to the normal crash-policy / clean-exit classification (which
+    /// may itself prompt, auto-restart, or halt).
+    NormalExitClassification,
+}
+
+/// Pure model of the `start` supervisor run loop's post-child-exit flag dispatch.
+///
+/// The priority order mirrors `start/run.rs`: route-owned completion first, then
+/// `stop_requested` (exit), then `stop_agent_requested` (keepalive — kill child,
+/// keep supervisor, no auto-restart), then `restart_requested` (auto-restart),
+/// then normal classification. Crucially, `StopAgentKeepalive` is returned
+/// regardless of `restart_requested` or any harness clean-exit behavior, proving
+/// "Stop Agent" never auto-restarts and never exits the supervisor.
+pub fn post_child_exit_action(
+    route_owned_completion: bool,
+    stop_requested: bool,
+    stop_agent_requested: bool,
+    restart_requested: bool,
+) -> PostChildExitAction {
+    if route_owned_completion {
+        return PostChildExitAction::RouteOwnedComplete;
+    }
+    if stop_requested {
+        return PostChildExitAction::ExitSupervisor;
+    }
+    if stop_agent_requested {
+        return PostChildExitAction::StopAgentKeepalive;
+    }
+    if restart_requested {
+        return PostChildExitAction::AutoRestart;
+    }
+    PostChildExitAction::NormalExitClassification
+}
+
 /// `#suphandoff` — PCP-owned red/green supervisor handoff state.
 ///
 /// This models the future two-process replacement path separately from the
@@ -1247,6 +1298,60 @@ mod tests {
         assert_eq!(supervisor_restart_action(true, true, true), ReexecInPlace);
         // At the boundary with a fresh binary, the normal child relaunch serves it.
         assert_eq!(supervisor_restart_action(true, false, true), RelaunchChild);
+    }
+
+    #[test]
+    fn post_child_exit_action_priority_and_stop_agent_keepalive() {
+        use PostChildExitAction::*;
+        // Args: (route_owned_completion, stop_requested, stop_agent_requested, restart_requested)
+
+        // No flags → fall through to the normal crash-policy/clean-exit classification.
+        assert_eq!(
+            post_child_exit_action(false, false, false, false),
+            NormalExitClassification
+        );
+
+        // Route-owned completion wins over everything (it's the first check).
+        assert_eq!(
+            post_child_exit_action(true, true, true, true),
+            RouteOwnedComplete
+        );
+
+        // `stop_requested` (Kill Supervisor) exits the supervisor and beats
+        // stop-agent + restart.
+        assert_eq!(
+            post_child_exit_action(false, true, true, true),
+            ExitSupervisor
+        );
+
+        // KEYSTONE: `stop_agent_requested` ⇒ keepalive, and it beats
+        // `restart_requested` so "Stop Agent" NEVER auto-restarts. It is also
+        // independent of any harness clean-exit behavior because this path runs
+        // BEFORE the normal classification.
+        assert_eq!(
+            post_child_exit_action(false, false, true, true),
+            StopAgentKeepalive
+        );
+        assert_eq!(
+            post_child_exit_action(false, false, true, false),
+            StopAgentKeepalive
+        );
+
+        // `restart_requested` alone auto-restarts.
+        assert_eq!(
+            post_child_exit_action(false, false, false, true),
+            AutoRestart
+        );
+
+        // Stop Agent must not exit the supervisor and must not auto-restart:
+        // for every combination where stop_agent is set (and neither route-owned
+        // completion nor a hard stop is requested), the action is the keepalive.
+        for restart in [false, true] {
+            let action = post_child_exit_action(false, false, true, restart);
+            assert_eq!(action, StopAgentKeepalive);
+            assert_ne!(action, ExitSupervisor);
+            assert_ne!(action, AutoRestart);
+        }
     }
 
     #[test]

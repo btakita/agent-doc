@@ -161,6 +161,22 @@ pub(crate) fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcRes
             shared.kill_child();
             IpcResponse::ok_empty()
         }
+        IpcMethod::StopAgent { reason: _ } => {
+            // "Stop Agent": kill the harness child but keep the supervisor alive.
+            // Unlike `Stop`, this must NOT set `stop_requested` (which exits the
+            // supervisor) and must NOT set `restart_requested` (which auto-restarts).
+            // The run loop observes `stop_agent_requested` after the child exits and
+            // lands on the restart-or-quit keepalive prompt so the operator can
+            // restart manually.
+            shared.transition_actor_state(
+                crate::session_actor::ActorState::WaitingInput,
+                "supervisor",
+                "ipc_stop_agent_requested",
+            );
+            shared.stop_agent_requested.store(true, Ordering::Relaxed);
+            shared.kill_child();
+            IpcResponse::ok_empty()
+        }
     }
 }
 

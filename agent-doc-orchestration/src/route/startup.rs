@@ -2032,7 +2032,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                     IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
-                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+                    IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
                 }
             })
             .unwrap();
@@ -2167,7 +2167,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             }
             IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
         crate::startup_miss::record(
@@ -2283,7 +2283,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                         }
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
-                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+                    IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
                 }
             })
             .unwrap();
@@ -2431,7 +2431,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                     IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
-                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+                    IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
                 }
             })
             .unwrap();
@@ -2579,7 +2579,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                         injects_for_ipc.lock().unwrap().push(bytes.clone());
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
-                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+                    IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
                 }
             })
             .unwrap();
@@ -2829,7 +2829,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -2961,7 +2961,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -3094,7 +3094,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 IpcResponse::ok_empty()
             }
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -3221,7 +3221,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 IpcResponse::ok_empty()
             }
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -3321,7 +3321,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                     }
                     IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
                     IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+                    IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
                 })
                 .unwrap();
 
@@ -3421,7 +3421,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -3551,7 +3551,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -3672,7 +3672,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -3772,7 +3772,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -3894,7 +3894,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -3977,7 +3977,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 injects_for_ipc.lock().unwrap().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
-            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 

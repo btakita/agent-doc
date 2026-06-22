@@ -1020,6 +1020,7 @@ pub fn run_with_reap_policy(
         shared.restart_requested.store(false, Ordering::Relaxed);
         shared.restart_reexec.store(false, Ordering::Relaxed);
         shared.stop_requested.store(false, Ordering::Relaxed);
+        shared.stop_agent_requested.store(false, Ordering::Relaxed);
         shared.ctrl_d_forwarded.store(false, Ordering::Relaxed);
         shared.ctrl_c_forwarded.store(false, Ordering::Relaxed);
         shared
@@ -1151,6 +1152,7 @@ pub fn run_with_reap_policy(
                 // restart / route-complete.
                 if !kill_requested
                     && (shared.stop_requested.load(Ordering::Relaxed)
+                        || shared.stop_agent_requested.load(Ordering::Relaxed)
                         || (shared.restart_requested.load(Ordering::Relaxed)
                             && !shared.restart_reexec.load(Ordering::Relaxed))
                         || route_owned_completion.load(Ordering::Relaxed))
@@ -1226,28 +1228,84 @@ pub fn run_with_reap_policy(
             libc::tcflush(libc::STDIN_FILENO, libc::TCIFLUSH);
         }
 
-        // Check IPC-requested stop
-        if route_owned_completion.load(Ordering::Relaxed) {
-            log_event(&mut session_log, "route_owned_cycle_complete_stop");
-            break "route_owned_cycle_complete";
-        }
-
-        if shared.stop_requested.load(Ordering::Relaxed) {
-            log_event(&mut session_log, "ipc_stop");
-            break "ipc_stop";
-        }
-
-        // Check IPC-requested restart (override normal exit classification)
-        if shared.restart_requested.load(Ordering::Relaxed) {
-            let mode = shared.restart_mode.lock().unwrap().clone();
-            first_run = mode == "fresh";
-            auto_trigger_next_launch = true;
-            restart_count += 1;
-            log_event(
-                &mut session_log,
-                &format!("ipc_restart mode={} restart_count={}", mode, restart_count),
-            );
-            continue;
+        // Post-child-exit flag dispatch. The priority order (route-owned →
+        // stop → stop-agent → restart → normal classification) is modeled by the
+        // pure `post_child_exit_action` so the "Stop Agent" keepalive contract is
+        // unit-testable without a live PTY.
+        match crate::start::decisions::post_child_exit_action(
+            route_owned_completion.load(Ordering::Relaxed),
+            shared.stop_requested.load(Ordering::Relaxed),
+            shared.stop_agent_requested.load(Ordering::Relaxed),
+            shared.restart_requested.load(Ordering::Relaxed),
+        ) {
+            crate::start::decisions::PostChildExitAction::RouteOwnedComplete => {
+                log_event(&mut session_log, "route_owned_cycle_complete_stop");
+                break "route_owned_cycle_complete";
+            }
+            crate::start::decisions::PostChildExitAction::ExitSupervisor => {
+                log_event(&mut session_log, "ipc_stop");
+                break "ipc_stop";
+            }
+            crate::start::decisions::PostChildExitAction::StopAgentKeepalive => {
+                // "Stop Agent": the harness child was killed, but the supervisor must
+                // STAY alive at the restart-or-quit keepalive prompt — never exit
+                // (unlike `stop_requested`) and never auto-restart (unlike
+                // `restart_requested` or the normal clean-exit classification, which
+                // would auto-restart codex/opencode whose `clean_exit_behavior` is
+                // RestartContinue). The operator presses Enter to restart manually.
+                //
+                // Clear the flag so a later natural child exit re-enters normal handling.
+                shared.stop_agent_requested.store(false, Ordering::Relaxed);
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "stop_agent_performed file={} action=kill_child_keep_supervisor",
+                        file.display()
+                    ),
+                );
+                log_event(
+                    &mut session_log,
+                    &format!("ipc_stop_agent restart_count={}", restart_count),
+                );
+                shared.transition_actor_state(
+                    crate::session_actor::ActorState::WaitingInput,
+                    "supervisor",
+                    "stop_agent_prompt",
+                );
+                raw_mode.suspend();
+                eprintln!("\nAgent stopped. Supervisor is still running.");
+                match prompt_for_restart_or_quit(
+                    &mut session_log,
+                    "stop_agent",
+                    "Press Enter to restart the agent, or 'q' to exit.",
+                    "user_quit_after_stop_agent",
+                    PromptEofPolicy::Quit,
+                ) {
+                    PromptOutcome::Quit => {
+                        break "user_quit_after_stop_agent";
+                    }
+                    PromptOutcome::RestartFresh => {
+                        raw_mode.resume();
+                        first_run = true;
+                        auto_trigger_next_launch = auto_trigger;
+                        restart_count += 1;
+                        suppress_stale_ctrl_d_until_prompt = false;
+                        continue;
+                    }
+                }
+            }
+            crate::start::decisions::PostChildExitAction::AutoRestart => {
+                let mode = shared.restart_mode.lock().unwrap().clone();
+                first_run = mode == "fresh";
+                auto_trigger_next_launch = true;
+                restart_count += 1;
+                log_event(
+                    &mut session_log,
+                    &format!("ipc_restart mode={} restart_count={}", mode, restart_count),
+                );
+                continue;
+            }
+            crate::start::decisions::PostChildExitAction::NormalExitClassification => {}
         }
 
         // Normal exit classification via CrashPolicy

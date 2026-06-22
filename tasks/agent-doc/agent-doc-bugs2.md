@@ -39,7 +39,17 @@ completed
 Compacted content:
 - Archived 12 response topic(s): Validate/invalidate operator-verify items from the logs; do [#fbwire]; do [#j9ja]; 9 more
 - Prior summary/context: prior compacted content: Archived 6 response topic(s): #opslogtrack verified live; make the transport healthy + advan...
-<!-- agent:boundary:cd30e9d3 -->
+
+### Re: do [#pendaddorder] — gpt-5
+
+> **Queue prompt:** :pushpin: [#pendaddorder]
+
+Closed `#pendaddorder`. The product contract is now explicit: repeated `--pending-add` flags preserve flag order top-down in the backlog, and active `queue: start` same-cycle queue mirroring appends those new ids after the existing live queue tail in the same order.
+
+Changes shipped in agent-doc `6887fe26` and superproject `6891417b7`: clarified the `add_many` order invariant, updated CLI help and `SKILL.md` wording, and added `finalize_pending_add_multiple_flags_keep_cli_order_in_active_go_queue` to cover backlog order plus queue-mirror parity for multiple same-cycle pending adds. `runbooks/pending-ops.md` already had the desired wording.
+
+Verified: focused pending-add order tests, `make check` green (4973 nextest tests plus doctests and the medium SimWorld test), and GitHub Actions CI for `6887fe26` completed successfully. Installed from a clean self-install worktree at the pushed commit; `lib-install` marked 2 controllers for recycle, and explicit `agent-doc admin recycle` for this project reported no running controller.
+<!-- agent:boundary:a6b5eede -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -90,7 +90,25 @@ Deploy: activated Worker version `41030a3b-218e-41ab-92e1-a73c97715da2` at `http
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:fe4e7b2e -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Deploy is complete. `make deploy` applied remote D1 migration `0099_lender_role_and_schema.sql` and published Worker version `41030a3b-218e-41ab-92e1-a73c97715da2` to `https://equityfundingsource.brian-takita.workers.dev`.
+
+Post-deploy verification:
+- `bun run cf:d1:migrations:list:remote` reports `No migrations to apply`.
+- Remote D1 role query returns only `admin`, `borrower`, `broker`, and `lender` roles.
+- Remote schema query shows the renamed `lender_*` tables and no matching `investor_*` tables from the renamed set.
+- Live root returned `200`; `/admin/users` redirected to admin login with `next=%2Fadmin%2Fusers`; `/login?role=lender` returned `200`.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:34727946 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -102,8 +120,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~The role dropdown in https://equityfundingsource.brian-takita.workers.dev/admin/users should have "lender" instead of "investor". Rename any "investor" field data and db schema entity names to "lender".~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

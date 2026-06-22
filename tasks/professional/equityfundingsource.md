@@ -38,7 +38,47 @@ completed
 Compacted content:
 - Archived 8 response topic(s): lender role/schema rename + deploy; deploy; admin reset password links + deploy; 5 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:76e6dd76 -->
+
+### Re: expired password reset links + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> If a password reset link has expired, it should go to "Sign in by email." with the expiration error message with instructions to send another email link and the email address prefilled in the email input. This flow current goes to th set password form which cannot succeed with an expired email login link.
+
+> **Queue prompt:**
+>
+> deploy
+
+Verified and redeployed. No code changes were needed in this cycle because the current EFS code already contains the expired-password-reset redirect fix and its regression coverage. The production Worker now redirects invalid/expired password reset links to `Sign in by email` with the reset-link expiration message, and the known-token path is covered by tests for prefilled email resend.
+
+Changed paths: none.
+
+Commands:
+- `bun test tests/auth.test.ts`
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before and after deploy
+- `make deploy`
+- Live smoke checks for `/`, `/reset-password?token=bad&role=admin`, and `/login/email?role=admin&email=expired-reset%40example.com&error=...`
+- `gh run list --workflow CI --limit 1` in EFS and parent repos
+
+Verification:
+- Focused auth suite passed: `21 pass`, `0 fail`, including `redirects expired reset links to sign in by email with prefilled resend`.
+- Remote D1 reported `No migrations to apply` before and after deploy.
+- `make deploy` succeeded and published the current clean EFS commit.
+- Live root returned `200`.
+- Live bad reset token returned `303` to `/login/email?role=admin&error=This+password+reset+link+is+invalid+or+has+expired.+Request+a+new+sign-in+link+below.`
+- Live email-login page returned `200` and rendered `Sign in by email`, the reset-link expiration message, `value="expired-reset@example.com"`, and `Email me a sign-in link`.
+- Both EFS and parent repos report no GitHub workflow named `CI`, so there was no CI run to inspect.
+
+Commits: none in this cycle; the EFS submodule was already clean at `fc6801f` (`feat(ui): add submit button busy state`) and pushed to `origin/main`.
+
+Deploy: activated Worker version `f0f55798-0463-4fec-ae6d-724d3ef9d2f8` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Preflight note: preflight warned that the installed `agent-doc` binary/cdylib are stale relative to `src/agent-doc`; this did not block this cycle, and the response was finalized through proven IPC.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:56b375b6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,7 +90,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- If a password reset link has expired, it should go to "Sign in by email." with the expiration error message with instructions to send another email link and the email address prefilled in the email input. This flow current goes to th set password form which cannot succeed with an expired email login link.
+- ~~If a password reset link has expired, it should go to "Sign in by email." with the expiration error message with instructions to send another email link and the email address prefilled in the email input. This flow current goes to th set password form which cannot succeed with an expired email login link.~~
 - deploy
 <!-- /agent:queue -->
 

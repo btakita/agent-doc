@@ -260,7 +260,20 @@ So sending specifically from `efs@`**`efs.briantakita.me`** has only these real 
 My read: if the **`efs.briantakita.me` From specifically** matters, it's **Resend** (option 1) — CF simply can't do it here without Enterprise. If "send from an EFS-branded CF address" is the real goal, **`efs@briantakita.me` apex** (option 2) is the clean, free, works-now choice.
 
 Which way? Prod stays on `info@briantakita.me` (working) until you pick and a live test passes. `#g6d0` holds this.
-<!-- agent:boundary:f9bf5b35 -->
+> **Queue prompt:** Can we have efs@briantakita.me instead?
+
+### Re: efs@briantakita.me — shipped + verified — opus-4-8
+
+Yes — done. EFS now sends from **`efs@briantakita.me`** via Cloudflare Email Service, and I verified it end-to-end before committing.
+
+- Flipped the three `*_FROM` vars (`EFS_EMAIL_FROM`, `MESSAGE_NOTIFICATION_FROM`, `LENDING_GROUP_NOTIFICATION_FROM`) to `Equity Funding Source <efs@briantakita.me>`; updated the three wrangler-assertion tests to match. Full suite green (1091).
+- Deployed (`d291c7fe`), then sent a **live contact-form test**: Cloudflare accepted it and it **landed in the `btak.dev@gmail.com` inbox** (not spam) with From `efs@briantakita.me`. Auth passes because it rides the already-verified `briantakita.me` apex sending zone (DKIM `cf2024-1._domainkey` + SPF + DMARC).
+- Committed + pushed (EFS `91b944a`; superproject pointer `f9a713297`).
+
+No Resend, no plan change, no zone surgery. Inbound `efs@efs.briantakita.me → btak.dev+efs@gmail.com` is untouched and still live.
+
+The only thing you don't get this way is the literal `efs.briantakita.me` *subdomain* in the From — that needs CF Enterprise (Subdomain Setup) or Resend, both of which we set aside. Closing `#g6d0` as done.
+<!-- agent:boundary:be734b6b -->
 <!-- /agent:exchange -->
 ###
 <!--

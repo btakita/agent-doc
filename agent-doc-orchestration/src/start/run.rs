@@ -640,7 +640,13 @@ pub fn run_with_reap_policy(
         mut base_args,
         mut resolved_env,
         capability_proof_required,
-    } = build_harness_launch_spec(&fm, &global_config, &canonical, &mut session_log, route_owned)?;
+    } = build_harness_launch_spec(
+        &fm,
+        &global_config,
+        &canonical,
+        &mut session_log,
+        route_owned,
+    )?;
 
     // Query initial terminal size
     let initial_size = {

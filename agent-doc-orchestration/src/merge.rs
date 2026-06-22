@@ -524,7 +524,10 @@ User line 2.
         let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
         let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
 
-        assert!(merged.contains("### Re: topic"), "response present:\n{merged}");
+        assert!(
+            merged.contains("### Re: topic"),
+            "response present:\n{merged}"
+        );
         assert_eq!(
             merged.matches("do [#bbbb]").count(),
             1,

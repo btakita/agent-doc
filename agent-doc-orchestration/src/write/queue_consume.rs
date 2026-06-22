@@ -944,10 +944,7 @@ fn strip_list_bullet_prefix(line: &str) -> &str {
 /// on-disk exchange continues to equal `content_ours` (the `#qpcwcmerge`/`#pcwc`
 /// invariant). Idempotent: re-running over an already-annotated document is a
 /// no-op because annotated lines no longer end in a bare `~~` and carry the marker.
-pub(crate) fn annotate_newly_struck_free_text_heads(
-    before: &str,
-    after: &str,
-) -> Result<String> {
+pub(crate) fn annotate_newly_struck_free_text_heads(before: &str, after: &str) -> Result<String> {
     let struck_before: std::collections::HashSet<String> =
         agent_doc_markdown_ast::mutations::item_nodes(before, "queue")
             .map(|nodes| {
@@ -1089,8 +1086,7 @@ pub fn strike_answered_free_text_queue_heads(
     // `#qstrikenote` observability: one marker per struck head naming a short text
     // prefix, so a struck line is auditable as an explained auto-strike.
     if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(&content, "queue") {
-        let key_set: std::collections::HashSet<&str> =
-            keys.iter().map(String::as_str).collect();
+        let key_set: std::collections::HashSet<&str> = keys.iter().map(String::as_str).collect();
         for node in nodes {
             if !key_set.contains(node.node_key.as_str()) {
                 continue;
@@ -3417,7 +3413,9 @@ mod core_tests {
         // `#qstrikenote`: each struck free-text head carries the deterministic
         // auto-struck explanation, on the queue line itself — NOT in exchange.
         assert_eq!(
-            updated.matches("— auto-struck: answered this cycle (#ftstrike)").count(),
+            updated
+                .matches("— auto-struck: answered this cycle (#ftstrike)")
+                .count(),
             2,
             "both struck heads must carry exactly one auto-struck note:\n{updated}"
         );
@@ -3439,7 +3437,8 @@ mod core_tests {
         );
         // Zero-drift: nothing was written into an exchange component.
         assert!(
-            !after_again.contains("auto-struck") || !after_again.contains("<!-- agent:exchange -->"),
+            !after_again.contains("auto-struck")
+                || !after_again.contains("<!-- agent:exchange -->"),
             "this fixture has no exchange; note must never target exchange:\n{after_again}"
         );
     }

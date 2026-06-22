@@ -377,10 +377,12 @@ fn unstrike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResul
     // Strip both the `~~…~~` wrapper and any `#qstrikenote` annotation appended
     // outside it (`~~text~~ — auto-struck: …`). The annotated shape closes the
     // wrapper before the deterministic separator, so split there first.
-    let body_after_open = raw.strip_prefix("~~").ok_or_else(|| MutationError::MalformedItem {
-        component: patch.component.clone(),
-        node_key: patch.node_key.clone(),
-    })?;
+    let body_after_open = raw
+        .strip_prefix("~~")
+        .ok_or_else(|| MutationError::MalformedItem {
+            component: patch.component.clone(),
+            node_key: patch.node_key.clone(),
+        })?;
     let annotated_needle = format!("~~{}", crate::overlay::STRUCK_ANNOTATION_SEPARATOR);
     let unstruck = if let Some(close) = body_after_open.find(&annotated_needle) {
         &body_after_open[..close]
@@ -846,13 +848,22 @@ operator note
         assert_eq!(nodes.len(), 1);
         assert!(nodes[0].item.struck);
         let key = nodes[0].node_key.clone();
-        let patches = [node_patch(&key, MutationNodePatchOp::Unstrike, None, None, None)];
+        let patches = [node_patch(
+            &key,
+            MutationNodePatchOp::Unstrike,
+            None,
+            None,
+            None,
+        )];
         let updated = apply_node_patches(doc, &patches).unwrap();
         assert!(
             updated.contains("- answered free-text head\n"),
             "unstrike must restore bare text:\n{updated}"
         );
-        assert!(!updated.contains("~~"), "no strike wrapper remains:\n{updated}");
+        assert!(
+            !updated.contains("~~"),
+            "no strike wrapper remains:\n{updated}"
+        );
         assert!(
             !updated.contains("auto-struck"),
             "the note must be removed:\n{updated}"

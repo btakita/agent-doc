@@ -995,8 +995,7 @@ mod tests {
         // returns `Restart` (changed + knob on + quiet dispatch-ready boundary).
         // Every other policy outcome must NOT trigger a restart.
         use AgentChangeRestartAction as A;
-        let should_request_restart =
-            |d: A| matches!(d, A::Restart);
+        let should_request_restart = |d: A| matches!(d, A::Restart);
         // The boundary case that triggers.
         assert!(should_request_restart(agent_change_restart_decision(
             true, true, true, false

@@ -2714,7 +2714,9 @@ mod tests {
 
     // ----- `#fbwire` / `#fullboundary` Phase 2: convergence-gated boundary -----
 
-    use crate::convergence_gate::{ConvergenceFacts, ConvergenceGateDecision, convergence_gate_decision};
+    use crate::convergence_gate::{
+        ConvergenceFacts, ConvergenceGateDecision, convergence_gate_decision,
+    };
 
     fn quiescent_facts() -> ConvergenceFacts {
         ConvergenceFacts {
@@ -2799,10 +2801,7 @@ mod tests {
                 other => panic!("inflight>0 must Defer, not dispatch: {other:?}"),
             }
         }
-        assert!(matches!(
-            decisions[3],
-            ConvergenceGateDecision::Dispatch
-        ));
+        assert!(matches!(decisions[3], ConvergenceGateDecision::Dispatch));
     }
 
     #[test]
@@ -2856,8 +2855,7 @@ mod tests {
         ];
         record_convergence_force_disk_fallback(&doc, &facts, &unmet);
 
-        let ops_log =
-            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("convergence_gate_force_disk_fallback severity=error"),
             "must emit the loud ERROR line: {ops_log}"

@@ -61,7 +61,10 @@ fn cached_session_id(file: &Path, rc: Option<&RunContext>) -> Option<String> {
         Some(rc) => rc.doc_content(),
         None => std::fs::read_to_string(file).ok()?,
     };
-    let session = agent_doc_core::frontmatter::parse(&content).ok()?.0.session?;
+    let session = agent_doc_core::frontmatter::parse(&content)
+        .ok()?
+        .0
+        .session?;
     if session.is_empty() {
         return None;
     }
@@ -92,7 +95,10 @@ fn ops_log_tracking_suffix(file: &Path, rc: Option<&RunContext>) -> String {
     }
     let turn = match rc {
         Some(rc) => rc.cycle_state().map(|cs| cs.cycle_id.clone()),
-        None => crate::cycle_state::load(file).ok().flatten().map(|cs| cs.cycle_id),
+        None => crate::cycle_state::load(file)
+            .ok()
+            .flatten()
+            .map(|cs| cs.cycle_id),
     };
     if let Some(turn) = turn.filter(|t| !t.is_empty()) {
         suffix.push_str(" turn=");

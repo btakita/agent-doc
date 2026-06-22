@@ -1461,7 +1461,9 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
             agent_doc_orchestration::crdt::EditorOp::Delete { offset, len }
         }
         other => {
-            eprintln!("[op-capture] agent_doc_record_editor_op: unknown op_kind {other:?}; ignoring");
+            eprintln!(
+                "[op-capture] agent_doc_record_editor_op: unknown op_kind {other:?}; ignoring"
+            );
             return 0;
         }
     };

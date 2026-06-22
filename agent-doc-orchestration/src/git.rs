@@ -604,9 +604,9 @@ fn strike_answered_free_text_heads_at_commit_seam(file: &Path) {
                 n
             ),
         ),
-        Err(e) => eprintln!(
-            "[commit] warning: commit-seam free-text head strike failed: {e} (non-fatal)"
-        ),
+        Err(e) => {
+            eprintln!("[commit] warning: commit-seam free-text head strike failed: {e} (non-fatal)")
+        }
     }
 }
 
@@ -616,7 +616,9 @@ fn strike_answered_free_text_heads_at_commit_seam(file: &Path) {
 fn capture_response_body_for(file: &Path) -> Option<String> {
     let state = crate::cycle_state::load(file).ok().flatten()?;
     let capture_id = state.capture_id?;
-    let record = crate::capture::load_by_id(file, &capture_id).ok().flatten()?;
+    let record = crate::capture::load_by_id(file, &capture_id)
+        .ok()
+        .flatten()?;
     Some(record.response_body)
 }
 
@@ -5183,7 +5185,8 @@ Duplicate replay should stay live.
 
         // Capture a response that answers the first free-text head (quoted in a
         // blockquote, as the strike matcher requires).
-        let response = "### Re: parser\n> **Queue prompt:** fix the parser bug in the lexer\n\nFixed.\n";
+        let response =
+            "### Re: parser\n> **Queue prompt:** fix the parser bug in the lexer\n\nFixed.\n";
         crate::capture::capture_response(&doc, response).unwrap();
 
         strike_answered_free_text_heads_at_commit_seam(&doc);

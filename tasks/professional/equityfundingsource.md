@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,32 @@ completed
 Compacted content:
 ❯ - Archived 14 response topic(s): email reply didn't appear in the funder portal; reply-to app email + token, and which domain for staging; subdomain reply@efs.briantakita.me + keeping Protonmail on the root; 11 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:16ba9c2c -->
+
+### Re: post-compaction state + the "queue all gated items" directive — opus-4-8
+
+> **Queue prompt:**
+>
+> Add actionable items into the queue for all gated backlog and review items.
+
+
+Housekeeping first: the exchange was compacted (14 topics archived to `...-20260622-065618.md`). It landed with a stale snapshot/CRDT (53KB snapshot vs 20KB visible file), so I rebuilt the sidecars from the compacted file (`reset --from-current --preserve-session`) and committed the compacted state cleanly (`2967960f7`) rather than letting a plain commit un-compact it.
+
+> **Queue prompt:** Add actionable items into the queue for all gated backlog and review items.
+
+On this — I want to confirm scope before bulk-expanding, because "all gated items" = **4 gated backlog + 26 gated review = 30 items**, and a straight dump would flood the go-queue with work that can't actually drain:
+
+- **Several are already done/superseded.** Preflight's semantic matcher flags ~5 review items as resolved by shipped work: `#5q7z`→`#37ah`, `#dropbox-sync-adapter`→`#dropbox-sync-contract`, `#dzmm-writeback-replay`→`#37ah`, `#zwws-vestings-local`→`#zwws-local-first`, `#lender-card-msg-email`→`#lender-card-msg`. Queuing these re-does finished work.
+- **Several are operator-gated, not agent-actionable.** e.g. `#5q7z-ship` is live-verify only; `#cutover-checklist`/`#e1kb` execution waits on creds (`#m6ch`); `#67v2-aa-local` is gated on `#dzmm`. Queued as `go` they'd just churn (the `#goqueuestall` pattern).
+
+So rather than flood, tell me which you want and I'll do it in one pass:
+- **(A)** Queue only the genuinely agent-actionable gated items; tag the operator-gated ones so go-mode defers them; close the superseded ones. (my recommendation)
+- **(B)** Queue a specific subset you name.
+- **(C)** Literally all 30, churn and all.
+
+The queue is currently **paused** (stale qflood guard), so nothing auto-drains while we settle this.
+
+**Separately — heads-up that affects this whole session:** preflight warns the installed `agent-doc` binary + cdylib **predate source commit `fefc5f2a`**, so the live tmux/JetBrains supervisor is running older code. That's the likely cause of the repeated finalize IPC socket wedges and the go-mode queue churn this session. Recommend `make install` in `src/agent-doc` (rebuilds binary + cdylib) then an `admin recycle` to pick it up — I held off doing it unprompted since it's a build on a live session.
+<!-- agent:boundary:df6e018a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,7 +75,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Add actionable items into the queue for all gated backlog and review items.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -62,7 +62,7 @@ So your reply sat in the mailbox; nothing wrote it to D1; the portal (and the ne
 - Tests (6 new + refactor of the existing inbound tests), full suite green (1089), built, committed (`fbba9eb`), pushed, **deployed** (worker `0ab29102`). It is **inert** until enabled — deploying it changed nothing in prod by itself.
 
 **What's left — operator infra to turn it on (`#msgmail4b`, filed in backlog):** in the Cloudflare dashboard, add an **Email Routing rule** delivering the portal Reply-To address (e.g. `info@briantakita.me` or a dedicated `replies@…`) to **this Worker** (Email Worker binding, not forward-to-address); verify the receiving domain's MX + Email Routing; then set `MESSAGE_EMAIL_INBOUND_ENABLED=true` and `MESSAGE_EMAIL_INBOUND_REPLY_TO` (and `MESSAGE_EMAIL_INBOUND_SECRET` for the HTTP path). Send a test reply and confirm it lands in the thread. I left this to you per the chosen split (it's security-sensitive and needs dashboard/MX access). Plan: `prds/message-email-roundtrip.md`.
-<!-- agent:boundary:f3408af6 -->
+<!-- agent:boundary:104f5fbe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -74,6 +74,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#f2w8]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -34,7 +34,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check out agent-kit path dependency
+        run: git clone --depth 1 https://github.com/btakita/agent-kit ../agent-kit
 
+      - name: Check out tmux-router patch dependency
+        run: git clone --depth 1 https://github.com/btakita/tmux-router ../tmux-router
+
+      - name: Check out lazily-rs path dependency
+        run: git clone --depth 1 https://github.com/btakita/lazily-rs ../lazily-rs
 
       - uses: dtolnay/rust-toolchain@stable
         with:

@@ -52,7 +52,31 @@ The supervisor recycled onto the new binary, so `#opslogtrack` is now live in `.
 Every line carries the ISO timestamp plus the appended ` doc=<stem> session=<id> turn=<cycle_id>` suffix, and the `agent-doc-bugs2` vs `equityfundingsource` lines are now distinguishable by `doc=`/`session=` — the multi-document tracking you asked for. Marking `#opslogtrackverify` done.
 
 Note: those same lines show `reason=queue_control_paused` / `queue_dispatch_skipped`, i.e. the supervisor is correctly respecting the halt — the frontmatter shows `queue: start` flipped back, but `admin queue pause` is still active so the supervisor isn't auto-dispatching. If you want the drain to actually resume, run `agent-doc admin queue resume tasks/agent-doc/agent-doc-bugs2.md` (and confirm the JB editor IPC is reconnected). The head is still operator-verify `#tb4q`.
-<!-- agent:boundary:6d0aa4f7 -->
+❯ Make the transport healthy. The end part of the response that guides me on how to advance the queue should have been placed in this document.
+
+### Re: make the transport healthy + advance the queue — opus-4-8
+
+> **Queue prompt:** Make the transport healthy. The end part of the response that guides me on how to advance the queue should have been placed in this document.
+
+**Transport repair (agent-side, done this cycle):** the wedge is the JetBrains plugin's editor-IPC listener socket (a supervisor recycle alone didn't fix it — `admin inspect` showed `supervisor:fresh` but `projection_lag=true`). The agent-side lever is refreshing the cdylib the plugin hot-reloads:
+
+1. `cargo build --release` (picks up the `#opslogtrack` source too)
+2. `agent-doc lib-install` → `libagent_doc-0.34.35.so` refreshed; 2 controllers marked to recycle
+3. `agent-doc admin recycle` → controller marked to recycle at the next idle boundary
+
+The plugin hot-reloads the `.so` on its mtime watch and re-runs `agent_doc_start_ipc_listener`, which should re-establish the listener. If this very response committed through a clean editor-IPC path (no `live_prompt_drift`), the transport is healthy again. If `projection_lag`/`live_prompt_drift` persists, the plugin hasn't picked up the reload — then the reliable fix is an **IDE-side restart** (close/reopen the doc tab or restart IntelliJ); that is the one step I cannot perform from here.
+
+### How to advance the queue (kept in the document, as requested)
+
+1. **Clear the transport** (above) — confirm a clean closeout with no `live_prompt_drift`.
+2. **Resume dispatch:** the queue is `admin queue pause`d (the `#qflood` flood-guard). Frontmatter is already `queue: start`. To let the supervisor auto-dispatch again:
+   ```
+   agent-doc admin queue resume tasks/agent-doc/agent-doc-bugs2.md
+   ```
+3. **Operator-verify heads at the front** (`#tb4q`, `#k7mf`) need a live editor/pane and can't be agent-drained — drive them yourself, or move them below the agent code items so the drain doesn't stall on them.
+4. **Agent-drainable code items** ready to drain on a healthy transport: `#qheadstrike` (kills the answered-head re-surfacing churn — highest leverage), then `#editorbufwin`, `#hap7`, `#fbwire`, `#j9ja`, `#agentreloadrestart`.
+5. **Done this session:** `#opslogtrack` (live + verified), `#supinstallvis` filed.
+<!-- agent:boundary:17cf09b3 -->
 <!-- /agent:exchange -->
 
 ## Queue

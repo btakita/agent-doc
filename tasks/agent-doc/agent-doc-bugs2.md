@@ -130,7 +130,21 @@ Both convert the editor's **UTF-16** offsets to the **UTF-8 byte** units `Editor
 **Build + install** (per your directive): cdylib rebuilt + `lib-install`ed (the new FFI symbols are hot-reloaded live for the JB plugin). JB signed/unsigned zips (0.2.173) and the VS Code `.vsix` (0.2.29) are built. I did **not** `cargo install` the binary — the supervisor's behavior is unchanged (only the cdylib FFI moved), so this avoids the mid-session finalize-client-newer drift.
 
 The agent-doable work is complete, so I'm closing `#qnodemerge4wire`. The operator-gated remainder is filed as `#qnodemerge4verify`: install the JB plugin zip + VS Code `.vsix` (the Kotlin/TS reporters need a plugin reinstall) and do one live non-ASCII edit-during-merge to confirm the ops are recorded with byte offsets and accepted by the merge gate.
-<!-- agent:boundary:5793b7f3 -->
+
+### Re: do [#agentreloadrestart] — Phase 1b harness re-resolve + fresh-spawn — opus-4-8
+
+Implemented the Phase 1b execution core (agent-doc submodule `603ce7a2`, superproject `af47eedfe`; committed + pushed, **not installed**). Phase 1a (detection + policy + knob + logging) was already shipped.
+
+**What it does.** A supervisor restart now re-resolves the harness from *current* frontmatter and, when `agent:` changed (e.g. claude→opencode), brings up the **new** harness fresh instead of restarting the old one:
+- `run.rs` — extracted the harness launch-spec assembly (binary + `base_args` + env + workspace-access args + codex network/capability-proof) into a reusable `build_harness_launch_spec`; the pre-loop call is a pure refactor. At the top of a restart iteration it re-resolves the spec and, **only** when the binary differs (`harness_change_forces_fresh_spawn`), swaps in the new harness + forces `pending_adopt=None` (a harness change must never adopt the old child) + emits `agent_restart_performed`.
+- `idle_watch.rs` — on the `Restart` boundary decision, sets `restart_mode=fresh` + `restart_requested=true` so the new harness spawns clean; logs `agent_restart_triggered`.
+
+**Inertness (the safety property).** When `agent:` is unchanged the re-resolve yields the same binary → the guard is false → no swap, `pending_adopt` untouched, no marker. A respec error keeps the running harness (fail-safe); the initial pre-loop spec still uses `?` (fail-closed). So normal restarts are behaviorally unchanged — only a real agent-change exercises the new path.
+
+**Verification.** `make check` green (4960 tests, clippy clean); new pure-predicate + wiring-contract unit tests pass.
+
+**Closeout.** Gating `#agentreloadrestart` on the live two-pane `make tmux-ci` proof (a real claude→opencode switch must respawn fresh at the boundary without killing the in-flight turn) — that needs two live panes this driving session can't host. Two follow-ups filed: `#arrkillguard` (the real-harm route/sync kill-guard — refuse to cold-start a replacement pane solely on an `agent:` change) and `#arrcodexproof` (re-run the codex capability proof on a switch *to* codex). This was the deep-supervisor-refactor head you sent to a fresh focused cycle; I delegated the implementation to a clean-context agent and reviewed the inertness + `make check` before committing.
+<!-- agent:boundary:8abc6d63 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -141,7 +155,7 @@ The agent-doable work is complete, so I'm closing `#qnodemerge4wire`. The operat
 - ~~:pushpin: do [#j9ja]~~
 - ~~:pushpin: do [#qnodemerge4wire]~~
 - :pushpin: do [#tb4q]
-- :pushpin: do [#agentreloadrestart]
+- ~~:pushpin: do [#agentreloadrestart]~~
 - :pushpin: do [#restartagentmenu]
 - :pushpin: Add `Stop Agent` and `Restart Agent` in JB + VSCode menus.
 - :pushpin: JB `Run Agent Doc` on monsterrodholders.md stalled after restarting the agent in both Claude Code + Codex.
@@ -168,6 +182,9 @@ The agent-doable work is complete, so I'm closing `#qnodemerge4wire`. The operat
 - :pushpin: do [#supinstallvis]
 - :pushpin: do [#1jec]
 - do [#fbwireverify]
+- do [#qnodemerge4verify]
+- do [#arrkillguard]
+- do [#arrcodexproof]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -196,10 +213,11 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#arrkillguard] #agent-doc-bug #agentreloadrestart Phase 1 kill-guard (the real-harm item): route/sync/start must NOT cold-start a replacement pane / evict an in-flight turn solely because frontmatter agent: changed — defer to the graceful boundary restart (#agentreloadrestart Phase 1b, shipped 603ce7a2). Root harm 2026-06-18: agent: claude->opencode on equityfundingsource.md killed the live claude turn (route migrated [claude] %83 -> [opencode] %90 mid-turn). Add a guard in route.rs/sync.rs that refuses to replace a BUSY same-session pane when the only difference is agent:; verify with make tmux-ci across two panes (one mid-turn) that the switch waits for the boundary and never kills the running turn. Plan: tasks/agent-doc/plan-restart-agent.md
+- [ ] [#arrcodexproof] [recommended] #agent-doc-bug #agentreloadrestart Phase 1b follow-up: re-run the managed codex capability proof when a boundary restart switches TO codex. Today spawn_managed_capability_proof_thread runs once before the supervisor loop with the launch harness; build_harness_launch_spec re-resolves args/env/network on restart but capability_proof_required is discarded at the swap, so a mid-session switch to codex spawns fresh but skips the managed capability proof. Wire the proof (re)start into the harness-change restart path. make check + a focused check.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.
 - [ ] [#supinstallvis] [recommended] #agent-doc-bug #supinstallfeedback follow-up: the supervisor auto-install status (surface_supervisor_auto_install_status, idle_watch.rs) is surfaced ONLY as a transient tmux display-message on the status line, which is easy to miss while the pane scrollback keeps showing the misleading post-exit "Press Enter to restart" keepalive — so an operator watching the pane body still perceives a ~1-min stall. Residual: make the rebuild state visible in the pane BODY/scrollback (not just the status line) without disturbing the keepalive Enter-to-restart reader, e.g. a pane title set + a single non-input-consuming visible line, or render it through the JB/VSCode plugin notification surface (overlaps #qpauseux notification rendering). Decide the safe pane-write mechanism with the operator before implementing (send-keys risks being consumed by the keepalive). Plan TBD.
-- [ ] [#agentreloadrestart] restart-agent Phase 1: supervisor restart re-resolves harness from current frontmatter (agent claude->opencode takes effect on restart) + boundary auto-restart when resolved harness differs, behind agent_doc_agent_change_restart (default ON). Log harness_change_detected old/new + agent_restart_boundary_gate + agent_restart_performed. SimWorld + make tmux-ci. Plan: tasks/agent-doc/plan-restart-agent.md
 - [ ] [#restartagentmenu] restart-agent Phase 2 (after agentreloadrestart): RestartAgentAction.kt JB menu cmd mirroring RestartSupervisorProcessAction.kt + plugin.xml registration + TerminalUtil restart wiring; bump pluginVersion; build signed+unsigned. Log action invocation + resolved harness. Decide alongside-vs-replace Restart Supervisor Process with operator. Plan: tasks/agent-doc/plan-restart-agent.md
 - [ ] [#editorbufwin] merge-core: P1 the #pcwc post-commit reconcile must preserve unconsumed user queue additions on disk (do NOT overwrite the disk addition with HEAD); P2 auto-recover the commit (automate the manual reset --from-current); P4 refresh the stale supervisor CRDT enabling the drift. Plan: tasks/agent-doc/plan-editor-buffer-wins-queue-merge.md
 - [ ] [#jbdisprecycle] OPERATOR-TEST (code R1-R4 shipped submodule d21079b7): at a recycle boundary fire JB Run Agent Doc on a 2nd doc during the hot-reload burst; confirm a single dispatch_start_proof WITH submit and no stranded start_session failed. ops.log marker: route_dispatch_submit_recycle_settle.
@@ -224,6 +242,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#agentreloadrestart] restart-agent Phase 1: supervisor restart re-resolves harness from current frontmatter (agent claude->opencode takes effect on restart) + boundary auto-restart when resolved harness differs, behind agent_doc_agent_change_restart (default ON). Log harness_change_detected old/new + agent_restart_boundary_gate + agent_restart_performed. SimWorld + make tmux-ci. Plan: tasks/agent-doc/plan-restart-agent.md
 - [/] [#j9ja] [/] [blocked] #optverify SUCCESS ops.log markers so operator live tests auto-verify. SHIPPED this cycle: convergence_gate_converged_dispatch (agent-doc submodule 2367d883 — #fbwire Phase 2 success-after-defer in idle_watch.rs, emitted only when the gate had been deferring; auto-verifies #fbwireverify slow-ACK). Already exists: route_dispatch_submit_recycle_settle (route/dispatch.rs:831), auto_start_dispatch_ready_confirmed, queue_paused_continuation_guidance_emitted. BLOCKED (code sites do not exist yet): agent_restart_performed — add inside #agentreloadrestart Phase 1b restart EXECUTION (today only harness_change_detected + agent_restart_boundary_gate note=phase1b_execution_pending exist); restart-agent menu-invoke marker — add inside #restartagentmenu RestartAgentAction. Un-gate + close when those two parent features land and their markers are added.
 <!-- /agent:review -->
 

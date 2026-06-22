@@ -362,13 +362,15 @@ mod idle_watch;
 
 pub(crate) use decisions::{
     CLEAR_COOLDOWN_RESUME_IDLE_TICKS, IdleQueueContextResetDecision, IdleQueueDrainDecision,
-    REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState, SupervisorInstallAction,
-    SupervisorRecycleAction, SupervisorRestartAction, clear_cooldown_resume_ready,
-    drain_blocked_awaiting_clear_settle, drain_dispatch_dedup_skip,
-    idle_queue_context_reset_decision, idle_queue_drain_decision,
-    stale_drain_recycle_yield_requested, supervisor_install_action, supervisor_recycle_action,
-    supervisor_restart_action,
+    IdleQueueDrainDecisionFacts, REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState,
+    SupervisorInstallAction, SupervisorRecycleAction, SupervisorRestartAction,
+    clear_cooldown_resume_ready, drain_blocked_awaiting_clear_settle, drain_dispatch_dedup_skip,
+    idle_queue_context_reset_decision_with_editor_typing,
+    idle_queue_drain_decision_with_editor_typing, stale_drain_recycle_yield_requested,
+    supervisor_install_action, supervisor_recycle_action, supervisor_restart_action,
 };
+#[cfg(test)]
+pub(crate) use decisions::{idle_queue_context_reset_decision, idle_queue_drain_decision};
 
 fn idle_queue_head_slash_command(active_head: &str) -> Option<String> {
     crate::queue_command::slash_command_text(active_head)

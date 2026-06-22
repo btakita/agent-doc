@@ -2055,7 +2055,7 @@ fn normalize_route_queue_prompt_text(text: &str) -> String {
         .to_string()
 }
 
-fn preflight_debounce_ms(file: &Path) -> u64 {
+pub(crate) fn preflight_debounce_ms(file: &Path) -> u64 {
     std::fs::read_to_string(file)
         .ok()
         .and_then(|content| {

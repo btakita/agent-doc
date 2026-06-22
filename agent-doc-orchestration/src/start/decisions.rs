@@ -43,6 +43,9 @@ pub enum IdleQueueDrainDecision {
     SkipTurnActive,
     /// No active `queue_active: true` head remains to drain.
     SkipNoActiveHead,
+    /// A live editor reports recent typing for this document; the supervisor
+    /// must not read/submit a half-edited queue head.
+    SkipEditorTyping,
     /// This exact head was already dispatched and has not advanced/drained yet —
     /// suppress re-firing so a stuck head cannot spin the watch into a hot loop.
     SkipAlreadyDispatched,
@@ -62,6 +65,7 @@ pub(crate) enum IdleQueueContextResetDecision {
     SkipNoActiveHead,
     SkipNotIdle,
     SkipTurnActive,
+    SkipEditorTyping,
     SkipRouteSubmitInFlight,
     SkipAlreadyResetHead,
     SkipNoResetNeeded,
@@ -134,6 +138,28 @@ pub(crate) fn idle_queue_context_reset_decision(
     }
 }
 
+pub(crate) fn idle_queue_context_reset_decision_with_editor_typing(
+    prompt_visible: bool,
+    turn_active: bool,
+    route_submit_in_flight: bool,
+    editor_typing_active: bool,
+    active_head: Option<&str>,
+    last_context_reset_head: Option<&str>,
+    reset_required: bool,
+) -> IdleQueueContextResetDecision {
+    if active_head.is_some() && editor_typing_active {
+        return IdleQueueContextResetDecision::SkipEditorTyping;
+    }
+    idle_queue_context_reset_decision(
+        prompt_visible,
+        turn_active,
+        route_submit_in_flight,
+        active_head,
+        last_context_reset_head,
+        reset_required,
+    )
+}
+
 /// Pure idle-queue drain decision. Kept side-effect free so the busy→idle drain
 /// state machine is deterministically testable without a live pane.
 ///
@@ -178,6 +204,35 @@ pub fn idle_queue_drain_decision(
         }
         Some(_) => IdleQueueDrainDecision::Dispatch,
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IdleQueueDrainDecisionFacts<'a> {
+    pub clear_cooldown_active: bool,
+    pub prompt_visible: bool,
+    pub turn_active: bool,
+    pub self_driving_loop_active: bool,
+    pub route_submit_in_flight: bool,
+    pub editor_typing_active: bool,
+    pub active_head: Option<&'a str>,
+    pub last_dispatched: Option<&'a str>,
+}
+
+pub fn idle_queue_drain_decision_with_editor_typing(
+    facts: IdleQueueDrainDecisionFacts<'_>,
+) -> IdleQueueDrainDecision {
+    if !facts.clear_cooldown_active && facts.active_head.is_some() && facts.editor_typing_active {
+        return IdleQueueDrainDecision::SkipEditorTyping;
+    }
+    idle_queue_drain_decision(
+        facts.clear_cooldown_active,
+        facts.prompt_visible,
+        facts.turn_active,
+        facts.self_driving_loop_active,
+        facts.route_submit_in_flight,
+        facts.active_head,
+        facts.last_dispatched,
+    )
 }
 
 /// Whether a lingering *manual* clear cooldown should be auto-expired so an
@@ -1924,6 +1979,22 @@ mod tests {
     }
 
     #[test]
+    fn idle_queue_context_reset_waits_for_editor_typing() {
+        assert_eq!(
+            idle_queue_context_reset_decision_with_editor_typing(
+                true,
+                false,
+                false,
+                true,
+                Some("operator is still typing"),
+                None,
+                true,
+            ),
+            IdleQueueContextResetDecision::SkipEditorTyping
+        );
+    }
+
+    #[test]
     fn idle_queue_drain_skips_when_no_active_head() {
         assert_eq!(
             idle_queue_drain_decision(false, true, false, false, false, None, None),
@@ -1977,6 +2048,23 @@ mod tests {
         assert_eq!(
             idle_queue_drain_decision(false, true, false, false, true, Some("do [#a]"), None),
             IdleQueueDrainDecision::SkipRouteSubmitInFlight
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_waits_for_editor_typing() {
+        assert_eq!(
+            idle_queue_drain_decision_with_editor_typing(IdleQueueDrainDecisionFacts {
+                clear_cooldown_active: false,
+                prompt_visible: true,
+                turn_active: false,
+                self_driving_loop_active: false,
+                route_submit_in_flight: false,
+                editor_typing_active: true,
+                active_head: Some("operator is still typing"),
+                last_dispatched: None,
+            }),
+            IdleQueueDrainDecision::SkipEditorTyping
         );
     }
 

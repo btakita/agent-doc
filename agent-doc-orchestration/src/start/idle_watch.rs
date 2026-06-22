@@ -73,6 +73,19 @@ fn gather_convergence_facts(
     }
 }
 
+fn editor_typing_active_for_idle_queue(file: &std::path::Path) -> bool {
+    let debounce_ms = crate::preflight::preflight_debounce_ms(file);
+    let file_str = file.to_string_lossy();
+    if crate::debounce::is_typing_via_file(&file_str, debounce_ms) {
+        return true;
+    }
+    let absolute = crate::git::resolve_absolute_file_path(file);
+    if absolute == file {
+        return false;
+    }
+    crate::debounce::is_typing_via_file(&absolute.to_string_lossy(), debounce_ms)
+}
+
 /// `#fbwire` / `#fullboundary` Phase 2 — the convergence gate could not be
 /// satisfied within `CONVERGENCE_GATE_TIMEOUT_MS` (editor IPC wedged). Persist a
 /// replayable [`crate::convergence_playback::ConvergencePlayback`] artifact and
@@ -471,6 +484,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut last_pending_enter_resubmitted: Option<String> = None;
             let mut clear_cooldown_logged = false;
             let mut route_submit_in_flight_logged = false;
+            let mut editor_typing_active_logged = false;
             let mut context_reset_policy_error_logged = false;
             let mut idle_busy_ticks: u32 = 0;
             // `#clearcontresume`: consecutive idle-prompt polls observed while a
@@ -780,6 +794,31 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
             } else {
                 route_submit_in_flight_logged = false;
+            }
+            let editor_typing_active =
+                active_head.is_some() && editor_typing_active_for_idle_queue(&path);
+            if editor_typing_active {
+                if !editor_typing_active_logged {
+                    log_event(
+                        &mut session_log,
+                        &format!(
+                            "idle_queue_watch_skipped harness={} reason=editor_typing_active file={}",
+                            harness.binary,
+                            path.display()
+                        ),
+                    );
+                    crate::ops_log::log_op(
+                        &path,
+                        &format!(
+                            "idle_queue_watch_skipped file={} harness={} reason=editor_typing_active",
+                            path.display(),
+                            harness.binary
+                        ),
+                    );
+                    editor_typing_active_logged = true;
+                }
+            } else {
+                editor_typing_active_logged = false;
             }
             let context_clear_marker =
                 match crate::context_clear_in_flight::context_clear_in_flight(&path) {
@@ -1833,10 +1872,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     last_context_reset_head.as_deref(),
                     context_reset_in_flight,
                 );
-                match idle_queue_context_reset_decision(
+                match idle_queue_context_reset_decision_with_editor_typing(
                     prompt_visible,
                     turn_active,
                     route_submit_in_flight,
+                    editor_typing_active,
                     active_head.as_deref(),
                     reset_already_sent_for_active_slot,
                     context_reset_reason.is_some(),
@@ -1998,6 +2038,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     IdleQueueContextResetDecision::SkipNoActiveHead
                     | IdleQueueContextResetDecision::SkipNotIdle
                     | IdleQueueContextResetDecision::SkipTurnActive
+                    | IdleQueueContextResetDecision::SkipEditorTyping
                     | IdleQueueContextResetDecision::SkipRouteSubmitInFlight
                     | IdleQueueContextResetDecision::SkipAlreadyResetHead
                     | IdleQueueContextResetDecision::SkipNoResetNeeded => {}
@@ -2163,15 +2204,16 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     );
                     continue;
                 }
-                match idle_queue_drain_decision(
+                match idle_queue_drain_decision_with_editor_typing(IdleQueueDrainDecisionFacts {
                     clear_cooldown_active,
                     prompt_visible,
                     turn_active,
-                    drain_owner_lease.is_some(),
+                    self_driving_loop_active: drain_owner_lease.is_some(),
                     route_submit_in_flight,
-                    active_head.as_deref(),
-                    last_dispatched.as_deref(),
-                ) {
+                    editor_typing_active,
+                    active_head: active_head.as_deref(),
+                    last_dispatched: last_dispatched.as_deref(),
+                }) {
                     IdleQueueDrainDecision::Dispatch => {
                         // `#qstallguard` Layer B/C interaction: the supervisor idle-watch
                         // is itself continuing the drain (whether the queue is paused —
@@ -2493,6 +2535,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                     IdleQueueDrainDecision::SkipNotIdle
                     | IdleQueueDrainDecision::SkipTurnActive
+                    | IdleQueueDrainDecision::SkipEditorTyping
                     | IdleQueueDrainDecision::SkipRouteSubmitInFlight
                     | IdleQueueDrainDecision::SkipClearCooldown
                     | IdleQueueDrainDecision::SkipAlreadyDispatched => {}
@@ -2616,6 +2659,23 @@ mod tests {
                 true,
             ),
             IdleQueueContextResetDecision::Reset
+        );
+    }
+
+    #[test]
+    fn idle_queue_typing_guard_checks_absolute_editor_path() {
+        let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir_in(&cwd).unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(&doc, "body\n").unwrap();
+        let relative_doc = doc.strip_prefix(&cwd).unwrap();
+
+        crate::debounce::document_changed(doc.to_string_lossy().as_ref());
+
+        assert!(
+            super::editor_typing_active_for_idle_queue(relative_doc),
+            "route-owned supervisors may hold a relative path while editor typing is recorded with the absolute path"
         );
     }
 

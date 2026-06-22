@@ -101,14 +101,46 @@ I located the exact root cause for why the answered "JB Run Agent Doc stalled wi
 **Recommended next step:** recycle the supervisor/editor to clear the `ack_mismatch` IPC wedge, then run `do [#qheadstrike]` as a focused cycle on the healthy session — the plan now makes it a targeted ~1-file change plus one test, not a re-investigation. If you'd rather halt the re-fire churn first, set `queue: stop` in frontmatter (an `admin queue pause` only suppresses unattended supervisor injection, not the head re-surfacing).
 
 Not auto-looping: the answered head will keep re-surfacing until P2 lands (it can't strike while IPC is wedged), so looping would only churn.
-<!-- agent:boundary:c697560d -->
+❯ do [#qheadstrike]
+
+### Re: ops.log should carry timestamp + doc name + session id + turn id — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: All log output should include a timestamp...especially ops.log. ops.log could also include the name of the agent document, the session id, and turn id for easier tracking when working with multiple documents.
+
+
+> **Queue prompt:** :pushpin: All log output should include a timestamp...especially ops.log. ops.log could also include the name of the agent document, the session id, and turn id for easier tracking when working with multiple documents.
+
+Shipped (`#opslogtrack`, agent-doc submodule `50d8f021`, superproject `ec280c65d`).
+
+**Timestamp:** `ops.log` already carries an ISO-8601 UTC timestamp on every line (`[<iso-ts>] …`, `#opslogts`) — so that half was already in place. (`cycles.jsonl` is also already ISO-timestamped.)
+
+**New — doc/session/turn attribution:** every `ops.log` line now gains a suffix:
+
+```
+[2026-06-21T21:05:46Z] <message> doc=agent-doc-bugs2 session=b26b9957-… turn=cycle-1782090233572
+```
+
+- `doc=<stem>` — the agent document name (cheap, derived from the path; always present). This is the key disambiguator since `ops.log` is **per-project** and interleaves lines from every document running in the project.
+- `session=<id>` — the `agent_doc_session` frontmatter id, parsed once and cached per process (immutable per doc, so no per-line YAML parse).
+- `turn=<cycle_id>` — the current cycle/turn id from the cycle-state sidecar.
+
+`session`/`turn` are best-effort (omitted when unavailable, e.g. a doc with no frontmatter or no open cycle).
+
+**Why appended, not prepended:** the suffix goes at the *end* of each line so it never disturbs the positional message parsers (`gate_verify`'s `strip_prefix("s760 clear-decision …")`, which iterates `key=value` fields and ignores unknown `doc`/`session`/`turn` keys) or `contains()`-based ops.log marker scans. Verified safe against all current consumers.
+
+Test: `log_op_appends_doc_and_session_tracking_suffix` (asserts the suffix + that the message stays at the front of the body); `make check` green (4949). Filed `[#opslogtrackverify]` as the non-blocking live check (the suffix goes live once the supervisor recycles onto the freshly-built binary).
+
+Scope note: I targeted `ops.log` (your stated priority — *"especially ops.log"*). The broader stderr/`eprintln!` surface is much larger and unscoped; if you want timestamps there too, say the word and I'll file it.
+<!-- agent:boundary:6d7aa67e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
 - ~~The end part of the response that breaks down churn with tips shows up in the Claude Code console but not in the document. That part of the response should be in the document.~~
-- :pushpin: All log output should include a timestamp...especially ops.log. ops.log could also include the name of the agent document, the session id, and turn id for easier tracking when working with multiple documents.
+- ~~:pushpin: All log output should include a timestamp...especially ops.log. ops.log could also include the name of the agent document, the session id, and turn id for easier tracking when working with multiple documents.~~
 - :pushpin: do [#tb4q]
 - :pushpin: do [#k7mf]
 - :pushpin: Add `Stop Agent` and `Restart Agent` in JB + VSCode menus.
@@ -171,6 +203,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#opslogtrackverify] [operator-verify] #opslogtrack Live-verify the ops.log doc/session/turn suffix (agent-doc submodule 50d8f021, superproject ec280c65d). Code shipped + make check green (4949); NOT installed (STOP-cutting-releases — the supervisor auto-installs from source at its idle boundary). After the supervisor recycles onto the new binary, confirm `.agent-doc/logs/ops.log` lines end with ` doc=agent-doc-bugs2 session=<id> turn=cycle-<n>` and that two docs running concurrently are distinguishable by the doc= field.
 - [ ] [#supinstallvis] [recommended] #agent-doc-bug #supinstallfeedback follow-up: the supervisor auto-install status (surface_supervisor_auto_install_status, idle_watch.rs) is surfaced ONLY as a transient tmux display-message on the status line, which is easy to miss while the pane scrollback keeps showing the misleading post-exit "Press Enter to restart" keepalive — so an operator watching the pane body still perceives a ~1-min stall. Residual: make the rebuild state visible in the pane BODY/scrollback (not just the status line) without disturbing the keepalive Enter-to-restart reader, e.g. a pane title set + a single non-input-consuming visible line, or render it through the JB/VSCode plugin notification surface (overlaps #qpauseux notification rendering). Decide the safe pane-write mechanism with the operator before implementing (send-keys risks being consumed by the keepalive). Plan TBD.
 - [ ] [#agentreloadrestart] restart-agent Phase 1: supervisor restart re-resolves harness from current frontmatter (agent claude->opencode takes effect on restart) + boundary auto-restart when resolved harness differs, behind agent_doc_agent_change_restart (default ON). Log harness_change_detected old/new + agent_restart_boundary_gate + agent_restart_performed. SimWorld + make tmux-ci. Plan: tasks/agent-doc/plan-restart-agent.md
 - [ ] [#restartagentmenu] restart-agent Phase 2 (after agentreloadrestart): RestartAgentAction.kt JB menu cmd mirroring RestartSupervisorProcessAction.kt + plugin.xml registration + TerminalUtil restart wiring; bump pluginVersion; build signed+unsigned. Log action invocation + resolved harness. Decide alongside-vs-replace Restart Supervisor Process with operator. Plan: tasks/agent-doc/plan-restart-agent.md

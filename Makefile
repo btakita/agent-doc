@@ -1,13 +1,21 @@
-.PHONY: build build-release release test sim-medium tmux-ci clippy check precommit install install-hooks clean init-python wheel publish publish-crate publish-pypi bump-plugin
+.PHONY: build build-release release test sim-medium tmux-ci clippy check precommit timings install install-full install-hooks clean init-python wheel publish publish-crate publish-pypi bump-plugin
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
 TMUX_TEST_THREADS ?= 1
 CARGO_CLEAN_ENV = env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE
+LOCAL_INSTALL_PROFILE ?= release-local
+LOCAL_INSTALL_TARGET_DIR ?= target/local-install
+LOCAL_LINKER ?= $(shell if command -v mold >/dev/null 2>&1; then printf '%s' mold; elif command -v ld.lld >/dev/null 2>&1 || command -v lld >/dev/null 2>&1; then printf '%s' lld; fi)
+LOCAL_RUSTFLAGS ?= $(if $(LOCAL_LINKER),-C link-arg=-fuse-ld=$(LOCAL_LINKER),)
+LOCAL_CARGO_ENV = CARGO_INCREMENTAL=1
+ifneq ($(strip $(LOCAL_RUSTFLAGS)),)
+LOCAL_CARGO_ENV += RUSTFLAGS="$(LOCAL_RUSTFLAGS)"
+endif
 
 # Build debug binary
 build:
-	cargo build
+	$(LOCAL_CARGO_ENV) cargo build
 
 # Build release binary, cdylib, and symlink to .bin/
 build-release:
@@ -90,9 +98,19 @@ check: clippy test sim-medium version-sync
 precommit: check plugin-version-check
 	cargo run --quiet -- audit-docs
 
-# Install binary + versioned cdylib to ~/.cargo/bin
+# Emit Cargo's build-timing report for local bottleneck analysis.
+timings:
+	$(LOCAL_CARGO_ENV) cargo build --timings
+
+# Fast local install: reusable incremental target dir + local release profile.
 install:
-	cargo install --path .
+	$(LOCAL_CARGO_ENV) cargo install --path . --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --force
+	@$(LOCAL_CARGO_ENV) cargo build --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --lib
+	@CARGO_TARGET_DIR="$(LOCAL_INSTALL_TARGET_DIR)" agent-doc lib-install --profile "$(LOCAL_INSTALL_PROFILE)"
+
+# Full optimized local install for pre-release parity.
+install-full:
+	cargo install --path . --force
 	@cargo build --release --lib
 	@agent-doc lib-install
 

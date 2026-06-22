@@ -1492,13 +1492,12 @@ pub(crate) fn newest_crate_source_mtime_secs(crate_root: &Path) -> Option<u64> {
     (newest > 0).then_some(newest)
 }
 
-/// `#supautoinstall` — run the dogfood build+install for agent-doc's own source from
-/// `crate_root`, the historical manual refresh steps:
-/// `cargo build --release` → `cargo install --path .` → `agent-doc lib-install`. Runs IN
-/// THE SUPERVISOR at an idle boundary (never the finalize client mid-cycle), which is what
-/// root-fixes the mid-session-install drift. After it succeeds the installed binary is
-/// newer than the running supervisor process, so the existing `process_binary_is_stale`
-/// recycle path hot-reloads onto it. Returns `Err` naming the failed step.
+/// `#supautoinstall` — run the dogfood local install for agent-doc's own source
+/// from `crate_root`. Runs IN THE SUPERVISOR at an idle boundary (never the
+/// finalize client mid-cycle), which is what root-fixes the mid-session-install
+/// drift. After it succeeds the installed binary is newer than the running
+/// supervisor process, so the existing `process_binary_is_stale` recycle path
+/// hot-reloads onto it. Returns `Err` naming the failed step.
 pub(crate) fn run_supervisor_auto_install(crate_root: &Path) -> Result<()> {
     run_supervisor_auto_install_with_retry(
         crate_root,
@@ -1509,14 +1508,15 @@ pub(crate) fn run_supervisor_auto_install(crate_root: &Path) -> Result<()> {
 
 /// `#autoinstallretry` — number of times to attempt the auto-install step sequence
 /// before falling back to operator refresh, and the backoff between attempts. The
-/// `cargo build --release` step is most failures' culprit and is almost always
-/// TRANSIENT: the supervisor builds from the live working tree, so it can catch a
-/// mid-edit non-compiling window (an agent/operator part-way through a multi-file
-/// edit) or lose a cargo build/target lock to a concurrent `make check`. A bounded
-/// retry with backoff rescues both — by the next attempt the edit has committed
-/// (edits land atomically) and the lock has freed — instead of giving up after one
-/// failure and stalling the installed binary at the last good commit (which is what
-/// produced the false "stale binary, install manually" handoffs).
+/// `make install` build step is most failures' culprit and is almost always
+/// TRANSIENT: the supervisor builds from the live working tree, so it can catch
+/// a mid-edit non-compiling window (an agent/operator part-way through a
+/// multi-file edit) or lose a cargo build/target lock to a concurrent
+/// `make check`. A bounded retry with backoff rescues both — by the next
+/// attempt the edit has committed (edits land atomically) and the lock has
+/// freed — instead of giving up after one failure and stalling the installed
+/// binary at the last good commit (which is what produced the false
+/// "stale binary, install manually" handoffs).
 const AUTO_INSTALL_MAX_ATTEMPTS: u32 = 3;
 const AUTO_INSTALL_RETRY_BACKOFF_SECS: u64 = 20;
 
@@ -1526,15 +1526,11 @@ pub(crate) fn auto_install_should_retry(attempt: u32, max_attempts: u32) -> bool
     attempt < max_attempts
 }
 
-/// Run the auto-install step sequence ONCE: `cargo build --release` →
-/// `cargo install --path .` → `agent-doc lib-install`. Returns `Err` naming the
-/// failed step. The later steps are idempotent, so retrying the whole sequence is safe.
+/// Run the auto-install sequence ONCE through `make install`. The Makefile owns
+/// the local-dev profile, incremental target dir, linker selection, and cdylib
+/// install flags. The target is idempotent, so retrying it is safe.
 fn run_auto_install_steps_once(crate_root: &Path) -> Result<()> {
-    let steps: [(&str, &[&str]); 3] = [
-        ("cargo", &["build", "--release"]),
-        ("cargo", &["install", "--path", ".", "--quiet", "--force"]),
-        ("agent-doc", &["lib-install"]),
-    ];
+    let steps: [(&str, &[&str]); 1] = [("make", &["install"])];
     for (program, args) in steps {
         let status = std::process::Command::new(program)
             .args(args)
@@ -1552,10 +1548,10 @@ fn run_auto_install_steps_once(crate_root: &Path) -> Result<()> {
 }
 
 /// `#autoinstallretry` — retry the auto-install sequence up to `max_attempts`,
-/// sleeping `backoff` between attempts, so a transient `cargo build --release`
-/// failure (mid-edit working tree / build-lock contention) self-heals instead of
-/// stalling the installed binary. Returns the LAST attempt's error after exhausting
-/// retries (the caller then falls back to operator refresh).
+/// sleeping `backoff` between attempts, so a transient `make install` failure
+/// (mid-edit working tree / build-lock contention) self-heals instead of
+/// stalling the installed binary. Returns the LAST attempt's error after
+/// exhausting retries (the caller then falls back to operator refresh).
 fn run_supervisor_auto_install_with_retry(
     crate_root: &Path,
     max_attempts: u32,

@@ -250,7 +250,7 @@ This is the **only PR visible in production**. Replaces the existing `start.rs:1
 ### Done criteria
 - All 6 end-to-end tests green.
 - `#![allow(dead_code)]` removed.
-- `make check` + `cargo install --path .` + manual smoke test per release checklist.
+- `make check` + `make install-full` + manual smoke test per release checklist.
 - `src/agent-doc/VERSIONS.md` entry drafted.
 - Release notes draft mentions the behavior change.
 

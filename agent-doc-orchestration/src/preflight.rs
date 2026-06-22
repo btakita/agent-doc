@@ -920,8 +920,8 @@ fn classify_stale_install_artifacts(
         .collect()
 }
 
-/// Unix mtime (seconds) of `path`, following symlinks (installed cdylibs are
-/// symlinks into `target/release`). `None` when missing/unreadable.
+/// Unix mtime (seconds) of `path`, following symlinks. `None` when
+/// missing/unreadable.
 fn artifact_mtime_secs(path: &Path) -> Option<u64> {
     std::fs::metadata(path)
         .ok()?
@@ -930,6 +930,10 @@ fn artifact_mtime_secs(path: &Path) -> Option<u64> {
         .duration_since(std::time::UNIX_EPOCH)
         .ok()
         .map(|d| d.as_secs())
+}
+
+fn newest_artifact_mtime(paths: &[PathBuf]) -> Option<u64> {
+    paths.iter().filter_map(|path| artifact_mtime_secs(path)).max()
 }
 
 /// `~/.cargo/bin` (honoring `CARGO_HOME`), or `None` when unresolvable.
@@ -1013,6 +1017,7 @@ fn stale_install_warning(doc_git_root: &Path) -> Option<PreflightWarning> {
 
     let bin_dir = cargo_bin_dir();
     let release_dir = repo.join("target/release");
+    let local_install_dir = repo.join("target/local-install/release-local");
     let artifacts: Vec<(&'static str, Option<u64>)> = vec![
         (
             "~/.cargo/bin/agent-doc",
@@ -1025,12 +1030,18 @@ fn stale_install_warning(doc_git_root: &Path) -> Option<PreflightWarning> {
             bin_dir.as_deref().and_then(installed_cdylib_mtime),
         ),
         (
-            "target/release/agent-doc",
-            artifact_mtime_secs(&release_dir.join("agent-doc")),
+            "built agent-doc",
+            newest_artifact_mtime(&[
+                release_dir.join("agent-doc"),
+                local_install_dir.join("agent-doc"),
+            ]),
         ),
         (
-            "target/release cdylib",
-            artifact_mtime_secs(&release_dir.join("libagent_doc.so")),
+            "built cdylib",
+            newest_artifact_mtime(&[
+                release_dir.join("libagent_doc.so"),
+                local_install_dir.join("libagent_doc.so"),
+            ]),
         ),
     ];
 
@@ -3201,6 +3212,27 @@ mod tests {
                 .is_empty()
         );
     }
+
+    #[test]
+    fn newest_artifact_mtime_uses_freshest_existing_path() {
+        let dir = TempDir::new().unwrap();
+        let old = dir.path().join("target/release/agent-doc");
+        let fresh = dir.path().join("target/local-install/release-local/agent-doc");
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(fresh.parent().unwrap()).unwrap();
+        std::fs::write(&old, "old").unwrap();
+        std::fs::write(&fresh, "fresh").unwrap();
+
+        filetime::set_file_mtime(&old, filetime::FileTime::from_unix_time(1_000, 0)).unwrap();
+        filetime::set_file_mtime(&fresh, filetime::FileTime::from_unix_time(2_000, 0)).unwrap();
+
+        assert_eq!(
+            newest_artifact_mtime(&[old, fresh]),
+            Some(2_000),
+            "fresh local-install output should satisfy stale-install freshness"
+        );
+    }
+
     #[test]
     fn locate_agent_doc_source_repo_matches_root_and_dogfood_layout() {
         let agent_doc_manifest = "[package]\nname = \"agent-doc\"\nversion = \"0.0.0\"\n";

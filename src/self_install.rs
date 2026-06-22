@@ -9,6 +9,7 @@ pub fn run(
     source_root: Option<&Path>,
     target_dir: Option<&Path>,
     keep_worktree: bool,
+    profile: &str,
 ) -> Result<()> {
     let repo_root = match source_root {
         Some(path) => path
@@ -20,27 +21,29 @@ pub fn run(
     let worktree = IsolatedWorktree::create(&repo_root, keep_worktree)?;
     eprintln!("[self-install] worktree: {}", worktree.path().display());
 
+    let install_label = format!("cargo install --path . --profile {profile}");
     run_command(
         worktree.path(),
         "cargo",
-        &["install", "--path", "."],
-        "cargo install --path .",
+        &["install", "--path", ".", "--profile", profile],
+        &install_label,
     )?;
+    let lib_build_label = format!("cargo build --profile {profile} --lib");
     run_command(
         worktree.path(),
         "cargo",
-        &["build", "--release", "--lib"],
-        "cargo build --release --lib",
+        &["build", "--profile", profile, "--lib"],
+        &lib_build_label,
     )?;
 
-    let lib_source = release_lib_path(worktree.path());
+    let lib_source = profile_lib_path(worktree.path(), profile);
     if !lib_source.exists() {
         bail!(
             "[self-install] built shared library not found: {}",
             lib_source.display()
         );
     }
-    crate::lib_install::run_paths(Some(&lib_source), target_dir)?;
+    crate::lib_install::run_paths(Some(&lib_source), target_dir, profile)?;
 
     if keep_worktree {
         eprintln!(
@@ -196,11 +199,8 @@ fn run_command(cwd: &Path, program: &str, args: &[&str], label: &str) -> Result<
     Ok(())
 }
 
-fn release_lib_path(worktree: &Path) -> PathBuf {
-    worktree
-        .join("target")
-        .join("release")
-        .join(crate::lib_install::platform_lib_name())
+fn profile_lib_path(worktree: &Path, profile: &str) -> PathBuf {
+    crate::lib_install::profile_lib_path(worktree, None, profile)
 }
 
 #[cfg(test)]
@@ -223,12 +223,12 @@ mod tests {
     }
 
     #[test]
-    fn release_lib_path_points_at_worktree_release_cdylib() {
+    fn profile_lib_path_points_at_worktree_profile_cdylib() {
         let root = PathBuf::from("/tmp/worktree");
         assert_eq!(
-            release_lib_path(&root),
+            profile_lib_path(&root, "release-local"),
             root.join("target")
-                .join("release")
+                .join("release-local")
                 .join(crate::lib_install::platform_lib_name())
         );
     }

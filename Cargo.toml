@@ -82,3 +82,10 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[profile.release-local]
+inherits = "release"
+lto = "off"
+codegen-units = 256
+incremental = true
+strip = false

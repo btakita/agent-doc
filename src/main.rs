@@ -1202,9 +1202,12 @@ enum Commands {
     },
     /// Install versioned shared library with atomic symlink swap
     LibInstall {
-        /// Source .so path (default: target/release/libagent_doc.so)
+        /// Source .so path (default: target/<profile>/libagent_doc.so)
         #[arg(long)]
         source: Option<String>,
+        /// Cargo profile to read when --source is omitted
+        #[arg(long, default_value = "release")]
+        profile: String,
         /// Target directory (default: directory containing agent-doc binary)
         #[arg(long)]
         target_dir: Option<String>,
@@ -1218,6 +1221,9 @@ enum Commands {
         /// Target directory for the shared library (default: binary directory)
         #[arg(long)]
         target_dir: Option<PathBuf>,
+        /// Cargo profile to build in the isolated worktree
+        #[arg(long, default_value = "release")]
+        profile: String,
         /// Leave the temporary worktree on disk for debugging
         #[arg(long)]
         keep_worktree: bool,
@@ -3016,14 +3022,24 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Commands::GcLibs { target_dir } => lib_gc::run(target_dir.as_deref()),
-        Commands::LibInstall { source, target_dir } => {
-            lib_install::run(source.as_deref(), target_dir.as_deref())
+        Commands::LibInstall {
+            source,
+            profile,
+            target_dir,
+        } => {
+            lib_install::run(source.as_deref(), target_dir.as_deref(), &profile)
         }
         Commands::SelfInstall {
             source_root,
             target_dir,
+            profile,
             keep_worktree,
-        } => self_install::run(source_root.as_deref(), target_dir.as_deref(), keep_worktree),
+        } => self_install::run(
+            source_root.as_deref(),
+            target_dir.as_deref(),
+            keep_worktree,
+            &profile,
+        ),
         Commands::ListCommands => commands::run(),
         Commands::Session { action } => match action {
             Some(SessionAction::Set { name }) => session_cmd::set(&name),

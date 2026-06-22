@@ -78,28 +78,35 @@ pub fn install_versioned(source: &Path, target_dir: &Path, version: &str) -> Res
     Ok(dst)
 }
 
-pub fn run(source: Option<&str>, target_dir: Option<&str>) -> Result<()> {
+pub fn run(source: Option<&str>, target_dir: Option<&str>, profile: &str) -> Result<()> {
     let source_path = source.map(PathBuf::from);
     let target_dir = target_dir.map(PathBuf::from);
-    run_paths(source_path.as_deref(), target_dir.as_deref())
+    run_paths(source_path.as_deref(), target_dir.as_deref(), profile)
 }
 
-pub(crate) fn run_paths(source: Option<&Path>, target_dir: Option<&Path>) -> Result<()> {
+pub(crate) fn run_paths(
+    source: Option<&Path>,
+    target_dir: Option<&Path>,
+    profile: &str,
+) -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     let ext = platform_lib_ext();
+    let profile = normalized_profile(profile);
 
     let source_path = match source {
         Some(s) => s.to_path_buf(),
         None => {
             let cwd = std::env::current_dir()?;
-            cwd.join(format!("target/release/{}", platform_lib_name()))
+            let cargo_target_dir = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
+            profile_lib_path(&cwd, cargo_target_dir.as_deref(), profile)
         }
     };
 
     if !source_path.exists() {
         anyhow::bail!(
-            "[lib-install] source not found: {}\nBuild with: cargo build --release --lib",
-            source_path.display()
+            "[lib-install] source not found: {}\nBuild with: cargo build --profile {} --lib",
+            source_path.display(),
+            profile
         );
     }
 
@@ -132,6 +139,26 @@ pub(crate) fn run_paths(source: Option<&Path>, target_dir: Option<&Path>) -> Res
     auto_recycle_after_install();
 
     Ok(())
+}
+
+fn normalized_profile(profile: &str) -> &str {
+    match profile.trim() {
+        "" => "release",
+        trimmed => trimmed,
+    }
+}
+
+pub(crate) fn profile_lib_path(
+    cwd: &Path,
+    cargo_target_dir: Option<&Path>,
+    profile: &str,
+) -> PathBuf {
+    let target_root = cargo_target_dir
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| cwd.join("target"));
+    target_root
+        .join(normalized_profile(profile))
+        .join(platform_lib_name())
 }
 
 /// `#autorecycle-on-install`: default-on resolution for auto-recycling running
@@ -242,6 +269,28 @@ mod tests {
         assert!(symlink.is_symlink());
         let target = fs::read_link(&symlink).unwrap();
         assert_eq!(target.to_str().unwrap(), versioned_lib_name("1.2.3"));
+    }
+
+    #[test]
+    fn profile_lib_path_uses_profile_and_cargo_target_dir() {
+        let cwd = PathBuf::from("/tmp/agent-doc");
+
+        assert_eq!(
+            profile_lib_path(&cwd, None, "release-local"),
+            cwd.join("target")
+                .join("release-local")
+                .join(platform_lib_name())
+        );
+        assert_eq!(
+            profile_lib_path(&cwd, Some(Path::new("target/local-install")), "release-local"),
+            PathBuf::from("target/local-install")
+                .join("release-local")
+                .join(platform_lib_name())
+        );
+        assert_eq!(
+            profile_lib_path(&cwd, None, " "),
+            cwd.join("target").join("release").join(platform_lib_name())
+        );
     }
 
     #[test]

@@ -86,7 +86,7 @@ Done. Triaged all 30 gated items (4 backlog + 26 review) per Option A:
 **Left gated (genuinely operator/externally blocked, ~22):** TMO writeback chain (`#dzmm`/`#dzmm-writeback-replay`/`#67v2`/`#67v2-auto-advance`/`#67v2-aa-local`/`#zwws*`) needs `#7a4d`+`#k2xg`; cutover/SSO (`#efs-cutover-sso-plan`/`#next-steps`/`#214f`) and `#xcvg*` need `#m6ch` creds / a comms-path decision; `#jnzs*` await Judith; `#msg-unify3/4` await dual-write soak; `#dropbox-sync-adapter` needs Dropbox access; `#5eq8` is design-blocked; `#nthc`/`#dealtab500`/`#5q7z*`/`#proprate` are operator-verify or need a business-rule decision. These correctly stay in review rather than churning the go-queue.
 
 **Two blockers before the un-gated items can auto-drain:** the queue is still **paused** (stale qflood guard — say "unpause" and I'll clear it), and the installed binary is **stale vs `fefc5f2a`** (every `finalize` this session wedged the IPC socket and recovered via `--force-disk`). Recommend `make install` in `src/agent-doc` + `admin recycle` before resuming the drain.
-<!-- agent:boundary:8e1cf15c -->
+<!-- agent:boundary:2bf85c7f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -105,7 +105,6 @@ After 20:30
 <!-- agent:backlog priority queue -->
 - [ ] [#cmtsec] [recommended] (UPDATED w/ D1 data 2026-06-20) d6b78994 "Committed amount" section shows a REAL submitted proposal: investor@ (btak.dev+investor@gmail.com) proposal_amount=$100,000 @ 6.5%, submitted 2026-06-19, selected_at=null — NOT a null-amount artifact, so for this deal the block is correct. Latent UI note still valid for OTHER rows: interest_has_proposal_ (admin/deal_detail.tsx:730) renders the block whenever proposal_submitted_at is set, which lib/investor/shared.ts:504 stamps on ANY of amount/rate/points — a rate/points-only proposal would show "Committed amount: -". Optional: gate on proposal_amount != null or relabel "Proposed terms". If the $100k investor@ proposal was unintended/test data, clear that interest row to remove the section.
 - [/] [#5q7z-ship] [operator-verify] DEPLOYED 2026-06-19 (worker version 0dd3c983; EFS d8c17b4, pointer 58a2c5fea). Remaining = operator live-verify only: open the admin approve flow on an already-in-TMO loan (deal 7a0c1463 / loan 45ddae53 GQI751) and confirm it no longer returns TMO 400 Duplicate loan number and the Accept-and-Send button reads Already in TMO. Advances #5q7z.
-- [ ] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
 - [/] [#67v2-aa-local] [recommended] Admin pipeline auto-advance local half (advances #67v2-auto-advance): define stage-requirement checks from the TMO-aligned Kanban and enqueue audited status updates to tmo_cache_outbox; replay stays gated on #dzmm. Depends on the #67v2 Kanban stages being built first.
 <!-- /agent:backlog -->
 
@@ -141,6 +140,7 @@ After 20:30
 ## Completed / Reaped
 
 <!-- agent:icebox -->
+- [ ] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
 - [ ] [#ghl-stage-bridge] [recommended] Implement an event-driven GHL stage bridge from EFS Deal Pipeline state to HighLevel contacts/opportunities/workflows for Processing, Underwriting, Terms negotiation, and Closing while keeping EFS/D1 canonical for loan, lender-selection, borrower portal, document, audit, and funding state.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document

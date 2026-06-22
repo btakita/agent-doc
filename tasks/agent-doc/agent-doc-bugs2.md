@@ -72,13 +72,60 @@ Verification passed locally: focused queue-consume ACK mismatch tests, the relat
 Parent superproject commit `3c2cc2fa3` updates the `src/agent-doc` pointer, but pushing parent `main` is blocked because this worktree is ahead `86` and behind `15` relative to `origin/main`; I did not rebase over unrelated dirty work. `#98t4` remains open as the separate publish-packaging blocker and was restored to an active queue item rather than being falsely consumed.
 
 Supervisor recycle was requested for the superproject controller.
-<!-- agent:boundary:0d7e850e -->
+
+### Re: JB Run Agent Doc typing guard — gpt-5
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` still does not submit sometimes. Sometimes it does submit. There also is some logic that adds a prompt while I'm typing into the queue. I know this because that auto-prompt adds `agent-doc tasks/agent-doc/agent-doc-bugs2.md` and `/clear` while JB `Run Agent Doc` sends `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`. None of the prompts were submitted. The send-docs should be completely binary logic sent by the PCP->supervisor. No skill agent logic should be involved.
+
+
+> **Queue prompt:**
+> JB `Run Agent Doc` sometimes does not submit, and an auto-prompt sometimes adds `agent-doc tasks/agent-doc/agent-doc-bugs2.md` plus `/clear` while the JB action sends the absolute-path `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`. The send-docs path should be binary PCP->supervisor logic only.
+
+Fixed the supervisor-side root cause in `src/agent-doc`: the idle queue watcher now treats active editor typing as a hard skip for both context-reset `/clear` submission and queue-drain `agent-doc <FILE>` submission. The guard checks the route-owned path and its resolved absolute path, so a supervisor holding a relative session path still sees the JetBrains typing sidecar keyed by the absolute path. No skill-agent logic is involved in that decision.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/preflight.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start/decisions.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start/idle_watch.rs`
+- `src/agent-doc/editors/SPEC.md`
+- `src/agent-doc/VERSIONS.md`
+- `.codex/AGENTS.md` and the parent `src/agent-doc` submodule pointer were updated locally after `agent-doc skill install` and the submodule commit.
+
+Implementation notes:
+- Added `SkipEditorTyping` decisions for idle queue context reset and drain.
+- Added `editor_typing_active_for_idle_queue()` in the supervisor idle watcher, including absolute-path fallback.
+- Added regression coverage for both decision paths and for relative-path supervisor vs absolute-path editor typing sidecar.
+- Documented the binary-only Run behavior in the editor spec and added an unreleased version note.
+
+Verification:
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration editor_typing`
+- `cargo test -p agent-doc-orchestration typing_guard`
+- `cargo test -p agent-doc-orchestration idle_queue_`
+- `make check` passed locally: 4,999 tests passed, 241 skipped, plus doctests and the closeout simulation test.
+- `make install-full` completed, installing `agent-doc 0.34.38` and `libagent_doc-0.34.38.so` under `/home/brian/.cargo/bin`.
+- `agent-doc --version` reports `agent-doc 0.34.38`.
+- GitHub Actions CI for pushed submodule commit `df7ac7af` passed: `make check` and `make tmux-ci` completed successfully in run `27991483860`.
+
+Commits and push:
+- Pushed `src/agent-doc` commit `df7ac7af` (`fix idle queue typing guard`) to `btakita/agent-doc` `main`.
+- Created parent repo commit `19c76e484` (`chore: update agent-doc typing guard`) for the submodule pointer and `.codex/AGENTS.md` refresh.
+- Parent repo push to `btakita/agent-loop` `main` is blocked by pre-existing divergence: local `main` is ahead 92 and behind 15. I attempted `git rebase --autostash origin/main`, but aborted it after it hit an unrelated `src/boost-client` submodule conflict while replaying older local commits. The dirty user/session files were restored by the abort.
+
+No actionable follow-up backlog item was captured for this response; the only remaining caveat is the unrelated parent-branch integration needed before the local parent commit can push to `main`.
+
+Escalation: none.
+Confidence: high for the fixed supervisor race and coverage; parent repo push remains blocked on unrelated branch integration.
+<!-- agent:boundary:9851d5f1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~When rebuilding the binary + library, wait for both to complete before replacing the existing binary + library.~~
+- ~~JB `Run Agent Doc` still does not submit sometimes. Sometimes it does submit. There also is some logic that adds a prompt while I'm typing into the queue. I know this because that auto-prompt adds `agent-doc tasks/agent-doc/agent-doc-bugs2.md` and `/clear` while JB `Run Agent Doc` sends `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`. None of the prompts were submitted. The send-docs should be completely binary logic sent by the PCP->supervisor. No skill agent logic should be involved.~~
 ---
 :pushpin: Fix the root cause of this issue that occurred in this document.
 ```

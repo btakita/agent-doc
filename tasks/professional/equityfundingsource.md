@@ -108,7 +108,56 @@ Post-deploy verification:
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:34727946 -->
+
+### Re: admin reset password links + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> From /admin, I did a Forgot Password. I received an email. Clicking on the reset password link I got an error "Something went wrong" "This password reset link is invalid or has expired.".
+
+> **Queue prompt:**
+>
+> deploy
+
+Fixed and deployed. The production D1 token history showed the failure mode: four admin reset tokens were created within about 82 seconds, and each new Forgot Password request immediately marked the prior unused token as used. That meant an earlier email could arrive or be clicked after a later request and show the invalid/expired error even though it was just sent.
+
+The reset-token behavior now allows multiple unexpired emailed reset links to remain valid for the same user until one password reset succeeds. After a successful password change, the used token path revokes all remaining unused reset tokens for that user so older emails cannot reset the password afterward. Existing emails that were already invalidated before this deploy stay invalid; newly requested overlapping reset emails use the fixed behavior.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/password_reset.ts`
+- `src/equityfundingsource-dev/tests/auth.test.ts`
+- `src/equityfundingsource-dev/prds/admin-provisioning-spec.md`
+- `src/equityfundingsource-dev` parent submodule pointer
+
+Commands:
+- Production D1 inspection query for recent `password_reset_tokens` without printing token hashes
+- `bun test tests/auth.test.ts`
+- `make check`
+- `git diff --check`
+- `gh run list --workflow CI --limit 1` in the EFS submodule and parent repo
+- `bun run cf:d1:migrations:list:remote` before and after deploy
+- `make deploy`
+- Live smoke checks for `/`, `/admin`, and `/forgot-password?role=admin`
+
+Verification:
+- Focused auth suite passed, including the new regression test for two back-to-back reset emails where the first email still opens and a successful reset revokes the second link.
+- Full `make check` passed: `1126 pass`, `0 fail`, then app and Worker builds completed.
+- `git diff --check` passed.
+- Both the EFS submodule and parent repo report no GitHub workflow named `CI`, so there was no CI run to inspect.
+- Remote D1 reports `No migrations to apply`.
+- Live smoke checks returned root `200`, `/admin` `303` to admin login, and `/forgot-password?role=admin` `200`.
+
+Commits:
+- EFS submodule: `01f4ac9` (`fix(auth): keep overlapping reset links valid`) pushed to `origin/main`.
+- Parent local pointer: `2a61c34ff` (`chore: update efs submodule for reset links`) committed in the current divergent parent worktree.
+- Parent remote pointer: `fbc5a9f9f` (`chore: update efs submodule for reset links`) pushed to parent `origin/main` from a clean temporary worktree so unrelated local parent history/dirty files were not pushed.
+
+Deploy: activated Worker version `4b8e8114-a823-4765-9510-98dbaef4297c` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:13dc9d1a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -120,6 +169,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~From /admin, I did a Forgot Password. I received an email. Clicking on the reset password link I got an error "Something went wrong" "This password reset link is invalid or has expired.".~~
+- Make any email login links expire based on time. Use best security practice to set the expiration time. Is 1 day reasonable? The email should explain when the login link will expire.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

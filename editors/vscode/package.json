@@ -2,7 +2,7 @@
   "name": "agent-doc",
   "displayName": "Agent Doc",
   "description": "Submit markdown documents to AI agents via agent-doc",
-  "version": "0.2.30",
+  "version": "0.2.31",
   "publisher": "btakita",
   "icon": "icon.png",
   "license": "MIT",
@@ -63,6 +63,10 @@
         "title": "Agent Doc: Stop Agent"
       },
       {
+        "command": "agentDoc.cancelTurn",
+        "title": "Agent Doc: Cancel Turn"
+      },
+      {
         "command": "agentDoc.killSupervisor",
         "title": "Agent Doc: Kill Supervisor"
       },
@@ -120,6 +124,10 @@
           "when": "editorLangId == markdown"
         },
         {
+          "command": "agentDoc.cancelTurn",
+          "when": "editorLangId == markdown"
+        },
+        {
           "command": "agentDoc.killSupervisor",
           "when": "editorLangId == markdown"
         }
@@ -136,9 +144,14 @@
           "group": "agentDoc@2"
         },
         {
-          "command": "agentDoc.killSupervisor",
+          "command": "agentDoc.cancelTurn",
           "when": "editorLangId == markdown",
           "group": "agentDoc@3"
+        },
+        {
+          "command": "agentDoc.killSupervisor",
+          "when": "editorLangId == markdown",
+          "group": "agentDoc@4"
         }
       ]
     }

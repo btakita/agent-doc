@@ -701,6 +701,25 @@ object TerminalUtil {
     }
 
     /**
+     * Cancel Turn — `agent-doc session cancel-turn <relPath>`. Cancels the
+     * currently running turn while keeping the agent harness and its supervisor
+     * alive. No-op when the agent is idle, so it never closes the agent. Mirrors
+     * [stopAgent]'s session-subcommand shape.
+     */
+    fun cancelTurn(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        runSessionCommand(
+            project = project,
+            file = file,
+            args = listOf("cancel-turn"),
+            startedMessage = "Cancelling turn for ${file.name}",
+            onSuccess = { relativePath, output ->
+                showHint(project, output.ifBlank { "Cancelled turn for $relativePath (no-op if the agent was idle)." })
+            },
+            onComplete = onComplete,
+        )
+    }
+
+    /**
      * #s81q: Kill Supervisor — `agent-doc admin kill-supervisor <relPath>`. Stops
      * the whole route-owned supervisor process for this document. The CLI refuses
      * to kill the caller's own ancestor, so this runs from the editor's project

@@ -887,6 +887,19 @@ async function stopAgentAction(): Promise<void> {
     );
 }
 
+// Cancel Turn — `agent-doc session cancel-turn <rel>`. Cancels the currently
+// running turn while keeping the agent harness and its supervisor alive; no-op
+// when the agent is idle, so it never closes the agent. Mirrors stopAgentAction.
+async function cancelTurnAction(): Promise<void> {
+    await runSessionCommandForActiveFile(
+        'cancel-turn',
+        (output, rel) => {
+            showHint(buildSessionSuccessHint('cancel-turn', rel, output));
+        },
+        'cancel turn failed',
+    );
+}
+
 // #s81q: Kill Supervisor — `agent-doc admin kill-supervisor <rel>`. Stops the
 // whole route-owned supervisor process for this document. The CLI refuses to
 // kill the caller's own ancestor, so this runs from the editor's project root.
@@ -2626,6 +2639,9 @@ export function activate(context: vscode.ExtensionContext): void {
     );
     context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.stopAgent', stopAgentAction)
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.cancelTurn', cancelTurnAction)
     );
     context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.killSupervisor', killSupervisorAction)

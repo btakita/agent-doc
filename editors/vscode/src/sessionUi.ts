@@ -1,4 +1,4 @@
-export type SessionCommandName = 'status' | 'restart-supervisor' | 'stop-agent' | 'clear' | 'interrupt-clear' | 'doctor';
+export type SessionCommandName = 'status' | 'restart-supervisor' | 'stop-agent' | 'cancel-turn' | 'clear' | 'interrupt-clear' | 'doctor';
 
 export interface OutputPresentation {
     title: string;
@@ -81,6 +81,8 @@ export function buildSessionSuccessHint(
             return `Restart requested for supervisor handling ${relativePath}`;
         case 'stop-agent':
             return `Stopped agent for ${relativePath} (supervisor still running)`;
+        case 'cancel-turn':
+            return `Cancelled turn for ${relativePath} (no-op if the agent was idle)`;
         case 'clear':
             return `Cleared session context for ${relativePath}`;
         case 'interrupt-clear':

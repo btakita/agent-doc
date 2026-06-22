@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -38,6 +38,39 @@ completed
 Compacted content:
 - Archived 8 response topic(s): post-compaction state + the "queue all gated items" directive; Option A; #cmtsec lender proposal display; 5 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
+
+### Re: admin in-app notification endpoint — gpt-5
+
+> **Queue prompt:**
+>
+> "In-app admin notifications still fan out to the owner/all-admin recipients as before". Do not fan out to all admins. Instead, only the configured admin endpoint email btak.dev+efs@gmail.com.
+
+Done. Admin-facing secure-message in-app notification rows now target only the active admin user whose email matches `MESSAGE_ADMIN_NOTIFICATION_TO` (falling back to `MESSAGE_EMAIL_INBOUND_FALLBACK_TO` if needed). The old owner/all-active-admin fallback was removed for borrower-originated secure messages and unified lender/broker/borrower inbound replies. Admin emails still go to the same configured endpoint, and if no matching active admin user exists the email path still runs while the in-app row is skipped.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/borrower/messages/notify.ts`
+- `src/equityfundingsource-dev/tests/borrower-message-notify.test.ts`
+- `src/equityfundingsource-dev/tests/msgmail3-inbound-unified.test.ts`
+- `src/equityfundingsource-dev/.dev.vars.example`
+- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
+- `src/equityfundingsource-dev/prds/message-email-roundtrip.md`
+- `src/equityfundingsource-dev` parent submodule pointer
+
+Commands:
+- `bun test tests/borrower-message-notify.test.ts`
+- `bun test tests/borrower-message-notify.test.ts tests/msgmail3-inbound-unified.test.ts`
+- `git diff --check`
+- `make check`
+- `gh run list --workflow CI --limit 1`
+
+Verification: focused notification suites passed. Full `make check` passed with 1101 tests plus app and worker builds. GitHub still has no workflow named `CI`, so there was no remote CI run to inspect.
+
+Commits pushed: EFS submodule `283120b` (`fix(messages): route admin notifications to endpoint`) and parent pointer `9c7ab750c` (`chore: update efs submodule for admin endpoint notifications`).
+
+Escalation: none. Preflight still warns the installed `agent-doc` binary/cdylib are stale relative to source; I did not rebuild agent-doc as part of this product-code cycle.
+
+Confidence: high.
+<!-- agent:boundary:f8af93f6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -49,8 +82,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~In the admin email, do not CC all admins. Only send to the configured admin endpoint email btak.dev+efs@gmail.com.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~"In-app admin notifications still fan out to the owner/all-admin recipients as before". Do not fan out to all admins. Instead, only the configured admin endpoint email btak.dev+efs@gmail.com.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

@@ -206,7 +206,27 @@ Half done, and I hit a real wall on the other half. Here's the honest status.
 Tell me A, B, or C and I'll finish it + verify a live send end-to-end. I'd go with **A**.
 
 (Queue note: this doc's queue was operator-paused for flood earlier; these two prompts are the new work that unblocked it. Not auto-looping — this needs your decision.)
-<!-- agent:boundary:f0608a36 -->
+
+### Re: #efssubsend — efs@efs.briantakita.me via Resend (path A) — opus-4-8
+
+You said "if this only touches the existing EFS app email, it's ok — test/staging only," so I went with **A (Resend)**. It's **code- and infra-complete and shipped**, but the final live-send proof is **blocked on Resend auth** — handing that one external step to you.
+
+**Done this cycle (committed `2e31631`, pushed to EFS main; worker deployed `a184ba84`):**
+- **Resend send branch** added to `email_send_or_capture_`, preferred when `RESEND_API_KEY` is set (Cloudflare stays the fallback). The three notify gates (borrower-message / lending-group / broker) now treat a configured Resend key as a valid delivery path.
+- **`efs.briantakita.me` verified in Resend** — added the DKIM + `send.efs` SPF/MX records to the Cloudflare zone via API; Resend reports **DKIM verified, SPF verified**. These are on `resend._domainkey.efs` / `send.efs`, so they don't touch the existing inbound `efs` MX.
+- **`*_FROM` vars flipped** to `efs@efs.briantakita.me`; `RESEND_API_KEY` set as a worker secret.
+- **Tests**: full suite green (1095 pass, 0 fail), including a new `local_capture.test.ts` covering the Resend branch + the gate's Resend-awareness.
+
+**❌ Blocked — Resend rejects auth (`401 "API key is invalid"`).** The `btak/RESEND_API_KEY` worked for ~6 domain calls earlier this cycle (created + verified the domain), then **both** it and `equityfundingsource/RESEND_API_KEY` started 401'ing on every endpoint. No rate-limit headers. This pattern — a brand-new domain plus rapid test sends, then all keys invalidated — looks like **Resend anti-abuse auto-suspending the account/domain** (the keys are even named "Onboarding", so it's a fresh account). I can't resolve this from the API side.
+
+**Your move (one of):**
+1. Open the **Resend dashboard** → check for a suspension/verification hold on the account or `efs.briantakita.me`; if a key was rotated, update `passage equityfundingsource/RESEND_API_KEY`. Then I re-set the worker secret and verify a live send end-to-end (contact form → `btak.dev@gmail.com`, with SPF/DKIM/DMARC pass).
+2. If it self-heals (transient anti-abuse), the deployed worker just starts sending — no further action.
+
+**Heads-up:** since the worker now prefers Resend and Resend is 401'ing, **EFS outbound email is failing right now** (contact inquiries still persist to D1; notifications/login emails don't send). It's test/staging so I left the cutover in place per your goal — but if you want working email immediately, say the word and I'll revert the `*_FROM` vars to `info@briantakita.me` + drop the Resend secret (one deploy) to restore Cloudflare apex sending while Resend gets sorted.
+
+Gating `#g6d0`/`#efssubsend` as code-complete, awaiting the Resend-auth live-send proof.
+<!-- agent:boundary:1f2c6922 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -448,12 +448,13 @@ Verification: documentation/source evidence only; no tests were run because this
 Escalation: none.
 
 Confidence: high for the already-shipped coverage; medium for live editor-only loss until plugin buffer-flush-on-edit is implemented and live-verified.
-<!-- agent:boundary:c02a4a30 -->
+<!-- agent:boundary:4e51ae08 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- I'm adding queue items into equityfundingsource.md and agent-doc keeps on reverting to a stale state...and I keep on losing my work. As I was typing in this queue item, a JB `File Cache Conflict` occurred and it deleted this entire item.
 ---
 Still getting too many IPC issues. Repair needs to run too frequently. The AST/semantic merge should resolve without the need to repair.
 ```
@@ -542,7 +543,7 @@ These heads are not stale. I just typed them in.
     46  <!-- /agent:queue -->
 ```
 - ~~JB `Run Agent Doc` on monsterrodholders.md stalls (no prompt) and does not submit (prompt sent but no submit).~~
-- ~~do [#cancelturnverify]~~
+- do [#cancelturnverify]
 - ~~I typed into monsterrodholders.md queue but agent-doc reverted to an old snapshot and I lost everything that I typed.~~ — auto-struck: answered this cycle (#ftstrike)
 - Figure out how to make AGENTS.md lean & reliable so agents follow the directives. Should we treat AGENTS.md as a menu that defers to runbooks? Would that be more reliable?
 - :pushpin: do [#qcm1verify]

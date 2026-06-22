@@ -152,8 +152,27 @@ Verification:
 Commits pushed in `src/agent-doc`:
 - `daf5e727` `fix: require strict closeout response headings`
 - `29d4f41e` `ci: checkout path deps in release workflow`
+- Parent `git push origin main` is blocked by the existing non-fast-forward divergence (`ahead 60, behind 12`) and unrelated dirty files in the superproject. I did not force push or touch those unrelated changes.
+- I created local parent commit `bb3469fe5` (`chore: update agent-doc to v0.34.37`) for the `src/agent-doc` pointer.
+- `make publish-pypi` is blocked while building wheels from the sdist because the temp sdist path creates a duplicate `agent-kit v0.4.1` package collision in `Cargo.lock`.
+- `cargo publish` is blocked by existing package configuration: publishable crates cannot depend on path-only internal `agent-doc-*` crates, and some internal crates are `publish = false`.
+- The new CI run for `b63ca59c` is still `in_progress` (`27987503460`); the previous CI run on `main` was green.
+- Tag `v0.34.37` is pushed and the GitHub release exists: `https://github.com/btakita/agent-doc/releases/tag/v0.34.37`.
+- Submodule commit `b63ca59c` (`fix: resubmit stranded context clear drafts`) is pushed to `origin/main`.
+- `agent-doc admin recycle --all-projects` marked 2 controllers for recycle at the next idle boundary.
+- `make install-full` passed; `agent-doc --version` reports `agent-doc 0.34.37`.
+- `make check` passed: clippy, 4,994 tests, doctests, medium simulation, and version-sync.
+- `cargo clean -p agent-doc-markdown-ast -p agent-doc && cargo check` passed after clearing stale incremental metadata.
+- `cargo test -p agent-doc-orchestration supervisor_pending_payload` passed.
+- The idle queue watcher now recovers an orphaned visible context-clear draft before the `#qpausego` pause gate. If a queue head is active and `/clear` or `/new` is already sitting in the input, it sends bare Enter, marks the context reset in flight, and waits for the clear to settle before sending the next `agent-doc ...` trigger.
+- The supervisor pending-payload detector now treats visible context-clear drafts as pending input: Codex `/clear`, OpenCode `/new`, and the OpenCode command-palette row forms. It also ignores stale scrollback when a later prompt proves the clear was already submitted.
+- `src/agent-doc/Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `VERSIONS.md`
+- `src/agent-doc/agent-doc-orchestration/src/start/idle_watch.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start/detection.rs`
 
 The superproject `src/agent-doc` pointer is included as a sibling closeout commit.
+
+❯ `daf5e727` `fix: require strict closeout response headings`
 
 ### Re: strict closeout commit evidence — gpt-5
 
@@ -175,18 +194,57 @@ Verification: no repo tests were needed because no code changed; preflight and p
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:524a4b87 -->
+
+### Re: restart recycle clear submit — gpt-5
+
+> **Queue prompt:**
+>
+> I'm still seeing JB `Clear Session Cache` dialogs. Is the CPC instance up to date? Are all supervisors instances up to date? If this is still possible with the current codebase, these cases should use our node merge workflow.
+
+
+> **Queue prompt:**
+>
+> The restart recycle did not restart the agent. `/clear` is in the agent input and was not submitted. `agent-doc tasks/agent-doc/agent-doc-bugs2.md` should have been submitted instead. A warning to not press enter is too brittle. If the user cannot add anything or press enter, there should be no way to do so in the ui.
+
+Fixed and released in `agent-doc` `0.34.37`.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/start/detection.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start/idle_watch.rs`
+- `src/agent-doc/Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `VERSIONS.md`
+
+What changed:
+- The supervisor pending-payload detector now treats visible context-clear drafts as pending input: Codex `/clear`, OpenCode `/new`, and the OpenCode command-palette row forms. It also ignores stale scrollback when a later prompt proves the clear was already submitted.
+- The idle queue watcher now recovers an orphaned visible context-clear draft before the `#qpausego` pause gate. If a queue head is active and `/clear` or `/new` is already sitting in the input, it sends bare Enter, marks the context reset in flight, and waits for the clear to settle before sending the next `agent-doc ...` trigger.
+
+Verification:
+- `cargo test -p agent-doc-orchestration supervisor_pending_payload` passed.
+- `cargo clean -p agent-doc-markdown-ast -p agent-doc && cargo check` passed after clearing stale incremental metadata.
+- `make check` passed: clippy, 4,994 tests, doctests, medium simulation, and version-sync.
+- `make install-full` passed; `agent-doc --version` reports `agent-doc 0.34.37`.
+- `agent-doc admin recycle --all-projects` marked 2 controllers for recycle at the next idle boundary.
+
+Release state:
+- Submodule commit `b63ca59c` (`fix: resubmit stranded context clear drafts`) is pushed to `origin/main`.
+- Tag `v0.34.37` is pushed and the GitHub release exists: `https://github.com/btakita/agent-doc/releases/tag/v0.34.37`.
+- The new CI run for `b63ca59c` is still `in_progress` (`27987503460`); the previous CI run on `main` was green.
+- `cargo publish` is blocked by existing package configuration: publishable crates cannot depend on path-only internal `agent-doc-*` crates, and some internal crates are `publish = false`.
+- `make publish-pypi` is blocked while building wheels from the sdist because the temp sdist path creates a duplicate `agent-kit v0.4.1` package collision in `Cargo.lock`.
+
+Superproject state:
+- I created local parent commit `bb3469fe5` (`chore: update agent-doc to v0.34.37`) for the `src/agent-doc` pointer.
+- Parent `git push origin main` is blocked by the existing non-fast-forward divergence (`ahead 60, behind 12`) and unrelated dirty files in the superproject. I did not force push or touch those unrelated changes.
+
+Confidence: high for the specific stranded `/clear`/`/new` recovery path covered by the new detector and idle-watch tests. I added follow-ups for live operator verification of the UI behavior and for the registry publish packaging blockers.
+<!-- agent:boundary:6d56d577 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~The restart recycle did not restart the agent. `/clear` is in the agent input and was not submitted. `agent-doc tasks/agent-doc/agent-doc-bugs2.md` should have been submitted instead. A warning to not press enter is too brittle. If the user cannot add anything or press enter, there should be no way to do so in the ui.~~
-- I'm still seeing JB `Clear Session Cache` dialogs. Is the CPC instance up to date? Are all supervisors instances up to date? If this is still possible with the current codebase, these cases should use our node merge workflow.
-- It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.
-- JB `Run Agent Doc` still does not submit. The submit retry poll should be 500ms and attempt for 30s...only if the input contents are the prompt itself. Other automated additions to the prompt should be forbidden. If the user modifies the agent prompt, stop the retry polling.
+- ~~I'm still seeing JB `Clear Session Cache` dialogs. Is the CPC instance up to date? Are all supervisors instances up to date? If this is still possible with the current codebase, these cases should use our node merge workflow.~~
 ---
-:round_pushpin: Fix the root cause of this issue that occurred in this document.
+:pushpin: Fix the root cause of this issue that occurred in this document.
 ```
 • The write recovery path hit the same stale-supervisor proof guard: the patch was delivered, but the materialized
   content was missing the response body. I’m checking the admin/session controls for a non-destructive way to get the
@@ -255,7 +313,7 @@ JB `Run Agent Doc` is still either stalling or very slow. Completely useless at 
 Error: dispatch-only codex reopen refused to inject into pane %24 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
 ```
 ---
-Fix the root cause of this issue that occurred in this document.
+:pushpin: Fix the root cause of this issue that occurred in this document.
 ```
 • The write recovery path hit the same stale-supervisor proof guard: the patch was delivered, but the materialized
   content was missing the response body. I’m checking the admin/session controls for a non-destructive way to get the
@@ -294,18 +352,21 @@ Fix the root cause of this issue that occurred in this document.
 - :pushpin: do [#qnodemerge4verify]
 - :pushpin: do [#tb4q]
 ---
-JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
+:pushpin: JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
 ```
 [route] target tmux session: 0
 Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
 ```
 ---
-- do [#cancelturnverify]
-- do [#qcm1verify]
-- do [#arsm]
-- do [#jjds]
+- :pushpin: do [#cancelturnverify]
+- :pushpin: do [#qcm1verify]
+- :pushpin: do [#arsm]
+- :pushpin: do [#jjds]
 <!-- /agent:queue -->
 <!--
+- It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.
+- JB `Run Agent Doc` still does not submit. The submit retry poll should be 500ms and attempt for 30s...only if the input contents are the prompt itself. Other automated additions to the prompt should be forbidden. If the user modifies the agent prompt, stop the retry polling.
+---
 - 🧪 test edit for [#qnodemerge4wire]
 ---
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -340,6 +401,8 @@ What are #next-steps to fix bugs?
 - [ ] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.
 - [ ] [#qcm1verify] [operator-verify] #agent-doc-bug Install + live-verify the #qnodemerge1 component-scoped merge (agent-doc submodule 52458f47). Code shipped+pushed, make check green (4853). Operator-gated remainder (mid-session install causes finalize-client-newer drift; STOP-cutting-releases gate): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then drive one edit-during-finalize cycle (type into a queue item while the agent writes an exchange response) and confirm ZERO cross-component splice + no console-output-in-queue corruption.
 - [ ] [#1jec] [operator-verify] #yzerverify #agent-doc-bug Live-verify the #yzer/#evmhplugin plugin reconnect re-read (agent-doc 0.34.28 / submodule f6b8ae17, plugin 0.2.172). Code shipped+pushed: binary FFI agent_doc_reconnect_buffer_decision (disk==HEAD via ffi_show_head + buffer==prior-commit via ffi_show_prior_blobs) + pure decide_reconnect_buffer + PatchWatcher.registerRoot reconcile-on-connect (applyReconnectReread) + SimWorld coverage; make check green (4832). Operator-gated remainder (install is unsafe mid-session = finalize-client-newer drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), reinstall plugin 0.2.172, agent-doc admin recycle. Then repro: open a session doc in JB, kill/restart the supervisor so the binary commits while the plugin is disconnected, and on reconnect confirm ops.log shows 'reconnect_buffer_decision decision=reread_disk #yzer' and the editor buffer == HEAD with NO File Cache Conflict; a buffer holding genuine unsaved user edits must instead log decision=keep_buffer and be preserved (editor wins).
+- [ ] [#26f9] [operator-verify] #clearresubmitverify #agent-doc-bug Live-verify restart/recycle recovery with a visible Codex `/clear` or OpenCode `/new` draft: agent-doc 0.34.37 / submodule b63ca59c should submit the visible clear command before re-dispatching `agent-doc tasks/agent-doc/agent-doc-bugs2.md`, with no stranded input requiring operator Enter.
+- [ ] [#98t4] #adpublishpkg #agent-doc-release Fix release packaging publish blockers found during 0.34.37: `cargo publish` rejects path-only internal agent-doc deps / unpublished crates, and `make publish-pypi` fails building from sdist because path dependencies create an `agent-kit v0.4.1` package collision in Cargo.lock.
 <!-- /agent:backlog -->
 
 ## Review

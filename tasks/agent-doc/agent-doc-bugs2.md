@@ -128,7 +128,7 @@ Done. `#hap7` (`#qcellmerge1`) is implemented, tested, and committed.
 **Verification:** `make check` green — **4951 passed**, clippy clean. Added `crdt_merge_concurrent_queue_insert_no_structural_duplication` (a concurrent operator queue-insert during an agent response: the new item appears exactly once, no splice into the queue).
 
 Committed locally only (no push/install — per the release-freeze; you're driving install+recycle). Goes live after `make install` + `admin recycle`. Filed `#hap7verify` `[operator-verify]` for the live no-duplication eyeball.
-<!-- agent:boundary:1c84271b -->
+<!-- agent:boundary:7b7ae30b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -228,7 +228,6 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
-- [/] [#qheadstrikeverify] [operator-verify] #qheadstrike Live-verify the P2 commit-seam free-text strike (agent-doc submodule 84a939f7, superproject 7ef5256e4). Code shipped + make check green (4950); goes live once the supervisor recycles onto the new binary. Proof: answer a free-text queue head in a cycle whose finalize falls into live_prompt_drift/commit-recovery (or reset --from-current -> commit), then confirm ops.log shows `commit_seam_free_text_strike ... struck=N (#qheadstrike)` AND the answered head is struck (~~...~~) with no phantom re-surfacing on the next preflight (queue_drainable_head_count drops).
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

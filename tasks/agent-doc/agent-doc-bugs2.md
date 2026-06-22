@@ -220,13 +220,39 @@ Install state:
 - `agent-doc --version` reports `agent-doc 0.34.35` because `Cargo.toml` still carries that version.
 
 I left the unrelated open operator-verify backlog items alone, including the existing `#qcm1verify` warning.
-<!-- agent:boundary:981083ab -->
+
+### Re: queue typing File Cache Conflict — gpt-5
+
+> **Queue prompt:**
+>
+> If I am typing a queue item, JB `File Cache Conflict` should not occur. This causes me to lose the last few words that I typed.
+
+
+> **Queue prompt:** If I am typing a queue item, JB `File Cache Conflict` should not occur. This causes me to lose the last few words that I typed.
+
+This is covered by the ACK-content fix shipped in this session.
+
+The root problem was that the editor plugin could consume and delete a file-IPC patch after mutating the live buffer even when it failed to write the `*.ack-content` proof. That left the binary in a no-ACK state with no patch file left to replay, which is the stale editor state that can surface as a JetBrains File Cache Conflict and lose the last text typed into a queue item.
+
+The fix now gates patch deletion on ACK-content proof in both editor integrations:
+- JetBrains returns failure when ACK-content cannot be written for response patches, no-op/dedupe patches, VFS apply, or `save_document`.
+- VS Code requires document save success, an existing patches dir, and a successful ACK-content write before reporting patch success.
+- A patch without ACK proof now remains available for binary retry instead of being deleted after an unproven live-buffer mutation.
+
+Installed state:
+- Submodule fix `568755be` and parent pointer `dc575cd57` contain the editor ACK-content change.
+- Rust repair guard `6f022d7b` and parent pointer `788deb5f7` are also installed locally.
+- CLI and shared library were rebuilt and installed from the current checkout.
+- JetBrains and VS Code plugins were rebuilt and installed; IntelliJ still needs a restart before the newly installed JetBrains plugin code is active.
+
+Verification completed in this session includes the VS Code test suite, JetBrains plugin tests/build, focused Rust IPC tests, `make check`, and the latest green GitHub Actions CI run.
+<!-- agent:boundary:39e654e3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- If I am typing a queue item, JB `File Cache Conflict` should not occur. This causes me to lose the last few words that I typed.
+- ~~If I am typing a queue item, JB `File Cache Conflict` should not occur. This causes me to lose the last few words that I typed.~~
 ---
 JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
 ```

@@ -281,7 +281,7 @@ Verification after staging/committing:
 
 I added a recommended follow-up to reconcile the superproject `main` divergence and merge the pushed branch without a force-push.
 
-### Re: equityfundingsource sync recovery — gpt-5 (HEAD)
+### Re: equityfundingsource sync recovery — gpt-5
 
 > **Queue prompt:**
 >
@@ -323,7 +323,35 @@ Live recovery verification:
   - `tasks/professional/equityfundingsource.md -> pane %24`
 
 GitHub CI for the latest pushed submodule commit was started (`27972775024`) and was still in progress; per your instruction, I did not wait for CI.
-<!-- agent:boundary:0bd5dab6 -->
+
+### Re: fast local agent-doc builds and installs — gpt-5
+
+> **Queue prompt:** Enable incremental compilation to speed up local dev builds + installs. Save full compilations for pre-release + ci. Switch to faster linkers like lld or mold via .cargo/config.toml, which can reduce link time by 27-70%. Use cargo build --timings to identify bottlenecks.
+
+Closed. The main implementation is already on agent-doc `5805ab76` (`feat: improve local install workflow`), with the follow-up alignment on `48cf0210` (`chore: align agent-doc install docs`).
+
+What changed:
+
+- Local installs now use `release-local`: incremental enabled, LTO off, high codegen parallelism, and no stripping. The full `release` profile remains fat-LTO / single-codegen-unit / stripped for pre-release and CI artifacts.
+- `make install` now uses a reusable `target/local-install` target dir, `CARGO_INCREMENTAL=1`, and auto-detected faster linker flags. On this machine it selected `lld` via `RUSTFLAGS="-C link-arg=-fuse-ld=lld"`.
+- `make install-full` is the explicit full release-profile local install path, and the Makefile `release` target now delegates to it.
+- `agent-doc lib-install --profile <profile>` is profile-aware and honors `CARGO_TARGET_DIR`, so the cdylib install comes from `target/local-install/release-local/libagent_doc.so` during fast local installs.
+- Supervisor auto-install now goes through `make install`, so live dogfood recovery uses the same fast local path instead of forcing a full release build.
+- The stale-install guard now treats the freshest built binary/cdylib from `target/release` and `target/local-install/release-local` as build freshness evidence, avoiding false stale warnings from old `target/release` artifacts.
+- Added `make timings`, which runs `cargo build --timings` with the same local linker/incremental env.
+
+I did not commit a target-wide `.cargo/config.toml` linker switch because stable Cargo still rejects profile-scoped rustflags (`profile-rustflags` is unstable), and a committed target-wide linker config would also affect release/PyPI/CI builds. The local Makefile path applies the `mold`/`lld` optimization only where the queue item wanted it: local dev builds and installs.
+
+Verification:
+
+- `cargo test -p agent-doc-orchestration newest_artifact_mtime_uses_freshest_existing_path -- --nocapture`
+- `cargo test -p agent-doc profile_lib_path_uses_profile_and_cargo_target_dir -- --nocapture`
+- `make install` completed and installed from `target/local-install/release-local/libagent_doc.so`; `lib-install` marked 2 controllers for idle-boundary recycle.
+- `make timings` completed and wrote `target/cargo-timings/cargo-timing-20260622T180903789Z-e2986a9194019001.html`.
+- `make check` passed: clippy, 4,980 nextest tests, doctests, and the medium SimWorld test.
+
+Per the latest operator instruction, I did not wait for CI.
+<!-- agent:boundary:94d570fa -->
 <!-- /agent:exchange -->
 
 ## Queue

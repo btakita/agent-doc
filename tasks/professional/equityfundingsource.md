@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,226 +33,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260622-214041.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260622-221156.md`*
 
 Compacted content:
-❯ - Archived 2 response topic(s): expired password reset links + deploy; deploy
-❯ - Prior summary/context: prior compacted content: Archived 8 response topic(s): lender role/schema rename + deploy; deploy; admin reset passwo...
-
-### Re: lender role/schema rename + deploy — gpt-5
-
-> **Queue prompt:**
->
-> https://equityfundingsource.brian-takita.workers.dev/login/email/verify?token=7uyIxPaKpf37j0FrmC4GU3dx59EHj7PCCyMpiRtDUx8&role=admin is an expired link. If I click on it, I'm sent to https://equityfundingsource.brian-takita.workers.dev/login/email?role=admin&error=This+sign-in+link+has+expired+or+was+already+used.+Request+a+new+one+below. without the email field filled out. The email field should be filled out. Is this ok with security?
-
-
-> **Queue prompt:**
->
-> The role dropdown in https://equityfundingsource.brian-takita.workers.dev/admin/users should have "lender" instead of "investor". Rename any "investor" field data and db schema entity names to "lender".
-
-> **Queue prompt:**
->
-> deploy
-
-Implemented and deployed. The admin Users role dropdown now uses `lender` instead of `investor`, persisted `users.role` data is migrated from `investor` to `lender`, and the current D1 schema entity names were renamed to the `lender_*` forms for documents, document requests, accreditation verifications, vestings, special instructions, deal signatures, and deal interests. Legacy `role=investor` inputs are still accepted at auth/API boundaries as compatibility aliases.
-
-Changed paths:
-- `src/equityfundingsource-dev/app/equityfundingsource/migrations/0099_lender_role_and_schema.sql`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/{auth,admin,investor,borrower,messages,lending_groups}/**`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/**` and `src/equityfundingsource-dev/lib/ui--server--efs/**`
-- `src/equityfundingsource-dev/tests/**`
-- `src/equityfundingsource-dev/prds/**` and `src/equityfundingsource-dev/docs/**`
-- `src/equityfundingsource-dev` parent submodule pointer
-
-Commands:
-- `bun test tests/admin-dashboard.test.ts tests/admin-url-filter-sync.test.ts tests/auth.test.ts tests/invite-login-token.test.ts tests/investor-documents.test.ts tests/investor-vestings.test.ts tests/investor-portal-e2e.test.ts tests/admin-investor-pipeline.test.ts tests/borrower-messages.test.ts tests/upload-guard.test.ts tests/message-avatar-shortcut.test.ts app/equityfundingsource/lib/lending_groups/service.test.ts`
-- `bun test tests/prd.test.ts tests/msg-unify4-lender-cutover.test.ts`
-- `bun test tests/admin-investor-documents.test.ts`
-- `git diff --check`
-- `make check`
-- `gh run list --workflow CI --limit 1`
-- `bun run cf:d1:migrations:list:remote` before and after deploy
-- `make deploy`
-- Remote D1 role/table sanity queries via `bun run cf:d1:query:remote -- ...`
-- Live smoke checks for `/`, `/admin/users`, and `/login?role=lender`
-
-Verification:
-- Focused suites passed.
-- Full `make check` passed: `1125 pass`, `0 fail`, then app and Worker builds completed. The digest runner still flags the intentional non-fatal `d1 down` log from an outbox failure test, but the command exited `0` and the suite summary is clean.
-- GitHub reports no workflow named `CI`, so there was no CI run to inspect.
-- Remote D1 had `0099_lender_role_and_schema.sql` pending before deploy and `No migrations to apply` after deploy.
-- Remote role query now returns only `admin`, `borrower`, `broker`, and `lender` roles (`lender` count: 3).
-- Remote schema query shows the renamed `lender_*` tables and no matching `investor_*` tables from the renamed set.
-- Live root returned `200`; `/admin/users` returned `303` to `/login?role=admin&next=%2Fadmin%2Fusers`; `/login?role=lender` returned `200`.
-
-Commits:
-- EFS submodule: `071a93f` (`Rename investor role schema to lender`) pushed to `origin/main`.
-- Parent remote pointer: `a9cff9113` (`chore: update efs submodule for lender rename`) pushed to parent `origin/main` from a clean temporary worktree so unrelated local parent commits/dirty files were not pushed.
-
-Deploy: activated Worker version `41030a3b-218e-41ab-92e1-a73c97715da2` at `https://equityfundingsource.brian-takita.workers.dev`.
-
-Escalation: none.
-
-Confidence: high.
-
-### Re: expired sign-in link prefill + deploy — gpt-5
-
-> **Queue prompt:**
->
-> deploy
-
-Implemented, pushed, and deployed the email sign-in retry prefill fix.
-
-Security answer: prefilling is OK only when it does not reveal account data from an arbitrary token. The deployed behavior now prefers the DB-backed token-owner lookup when the token row still exists; for future generated email sign-in links, the verify URL also carries the recipient email, and the invalid/expired-token redirect uses that query email only as a fallback after validating it as an email string. A forged or unknown token cannot make the server disclose the account email; it can only echo an email value already present in the URL, and the resend POST remains enumeration-safe.
-
-Important live note: the exact old URL from the queue still redirects without an email because remote D1 has no row for that token hash and the old URL has no `email=` query value. I did not guess or hard-code an address, because that would be the unsafe part. Newly sent sign-in links will include `email=` and will prefill after expiry/invalid use.
-
-Changed paths:
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/email_login.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/routes.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/user_management/index.ts`
-- `src/equityfundingsource-dev/tests/email-login.test.ts`
-- `src/equityfundingsource-dev` parent submodule pointer
-
-Commands:
-- `curl` pre-deploy check of the exact expired URL: confirmed production still omitted `email=`
-- Remote D1 query for the exact token hash: confirmed no `email_login_tokens` row exists for it
-- `bun test tests/email-login.test.ts tests/auth.test.ts`
-- `bun test tests/email-login.test.ts tests/auth.test.ts tests/admin-dashboard.test.ts`
-- `git diff --check`
-- `make check`
-- `git commit -m "Fix expired email login retry prefill"`
-- `git push origin main` in EFS
-- temporary parent worktree gitlink commit + push
-- `make deploy`
-- `gh run list --workflow CI --limit 1` in EFS and parent repos
-- Live smoke checks for `/`, the exact old expired URL, a future-style invalid verify URL with `email=`, and the redirected `/login/email` page
-
-Verification:
-- Focused suites passed: `66 pass`, `0 fail` across `tests/email-login.test.ts`, `tests/auth.test.ts`, and `tests/admin-dashboard.test.ts`.
-- Full `make check` passed: `1131 pass`, `0 fail`, followed by app and Worker builds. The suite still logs the intentional non-fatal `d1 down` outbox test path while exiting cleanly.
-- Remote D1 reports `No migrations to apply`.
-- Live root returned `200`.
-- Live future-style invalid verify URL returned `303` to `/login/email?...&email=prefill-check%40example.com`.
-- Live redirected email-login page returned `200` and rendered `Sign in by email`, the expiration message, `value="prefill-check@example.com"`, and `Email me a sign-in link`.
-- The exact old URL still returns `303` without `email=` because there is no retained token-owner row for that token and no email query value in the old URL.
-- Both EFS and parent repos report no GitHub workflow named `CI`, so there was no CI run to inspect.
-
-Commits:
-- EFS submodule: `a54155a` (`Fix expired email login retry prefill`) pushed to `origin/main`.
-- Parent gitlink: `3aeff7e92` (`chore: update efs submodule for email login prefill`) pushed to parent `origin/main` from a clean temporary worktree.
-
-Deploy: activated Worker version `6e6f1da2-6dcd-4c56-a54c-9a451d50014f` at `https://equityfundingsource.brian-takita.workers.dev`.
-
-Session note: preflight first recovered and committed a stale orphaned response while consuming the prior expired-link queue head, so I treated that prompt as still requiring real verification and handled it in this deploy cycle.
-
-Escalation: none.
-
-Confidence: high.
-
-### Re: email login token hash retention — gpt-5
-
-> **Queue prompt:**
->
-> Should we store the email login link hashes indefinately?
-
-No. We should not store email-login link hashes indefinitely.
-
-The current auth behavior is safe from a login-validity standpoint: the raw token is never stored, only a SHA-256 hash is stored, and a row only authenticates while `used_at IS NULL` and `expires_at > now`. After use, supersession, or expiry, the retained hash does not let someone sign in.
-
-But indefinite retention still has little upside. The row maps a historical login-link hash back to a user, so keeping it forever widens the audit/privacy surface without improving authentication. The useful reasons to keep it are short-term: resend prefill for recently expired links, debugging, abuse investigation, and rate-limit forensics.
-
-My recommendation: retain spent/expired `email_login_tokens` for a bounded window, preferably 30 days. Seven days would also be defensible; 30 days is easier operationally and still avoids permanent retention. Purge rows where both login validity is impossible and the retention window has passed, for example expired rows older than the window and used/superseded rows whose `used_at` is older than the window. Future links already carry an `email=` fallback, so once a very old token row is purged, the only behavior lost is DB-backed prefill for old links.
-
-I added a recommended backlog item to implement that cleanup and align password-reset / invite-login token retention unless there is a specific compliance reason to retain those longer.
-
-Changed paths: session document only.
-Commands: `tsift status`; `rg` for token retention references; inspected `app/equityfundingsource/lib/auth/email_login.ts`, `app/equityfundingsource/lib/auth/routes.ts`, `app/equityfundingsource/migrations/0093_email_login_tokens.sql`, and `prds/admin-provisioning-spec.md`.
-Verification: static inspection only; no tests were run because no code changed.
-Escalation: none.
-Confidence: high.
-
-### Re: JWTs for email login links — gpt-5
-
-> **Queue prompt:**
->
-> Instead of storing the token in the database, can we use JWT?
-
-Technically yes, but I would not replace the current DB-backed opaque token with a purely stateless JWT for these email sign-in links.
-
-A JWT can carry `sub`, `iat`, `exp`, `aud`, and a `jti`, and the server can verify the signature without looking up a token row. That removes the token-hash table lookup, but it also removes the main protections we currently rely on unless we add state back somewhere else.
-
-Current DB-backed hash rows give us useful security behavior:
-
-- single-use links: `used_at IS NULL` is required and `email_login_token_use_` consumes the link
-- supersession: issuing a new link marks older unused links used
-- resend throttling: `email_login_recent_token_exists_` suppresses repeated sends
-- active-user validation: the route still checks the current user record before login
-- expired/used retry prefill: old token hash can map to an active user without trusting arbitrary query claims
-- bounded future cleanup: we can purge spent/expired rows after a retention window
-
-A stateless JWT link is a bearer credential that remains replayable until `exp`. If someone forwards it, a mail scanner opens it in a real browser context, or it leaks from logs/history, the server cannot know it was already used. To make JWTs single-use, revocable, supersedable, and auditable, we would need to store a used/denied `jti` or per-user token version. At that point we still have state, just with a more complex token format.
-
-My recommendation for EFS: keep the current opaque random token plus SHA-256 hash row, and implement the retention cleanup already added to backlog. If we ever use JWT here, use it only as a signed envelope and still store a hashed `jti`/nonce server-side for one-time use. Do not put email or role authority in trusted JWT claims unless the current user row is still fetched and validated before login.
-
-Changed paths: session document only.
-Commands: `tsift status`; `agent-doc plan`; `agent-doc read --component exchange`; inspected `app/equityfundingsource/lib/auth/email_login.ts`, `app/equityfundingsource/lib/auth/routes.ts`, and `prds/admin-provisioning-spec.md`.
-Verification: static inspection only; no tests were run because no code changed.
-Escalation: none.
-Confidence: high.
-
-### Re: hybrid JWT plus single valid token row — gpt-5
-
-> **Queue prompt:**
->
-> How about a hybrid where we generate JWT but store the only valid JWT?
-
-A hybrid can work, but only if we are careful about what is stored.
-
-I would not store the raw JWT as the “only valid JWT” in D1. A login-link JWT is still a bearer credential: anyone who has that exact string can use it until it is consumed or expired. If the database ever leaks, storing the raw JWT leaks active login links. That is worse than the current design, where D1 only has a SHA-256 hash of a random token.
-
-The safe version of the hybrid is: generate a signed JWT with a random `jti`, store only a hash of the `jti` or a hash of the full compact JWT, and require a matching unconsumed DB row before login. On use, set `used_at`; when issuing a new link, supersede older unused rows for that user. That preserves single-use, supersession, revocation, resend throttling, and audit behavior.
-
-But once we do that, JWT is not buying much for this flow. The server still has to hit D1 before login to enforce one-time use and “only latest link is valid.” The current opaque-token design is simpler and at least as secure: 32 random bytes in the emailed URL, SHA-256 hash in D1, `expires_at`, `used_at`, and current user validation at consumption time.
-
-So my recommendation stays: keep the current opaque random token plus stored hash. If we want a more structured token later, use a JWT only as a signed envelope and store a hashed `jti`/nonce server-side, never the raw JWT. The route should still fetch the current user row before login and should not trust role/email claims from the email URL as authority.
-
-Session note: the exchange is large, but the queue is active, so I continued this cycle without compacting.
-
-Changed paths: session document only.
-Commands: `tsift status`; `agent-doc plan`; inspected `app/equityfundingsource/lib/auth/email_login.ts` and `app/equityfundingsource/lib/auth/routes.ts`.
-Verification: static inspection only; no tests were run because no code changed.
-Escalation: none.
-Confidence: high.
-
-### Re: email hint without indefinite hash history — gpt-5
-
-> **Queue prompt:**
->
-> The advantage is we have the email without having to store the hash history in the db indefinately.
-
-Yes, that is a real advantage, but we can get it without making the JWT the login authority.
-
-The clean split is:
-
-- auth authority: short-lived DB row keyed by a hash of the random login token, with `expires_at` and `used_at`
-- retry hint: email/role carried in the link for prefill only, not trusted for login
-- retention: purge expired/used token rows after the chosen retention window
-
-That gives us the email after the token row is gone, while still avoiding permanent token-hash history. The current implementation already moved in that direction: generated email-login URLs can include `email=...`, and the invalid-link route uses DB-backed owner lookup first, then falls back to the query email only after validating it as an email string. That fallback is safe because it is only a form prefill; it does not authenticate anyone and the resend POST remains enumeration-safe.
-
-A JWT can be useful as a signed retry hint if we want tamper evidence, for example a separate `hint=` token containing `email`, `role`, `purpose=email-login-retry`, and its own `exp`. But it should still be treated as display/prefill data, not as authority to sign in. Also, a normal signed JWT does not hide the email; it is base64url-encoded, not encrypted. If the concern is email exposure in URLs/logs, JWT does not solve that unless we use encryption or avoid carrying the email at all.
-
-So the practical recommendation is: keep the opaque random login token plus DB hash for authentication, do not store hash history indefinitely, and use either the current `email=` fallback or a signed non-auth retry hint if we want tamper-evident prefill after cleanup. I would fold that into the existing retention-cleanup backlog item rather than redesigning the login token around JWT.
-
-Session note: the exchange is large, but the queue is active, so I continued this cycle without compacting.
-
-Changed paths: session document only.
-Commands: `tsift status`; `agent-doc plan`; inspected `app/equityfundingsource/lib/auth/email_login.ts` and `app/equityfundingsource/lib/auth/routes.ts`.
-Verification: static inspection only; no tests were run because no code changed.
-Escalation: none.
-Confidence: high.
-<!-- agent:boundary:1ce3959b -->
+- Archived 6 response topic(s): lender role/schema rename + deploy; expired sign-in link prefill + deploy; email login token hash retention; 3 more
+- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
+<!-- agent:boundary:dd97eb64 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -264,7 +50,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The advantage is we have the email without having to store the hash history in the db indefinately.
+- Implement your recommnedation.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

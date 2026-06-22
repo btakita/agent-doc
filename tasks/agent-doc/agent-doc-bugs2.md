@@ -191,16 +191,39 @@ Implemented the full Cancel Turn feature (agent-doc submodule → `b4471d05`, su
 **Menus.** JB `CancelTurnAction` (0.2.176) + VS Code `cancelTurn` command (0.2.31), alongside the existing Restart/Stop/Kill actions. `make check` green (clippy clean); JB gradle + VS Code tsc/97-tests green.
 
 Filed `#cancelturnverify` (operator-gated live behavior) and — separately — `#recyclerename`: your "Rename Restart Supervisor → Recycle Supervisor" request was struck when I gated `#s81q` last cycle but I did **not** implement it, so I've re-filed it honestly as its own item. Backend + editors delegated to clean-context agents; I reviewed the idle-no-op guard + CLI wiring + builds before committing.
-<!-- agent:boundary:e65c7818 -->
+
+### Re: Route/dispatch stall + no-submit + stray /clear reports — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` on monsterrodholders.md stalled after restarting the agent in both Claude Code + Codex.
+
+
+> **Queue prompt:** JB `Run Agent Doc` on monsterrodholders.md stalled after restarting the agent in both Claude Code + Codex.
+
+> **Queue prompt:** `agent-doc tasks/monsterrodholders.md` was added to the codex input but not submitted. Whatever wrote the prompt should also loop to check the input and submit it if not submitted.
+
+> **Queue prompt:** As I was writing queue items during a turn, an extra `/clear\n/agent-doc tasks/agent-doc/agent-doc-bugs2.md\n/clear` was written into the input and submitted.
+
+These three are the **same already-tracked route/dispatch cluster** — `#jbrundispatch` / `#rdypoll` / `#routeretest` (stall + no-submit) and `#qflood` / `#rt83` (stray `/clear` injection) — and they are **OPERATOR-CAPTURE**: they can't be diagnosed or fixed blind from here; they need a live repro (the stall state + `agent-doc admin detect` + the ops.log route trace).
+
+**The most likely root cause is that the running supervisor is on the OLD binary.** The relevant fixes are already shipped in code but **not installed**:
+- *"loop to check the input and submit it if not submitted"* — exactly the shipped `not_dispatched` full-trigger re-send + `send_direct_pane_enter_resubmit_until_stable` Enter-resubmit loop (`#jbrundispatch` directive 2 / `#rdypoll`).
+- stall-after-restart + stray `/clear` — covered by the shipped recycle-settle dispatch gate (`#jbdisprecycle`) + the `#qflood2` clear-settle guard.
+
+The supervisor driving this session (and the monsterrodholders one) keeps using its launch binary until recycled, so you're most likely observing **pre-fix behavior on a stale binary**. The single highest-value next step is to **install the batch** (`make install` + `agent-doc admin recycle`, JB plugin `0.2.176`, VS Code `0.2.31`), then re-test — that is `#routeretest`'s live re-verify on the fresh binary. If any symptom persists *after* install+recycle, that's a genuine residual and I'll dig into `route.rs` with the captured trace.
+
+Striking these as duplicates of the existing tracking. **Stopping the loop here:** the remaining near-head items are operator-capture (these), operator-verify (`#qcm1verify`), and a couple of agent-drainable items (`#qstrikenote`, `#pendaddorder`) that deserve fresh context after this very long run. Re-dispatch and I'll take `#qstrikenote` / `#pendaddorder` — but installing the batch first will resolve most of what you're reporting.
+<!-- agent:boundary:6a14c992 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~Add `Cancel Turn` in JB + VSCode menus...which cancels the current turn. Do this in a safe manner where multiple calls to `Cancel Turn` do not close the agent. In Codex + Opencode Ctrl+C will stop the running turn but Ctrl+C while idle will close the agent. In Claude Code pressing Ctrl+C twice while idle will close the agent.~~
-- :pushpin: JB `Run Agent Doc` on monsterrodholders.md stalled after restarting the agent in both Claude Code + Codex.
-- :pushpin: `agent-doc tasks/monsterrodholders.md` was added to the codex input but not submitted. Whatever wrote the prompt should also loop to check the input and submit it if not submitted.
-- :pushpin: As I was writing queue items during a turn, an extra `/clear\n/agent-doc tasks/agent-doc/agent-doc-bugs2.md\n/clear` was written into the input and submitted.
+- ~~:pushpin: JB `Run Agent Doc` on monsterrodholders.md stalled after restarting the agent in both Claude Code + Codex.~~
+- ~~:pushpin: `agent-doc tasks/monsterrodholders.md` was added to the codex input but not submitted. Whatever wrote the prompt should also loop to check the input and submit it if not submitted.~~
+- ~~:pushpin: As I was writing queue items during a turn, an extra `/clear\n/agent-doc tasks/agent-doc/agent-doc-bugs2.md\n/clear` was written into the input and submitted.~~
 - :pushpin: do [#qcm1verify]
 - :pushpin: do [#qstrikenote]
 - :pushpin: [#pendaddorder]
@@ -225,6 +248,8 @@ Filed `#cancelturnverify` (operator-gated live behavior) and — separately — 
 - do [#arrkillguard]
 - do [#arrcodexproof]
 - do [#tb4q]
+- do [#cancelturnverify]
+- do [#recyclerename]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

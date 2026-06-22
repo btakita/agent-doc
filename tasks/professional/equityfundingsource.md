@@ -100,7 +100,45 @@ Verification: pre-deploy and post-deploy remote D1 checks both reported `No migr
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:6ae966cd -->
+
+### Re: wiring instructions still visible + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> I still see "Wiring Instructions (Secure Link)" in https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=loan which is an Available Deal with no lender selected. Did you implement hiding Wiring Instructions until a lender is selected?
+
+> **Queue prompt:**
+>
+> deploy
+
+Yes, the hiding implementation is present in current EFS `main`: the embedded deal Loan Detail tab passes `show_wire_links={selected_interests.length > 0}`, and `selected_interests` is derived from non-null `investor_deal_interests.selected_at`.
+
+The reason this live URL still shows `Wiring Instructions (Secure Link)` is that production D1 does not match the "no lender selected" premise. Deal `d6b78994-0970-498f-9e10-6f0035902c0d` currently has a selected interest row `cc15d2fa-a98d-43c2-8451-d389c77cde9c` for `btak.dev+investor@gmail.com` / Dude Lender, `lender_account='123'`, `proposal_amount=100000`, and `selected_at=1782012995` (`2026-06-20T23:36:35-04:00`). The deal row is also `status='reserved'`.
+
+There is a separate status drift: the linked loan is back to `tmo_loan_status='Application Received'`, so the admin pipeline can still make the deal look like an Available Deal even though EFS has selected-lender data. I added a backlog item for that reconciliation instead of changing behavior in this cycle.
+
+Deployed current clean EFS `main` (`23338d729ed094829bcaa540a9ed2e88393c444b`) through the documented `make deploy` path. The deploy applied no D1 migrations, uploaded no changed assets, and activated Worker version `469232ce-28b2-41fd-be76-85d1b2c97d65` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Changed paths: none in `src/equityfundingsource-dev`.
+
+Commands:
+- `bun run --cwd app/equityfundingsource cf:d1:query:remote -- "SELECT ... FROM investor_deal_interests ..."`
+- `bun run --cwd app/equityfundingsource cf:d1:query:remote -- "SELECT ... FROM investment_deals ... LEFT JOIN loans ..."`
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
+- `git rev-parse HEAD`
+- `git ls-remote origin main`
+- `make deploy`
+- post-deploy `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`
+- post-deploy `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
+- post-deploy `git status --short --branch`
+
+Verification: EFS submodule is clean and synced with `origin/main`; remote D1 has no pending migrations; Worker root returned HTTP `200` after deploy. I did not run the full test suite because there were no source changes; the deploy build succeeded.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:55d89ab7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -112,6 +150,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- I still see "Wiring Instructions (Secure Link)" in https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=loan which is an Available Deal with no lender selected. Did you implement hiding Wiring Instructions until a lender is selected?
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

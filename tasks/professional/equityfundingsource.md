@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -157,7 +157,7 @@ Deploy: activated Worker version `4b8e8114-a823-4765-9510-98dbaef4297c` at `http
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:13dc9d1a -->
+<!-- agent:boundary:a71234ea -->
 <!-- /agent:exchange -->
 ###
 <!--

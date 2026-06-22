@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.38
+
+- **ACK-mismatched queue-consume convergence now clears only the proven stale editor artifact (`#fcc0-ack-mismatch`).** When an active editor listener ACKs a queue-consume patch but the ACK-content does not match the intended target, the write still fails closed and refuses the external disk write. The new recovery step first proves the mismatch is the narrow stale queued-prompt blockquote artifact in `agent:exchange` with no drift outside `exchange`; only then it sends a hash/length-guarded `refresh_content` message to restore the editor buffer to the pre-consume document, preventing a later editor flush from persisting the stale queue strike. If the ACK content contains a real concurrent prompt or other non-artifact drift, the refresh is skipped and the editor-owned content is preserved. Coverage includes positive and negative queue-consume ACK-mismatch regressions, the existing editor-IPC success path, and the FlowCore reason-budget audit.
+
 ## 0.34.37
 
 - **Supervisor restart/context-clear recovery now submits visible `/clear` drafts before queue triggers (`#clearresubmit`).** The idle-watch pending-payload detector now treats context-clear slash commands separately from `agent-doc ...` triggers, using the same active-composer evidence as explicit `session clear`: a visible Codex `/clear` or OpenCode `/new` draft is recognized only when no later idle prompt proves it already submitted. The supervisor also runs an orphan-clear recovery before the paused-queue gate, so a recycle, marker expiry, or durable `admin queue pause` cannot strand `/clear` in the input and require the operator to press Enter before the next `agent-doc <FILE>` drain. Coverage includes Codex/OpenCode active-composer detection and stale-scrollback rejection.

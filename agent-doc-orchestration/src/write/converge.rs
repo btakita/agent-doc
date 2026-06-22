@@ -725,6 +725,160 @@ fn refuse_or_editorless_disk_fallback(file: &Path, source: &str, reason: &str) -
     Ok(false)
 }
 
+fn blank_components_named(doc: &str, names: &[&str]) -> Option<String> {
+    let comps = crate::component::parse(doc).ok()?;
+    let mut spans: Vec<(usize, usize)> = comps
+        .iter()
+        .filter(|c| names.contains(&c.name.as_str()))
+        .map(|c| (c.open_end, c.close_start))
+        .collect();
+    spans.sort_by_key(|(start, _)| *start);
+    let mut out = doc.to_string();
+    for (start, end) in spans.into_iter().rev() {
+        if start <= end
+            && end <= out.len()
+            && out.is_char_boundary(start)
+            && out.is_char_boundary(end)
+        {
+            out.replace_range(start..end, "");
+        }
+    }
+    Some(out)
+}
+
+fn stale_queue_prompt_exchange_artifact(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with('>') || trimmed == "❯ >"
+}
+
+fn ack_mismatch_refresh_safe(target: &str, recovered: &str) -> bool {
+    let (Some(target_without_exchange), Some(recovered_without_exchange)) = (
+        blank_components_named(target, &[AGENT_RESPONSE_COMPONENT]),
+        blank_components_named(recovered, &[AGENT_RESPONSE_COMPONENT]),
+    ) else {
+        return false;
+    };
+    let norm = |text: &str| crate::git::normalize_transient_agent_doc_markers(text);
+    if norm(&target_without_exchange) != norm(&recovered_without_exchange) {
+        return false;
+    }
+
+    let (Ok(target_comps), Ok(recovered_comps)) = (
+        crate::component::parse(target),
+        crate::component::parse(recovered),
+    ) else {
+        return false;
+    };
+    let target_exchange = target_comps
+        .iter()
+        .find(|c| c.name == AGENT_RESPONSE_COMPONENT);
+    let recovered_exchange = recovered_comps
+        .iter()
+        .find(|c| c.name == AGENT_RESPONSE_COMPONENT);
+    let (Some(target_exchange), Some(recovered_exchange)) = (target_exchange, recovered_exchange)
+    else {
+        return false;
+    };
+    let target_body = norm(target_exchange.content(target));
+    let recovered_body = norm(recovered_exchange.content(recovered));
+    if target_body == recovered_body {
+        return false;
+    }
+    let target_lines: HashSet<&str> = target_body
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let recovered_lines: HashSet<&str> = recovered_body
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if !target_lines
+        .iter()
+        .all(|line| recovered_lines.contains(line))
+    {
+        return false;
+    }
+    let recovered_only: Vec<&str> = recovered_lines.difference(&target_lines).copied().collect();
+    !recovered_only.is_empty()
+        && recovered_only
+            .iter()
+            .all(|line| stale_queue_prompt_exchange_artifact(line))
+        && recovered_only
+            .iter()
+            .any(|line| line.trim().starts_with("> **Queue prompt:**"))
+}
+
+fn refresh_editor_after_ack_mismatch(
+    file: &Path,
+    project_root: &Path,
+    canonical: &Path,
+    target: &str,
+    recovered: &str,
+    current_content: &str,
+    source: &str,
+) {
+    let stale_hash = crate::ops_log::content_hash(recovered);
+    let target_hash = crate::ops_log::content_hash(current_content);
+    if !ack_mismatch_refresh_safe(target, recovered) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "{source}_ack_mismatch_editor_refresh file={} transport=blocked reason=untrusted_ack_content_contains_user_drift action=leave_editor_owned_ack_content stale_len={} stale_hash={}",
+                file.display(),
+                recovered.len(),
+                &stale_hash[..stale_hash.len().min(12)]
+            ),
+        );
+        return;
+    }
+    match crate::ipc_socket::send_refresh_content(
+        project_root,
+        &canonical.to_string_lossy(),
+        current_content,
+        &stale_hash,
+        recovered.len(),
+    ) {
+        Ok(true) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "{source}_ack_mismatch_editor_refresh file={} transport=editor_ipc action=revert_untrusted_ack_content stale_len={} stale_hash={} target_len={} target_hash={}",
+                    file.display(),
+                    recovered.len(),
+                    &stale_hash[..stale_hash.len().min(12)],
+                    current_content.len(),
+                    &target_hash[..target_hash.len().min(12)]
+                ),
+            );
+        }
+        Ok(false) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "{source}_ack_mismatch_editor_refresh file={} transport=blocked reason=no_ack action=left_untrusted_ack_content_editor_owned stale_len={} stale_hash={}",
+                    file.display(),
+                    recovered.len(),
+                    &stale_hash[..stale_hash.len().min(12)]
+                ),
+            );
+        }
+        Err(err) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "{source}_ack_mismatch_editor_refresh file={} transport=blocked reason=send_failed error={} action=left_untrusted_ack_content_editor_owned stale_len={} stale_hash={}",
+                    file.display(),
+                    err,
+                    recovered.len(),
+                    &stale_hash[..stale_hash.len().min(12)]
+                ),
+            );
+        }
+    }
+}
+
 pub fn try_editor_converge(
     file: &Path,
     target: &str,
@@ -900,6 +1054,15 @@ pub fn try_editor_converge(
                         recovered.len(),
                         target.len()
                     ),
+                );
+                refresh_editor_after_ack_mismatch(
+                    file,
+                    &project_root,
+                    &canonical,
+                    target,
+                    &recovered,
+                    current_content,
+                    source,
                 );
                 anyhow::bail!(
                     "{source}: refused direct disk write for {} while editor IPC listener is active (reason=ack_mismatch)",
@@ -1203,6 +1366,39 @@ mod core_tests {
         format!(
             "---\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange -->\n{response}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n{queue_body}\n<!-- /agent:queue -->\n"
         )
+    }
+
+    fn start_ack_mismatch_then_refresh_listener(
+        project_root: &Path,
+        ack_content: String,
+    ) -> std::thread::JoinHandle<()> {
+        let listener_root = project_root.to_path_buf();
+        std::thread::spawn(move || {
+            let root_clone = listener_root.clone();
+            let _ = crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                let msg_type = v.get("type").and_then(|value| value.as_str()).unwrap_or("");
+                let patch_id = v
+                    .get("patch_id")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("unknown");
+                let content = if msg_type == "refresh_content" {
+                    v.get("content")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("")
+                        .to_string()
+                } else {
+                    ack_content.clone()
+                };
+                if let Some(file_path) = v.get("file").and_then(|value| value.as_str()) {
+                    let _ = std::fs::write(file_path, &content);
+                }
+                let ack_dir = root_clone.join(".agent-doc/ack-content");
+                let _ = std::fs::create_dir_all(&ack_dir);
+                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &content);
+                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+            });
+        })
     }
 
     #[test]
@@ -1594,6 +1790,120 @@ mod core_tests {
             "a converged queue consume must not also take the disk fallback:\n{log}"
         );
     }
+
+    #[test]
+    fn queue_consume_ack_mismatch_refreshes_editor_back_to_preconsume() {
+        // `#fcc0-ack-mismatch`: when the editor acks with content that does not
+        // match the target, the disk write must still fail closed. The previous
+        // behavior left that untrusted ACK content in the live editor buffer, so a
+        // later flush could persist a stale queue strike. Refresh it back to the
+        // pre-consume document using the ACK content as the stale hash guard.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = crate::test_support::queue_consume_convergence_source();
+        let target = crate::test_support::queue_consume_convergence_target();
+        let stale_ack = target.replace(
+            "<!-- /agent:exchange -->",
+            "> **Queue prompt:** stale leftover from failed queue consume\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, &source).unwrap();
+
+        let root = dir.path().to_path_buf();
+        let _listener = start_ack_mismatch_then_refresh_listener(&root, stale_ack);
+        crate::test_support::wait_for_live_prompt_drift_listener(&root);
+        crate::plugin_owner::write_plugin_owner_lease_for_test(
+            doc.to_str().unwrap(),
+            std::process::id(),
+        );
+
+        let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("ack_mismatch"),
+            "ACK mismatch should still fail closed: {err}"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            source,
+            "untrusted ACK content should be refreshed back to the pre-consume editor buffer"
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("queue_consume_writeback")
+                && log.contains("transport=blocked")
+                && log.contains("ack_mismatch"),
+            "ACK mismatch must remain a blocked writeback:\n{log}"
+        );
+        assert!(
+            log.contains("queue_consume_ack_mismatch_editor_refresh")
+                && log.contains("action=revert_untrusted_ack_content"),
+            "ACK mismatch should refresh the editor back to the pre-consume buffer:\n{log}"
+        );
+        assert!(
+            !log.contains("transport=disk_fallback"),
+            "ACK mismatch must not take the disk fallback:\n{log}"
+        );
+    }
+
+    #[test]
+    fn queue_consume_ack_mismatch_does_not_refresh_user_prompt_drift() {
+        // If the ACK content carries a genuine concurrent editor prompt, the
+        // binary must still refuse the disk write but must not refresh the editor
+        // back to the pre-consume document, because that would drop user work.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = crate::test_support::queue_consume_convergence_source();
+        let target = crate::test_support::queue_consume_convergence_target();
+        let user_ack = target.replace(
+            "<!-- /agent:exchange -->",
+            "❯ do [#followup] preserve this concurrent prompt\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, &source).unwrap();
+
+        let root = dir.path().to_path_buf();
+        let _listener = start_ack_mismatch_then_refresh_listener(&root, user_ack.clone());
+        crate::test_support::wait_for_live_prompt_drift_listener(&root);
+        crate::plugin_owner::write_plugin_owner_lease_for_test(
+            doc.to_str().unwrap(),
+            std::process::id(),
+        );
+
+        let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("ack_mismatch"),
+            "ACK mismatch should still fail closed: {err}"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            user_ack,
+            "user prompt drift must remain editor-owned instead of being refreshed away"
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("queue_consume_ack_mismatch_editor_refresh")
+                && log.contains("untrusted_ack_content_contains_user_drift")
+                && log.contains("action=leave_editor_owned_ack_content"),
+            "user drift should block the refresh path:\n{log}"
+        );
+        assert!(
+            !log.contains("action=revert_untrusted_ack_content"),
+            "user drift must not be reverted:\n{log}"
+        );
+    }
+
     #[test]
     fn queue_consume_editor_convergence_payload_is_node_keyed_and_fenced() {
         let dir = TempDir::new().unwrap();

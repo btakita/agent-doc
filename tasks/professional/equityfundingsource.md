@@ -118,7 +118,55 @@ Commands: `agent-doc preflight`; prior deploy/smoke commands from the implementa
 Verification: session drain closeout only; deploy evidence is from the immediately preceding cycle.
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:77619c32 -->
+
+### Re: same-user email login links — gpt-5
+
+> **Queue prompt:**
+>
+> Clicking on an email login link while logged in as the same user still goes to https://equityfundingsource.brian-takita.workers.dev/?notice=You%E2%80%99re%20already%20signed%20in.%20Please%20log%20out%2C%20then%20open%20your%20email%20sign-in%20link%20again. I seems that GWT would still be beneficial to cover this case. Can we relax the 1 time token and just use an expiration instead? Will this be insecure? It will be more usable.
+
+Implemented the same-user case without relaxing the one-time-token model.
+
+Security answer: I would not make email login links reusable until expiration. That would turn every emailed URL into a replayable bearer token for its full TTL, which is worse for forwarded email, browser history, email-client previews, logs, and any accidental disclosure. The safer usability fix is narrower: if the link is still valid and unused, and the current browser session already belongs to that same active user, consume the token once and continue to the normal destination. If the browser is signed in as a different user, the logout notice still appears before token consumption so the link can be used after switching sessions.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/routes.ts`
+- `src/equityfundingsource-dev/tests/auth.test.ts`
+- `src/equityfundingsource-dev/tests/email-login.test.ts`
+- `src/equityfundingsource-dev/prds/admin-provisioning-spec.md`
+- `src/equityfundingsource-dev` parent gitlink
+
+Commands:
+- `bun test tests/email-login.test.ts tests/auth.test.ts`
+- `git diff --check`
+- `make check`
+- `gh run list --workflow CI --limit 1` in EFS and parent repos
+- `git push origin main` in EFS
+- Parent gitlink commit/push from a clean temporary worktree based on `origin/main`
+
+Verification:
+- Focused auth tests passed: `41 pass`, `0 fail` across `tests/email-login.test.ts` and `tests/auth.test.ts`.
+- Full `make check` passed: `1136 pass`, `0 fail`, then app and Worker builds completed. The suite still logs the intentional non-fatal `d1 down` outbox failure test while exiting cleanly.
+- `git diff --check` passed for the EFS changes.
+- Both EFS and parent repos still report no GitHub workflow named `CI`, so there was no CI run to inspect.
+
+Commits:
+- EFS submodule: `e43d99a` (`fix(auth): allow same-user email login links`) pushed to EFS `origin/main`.
+- Parent gitlink: `e1cbc5c76` (`chore: update efs submodule for email login link fix`) pushed to parent `origin/main` from a clean temporary worktree. The current parent worktree is still locally divergent and has unrelated dirty files, so I left that local state untouched.
+
+Deploy: not run; this queue preset requested spec, tests, commit, and push, not deploy.
+
+Escalation: none.
+Confidence: high.
+
+Suggested commit message:
+
+```txt
+fix(auth): allow same-user email login links (#email-login-signed-in-notice)
+
+Keep email-login links single-use while allowing a still-valid link opened by the same signed-in user to consume the token and continue to the normal portal destination. Different signed-in users still get the logout notice before token consumption; docs and auth route tests cover both branches.
+```
+<!-- agent:boundary:3b53fb13 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -130,6 +178,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Clicking on an email login link while logged in as the same user still goes to https://equityfundingsource.brian-takita.workers.dev/?notice=You%E2%80%99re%20already%20signed%20in.%20Please%20log%20out%2C%20then%20open%20your%20email%20sign-in%20link%20again. I seems that GWT would still be beneficial to cover this case. Can we relax the 1 time token and just use an expiration instead? Will this be insecure? It will be more usable.
 <!-- /agent:queue -->
 
 ## Backlog

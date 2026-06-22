@@ -81,33 +81,15 @@ Why your captured log still looks feedback-less: it's pane **scrollback**, and t
 **Residual gap captured** as `[#supinstallvis]` (`[recommended]`): make the rebuild state visible in the pane **body/scrollback** (or via the JB/VSCode plugin notification surface, overlapping `#qpauseux`) rather than only the status line — without disturbing the keepalive's Enter-to-restart reader. The safe pane-write mechanism needs an operator decision (a raw `send-keys` line risks being consumed by the keepalive), so I did not implement a blind pane-write change this cycle.
 
 No build/install/push this turn: STOP-cutting-releases is in effect, and the supervisor already auto-installs from source at its idle boundary (exactly what your log shows). Stopping the loop here — the remaining queue heads are dominated by `[operator-verify]`/operator-capture items on a queue paused for `#qflood` churn; those need a live editor/pane and can't be agent-drained.
-<!-- agent:boundary:2c78d560 -->
+<!-- agent:boundary:48715776 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
----
-:round_pushpin: JB `Run Agent Doc` stalled without feedback
-```
-claude exited cleanly.
-Press Enter to restart, or 'q' to exit.
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-
-claude exited cleanly.
-Press Enter to restart, or 'q' to exit.
-[start] stderr redirected to /home/brian/work/btakita/agent-loop/.agent-doc/logs/supervisor-stderr.log for claude TUI
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)
-[agent-doc] supervisor auto-install: rebuilding + installing agent-doc from /home/brian/work/btakita/agent-loop/src/agent-doc so the next queue item runs on the freshly-committed source
-   Compiling agent-doc v0.34.35 (/home/brian/work/btakita/agent-loop/src/agent-doc)
-```
----
-- ~~[#1jec]~~
-- Add a command to explicitly sync IPC wedge issues. If wedge issues can be handled entirely in the binary, implement the binary logic that also logs a warning.
-- All log output should include a timestamp...especially ops.log. ops.log could also include the name of the agent document for easier tracking when working with multiple documents.
+- :pushpin: do [#qheadstrike]
+- The end part of the response that breaks down churn with tips shows up in the Claude Code console but not in the document. That part of the response should be in the document.
+- :pushpin: All log output should include a timestamp...especially ops.log. ops.log could also include the name of the agent document for easier tracking when working with multiple documents.
 - :pushpin: do [#tb4q]
 - :pushpin: do [#k7mf]
 - :pushpin: Add `Stop Agent` and `Restart Agent` in JB + VSCode menus.
@@ -122,25 +104,25 @@ Press Enter to restart, or 'q' to exit.
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` does nothing. Subsequent JB `Run Agent Doc` eventually dispatches...it seems there's a delay before working. Please enable JB `Run Agent Doc` to dispatch immediately.
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` sometimes has the dispatch storm (multiple duplicate prompts) and no submit.
 - :pushpin: do [#arsm]
-- do [#agentreloadrestart]
-- do [#restartagentmenu]
-- do [#j9ja]
-- do [#editorbufwin]
-- do [#hap7]
-- do [#fbwire]
-- do [#qheadstrike]
-- do [#qnodemerge4wire]
-- do [#jbdisprecycle]
-- do [#sqedit-race]
-- do [#qpauseux]
-- do [#8bfz]
-- do [#cyh0]
-- do [#1vhn]
-- do [#jbrundispatch]
-- do [#docdriftgrace]
-- do [#runexitrestart]
-- do [#gf5n]
-- do [#supinstallvis]
+- :pushpin: do [#agentreloadrestart]
+- :pushpin: do [#restartagentmenu]
+- :pushpin: do [#j9ja]
+- :pushpin: do [#editorbufwin]
+- :pushpin: do [#hap7]
+- :pushpin: do [#fbwire]
+- :pushpin: do [#qnodemerge4wire]
+- :pushpin: do [#jbdisprecycle]
+- :pushpin: do [#sqedit-race]
+- :pushpin: do [#qpauseux]
+- :pushpin: do [#8bfz]
+- :pushpin: do [#cyh0]
+- :pushpin: do [#1vhn]
+- :pushpin: do [#jbrundispatch]
+- :pushpin: do [#docdriftgrace]
+- :pushpin: do [#runexitrestart]
+- :pushpin: do [#gf5n]
+- :pushpin: do [#supinstallvis]
+- do [#1jec]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -34,106 +34,25 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260621-213916.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260622-014427.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do [#pcwcwarn]
-- Prior summary/context: prior compacted content: Archived 14 response topic(s): #1jec; do [#qauthorderpin]; harness switch to claude; 11 more
+❯ - Archived 5 response topic(s): JB Run Agent Doc "stalled without feedback" during auto-install; clear all gated review items → actionable backlog replacements; JB `Run Agent Doc` stalled without feedback; 2 more
+❯ - Prior summary/context: prior compacted content: Archived 1 response topic(s): do [#pcwcwarn]
 
-### Re: JB Run Agent Doc "stalled without feedback" during auto-install — opus-4-8
+### Re: #opslogtrack verified live — opus-4-8
 
-> **Queue prompt:** JB `Run Agent Doc` stalled without feedback — pane showed `claude exited cleanly. / Press Enter to restart, or 'q' to exit.` repeated, idle-queue watch reconciled stale busy→ready, then `supervisor auto-install: rebuilding + installing agent-doc … Compiling agent-doc v0.34.35`.
-
-Diagnosed and fixed (`#supinstallfeedback`, agent-doc submodule `cf7347a9`, superproject `baf6a8ec2`).
-
-**What actually happened** (this log is from the prior cycle's own closeout): after my `#pcwcwarn` commit landed, the supervisor's idle-watch detected the source was newer than the installed binary and ran the **dogfood auto-install** — a ~1-minute blocking `cargo install`. During that minute the pane still showed the post-`claude exited cleanly` keepalive `Press Enter to restart, or 'q' to exit`, and **all rebuild progress went to the redirected supervisor stderr / session log** — never to the visible pane. So the keepalive read as a stall waiting on a keypress. Nothing was actually wedged; it was rebuilding.
-
-**Fix:** the auto-install now surfaces its phase on the owned tmux pane via `display-message`, mirroring the existing managed-capability-proof status surface (diagnostics stay out of the child pane transcript; user-visible status goes to the tmux status line). The `Started` line persists (`-d 0`) for the whole compile and says **"rebuilding the freshly-committed binary (~1 min) — do NOT press Enter; the supervisor auto-restarts when the build finishes"**; `Succeeded`/`Failed` use a bounded display time. Best-effort + fail-open (no owned pane → stderr, unchanged).
-
-Tests: 1 unit (message wording); `make check` green (4948). Prior `#pcwcwarn` CI (`5f3fc07d`) **completed green**.
-
-> **Operator live-verify:** next time a commit triggers the supervisor auto-install, the tmux status line should show the "rebuilding … do NOT press Enter" message instead of a silent pane. Filed as `#supinstallfeedbackverify`.
-
-Note: the rest of this queue head's siblings (dispatch storm after `Clear Session Context`, trigger typed-but-not-submitted, `Stop/Restart Agent` menu items, `Recycle Supervisor` rename) are separate tracked items further down the queue — draining them in order.
-
-### Re: clear all gated review items → actionable backlog replacements — opus-4-8
-
-Done — the review is empty and the plan no longer carries any gates. Committed `38b83be05`.
-
-**What I did:** converted all **22 gated review items** (`[/]`) into **ungated, actionable backlog items** (`[ ]`) and cleared `agent:review`. Each replacement preserves its `#id`, its plan path, and — per "I will test, file bugs, and you will check the logs" — its concrete ops.log success marker so your live test proves/disproves it:
-
-- **Operator-test now (code shipped, just needs your live run):** `#jbdisprecycle` (route_dispatch_submit_recycle_settle), `#rdypoll-deploy` (dispatch_inject attempt=1), `#wd40` (supervisor_recycle_yield_requested reason=state_flush_drain), `#qpausemix-verify` (queue_paused_continuation_guidance_emitted), `#tsiftmdcrash-verify` (capability_proof_live_child_preserved), `#sqedit-race` P4 (queue_stale_noise_lines=0), `#gf5n`, `#docdriftgrace`, `#runexitrestart`.
-- **Operator-capture (need a live repro/log capture from you):** `#cyh0` (which action raises File Cache Conflict), `#jbrundispatch`, `#1vhn`.
-- **Still agent code-work (queued, not gated):** `#editorbufwin`, `#hap7`, `#fbwire`, `#qheadstrike`, `#qnodemerge4wire` P4, `#agentreloadrestart` + `#restartagentmenu` (restart-agent, unshipped — these need their logging shipped first, tracked in `#j9ja`).
-
-**JB plugin updates you'll need to install** (for the items whose proof needs plugin code): `#qpauseux` (paused-queue notification render), `#8bfz` (single-owner lease), `#restartagentmenu` (Restart Agent menu), `#qnodemerge4wire` P4 (DocumentListener reporters). I'll flag the exact build when each lands; none are shipped yet.
-
-**Also this cycle:** noted your `#1jec` strike (resolved) and preserved the `:pushpin:` position-locks (`#qauthorder`). The answered JB-stall head (`#supinstallfeedback`, shipped `cf7347a9`) stays at the queue head only because last cycle's `content_ours` drift recovery reverted its strike — no re-work needed.
-
-### Re: JB `Run Agent Doc` stalled without feedback — opus-4-8
-
-> **Queue prompt:** :round_pushpin: JB `Run Agent Doc` stalled without feedback — pane showed the post-exit `Press Enter to restart` keepalive while the supervisor auto-install was `Compiling agent-doc v0.34.35`.
-
-This specific stall is already addressed by shipped code (`#supinstallfeedback`). On the idle-watch auto-install path (`agent-doc-orchestration/src/start/idle_watch.rs`), `surface_supervisor_auto_install_status` fires a `Started` phase message — *"agent-doc: rebuilding the freshly-committed binary (~1 min) — do NOT press Enter; the supervisor auto-restarts when the build finishes"* — at the moment the `cargo build --release` / `cargo install` / `lib-install` rebuild begins, plus `Succeeded`/`Failed` terminal phases. It's unit-tested (`supervisor_auto_install_pane_message_started_warns_against_keypress`).
-
-Why your captured log still looks feedback-less: it's pane **scrollback**, and the feedback is a transient `tmux display-message` on the **status line** (bottom bar), so it doesn't appear in the captured body — and the scrollback itself keeps showing the misleading `Press Enter to restart` keepalive for the whole ~1-min compile. So the stall is fixed in principle but the indicator is easy to miss.
-
-**Residual gap captured** as `[#supinstallvis]` (`[recommended]`): make the rebuild state visible in the pane **body/scrollback** (or via the JB/VSCode plugin notification surface, overlapping `#qpauseux`) rather than only the status line — without disturbing the keepalive's Enter-to-restart reader. The safe pane-write mechanism needs an operator decision (a raw `send-keys` line risks being consumed by the keepalive), so I did not implement a blind pane-write change this cycle.
-
-No build/install/push this turn: STOP-cutting-releases is in effect, and the supervisor already auto-installs from source at its idle boundary (exactly what your log shows). Stopping the loop here — the remaining queue heads are dominated by `[operator-verify]`/operator-capture items on a queue paused for `#qflood` churn; those need a live editor/pane and can't be agent-drained.
-
-### Re: put the churn breakdown in the document + do [#qheadstrike] — opus-4-8
-
-> **Queue prompt:** The end part of the response that breaks down churn with tips shows up in the Claude Code console but not in the document. That part of the response should be in the document.
-
-You're right — that was my bug, not a rendering issue. In the last two cycles I diagnosed the churn in the console but then **stopped without `finalize`**, so the reasoning never crossed into the document. Fixed now: this response (and the analysis below) lands in the doc via the normal `finalize` path. Going forward I'll persist the substantive content here rather than leaving it console-only.
-
-> **Queue prompt:** :pushpin: do [#qheadstrike]
-
-I located the exact root cause for why the answered "JB Run Agent Doc stalled without feedback" head kept re-surfacing (the `#rt83/#qflood` phantom pin), and recorded the precise implementation seam in `tasks/agent-doc/plan-freetext-queue-head-autostrike.md`:
-
-- **P1 + P3 are already shipped.** `strike_answered_free_text_queue_heads` (`queue_consume.rs:872`) already strikes *all* answered free-text heads regardless of position and is pushpin/fence/baseline-aware, with end-to-end tests. So the matching is not the problem.
-- **The remaining gap is purely P2.** The strike is called from exactly one site — `write.rs:2139`, inside the `finalize` path, given the in-memory `response_body`. When `finalize` hits `live_prompt_drift_after_preflight` and the cycle is closed out through the **standalone `agent-doc commit` recovery path** (`git.rs commit_with_outcome`), the strike never runs (no `response_body` there). That is exactly what happened: my answer committed via `agent-doc commit`, but the strike lives only on the finalize path → the head stayed unstruck → it re-surfaced every re-fire.
-- **Focused-cycle fix:** at the post-commit success point in `commit_with_outcome`, load the freshly-committed cycle's captured `response_body` (the capture ledger already persists it) and call `strike_answered_free_text_queue_heads` best-effort via `converge_document_or_disk`, plus a deterministic SimWorld "recovery-path parity" test. Full seam is in the plan file.
-
-**Why I did not land the P2 code this cycle** (and am not just punting): (1) your own plan flags it as commit/queue-core work that is *"not safe to rush inside an in-session loop; needs a focused operator-driven cycle"*; (2) the live editor IPC is currently **wedged** (`ack_mismatch` — my last two finalizes fell back through `commit` recovery), so even a correct P2 fix could not be **live-verified** this session — I'd be shipping unverified commit-core code; (3) STOP-cutting-releases is in effect.
-
-**Recommended next step:** recycle the supervisor/editor to clear the `ack_mismatch` IPC wedge, then run `do [#qheadstrike]` as a focused cycle on the healthy session — the plan now makes it a targeted ~1-file change plus one test, not a re-investigation. If you'd rather halt the re-fire churn first, set `queue: stop` in frontmatter (an `admin queue pause` only suppresses unattended supervisor injection, not the head re-surfacing).
-
-Not auto-looping: the answered head will keep re-surfacing until P2 lands (it can't strike while IPC is wedged), so looping would only churn.
-❯ do [#qheadstrike]
-
-### Re: ops.log should carry timestamp + doc name + session id + turn id — opus-4-8
-
-> **Queue prompt:**
->
-> :pushpin: All log output should include a timestamp...especially ops.log. ops.log could also include the name of the agent document, the session id, and turn id for easier tracking when working with multiple documents.
-
-
-> **Queue prompt:** :pushpin: All log output should include a timestamp...especially ops.log. ops.log could also include the name of the agent document, the session id, and turn id for easier tracking when working with multiple documents.
-
-Shipped (`#opslogtrack`, agent-doc submodule `50d8f021`, superproject `ec280c65d`).
-
-**Timestamp:** `ops.log` already carries an ISO-8601 UTC timestamp on every line (`[<iso-ts>] …`, `#opslogts`) — so that half was already in place. (`cycles.jsonl` is also already ISO-timestamped.)
-
-**New — doc/session/turn attribution:** every `ops.log` line now gains a suffix:
+The supervisor recycled onto the new binary, so `#opslogtrack` is now live in `.agent-doc/logs/ops.log`. Confirmed directly from the log — two documents interleaved, each attributable:
 
 ```
-[2026-06-21T21:05:46Z] <message> doc=agent-doc-bugs2 session=b26b9957-… turn=cycle-1782090233572
+[2026-06-22T01:46:32Z] queue_dispatch_skipped file=tasks/agent-doc/agent-doc-bugs2.md … doc=agent-doc-bugs2 session=b26b9957-… turn=cycle-1782092736424
+[2026-06-22T01:46:32Z] queue_dispatch_skipped file=tasks/professional/equityfundingsource.md … doc=equityfundingsource session=62fe1f41-… turn=cycle-1782092755072
 ```
 
-- `doc=<stem>` — the agent document name (cheap, derived from the path; always present). This is the key disambiguator since `ops.log` is **per-project** and interleaves lines from every document running in the project.
-- `session=<id>` — the `agent_doc_session` frontmatter id, parsed once and cached per process (immutable per doc, so no per-line YAML parse).
-- `turn=<cycle_id>` — the current cycle/turn id from the cycle-state sidecar.
+Every line carries the ISO timestamp plus the appended ` doc=<stem> session=<id> turn=<cycle_id>` suffix, and the `agent-doc-bugs2` vs `equityfundingsource` lines are now distinguishable by `doc=`/`session=` — the multi-document tracking you asked for. Marking `#opslogtrackverify` done.
 
-`session`/`turn` are best-effort (omitted when unavailable, e.g. a doc with no frontmatter or no open cycle).
-
-**Why appended, not prepended:** the suffix goes at the *end* of each line so it never disturbs the positional message parsers (`gate_verify`'s `strip_prefix("s760 clear-decision …")`, which iterates `key=value` fields and ignores unknown `doc`/`session`/`turn` keys) or `contains()`-based ops.log marker scans. Verified safe against all current consumers.
-
-Test: `log_op_appends_doc_and_session_tracking_suffix` (asserts the suffix + that the message stays at the front of the body); `make check` green (4949). Filed `[#opslogtrackverify]` as the non-blocking live check (the suffix goes live once the supervisor recycles onto the freshly-built binary).
-
-Scope note: I targeted `ops.log` (your stated priority — *"especially ops.log"*). The broader stderr/`eprintln!` surface is much larger and unscoped; if you want timestamps there too, say the word and I'll file it.
-<!-- agent:boundary:e63ce5fc -->
+Note: those same lines show `reason=queue_control_paused` / `queue_dispatch_skipped`, i.e. the supervisor is correctly respecting the halt — the frontmatter shows `queue: start` flipped back, but `admin queue pause` is still active so the supervisor isn't auto-dispatching. If you want the drain to actually resume, run `agent-doc admin queue resume tasks/agent-doc/agent-doc-bugs2.md` (and confirm the JB editor IPC is reconnected). The head is still operator-verify `#tb4q`.
+<!-- agent:boundary:6d0aa4f7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -173,7 +92,7 @@ Scope note: I targeted `ops.log` (your stated priority — *"especially ops.log"
 - :pushpin: do [#supinstallvis]
 - :pushpin: do [#1jec]
 - do [#qheadstrike]
-- do [#opslogtrackverify]
+- ~~do [#opslogtrackverify]~~
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -202,7 +121,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#opslogtrackverify] [operator-verify] #opslogtrack Live-verify the ops.log doc/session/turn suffix (agent-doc submodule 50d8f021, superproject ec280c65d). Code shipped + make check green (4949); NOT installed (STOP-cutting-releases — the supervisor auto-installs from source at its idle boundary). After the supervisor recycles onto the new binary, confirm `.agent-doc/logs/ops.log` lines end with ` doc=agent-doc-bugs2 session=<id> turn=cycle-<n>` and that two docs running concurrently are distinguishable by the doc= field.
 - [ ] [#supinstallvis] [recommended] #agent-doc-bug #supinstallfeedback follow-up: the supervisor auto-install status (surface_supervisor_auto_install_status, idle_watch.rs) is surfaced ONLY as a transient tmux display-message on the status line, which is easy to miss while the pane scrollback keeps showing the misleading post-exit "Press Enter to restart" keepalive — so an operator watching the pane body still perceives a ~1-min stall. Residual: make the rebuild state visible in the pane BODY/scrollback (not just the status line) without disturbing the keepalive Enter-to-restart reader, e.g. a pane title set + a single non-input-consuming visible line, or render it through the JB/VSCode plugin notification surface (overlaps #qpauseux notification rendering). Decide the safe pane-write mechanism with the operator before implementing (send-keys risks being consumed by the keepalive). Plan TBD.
 - [ ] [#agentreloadrestart] restart-agent Phase 1: supervisor restart re-resolves harness from current frontmatter (agent claude->opencode takes effect on restart) + boundary auto-restart when resolved harness differs, behind agent_doc_agent_change_restart (default ON). Log harness_change_detected old/new + agent_restart_boundary_gate + agent_restart_performed. SimWorld + make tmux-ci. Plan: tasks/agent-doc/plan-restart-agent.md
 - [ ] [#restartagentmenu] restart-agent Phase 2 (after agentreloadrestart): RestartAgentAction.kt JB menu cmd mirroring RestartSupervisorProcessAction.kt + plugin.xml registration + TerminalUtil restart wiring; bump pluginVersion; build signed+unsigned. Log action invocation + resolved harness. Decide alongside-vs-replace Restart Supervisor Process with operator. Plan: tasks/agent-doc/plan-restart-agent.md

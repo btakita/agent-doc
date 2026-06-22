@@ -1500,6 +1500,36 @@ pub(crate) fn newest_crate_source_mtime_secs(crate_root: &Path) -> Option<u64> {
 /// newer than the running supervisor process, so the existing `process_binary_is_stale`
 /// recycle path hot-reloads onto it. Returns `Err` naming the failed step.
 pub(crate) fn run_supervisor_auto_install(crate_root: &Path) -> Result<()> {
+    run_supervisor_auto_install_with_retry(
+        crate_root,
+        AUTO_INSTALL_MAX_ATTEMPTS,
+        Duration::from_secs(AUTO_INSTALL_RETRY_BACKOFF_SECS),
+    )
+}
+
+/// `#autoinstallretry` — number of times to attempt the auto-install step sequence
+/// before falling back to operator refresh, and the backoff between attempts. The
+/// `cargo build --release` step is most failures' culprit and is almost always
+/// TRANSIENT: the supervisor builds from the live working tree, so it can catch a
+/// mid-edit non-compiling window (an agent/operator part-way through a multi-file
+/// edit) or lose a cargo build/target lock to a concurrent `make check`. A bounded
+/// retry with backoff rescues both — by the next attempt the edit has committed
+/// (edits land atomically) and the lock has freed — instead of giving up after one
+/// failure and stalling the installed binary at the last good commit (which is what
+/// produced the false "stale binary, install manually" handoffs).
+const AUTO_INSTALL_MAX_ATTEMPTS: u32 = 3;
+const AUTO_INSTALL_RETRY_BACKOFF_SECS: u64 = 20;
+
+/// `#autoinstallretry` — should the auto-install retry after a failed attempt?
+/// Pure + testable: retry while attempts remain. (`attempt` is 1-based.)
+pub(crate) fn auto_install_should_retry(attempt: u32, max_attempts: u32) -> bool {
+    attempt < max_attempts
+}
+
+/// Run the auto-install step sequence ONCE: `cargo build --release` →
+/// `cargo install --path .` → `agent-doc lib-install`. Returns `Err` naming the
+/// failed step. The later steps are idempotent, so retrying the whole sequence is safe.
+fn run_auto_install_steps_once(crate_root: &Path) -> Result<()> {
     let steps: [(&str, &[&str]); 3] = [
         ("cargo", &["build", "--release"]),
         ("cargo", &["install", "--path", ".", "--quiet", "--force"]),
@@ -1519,6 +1549,40 @@ pub(crate) fn run_supervisor_auto_install(crate_root: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// `#autoinstallretry` — retry the auto-install sequence up to `max_attempts`,
+/// sleeping `backoff` between attempts, so a transient `cargo build --release`
+/// failure (mid-edit working tree / build-lock contention) self-heals instead of
+/// stalling the installed binary. Returns the LAST attempt's error after exhausting
+/// retries (the caller then falls back to operator refresh).
+fn run_supervisor_auto_install_with_retry(
+    crate_root: &Path,
+    max_attempts: u32,
+    backoff: Duration,
+) -> Result<()> {
+    let mut last_err = None;
+    for attempt in 1..=max_attempts.max(1) {
+        match run_auto_install_steps_once(crate_root) {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                if auto_install_should_retry(attempt, max_attempts) {
+                    eprintln!(
+                        "[agent-doc] supervisor auto-install attempt {attempt}/{max_attempts} failed ({err}); retrying in {}s (#autoinstallretry — transient build state: mid-edit working tree or build-lock contention usually clears by the next attempt)",
+                        backoff.as_secs()
+                    );
+                    last_err = Some(err);
+                    std::thread::sleep(backoff);
+                } else {
+                    return Err(err);
+                }
+            }
+        }
+    }
+    // Unreachable in practice (the loop returns on the final attempt), but keep a
+    // total fallback so the signature stays honest.
+    Err(last_err
+        .unwrap_or_else(|| anyhow::anyhow!("auto-install exhausted retries with no recorded error")))
 }
 
 /// `#jbrestale` — seam-isolated classifier (NOT yet wired into the dispatch bail).
@@ -4452,6 +4516,24 @@ mod tests {
     // directly to assert the schema/rows the seam writes. `Connection` is the
     // `state_store` re-export already in scope via `super::*`.
     use agent_doc_sqlite::state_store::{load_actor_transitions_from_db, sqlite_i64};
+
+    #[test]
+    fn auto_install_should_retry_while_attempts_remain() {
+        // `#autoinstallretry`: retry the first attempts, give up on the last so the
+        // caller can fall back to operator refresh.
+        assert!(auto_install_should_retry(1, 3), "attempt 1 of 3 retries");
+        assert!(auto_install_should_retry(2, 3), "attempt 2 of 3 retries");
+        assert!(
+            !auto_install_should_retry(3, 3),
+            "final attempt does not retry"
+        );
+        assert!(
+            !auto_install_should_retry(4, 3),
+            "past the cap never retries"
+        );
+        // A single-attempt policy never retries.
+        assert!(!auto_install_should_retry(1, 1));
+    }
     use rusqlite::params;
     use std::collections::BTreeMap;
 

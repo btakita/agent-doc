@@ -1581,8 +1581,9 @@ fn run_supervisor_auto_install_with_retry(
     }
     // Unreachable in practice (the loop returns on the final attempt), but keep a
     // total fallback so the signature stays honest.
-    Err(last_err
-        .unwrap_or_else(|| anyhow::anyhow!("auto-install exhausted retries with no recorded error")))
+    Err(last_err.unwrap_or_else(|| {
+        anyhow::anyhow!("auto-install exhausted retries with no recorded error")
+    }))
 }
 
 /// `#jbrestale` — seam-isolated classifier (NOT yet wired into the dispatch bail).
@@ -1751,13 +1752,19 @@ fn clear_superseded_stale_supervisor_pause(
     let lease = load_supervisor_lease_from_db(&conn, document_id, record.generation)?;
     let stale_pid = stale_supervisor_pid_from_pause_reason(reason);
     let current_pid = lease.as_ref().and_then(|lease| lease.supervisor_pid);
+    let stale_pid_dead = stale_pid.is_some_and(|pid| !process_is_alive(pid));
+    let stale_pid_dead_after_reboot =
+        stale_pid_dead && queue_pause_predates_current_boot(control.updated_at);
     let superseded_by_actor_transition = record.last_transition.prior_generation
         < record.generation
         && record.last_transition.new_generation == record.generation
         && record.last_transition.timestamp >= control.updated_at;
     let superseded_by_supervisor_pid =
         stale_pid.is_some() && current_pid.is_some() && stale_pid != current_pid;
-    if !superseded_by_actor_transition && !superseded_by_supervisor_pid {
+    if !superseded_by_actor_transition
+        && !superseded_by_supervisor_pid
+        && !stale_pid_dead_after_reboot
+    {
         return Ok(false);
     }
 
@@ -1766,11 +1773,13 @@ fn clear_superseded_stale_supervisor_pause(
         file,
         document_id,
         &format!(
-            "stale_supervisor_pause_superseded file={} stale_pid={} current_pid={} session={} pane={} generation={} actor_transition_at={} control_updated_at={} result=cleared",
+            "stale_supervisor_pause_superseded file={} stale_pid={} stale_pid_dead={} pause_predates_boot={} current_pid={} session={} pane={} generation={} actor_transition_at={} control_updated_at={} result=cleared",
             file.display(),
             stale_pid
                 .map(|pid| pid.to_string())
                 .unwrap_or_else(|| "unknown".to_string()),
+            stale_pid_dead,
+            stale_pid_dead_after_reboot,
             current_pid
                 .map(|pid| pid.to_string())
                 .unwrap_or_else(|| "unknown".to_string()),
@@ -1782,6 +1791,10 @@ fn clear_superseded_stale_supervisor_pause(
         ),
     )?;
     Ok(true)
+}
+
+fn queue_pause_predates_current_boot(updated_at: u64) -> bool {
+    system_boot_timestamp_secs().is_some_and(|boot| updated_at < boot)
 }
 
 fn repair_spent_preset_pause_before_dispatch(
@@ -1939,6 +1952,19 @@ pub(crate) fn canonical_path_for_compare(path: &Path) -> PathBuf {
 
 pub(crate) fn process_is_alive(pid: u32) -> bool {
     Path::new("/proc").join(pid.to_string()).exists()
+}
+
+pub(crate) fn system_boot_timestamp_secs() -> Option<u64> {
+    let uptime_secs = std::fs::read_to_string("/proc/uptime")
+        .ok()?
+        .split_whitespace()
+        .next()?
+        .parse::<f64>()
+        .ok()?;
+    if !uptime_secs.is_finite() || uptime_secs.is_sign_negative() {
+        return None;
+    }
+    Some(timestamp_secs().saturating_sub(uptime_secs.floor() as u64))
 }
 
 pub(crate) fn reap_verified_controller_pid(project_root: &Path, pid: u32, generation: u64) {

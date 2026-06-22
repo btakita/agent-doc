@@ -3518,6 +3518,114 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_clears_stale_supervisor_pause_when_named_pid_is_dead_after_reboot() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/dispatch-reboot.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-reboot\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let dead_pid = u32::MAX;
+        assert!(
+            !process_is_alive(dead_pid),
+            "sentinel PID must not exist for the reboot-stale regression"
+        );
+
+        crate::session_actor::record_session_start_direct(&doc, "session-reboot", "%41", "@1", 1)
+            .unwrap();
+        let record = crate::session_actor::transition_state_direct(
+            &doc,
+            "session-reboot",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+        assert_eq!(record.generation, 1);
+
+        let conn = open_state_db(dir.path()).unwrap();
+        let boot_timestamp =
+            system_boot_timestamp_secs().expect("/proc/uptime should be available in tests");
+        let old_transition_timestamp = boot_timestamp.saturating_sub(2);
+        let preboot_pause_timestamp = boot_timestamp.saturating_sub(1);
+        conn.execute(
+            "UPDATE actor_transitions SET timestamp = ?1 WHERE new_generation = 1",
+            params![sqlite_i64(old_transition_timestamp, "old transition timestamp").unwrap()],
+        )
+        .unwrap();
+        state_store::upsert_queue_control_in_db(
+            &conn,
+            &state_store::QueueControlInsert {
+                scope_kind: "document",
+                scope_id: &doc.to_string_lossy(),
+                state: "paused",
+                reason: Some(&format!(
+                    "stale route-owned supervisor (pid {dead_pid}) replaying already-answered queue item after reboot"
+                )),
+                operation_receipt_id: None,
+            },
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE queue_controls SET updated_at = ?1 WHERE scope_kind = 'document' AND scope_id = ?2",
+            params![
+                sqlite_i64(preboot_pause_timestamp, "queue control timestamp")
+                    .unwrap(),
+                doc.to_string_lossy().to_string()
+            ],
+        )
+        .unwrap();
+
+        let dispatch = ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-reboot".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("idle_queue_continuation".to_string()),
+            diagnostic_payload: Some("post-reboot auto dispatch".to_string()),
+        };
+        let auth = handle_dispatch(&bootstrap, None, dispatch).unwrap();
+        assert_eq!(auth.record.session_id, "session-reboot");
+        assert_eq!(auth.record.generation, 1);
+
+        let effective = state_store::load_effective_queue_control_from_db(
+            &conn,
+            &doc.to_string_lossy(),
+            &dir.path().to_string_lossy(),
+        )
+        .unwrap();
+        assert!(
+            effective.is_none(),
+            "dispatch should clear stale-supervisor pause when the named old PID is dead"
+        );
+        let blocked: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM dispatch_attempts WHERE failed_stage = 'queue_paused'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(blocked, 0, "dispatch must not stay queue_paused");
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("stale_supervisor_pause_superseded"));
+        assert!(ops_log.contains("stale_pid_dead=true"));
+        assert!(ops_log.contains("pause_predates_boot=true"));
+    }
+
+    #[test]
     fn gc_closes_stale_starting_actor_without_fresh_supervisor_lease() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();

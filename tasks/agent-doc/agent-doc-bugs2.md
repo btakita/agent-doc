@@ -34,85 +34,17 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260622-222003.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260622-224034.md`*
 
 Compacted content:
-- Archived 5 response topic(s): Codex Run Agent Doc submit retries - gpt-5; strict closeout and stale supervisor recycle; strict closeout commit evidence; 2 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-
-### Re: queued blockers after repair — gpt-5
-
-> **Queue prompt:**
->
-> do [#1jec]
-> do [#98t4]
-> do [#fccd]
-
-`#1jec` is blocked on live operator verification. It requires a JetBrains/plugin reconnect scenario that cannot be proven from this Codex shell, so I gated it instead of marking it done.
-
-`#98t4` is not complete. The concrete blocker is release packaging design: `cargo publish` currently rejects the package graph because internal `agent-doc-*` dependencies are path-only / unpublished, and `make publish-pypi` fails from the sdist because path dependencies create a duplicate `agent-kit v0.4.1` lockfile package. Fixing it requires deciding whether the internal crates are publishable crates or should be packaged out of the release path.
-
-`#fccd` is not complete. The concrete live-state evidence is that the installed CLI is `agent-doc 0.34.37`, `agent-doc admin recycle` is already marked, and `agent-doc session restart-supervisor` refused because pane `%3` is alive-busy. That leaves the Clear Session Cache dialog investigation open until the supervisor can recycle at an idle boundary and the JB behavior can be re-tested.
-
-No source files changed in this closeout. No tests were needed for these blocker classifications.
-
-### Re: live-verification queue gating — gpt-5
-
-> **Queue prompt:**
->
-> do [#fbwireverify]
-> do [#qnodemerge4verify]
-> do [#tb4q]
-> do [#cancelturnverify]
-> do [#qcm1verify]
-> do [#arsm]
-> do [#jjds]
-> do [#98t4]
-> do [#fccd]
-
-The live-verification items `#fbwireverify`, `#qnodemerge4verify`, `#tb4q`, `#cancelturnverify`, `#qcm1verify`, `#arsm`, and `#jjds` cannot be completed from this Codex shell because they require live JetBrains/editor/operator proof. I gated them instead of marking them done.
-
-`#98t4` remains open. Its blocker is package architecture: the Rust publish path needs versioned/publishable internal crates or a different package boundary, and the PyPI sdist path needs the duplicate `agent-kit v0.4.1` lockfile collision resolved.
-
-`#fccd` remains open. Its blocker is live supervisor/editor state: the installed CLI is `agent-doc 0.34.37`, recycle is marked, and immediate supervisor restart refused because pane `%3` is alive-busy. The Clear Session Cache behavior still needs retest after the supervisor reaches an idle recycle boundary.
-
-No source files changed in this closeout. No tests were needed for these blocker/gating updates.
-
-### Re: closeout write repair — gpt-5
-
-This write absorbs the live queue-convergence changes left after the stale-supervisor recovery path.
-
-No source files changed in this repair write. The remaining actionable queue heads, including `#98t4` and `#fccd`, stay open.
-
-### Re: stale-supervisor repair and JB route checks — gpt-5
-
-> **Queue prompt:**
->
-> JB `Clear Session Context`, JB `Run Agent Doc`, and any other tmux prompt + submit should have a 500ms poll for 15s to retry the submit.
-
-
-> **Queue prompt:**
->
-> Fix the root cause of this issue that occurred in this document.
->
-> The write recovery path hit the same stale-supervisor proof guard: the patch was delivered, but the materialized content was missing the response body.
-
-I traced the closeout failure against the current `src/agent-doc` tree. The root response-materialization guard is already fixed in the installed code path: repair now fails closed unless the captured response block is actually materialized (`6f022d7b`), strict closeout requires a real response heading (`daf5e727`), and missing repair materialization is covered by regression test `repair_materialization_requires_captured_response_block`.
-
-I also checked the JB Codex slow/stalled route evidence in this queue. The exact Codex footer shape from the log (`Context N% use`) is already accepted by `ready_prompt_candidate`, and the direct-pane submit retry cadence is covered by `direct_pane_enter_resubmit_retries_at_least_once_per_second`. The current tree therefore has the route fixes that match the reported symptoms; I did not add a duplicate code path.
-
-Changed paths: `src/agent-doc/.claude/skills/agent-doc/SKILL.md` and the parent `src/agent-doc` submodule pointer. I refreshed the managed agent-doc skill from `0.34.36` to `0.34.37` so the checked-in instruction surface matches the installed binary. Commits: submodule `2e450aaf` and parent `c203479df`.
-
-Verification: focused cargo tests for repair materialization, Codex footer readiness, direct-pane resubmit cadence, and authoritative ready polling all passed. Full `make check` in `src/agent-doc` passed: clippy, 4,994 nextest tests, doctests, and the medium SimWorld seed check. Latest GitHub Actions CI for `src/agent-doc` is green: run `27987503460` on `2026-06-22T22:11:42Z`.
-
-`#98t4` and `#fccd` stay open because this cycle consumed the older free-text repair/route queue head, not those backlog implementations. Escalation: none. Confidence: high that the reported stale-supervisor materialization and JB Codex route-stall classes are already covered by the current `0.34.37` tree plus the refreshed skill surface.
-<!-- agent:boundary:3f31a18b -->
+- Archived 4 response topic(s): queued blockers after repair; live-verification queue gating; closeout write repair; 1 more
+- Prior summary/context: prior compacted content: Archived 5 response topic(s): Codex Run Agent Doc submit retries - gpt-5; strict closeout an...
+<!-- agent:boundary:3325c10d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~JB `Clear Session Context`, JB `Run Agent Doc`, and any other tmux prompt + submit should have a 500ms poll for 15s to retry the submit.~~
 ---
 :pushpin: Fix the root cause of this issue that occurred in this document.
 ```

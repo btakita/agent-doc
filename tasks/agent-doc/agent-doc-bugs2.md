@@ -175,7 +175,22 @@ The source commits remain the same.
 The package version still prints `agent-doc 0.34.35` because `Cargo.toml` was not version-bumped in this fix; the local binary and library are nevertheless rebuilt from the current checkout containing the editor integration changes and current source tree.
 
 Verification already completed in this session includes `npm test`, JetBrains targeted test, JetBrains `test buildPlugin`, the focused Rust IPC/route tests, `make check`, and the latest GitHub Actions `CI` run reporting success.
-<!-- agent:boundary:1bc8d226 -->
+
+### Re: install closeout repair — gpt-5
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
+> ```
+> [route] target tmux session: 0
+> Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
+> ```
+
+
+The build and install follow-up is now complete. The CLI was reinstalled from the current checkout, release artifacts were rebuilt, the native library was installed, the JetBrains plugin was built and installed for IntelliJ IDEA 2026.1, and the VS Code package was rebuilt and installed through `codium`.
+
+The JetBrains plugin still requires an IDE restart before the newly installed plugin code is active. The controller was also marked for recycle at the next idle boundary with `agent-doc admin recycle`.
+<!-- agent:boundary:ca6c9adc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -241,7 +256,7 @@ Error: authoritative actor record for tasks/software/agent-loop.md is bound to h
 ---
 — auto-struck: answered this cycle (#ftstrike)
 - ~~Figure out how to make AGENTS.md lean & reliable so agents follow the directives. Should we treat AGENTS.md as a menu that defers to runbooks? Would that be more reliable?~~
-- :pushpin: do [#qcm1verify]
+- ~~:pushpin: do [#qcm1verify]~~
 - :pushpin: do [#arsm]
 - :pushpin: do [#1jec]
 - :pushpin: do [#fbwireverify]

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -295,7 +295,7 @@ Confirmed your model and built the missing half. First a correction that makes t
 2. Add an apex **custom-address rule: `efs@briantakita.me` → Send to Worker `equityfundingsource`**. That's the one rule that makes "incoming emails to efs@briantakita.me go to the app." No catch-all, no MX change.
 
 Then the live test: email `efs@briantakita.me` from any address → it should land in `btak.dev+efs@gmail.com`. Reply to an app notification → still threads via `reply@efs.briantakita.me` as before.
-<!-- agent:boundary:5b2c22da -->
+<!-- agent:boundary:cc05a5bd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -307,6 +307,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Use chromium-bridge on https://dash.cloudflare.com/1e7e194ff8da4ad9e40ce041aea84f76/email-service/routing to configure the email routing and the apex rule.
 <!-- /agent:queue -->
 
 ## Backlog

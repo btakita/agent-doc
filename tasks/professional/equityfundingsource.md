@@ -25,7 +25,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-completed
+complete
 <!-- /agent:status -->
 
 ## Exchange
@@ -67,7 +67,29 @@ Verification: production D1 query results above; code path verified in `app/equi
 Confidence: high that the missing cards are caused by empty local `loans`/`investment_deals`; medium on the exact cause of the row loss because production D1 has no audit rows for that deletion/orphaning.
 
 Escalation: none.
-<!-- agent:boundary:18cda450 -->
+
+### Re: audit rows + due-diligence packet — gpt-5
+
+> **Queue prompt:**
+>
+> Add audit rows for deletion/orphaning. Did adding the send due diligence packet break the available deals?
+
+Implemented durable audit coverage for loan deletion and TMO-cache orphan detection, and added a regression guard around the due-diligence package sender.
+
+The due-diligence package send did not appear to break available deals. I traced the feature commit `ff0d565` and it touched the lender-message/email path, not `loans` or `investment_deals` deletion. I also added a test asserting `selected_lender_due_diligence_package_send_` stays messaging-only and does not call loan/deal delete paths.
+
+Changed paths: `app/equityfundingsource/migrations/0100_audit_logs.sql`; `app/equityfundingsource/lib/admin/repo.ts`; `app/equityfundingsource/lib/admin/loan_management/index.ts`; `app/equityfundingsource/lib/borrower/loans/index.ts`; `tests/admin-pipeline.test.ts`; `tests/admin-investor-pipeline.test.ts`; `prds/equity-funding-source-lending-portal-prd.md`; parent submodule pointer `src/equityfundingsource-dev`.
+
+Commands: `tsift status`; `tsift diff-digest --revision ff0d565`; `bun test tests/admin-pipeline.test.ts tests/admin-investor-pipeline.test.ts`; `bun run build`; `git diff --check`; `bun test tests/prd.test.ts`; `make check`; `gh run list --workflow CI --limit 1`; `git diff --cached --check`; `git commit`; `git push origin main`.
+
+Verification: focused Bun tests passed (`149 pass, 0 fail`); PRD tests passed (`8 pass`); `bun run build` passed; `make check` passed (`1142 pass, 0 fail`); staged whitespace check passed. GitHub Actions check could not run because this repo has no workflow named `CI`.
+
+Commit/push: EFS submodule commit `36b621a` was pushed to `origin/main`. Parent submodule pointer is included in the agent-doc closeout commit.
+
+Confidence: high. The new `audit_logs` table is intentionally not FK-cascaded from `loans`, deletion paths write audit rows before deleting, observed TMO-cache/local loan orphaning is deduped, and the due-diligence sender is pinned by test as non-destructive.
+
+Escalation: none.
+<!-- agent:boundary:74110572 -->
 <!-- /agent:exchange -->
 ###
 <!--

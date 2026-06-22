@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -566,7 +566,26 @@ Verification and commits:
 - `gh run list --workflow CI --limit 1` still reports no workflow named `CI`.
 - EFS commit pushed: `d6f8fd8` (`chore(email): remove stale resend config`).
 - Parent pointer pushed to `origin/main`: `5b43587ad` (`chore: update efs submodule for cloudflare email cleanup`).
-<!-- agent:boundary:37eb8026 -->
+
+### Re: deploy — gpt-5
+
+Deployed current EFS `main` (`d6f8fd8`) after the Cloudflare Email cleanup.
+
+Deploy details:
+- Remote D1 pre-check: `No migrations to apply`
+- `make deploy`: succeeded
+- Remote D1 post-check: `No migrations to apply`
+- Live smoke: `https://equityfundingsource.brian-takita.workers.dev/` returned HTTP `200`
+- Worker version: `49dc790c-2485-46b0-bf68-d0a29bec26ac`
+
+Verification already completed before deploy: full `make check` passed with 1122 tests plus app and Worker builds. GitHub still has no workflow named `CI`.
+
+Commits:
+- EFS submodule: `d6f8fd8` (`chore(email): remove stale resend config`) pushed to `origin/main`.
+- Parent repo pointer: `5b43587ad` (`chore: update efs submodule for cloudflare email cleanup`) pushed to `origin/main` via a temporary clean worktree, so unrelated local parent commits/dirty files were not pushed.
+
+Notes: local parent `main` still has pre-existing unrelated divergence and dirty files (`src/boost-client`, `tasks/agent-doc/agent-doc-bugs2.md`, this session doc). I left those untouched.
+<!-- agent:boundary:5e342b1d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -578,11 +597,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~The admin users page should have a button to send a login by email link to a user.~~
-- ~~I want to test the rwaldman100+admin@gmail.com scenario. Please send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com. I want to manually test his scenario so next time I have a call with him, I will have confidence that the fixes work.~~
-- ~~Why are we still using Resend? We should be using CF email sending API.~~
-- ~~Please give an analysis of all issues that rwaldman100+admin@gmail.com, their root causes, how they are fixed, and what I can do to test these scenarios.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

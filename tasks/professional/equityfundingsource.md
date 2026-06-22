@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -167,7 +167,17 @@ So you can't make a Gmail address the *sender*. But there are good options depen
 3. **You want that Gmail to *receive* EFS mail / test the round-trip** → that's a *recipient*, not a sender. Replies can come **from** `btak.dev+efs@gmail.com` just fine — to test inbound, add that Gmail as an admin (or party) user email and reply from it; or point the notification-recipient vars (`CONTACT_NOTIFICATION_TO`, etc.) at it.
 
 **Tell me which (1, 2, or 3 — or something else) and I'll make the change + deploy.** I didn't touch anything this cycle, so the current verified `info@briantakita.me` sender keeps working in the meantime.
-<!-- agent:boundary:74860ba2 -->
+> **Queue prompt:** deploy
+
+### Re: deploy — nothing to deploy (sender switch is blocked) — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+
+Nothing to deploy this cycle. This "deploy" was paired with the sender switch above, which I held off on (you can't send *from* a Gmail address — see the previous response for the viable options). No repo change was made, and prod is already current — worker `addc055c`, EFS submodule `28300b3`, with the inbound email round-trip enabled. Once you pick option 1/2/3 for the sender, I'll make that change and deploy it together. Queue drained.
+<!-- agent:boundary:7a86abd7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -179,8 +189,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Switch the efs email from info@briantakita.me to btak.dev+efs@gmail.com~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -295,13 +295,28 @@ Verification:
 - GitHub Actions CI for `c232455e` completed successfully: run `27980324845` (`make check` and `make tmux-ci`).
 
 I left the newer broader bidirectional document-sync workflow prompt queued; this turn only implemented the concrete in-sync node merge/ACK contract.
-<!-- agent:boundary:9452c783 -->
+
+### Re: realtime node patch syncing — gpt-5
+
+> **Queue prompt:**
+>
+> Make sure the document node patches are real-time. They should always be syncing as changes are made.
+
+
+> **Queue prompt:** Make sure the document node patches are real-time. They should always be syncing as changes are made.
+
+I am treating this as a requirement, not as satisfied by the prior node-ACK fix. The shipped node-ACK merge guard proves that emitted node patches are gated on target-node proof before ACK; it does not by itself guarantee continuous editor-to-CPC and CPC-to-editor syncing while the operator is typing.
+
+I captured the remaining implementation as backlog item `#rtndsync`: realtime document-node patch syncing, ACK-gated in both directions, dirty-node conflict handling that preserves operator edits, and no JetBrains File Cache Conflict dialog or direct disk fallback except explicit force/emergency.
+
+Changed paths: session document only. Commands: preflight, plan, interrupted-cycle recovery, and finalize. Verification: finalize/session-check. Escalation: none. Confidence: medium; the requirement is clear, but this response does not claim the realtime-sync implementation is complete.
+<!-- agent:boundary:532fe32e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Stop using a JB `File Cache Conflict` to delete all my work. You should never use JB `File Cache Conflict` while the editor is open ever again. We must fix all issues where JB `File Cache Conflict` was used as a band aid...bese it results in drastic changes to delete my work. We need realtime document syncing. There should be a document sync plugin<->cpc workflow to gracefully recover from drift. The sync should compare the nodes that are out of sync, then apply rules to merge the state. The user editing/adding/deleting a node should be the highest precedence, then mtime. Add and delete clean nodes should also be part of the sync workflow. Add/delete/modify a dirty node needs to be reconciled with the rules of precedence. If a node is in sync, both mtimes should be ensured to be in sync. If the mtimes for the same node between the cpc document model and the editor model are out of sync, the latest mtime should be applied. The editor buffer mtime then document file mtime is the baseline for the plugin side when starting the process. Modifications on the editor side buffer should only affect the node that was modified. Any in-memory modifications to the cpc document model should set the mtime in the document model. Please sanity check this logic to ensure it is sound. If there are ambiguities or the logic is not sound, please notify me with a prompt of options to move forward. There should be 0 JB `File Cache Conflict` dialogs. The operator should never lose work as well. Make sure these operations do not result in lost operator work. The previous turn deleted these recently added queue items...lost work. There should be a continuous stream of bidirectional cpc<->plugin operations to ensure the document model on both ends remain in sync. Ensure any races between the editor buffer and the ffi plugin document model resolve before comparing cpc<->plugin document models. The document model node must be up to date with ack before a merge occurs. Keep on retrying until the document model node is acked as in sync. We should never write directly to the disk unless forced. Force should only occur in exceptional emergency circumstances while the plugin is running. Even IPC drift should have a sync workflow. Even if the entire document model is not in sync but a specific document node is in sync, a merge can occur on the in sync document node.~~
+- ~~Make sure the document node patches are real-time. They should always be syncing as changes are made.~~
 ---
 JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
 ```
@@ -362,6 +377,7 @@ Error: authoritative actor record for tasks/software/agent-loop.md is bound to h
 - do [#cancelturnverify]
 - ~~do [#mrh-response-loss-stalled-queue]~~
 - do [#qcm1verify]
+- do [#rtndsync]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -390,6 +406,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#rtndsync] #agent-doc-bug Implement realtime document-node patch syncing: editor-side node changes stream to the CPC document model as they are made, CPC-side node patches stream back through ACK-gated IPC, dirty-node conflict rules preserve operator edits, and the flow avoids JetBrains File Cache Conflict dialogs and direct disk fallback except explicit force/emergency. Include specs, tests, build/install, commit, and push.
 - [ ] [#cancelturnverify] [operator-verify] #agent-doc-bug Live-verify Cancel Turn (agent-doc submodule b4471d05; committed+pushed, make check green, JB 0.2.176 + VS Code 0.2.31 built, NOT installed). After installing the plugins: (1) while a turn is RUNNING, invoke Cancel Turn (JB menu / VS Code command) and confirm the turn is interrupted (ops.log cancel_turn_performed action=interrupt_active_turn) and the agent stays open; (2) while the agent is IDLE, invoke Cancel Turn (even repeatedly) and confirm it is a NO-OP (ops.log cancel_turn_noop reason=idle_no_active_turn) and the agent is NOT closed — the core safety requirement. Verify per harness: Codex/OpenCode (Escape/C-c, never raw Ctrl+C that would close on idle) and Claude.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.

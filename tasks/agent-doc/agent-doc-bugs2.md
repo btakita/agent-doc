@@ -39,13 +39,59 @@ completed
 Compacted content:
 ❯ - Archived 26 response topic(s): do [#pendaddorder]; Clear Session Context delayed Run Agent Doc dispatch; Clear Session Context dispatch storm / no-submit report; 23 more
 ❯ - Prior summary/context: prior compacted content: Archived 12 response topic(s): Validate/invalidate operator-verify items from the logs; do [...
-<!-- agent:boundary:35eb20a1 -->
+
+### Re: editor stale-state rollback and slow Run Agent Doc — gpt-5
+
+> **Queue prompt:**
+>
+> I'm adding queue items into equityfundingsource.md and agent-doc keeps on reverting to a stale state...and I keep on losing my work. As I was typing in this queue item, a JB `File Cache Conflict` occurred and it deleted this entire item.
+
+
+> **Queue prompt:** I'm adding queue items into equityfundingsource.md and agent-doc keeps on reverting to a stale state...and I keep on losing my work. As I was typing in this queue item, a JB `File Cache Conflict` occurred and it deleted this entire item.
+
+Root cause confirmed: the editor plugin could consume and delete a file-IPC patch after mutating the live editor buffer even when it failed to write the required `*.ack-content` sidecar. That left the binary in the `no_ack` retry state with no patch file left to replay, which is exactly the stale-state/FCC shape shown by the live `equityfundingsource.md` diagnostics.
+
+Fix shipped locally:
+
+- JetBrains `PatchWatcher.writeAckContent(...)` now returns `Boolean`; response patch apply, no-op/dedupe apply, VFS apply, and `save_document` all return failure if ACK-content cannot be written.
+- VS Code patch apply and `save_document` now have the same ACK-gated behavior: document save must succeed, a patches dir must exist, and `writeAckContent(...)` must return true.
+- Because `processPatchFile` only deletes a patch file when `applyPatch(...)` returns true, a missing ACK-content proof now leaves the patch in place for binary retry instead of losing the replay source.
+- Added guard tests for both editor integrations, plus `VERSIONS.md` entry `#ackcontent-delete`.
+
+Commits:
+
+- agent-doc submodule `568755be` — `fix: ack-gate editor file ipc patches`
+- parent repo `dc575cd57` — `chore: update agent-doc ack-gated editor patches`
+
+I also installed the local JetBrains plugin build to `/home/brian/.config/JetBrains/IntelliJIdea2026.1`; IntelliJ needs a restart before that plugin code is active.
+
+> **Queue prompt:** JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
+
+I checked the specific route shape in the pasted log and the current source already treats a footer-only Codex line like `gpt-5.5 xhigh ... Context 0% use` as dispatch-ready; the focused route tests for that pass. I also checked the live `equityfundingsource.md` actor: it is not a footer-only idle pane right now, it is a real active Codex turn with `Working (... esc to interrupt)` and `prompt_ready=false`, so route must not inject another run into that pane until the turn finishes or is cancelled.
+
+So this cycle fixes the stale-state/patch-loss root cause. For the route complaint, I verified the current source covers the pasted footer-only readiness case and that the live stall now is an occupied actor pane, not an idle-readiness false negative.
+
+Verification:
+
+- `npm test` in `editors/vscode` passed: 98 tests.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.NormalizeExchangePrefixesTest` passed.
+- `cargo test -p agent-doc-orchestration file_ipc_` passed: 13 tests.
+- `cargo test -p agent-doc-orchestration ready_prompt_candidate_accepts_codex` passed: 3 tests.
+- `cargo test -p agent-doc-orchestration has_busy_cue_detects_codex_working_status_with_idle_placeholder` passed.
+- `make check` passed: clippy plus 4,982 tests, doctests, and the ignored medium sim target.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` passed.
+- Latest GitHub Actions `CI` run was `completed success` at `2026-06-22T18:30:51Z`.
+
+Escalation: none.
+
+Confidence: high for the stale-state/File Cache Conflict patch-loss fix; medium for the route report because the currently observed live slowdown is a genuinely busy actor pane rather than the footer-only readiness case from the pasted log.
+<!-- agent:boundary:b718c2f5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- I'm adding queue items into equityfundingsource.md and agent-doc keeps on reverting to a stale state...and I keep on losing my work. As I was typing in this queue item, a JB `File Cache Conflict` occurred and it deleted this entire item.
+- ~~I'm adding queue items into equityfundingsource.md and agent-doc keeps on reverting to a stale state...and I keep on losing my work. As I was typing in this queue item, a JB `File Cache Conflict` occurred and it deleted this entire item.~~
 ---
 JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
 ```
@@ -97,7 +143,7 @@ JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The se
 [route] target tmux session: 0
 Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
 ```
----
+~~~done
 [#freshqueueauth]: These heads are not stale. I just typed them in.
 ```
 • The doctor confirms the stale queue heads are why the document is still blocked. I’m removing only those two queue
@@ -136,11 +182,15 @@ These heads are not stale. I just typed them in.
 - do [#fbwireverify]
 - do [#qnodemerge4verify]
 - do [#tb4q]
----
-- do [#mrh-response-loss-stalled-queue]
-- do [#qnodemerge4verify]
-- do [#fbwireverify]
-- do [#tb4q]
+~~~
+- :pushpin: do [#mrh-response-loss-stalled-queue]
+- :pushpin: do [#qnodemerge4verify]
+- :pushpin: do [#fbwireverify]
+- :pushpin: do [#tb4q]
+- do [#cancelturnverify]
+- do [#arsm]
+- do [#qcm1verify]
+- do [#1jec]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

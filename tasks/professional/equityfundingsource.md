@@ -38,7 +38,59 @@ completed
 Compacted content:
 ❯ - Archived 1 response topic(s): optional admin-created passwords + deploy
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:cf8601f6 -->
+
+### Re: lender role/schema rename + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> The role dropdown in https://equityfundingsource.brian-takita.workers.dev/admin/users should have "lender" instead of "investor". Rename any "investor" field data and db schema entity names to "lender".
+
+> **Queue prompt:**
+>
+> deploy
+
+Implemented and deployed. The admin Users role dropdown now uses `lender` instead of `investor`, persisted `users.role` data is migrated from `investor` to `lender`, and the current D1 schema entity names were renamed to the `lender_*` forms for documents, document requests, accreditation verifications, vestings, special instructions, deal signatures, and deal interests. Legacy `role=investor` inputs are still accepted at auth/API boundaries as compatibility aliases.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/migrations/0099_lender_role_and_schema.sql`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/{auth,admin,investor,borrower,messages,lending_groups}/**`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/**` and `src/equityfundingsource-dev/lib/ui--server--efs/**`
+- `src/equityfundingsource-dev/tests/**`
+- `src/equityfundingsource-dev/prds/**` and `src/equityfundingsource-dev/docs/**`
+- `src/equityfundingsource-dev` parent submodule pointer
+
+Commands:
+- `bun test tests/admin-dashboard.test.ts tests/admin-url-filter-sync.test.ts tests/auth.test.ts tests/invite-login-token.test.ts tests/investor-documents.test.ts tests/investor-vestings.test.ts tests/investor-portal-e2e.test.ts tests/admin-investor-pipeline.test.ts tests/borrower-messages.test.ts tests/upload-guard.test.ts tests/message-avatar-shortcut.test.ts app/equityfundingsource/lib/lending_groups/service.test.ts`
+- `bun test tests/prd.test.ts tests/msg-unify4-lender-cutover.test.ts`
+- `bun test tests/admin-investor-documents.test.ts`
+- `git diff --check`
+- `make check`
+- `gh run list --workflow CI --limit 1`
+- `bun run cf:d1:migrations:list:remote` before and after deploy
+- `make deploy`
+- Remote D1 role/table sanity queries via `bun run cf:d1:query:remote -- ...`
+- Live smoke checks for `/`, `/admin/users`, and `/login?role=lender`
+
+Verification:
+- Focused suites passed.
+- Full `make check` passed: `1125 pass`, `0 fail`, then app and Worker builds completed. The digest runner still flags the intentional non-fatal `d1 down` log from an outbox failure test, but the command exited `0` and the suite summary is clean.
+- GitHub reports no workflow named `CI`, so there was no CI run to inspect.
+- Remote D1 had `0099_lender_role_and_schema.sql` pending before deploy and `No migrations to apply` after deploy.
+- Remote role query now returns only `admin`, `borrower`, `broker`, and `lender` roles (`lender` count: 3).
+- Remote schema query shows the renamed `lender_*` tables and no matching `investor_*` tables from the renamed set.
+- Live root returned `200`; `/admin/users` returned `303` to `/login?role=admin&next=%2Fadmin%2Fusers`; `/login?role=lender` returned `200`.
+
+Commits:
+- EFS submodule: `071a93f` (`Rename investor role schema to lender`) pushed to `origin/main`.
+- Parent local pointer: `0d4677f9a` (`chore: update efs submodule for lender rename`) committed in the current divergent parent worktree.
+- Parent remote pointer: `a9cff9113` (`chore: update efs submodule for lender rename`) pushed to parent `origin/main` from a clean temporary worktree so unrelated local parent commits/dirty files were not pushed.
+
+Deploy: activated Worker version `41030a3b-218e-41ab-92e1-a73c97715da2` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:fe4e7b2e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,7 +102,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The role dropdown in https://equityfundingsource.brian-takita.workers.dev/admin/users should have "lender" instead of "investor". Rename any "investor" field data and db schema entity names to "lender".
+- ~~The role dropdown in https://equityfundingsource.brian-takita.workers.dev/admin/users should have "lender" instead of "investor". Rename any "investor" field data and db schema entity names to "lender".~~
 - deploy
 <!-- /agent:queue -->
 

@@ -85,7 +85,73 @@ Verification:
 Escalation: none.
 
 Confidence: high for the stale-state/File Cache Conflict patch-loss fix; medium for the route report because the currently observed live slowdown is a genuinely busy actor pane rather than the footer-only readiness case from the pasted log.
-<!-- agent:boundary:b718c2f5 -->
+
+### Re: Run Agent Doc footer-only route wait — gpt-5
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
+> ```
+> [route] target tmux session: 0
+> [route] Still waiting for codex (1s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (3s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (4s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (6s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (7s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (9s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (11s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (12s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (14s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (15s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (17s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (18s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (20s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (21s)... last line:   reverse-i-search:
+> [route] Still waiting for codex (23s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (24s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (26s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (27s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (29s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (30s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (32s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (33s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (35s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (36s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (38s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (39s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (41s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (42s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (44s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (46s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (47s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (49s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (50s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (52s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (53s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+> [route] Still waiting for codex (55s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+> [route] Still waiting for codex (56s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+> [route] Still waiting for codex (58s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+> [route] Still waiting for codex (59s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+> Error: dispatch-only codex reopen refused to inject into pane %24 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
+> ```
+
+
+> JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
+
+I rechecked this item after the stale-state fix. The installed CLI is `agent-doc 0.34.35`, and the current source already has coverage for the exact footer-only shape in the pasted log: `Context 0% use` is accepted by `ready_prompt_candidate_accepts_codex_context_use_footer_without_prompt`, and `ready_prompt_candidate_accepts_codex_footer_without_prompt` is also green.
+
+I also checked the live `equityfundingsource.md` session that the pasted route targets. It is currently `alive-busy` with a real Codex active-turn proof: `Working (... esc to interrupt)` and `prompt_ready=false`. In that state, Run Agent Doc must not inject another trigger into the pane. The actionable unblock is to let that actor finish or cancel/restart that session; treating it as idle would risk queueing text into the wrong turn.
+
+No additional route code changed in this follow-up cycle. The stale-state/file-IPC patch-loss fix from the previous closeout is still the code change for this run.
+
+Verification already run in this session:
+
+- `cargo test -p agent-doc-orchestration ready_prompt_candidate_accepts_codex` passed.
+- `cargo test -p agent-doc-orchestration has_busy_cue_detects_codex_working_status_with_idle_placeholder` passed.
+- `make check` passed.
+
+Confidence: medium. The source behavior covers the pasted footer-only route case; the live slowdown I can observe now is a genuinely busy actor pane.
+<!-- agent:boundary:4d0b14e0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -183,7 +249,7 @@ These heads are not stale. I just typed them in.
 - do [#qnodemerge4verify]
 - do [#tb4q]
 ~~~
-- :pushpin: do [#mrh-response-loss-stalled-queue]
+- ~~:pushpin: do [#mrh-response-loss-stalled-queue]~~
 - :pushpin: do [#qnodemerge4verify]
 - :pushpin: do [#fbwireverify]
 - :pushpin: do [#tb4q]

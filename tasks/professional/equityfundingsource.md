@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -189,7 +189,44 @@ Deploy: activated Worker version `e7a2b801-1a89-44e4-857f-d0db5da38aa5` at `http
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:8da8e1fd -->
+
+### Re: invite link + due diligence notes — gpt-5
+
+> **Queue prompt:**
+>
+> rwaldman100+admin@gmail.com clicked the invite link but was not logged in and prompted to set password.
+
+That is expected for an invite opened from an unauthenticated browser: the invite flow should let the invited admin set a password before entering the admin portal. The thing to verify is the post-password path: after setting the password, `rwaldman100+admin@gmail.com` should land in the admin portal with the intended admin role. If it loops back to password setup, loses the invite, or lands without admin access, that is the bug to fix.
+
+> **Queue prompt:**
+>
+> Once a lender is selected, EFS sends a "Due Diligence Package" to the lender. The lender will request documents.
+
+Captured as product workflow context. I added backlog coverage for the selected-lender Due Diligence Package flow: the selected lender should receive the package, then lender document requests should become visible workflow state in the deal dialog with status and audit history rather than ad hoc messages.
+
+I also added a backlog item to verify the admin invite/password setup path for `rwaldman100+admin@gmail.com`.
+
+Changed paths: none.
+
+Commands:
+- `tsift status`
+- `agent-doc --version`
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc read /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc repair /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc admin inspect /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc admin detect`
+- `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc finalize ... --force-disk`
+
+Verification: preflight and planning passed. No app tests were run because no source files changed. The normal editor IPC path repeatedly failed with `recovery=retry_without_disk_write`; the final closeout used agent-doc's explicit `--force-disk` path because the response was otherwise captured but not visible or committed. Preflight still reports the exchange is large while the queue is active; I did not compact without explicit opt-in.
+
+Escalation: none.
+
+Confidence: medium; the product interpretation is straightforward, but closeout required the force-disk recovery path after repeated IPC no-ack failures.
+<!-- agent:boundary:72443f2a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -201,13 +238,21 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~rwaldman100+admin@gmail.com clicked the invite link but was not logged in and prompted to set password.~~
+- rwaldman100+admin@gmail.com forgot password "did not work". Gave an account already existed error.
+- Forgot password email was not sent when rwaldman100+admin@gmail.com clicked "Forgot password" link.
+- [#admin-invite-password-flow]
 - Why is https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=d6b78994-0970-498f-9e10-6f0035902c0d&deal_tab=loan still an Available Deal? We need to have messaging in the dialog/page to instruct the admin on how to advance the deal. If it is due to a lender not having their accredidation approved by the admin, then provide a message with a button to approve the lender accredidation.
+- ~~Once a lender is selected, EFS sends a "Due Diligence Package" to the lender. The lender will request documents.~~ — auto-struck: answered this cycle (#ftstrike)
 - deploy
+- do [#due-diligence-package]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#admin-invite-password-flow] Verify rwaldman100+admin@gmail.com invite acceptance: unauthenticated invite-link password setup should create/login the invited admin and land in the admin portal with the correct role; fix any loop/lost-invite failure.
+- [ ] [#due-diligence-package] After a lender is selected, send the lender a Due Diligence Package and support lender document requests with deal-dialog status/audit visibility.
 <!-- /agent:backlog -->
 
 ## Review

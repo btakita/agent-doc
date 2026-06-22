@@ -32,6 +32,15 @@ free-text item is the blockquote-matched `#ftstrike`. `do [#id]` heads are
 different — they strike by id via `--done <id>` regardless of position and need no
 quote.
 
+The `#ftstrike` pass is **conservative about in-flight edits (`#qstrikeexplain`)**: it
+strikes a free-text head only when that head was present in the stable pre-turn
+baseline (the preflight baseline). A head that first appeared in the live buffer
+*this* turn — a line the operator is still typing — is **never** same-cycle struck,
+even if it happens to fuzzy-match a quoted prompt; it defers to the cycle that
+actually answers it (editor-wins, consistent with `#queue-user-edit-overwrite`). So
+quoting a queue head you did not intend to drain cannot strike a line the operator
+is mid-authoring.
+
 **Response header format (template mode):** use `### Re: topic` markdown headers —
 **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings. Use
 h4–h6 for sub-sections within a response.

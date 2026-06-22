@@ -3,7 +3,6 @@ hooks = true
 sandbox_mode = false
 
 [mcp_servers.agent-doc]
-default_tools_approval_mode = "approve"
 args = [
     "mcp",
     "serve",
@@ -11,3 +10,4 @@ args = [
     "/home/brian/work/btakita/agent-loop",
 ]
 command = "agent-doc"
+default_tools_approval_mode = "approve"

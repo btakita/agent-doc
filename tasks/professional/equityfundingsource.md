@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -105,7 +105,25 @@ So the recommended config:
 **One timing note:** outbound notifications are already live in prod, so I should set `MESSAGE_EMAIL_INBOUND_REPLY_TO` + flip `MESSAGE_EMAIL_INBOUND_ENABLED=true` **only after** the `efs.briantakita.me` subdomain + catch-all exist — otherwise real emails would carry a `reply+…@efs.briantakita.me` Reply-To that dead-ends until routing is live. So the order is: (1) you add the subdomain + catch-all in Cloudflare, (2) tell me, (3) I set the two vars and deploy, (4) we send a test reply and confirm it lands in the thread. That closes `#f2w8`/`#msgmail4b`.
 
 Sources: [Cloudflare Email Routing — Subdomains](https://developers.cloudflare.com/email-routing/setup/subdomains/), [Email Routing subdomain support (Cloudflare blog)](https://blog.cloudflare.com/email-routing-subdomains/).
-<!-- agent:boundary:2fda5da1 -->
+> **Queue prompt:** Is the email replies to real-time messages working? Will the replies also go to the efs admin email?
+
+### Re: is email-reply working yet, and do replies reach the EFS admin email — opus-4-8
+
+> **Queue prompt:**
+>
+> Is the email replies to real-time messages working? Will the replies also go to the efs admin email?
+
+
+**Email replies into threads: not working yet.** The handler is deployed but **inert** — it only turns on after the two #msgmail4b steps that are still pending: (1) you add the `efs.briantakita.me` subdomain + catch-all in Cloudflare, and (2) I flip `MESSAGE_EMAIL_INBOUND_ENABLED=true` + set `MESSAGE_EMAIL_INBOUND_REPLY_TO`. So right now, replying to a notification email does **not** post back into the thread. (To be clear, the **in-app realtime messaging** over websocket *is* live and working — that's the separate `#msgrt` piece. Email-reply-into-the-thread is the `#msgmail4` piece that's still gated on the Cloudflare setup.)
+
+**Yes — replies will also reach the EFS admin email** (once inbound is enabled). The inbound path reuses the existing notify flow, which is symmetric:
+- A **party** (lender/broker/borrower) reply → the app emails **all active EFS admins** (every `role='admin'` user, at their own email) **and** drops an in-app notification, **and** posts the message into the thread (firing the realtime tick so any open admin view updates live).
+- An **admin** reply → the app emails the **party** and posts to the thread.
+
+So the chain is bidirectional: a party's email reply lands in the thread *and* notifies admins by email; an admin can then reply (in-app or by email) and the party is emailed — "and so on." Note the admin notification already happens **today** for in-app party messages (outbound notifications are enabled); the email-reply path simply feeds the same notify once `#msgmail4b` is switched on.
+
+**Net:** nothing to flip on my side until the Cloudflare subdomain + catch-all exist. Add those and ping me, and I'll enable + deploy + we test a round-trip. (`#f2w8`/`#msgmail4b`)
+<!-- agent:boundary:7f4089ff -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -117,7 +135,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Is the email replies to real-time messages working? Will the replies also go to the efs admin email?
 <!-- /agent:queue -->
 
 ## Backlog

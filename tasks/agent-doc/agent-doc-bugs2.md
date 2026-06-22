@@ -161,16 +161,16 @@ I should have made the install state explicit before the first closeout. The act
 
 I completed the full local install path now.
 
-❯ - Reinstalled the CLI from this checkout with `cargo install --path .`; it replaced `/home/brian/.cargo/bin/agent-doc`.
-❯ - Rebuilt release artifacts with `cargo build --release`.
-❯ - Installed the native library with `agent-doc lib-install`; it wrote `/home/brian/.cargo/bin/libagent_doc-0.34.35.so`, updated the `libagent_doc.so` symlink, and marked 2 controllers for recycle at the next idle boundary.
-❯ - Built the JetBrains plugin with `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` and installed it to `/home/brian/.config/JetBrains/IntelliJIdea2026.1`. IntelliJ still needs a restart for that plugin code to load.
-❯ - Rebuilt the VS Code package with `npm run package` and installed the rebuilt `agent-doc-0.2.31.vsix` with `agent-doc plugin install --local vscode`; it installed via `codium`.
+- Reinstalled the CLI from this checkout with `cargo install --path .`; it replaced `/home/brian/.cargo/bin/agent-doc`.
+- Rebuilt release artifacts with `cargo build --release`.
+- Installed the native library with `agent-doc lib-install`; it wrote `/home/brian/.cargo/bin/libagent_doc-0.34.35.so`, updated the `libagent_doc.so` symlink, and marked 2 controllers for recycle at the next idle boundary.
+- Built the JetBrains plugin with `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` and installed it to `/home/brian/.config/JetBrains/IntelliJIdea2026.1`. IntelliJ still needs a restart for that plugin code to load.
+- Rebuilt the VS Code package with `npm run package` and installed the rebuilt `agent-doc-0.2.31.vsix` with `agent-doc plugin install --local vscode`; it installed via `codium`.
 
 The source commits remain the same.
 
-❯ - agent-doc submodule `568755be` contains the ACK-gated editor patch fix.
-❯ - parent repo `dc575cd57` records the submodule pointer update.
+- agent-doc submodule `568755be` contains the ACK-gated editor patch fix.
+- parent repo `dc575cd57` records the submodule pointer update.
 
 The package version still prints `agent-doc 0.34.35` because `Cargo.toml` was not version-bumped in this fix; the local binary and library are nevertheless rebuilt from the current checkout containing the editor integration changes and current source tree.
 
@@ -190,19 +190,44 @@ Verification already completed in this session includes `npm test`, JetBrains ta
 The build and install follow-up is now complete. The CLI was reinstalled from the current checkout, release artifacts were rebuilt, the native library was installed, the JetBrains plugin was built and installed for IntelliJ IDEA 2026.1, and the VS Code package was rebuilt and installed through `codium`.
 
 The JetBrains plugin still requires an IDE restart before the newly installed plugin code is active. The controller was also marked for recycle at the next idle boundary with `agent-doc admin recycle`.
-<!-- agent:boundary:ca6c9adc -->
+
+### Re: do [#mrh-response-loss-stalled-queue] — gpt-5
+
+> **Queue prompt:** do [#mrh-response-loss-stalled-queue]
+
+Implemented the response-loss guard for `#mrh-response-loss-stalled-queue`.
+
+What changed:
+- In `repair::run`, replayed orphan/captured responses now re-read the repaired document and require the normalized response block to be present before clearing pending/capture state.
+- The materialization check uses the shared response-materialization probe, so patch-wrapped and guard-prefixed payloads match their committed visible body while malformed body-only leaks still fail closed.
+- Added regression coverage for the MRH/install shape where only a body bullet lands under an older response and the `### Re:` heading is missing.
+
+Commits made:
+- `6f022d7b` in `src/agent-doc`: `fix: fail closed on missing repair materialization`
+- `788deb5f7` in the parent repo: `chore: update agent-doc repair guard`
+
+Verification completed:
+- `cargo test -p agent-doc-orchestration stop_auto_closes_guard_prefixed_patch_payload`
+- `cargo test -p agent-doc-orchestration repair_materialization_requires_captured_response_block`
+- `cargo test -p agent-doc-orchestration recover_replays_latest_committed_capture_when_matching_prompt_was_left_orphaned`
+- `make check`, including clippy, 4,983 tests, doctests, and the ignored medium sim
+- Latest GitHub Actions CI run was green at `2026-06-22T18:30:51Z`.
+
+Install state:
+- `cargo install --path .` replaced `/home/brian/.cargo/bin/agent-doc`.
+- `cargo build --release` completed.
+- `agent-doc lib-install` installed `libagent_doc-0.34.35.so` and marked two controllers for idle recycle.
+- `agent-doc --version` reports `agent-doc 0.34.35` because `Cargo.toml` still carries that version.
+
+I left the unrelated open operator-verify backlog items alone, including the existing `#qcm1verify` warning.
+<!-- agent:boundary:981083ab -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-~~~done
-equityfundingsource.md has MCP preflight error without diagnostics.
-```
-• The MCP preflight retry failed without diagnostics, so I’m invoking the CLI preflight directly to get the recovery
-  detail and avoid guessing at the next step.
-```
-~~~
+- If I am typing a queue item, JB `File Cache Conflict` should not occur. This causes me to lose the last few words that I typed.
+---
 JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
 ```
 [route] target tmux session: 0
@@ -254,16 +279,13 @@ JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The se
 Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
 ```
 ---
-— auto-struck: answered this cycle (#ftstrike)
-- ~~Figure out how to make AGENTS.md lean & reliable so agents follow the directives. Should we treat AGENTS.md as a menu that defers to runbooks? Would that be more reliable?~~
-- ~~:pushpin: do [#qcm1verify]~~
 - :pushpin: do [#arsm]
 - :pushpin: do [#1jec]
 - :pushpin: do [#fbwireverify]
 - :pushpin: do [#qnodemerge4verify]
 - :pushpin: do [#tb4q]
 - do [#cancelturnverify]
-- do [#mrh-response-loss-stalled-queue]
+- ~~do [#mrh-response-loss-stalled-queue]~~
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -292,7 +314,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#mrh-response-loss-stalled-queue] #agent-doc-bug Response patchback loss plus queue stall from the 2026-06-22 `src/boost-client/tasks/monsterrodholders.md` SERP closeout: the MRH work was completed and committed, compact/recovery left `live_exchange_tail_total=0`, `agent-doc session-check` still reported the cycle committed with `queue_continuation_required=true`, and the visible document had no assistant response block. Plan: tasks/agent-doc/plan-response-missing-after-manual-closeout.md. DO NOT IMPLEMENT until scheduled.
 - [ ] [#cancelturnverify] [operator-verify] #agent-doc-bug Live-verify Cancel Turn (agent-doc submodule b4471d05; committed+pushed, make check green, JB 0.2.176 + VS Code 0.2.31 built, NOT installed). After installing the plugins: (1) while a turn is RUNNING, invoke Cancel Turn (JB menu / VS Code command) and confirm the turn is interrupted (ops.log cancel_turn_performed action=interrupt_active_turn) and the agent stays open; (2) while the agent is IDLE, invoke Cancel Turn (even repeatedly) and confirm it is a NO-OP (ops.log cancel_turn_noop reason=idle_no_active_turn) and the agent is NOT closed — the core safety requirement. Verify per harness: Codex/OpenCode (Escape/C-c, never raw Ctrl+C that would close on idle) and Claude.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.

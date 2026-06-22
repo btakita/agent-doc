@@ -1992,6 +1992,13 @@ enum SessionAction {
         #[arg(long)]
         force: bool,
     },
+    /// Cancel the currently-running turn (interrupt only, context preserved).
+    /// Safe no-op when the harness is idle, so repeated calls never close the agent.
+    #[command(name = "cancel-turn")]
+    CancelTurn {
+        /// Path to the session document
+        file: PathBuf,
+    },
     /// Diagnose actor/registry/supervisor drift for a document
     Doctor {
         /// Path to the session document
@@ -3038,6 +3045,7 @@ fn main() -> anyhow::Result<()> {
             Some(SessionAction::InterruptClear { file, force }) => {
                 session_actor_cmd::interrupt_clear(&file, force)
             }
+            Some(SessionAction::CancelTurn { file }) => session_actor_cmd::cancel_turn(&file),
             Some(SessionAction::Doctor { file, repair }) => {
                 session_actor_cmd::doctor(&file, repair)
             }

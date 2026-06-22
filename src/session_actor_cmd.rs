@@ -1214,6 +1214,157 @@ fn busy_clear_refusal_message(file: &Path, evidence: &LivePaneEvidence, reason: 
     )
 }
 
+/// Pure decision for `session cancel-turn`: interrupt the running turn, or
+/// no-op when the harness is idle. The whole safety contract lives here — when
+/// no turn is active the command must NOT send the harness interrupt sequence,
+/// because in Codex/OpenCode a `Ctrl+C` (and in Claude Code a second `Ctrl+C`)
+/// at an idle prompt closes the agent. Keeping the active/idle branch in a pure
+/// function makes that guard provable without a live PTY.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CancelTurnAction {
+    /// A turn is in flight; deliver the harness-aware interrupt sequence.
+    Interrupt,
+    /// The harness is idle; do nothing (sending an interrupt would close it).
+    NoOpIdle,
+}
+
+impl CancelTurnAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Interrupt => "interrupt_active_turn",
+            Self::NoOpIdle => "noop_idle",
+        }
+    }
+}
+
+/// Decide what `cancel_turn` should do from the single fact "is a turn active".
+/// `turn_active` is read from the `turn_status` turn-active marker (the same
+/// marker `start::turn_active_for_owned_pane` consults). Active → interrupt;
+/// idle → no-op.
+pub(crate) fn cancel_turn_action(turn_active: bool) -> CancelTurnAction {
+    if turn_active {
+        CancelTurnAction::Interrupt
+    } else {
+        CancelTurnAction::NoOpIdle
+    }
+}
+
+/// True when a `turn_status` turn-active marker is present for `base_dir` and
+/// (when a pane can be resolved) belongs to this document's owned pane. Mirrors
+/// `start::turn_active_for_owned_pane`: the marker is per-project-root, so we
+/// require the marker pane to match the document's authoritative/registered
+/// pane when one is known. When no owned pane can be resolved, any non-expired
+/// marker counts (the marker itself self-expires via its TTL).
+fn document_turn_active(ctx: &SessionContext) -> bool {
+    let Some(marker) =
+        agent_doc_orchestration::turn_status::read_turn_active_marker(&ctx.base_dir)
+    else {
+        return false;
+    };
+    let owned_pane = ctx
+        .actor_record
+        .as_ref()
+        .filter(|record| record.state != ActorState::Closed)
+        .map(|record| record.pane_id.clone())
+        .or_else(|| ctx.registry_entry.as_ref().map(|entry| entry.pane.clone()));
+    match owned_pane {
+        Some(pane) if !pane.is_empty() => marker.pane == pane,
+        _ => true,
+    }
+}
+
+/// "Cancel Turn": interrupt the CURRENTLY-RUNNING turn, but stay a no-op when
+/// the harness is idle. Sending the harness interrupt while idle would close
+/// the agent (Codex/OpenCode `Ctrl+C` at idle, Claude Code's second idle
+/// `Ctrl+C`), so the idle branch must never deliver keys. This also makes
+/// repeated calls safe: the first call settles the pane to idle, and every
+/// later call sees no active turn and no-ops. Unlike `interrupt-clear`, this
+/// only interrupts — it does NOT clear context.
+pub fn cancel_turn(file: &Path) -> Result<()> {
+    let ctx = build_context(file)?;
+    agent_doc_orchestration::project_controller::authorize_operator_command(
+        &ctx.base_dir,
+        &ctx.canonical_file,
+        "session_cancel_turn",
+    )?;
+    let tmux = Tmux::default_server();
+    let turn_active = document_turn_active(&ctx);
+    match cancel_turn_action(turn_active) {
+        CancelTurnAction::NoOpIdle => {
+            agent_doc_orchestration::ops_log::log_op(
+                &ctx.canonical_file,
+                &format!(
+                    "cancel_turn_noop file={} reason=idle_no_active_turn harness={}",
+                    ctx.canonical_file.display(),
+                    ctx.harness
+                ),
+            );
+            println!(
+                "No active turn to cancel for {} (harness is idle; not sending an interrupt).",
+                ctx.canonical_file.display()
+            );
+            Ok(())
+        }
+        CancelTurnAction::Interrupt => {
+            let evidence = live_pane_evidence(&ctx, &tmux);
+            let Some(pane) = evidence.pane_id.as_deref() else {
+                // The marker says a turn is active but no pane can be resolved —
+                // there is nothing to interrupt. Stay safe: do not blind-send keys.
+                agent_doc_orchestration::ops_log::log_op(
+                    &ctx.canonical_file,
+                    &format!(
+                        "cancel_turn_noop file={} reason=active_marker_no_live_pane harness={} action={}",
+                        ctx.canonical_file.display(),
+                        ctx.harness,
+                        CancelTurnAction::Interrupt.as_str()
+                    ),
+                );
+                println!(
+                    "Turn-active marker present for {} but no live pane to interrupt; nothing sent.",
+                    ctx.canonical_file.display()
+                );
+                return Ok(());
+            };
+            if !tmux.pane_alive(pane) {
+                agent_doc_orchestration::ops_log::log_op(
+                    &ctx.canonical_file,
+                    &format!(
+                        "cancel_turn_noop file={} pane={} reason=pane_already_closed harness={}",
+                        ctx.canonical_file.display(),
+                        pane,
+                        ctx.harness
+                    ),
+                );
+                println!(
+                    "Pane {} for {} is already closed; nothing to cancel.",
+                    pane,
+                    ctx.canonical_file.display()
+                );
+                return Ok(());
+            }
+            let codex_shell_search = codex_pane_in_shell_search_state(&ctx, &tmux, &evidence);
+            send_operator_interrupt_sequence(&tmux, pane, &ctx.harness, codex_shell_search)?;
+            agent_doc_orchestration::ops_log::log_op(
+                &ctx.canonical_file,
+                &format!(
+                    "cancel_turn_performed file={} action={} harness={} pane={} source={}",
+                    ctx.canonical_file.display(),
+                    CancelTurnAction::Interrupt.as_str(),
+                    ctx.harness,
+                    pane,
+                    evidence.source
+                ),
+            );
+            println!(
+                "Cancelled the active turn for {} (interrupted pane {}; context preserved).",
+                ctx.canonical_file.display(),
+                pane
+            );
+            Ok(())
+        }
+    }
+}
+
 pub fn interrupt_clear(file: &Path, force: bool) -> Result<()> {
     if force {
         return force_interrupt_clear(file);
@@ -3973,6 +4124,26 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             interrupt_clear_initial_action(&evidence),
             InterruptClearInitialAction::SendInterrupt
         );
+    }
+
+    #[test]
+    fn cancel_turn_action_interrupts_only_when_turn_active() {
+        // The whole safety contract: an active turn → interrupt; idle → no-op.
+        // Idle must never resolve to Interrupt, because the harness interrupt
+        // sequence at an idle prompt closes the agent.
+        assert_eq!(cancel_turn_action(true), CancelTurnAction::Interrupt);
+        assert_eq!(cancel_turn_action(false), CancelTurnAction::NoOpIdle);
+    }
+
+    #[test]
+    fn cancel_turn_action_noop_idle_never_interrupts_on_repeated_calls() {
+        // After the first cancel settles the pane to idle, every later call sees
+        // an absent turn-active marker (turn_active=false) and stays a no-op —
+        // proving repeated Cancel Turn calls never deliver an interrupt that
+        // could close the agent.
+        for _ in 0..5 {
+            assert_eq!(cancel_turn_action(false), CancelTurnAction::NoOpIdle);
+        }
     }
 
     #[test]

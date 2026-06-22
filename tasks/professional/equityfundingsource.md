@@ -38,7 +38,65 @@ completed
 Compacted content:
 - Archived 6 response topic(s): lender role/schema rename + deploy; expired sign-in link prefill + deploy; email login token hash retention; 3 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:dd97eb64 -->
+
+### Re: auth token retention cleanup + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> Implement your recommnedation.
+
+> **Queue prompt:**
+>
+> deploy
+
+Implemented, pushed, and deployed the bounded auth-token retention cleanup.
+
+What changed:
+- Added `auth_token_cleanup_` with a 30-day default retention window, configurable by `AUTH_TOKEN_RETENTION_DAYS` and clamped to 1..365 days.
+- The hourly scheduled Worker now purges stale rows from `email_login_tokens`, `password_reset_tokens`, and `invite_login_tokens`.
+- Cleanup deletes rows once login authority is impossible and the retention window has passed: expired rows older than retention, or consumed/superseded rows older than retention.
+- Kept the current safer login model: opaque random emailed token, SHA-256 verifier in D1, `expires_at`, `used_at`, and current-user validation at consumption time.
+- Kept email/role as non-authoritative retry-form prefill data only; the email in the URL is not trusted for login.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/token_retention.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/worker.ts`
+- `src/equityfundingsource-dev/tests/email-login.test.ts`
+- `src/equityfundingsource-dev/prds/admin-provisioning-spec.md`
+- `src/equityfundingsource-dev` parent gitlink
+
+Commands:
+- `bun test tests/email-login.test.ts tests/auth.test.ts`
+- `bun test tests/prd.test.ts`
+- `git diff --check`
+- `make check`
+- `gh run list --workflow CI --limit 1` in EFS and parent repos
+- `git push origin main` in EFS
+- `make deploy`
+- Live smoke checks for `/`, `/login/email?role=admin&email=retention-smoke@example.com`, and invalid `/login/email/verify?...&email=retention-smoke@example.com`
+- Parent gitlink commit/push from a clean temporary worktree based on `origin/main`
+
+Verification:
+- Focused auth tests passed: `39 pass`, `0 fail` across `tests/email-login.test.ts` and `tests/auth.test.ts`.
+- PRD test passed: `8 pass`, `0 fail`.
+- Full `make check` passed: `1134 pass`, `0 fail`, then app and Worker builds completed. The suite still logs the intentional non-fatal `d1 down` outbox failure test while exiting cleanly.
+- Remote deploy reported `No migrations to apply`.
+- Live root returned `200`.
+- Live `/login/email?role=admin&email=retention-smoke%40example.com` returned `200` and rendered `value="retention-smoke@example.com"`.
+- Live invalid verify URL returned `303` to `/login/email?...&email=retention-smoke%40example.com`.
+- Both EFS and parent repos still report no GitHub workflow named `CI`, so there was no CI run to inspect.
+
+Commits:
+- EFS submodule: `2ee1afa` (`Add auth token retention cleanup`) pushed to `origin/main`.
+- Parent gitlink: `b5758abb4` (`chore: update efs submodule for auth token cleanup`) pushed to parent `origin/main` from a clean temporary worktree. The first parent push from the main worktree was rejected because local parent `main` was behind the remote and the local working tree has unrelated dirty files; I left those unrelated local files untouched.
+
+Deploy: activated Worker version `1b094331-7f91-4b96-8209-ea17515ea70d` at `https://equityfundingsource.brian-takita.workers.dev`; the hourly cron trigger remains `0 * * * *`.
+
+Session note: the exchange is large, but the queue is active, so I continued this cycle without compacting. During closeout, agent-doc detected stale snapshot/CRDT sidecars after the implementation was complete; I ran `agent-doc reset --from-current` and retried through the normal finalize path.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:27d2e496 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,7 +108,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Implement your recommnedation.
+- ~~Implement your recommnedation.~~
 - deploy
 <!-- /agent:queue -->
 

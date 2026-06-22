@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -295,7 +295,29 @@ Confirmed your model and built the missing half. First a correction that makes t
 2. Add an apex **custom-address rule: `efs@briantakita.me` → Send to Worker `equityfundingsource`**. That's the one rule that makes "incoming emails to efs@briantakita.me go to the app." No catch-all, no MX change.
 
 Then the live test: email `efs@briantakita.me` from any address → it should land in `btak.dev+efs@gmail.com`. Reply to an app notification → still threads via `reply@efs.briantakita.me` as before.
-<!-- agent:boundary:cc05a5bd -->
+> **Queue prompt:** Use chromium-bridge on https://dash.cloudflare.com/.../email-service/routing to configure the email routing and the apex rule.
+
+### Re: apex routing configured + live-tested via chromium-bridge — opus-4-8
+
+> **Queue prompt:**
+>
+> Use chromium-bridge on https://dash.cloudflare.com/1e7e194ff8da4ad9e40ce041aea84f76/email-service/routing to configure the email routing and the apex rule.
+
+
+Done in the Cloudflare dashboard, and the full round-trip is verified live. Both operator steps from last cycle are complete:
+
+1. **Destination `btak.dev+efs@gmail.com`** — already **Verified** (created ~2h ago, found it in Email Routing → Destination Addresses). No action needed.
+2. **Apex rule created** — `efs@briantakita.me` → **Send to Worker `equityfundingsource`**, status **Active**. Added alongside the existing rules (catch-all→protonmail, `efs@efs.briantakita.me`→btak.dev+efs@gmail.com, `dev@`/`dev-slack@`→workers, `info@`→protonmail); none of those were touched. The zone now shows 5 rules.
+
+**Live end-to-end test (passed):** sent a real email from `brian.takita@gmail.com` → `efs@briantakita.me` ("EFS apex routing live test"). It **landed in the `btak.dev@gmail.com` inbox** within ~30s. That delivery path is unambiguous proof of the new wiring: the only rule that sends `efs@briantakita.me` mail to a btak.dev gmail address is the apex rule → Worker → the `MESSAGE_EMAIL_INBOUND_FALLBACK_TO=btak.dev+efs@gmail.com` forward (the catch-all goes to protonmail, not gmail).
+
+**Your full model is now live:**
+- App sends **from** `efs@briantakita.me` ✓
+- Mail **to** `efs@briantakita.me` → app worker → forwarded to **`btak.dev+efs@gmail.com`** ✓ (just proven)
+- Threaded **replies** to app notifications → `reply+{token}@efs.briantakita.me` → worker → posted back to the thread ✓ (unchanged)
+
+Nothing left to deploy or configure. Threaded reply round-trip can be spot-checked anytime by replying to a real portal notification.
+<!-- agent:boundary:b7c80b81 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -307,7 +329,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Use chromium-bridge on https://dash.cloudflare.com/1e7e194ff8da4ad9e40ce041aea84f76/email-service/routing to configure the email routing and the apex rule.
 <!-- /agent:queue -->
 
 ## Backlog

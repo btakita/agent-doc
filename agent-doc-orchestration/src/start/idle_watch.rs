@@ -2003,6 +2003,67 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     | IdleQueueContextResetDecision::SkipNoResetNeeded => {}
                 }
 
+                // A visible `/clear`/`/new` draft is an input-ownership hazard even when its
+                // in-flight marker was lost across recycle or aged out. Recover it before
+                // the paused-queue gate so a durable pause cannot strand the pane with a
+                // command the operator must manually submit.
+                if let Some(head) = active_head.as_deref() {
+                    let clear_cmd = harness.context_clear_command();
+                    let clear_already_pending =
+                        supervisor_pane_payload_already_pending(&shared, clear_cmd, &harness);
+                    let resubmit_key = format!("orphan_context_clear:{head}");
+                    if idle_queue_pending_payload_needs_enter_resubmit(
+                        &harness.binary,
+                        clear_already_pending,
+                        last_pending_enter_resubmitted.as_deref() == Some(resubmit_key.as_str()),
+                    ) {
+                        match idle_queue_resubmit_pending_payload(
+                            &path,
+                            &shared,
+                            &harness,
+                            "context_clear",
+                            head,
+                            clear_cmd,
+                        ) {
+                            AutoTriggerOutcome::Sent => {
+                                last_pending_enter_resubmitted = Some(resubmit_key);
+                                last_context_reset_head = active_head.clone();
+                                last_context_clear_at = Some(current_epoch_secs());
+                                context_reset_in_flight = true;
+                                awaiting_clear_settle = true;
+                                clear_settle_idle_ticks = 0;
+                                record_context_clear_in_flight_marker(
+                                    &path,
+                                    &shared,
+                                    &harness,
+                                    clear_cmd,
+                                    Some(head),
+                                );
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "idle_queue_watch_orphan_context_clear_resubmit harness={} reason=clear_draft_pending head={:?}",
+                                        harness.binary, head
+                                    ),
+                                );
+                                continue;
+                            }
+                            AutoTriggerOutcome::Cancelled => return,
+                            outcome => {
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "idle_queue_watch_orphan_context_clear_resubmit_failed harness={} outcome={}",
+                                        harness.binary,
+                                        outcome.as_str()
+                                    ),
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                }
+
                 // `#qpausego`: an accepted `admin queue pause` records a durable
                 // controller pause the dispatch RPC already honors, but the
                 // idle-watch injects triggers straight into the pane and so

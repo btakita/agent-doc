@@ -194,8 +194,70 @@ pub(crate) fn supervisor_pane_payload_pending_in_content(
     payload: &str,
     harness: &crate::harness::HarnessConfig,
 ) -> bool {
+    if crate::queue_command::is_context_clear_command(payload) {
+        return context_clear_command_visible_in_active_input(content, payload, harness);
+    }
     crate::route::recent_lines_contain_trigger(content, payload)
         || crate::route::direct_pane_existing_draft_visible(content, payload, harness)
+}
+
+pub(crate) fn context_clear_command_visible_in_active_input(
+    content: &str,
+    command: &str,
+    harness: &crate::harness::HarnessConfig,
+) -> bool {
+    let recent_lines: Vec<String> = content
+        .lines()
+        .rev()
+        .take(8)
+        .map(crate::prompt::strip_ansi)
+        .collect();
+    let lines: Vec<&String> = recent_lines.iter().rev().collect();
+    for start in 0..lines.len() {
+        if !line_shows_context_clear_command_input(lines[start], command) {
+            continue;
+        }
+        let later_has_idle_prompt = lines.iter().skip(start + 1).any(|line| {
+            harness.is_dispatch_ready_prompt_line(line.trim())
+                || line_starts_with_context_clear_prompt_prefix(line)
+        });
+        if later_has_idle_prompt {
+            continue;
+        }
+        return true;
+    }
+    false
+}
+
+fn line_shows_context_clear_command_input(line: &str, command: &str) -> bool {
+    let trimmed = line.trim();
+    context_clear_command_candidate_visible(trimmed, command)
+        || context_clear_command_candidate_visible(
+            strip_context_clear_prompt_prefix(trimmed).trim(),
+            command,
+        )
+}
+
+fn context_clear_command_candidate_visible(candidate: &str, command: &str) -> bool {
+    if candidate == command {
+        return true;
+    }
+    command == "/new"
+        && candidate
+            .strip_prefix("/new")
+            .map(|rest| {
+                let label = rest.trim_start();
+                label.starts_with("New session") || label.starts_with("session_new")
+            })
+            .unwrap_or(false)
+}
+
+fn line_starts_with_context_clear_prompt_prefix(line: &str) -> bool {
+    matches!(line.trim_start().chars().next(), Some('>' | '›' | '❯'))
+}
+
+fn strip_context_clear_prompt_prefix(line: &str) -> &str {
+    line.trim_start_matches(|ch: char| matches!(ch, '>' | '›' | '❯') || ch.is_whitespace())
 }
 
 pub(crate) fn supervisor_pane_payload_already_pending(
@@ -386,6 +448,54 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client · Context 0% use
             supervisor_pane_payload_pending_in_content(content, payload, &harness),
             "idle-queue dedupe must recognize equivalent relative Codex drafts before appending another trigger"
         );
+    }
+
+    #[test]
+    fn supervisor_pending_payload_detects_codex_context_clear_draft() {
+        let harness = crate::harness::HarnessConfig::codex();
+        let content = concat!(
+            "older output\n",
+            "› /clear\n",
+            "gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used\n",
+        );
+
+        assert!(
+            supervisor_pane_payload_pending_in_content(content, "/clear", &harness),
+            "idle-queue recovery must see a visible Codex /clear draft and resubmit Enter"
+        );
+    }
+
+    #[test]
+    fn supervisor_pending_payload_ignores_submitted_context_clear_scrollback() {
+        let harness = crate::harness::HarnessConfig::claude();
+        let content = concat!(
+            "✶ Generating... (3s · esc to interrupt)\n",
+            "  ❯ /clear\n",
+            "────────────────────\n",
+            "❯ Press up to edit queued messages\n",
+            "────────────────────\n",
+            "  Opus 4.8 ctx:10% ~/work/btakita/agent-loop main brian@host\n",
+        );
+
+        assert!(
+            !supervisor_pane_payload_pending_in_content(content, "/clear", &harness),
+            "a prior submitted /clear in scrollback must not suppress or resubmit the next drain"
+        );
+    }
+
+    #[test]
+    fn supervisor_pending_payload_detects_opencode_new_palette_row() {
+        let harness = crate::harness::HarnessConfig::opencode();
+        let content = concat!(
+            "older output\n",
+            "/new        New session\n",
+            "/models     Select model\n",
+            "> /new\n",
+        );
+
+        assert!(supervisor_pane_payload_pending_in_content(
+            content, "/new", &harness
+        ));
     }
     #[test]
     fn stale_busy_reconcile_waits_for_full_debounce() {

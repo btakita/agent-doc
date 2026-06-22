@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.37
+
+- **Supervisor restart/context-clear recovery now submits visible `/clear` drafts before queue triggers (`#clearresubmit`).** The idle-watch pending-payload detector now treats context-clear slash commands separately from `agent-doc ...` triggers, using the same active-composer evidence as explicit `session clear`: a visible Codex `/clear` or OpenCode `/new` draft is recognized only when no later idle prompt proves it already submitted. The supervisor also runs an orphan-clear recovery before the paused-queue gate, so a recycle, marker expiry, or durable `admin queue pause` cannot strand `/clear` in the input and require the operator to press Enter before the next `agent-doc <FILE>` drain. Coverage includes Codex/OpenCode active-composer detection and stale-scrollback rejection.
+
 ## 0.34.36
 
 - **Realtime cross-editor broadcasts now deliver node-keyed patches (`#rtndsync`).** The `realtime_model::broadcast_editor_change` path no longer queues peer editor convergence as component-only replacement payloads. It now computes `node_patches` from the target peer buffer to the CRDT-merged buffer, includes peer-baseline raw/transient-normalized hashes for generation fencing, and logs node/component patch counts. JetBrains can therefore allow unrelated live-buffer drift while ACK-gating the targeted node proof; VS Code consumes the same native node patch plan under its editor-generation apply proof. Legacy component patches remain in the payload as older-plugin fallback and are skipped by current plugins for components already covered by node patches. Coverage includes the realtime payload unit test and the SimWorld two-editor broadcast convergence path.

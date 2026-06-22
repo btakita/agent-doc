@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,36 @@ completed
 Compacted content:
 ❯ - Archived 5 response topic(s): auth token retention cleanup + deploy; deploy; same-user email login links; 2 more
 ❯ - Prior summary/context: prior compacted content: Archived 6 response topic(s): lender role/schema rename + deploy; expired sign-in link prefi...
-<!-- agent:boundary:8d007b68 -->
+
+### Re: Available Deals missing — gpt-5
+
+> **Queue prompt:**
+>
+> The Available Deals in https://equityfundingsource.brian-takita.workers.dev/admin/pipeline are now missing from the pipeline. What happened to them?
+
+They are missing because production D1 currently has no local `loans` rows and no `investment_deals` rows. The admin pipeline does not build the Deal Pipeline from raw TMO cache; `admin_pipeline_columns_` reads `loans`, maps each loan through `loan_pipeline_card_`, then groups by `tmo_loan_status`. The `Available Deals` lane is just the display label for loans whose `tmo_loan_status` is `Application Received`, so with `loans` empty that lane has zero cards and collapses.
+
+Evidence checked:
+
+- `SELECT COUNT(*) AS loans_count FROM loans` on remote D1 returned `0`.
+- `SELECT COUNT(*) AS deals_count FROM investment_deals` returned `0`.
+- `SELECT status, COUNT(*) FROM full_applications GROUP BY status` returned `15 draft` applications; none are accepted/submitted into loans.
+- `application_leads` still has open funnel entries (`19 new`, `2 contacted`, `2 archived`), so the early application funnel is still present.
+- `tmo_cache_entities` still has `12` cached TMO loan entities, `11` not marked deleted. Three cache rows carry old EFS ids; examples include `FTM631 -> bbd437b0-913f-4a6f-960b-901c72a410c9` and `GQI751 -> 45ddae53-3e7f-43b1-a627-17b79b06fa3f`. Those ids are now orphaned because the local `loans` table is empty.
+- The TMO sync loop starts from `SELECT id, tmo_loan_number FROM loans`; it enriches existing EFS loan rows and writes cache, but it does not recreate missing `loans` rows from cache.
+
+I did not find evidence of a frontend filter regression. The current diagnosis is: the local EFS loan/deal rows backing the `Available Deals` lane are absent, while TMO cache still retains several loan records. D1 does not currently have loan activity or application change-log rows that identify who/what removed those local rows. The repair path is to restore/reconcile `loans` and any corresponding `investment_deals` from D1 time travel or from the TMO cache/TMO source of truth; I only inspected time-travel info and did not run any restore.
+
+Changed paths: none outside agent-doc session bookkeeping.
+
+Commands: `agent-doc reset --from-current ...`, `agent-doc preflight ...`, `agent-doc plan ...`, `tsift status`, targeted `tsift source-read`/`symbol-read`, remote D1 `SELECT` queries through `bun run cf:d1:query:remote`, and `bun ./bin/cf-wrangler.ts d1 time-travel info equityfundingsource -c ../../wrangler.toml`.
+
+Verification: production D1 query results above; code path verified in `app/equityfundingsource/lib/admin/loan_management/index.ts`, `app/equityfundingsource/lib/admin/repo.ts`, `lib/ui--browser--efs/portal/admin/pipeline.tsx`, and `app/equityfundingsource/lib/tmo-sync.ts`.
+
+Confidence: high that the missing cards are caused by empty local `loans`/`investment_deals`; medium on the exact cause of the row loss because production D1 has no audit rows for that deletion/orphaning.
+
+Escalation: none.
+<!-- agent:boundary:18cda450 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,7 +79,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The Available Deals in https://equityfundingsource.brian-takita.workers.dev/admin/pipeline are now missing from the pipeline. What happened to them?
 <!-- /agent:queue -->
 
 ## Backlog

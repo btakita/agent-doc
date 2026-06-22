@@ -290,7 +290,58 @@ Session note: exchange size is in the warning range, but the active queue requir
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:49c4aabd -->
+
+### Re: expired password reset links + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> If a password reset link has expired, it should go to "Sign in by email." with the expiration error message with instructions to send another email link and the email address prefilled in the email input. This flow current goes to th set password form which cannot succeed with an expired email login link.
+
+> **Queue prompt:**
+>
+> deploy
+
+Implemented and deployed. Expired, used, revoked, or otherwise invalid password reset links now redirect to `Sign in by email` instead of rendering the set-password form. When the reset token hash still maps to an active user, the redirect carries that user's role and email so the email-login form is prefilled and shows the reset-link expiration message with instructions to request a new sign-in link.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/password_reset.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/routes.ts`
+- `src/equityfundingsource-dev/tests/auth.test.ts`
+- `src/equityfundingsource-dev/prds/admin-provisioning-spec.md`
+- `src/equityfundingsource-dev` parent submodule pointer
+
+Commands:
+- `bun test tests/auth.test.ts`
+- `git diff --check`
+- `make check`
+- `gh run list --workflow CI --limit 1` in EFS and parent repos
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before and after deploy
+- `make deploy`
+- Live smoke checks for `/`, `/reset-password?token=bad&role=admin`, and `/login/email?role=admin&email=expired-reset%40example.com&error=...`
+
+Verification:
+- Focused auth suite passed: `21 pass`, `0 fail`.
+- Full `make check` passed: `1128 pass`, `0 fail`, then app and Worker builds completed. The known intentional `d1 down` log appeared in the non-fatal outbox failure test while the suite passed.
+- `git diff --check` passed.
+- Both EFS and parent repos report no GitHub workflow named `CI`, so there was no CI run to inspect.
+- Remote D1 reported `No migrations to apply` before and after deploy.
+- Live root returned `200`.
+- Live bad reset token returned `303` to `/login/email?role=admin&error=This+password+reset+link+is+invalid+or+has+expired.+Request+a+new+sign-in+link+below.`
+- Live email-login page returned `200` and rendered `Sign in by email`, the reset-link expiration message, `value="expired-reset@example.com"`, and `Email me a sign-in link`.
+
+Commits:
+- EFS submodule: `05fb7c6` (`fix(auth): redirect expired reset links`) pushed to `origin/main`.
+- Parent local pointer: `da7caa8b6` (`chore: update efs submodule for reset link redirect`) committed in the current divergent parent worktree.
+- Parent remote pointer: `feced0077` (`chore: update efs submodule for reset link redirect`) pushed to parent `origin/main` from a clean temporary worktree so unrelated local parent drift was not pushed.
+
+Deploy: activated Worker version `12d2be82-5eb4-4e35-870e-b4ce59093baa` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Session note: the parent worktree still has unrelated pre-existing dirty files; I left them untouched.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:e89d5c24 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -302,6 +353,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- If a password reset link has expired, it should go to "Sign in by email." with the expiration error message with instructions to send another email link and the email address prefilled in the email input. This flow current goes to th set password form which cannot succeed with an expired email login link.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -116,7 +116,46 @@ Verification: current remote D1 returned `loans=0`, `investment_deals=0`, `loan_
 Confidence: high that the two visible cards disappeared because their local EFS loan rows are gone; medium on the exact actor/mechanism because the pre-audit production schema does not preserve deletion evidence after loan rows are removed.
 
 Escalation: none.
-<!-- agent:boundary:04802e54 -->
+
+### Re: migration/delete logic audit — gpt-5
+
+> **Queue prompt:**
+>
+> Did a migration from a previous commit cause the deletions? What logic in the codebase would delete the rows?
+
+I do not see evidence that a previous migration deleted the two `loans` rows.
+
+Migration evidence:
+
+- Remote D1 has not applied `0100_audit_logs.sql` from the last EFS commit (`has_0100=0`), so that commit's migration could not have caused the already-missing rows.
+- No migration contains `DELETE FROM loans` or `DROP TABLE loans`.
+- `0042_investor_deal_signatures_and_funded_status.sql` rebuilds `investment_deals` with a `JOIN loans`, so it can drop orphaned deal rows if the matching loan is already missing. It was applied June 8, 2026, before `GQI751` and `FTM631` appeared in the TMO cache, so it does not explain these two rows.
+- `0085_investment_deals_reserved_status.sql` also rebuilds `investment_deals`, but it copies all existing deal rows from `investment_deals` without joining `loans`. It was applied June 19, 2026 03:26:33 UTC, before `FTM631` appeared in cache and without loan deletion logic.
+- The later migrations after the two affected cache rows existed are additive/message/lender schema migrations. `0099_lender_role_and_schema.sql` drops/recreates `users`, but it wraps that with `PRAGMA foreign_keys = OFF` and does not touch `loans` or `investment_deals`.
+
+The code paths that can delete these rows are:
+
+- `DELETE /api/admin/loans/:id` -> `admin_loans_by_id_DELETE_` -> `admin_loan_delete_` -> `DELETE FROM loans WHERE id = ?`; `investment_deals` then cascades from `investment_deals.loan_id REFERENCES loans(id) ON DELETE CASCADE`.
+- `POST /api/admin/loans/bulk-delete` -> `admin_loans_bulk_delete_POST_` -> `admin_loans_bulk_delete_` -> `DELETE FROM loans WHERE id IN (...)`; deals cascade.
+- `DELETE /api/admin/tmo-loans/:loan_number` -> deletes from TMO, then runs `DELETE FROM loans WHERE tmo_loan_number = ?`; deals cascade.
+- `POST /api/admin/tmo-loans/bulk-delete` -> deletes matching TMO loans, then runs `DELETE FROM loans WHERE tmo_loan_number IN (...)`; deals cascade.
+- `DELETE /api/borrower/loans/:id` -> `borrower_loans_by_id_DELETE_` -> `DELETE FROM loans WHERE id = ?`; deals cascade.
+- `DELETE /api/admin/users/:id` -> `admin_user_delete_` -> `DELETE FROM users WHERE id = ?`; `loans.user_id REFERENCES users(id) ON DELETE CASCADE`, then `investment_deals` cascades from `loans`. I checked the two borrower emails from the TMO cache and both user rows still exist now, so current evidence does not point strongly at user deletion for these two, but the cascade path exists.
+
+So the most likely row-loss mechanisms in this codebase are explicit loan delete routes or a borrower/user cascade, not a migration. The current production database still cannot prove which one happened because the rows were lost before durable `audit_logs` existed and `loan_activity_logs` is empty.
+
+Changed paths: none outside the agent-doc session document.
+
+Commands: `agent-doc preflight`; `agent-doc plan`; `agent-doc read exchange`; `tsift status`; `rg` migration/app destructive SQL sweeps; `sed` reads of relevant migrations and delete handlers; remote D1 queries for migration history, `0100` application status, row counts, foreign keys, and affected borrower users.
+
+Verification: EFS submodule remained clean; remote D1 still reports `loans=0`, `investment_deals=0`, `loan_activity_logs=0`; `0100_audit_logs.sql` is not applied remotely; affected borrower users `btak.dev+admin2@gmail.com` and `brian.takita+borrower6@gmail.com` exist; destructive SQL search found no loan-deleting migration and found the app delete paths listed above.
+
+Confidence: high that a previous migration did not directly delete the two `loans` rows; medium on the exact runtime route/actor because production had no durable deletion audit at the time.
+
+Commit: no EFS source commit; investigation-only agent-doc closeout.
+
+Escalation: none.
+<!-- agent:boundary:3072ff1b -->
 <!-- /agent:exchange -->
 ###
 <!--

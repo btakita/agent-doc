@@ -562,7 +562,42 @@ pub fn merge_by_component(
         Some(n) => base_by_name.get(n).map(|s| s.to_string()),
         None => base_interstitials.get(idx).map(|s| s.to_string()),
     })?;
-    Ok(merged_nodes.into_iter().map(|(_, text)| text).collect())
+    let merged: String = merged_nodes.into_iter().map(|(_, text)| text).collect();
+
+    // Structural safety net (#hap7): a per-node leaf merge can, for some shapes
+    // (e.g. a compacted-exchange body whose prose mentions the component markers,
+    // or an interstitial carrying a stray heading), reassemble into a document
+    // whose top-level component framing no longer round-trips — a duplicated or
+    // dropped `<!-- /agent:NAME -->` close, or a changed component-name sequence.
+    // That malformed shape would then trip the downstream exchange-tail / boundary
+    // repair. Rather than emit it, fall back to the proven whole-doc `merge`
+    // (logged, never silent) — the same "never worse than today" contract the
+    // op-capture gate and the structural-divergence branch above already honor.
+    let merged_names: Vec<String> = match segment_into_nodes(&merged) {
+        Ok(nodes) => nodes
+            .iter()
+            .filter_map(|n| n.component_name().map(str::to_string))
+            .collect(),
+        Err(e) => {
+            eprintln!(
+                "[crdt] merge_by_component: merged result failed to re-segment ({e}); falling back to whole-doc merge"
+            );
+            return merge(base_state, ours_text, theirs_text);
+        }
+    };
+    let names_match = merged_names.len() == ours_names.len()
+        && merged_names
+            .iter()
+            .zip(ours_names.iter())
+            .all(|(m, o)| m.as_str() == *o);
+    if !names_match {
+        eprintln!(
+            "[crdt] merge_by_component: merged component framing diverged (ours {ours_names:?} != merged {merged_names:?}); falling back to whole-doc merge"
+        );
+        return merge(base_state, ours_text, theirs_text);
+    }
+
+    Ok(merged)
 }
 
 /// Merge aligned `ours`/`theirs` node vectors (same component-name sequence),
@@ -865,7 +900,19 @@ fn reconcile_component_body(
 
     let ours_keys: Vec<&str> = ours_children.iter().map(|c| c.key.as_str()).collect();
     let theirs_keys: Vec<&str> = theirs_children.iter().map(|c| c.key.as_str()).collect();
-    let order = order_union(&ours_keys, &theirs_keys);
+    // Spine selection (#hap7/#qauthorder): for `exchange`, `ours` (the agent side)
+    // carries the append-only committed-response history, so it stays the order
+    // spine. For the operator-ordered list components (queue/backlog/review/done),
+    // `theirs` — the live editor / disk side — carries the operator-authored order,
+    // which is authoritative; using it as the spine lets an operator reorder (e.g.
+    // moving an interspersed priority prompt to the queue tail) survive the merge
+    // instead of being reverted to the snapshot order. Agent-only keys weave in
+    // after their nearest preceding placed key either way.
+    let order = if name == "exchange" {
+        order_union(&ours_keys, &theirs_keys)
+    } else {
+        order_union(&theirs_keys, &ours_keys)
+    };
 
     // `exchange` is append-only committed history: a `### Re:` block present in
     // the base must never be dropped by a stale/divergent side (the

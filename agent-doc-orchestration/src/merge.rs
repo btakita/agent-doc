@@ -2,10 +2,13 @@
 //!
 //! ## Spec
 //! - `merge_contents_crdt(base_state, ours, theirs)`: conflict-free merge using Yrs CRDT.
-//!   Delegates to `crdt::merge`, then encodes a fresh CRDT state from the merged result.
-//!   Agent content (client_id=1) is ordered before human content (client_id=2) at the same
-//!   insertion point by Yrs' native client-ID ordering — no post-merge reorder needed.
-//!   Returns `(merged_text, new_crdt_state_bytes)`.
+//!   Delegates to `crdt::merge_by_component` (#hap7/#qcellmerge1) so each `agent:*`
+//!   component — and each keyed child inside a list/exchange component — reconciles against
+//!   its own base instead of merging the whole document as one blob; a concurrent operator
+//!   edit to one queue item can no longer duplicate adjacent structure. Then encodes a fresh
+//!   CRDT state from the merged result. Agent content (client_id=1) is ordered before human
+//!   content (client_id=2) at the same insertion point by Yrs' native client-ID ordering — no
+//!   post-merge reorder needed. Returns `(merged_text, new_crdt_state_bytes)`.
 //! - `merge_contents(base, ours, theirs)`: 3-way merge via `git merge-file --diff3`.
 //!   Auto-resolves append-only conflicts (empty original section) by concatenating ours then
 //!   theirs. Preserves standard conflict markers only for true conflicts where existing lines
@@ -67,7 +70,14 @@ pub fn merge_contents_crdt(
     ours: &str,
     theirs: &str,
 ) -> Result<(String, Vec<u8>)> {
-    let merged = crate::crdt::merge(base_state, ours, theirs).context("CRDT merge failed")?;
+    // Per-structural-node scoping (#hap7/#qcellmerge1): reconcile each `agent:*`
+    // component (and, inside list/exchange components, each keyed child) against
+    // its own base instead of merging the whole document as one text blob. A
+    // concurrent operator edit to one queue item can no longer duplicate or
+    // corrupt an adjacent component/item. `merge_by_component` falls back to the
+    // whole-doc `merge` internally on structural divergence or inline-mode docs.
+    let merged =
+        crate::crdt::merge_by_component(base_state, ours, theirs).context("CRDT merge failed")?;
     // Build fresh CRDT state from the merged result
     let doc = crate::crdt::CrdtDoc::from_text(&merged);
     let state = doc.encode_state();
@@ -135,7 +145,13 @@ pub fn merge_contents_crdt_with_ops(
             crate::crdt::merge_with_editor_ops(base_state, ours, theirs, Some(ops))
                 .context("CRDT merge (with editor ops) failed")?
         }
-        None => crate::crdt::merge(base_state, ours, theirs).context("CRDT merge failed")?,
+        // No captured editor ops (the common production path until the editor
+        // reporters land): use the per-structural-node merge so the diff-guess
+        // side can no longer duplicate structure across components/items
+        // (#hap7/#qcellmerge1). The op-replay branch above stays whole-doc because
+        // captured ops carry whole-document byte offsets.
+        None => crate::crdt::merge_by_component(base_state, ours, theirs)
+            .context("CRDT merge failed")?,
     };
 
     // Consume the sidecar — the ops belonged to this base epoch (used or stale).
@@ -488,6 +504,45 @@ User line 2.
     }
 
     #[test]
+    fn crdt_merge_concurrent_queue_insert_no_structural_duplication() {
+        // #hap7/#qcellmerge1 regression at the orchestration wrapper: the operator
+        // inserts a new queue item while the agent is appending a `### Re:`
+        // response in the SAME cycle. The old whole-document merge could
+        // splice/duplicate adjacent structure (operator-reported: a queue prompt
+        // duplicated mid-turn). With per-structural-node scoping each component
+        // reconciles against its own base, so the new queue item appears exactly
+        // once and the response never splices into the queue.
+        let base = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+                    <!-- agent:queue -->\n- do [#aaaa]\n<!-- /agent:queue -->\n";
+        // Agent side: appended a response block to exchange; queue untouched.
+        let ours = "<!-- agent:exchange -->\n### Re: topic\nAgent response body.\n<!-- /agent:exchange -->\n\n\
+                    <!-- agent:queue -->\n- do [#aaaa]\n<!-- /agent:queue -->\n";
+        // Operator side: exchange untouched; inserted a new queue item.
+        let theirs = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+                    <!-- agent:queue -->\n- do [#aaaa]\n- do [#bbbb]\n<!-- /agent:queue -->\n";
+
+        let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+
+        assert!(merged.contains("### Re: topic"), "response present:\n{merged}");
+        assert_eq!(
+            merged.matches("do [#bbbb]").count(),
+            1,
+            "new operator queue item must appear exactly once:\n{merged}"
+        );
+        assert_eq!(
+            merged.matches("do [#aaaa]").count(),
+            1,
+            "existing queue item must not be duplicated:\n{merged}"
+        );
+        let queue_start = merged.find("<!-- agent:queue -->").unwrap();
+        assert!(
+            !merged[queue_start..].contains("Agent response body."),
+            "agent response must not splice into the queue component:\n{merged}"
+        );
+    }
+
+    #[test]
     fn crdt_merge_concurrent_same_line() {
         let base = "Line 1\nLine 3\n";
         let ours = "Line 1\nAgent\nLine 3\n";
@@ -549,8 +604,14 @@ User line 2.
 
         let (merged, state) =
             merge_contents_crdt_with_ops(&doc, Some(&base_state), ours, theirs).unwrap();
-        assert!(merged.contains("Agent response."), "agent side preserved:\n{merged}");
-        assert!(merged.contains("User edit."), "editor op preserved:\n{merged}");
+        assert!(
+            merged.contains("Agent response."),
+            "agent side preserved:\n{merged}"
+        );
+        assert!(
+            merged.contains("User edit."),
+            "editor op preserved:\n{merged}"
+        );
         assert!(!merged.contains("<<<<<<<"));
         assert!(!state.is_empty());
 

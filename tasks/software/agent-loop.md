@@ -1,6 +1,6 @@
 ---
 agent_doc_session: be20dd6e-31ce-4f16-93ed-42c9c2a21b98
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': ''
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 # agent-loop operations
@@ -33,51 +33,12 @@ Operational task document for agent-loop workspace management.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca3007b9c6c5bc21d81a0b9ff27f894487e97141f4cdafe2a9d12a4a19b1-20260607-073145.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca3007b9c6c5bc21d81a0b9ff27f894487e97141f4cdafe2a9d12a4a19b1-20260622-175506.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Fix workspace patch warnings for agent-kit, tagpath, tmux-router
-- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca30...
-- **skill-harness** (only CI/install.sh/README since v0.1.1, no `src/`), **agent-memories**, **agent-rules**, **agent-runbooks** (gitignore + "fix release workflow"), **module-harness** (lockfile only), **existence** (docs/checkpoint/ci), **webmaster** (docs/gitignore), **existence-lang/ontology** + **spec** (content/doc repos, git-tag-only, mostly renames).
-- ⚠️ **corky** — the `v0.28.2` workspace split added 5 member crates (corky-core/google/mail/social/transcribe), **none on crates.io**, all path+version-depended by the root. Publishing now means claiming 5 new public crate names (all currently available) and a dependency-ordered multi-crate publish that can partially fail — an irreversible namespace decision I won't make unilaterally. Recommended: lockstep `0.29.0`, publish members in dep order, then root + PyPI/maturin via CI. Or keep corky binary/PyPI-only and mark members `publish = false`.
-- ✅ **instruction-files v0.3.0** → crates.io (new `check-policy` CLI subcommand + Library Context Policy spec). Folded in the legit `Cargo.lock` drift from the `glob` dep.
-- ✅ **chromium-bridge v0.3.0** → crates.io (5 feat commits: accessibility snapshots, network inspection, persistent browser state, corky ingest). Tag push also triggered the GitHub binary-release workflow (building now).
-
-### Re: Release + publish submodules with pending releases — opus-4-8
-
-Swept every submodule, excluding the 5 actively worked in other live panes (**lazily-rs** %26, **tagpath** %40, **tmux-router** %43, **tsift** %25, **agent-doc** via agent-doc-bugs/bugs2 %22/%30).
-
-**Released + published this cycle:**
-- ✅ **chromium-bridge v0.3.0** → crates.io (5 feat commits: accessibility snapshots, network inspection, persistent browser state, corky ingest). Tag push also triggered the GitHub binary-release workflow.
-- ✅ **instruction-files v0.3.0** → crates.io (new `check-policy` CLI subcommand + Library Context Policy spec). Folded in the legit `Cargo.lock` drift from the `glob` dep.
-
-Both verified live on crates.io at 0.3.0; superproject pointers bumped.
-
-**Blocked — needs your decision (`#jq1r`, plan: `tasks/software/corky-workspace-publish.md`):**
-- ⚠️ **corky** — the `v0.28.2` workspace split added 5 member crates (corky-core/google/mail/social/transcribe), **none on crates.io**, all path+version-depended by the root. Publishing now means claiming 5 new public crate names (all currently available) and a dependency-ordered multi-crate publish that can partially fail — an irreversible namespace decision I won't make unilaterally. Recommended: lockstep `0.29.0`, publish members in dep order, then root + PyPI/maturin via CI. Or keep corky binary/PyPI-only and mark members `publish = false`.
-
-**Skipped — no release-worthy code** (unreleased commits are only chore/ci/docs/lockfile/tsift-init):
-- **skill-harness** (only CI/install.sh/README since v0.1.1, no `src/`), **agent-memories**, **agent-rules**, **agent-runbooks** (gitignore + "fix release workflow"), **module-harness** (lockfile only), **existence** (docs/checkpoint/ci), **webmaster** (docs/gitignore), **existence-lang/ontology** + **spec** (content/doc repos, git-tag-only, mostly renames).
-
-Net: no crate had an *unpublished tag* to move forward — every last-tag matched its crates.io version — so each release required a deliberate version bump, which I did only for the two with genuine feature deltas.
-
-### Re: do #jq1r — publish corky workspace crates — opus-4-8
-
-> **Queue prompt:**
->
-> do #jq1r. Yes, publish new crates.
-
-Done. Claimed all 5 `corky-*` names and published the workspace at lockstep `0.29.0`.
-
-**Published to crates.io (dependency order, all verified live at 0.29.0):** `corky-core` → `corky-google`, `corky-social`, `corky-transcribe` → `corky-mail` → root `corky`. The 5 member names were available (404) before publish; member crates already carried `description`/`license`/`repository`, so no metadata fixes were needed.
-
-**Verification + build:**
-- `make check` (clippy + tests, default features incl. `diarize`) → green, 0 failed.
-- `cargo install --path . --features transcribe-cuda` → replaced `~/.cargo/bin/corky` 0.28.2 with 0.29.0.
-- `make release` → rebuilt `.bin/corky`; `corky --version` = 0.29.0.
-
-**Pushed:** corky commit `b57a6db` + tag `v0.29.0` (tag triggered the **Release**/**CI** workflows that own the PyPI trusted-publish wheel + `gh release` — still in progress, not blocking). Superproject pointer + plan-status committed in `7c3fb4f43`. VERSIONS.md and pyproject.toml bumped in sync; plan `tasks/software/corky-workspace-publish.md` marked DONE.
-<!-- agent:boundary:e3cc02fe -->
+❯ - Archived 2 response topic(s): Release + publish submodules with pending releases; do #jq1r
+❯ - Prior summary/context: prior compacted content: Archived 1 response topic(s): Fix workspace patch warnings for agent-kit, tagpath, tmux-router
+<!-- agent:boundary:c7c25cdd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -86,6 +47,7 @@ Done. Claimed all 5 `corky-*` names and published the workspace at lockstep `0.2
 ## Queue
 
 <!-- agent:queue go -->
+- Commit + push all uncommitted files in submodules + agent-loop.
 <!-- /agent:queue -->
 
 ## Backlog

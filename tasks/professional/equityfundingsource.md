@@ -86,7 +86,26 @@ You can keep **sending** from the verified `info@briantakita.me` (From and Reply
 **If you'd rather avoid a catch-all:** I can add a token-as-local-part scheme so the reply address is `{TOKEN}@replies.<domain>` (no plus) — that still needs a catch-all on the `replies.` subdomain, but it keeps the apex clean and reads better. Say the word and I'll wire it; otherwise the current plus-address scheme is ready.
 
 **My recommendation:** pick a dedicated subdomain on a Cloudflare zone, enable Email Routing with a catch-all → the EFS Worker, and use `replies@<subdomain>`. Once you tell me the exact domain/subdomain, I'll set `MESSAGE_EMAIL_INBOUND_REPLY_TO` (+ flip `MESSAGE_EMAIL_INBOUND_ENABLED=true`) in `wrangler.toml` and deploy; you add the Cloudflare Email Routing catch-all rule (dashboard) and we send a test reply to confirm it lands. That completes `#msgmail4b`/`#f2w8`.
-<!-- agent:boundary:65707792 -->
+❯ Can we use a subdomain such as reply@efs.briantakita.me? Would the root domain email briantakita.me still go to Protonmail?
+> **Queue prompt:** Can we use a subdomain such as reply@efs.briantakita.me? Would the root domain email briantakita.me still go to Protonmail?
+
+### Re: subdomain reply@efs.briantakita.me + keeping Protonmail on the root — opus-4-8
+
+**Yes on both counts — and this is the clean setup.**
+
+**1. A subdomain works.** Cloudflare Email Routing now supports subdomains (Dashboard → Email → Email Routing → Settings → **Add subdomain**). Add `efs.briantakita.me`, then create a **catch-all on that subdomain → the EFS Email Worker**. The catch-all is what captures the plus-addressed token (`reply+{TOKEN}@efs.briantakita.me`).
+
+**2. Your root `briantakita.me` email stays on Protonmail.** Email delivery is decided by **MX records**, and MX is per-hostname. Enabling Email Routing on the **subdomain** adds MX records to `efs.briantakita.me` only — it does **not** touch the apex `briantakita.me` MX (which points at Protonmail). So personal mail to `@briantakita.me` keeps flowing to Protonmail, untouched. (This is exactly why the subdomain is better than a catch-all on the apex, which *would* have hijacked Protonmail.)
+
+So the recommended config:
+- Cloudflare: add subdomain `efs.briantakita.me` to Email Routing, set a **catch-all rule → EFS Worker** (Email Worker action).
+- App: `MESSAGE_EMAIL_INBOUND_REPLY_TO = "EFS Replies <reply@efs.briantakita.me>"` → outbound Reply-To becomes `reply+{TOKEN}@efs.briantakita.me`.
+- Keep **sending** from the verified `info@briantakita.me` (From and Reply-To can differ).
+
+**One timing note:** outbound notifications are already live in prod, so I should set `MESSAGE_EMAIL_INBOUND_REPLY_TO` + flip `MESSAGE_EMAIL_INBOUND_ENABLED=true` **only after** the `efs.briantakita.me` subdomain + catch-all exist — otherwise real emails would carry a `reply+…@efs.briantakita.me` Reply-To that dead-ends until routing is live. So the order is: (1) you add the subdomain + catch-all in Cloudflare, (2) tell me, (3) I set the two vars and deploy, (4) we send a test reply and confirm it lands in the thread. That closes `#f2w8`/`#msgmail4b`.
+
+Sources: [Cloudflare Email Routing — Subdomains](https://developers.cloudflare.com/email-routing/setup/subdomains/), [Email Routing subdomain support (Cloudflare blog)](https://blog.cloudflare.com/email-routing-subdomains/).
+<!-- agent:boundary:99a20baa -->
 <!-- /agent:exchange -->
 ###
 <!--

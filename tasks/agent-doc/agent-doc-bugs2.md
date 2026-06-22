@@ -39,13 +39,28 @@ done
 Compacted content:
 - Archived 5 response topic(s): Codex Run Agent Doc submit retries - gpt-5; strict closeout and stale supervisor recycle; strict closeout commit evidence; 2 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-<!-- agent:boundary:6fab4936 -->
+
+### Re: queued blockers after repair — gpt-5
+
+> **Queue prompt:**
+>
+> do [#1jec]
+> do [#98t4]
+> do [#fccd]
+
+`#1jec` is blocked on live operator verification. It requires a JetBrains/plugin reconnect scenario that cannot be proven from this Codex shell, so I gated it instead of marking it done.
+
+`#98t4` is not complete. The concrete blocker is release packaging design: `cargo publish` currently rejects the package graph because internal `agent-doc-*` dependencies are path-only / unpublished, and `make publish-pypi` fails from the sdist because path dependencies create a duplicate `agent-kit v0.4.1` lockfile package. Fixing it requires deciding whether the internal crates are publishable crates or should be packaged out of the release path.
+
+`#fccd` is not complete. The concrete live-state evidence is that the installed CLI is `agent-doc 0.34.37`, `agent-doc admin recycle` is already marked, and `agent-doc session restart-supervisor` refused because pane `%3` is alive-busy. That leaves the Clear Session Cache dialog investigation open until the supervisor can recycle at an idle boundary and the JB behavior can be re-tested.
+
+No source files changed in this closeout. No tests were needed for these blocker classifications.
+<!-- agent:boundary:11833be6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~I'm still seeing JB `Clear Session Cache` dialogs. Is the CPC instance up to date? Are all supervisors instances up to date? If this is still possible with the current codebase, these cases should use our node merge workflow.~~
 ---
 :pushpin: Fix the root cause of this issue that occurred in this document.
 ```
@@ -150,7 +165,6 @@ Error: dispatch-only codex reopen refused to inject into pane %24 for tasks/prof
   entry.
 ```
 ---
-- ~~:pushpin: do [#1jec]~~
 - :pushpin: do [#fbwireverify]
 - :pushpin: do [#qnodemerge4verify]
 - :pushpin: do [#tb4q]
@@ -165,9 +179,9 @@ Error: authoritative actor record for tasks/software/agent-loop.md is bound to h
 - :pushpin: do [#qcm1verify]
 - :pushpin: do [#arsm]
 - :pushpin: do [#jjds]
-- ~~:pushpin: do [#26f9]~~
 - :pushpin: do [#98t4]
 - do [#fccd]
+- do [#1jec]
 <!-- /agent:queue -->
 <!--
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.
@@ -207,7 +221,6 @@ What are #next-steps to fix bugs?
 - [ ] [#arsm] [operator-verify] #pcwcwarnverify #agent-doc-bug Live-verify the #pcwcwarn post-commit stale-exchange reconcile (agent-doc submodule 5f3fc07d, superproject db7fc3594). Code shipped+pushed+make-check-green (4947). Runs in the binary commit path + editor IPC, so it goes live once the supervisor adopts the new build (admin recycle done). REMAINING (operator-gated, needs a live editor): drive one edit-during-finalize cycle with a stale > Queue prompt blockquote left inside the exchange in a live JB/VS Code buffer; confirm ops.log shows postcommit_exchange_reconciled reason=stale_editor_exchange AND zero recurring postcommit_worktree_check match=false drift on the next cycle (no manual git checkout HEAD needed).
 - [ ] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.
 - [ ] [#qcm1verify] [operator-verify] #agent-doc-bug Install + live-verify the #qnodemerge1 component-scoped merge (agent-doc submodule 52458f47). Code shipped+pushed, make check green (4853). Operator-gated remainder (mid-session install causes finalize-client-newer drift; STOP-cutting-releases gate): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then drive one edit-during-finalize cycle (type into a queue item while the agent writes an exchange response) and confirm ZERO cross-component splice + no console-output-in-queue corruption.
-- [ ] [#1jec] [operator-verify] #yzerverify #agent-doc-bug Live-verify the #yzer/#evmhplugin plugin reconnect re-read (agent-doc 0.34.28 / submodule f6b8ae17, plugin 0.2.172). Code shipped+pushed: binary FFI agent_doc_reconnect_buffer_decision (disk==HEAD via ffi_show_head + buffer==prior-commit via ffi_show_prior_blobs) + pure decide_reconnect_buffer + PatchWatcher.registerRoot reconcile-on-connect (applyReconnectReread) + SimWorld coverage; make check green (4832). Operator-gated remainder (install is unsafe mid-session = finalize-client-newer drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), reinstall plugin 0.2.172, agent-doc admin recycle. Then repro: open a session doc in JB, kill/restart the supervisor so the binary commits while the plugin is disconnected, and on reconnect confirm ops.log shows 'reconnect_buffer_decision decision=reread_disk #yzer' and the editor buffer == HEAD with NO File Cache Conflict; a buffer holding genuine unsaved user edits must instead log decision=keep_buffer and be preserved (editor wins).
 - [ ] [#98t4] #adpublishpkg #agent-doc-release Fix release packaging publish blockers found during 0.34.37: `cargo publish` rejects path-only internal agent-doc deps / unpublished crates, and `make publish-pypi` fails building from sdist because path dependencies create an `agent-kit v0.4.1` package collision in Cargo.lock.
 <!-- /agent:backlog -->
 

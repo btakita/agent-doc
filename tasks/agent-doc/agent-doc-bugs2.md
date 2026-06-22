@@ -32,6 +32,14 @@ done
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+### Session Summary
+
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260622-205008.md`*
+
+Compacted content:
+❯ - Archived 1 response topic(s): do [#rtndsync]
+❯ - Prior summary/context: prior compacted content: Archived 7 response topic(s): editor stale-state rollback and slow Run Agent Doc; build and ...
+
 ### Re: Codex Run Agent Doc submit retries - gpt-5
 
 > **Queue prompt:**
@@ -84,22 +92,14 @@ Preflight notes:
 Escalation: none.
 
 Confidence: high for the retry cadence and local install/test verification; remote CI was still running at closeout.
-
-### Session Summary
-
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260622-205008.md`*
-
-Compacted content:
-❯ - Archived 1 response topic(s): do [#rtndsync]
-❯ - Prior summary/context: prior compacted content: Archived 7 response topic(s): editor stale-state rollback and slow Run Agent Doc; build and ...
-<!-- agent:boundary:5b151629 -->
+<!-- agent:boundary:a4cc04a9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~JB `Run Agent Doc` does not submit with Codex or is very slow to submit. The submit retries should be very frequent. At least 1/sec if not more frequent.~~ — auto-struck: answered this cycle (#ftstrike)
-- I'm still seeing JB `Clear Session Cache` dialogs. Is the CPC instance up to date? Are all supervisors instances up to date?
+- I'm still seeing JB `Clear Session Cache` dialogs. Is the CPC instance up to date? Are all supervisors instances up to date? If this is still possible with the current codebase, these cases should use our node merge workflow.
 ---
 Fix the root cause of this issue that occurred in this document.
 ```

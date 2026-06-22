@@ -88,6 +88,25 @@ CI:
 
 Preflight notes:
 - Preflight reported semantic-completion ambiguity warnings for unrelated backlog/review IDs; I left those untouched.
+- `29d4f41e` `ci: checkout path deps in release workflow`
+- `daf5e727` `fix: require strict closeout response headings`
+- The first `v0.34.36` Release run failed because the Release workflow did not clone sibling path dependencies. I fixed the workflow, pushed `29d4f41e`, repointed `v0.34.36` to it, and the superseding Release run has passed the path-dependency checkout steps and is compiling.
+- Latest CI on `main` is running for `29d4f41e`; the previous latest CI was green before this push.
+- `make install-full` passed; `agent-doc --version` reports `agent-doc 0.34.36`.
+- `make check` passed after the version bump.
+- `cargo test finalize_stream_rejects_empty_exchange_shell_before_commit`
+- `cargo test orchestrate_streams_step_patchback_before_finalize`
+- `cargo test -p agent-doc-orchestration strict_template_response_heading`
+- `.github/workflows/release.yml` after the first release run exposed the missing path-dependency checkout.
+- `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `VERSIONS.md`
+- `specs/07-closeout-commands.md`
+- `runbooks/commit.md`
+- `.claude/skills/agent-doc/SKILL.md`
+- `src/skill.rs`
+- `agent-doc-orchestration/src/queue_continuation.rs`
+- `agent-doc-orchestration/src/write/normalize.rs`
+- `agent-doc-orchestration/src/write/run_entry.rs`
+- `agent-doc-orchestration/src/write/materialize.rs`
 
 Escalation: none.
 
@@ -135,18 +154,18 @@ Commits pushed in `src/agent-doc`:
 - `29d4f41e` `ci: checkout path deps in release workflow`
 
 The superproject `src/agent-doc` pointer is included as a sibling closeout commit.
-<!-- agent:boundary:fbbac828 -->
+<!-- agent:boundary:5fdadceb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Instead of blindly continuing while the supervisor is stale, you should recycle the supervisor then continue.~~
+- The restart recycle did not restart the agent. `/clear` is in the agent input and was not submitted. `agent-doc tasks/agent-doc/agent-doc-bugs2.md` should have been submitted instead. A warning to not press enter is too brittle. If the user cannot add anything or press enter, there should be no way to do so in the ui.
 - I'm still seeing JB `Clear Session Cache` dialogs. Is the CPC instance up to date? Are all supervisors instances up to date? If this is still possible with the current codebase, these cases should use our node merge workflow.
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.
 - JB `Run Agent Doc` still does not submit. The submit retry poll should be 500ms and attempt for 30s...only if the input contents are the prompt itself. Other automated additions to the prompt should be forbidden. If the user modifies the agent prompt, stop the retry polling.
 ---
-Fix the root cause of this issue that occurred in this document.
+:round_pushpin: Fix the root cause of this issue that occurred in this document.
 ```
 • The write recovery path hit the same stale-supervisor proof guard: the patch was delivered, but the materialized
   content was missing the response body. I’m checking the admin/session controls for a non-destructive way to get the
@@ -168,16 +187,6 @@ Fix the root cause of this issue that occurred in this document.
 • The repair command will not auto-apply this state; it needs the response finished first. I’m going to use the agent-
   doc component patcher to replace only the malformed exchange component with the complete response text while
   preserving the newly added queue item.
-```
-```
-• The partial IPC apply inserted only the body bullets and auto-struck the head, without the ### Re: header or queue
-  prompt. A new queue item was also added while I was closing out; I’m going to repair the malformed closeout first,
-  then the loop can move to the next queue head.
-```
-```
-• Session-check still fails because the exchange tail ends with the compacted Session Summary, not the response. I’m
-  reordering the exchange so the Session Summary stays first and the completed ### Re: response is the final exchange
-  entry.
 ```
 ---
 JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
@@ -225,18 +234,7 @@ JB `Run Agent Doc` is still either stalling or very slow. Completely useless at 
 Error: dispatch-only codex reopen refused to inject into pane %24 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
 ```
 ---
-JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
-```
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
-```
----
-- :pushpin: do [#1jec]
-- :pushpin: do [#fbwireverify]
-- :pushpin: do [#qnodemerge4verify]
-- :pushpin: do [#tb4q]
----
-:round_pushpin: Fix the root cause of this issue that occurred in this document.
+Fix the root cause of this issue that occurred in this document.
 ```
 • The write recovery path hit the same stale-supervisor proof guard: the patch was delivered, but the materialized
   content was missing the response body. I’m checking the admin/session controls for a non-destructive way to get the
@@ -259,10 +257,32 @@ Error: authoritative actor record for tasks/software/agent-loop.md is bound to h
   doc component patcher to replace only the malformed exchange component with the complete response text while
   preserving the newly added queue item.
 ```
+```
+• The partial IPC apply inserted only the body bullets and auto-struck the head, without the ### Re: header or queue
+  prompt. A new queue item was also added while I was closing out; I’m going to repair the malformed closeout first,
+  then the loop can move to the next queue head.
+```
+```
+• Session-check still fails because the exchange tail ends with the compacted Session Summary, not the response. I’m
+  reordering the exchange so the Session Summary stays first and the completed ### Re: response is the final exchange
+  entry.
+```
+---
+- :pushpin: do [#1jec]
+- :pushpin: do [#fbwireverify]
+- :pushpin: do [#qnodemerge4verify]
+- :pushpin: do [#tb4q]
+---
+JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
+```
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
+```
 ---
 - do [#cancelturnverify]
 - do [#qcm1verify]
 - do [#arsm]
+- do [#jjds]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

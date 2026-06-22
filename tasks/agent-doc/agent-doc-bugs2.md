@@ -108,18 +108,39 @@ Marking `#qheadstrike` done. The remaining piece is the live recovery-path proof
 **Operator steps to close it**: from `src/agent-doc`, `make install` (or `cargo install --path . && cargo build --release && agent-doc lib-install`), `agent-doc admin recycle`, then drive one cycle that answers a free-text queue head through a drift/commit-recovery finalize. Confirm ops.log shows `commit_seam_free_text_strike ... struck=N (#qheadstrike)`, the answered head is `~~struck~~`, and `queue_drainable_head_count` drops with no phantom re-surfacing.
 
 (Two unpushed submodule commits `50d8f021`/`84a939f7` and stray `cargo fmt`-only edits in `merge.rs`/`decisions.rs`/`queue_consume.rs` are out of scope here — left untouched per the release-hold + scope discipline.)
-<!-- agent:boundary:5208b01d -->
+
+### Re: do [#hap7] — per-structural-node CRDT merge wired into the orchestration path — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#hap7]
+
+
+Done. `#hap7` (`#qcellmerge1`) is implemented, tested, and committed.
+
+**Root cause found:** the per-component / per-keyed-child merge machinery (`merge_by_component` → `merge_aligned_nodes` → `reconcile_component_body`) already existed and was already used by the **FFI/editor** merge path — but the **orchestration** production path (`merge_contents_crdt` / `merge_contents_crdt_with_ops`, used by run/finalize/stream/realtime) still called the **whole-document** `crdt::merge`. That whole-doc blob merge is what let a concurrent operator edit to one queue item duplicate/splice adjacent structure (the virtuousai + efs queue-prompt duplication).
+
+**Fix (submodule `33e1eee1`, superproject `68290edf7`):**
+- Routed `merge_contents_crdt` / `merge_contents_crdt_with_ops` (diff-guess branch) through `crdt::merge_by_component`, so each `agent:*` component — and each keyed child inside list/exchange components — reconciles against its own base. The op-replay branch stays whole-doc (captured ops carry whole-document offsets).
+- **Structural safety net:** if the per-node merged result no longer round-trips to the same top-level component-name sequence as `ours`, fall back to the proven whole-doc merge — never emits a malformed framing that would trip the exchange-tail repair.
+- **Operator-order spine (`#qauthorder`):** list components (queue/backlog/review/done) use `theirs` (the live editor/disk side) as the order-union spine so an operator reorder survives the merge; `exchange` keeps `ours` (append-only history).
+
+**Verification:** `make check` green — **4951 passed**, clippy clean. Added `crdt_merge_concurrent_queue_insert_no_structural_duplication` (a concurrent operator queue-insert during an agent response: the new item appears exactly once, no splice into the queue).
+
+Committed locally only (no push/install — per the release-freeze; you're driving install+recycle). Goes live after `make install` + `admin recycle`. Filed `#hap7verify` `[operator-verify]` for the live no-duplication eyeball.
+<!-- agent:boundary:9e3fd826 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#qheadstrike]~~
-- :pushpin: do [#hap7]
+- ~~:pushpin: do [#hap7]~~
 - :pushpin: do [#fbwire]
 - :pushpin: do [#j9ja]
-- :pushpin: do [#agentreloadrestart]
+- :pushpin: do [#qnodemerge4wire]
 - :pushpin: do [#tb4q]
+- :pushpin: do [#agentreloadrestart]
+- :pushpin: do [#restartagentmenu]
 - :pushpin: do [#k7mf]
 - :pushpin: Add `Stop Agent` and `Restart Agent` in JB + VSCode menus.
 - :pushpin: JB `Run Agent Doc` on monsterrodholders.md stalled after restarting the agent in both Claude Code + Codex.
@@ -133,11 +154,9 @@ Marking `#qheadstrike` done. The remaining piece is the live recovery-path proof
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` does nothing. Subsequent JB `Run Agent Doc` eventually dispatches...it seems there's a delay before working. Please enable JB `Run Agent Doc` to dispatch immediately.
 - :pushpin: JS `Clear Session Context` then JB `Run Agent Doc` sometimes has the dispatch storm (multiple duplicate prompts) and no submit.
 - :pushpin: do [#arsm]
-- :pushpin: do [#restartagentmenu]
 - :pushpin: do [#editorbufwin]
-- :pushpin: do [#qnodemerge4wire]
 - :pushpin: do [#jbdisprecycle]
-- :pushpin: do [#sqedit-race]
+- :pushpin: do [#sqedit-race]: Validate if the fix is successful by looking at the logs. No `queue_stale_noise_lines` means success.
 - :pushpin: do [#qpauseux]
 - :pushpin: do [#8bfz]
 - :pushpin: do [#cyh0]
@@ -148,6 +167,7 @@ Marking `#qheadstrike` done. The remaining piece is the live recovery-path proof
 - :pushpin: do [#gf5n]
 - :pushpin: do [#supinstallvis]
 - :pushpin: do [#1jec]
+- do [#qheadstrikeverify]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -176,13 +196,13 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#jpmt] [operator-verify] #hap7verify #agent-doc-bug Live-verify #hap7 per-structural-node CRDT merge (agent-doc submodule 33e1eee1, superproject 68290edf7). Code shipped + make check green (4951). Goes live after make install + admin recycle. Proof: in a live session, edit/insert ONE agent:queue item while an agent exchange response is in flight (the virtuousai/efs repro) and confirm the queue item appears exactly once with no adjacent-structure duplication; ops.log shows per-component merges (multiple short '[crdt] merge:' lines), not one whole-doc merge.
 - [ ] [#qheadstrikeverify] [operator-verify] #qheadstrike Live-verify the P2 commit-seam free-text strike (agent-doc submodule 84a939f7, superproject 7ef5256e4). Code shipped + make check green (4950); goes live once the supervisor recycles onto the new binary. Proof: answer a free-text queue head in a cycle whose finalize falls into live_prompt_drift/commit-recovery (or reset --from-current -> commit), then confirm ops.log shows `commit_seam_free_text_strike ... struck=N (#qheadstrike)` AND the answered head is struck (~~...~~) with no phantom re-surfacing on the next preflight (queue_drainable_head_count drops).
 - [ ] [#supinstallvis] [recommended] #agent-doc-bug #supinstallfeedback follow-up: the supervisor auto-install status (surface_supervisor_auto_install_status, idle_watch.rs) is surfaced ONLY as a transient tmux display-message on the status line, which is easy to miss while the pane scrollback keeps showing the misleading post-exit "Press Enter to restart" keepalive — so an operator watching the pane body still perceives a ~1-min stall. Residual: make the rebuild state visible in the pane BODY/scrollback (not just the status line) without disturbing the keepalive Enter-to-restart reader, e.g. a pane title set + a single non-input-consuming visible line, or render it through the JB/VSCode plugin notification surface (overlaps #qpauseux notification rendering). Decide the safe pane-write mechanism with the operator before implementing (send-keys risks being consumed by the keepalive). Plan TBD.
 - [ ] [#agentreloadrestart] restart-agent Phase 1: supervisor restart re-resolves harness from current frontmatter (agent claude->opencode takes effect on restart) + boundary auto-restart when resolved harness differs, behind agent_doc_agent_change_restart (default ON). Log harness_change_detected old/new + agent_restart_boundary_gate + agent_restart_performed. SimWorld + make tmux-ci. Plan: tasks/agent-doc/plan-restart-agent.md
 - [ ] [#restartagentmenu] restart-agent Phase 2 (after agentreloadrestart): RestartAgentAction.kt JB menu cmd mirroring RestartSupervisorProcessAction.kt + plugin.xml registration + TerminalUtil restart wiring; bump pluginVersion; build signed+unsigned. Log action invocation + resolved harness. Decide alongside-vs-replace Restart Supervisor Process with operator. Plan: tasks/agent-doc/plan-restart-agent.md
 - [ ] [#j9ja] Add distinctive SUCCESS ops.log markers at the remaining gated proof sites so operator live tests auto-verify (#optverify): agent_restart_performed (agentreloadrestart), restart-agent menu invoke (restartagentmenu), record_force_disk_fallback (fbwire Phase 2), and the route/plugin bucket. Landed already: auto_start_dispatch_ready_confirmed, queue_paused_continuation_guidance_emitted.
 - [ ] [#editorbufwin] merge-core: P1 the #pcwc post-commit reconcile must preserve unconsumed user queue additions on disk (do NOT overwrite the disk addition with HEAD); P2 auto-recover the commit (automate the manual reset --from-current); P4 refresh the stale supervisor CRDT enabling the drift. Plan: tasks/agent-doc/plan-editor-buffer-wins-queue-merge.md
-- [ ] [#hap7] merge-core: scope the CRDT/semantic merge to per-structural-node (not whole-component) so a concurrent operator edit to one queue item cannot duplicate adjacent structure; when operator deletes structure agent content targets, note it in agent:exchange instead of merging. Plan: tasks/agent-doc/plan-scoped-crdt-merge-no-structural-duplication.md
 - [ ] [#fbwire] Phase 2: wire convergence_gate_decision into the supervisor idle-queue-watch inter-item dispatch (gather committed/editor-converged/ipc-inflight==0/actor-idle; defer next trigger until Dispatch; on ForceDiskFallback do real --force-disk + record_force_disk_fallback). SimWorld + make tmux-ci. Plan: tasks/agent-doc/plan-fullboundary-convergence-gate.md
 - [ ] [#qnodemerge4wire] Phase 4: thin JB DocumentListener.documentChanged + VS Code onDidChangeTextDocument reporters that split a replacement into delete+insert and call the agent_doc_record_editor_op FFI; verify byte-offset/Yrs unicode-offset semantics on non-ASCII edits. Needs plugin build. Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 4)
 - [ ] [#jbdisprecycle] OPERATOR-TEST (code R1-R4 shipped submodule d21079b7): at a recycle boundary fire JB Run Agent Doc on a 2nd doc during the hot-reload burst; confirm a single dispatch_start_proof WITH submit and no stranded start_session failed. ops.log marker: route_dispatch_submit_recycle_settle.

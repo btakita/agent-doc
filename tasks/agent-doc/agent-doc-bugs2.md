@@ -182,7 +182,7 @@ No code change is safe to make blind here; the next step is to pick the UI/surfa
 I gated `#arrkillguard` for a focused cycle. The plan explicitly labels Phase 1b execution/kill-guard as live-supervisor-critical and calls for a clean focused implementation with full `make check` plus `make tmux-ci` across two panes. Mixing that route/sync/start change into this already-long queue drain would be a bad risk tradeoff.
 
 The remaining work is still concrete: prevent route/sync/start from cold-starting or evicting a busy same-session pane solely because `agent:` changed; defer to the boundary restart path and verify it live.
-<!-- agent:boundary:05d51446 -->
+<!-- agent:boundary:00d62867 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -255,7 +255,6 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
-- [/] [#arrkillguard] #agent-doc-bug #agentreloadrestart Phase 1 kill-guard (the real-harm item): route/sync/start must NOT cold-start a replacement pane / evict an in-flight turn solely because frontmatter agent: changed — defer to the graceful boundary restart (#agentreloadrestart Phase 1b, shipped 603ce7a2). Root harm 2026-06-18: agent: claude->opencode on equityfundingsource.md killed the live claude turn (route migrated [claude] %83 -> [opencode] %90 mid-turn). Add a guard in route.rs/sync.rs that refuses to replace a BUSY same-session pane when the only difference is agent:; verify with make tmux-ci across two panes (one mid-turn) that the switch waits for the boundary and never kills the running turn. Plan: tasks/agent-doc/plan-restart-agent.md
 - [/] [#supinstallvis] [recommended] #agent-doc-bug #supinstallfeedback follow-up: the supervisor auto-install status (surface_supervisor_auto_install_status, idle_watch.rs) is surfaced ONLY as a transient tmux display-message on the status line, which is easy to miss while the pane scrollback keeps showing the misleading post-exit "Press Enter to restart" keepalive — so an operator watching the pane body still perceives a ~1-min stall. Residual: make the rebuild state visible in the pane BODY/scrollback (not just the status line) without disturbing the keepalive Enter-to-restart reader, e.g. a pane title set + a single non-input-consuming visible line, or render it through the JB/VSCode plugin notification surface (overlaps #qpauseux notification rendering). Decide the safe pane-write mechanism with the operator before implementing (send-keys risks being consumed by the keepalive). Plan TBD.
 - [/] [#runexitrestart] route/idle-watch should detect a cleanly-exited harness pane (Press Enter to restart) with prompt-bearing work, restart the harness, wait for dispatch-ready, then submit, so a cleanly-exited harness never drops a Run Agent Doc. Two-pane live verify. NOTE the originally-reported silent loss was already fixed in 0.34.18.
 - [/] [#docdriftgrace] OPERATOR-WATCH one live re-baseline cycle: binary should classify mid/between-turn drift by component and silently auto-rebase snapshot/CRDT for unrelated changes, surfacing only structural conflicts on the in-flight prompt/response. Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md

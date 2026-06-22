@@ -341,7 +341,61 @@ Session note: the parent worktree still has unrelated pre-existing dirty files; 
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:e89d5c24 -->
+
+### Re: submit button spinner + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> When the user clicks any submit button, have a spinner on the button and disallow further clicks until the request completes.
+
+> **Queue prompt:**
+>
+> deploy
+
+Implemented and deployed. Native form submit buttons now enter a busy state on submit: the clicked submit button gets `aria-busy="true"`, a CSS spinner, and the form's submit controls are disabled so repeat clicks cannot submit again while the request navigates. The handler preserves a named submitter value with a hidden input before disabling controls. Preact-managed submit forms that prevent the native submit event now expose `aria-busy` from their existing loading/saving/uploading state so those buttons use the same spinner styling.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/index.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/app/index.browser.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/app/index.css.ts`
+- `src/equityfundingsource-dev/lib/ui--server--efs/styles/index.ts`
+- `src/equityfundingsource-dev/lib/ui--server--efs/portal.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/**` submit-button call sites
+- `src/equityfundingsource-dev/tests/submit-button-busy.test.ts`
+- `src/equityfundingsource-dev` parent submodule pointer
+
+Commands:
+- `bun test tests/submit-button-busy.test.ts`
+- `git diff --check`
+- `make check`
+- `gh run list --workflow CI --limit 1` in EFS and parent repos
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before and after deploy
+- `make deploy`
+- Live smoke checks for `/`, `/login?role=admin`, `/contact`, and `/admin/users`
+- Deployed asset checks for `/index.browser-JB3H2OPF.js` and `/index.server-SFEHSVID_HLUX3Z7W.css`
+
+Verification:
+- Focused submit-button suite passed: `3 pass`, `0 fail`.
+- Full `make check` passed: `1131 pass`, `0 fail`, then app and Worker builds completed. The known intentional `d1 down` log appeared inside a passing outbox failure test.
+- `git diff --check` passed.
+- Both the EFS and parent repos report no GitHub workflow named `CI`, so there was no CI run to inspect.
+- Remote D1 reported `No migrations to apply` before and after deploy.
+- Live root, admin login, and contact pages returned `200`; `/admin/users` returned `303` to `/login?role=admin&next=%2Fadmin%2Fusers`.
+- Deployed HTML references the new CSS/JS assets, and the deployed assets contain the `efs-submit-spin` CSS plus the `efsSubmitBusy` submit handler.
+
+Commits:
+- EFS submodule: `fc6801f` (`feat(ui): add submit button busy state`) pushed to `origin/main`.
+- Parent local pointer: `cb4cee24a` (`chore: update efs submodule for submit busy state`) committed in the current divergent parent worktree.
+- Parent remote pointer: `643662c72` (`chore: update efs submodule for submit busy state`) pushed to parent `origin/main` from a clean temporary worktree so unrelated local parent history/dirty files were not pushed.
+
+Deploy: activated Worker version `b61fd658-39d5-488c-8e28-f842831fbadf` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Session note: I reset the agent-doc sidecars from the current compacted file before finalize because preflight detected stale snapshot/CRDT state from the compaction.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:f80df9f2 -->
 <!-- /agent:exchange -->
 ###
 <!--

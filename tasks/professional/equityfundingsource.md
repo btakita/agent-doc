@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -190,7 +190,7 @@ Commits pushed: EFS submodule `b1e614a` (`fix(messages): route admin emails to e
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:140db6d2 -->
+<!-- agent:boundary:93102f33 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -202,7 +202,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- In the admin email, do not CC all admins. Only send to the configured admin endpoint email btak.dev+efs@gmail.com.
+- ~~In the admin email, do not CC all admins. Only send to the configured admin endpoint email btak.dev+efs@gmail.com.~~ — auto-struck: answered this cycle (#ftstrike)
+- "In-app admin notifications still fan out to the owner/all-admin recipients as before". Do not fan out to all admins. Instead, only the configured admin endpoint email btak.dev+efs@gmail.com.
 <!-- /agent:queue -->
 
 ## Backlog

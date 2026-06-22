@@ -520,7 +520,7 @@ These heads are not stale. I just typed them in.
     46  <!-- /agent:queue -->
 ```
 - ~~JB `Run Agent Doc` on monsterrodholders.md stalls (no prompt) and does not submit (prompt sent but no submit).~~
-- ~~do [#cancelturnverify]~~
+- do [#cancelturnverify]
 - I typed into monsterrodholders.md queue but agent-doc reverted to an old snapshot and I lost everything that I typed.
 - Figure out how to make AGENTS.md lean & reliable so agents follow the directives. Should we treat AGENTS.md as a menu that defers to runbooks? Would that be more reliable?
 - :pushpin: do [#qcm1verify]

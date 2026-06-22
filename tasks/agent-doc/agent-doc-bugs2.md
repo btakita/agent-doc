@@ -69,7 +69,7 @@ Done — the review is empty and the plan no longer carries any gates. Committed
 **JB plugin updates you'll need to install** (for the items whose proof needs plugin code): `#qpauseux` (paused-queue notification render), `#8bfz` (single-owner lease), `#restartagentmenu` (Restart Agent menu), `#qnodemerge4wire` P4 (DocumentListener reporters). I'll flag the exact build when each lands; none are shipped yet.
 
 **Also this cycle:** noted your `#1jec` strike (resolved) and preserved the `:pushpin:` position-locks (`#qauthorder`). The answered JB-stall head (`#supinstallfeedback`, shipped `cf7347a9`) stays at the queue head only because last cycle's `content_ours` drift recovery reverted its strike — no re-work needed.
-<!-- agent:boundary:c5e043df -->
+<!-- agent:boundary:e0c134a4 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -128,6 +128,7 @@ Press Enter to restart, or 'q' to exit.
 - do [#docdriftgrace]
 - do [#runexitrestart]
 - do [#gf5n]
+- do [#supinstallvis]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -156,6 +157,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#supinstallvis] [recommended] #agent-doc-bug #supinstallfeedback follow-up: the supervisor auto-install status (surface_supervisor_auto_install_status, idle_watch.rs) is surfaced ONLY as a transient tmux display-message on the status line, which is easy to miss while the pane scrollback keeps showing the misleading post-exit "Press Enter to restart" keepalive — so an operator watching the pane body still perceives a ~1-min stall. Residual: make the rebuild state visible in the pane BODY/scrollback (not just the status line) without disturbing the keepalive Enter-to-restart reader, e.g. a pane title set + a single non-input-consuming visible line, or render it through the JB/VSCode plugin notification surface (overlaps #qpauseux notification rendering). Decide the safe pane-write mechanism with the operator before implementing (send-keys risks being consumed by the keepalive). Plan TBD.
 - [ ] [#agentreloadrestart] restart-agent Phase 1: supervisor restart re-resolves harness from current frontmatter (agent claude->opencode takes effect on restart) + boundary auto-restart when resolved harness differs, behind agent_doc_agent_change_restart (default ON). Log harness_change_detected old/new + agent_restart_boundary_gate + agent_restart_performed. SimWorld + make tmux-ci. Plan: tasks/agent-doc/plan-restart-agent.md
 - [ ] [#restartagentmenu] restart-agent Phase 2 (after agentreloadrestart): RestartAgentAction.kt JB menu cmd mirroring RestartSupervisorProcessAction.kt + plugin.xml registration + TerminalUtil restart wiring; bump pluginVersion; build signed+unsigned. Log action invocation + resolved harness. Decide alongside-vs-replace Restart Supervisor Process with operator. Plan: tasks/agent-doc/plan-restart-agent.md
 - [ ] [#j9ja] Add distinctive SUCCESS ops.log markers at the remaining gated proof sites so operator live tests auto-verify (#optverify): agent_restart_performed (agentreloadrestart), restart-agent menu invoke (restartagentmenu), record_force_disk_fallback (fbwire Phase 2), and the route/plugin bucket. Landed already: auto_start_dispatch_ready_confirmed, queue_paused_continuation_guidance_emitted.

@@ -1734,7 +1734,13 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
         write::apply_append_from_string(file, &response_to_write)?;
     }
 
-    // Remove the pending file after successful write
+    let final_doc_after_write = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read recovered document {}", file.display()))?;
+    ensure_repair_materialized_response(file, &final_doc_after_write, &response_to_write)?;
+
+    // Remove the pending file only after the repaired document proves the
+    // captured response materialized. A malformed/partial replay must leave the
+    // capture available for retry instead of closing a false-success cycle.
     clear_pending(&canonical)?;
 
     // #repair-strike-consumed-head: finalize strikes the consumed queue head, but
@@ -1768,6 +1774,16 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
         eprintln!("[repair] capture-state update failed: {} (non-fatal)", e);
     }
     Ok(RepairOutcome::ReplayedResponse)
+}
+
+fn ensure_repair_materialized_response(file: &Path, final_doc: &str, response: &str) -> Result<()> {
+    if crate::write::response_materialized_in_content(response, final_doc) {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "orphaned response replay did not materialize captured response in {}; refusing to clear capture",
+        file.display()
+    )
 }
 
 /// Strike the active queue head after a repaired response IF it is a free-text
@@ -2124,6 +2140,35 @@ mod tests {
         assert!(
             !response_already_applied(other_doc, captured_response),
             "an unrelated document must not match the captured response"
+        );
+    }
+
+    #[test]
+    fn repair_materialization_requires_captured_response_block() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: build and install status — gpt-5\n\n",
+            "- Reinstalled the CLI from this checkout.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let malformed = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Verification:\n",
+            "- Reinstalled the CLI from this checkout.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let err = ensure_repair_materialized_response(
+            std::path::Path::new("session.md"),
+            malformed,
+            response,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("orphaned response replay did not materialize captured response"),
+            "malformed body-only materialization must fail closed: {err}"
         );
     }
 

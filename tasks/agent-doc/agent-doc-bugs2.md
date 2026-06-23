@@ -147,7 +147,15 @@ This is the same remaining JB route issue, now with auto-restart narrowed out. T
 > **Recovered prompt:** `> JB Run Agent Doc still does not quickly submit.`
 
 The recovered prompt is preserved and answered as the same JB submit-latency report. Current interpretation: auto-restart does restart the agent-doc turn, so the remaining defect is after readiness, where submit either arrives late or lacks proof. No new backlog item is needed because the existing live-submit capture work already covers that narrowed failure.
-<!-- agent:boundary:7fe3f7a0 -->
+
+### Re: queue items struck without work — gpt-5
+
+> **Queue prompt:** Queue items are being struck without being worked on.
+
+Confirmed. This happened in this recovery: `#1jec` was struck in the queue while the response was only repairing and narrowing the JB submit/restart prompt, not actually live-verifying `#1jec`. That is wrong behavior.
+
+I added `#qstrikework` to the backlog to make queue striking proof-scoped: a queue item should only be struck when the current response proves that exact head was handled, or when an explicit pending/review operation targets its backing id. Interrupted finalize recovery must not auto-quote or strike a later queue head just because it became visible after the earlier head was consumed.
+<!-- agent:boundary:c07f61f6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -157,6 +165,7 @@ The recovered prompt is preserved and answered as the same JB submit-latency rep
 - ~~auto-restart session does restart the agent-doc turn.~~
 - ~~:pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀~~
 - ~~Turn response is overwriting parts of the previous response in an uncommitted state...so presumably during the finalize step.~~
+- ~~Queue items are being struck without being worked on.~~
 - Immediately log IPC issues in this document's sessions for dogfooding when I type into the queue.
 - `/clear` is being incorrectly flooded into the tmux pane during a turn.
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
@@ -164,6 +173,7 @@ The recovered prompt is preserved and answered as the same JB submit-latency rep
 - :pushpin: do [#tb4q]: please check logs
 - ~~:round_pushpin: do [#arsm]~~
 - do [#qcm1verify]: Use the logs to verify.
+- do [#qstrikework]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -192,6 +202,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#qstrikework] #agent-doc-bug Prevent queue items from being struck unless the current cycle proves that exact head was worked: the response quotes the exact free-text head, or a --done/--pending-gate/--review-resolve targets the backing id. Add regression coverage for interrupted finalize recovery where a later operator-verify or free-text head is auto-quoted/struck while the response only repairs an earlier prompt.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.
 - [ ] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.

@@ -405,7 +405,7 @@ pub(crate) fn dispatch_only_send_reopen(
             file_path,
             harness,
             SupervisorIpcDispatchOptions {
-                await_start_proof: true,
+                await_start_proof: dispatch_only_dispatch_start_proof_required(harness),
                 print_unproven_progress: should_print_dispatch_only_unproven_progress(),
             },
         )?,
@@ -415,7 +415,10 @@ pub(crate) fn dispatch_only_send_reopen(
             &dispatch_pane,
             file_path,
             harness,
-            should_print_dispatch_only_unproven_progress(),
+            DirectPaneDispatchOptions {
+                await_start_proof: dispatch_only_dispatch_start_proof_required(harness),
+                print_unproven_progress: should_print_dispatch_only_unproven_progress(),
+            },
         )?,
     };
     require_dispatch_only_dispatch_start_proof(

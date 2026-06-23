@@ -68,6 +68,9 @@
 //!   before sending input while the harness is redrawing or busy.
 //!   Hook-visible Codex and pane-state OpenCode proof remain stronger telemetry, but
 //!   dispatch-only success is the shared tmux text+`Enter` acceptance path for all harnesses.
+//!   Once that acceptance is observed, editor dispatch-only returns immediately instead of
+//!   paying the optional Codex/OpenCode dispatch-start proof timeout; unobserved acceptance
+//!   may still wait for stronger proof before failing closed.
 //! - **`await_idle(file, debounce)`**: Polls every 100ms. When an editor typing
 //!   indicator is present it is authoritative — an idle indicator dispatches
 //!   immediately (the editor already debounced; its pre-route save bumps mtime),

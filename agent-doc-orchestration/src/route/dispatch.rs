@@ -1547,7 +1547,17 @@ pub(crate) fn dispatch_routed_reopen(
     file_path: &str,
     harness: &HarnessConfig,
 ) -> Result<RoutedDispatchStartProof> {
-    dispatch_routed_reopen_with_mode(tmux, file, pane, file_path, harness, true)
+    dispatch_routed_reopen_with_mode(
+        tmux,
+        file,
+        pane,
+        file_path,
+        harness,
+        DirectPaneDispatchOptions {
+            await_start_proof: true,
+            print_unproven_progress: true,
+        },
+    )
 }
 
 pub(crate) fn dispatch_routed_reopen_with_mode(
@@ -1556,7 +1566,7 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
     pane: &str,
     file_path: &str,
     harness: &HarnessConfig,
-    print_unproven_progress: bool,
+    options: DirectPaneDispatchOptions,
 ) -> Result<RoutedDispatchStartProof> {
     let tracker =
         build_routed_dispatch_start_tracker(file, file_path, harness, Some(tmux), Some(pane))?;
@@ -1575,6 +1585,18 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
         );
         return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);
     };
+    if !direct_pane_should_await_dispatch_start_proof(options, submit_result.status) {
+        log_route_latency(
+            file,
+            "direct_pane_submit",
+            submit_result.elapsed,
+            direct_pane_submit_acceptance_budget(),
+            pane,
+            harness,
+            direct_pane_submit_outcome(submit_result.status, None),
+        );
+        return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);
+    }
 
     let timeout = routed_dispatch_start_timeout(harness);
     let proof_start = Instant::now();
@@ -1694,7 +1716,7 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
                     );
                 }
             }
-            if print_unproven_progress {
+            if options.print_unproven_progress {
                 eprintln!(
                     "[route] bare {} reopen for {} was accepted in pane {}, but no routed submission proof appeared after {}s",
                     harness.binary,
@@ -1724,6 +1746,19 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
             )
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DirectPaneDispatchOptions {
+    pub(crate) await_start_proof: bool,
+    pub(crate) print_unproven_progress: bool,
+}
+
+fn direct_pane_should_await_dispatch_start_proof(
+    options: DirectPaneDispatchOptions,
+    submit_status: CommandDispatchStatus,
+) -> bool {
+    options.await_start_proof || submit_status != CommandDispatchStatus::Accepted
 }
 
 pub(crate) fn routed_trigger_payload(trigger: &str) -> String {
@@ -2014,6 +2049,37 @@ mod tests {
         assert!(
             default_total_ms >= 30_000,
             "default retry budget should preserve a roughly 30s recovery window"
+        );
+    }
+
+    #[test]
+    fn dispatch_only_direct_pane_accepted_submit_skips_optional_proof_wait() {
+        let dispatch_only = DirectPaneDispatchOptions {
+            await_start_proof: false,
+            print_unproven_progress: true,
+        };
+        assert!(
+            !direct_pane_should_await_dispatch_start_proof(
+                dispatch_only,
+                CommandDispatchStatus::Accepted
+            ),
+            "dispatch-only editor reroutes must not pay the 10s optional proof timeout after accepted input"
+        );
+        assert!(
+            direct_pane_should_await_dispatch_start_proof(
+                dispatch_only,
+                CommandDispatchStatus::TimedOut
+            ),
+            "when submit acceptance is unobserved, the route may still wait for stronger dispatch-start proof"
+        );
+
+        let startup = DirectPaneDispatchOptions {
+            await_start_proof: true,
+            print_unproven_progress: true,
+        };
+        assert!(
+            direct_pane_should_await_dispatch_start_proof(startup, CommandDispatchStatus::Accepted),
+            "fresh/startup dispatch still requires dispatch-start proof after accepted input"
         );
     }
 

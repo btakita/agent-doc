@@ -39,7 +39,33 @@ queue: start
 Compacted content:
 ❯ - Archived 10 response topic(s): state machine architecture + do #438b; `Machine` naming; rename to `StateMachine`; 7 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-<!-- agent:boundary:c6bb9d55 -->
+
+
+### Re: do #lzmsrv + #lzdisposedrain — both fixed, verified, shipped — glm-5.2
+
+> **Queue prompts:** do [#lzmsrv], do [#lzdisposedrain] (preset `#spec-test-build-install-commit-push`)
+
+**Both queue items shipped this cycle.**
+
+**`#lzmsrv` — MSRV declared.** Added `rust-version = "1.88"` to `src/lazily-rs/Cargo.toml` (the crate uses `let_chains` pervasively, stabilized in 1.88) + an MSRV line in `README.md`. A downstream pin at `rust-version = "1.85"` (the edition floor) can no longer resolve-and-fail.
+
+**`#lzdisposedrain` — pending_effects drained on dispose.** `Context::dispose_effect` now deschedules **and** clears `pending_effects` of the id **before** recycling it — mirroring `ThreadSafeContext::dispose_effect` (`thread_safe.rs:2577-2578`). More than cosmetic: `free_ids` is LIFO, so a stale `pending_effects` entry could alias a freshly-recycled id and trigger a spurious run of a new node during a later flush. Added internal regression test `dispose_effect_drains_pending_effects_queue`.
+
+**Verification (lazily-rs submodule):**
+- `cargo fmt --check` clean.
+- `cargo clippy --all-features --all-targets -- -D warnings` clean.
+- `cargo test --all-features` — **all suites green**, incl. the new drain test + 15 Loom model tests + state-machine (11+12+async) + spec-compliance (73) + integration (27).
+- `make check` — green except the **known environmental** `benchmark-check` (`#lzbenchbudget`: missing p50/p95 latency rows; not a regression — rust-version + dispose-path touch zero benchmarked code).
+
+**Commits + pushes (executed):**
+- lazily-rs `e16cf71` (`fix: declare MSRV 1.88 (#lzmsrv)`) → `lazily-hub/lazily-rs` main.
+- lazily-rs `f0884f0` (`fix: drain pending_effects in Context::dispose_effect (#lzdisposedrain)`) → `lazily-hub/lazily-rs` main (`36bb381..f0884f0`).
+- superproject `1d5fccf10` (`chore(lazily-rs): bump gitlink`) → `btakita/agent-loop` main (`596f9a795..1d5fccf10`).
+
+**Closeout note:** the editor-IPC path was wedged for this file (`live_prompt_drift_after_preflight`; two refused commits with partial corrupt writes). Recovered by restoring the doc to HEAD + `agent-doc repair --apply-recovery` (`queue_metadata_drift`), then finalized with `--force-disk` (direct disk write) to bypass the broken IPC.
+
+Queue drained.
+<!-- agent:boundary:8dfa0ad2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,8 +74,6 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- [#lzmsrv]
-- [#lzdisposedrain]
 <!-- /agent:queue -->
 
 ## Backlog

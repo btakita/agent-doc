@@ -570,8 +570,8 @@ fn first_drainable_head<'a>(
 
 /// Whether a single queue head is agent-drainable this session (`#cleardrainsignal`).
 ///
-/// - Inert noise (a bare observation with no `#id`/directive/question, or a fenced
-///   console-output paste) is never drainable.
+/// - Inert noise (structural/log artifacts such as pasted console output or
+///   spliced agent response fragments) is never drainable.
 /// - An `#id` head is drainable only when the id is an **open** `agent:backlog`
 ///   item AND not deferred (`[operator-verify]` only; `#qcontdrain`). A `do [#id]`
 ///   head whose id is absent from the open
@@ -579,10 +579,8 @@ fn first_drainable_head<'a>(
 ///   the strike/reap path owns — NOT a continuation target, so it must not keep the
 ///   go-mode drain alive. This makes continuation agree with the no-response queue
 ///   guard, which intersects the head set with the open backlog the same way.
-/// - A free-text directive/question head (no `#id`) is drainable. In a queue with
-///   a marker-level `preset=...`, every non-empty, non-fenced free-text head is
-///   also drainable because the preset supplies the verb and the line is the
-///   object.
+/// - A free-text prose/directive/question head (no `#id`) is drainable. Plain
+///   operator prose is preserved as work even when it has no imperative verb.
 fn head_is_drainable(
     text: &str,
     open_backlog_ids: Option<&std::collections::HashSet<String>>,
@@ -789,16 +787,16 @@ pub fn drainable_head_count(file: &Path, content: &str) -> usize {
 }
 
 /// Recognized actionable directive verbs for go-mode drainability classification
-/// (`#goqstall2`). Word-matched anywhere in a normalized head — conservative in the
-/// SAFE direction: a head that looks even loosely directive stays drainable; only a
-/// bare observation with no directive and no question is demoted to inert noise.
+/// (`#goqstall2`). Word-matched anywhere in a normalized head. This is now an
+/// affirmative signal only: ordinary prose queue heads stay drainable even when
+/// they do not contain one of these verbs, because a natural-language bug report
+/// is still operator-authored work.
 ///
 /// `#cleardrainsignal`: deliberately EXCLUDES words that are common nouns in
-/// agent-doc's own bug reports and would false-positive a declarative observation
-/// into a drainable directive (e.g. "document" — "this document has…", "the
-/// document model" — appears in nearly every report; the rare imperative "document
-/// the API" arrives as a `do [#id]` head instead). Keep this list to verbs that
-/// read as imperatives, not nouns, in queue prose.
+/// agent-doc's own bug reports (e.g. "document" — "this document has…", "the
+/// document model" — appears in nearly every report). Keep this list to verbs
+/// that read as imperatives, not nouns, in queue prose; non-artifact prose is
+/// preserved separately by the default drainable branch.
 const QUEUE_DIRECTIVE_VERBS: &[&str] = &[
     "do",
     "fix",
@@ -918,41 +916,80 @@ fn leads_with_markdown_bold_report(text: &str) -> bool {
     s.trim_start().starts_with("**")
 }
 
+/// True for one-line console/status artifacts that are safe to classify as
+/// non-work queue noise. Plain prose reports deliberately do not match here.
+fn is_single_line_artifact_noise(normalized: &str) -> bool {
+    let lower = normalized.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return true;
+    }
+    if lower.starts_with("thread '") && lower.contains("panicked")
+        || lower == "stack backtrace:"
+        || lower == "backtrace:"
+    {
+        return true;
+    }
+    if lower.starts_with('[') {
+        let Some(close) = lower.find(']') else {
+            return false;
+        };
+        let tag = &lower[1..close];
+        if matches!(
+            tag,
+            "route"
+                | "preflight"
+                | "session-check"
+                | "queue"
+                | "write"
+                | "start"
+                | "sync"
+                | "debug"
+                | "info"
+                | "warn"
+                | "warning"
+                | "error"
+                | "trace"
+        ) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Whether a queue `Prompt` head is auto-drainable in go-mode (`#goqstall2`).
 ///
-/// A pre-materialized `## Queue` block can carry bulleted free-text lines that are
-/// not actionable drain targets — pasted bug-report observations or console
-/// evidence the agent already triaged into backlog items. Those churn no-op
-/// closeouts because the continuation walk treats every `Prompt` as a ready head.
+/// A pre-materialized `## Queue` block can carry free-text lines that are not
+/// actionable drain targets — pasted console evidence or agent response fragments.
+/// Those churn no-op closeouts because the continuation walk treats every
+/// `Prompt` as a ready head.
 ///
 /// A head is drainable iff it carries a `#id` / `[#id]` (the
 /// `[clean-session]`/`[operator-verify]` defer is applied separately by id), ends
 /// with a question mark, contains a recognized imperative directive verb, or lives
-/// in a preset-bearing queue where the preset supplies the directive verb.
-/// Everything else (a bare observation) is inert **noise**: excluded from the
-/// continuation head set and surfaced as `queue_stale_noise_lines`, never
-/// auto-deleted (the live IPC supervisor races on direct queue edits). Fresh
-/// operator prompts that remain drainable are authoritative queue heads.
+/// in a preset-bearing queue where the preset supplies the directive verb. Plain
+/// operator prose is also drainable by default; only structural/log artifacts are
+/// inert **noise** surfaced as `queue_stale_noise_lines`.
 pub(crate) fn is_drainable_queue_head(text: &str) -> bool {
     is_drainable_queue_head_with_context(text, false)
 }
 
 /// True when `text` is a non-drainable **noise** queue head: the inverse of
-/// [`is_drainable_queue_head_with_context`]. Pasted console output, an
-/// agent-response fragment, or a bare observation that can never drain and only
-/// churns the go-mode loop. Centralized so `queue prune-noise` strikes exactly the
-/// entries [`queue_stale_noise_lines`] counts (`#goqstall2`). `preset_supplies_directive`
-/// must match the active queue's `preset` attribute so a preset-bearing queue
-/// classifies predicate-proven noise identically to the counter.
+/// [`is_drainable_queue_head_with_context`]. Pasted console output and
+/// agent-response fragments can never drain and only churn the go-mode loop.
+/// Plain operator prose is not noise. Centralized so `queue prune-noise` strikes
+/// exactly the entries [`queue_stale_noise_lines`] counts (`#goqstall2`).
+/// `preset_supplies_directive` must match the active queue's `preset` attribute
+/// so a preset-bearing queue classifies predicate-proven noise identically to the
+/// counter.
 pub(crate) fn is_noise_queue_head(text: &str, preset_supplies_directive: bool) -> bool {
     !is_drainable_queue_head_with_context(text, preset_supplies_directive)
 }
 
 fn is_drainable_queue_head_with_context(text: &str, preset_supplies_directive: bool) -> bool {
-    // Pasted console-output / agent-response-fragment evidence is NOISE, not a drain
-    // target when it has no operator prose lead. Under a queue-level preset, a
-    // prose bug report followed by fenced diagnostics is still drainable: the
-    // preset supplies the verb and the prose lead is the object to act on.
+    // Pasted console-output / agent-response-fragment evidence is NOISE, not a
+    // drain target when it has no operator prose lead. A prose bug report followed
+    // by fenced diagnostics is still drainable: the prose lead is the object to
+    // act on, even without a queue-level preset.
     //
     // The non-prose markers below still demote the head even under a preset:
     //   1. an agent component or boundary comment (`<!-- agent:` / `agent:boundary`)
@@ -969,17 +1006,20 @@ fn is_drainable_queue_head_with_context(text: &str, preset_supplies_directive: b
         return false;
     }
     if text.contains('\n') || text.contains("```") || text.contains("~~~") {
-        if !preset_supplies_directive || !multiline_head_has_prose_lead(text) {
+        if !multiline_head_has_prose_lead(text) {
             return false;
         }
-        return true;
-    }
-    if extract_head_id(text).is_some() {
         return true;
     }
     let normalized = normalize_queue_head_text(text);
     if normalized.is_empty() {
         return false;
+    }
+    if is_single_line_artifact_noise(&normalized) {
+        return false;
+    }
+    if extract_head_id(text).is_some() {
+        return true;
     }
     // A harness slash command (`/clear`, `/model sonnet`, `/code-review`) is a
     // drainable command head, submitted to the owner pane — not prose noise.
@@ -993,9 +1033,16 @@ fn is_drainable_queue_head_with_context(text: &str, preset_supplies_directive: b
         return true;
     }
     let lowered = normalized.to_ascii_lowercase();
-    lowered
+    if lowered
         .split(|c: char| !c.is_alphanumeric())
         .any(|word| QUEUE_DIRECTIVE_VERBS.contains(&word))
+    {
+        return true;
+    }
+    // Default toward preserving operator-authored work. A prose bug report like
+    // "Queue items are being struck without being worked on" is actionable even
+    // though it is not phrased as an imperative.
+    true
 }
 
 fn multiline_head_has_prose_lead(text: &str) -> bool {
@@ -1021,12 +1068,12 @@ fn multiline_head_has_prose_lead(text: &str) -> bool {
 }
 
 /// Count of active queue `Prompt` heads that are non-drainable **noise**
-/// (`#goqstall2`): not a `#id` head, not a directive, not a question. Used by
+/// (`#goqstall2`): structural/log artifacts that are not `#id` heads, slash
+/// commands, questions, directives, or ordinary prose prompts. Used by
 /// `session-check` to surface a `queue_stale_noise_lines=N` diagnostic so the
-/// operator can clear pasted bug-report / console-evidence lines that would
-/// otherwise churn the go-mode drain. The field name is retained for
-/// compatibility; the predicate is exact noise, not a license to delete fresh
-/// operator queue edits.
+/// operator can clear pasted console evidence that would otherwise churn the
+/// go-mode drain. The field name is retained for compatibility; the predicate is
+/// exact noise, not a license to delete fresh operator queue edits.
 pub fn queue_stale_noise_lines(file: &Path) -> usize {
     let Ok(content) = std::fs::read_to_string(file) else {
         return 0;
@@ -1894,8 +1941,8 @@ mod tests {
 
     #[test]
     fn drainable_head_count_counts_only_real_drainable_heads() {
-        // #cleardrainsignal: a deferred head + an inert noise observation are
-        // excluded; only the genuine directive head counts.
+        // #cleardrainsignal: a deferred head is excluded; prose reports and
+        // directive heads both count as drainable work.
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("task.md");
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
@@ -1911,9 +1958,8 @@ mod tests {
             ],
         );
         std::fs::write(&doc, &content).unwrap();
-        // #b deferred (operator-verify), the bare observation is inert noise,
-        // only #c is a real drainable head.
-        assert_eq!(drainable_head_count(&doc, &content), 1);
+        // #b deferred (operator-verify), the prose report and #c remain real work.
+        assert_eq!(drainable_head_count(&doc, &content), 2);
     }
 
     #[test]
@@ -1945,10 +1991,14 @@ mod tests {
 
     #[test]
     fn is_drainable_queue_head_treats_fenced_paste_as_noise() {
-        // #cleardrainsignal: a pasted bug-report/console block (fenced ```) is noise
-        // even though it incidentally contains the directive word "run".
-        let fenced = ":pushpin: JB `Run Agent Doc` should self-heal.\n```\n[route] target tmux session: 0\nError: dispatch blocked\n```";
+        // #cleardrainsignal: a pure pasted console block (fenced ```) is noise
+        // even when it incidentally contains directive words.
+        let fenced = "```\n[route] target tmux session: 0\nError: run blocked\n```";
         assert!(!is_drainable_queue_head(fenced));
+        // A prose bug report with diagnostic evidence is still operator-authored
+        // queue work and must not be demoted to noise.
+        let report = ":pushpin: JB `Run Agent Doc` should self-heal.\n```\n[route] target tmux session: 0\nError: dispatch blocked\n```";
+        assert!(is_drainable_queue_head(report));
         // A genuine inline directive (no fence) stays drainable.
         assert!(is_drainable_queue_head("run the full test suite"));
     }
@@ -2210,7 +2260,8 @@ mod tests {
 
     #[test]
     fn is_drainable_queue_head_classifies_directive_vs_noise() {
-        // #goqstall2: `#id` heads, directives, and questions are drainable.
+        // #goqstall2: `#id` heads, directives, questions, and prose reports are
+        // drainable.
         assert!(is_drainable_queue_head(":round_pushpin: do [#fcc0]"));
         assert!(is_drainable_queue_head("- :pushpin: Fix the submit bug"));
         assert!(is_drainable_queue_head(
@@ -2224,31 +2275,39 @@ mod tests {
         assert!(is_drainable_queue_head("- /model sonnet"));
         assert!(is_drainable_queue_head(":pushpin: /clear"));
         assert!(is_drainable_queue_head("deploy"));
-
-        // Bare bug-report observations with no directive and no question → noise.
-        assert!(!is_drainable_queue_head(
+        assert!(is_drainable_queue_head(
             "- I'm still seeing JB `File Cache Conflict` dialogs. There should be 0."
         ));
-        assert!(!is_drainable_queue_head(
+        assert!(is_drainable_queue_head(
             ":pushpin: JB `Compact Exchange` has a partially uncommitted response."
         ));
-        assert!(!is_drainable_queue_head("- "));
-        assert!(!is_drainable_queue_head(":pushpin:"));
-
-        // #cleardrainsignal: declarative observations whose only "verb" match is the
-        // noun "document" are noise, not directives (these churned bugs2.md).
-        assert!(!is_drainable_queue_head(
+        assert!(is_drainable_queue_head(
+            "Queue items are being struck without being worked on."
+        ));
+        assert!(is_drainable_queue_head(
             "- This document has `agent:backlog priority queue`...but the backlog items are not being added to the `agent:queue`."
         ));
-        assert!(!is_drainable_queue_head(
+        assert!(is_drainable_queue_head(
             ":pushpin: Ensure the markdown AST handles strings and code blocks. Tags within the blocks should be treated as content, not as part of the document tags."
+        ));
+
+        // Empty or artifact-only heads remain noise.
+        assert!(!is_drainable_queue_head("- "));
+        assert!(!is_drainable_queue_head(":pushpin:"));
+        assert!(!is_drainable_queue_head("[route] target tmux session: 0"));
+        assert!(!is_drainable_queue_head(
+            "[error] dispatch blocked: only the gated #5eq8 remains."
+        ));
+        assert!(is_drainable_queue_head(
+            "Error: queue items are being struck without being worked on."
         ));
     }
 
     #[test]
-    fn detect_skips_noise_head_and_lands_on_drainable_directive() {
-        // #goqstall2: a bare bug-report observation ahead of a real directive must
-        // not be served as the continuation head — the drain lands on the directive.
+    fn detect_serves_prose_report_before_later_directive() {
+        // #freshprosequeue: a natural-language bug report is work even without an
+        // imperative verb, so it stays the continuation head instead of being
+        // skipped/struck as noise.
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(
             dir.path(),
@@ -2262,23 +2321,20 @@ mod tests {
         let continuation = detect(&doc).unwrap().expect("a drainable head remains");
         assert_eq!(
             continuation.head_prompt,
-            "Fix the submit bug and add coverage"
+            "I'm still seeing JB File Cache Conflict dialogs. There should be 0."
         );
-        assert_eq!(queue_stale_noise_lines(&doc), 1);
+        assert_eq!(queue_stale_noise_lines(&doc), 0);
     }
 
     #[test]
-    fn detect_quiesces_when_only_noise_heads_remain() {
-        // #goqstall2: a queue of only bare bug-report observations is NOT a stall —
-        // continuation is not required and the lines are counted as predicate-proven
-        // noise.
+    fn detect_quiesces_when_only_artifact_noise_heads_remain() {
+        // #goqstall2: a queue of only console/status artifacts is NOT a stall —
+        // continuation is not required and the lines are counted as predicate-
+        // proven noise.
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(
             dir.path(),
-            &[
-                "I'm still seeing JB File Cache Conflict dialogs. There should be 0.",
-                "JB Compact Exchange has a partially uncommitted response.",
-            ],
+            &["[route] target tmux session: 0", "[error] dispatch blocked"],
             true,
             true,
         );
@@ -2290,15 +2346,15 @@ mod tests {
     }
 
     #[test]
-    fn live_drainable_head_skips_noise_and_lands_on_directive() {
-        // #qchurn: the supervisor idle-watch dispatch head must skip inert noise
-        // lines and land on a real directive — matching detect(), so the watch does
-        // not churn no-op /agent-doc cycles when the only ready head is noise.
+    fn live_drainable_head_skips_artifact_noise_and_lands_on_directive() {
+        // #qchurn: the supervisor idle-watch dispatch head must skip inert
+        // artifact lines and land on real work — matching detect(), so the watch
+        // does not churn no-op /agent-doc cycles when the only ready head is noise.
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(
             dir.path(),
             &[
-                "I'm still seeing JB File Cache Conflict dialogs. There should be 0.",
+                "[route] target tmux session: 0",
                 "Fix the submit bug and add coverage",
             ],
             true,
@@ -2312,18 +2368,15 @@ mod tests {
     }
 
     #[test]
-    fn live_drainable_head_none_when_only_noise() {
-        // #qchurn: a queue of only bare bug-report observations yields NO drainable
-        // idle-watch head, so the supervisor stops re-dispatching. The unfiltered
-        // live_continuation_head still returns the first head — proving the new
-        // filter is what quiesces the churn.
+    fn live_drainable_head_none_when_only_artifact_noise() {
+        // #qchurn: a queue of only artifact lines yields NO drainable idle-watch
+        // head, so the supervisor stops re-dispatching. The unfiltered
+        // live_continuation_head still returns the first head, proving the filter
+        // is what quiesces the churn.
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(
             dir.path(),
-            &[
-                "I'm still seeing JB File Cache Conflict dialogs. There should be 0.",
-                "JB Compact Exchange has a partially uncommitted response.",
-            ],
+            &["[route] target tmux session: 0", "[error] dispatch blocked"],
             true,
             true,
         );

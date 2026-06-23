@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.43
+
+- **Prose queue heads no longer disappear as pruneable noise (`#freshprosequeue`).** The queue drainability classifier now treats ordinary operator prose as real queue work even when it is phrased as a declarative bug report rather than an imperative. `queue prune-noise`, `session-check` stale-noise counts, and supervisor idle-watch dispatch still skip/clear structural artifacts such as console status lines, log-only fenced blocks, bold response fragments, and agent comments, but they no longer strike natural-language queue items like "Queue items are being struck without being worked on" before an agent answers them. Coverage updates the continuation, prune-noise, and preflight drainability contracts.
+
 ## 0.34.42
 
 - **Windows release builds compile the library GC liveness probe.** `agent-doc gc-libs` now keeps Unix `kill(pid, 0)` probing behind Unix guards and uses the native Windows process handle API for PID liveness on Windows, so release packaging no longer trips over the missing `libc::kill` symbol while still cleaning stale versioned library locks.

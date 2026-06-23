@@ -1678,6 +1678,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
     let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
     let manifest = fs::read_to_string(manifest_path).unwrap();
     let parsed: toml::Value = toml::from_str(&manifest).unwrap();
+    let package_version = parsed["package"]["version"].as_str();
     let dependencies = parsed["dependencies"].as_table().unwrap();
     let agent_kit = dependencies["agent-kit"].as_table().unwrap();
 
@@ -1706,7 +1707,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         );
         assert_eq!(
             dependency.get("version").and_then(toml::Value::as_str),
-            Some("0.34.42"),
+            package_version,
             "{crate_name} must also carry a registry version for cargo publish"
         );
     }
@@ -1917,7 +1918,7 @@ fn preflight_json(root: &Path, doc: &Path) -> serde_json::Value {
 #[test]
 fn test_preflight_drainability_contract_zero_when_only_deferred_and_noise() {
     // Active go-mode queue whose ONLY heads are an `[operator-verify]` id-head and
-    // an inert bare-observation noise line. Neither is agent-drainable, so the
+    // an inert artifact noise line. Neither is agent-drainable, so the
     // authoritative no-loop signal must be `queue_continuation_required:false` +
     // `queue_drainable_head_count:0`, and the don't-stall guidance must be ABSENT.
     let tmp = tempfile::TempDir::new().unwrap();
@@ -1936,7 +1937,7 @@ fn test_preflight_drainability_contract_zero_when_only_deferred_and_noise() {
         ## Queue\n\n\
         <!-- agent:queue go -->\n\
         - do [#ov1]\n\
-        - lender application screenshot attached for the intake section\n\
+        - [route] target tmux session: 0\n\
         <!-- /agent:queue -->\n";
     fs::write(&doc, content).unwrap();
     init_git_repo(root, &doc);
@@ -1989,7 +1990,7 @@ fn test_preflight_drainability_contract_true_with_real_drainable_head() {
         - do [#cs1]\n\
         - do [#ov1]\n\
         - fix the parser bug in the tokenizer\n\
-        - lender application screenshot attached for the intake section\n\
+        - [route] target tmux session: 0\n\
         <!-- /agent:queue -->\n";
     fs::write(&doc, content).unwrap();
     init_git_repo(root, &doc);

@@ -1155,11 +1155,11 @@ pub fn strike_answered_free_text_queue_heads(
 
 /// Node keys of every active (non-struck) queue head that is non-drainable
 /// **noise** (`#goqstall2` / `#qcontam`): pasted console output, an agent-response
-/// fragment, or a bare observation that carries no `#id`, question mark, or
-/// directive verb. `preset_supplies_directive` is taken from the queue's `preset`
-/// attribute so classification matches `queue_continuation::queue_stale_noise_lines`
-/// exactly. Id-backed directive heads (`do [#id]`) and genuinely drainable free-text
-/// heads are excluded, so pruning never desyncs tracked or runnable work.
+/// fragment, or another structural/log artifact. `preset_supplies_directive` is
+/// taken from the queue's `preset` attribute so classification matches
+/// `queue_continuation::queue_stale_noise_lines` exactly. Id-backed directive heads
+/// (`do [#id]`) and genuinely drainable free-text/prose heads are excluded, so
+/// pruning never desyncs tracked or runnable work.
 fn noise_queue_head_node_keys(content: &str) -> Result<Vec<String>> {
     let preset_supplies_directive = component::parse(content)
         .ok()
@@ -1251,7 +1251,7 @@ fn orphan_id_queue_head_node_keys(content: &str) -> Result<Vec<String>> {
 /// This is the binary-mediated answer to the `queue_stale_noise_lines=N`
 /// session-check diagnostic: noise was previously "never auto-deleted (the live IPC
 /// supervisor races on direct queue edits)", leaving the operator no safe way to
-/// clear pasted bug-report / console-evidence lines. Routing the strike through the
+/// clear pasted console-evidence lines. Routing the strike through the
 /// same converge path the closeout strikes use keeps it supervisor-safe.
 ///
 /// Two head shapes are cleared (#qnoise-multiline-strike):
@@ -1313,7 +1313,7 @@ pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
 
 /// Clear every non-drainable queue head from `content`, returning the rewritten
 /// document and the number struck. Two non-drainable classes are cleared: **noise**
-/// (pasted console output / agent fragments / bare observations) and **orphan
+/// (pasted console output / agent fragments / structural artifacts) and **orphan
 /// id-backed heads** (`#orphanqhead`: a `do [#id]` / `[#id]` head whose id names no
 /// open `agent:backlog` item). Multiline fenced noise blocks are excised by byte
 /// range (`queue::parse_spans`); bulleted single-line noise AND orphan id heads are
@@ -4006,19 +4006,20 @@ Old.
         // #goqstall2: `queue prune-noise` strikes non-drainable NOISE at ANY
         // position — including noise interleaved BEHIND id-backed `do [#id]` heads,
         // which the leading-run `queue consume` stops at and can never reach — while
-        // preserving id-backed directives and genuinely drainable free-text heads.
+        // preserving id-backed directives and genuinely drainable free-text/prose heads.
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("s.md");
         let content = concat!(
             "---\nqueue_active: true\n---\n\n",
             "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
             "<!-- agent:queue go -->\n",
-            "- stale observation about the parser internals\n", // noise (no verb/id/?)
-            "- do [#keepme]\n",                                 // id-backed → preserved
-            "- another bare note that just describes state\n",  // noise BEHIND an id head
-            "- fix the tokenizer now\n",                        // `fix` verb → drainable
-            "- do [#keepme2]\n",                                // id-backed → preserved
-            "- lingering pasted detail line\n",                 // noise (tail)
+            "- [route] target tmux session: 0\n", // artifact noise
+            "- do [#keepme]\n",                   // id-backed -> preserved
+            "- [error] dispatch blocked by stale pane\n", // noise BEHIND an id head
+            "- fix the tokenizer now\n",          // `fix` verb -> drainable
+            "- Queue items are being struck without being worked on.\n", // prose -> preserved
+            "- do [#keepme2]\n",                  // id-backed -> preserved
+            "- [warning] stale queue marker\n",   // noise (tail)
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
@@ -4027,7 +4028,7 @@ Old.
         let struck = prune_noise_queue_heads(&doc).unwrap();
         assert_eq!(
             struck, 3,
-            "exactly the 3 bare-observation noise heads must be struck"
+            "exactly the 3 artifact noise heads must be struck"
         );
         let result = std::fs::read_to_string(&doc).unwrap();
 
@@ -4045,18 +4046,23 @@ Old.
             result.contains("fix the tokenizer now") && !result.contains("~~fix the tokenizer"),
             "drainable directive head must be preserved:\n{result}"
         );
-        // All three noise heads struck — including the one BEHIND `do [#keepme]`,
+        assert!(
+            result.contains("Queue items are being struck without being worked on.")
+                && !result.contains("~~Queue items are being struck"),
+            "operator prose report must be preserved:\n{result}"
+        );
+        // All three artifact noise heads struck — including the one BEHIND `do [#keepme]`,
         // which a leading-run consume could never reach.
         assert!(
-            result.contains("~~stale observation about the parser internals~~"),
+            result.contains("~~[route] target tmux session: 0~~"),
             "leading noise struck:\n{result}"
         );
         assert!(
-            result.contains("~~another bare note that just describes state~~"),
+            result.contains("~~[error] dispatch blocked by stale pane~~"),
             "noise interleaved behind an id head struck:\n{result}"
         );
         assert!(
-            result.contains("~~lingering pasted detail line~~"),
+            result.contains("~~[warning] stale queue marker~~"),
             "tail noise struck:\n{result}"
         );
 

@@ -236,7 +236,7 @@ fn record_context_clear_prompt_for_hooks(
 /// Thin wrapper over [`crate::queue_continuation::live_drainable_continuation_head`]
 /// so the supervisor idle-watch dispatch agrees with `session-check`'s continuation
 /// decision: it returns a head only when there is **agent-drainable** work at the
-/// queue head, skipping inert noise lines (operator bug-report observations) and
+/// queue head, skipping inert artifact/log noise lines and
 /// deferred `[clean-session]`/`[operator-verify]` heads. Otherwise the watch would
 /// re-inject a no-op `/agent-doc` drain trigger every idle boundary for a queue
 /// that has no continuation required (#qchurn / #goqueuestall / #goqstall2).

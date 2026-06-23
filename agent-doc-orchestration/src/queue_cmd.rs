@@ -212,14 +212,14 @@ pub fn consume(file: &Path, count: usize) -> Result<()> {
 
 /// `agent-doc queue prune-noise <FILE>` — strike every non-drainable noise queue
 /// head at any position (`#goqstall2`), clearing pasted console output / agent
-/// response fragments / bare observations that session-check surfaces as
+/// response fragments that session-check surfaces as
 /// `queue_stale_noise_lines=N`. Also strikes **orphan id-backed heads**
 /// (`#orphanqhead`): a `do [#id]` / `[#id]` head whose id names no open
 /// `agent:backlog` item, which is non-drainable yet blocks the leading-run
 /// `queue consume` from reaching answered free-text heads behind it. Preserves
 /// id-backed directives whose id is still open backlog work (including deferred
-/// `[operator-verify]` / `[focused-cycle]` items) and drainable free-text heads.
-/// The prune set is predicate-proven; fresh operator prompts that remain
+/// `[operator-verify]` / `[focused-cycle]` items) and drainable free-text/prose
+/// heads. The prune set is predicate-proven; fresh operator prompts that remain
 /// drainable are never removed by this command.
 /// Supervisor-safe: routes through the same editor-IPC-converged write path the
 /// closeout strikes use.

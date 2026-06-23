@@ -278,12 +278,13 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 // surface a one-line deferred-heads note so the idle queue reads
                 // as deferred work, not a silent stall.
                 let deferred = crate::queue_continuation::deferred_head_count(file);
-                // #goqstall2/#freshqueueauth: pre-materialized bulleted free-text
-                // lines that match the exact non-drainable noise predicate (pasted
-                // bug-report observations / console evidence) are counted so the idle
-                // queue reads as "deferred + N predicate-proven lines to clear", not a
-                // silent stall. Fresh drainable operator prompts remain authoritative
-                // and are never classified through this path.
+                // #goqstall2/#freshqueueauth: pre-materialized queue lines that
+                // match the exact non-drainable noise predicate (pasted console
+                // evidence / agent fragments, never ordinary prose reports) are
+                // counted so the idle queue reads as "deferred + N predicate-proven
+                // lines to clear", not a silent stall. Fresh drainable operator
+                // prompts remain authoritative and are never classified through
+                // this path.
                 let noise = crate::queue_continuation::queue_stale_noise_lines(file);
                 // #qfocsup: the in-session loop has no drainable head, but a
                 // `[focused-cycle]` head may still remain that the SUPERVISOR

@@ -39,13 +39,36 @@ complete
 Compacted content:
 - Archived 4 response topic(s): stale-supervisor materialization queue head; ACK-mismatch queue consume recovery and 0.34.38 install; release packaging publish blockers; 1 more
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): queued blockers after repair; live-verification queue gating; ...
-<!-- agent:boundary:f1102ae7 -->
+
+### Re: #qpinfl - gpt-5
+
+> **Queue prompt:**
+>
+> do [#qpinfl]
+
+
+Implemented and shipped `#qpinfl`.
+
+Changed `agent-doc-orchestration/src/write/queue_consume.rs` so consumed-prompt echo idempotency normalizes stale blockquoted or one-line queue-prompt echoes, prompt prefixes, priority pins, and list/checkbox markers before deciding to insert another echo. Added regressions proving the stale free-text prompt is not duplicated into `agent:exchange` and that the following open id-backed `#fccd` head remains queued and unstruck. Updated `specs/07-orchestration-commands.md` with the recovery invariant.
+
+Verification:
+- `cargo test -p agent-doc-orchestration consumed_prompt_echo_skips_stale_blockquoted_echo_variant`
+- `cargo test -p agent-doc-orchestration free_text_consume_preserves_following_id_backed_head`
+- `make check`
+- `make install` (`agent-doc 0.34.38`, with controller recycle marker set)
+- `gh run list --workflow CI --limit 1` latest CI success: `27993373472`
+
+Commits:
+- `src/agent-doc`: `9b48d43724782fdc8526a6d8563c65d90c65e77d` (`fix queue prompt echo replay`)
+- Superproject pushed to `origin/main`: `50cd5f5bb` (`agent-doc: update queue prompt echo replay fix`)
+<!-- agent:boundary:4f77294d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- do [#qpinfl]
+- ~~do [#qpinfl]~~
+- [#fccd]
 ---
 :pushpin: JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
 ```
@@ -84,7 +107,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#qpinfl] #agent-doc-bug Fix the queue/exchange flood where the stale `:pushpin: Fix the root cause of this issue that occurred in this document.` prompt is replayed into both `agent:queue` and `agent:exchange` during captured-response / `live_prompt_drift_after_preflight` recovery. Add a regression for repeated `queue consume: failed to write document` recovery with a modified queue head, prove captured responses are committed at most once, prove stale free-text queue prompts are not duplicated, and preserve open id-backed heads like `#fccd` instead of striking them.
 - [ ] [#fccd] #agent-doc-bug Restore the accidentally consumed Clear Session Cache queue head: investigate ongoing JB `Clear Session Cache` dialogs, confirm the CPC instance and all supervisors are on the installed agent-doc 0.34.37+ binary, and if dialogs are still possible in current code, fix the root cause with the structural/node merge workflow instead of requiring operator input.
 <!-- /agent:backlog -->
 

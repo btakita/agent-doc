@@ -39,14 +39,38 @@ complete
 Compacted content:
 - Archived 1 response topic(s): #qpinfl - gpt-5
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): stale-supervisor materialization queue head; ACK-mismatch queu...
-<!-- agent:boundary:5ca5a62c -->
+
+### Re: #fccd - gpt-5
+
+> **Queue prompt:**
+>
+> [#fccd]
+
+
+Restored and completed the accidentally consumed `#fccd` investigation.
+
+Findings: the installed CLI is `agent-doc 0.34.38`, and the current code already uses the structural clear preflight path in `src/session_actor_cmd.rs`: it classifies idle/clean-exit/no-live-pane/protected/busy states, refuses protected prompt input, and defers non-interrupting clears under an active auto-queue loop instead of delivering `/clear` into an in-flight turn. I did not find a current code path that would require a new structural/node merge fix for stale Clear Session Cache dialogs.
+
+Runtime remediation: `agent-doc-bugs2.md`, `agent-loop.md`, `equityfundingsource.md`, and the project controller were fresh. One foreign route-owned supervisor, `src/boost-client/tasks/monsterrodholders.md`, was still mapped to the deleted old binary (`/proc/3965752/exe`). I verified the dry-run target and retired it with the supported admin path; after that, the remaining live route-owned supervisors and controller all resolve to `/home/brian/.cargo/bin/agent-doc`.
+
+Verification:
+- `agent-doc --version` -> `agent-doc 0.34.38`
+- `agent-doc admin inspect ...agent-doc-bugs2.md` -> `freshness=controller:fresh,supervisor:fresh`
+- `agent-doc admin inspect ...agent-loop.md` -> `freshness=controller:fresh,supervisor:fresh`
+- `agent-doc admin inspect ...equityfundingsource.md` -> `freshness=controller:fresh,supervisor:fresh`
+- `agent-doc admin kill-supervisor ...monsterrodholders.md --dry-run --json` -> target PID `3965752`
+- `agent-doc admin kill-supervisor ...monsterrodholders.md --grace-secs 5 --json` -> `status=forced`
+- `readlink /proc/1517469/exe /proc/1669401/exe /proc/4005077/exe /proc/2635572/exe` -> all `/home/brian/.cargo/bin/agent-doc`
+- `git status --short` in `src/agent-doc` -> clean
+
+Remaining unrelated admin diagnostics: `agent-doc admin detect` still reports two stale dead-pane actor bindings for `tasks/sift.md` and `tasks/software/tsift.md`; those are orphaned bindings, not live stale supervisors and not part of the Clear Session Cache dialog path.
+<!-- agent:boundary:f7dcad79 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#qpinfl]~~
-- [#fccd]
+- ~~[#fccd]~~
 ---
 equityfundingsource.md turn is getting IPC ack status errors
 ```
@@ -106,7 +130,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#fccd] #agent-doc-bug Restore the accidentally consumed Clear Session Cache queue head: investigate ongoing JB `Clear Session Cache` dialogs, confirm the CPC instance and all supervisors are on the installed agent-doc 0.34.37+ binary, and if dialogs are still possible in current code, fix the root cause with the structural/node merge workflow instead of requiring operator input.
 <!-- /agent:backlog -->
 
 ## Review

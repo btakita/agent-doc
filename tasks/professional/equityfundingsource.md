@@ -166,7 +166,39 @@ Not deployed; the active preset was `#spec-test-commit-push`, not deploy.
 Preflight warnings were stale supervisor / legacy review hygiene / semantic-completion candidates; none blocked the fix. Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:8038d2dc -->
+
+### Re: Deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+
+> **Queue prompt:**
+>
+> ~~deploy~~ — answered this cycle (#ftstrike)
+
+Deployed the current EFS `main` Worker from clean submodule commit `319ff6c` (`fix(admin): keep advance lender dialog open on sync errors`). No source files changed in this cycle, and there were no new commits to make before deploy.
+
+Deployment:
+- Ran pre-deploy D1 checks: DB `280e1539-b940-4c59-8988-fbed63c12ac0` was reachable; remote migrations had no pending work.
+- Ran `make deploy`, which rebuilt the Worker, confirmed no remote D1 migrations to apply, uploaded one updated browser asset, and deployed Worker version `6d990010-04f4-4b5a-ae37-dcac64e39b91`.
+- Live URL: `https://equityfundingsource.brian-takita.workers.dev/`.
+
+Verification:
+- EFS `make check` — 1,164 pass / 0 fail plus app and Worker builds.
+- Post-deploy remote migration list — no migrations to apply.
+- Live smoke test `curl https://equityfundingsource.brian-takita.workers.dev/` — `200`.
+- EFS submodule worktree stayed clean.
+- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists in the parent repo.
+- Only available workflow is `Agent Doc`; latest run `28051857174` was already red from the prior session-doc push, with empty `check` and `tmux-ci` job step lists, so there were no failure logs to act on.
+
+Existing unrelated parent worktree changes remain untouched.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:e2b37bfc -->
 <!-- /agent:exchange -->
 ###
 <!--

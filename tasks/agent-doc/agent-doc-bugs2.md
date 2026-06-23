@@ -63,14 +63,14 @@ Compacted content:
 No. Bare `agent-doc <FILE>` is not supposed to launch a harness from a normal shell. It is a harness-native alias: inside Codex, Claude Code, or OpenCode it can run the document in that already-active harness; outside those harnesses it must fail immediately and direct the operator to explicit commands such as `agent-doc run <FILE>`, `agent-doc route <FILE>`, or `agent-doc start <FILE>`.
 
 Verification: after reinstalling `agent-doc 0.34.38`, a stripped-environment shell invocation exited 1 with the supported-harness error and did not hang. `#ws55` is resolved; `#3x90` remains the next queue item.
-<!-- agent:boundary:e629e878 -->
+<!-- agent:boundary:60ebc0f8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- do [#ws55]
-- do [#3x90]
+- ~~do [#ws55]~~
+- :pushpin: do [#3x90]
 <!-- /agent:queue -->
 <!--
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.

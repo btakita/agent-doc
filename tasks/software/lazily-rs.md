@@ -266,7 +266,23 @@ That's a small ergonomic improvement on one in-process slice, not a backbone. Ca
 **Bookkeeping:** resolved the verbatim-duplicate review item `#w4pq`; edited `#c7j5` to drop the stale "blocked on ThreadSafeStateMachine" framing and reflect the corrected, narrow scope.
 
 Queue drained.
-<!-- agent:boundary:77ab399c -->
+
+### Re: CyclePhase authority — JSON sidecar vs Project Control Pane — glm-5.2
+
+> **Queue prompt:**
+> re [#c7j5]: Why is CyclePhase authority a JSON sidecar? Can it be placed into the Project Control Pane process?
+
+**Why it's a sidecar.** `CyclePhase` is touched by a sequence of independent short-lived CLI processes: `agent-doc preflight` marks `PreflightStarted`, the harness runs as its own process, `agent-doc finalize`/`write --commit` marks `WriteApplied`/`Committed`, and the codex `Stop` hook, `git::commit`, `capture`, `repair`, and `session-check` paths each call the `mark_*` transitions from their own process. The callers of `cycle_state.rs`'s `mark_*` span `run.rs`, `write/run_entry.rs`, `preflight.rs`, `git.rs`, `codex_hook.rs`, `capture.rs`, `repair.rs`, `session_check.rs`, and `flow/closeout.rs`. No single process owns the cycle end-to-end, so the phase must live in a durable record each process can `load() → mutate → save()` (`cycle_state.rs:1186`), with `cycle_phase_rank` (`:1273`) enforcing monotonic forward progress across those writers. The sidecar is the lowest-common-denominator coordination point that survives crashes and needs no other process alive.
+
+**Why not the Project Control Pane.** The PCP (`agent-doc controller serve … --launch-mode lazy`) is a *lazily*-launched routing/supervision process — it owns pane bindings, session actors, dispatch authorization, and the launch lock (`project_controller.rs`), not cycle execution. Crucially, `cycle_state.rs` has **zero** coupling to it (no controller/socket references at all): the cycle authority is deliberately controller-independent so closeout works whether or not the PCP is up. Moving the authority into the PCP would (1) make every transition block on a lazily-booted controller socket, (2) make the PCP a single point of failure for cycle integrity — exactly the crash-recovery case `#durablerecycle`/interrupted-cycle detection needs to survive, and (3) still require an on-disk record anyway, because the editor plugin reads the phase without IPC (`cycle_state.rs:305`/`:1072`) and recovery must work when the controller was the thing that crashed.
+
+**What is viable (the #c7j5 narrow win).** Keep the sidecar as the durable authority; layer shadows on top:
+
+- **In-process:** `StateMachine<CyclePhase, CycleEvent>` in `RunContext`, seeded from the sidecar at start, `on_transition` → sidecar save, with `state_is(WriteApplied)` reactive guards. Single-threaded `Context` suffices. This is the #c7j5 pilot — a small ergonomic win, not an architecture change.
+- **PCP-side:** an optional cache/projection of phase in `ControllerMemoryState` for routing decisions, analogous to the `RunContext` read-side cache at `graph.rs:222` — a shadow, not the truth.
+
+Promoting the PCP to the write authority only pays off if the PCP were ever made mandatory/always-on; today that trades a local atomic file write for a socket round-trip on every transition without removing the on-disk record, so it is not a clear win. The #c7j5 re-scope stands: sidecar stays the authority, the `StateMachine` pilot stays narrow.
+<!-- agent:boundary:9c053334 -->
 <!-- /agent:exchange -->
 ###
 <!--

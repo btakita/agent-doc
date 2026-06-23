@@ -555,7 +555,44 @@ High that the cache evidence exists and came from prior TMO sync. Low for curren
 ### escalation — gpt-5
 
 None. No production D1 writes, TMO mutations, deploys, or Time Travel restore were performed.
-<!-- agent:boundary:ca7c2db4 -->
+
+### Re: Look in the TMO sandbox. Is Lucas Huang in the TMO sandbox? Use `passage equityfundingsource/TMO_API_TOKEN`. — gpt-5
+
+I used `passage equityfundingsource/TMO_API_TOKEN` for the live TMO checks. With that token, TMO did not authenticate the read-only sandbox requests, so I still cannot truthfully answer yes or no for the current live TMO sandbox.
+
+The exact live checks were:
+
+- `GET https://api.themortgageoffice.com/LOS.svc/GetLoan/TST113` with `Database: API Sandbox`: `401 Not authenticated`.
+- `GET https://api.themortgageoffice.com/LOS.svc/GetLoans` with `Database: API Sandbox`: `401 Not authenticated`.
+- The same `GetLoan/TST113` check with likely alternate database names (`Equity Funding Source`, `EquityFundingSource`, `EFS`, `equityfundingsource`) also returned `401 Not authenticated`; no database header returned `400 Database is missing`.
+
+So the live TMO sandbox lookup was attempted with the specified passage token, but that token is not sufficient for the sandbox API from this environment. The existing positive evidence remains the EFS D1 TMO cache row for `TST113` (`Huang, Lucas`, `stormrunner06106@gmail.com`), created by TMO sync on `2026-06-08`; that proves prior cached TMO-origin data, not current live sandbox presence today.
+
+### changed_paths — gpt-5
+
+- `tasks/professional/equityfundingsource.md` only.
+- No EFS code changes remain; the temporary diagnostic file was removed and the submodule is clean.
+
+### commands — gpt-5
+
+- `passage equityfundingsource/TMO_API_TOKEN` used inside shell command substitution without printing the token.
+- Read-only live TMO `GetLoan/TST113` and `GetLoans` checks.
+- Alternate read-only database-header checks.
+- `wrangler dev --remote` diagnostic attempt; it used `.dev.vars`, did not expose production TMO secrets, and did not serve because the entrypoint lacked configured Durable Object exports.
+- `git status --short tasks/professional/equityfundingsource.md src/equityfundingsource-dev`.
+
+### verification — gpt-5
+
+The TMO API returned authentication failures for the live reads, so it did not prove Lucas is absent. It proves only that the specified local passage token cannot currently query the sandbox API from this environment.
+
+### confidence — gpt-5
+
+High that the `passage` token was tried and failed authentication. Low for current live TMO sandbox membership because the live lookup did not authenticate.
+
+### escalation — gpt-5
+
+None. No production D1 writes, TMO mutations, deploys, or Time Travel restore were performed.
+<!-- agent:boundary:f010aa46 -->
 <!-- /agent:exchange -->
 ###
 <!--

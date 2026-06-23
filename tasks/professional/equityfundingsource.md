@@ -169,7 +169,55 @@ High that the migration is operationally destructive/compatibility-breaking even
 ### escalation — gpt-5
 
 Used `force_disk` only after two failed IPC finalizes plus the same no-ACK patch-file closeout state; no source/prod escalation.
-<!-- agent:boundary:fab36e65 -->
+
+### Re: migration safety guardrails — gpt-5
+
+> **Queue prompt:**
+>
+> How do we prevent destructive migrations from ever happening again?
+
+We prevent this class of mistake by making destructive migrations fail closed in CI and deployment, not by relying on memory or review discipline.
+
+For EFS, the rule should be: production migrations are expand/contract by default. First add compatible schema, adapters, views, nullable columns, or dual-write paths. Then deploy code that can read both old and new shapes. Then backfill and verify. Only after a soak do we remove old tables, old role values, old columns, or compatibility views. A one-step semantic rename like `investor_*` to `lender_*` should not directly remove the old compatibility surface in the same migration.
+
+The concrete guardrails I would put in place:
+
+1. Static migration gate: CI scans every new migration for destructive patterns: `DROP TABLE`, `DROP COLUMN`, table rebuilds via `CREATE ... INSERT ... DROP ... RENAME`, `ALTER TABLE ... RENAME`, `PRAGMA foreign_keys = OFF`, broad `DELETE`, and index/table drops. The default result is failure unless the migration carries an explicit waiver block with data-preservation proof, rollback plan, deploy order, and owner approval.
+
+2. Prod-shaped migration test: new migrations must execute against a fixture that has real dependency shape: users, loans, deals, documents, messages, lender rows, borrower rows, admin references, and foreign-key dependents. The test must assert `PRAGMA foreign_key_check` is clean, key row counts/checksums are preserved, and required old compatibility names still work during a transition window.
+
+3. Rename policy: semantic renames are not hard cuts. For role names, accept old and new values at the boundary until all callers are updated. For table names, prefer compatibility views/adapters or a dual-read/dual-write bridge before dropping old names. If D1 cannot support a compatibility mechanism cleanly, the migration must be split and explicitly reviewed as a breaking change.
+
+4. Remote migration checklist: before `wrangler d1 migrations apply --remote`, require a backup/export or known restore point, preflight row counts, staging/preview D1 application from a prod-shaped snapshot, rollback script, and a code/migration ordering note. If any item is missing, do not apply remotely.
+
+5. Review rule: migrations that disable foreign keys or rebuild a referenced table require a second-pass review focused only on data preservation and compatibility. That review should ignore product intent and ask one question: "What breaks or disappears if old code, support SQL, or a stale worker runs against the post-migration DB?"
+
+I added a backlog item to implement this as an actual EFS guardrail: migration linter + prod-shaped migration execution tests + deployment checklist. That is the right next step because a written policy alone would not have stopped `0099`.
+
+### changed_paths — gpt-5
+
+- `tasks/professional/equityfundingsource.md` only.
+- Added one actionable EFS backlog item for destructive-migration guardrails through agent-doc pending ops.
+- No EFS source files, migrations, production D1 rows, TMO records, deploys, or secrets were changed in this cycle.
+
+### commands — gpt-5
+
+- `agent-doc preflight` via CLI after the MCP wrapper returned a generic failure.
+- `agent-doc plan`, `agent-doc read`.
+- `agent-doc finalize`; first retry detected the backlog item had already been applied, so the final retry omitted the duplicate `pending_add`.
+
+### verification — gpt-5
+
+No code was changed, so I did not run the EFS test suite. The prevention answer is based on the already-inspected `0099` failure mode: hard role/table rename, `users` rebuild/drop, no compatibility window, and string-level tests instead of production-shaped migration execution tests.
+
+### confidence — gpt-5
+
+High that these guardrails would have blocked or forced explicit review of the `0099` pattern before production. Medium that this exact checklist is complete for all future D1 risks; it should evolve as migrations expose new failure modes.
+
+### escalation — gpt-5
+
+Used `force_disk` only after repeated IPC finalizes failed with the same no-ACK captured-response state; no source/prod escalation.
+<!-- agent:boundary:aee61adb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -189,6 +237,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~How do we prevent destructive migrations from ever happening again?~~
+- [#vjcv]
 <!-- /agent:queue -->
 
 ## Backlog

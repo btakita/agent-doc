@@ -62,32 +62,20 @@ Proof:
 - verification: no code/spec changed, so I did not run `make check`; installed version is `agent-doc 0.34.42`, and the latest `src/agent-doc` CI run for `v0.34.42` is `completed/success`
 - escalation: none
 - confidence: high
-<!-- agent:boundary:e463d682 -->
+<!-- agent:boundary:45cc20ec -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~[#directchatpb2]: If it's fixed, why did the last turn reproduce the issue in this document?~~
-- #qheadresidue
-- #directchatpb2
----
-:round_pushpin: JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
-```
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
-```
+- ~~#qheadresidue~~
+- ~~#directchatpb2~~
 ---
 - :pushpin: do [#1jec]
 - :pushpin: do [#fbwireverify]
 - :pushpin: do [#qnodemerge4verify]
 - :pushpin: do [#tb4q]
----
-JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
-```
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
-```
 ---
 - do [#cancelturnverify]
 - do [#qcm1verify]

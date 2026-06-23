@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -198,7 +198,27 @@ Verification:
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:22afa38c -->
+Implemented and pushed the EFS fix.
+
+> **Queue prompt:**
+>
+> I synced the lender with TMO but got "TMO sync complete" "Updated 0 loans, 0 fundings, 0 schedules. Refreshing the lender pipeline."
+
+
+The Advance Lender sync result now makes the real behavior explicit: it is a TMO loan/funding/schedule/cache refresh, not an auto-link for newly created TMO lender accounts. If the result is all zeroes, the dialog shows a warning and tells the admin to use `Manually Link Account` with the exact TMO lender account number.
+
+Commits:
+- EFS: `c9d8dae fix: clarify lender tmo sync result`, pushed to `origin/main`
+- Parent submodule pointer: `ed99a6f0a chore: update equityfundingsource submodule`, not pushed because the parent repo is already ahead and has unrelated dirty paths
+
+Verification passed:
+- `bun test tests/advance-lender-dialog.test.ts`
+- `bun test tests/advance-lender-dialog.test.ts tests/admin-investor-pipeline.test.ts`
+- EFS `make check`: 1,158 tests, 0 failures, app build, Worker build
+- Parent `make check`
+
+One closeout issue remains: `agent-doc` could not get editor IPC proof to write the response into `tasks/professional/equityfundingsource.md`; it queued the patch but the editor did not acknowledge/apply it. I did not force a disk write because that would bypass the active editor/CRDT path.
+<!-- agent:boundary:d4c5869c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -218,7 +238,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- I synced the lender with TMO but got "TMO sync complete" "Updated 0 loans, 0 fundings, 0 schedules. Refreshing the lender pipeline."
 <!-- /agent:queue -->
 
 ## Backlog

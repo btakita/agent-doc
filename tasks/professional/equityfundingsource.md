@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -271,7 +271,41 @@ Medium-high. The recorded agent command history is a strong negative signal for 
 **Escalation**
 
 None.
-<!-- agent:boundary:7ab9ceae -->
+
+### Re: stormrunner email and D1 state — gpt-5
+
+> **Queue prompt:**
+>
+> I see stormrunner06106@gmail.com as user emails. We previously chanegd the user emails. Did the database revert to a previous state?
+
+No, the production EFS app database does not look reverted.
+
+Current remote D1 `users` state shows the renamed rows are still present and the old source emails are absent:
+
+- `btak.dev+admin2@gmail.com` exists, role `borrower`, row id `48acd458-c531-4833-9cc1-017528acf48d`.
+- `btak.dev+broker2@gmail.com` exists, role `broker`, row id `37b88820-2a05-443c-85e7-7146660dc8b7`.
+- `btak.dev+lender2@gmail.com` exists, role `lender`, row id `68b25f71-9208-43ba-ab3f-047f3f8b767d`.
+- Exact lookup for `stormrunner06106@gmail.com`, `test2@broker.com`, and `test2@investor.com` returned zero rows.
+
+So if you are seeing `stormrunner06106@gmail.com`, it is probably not coming from the EFS `users` table. The likely source is Cloudflare Email Routing destination addresses: a June 22 session captured the Cloudflare dashboard destination list for `Brian.takita@gmail.com's Account`, and that list included `stormrunner06106@gmail.com` alongside `brian.takita@gmail.com`, `btak.dev+efs@gmail.com`, `dev-slack@briantakita.me`, and `info@briantakita.me`. Those are Cloudflare account/email-routing destinations, not EFS application users.
+
+Other checks:
+
+- Remote D1 has 14 total users; the oldest `created_at` is `2026-04-27 07:12:50 UTC`, and the newest user update is `2026-06-22 22:53:08 UTC`. That does not look like a wholesale restore to an old pre-rename database snapshot.
+- `audit_logs` exists now, but it only has 3 rows, all created `2026-06-23 00:33:43 UTC`, and none mention `stormrunner` or `btak.dev+admin2`. That matches the earlier finding that durable audit logging was deployed after the rename, so it cannot prove the June 17 rename history.
+- Remote D1 migrations report `No migrations to apply`.
+- I attempted to query Cloudflare Email Routing destination addresses through the Cloudflare API, but the current token returned `403 Authentication error` for that endpoint. That limits current API confirmation of the email-routing list, but it does not affect the D1 result.
+
+Changed paths: session document only; no EFS code or production data was changed.
+
+Commands: `tsift status`; `tsift status --fix`; `tsift index --workspace .`; `agent-doc preflight ...`; `agent-doc plan ...`; `agent-doc read ...`; targeted `rg`/`sed` over the session archives and EFS rename code; read-only remote D1 `SELECT` queries against `users`, `sqlite_master`, and `audit_logs`; `bun ./app/equityfundingsource/bin/cf-wrangler.ts d1 migrations list ... --remote`; Cloudflare Email Routing API read attempt via `bun -e`.
+
+Verification: remote D1 query directly confirmed the renamed app-user rows and confirmed zero rows for the three old source emails. No D1 write occurred (`changed_db=false`, `rows_written=0` on the read queries).
+
+Confidence: high that the EFS app database did not revert. Medium on the exact current Cloudflare Email Routing destination list because the API token lacks access to that endpoint, but the local session history strongly points to that as the `stormrunner` source.
+
+Escalation: none.
+<!-- agent:boundary:22b91141 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -291,10 +325,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Could the delete event have occured from a TMO sync bug?~~
-- ~~We should log all web requests, api calls, migrations, etc. in the application logs.~~
-- ~~No record should be deleted, only disabled. Create a migration. The durable app audit table should be deployed. Do we have sufficient logging to track deletion events? The delete borrower should not cascade. No deleted records. Only disabled records. We need a trail.~~ — auto-struck: answered this cycle (#ftstrike) 
-- ~~deploy~~
+- ~~I see stormrunner06106@gmail.com as user emails. We previously chanegd the user emails. Did the database revert to a previous state?~~
+- Do we have database backups?
 <!-- /agent:queue -->
 
 ## Backlog

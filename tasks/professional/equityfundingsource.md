@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -143,7 +143,62 @@ Verification:
 Confidence: high.
 
 Escalation: none. Production was not deployed in this cycle; `deploy` remains as the next queue prompt.
-<!-- agent:boundary:8f98899f -->
+
+### Re: Deploy - gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Deployed the current EFS Worker build to Cloudflare production at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Deployment details:
+- EFS code deployed from `src/equityfundingsource-dev` on `main...origin/main`.
+- Worker deploy command completed successfully: `bun run deploy:worker`.
+- Cloudflare Worker version: `9cd4405e-9d90-47e0-ae2e-d0d2f360aee1`.
+- Deployed static asset update: `/index.browser-HINKPVJJ.js`.
+- Cron trigger deployed with the Worker: `0 * * * *`.
+
+Changed paths:
+- None in this cycle. This was a deploy-only cycle for the already-committed EFS changes.
+
+Commands:
+- `agent-doc --version`
+- `tsift status` in the parent repo
+- `agent-doc preflight tasks/professional/equityfundingsource.md`
+- `agent-doc plan tasks/professional/equityfundingsource.md`
+- `agent-doc read tasks/professional/equityfundingsource.md`
+- `tsift status` in `src/equityfundingsource-dev`
+- `git status --short --branch` in EFS and parent
+- bounded deploy-runbook/package inspections with `sed` and `rg`
+- `bun run cf:whoami`
+- `bun run cf:d1:info`
+- `bun run cf:d1:time-travel:info`
+- `bun run cf:d1:migrations:list:remote`
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`
+- `bun run deploy:worker`
+- live smoke `curl` checks for `/`, `/funded-deals`, `/admin/login`, `/admin/lender-pipeline`, `/blog`, `/blog/california-private-lending-guide`, and `/index.browser-HINKPVJJ.js`
+- `bun run cf:d1:query:remote -- "SELECT COUNT(*) AS n FROM funded_deals WHERE status = 'visible'"`
+- `bun run cf:d1:query:remote -- "SELECT COUNT(*) AS n FROM blog_posts WHERE status = 'published'"`
+- `gh run list --workflow CI --limit 1` and `gh workflow list` in EFS and parent
+
+Verification:
+- Cloudflare auth succeeded for account `1e7e194ff8da4ad9e40ce041aea84f76`.
+- Remote D1 `equityfundingsource` is reachable at database id `280e1539-b940-4c59-8988-fbed63c12ac0`.
+- D1 time-travel current bookmark before deploy: `000004e5-00000000-00005093-e745e8e6a8254df782e97af71eac8074`.
+- Remote D1 migrations reported `No migrations to apply!` before deploy, and deploy also applied migrations with `No migrations to apply!`.
+- Local EFS `make check` passed: 1,157 tests, 0 failures, app build, and Worker build. The tsift digest classifier grouped one logged `error: d1 down` message, but the command exited 0 and the test output reported `1157 pass / 0 fail`.
+- Worker deploy succeeded and uploaded `equityfundingsource` version `9cd4405e-9d90-47e0-ae2e-d0d2f360aee1`.
+- Live smoke checks passed: `/` 200, `/funded-deals` 200, `/admin/login` 200, `/admin/lender-pipeline` 303 to admin login, `/blog` 200, `/blog/california-private-lending-guide` 200, `/index.browser-HINKPVJJ.js` 200.
+- Remote D1 read checks passed: visible funded deals count `18`; published blog posts count `1`.
+- EFS has no GitHub workflows; parent has no `CI` workflow and lists only `Agent Doc`.
+- EFS submodule remains clean on `main...origin/main`.
+- Parent repo still has unrelated dirty paths and is ahead of origin; no parent push was performed.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:ae7de96e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -163,8 +218,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~"Link TMO account here" should perform the automated sync with TMO. Not just expect the user to enter the id from TMO.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

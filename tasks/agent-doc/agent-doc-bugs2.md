@@ -236,20 +236,36 @@ Escalation: none.
 ### Re: post-closeout queue sync drift — gpt-5
 
 Committed editor-applied queue-sync/boundary drift that arrived after the prior closeout. No source work was performed and no queue head is being answered by this repair cycle.
-<!-- agent:boundary:6f75173e -->
+
+### Re: JB Run Agent Doc submit/start miss tracking — gpt-5
+
+> **Queue prompt:** JB `Run Agent Doc` still not submitting. Can we track when this happens and automatically file a bug so I don't have to endlessly repeat myself when you fail to fix the issue? [dogfooding] Can we also have the supervisor detect if the turn started? And if the turn has not started, send Enter and continue retrying until the turn starts?
+
+Yes. This belongs in the existing `#3ygp` bug, not as a second duplicate backlog item. I expanded `#3ygp` so it now covers both halves: automatic bug filing for repeated JetBrains route/dispatch misses, and supervisor-side turn-start proof with bounded Enter/submission retries before filing the evidence-backed bug.
+
+No source files changed in this cycle.
+
+Verification:
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+- `agent-doc read ... --component queue`
+- `agent-doc read ... --component backlog`
+
+Confidence: high for backlog capture; implementation remains queued as `do [#3ygp]`.
+Escalation: none.
+<!-- agent:boundary:328d272e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- JB `Run Agent Doc` still not submitting. Can we track when this happens and automatically file a bug so I don't have to endlessly repeat myself when you fail to fix the issue? [dogfooding] Can we also have the supervisor detect if the turn started? And if the turn has not started, send Enter and continue retrying until the turn starts?
+- ~~JB `Run Agent Doc` still not submitting. Can we track when this happens and automatically file a bug so I don't have to endlessly repeat myself when you fail to fix the issue? [dogfooding] Can we also have the supervisor detect if the turn started? And if the turn has not started, send Enter and continue retrying until the turn starts?~~
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
 - :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#tb4q]: please check logs
 - :pushpin: do [#qcm1verify]: Use the logs to verify.
 - :pushpin: do [#qstrikework]
 - :pushpin: do [#1jec]
-- do [#3ygp]
+- ~~do [#3ygp]~~
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -278,7 +294,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#3ygp] #jbrunautobug #agent-doc-bug Automatically file a session-doc backlog item when JetBrains Run Agent Doc route/dispatch fails after retries; include the saved route diagnostic path, failure class, pane/generation, and ops.log marker, and dedupe repeated failures for the same document/stage so the operator does not have to retype the bug.
+- [ ] [#3ygp] #jbrunautobug #agent-doc-bug Automatically file a session-doc backlog item when JetBrains Run Agent Doc route/dispatch fails after retries; include the saved route diagnostic path, failure class, pane/generation, dispatch/turn-start proof, and ops.log marker; dedupe repeated failures for the same document/stage; and have the supervisor detect whether the turn actually started after submit, retry Enter/submission until a bounded start proof is observed, then file the bug with evidence if the turn never starts.
 - [ ] [#qstrikework] #agent-doc-bug Prevent queue items from being struck unless the current cycle proves that exact head was worked: the response quotes the exact free-text head, or a --done/--pending-gate/--review-resolve targets the backing id. Add regression coverage for interrupted finalize recovery where a later operator-verify or free-text head is auto-quoted/struck while the response only repairs an earlier prompt.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.

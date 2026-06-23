@@ -34,116 +34,20 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260623-141628.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260623-170826.md`*
 
 Compacted content:
-- Archived 1 response topic(s): durable recycle checkpointing
-- Prior summary/context: prior compacted content: Archived 7 response topic(s): editor stale-state rollback and slow Run Agent Doc; build and ...
-
-### Re: lazily-rs session sync — gpt-5
-
-> **Queue prompt:** My PC had a hard crash. Now I cannot sync the lazily-rs.md session.
-
-I checked the `lazily-rs.md` session directly. The crash left cycle `cycle-1782226316184` stuck at `preflight_started` with an insufficient IPC proof (`live_prompt_drift_after_preflight`). Running an agent-doc probe closed that stale empty preflight cycle and committed the repair as `5c90b7c0d agent-doc(lazily-rs): 2026-06-23 11:00:20`.
-
-`agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md` now reports OK: that cycle is `committed`, and the next queue prompt is ready: `Add ThreadSafeStateMachine and AsyncStateMachine (Tokio).` So the sync blocker is cleared; the remaining `tasks/software/lazily-rs.md` working-tree change is the live queue edit/prompt waiting to be drained, not the stale crash state.
-
-Preflight on this bug tracker also emitted semantic-completion warnings for `#1jec`, `#arsm`, `#qcm1verify`, review `#ftqpartialdup`, and review `#j9ja`; I left those unchanged because this queue prompt was about recovering `lazily-rs.md` sync.
-
-Proof: changed paths were `tasks/software/lazily-rs.md` via the agent-doc repair commit and this session document via finalize. Commands used: `tsift status`, `tsift index --workspace .`, agent-doc preflight/plan/read, `agent-doc session-check` on `lazily-rs.md`, probe preflight on `lazily-rs.md`, and `git status`/`git log`. No code changed, so I did not run `make check`. CI status check was attempted with `gh run list --workflow CI --limit 1`, but this repo has no workflow named `CI`. Escalation: none. Confidence: high.
-
-### Re: JB Sync Tmux Layout deferral — gpt-5
-
-> **Queue prompt:** JB `Sync Tmux Layout` on lazily-rs.md `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.`
-
-I treated this as a sync-guard health check, not a new implementation item. The current `lazily-rs.md` session is healthy: `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md` reports cycle `cycle-1782226316184` committed, with the next queue prompt ready (`Add ThreadSafeStateMachine and AsyncStateMachine (Tokio).`).
-
-The warning text comes from the JetBrains plugin-local sync guard in `SyncLayoutAction.kt`: a second/manual sync request is deferred while an existing sync owns the guard, and the current code bumps a generation so the in-flight holder reruns with the latest layout afterward. The permanent-wedge version of this symptom is already covered by `tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md` / `#recyclerestart`: the FFI guard now has a 45s stale-holder supersede path, above the plugin's 30s sync-process timeout.
-
-Current evidence says this instance was transient rather than wedged. The recent ops log for `lazily-rs.md` shows repeated safe-passive syncs at `2026-06-23T15:03:14Z`-`15:03:16Z` with `sync_lock_wait elapsed_ms=0 status=ok`, and I did not find current `sync_lock_contention` / `safe_passive_sync_lock_contention_retry` / `stale_holder` evidence in the active ops log. So I left backlog/review unchanged and did not add a duplicate bug item.
-
-If the same JB notification persists past the plugin timeout/stale-bound window, that is a live-plugin guard regression against the `#recyclerestart` contract. This captured instance, though, matches the intended "another sync is in flight; retry newest layout" behavior and the binary-side lock is no longer stuck.
-
-Proof: changed paths are this session document via finalize only. Commands used: `agent-doc preflight`/`plan`/`read`, `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md`, `rg` over sync warning/source/log text, `sed` on `plan-pcp-recycle-no-restart-sync-block.md`, `SyncLayoutAction.kt`, and `ffi.rs`, `tail`/`rg` on `.agent-doc/logs/ops.log`, and `git status`. No code changed, so I did not run `make check`. CI status check was attempted with `gh run list --workflow CI --limit 1`, but this repo has no workflow named `CI`. Escalation: none. Confidence: medium-high; terminal evidence proves the binary-side sync lock was not wedged, while the exact JB notification lifecycle lives in the IDE log/UI.
-
-### Re: lazily-rs.md crash recovery -- gpt-5
-
-> **Queue prompt:** I still cannot get lazily-rs.md to sync. Please make recovery from machine crashes more robust. The state of lazily-rs.md is stuck. Please fix this recovery scenario.
-
-Fixed the recovery gap in full/manual sync. Preflight already knew how to close the stuck `jb_cache_conflict_cancel` shape, but editor/manual `agent-doc sync` could return early after tmux layout or pane-liveness checks and never close the commit boundary. `repair_file_state_with_tmux` now runs the same recoverable detector and narrow `git::commit(file)` repair before pane liveness can short-circuit, then proves the recoverable shape is gone before continuing.
-
-I also recovered the live `tasks/software/lazily-rs.md` stuck state first. Its visible response/snapshot drift was committed by preflight as `4bf7b2d88`.
-
-Proof:
-- changed_paths: `src/agent-doc/agent-doc-orchestration/src/sync.rs`, `README.md`, `SPEC.md`, `editors/SPEC.md`, `specs/07-session-tmux-commands.md`, `VERSIONS.md`, release version manifests/lockfile, `tests/test_cli.rs`, and parent gitlink `src/agent-doc`
-- commits: `058e6bf9` (`agent-doc: repair sync closeout crash recovery`), `46a3c0de` (`chore: release v0.34.39`), parent `bbc76e2dc` (`chore: update agent-doc submodule`)
-- commands: `cargo fmt`; `cargo test -p agent-doc-orchestration sync_repair_closes_jb_cache_conflict_cancel_commit_boundary -- --nocapture`; `cargo test -p agent-doc-orchestration jb_cache_conflict_cancel -- --nocapture`; `cargo test -p agent-doc test_manifest_uses_publishable_dependency_contract -- --nocapture`; `make check`; `make install-full`; `agent-doc admin recycle --all-projects`; submodule and parent `git push origin main`; `git tag v0.34.39`; `git push origin v0.34.39`
-- verification: final `make check` passed clippy, 5017 nextest tests, doctests, and the medium closeout simulator; local install replaced `agent-doc` with v0.34.39 and installed `libagent_doc-0.34.39.so`
-- CI/release: submodule CI for `058e6bf9` completed success; CI and Release workflows for `46a3c0de`/`v0.34.39` were in progress at closeout; parent repo has no workflow named `CI`
-- escalation: none
-- confidence: high
-
-### Re: #directchatpb2 response-loss recurrence recorded — glm-5.2
-
-Recorded the second same-day recurrence of direct-chat owned-pane response loss (#directchatpb2) without implementing it (the backlog entry gates it "DO NOT IMPLEMENT until scheduled"). Both the MRH "2300 words" lint prompt and the "Remove the max character count cap" follow-up were answered in chat but never crossed the `agent-doc finalize` / `write --commit` boundary, so `tasks/monsterrodholders.md` kept the queue prompt plus `no-free-text-queue-head-guard` / bare-heading residue and no matching `### Re:` response.
-
-This turn captured the bug class only:
-- Updated the `#directchatpb2` backlog entry with the consecutive-prompt evidence and queued `[#directchatpb2]`.
-- Extended `tasks/agent-doc/plan-direct-chat-owned-pane-response-loss-2026-06-23.md` with the second-recurrence Evidence bullet, the two-consecutive-answers regression step, and the independent-writeback acceptance criterion.
-
-Proof:
-- commit: `2612c5f46` (`agent-doc response: #directchatpb2 direct-chat response-loss recurrence`)
-- changed_files: `tasks/agent-doc/agent-doc-bugs2.md`, `tasks/agent-doc/plan-direct-chat-owned-pane-response-loss-2026-06-23.md`
-- escalation: none (implementation is gated behind scheduling)
-
-### Re: #qheadresidue and #gsf5 — gpt-5
-
-> **Queue prompt:**
->
-> [#directchatpb2]. The last turn had the response partially deleted in an uncommitted state.
-
-
-Closed both requested items.
-
-For `#qheadresidue`, I verified this bug class is already fixed in the installed/newer build rather than adding a duplicate patch. `session-check` now interrupts when a free-text `agent:queue` head is still active but exchange history contains the `> **Queue prompt:**` echo proving that head was answered, and it logs `free_text_queue_completed_residue_guard_fired` with the `#qheadresidue` hint. `git log -S free_text_queue_completed_residue_guard_fired` points to release commit `50c10480` (`v0.34.40`), and this machine is running `agent-doc 0.34.42`.
-
-For `#gsf5`, `tasks/software/lazily-rs.md` is no longer stuck. `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md` reports cycle `cycle-1782231717317` committed with `queue_continuation_required=false`, and an explicit sync against that file reused/recovered live pane `%32`, verified the layout, and logged `safe_passive_total status=ok` for `doc=lazily-rs`. I also restored the working tmux layout afterward so this bug tracker pane and `lazily-rs.md` are visible together again.
-
-Proof:
-- changed_paths: no source files changed this cycle; this session document is updated by finalize only
-- tests: `cargo test -p agent-doc-orchestration completed_free_text_queue_residue_guard_fires_for_answered_active_head -- --nocapture` passed; `cargo test --test finalize_integration finalize_echoes_consumed_free_text_queue_prompt_into_response -- --nocapture` passed; `cargo test --test finalize_integration finalize_keeps_free_text_queue_head_when_cycle_answers_foreign_exchange_prompt -- --nocapture` passed
-- sync/session proof: `agent-doc sync --no-autostart --exact-visible --focus ...lazily-rs.md --col ...lazily-rs.md` succeeded; follow-up sync restored the multi-pane layout; `agent-doc session-check ...lazily-rs.md` remained OK
-- CI: `gh run list --workflow CI --limit 1` shows the latest submodule CI for `v0.34.42` completed successfully
-- escalation: none
-- confidence: high for the binary/session state and medium-high for the editor sync path; the terminal proves the same underlying sync path and live pane recovery, while the JetBrains notification surface itself was not human-observed in this turn
-
-### Re: #directchatpb2 fixed-scope clarification — gpt-5
-
-> **Queue prompt:**
->
-> [#directchatpb2]: If it's fixed, why did the last turn reproduce the issue in this document?
-
-It reproduced because `#directchatpb2` is not fixed yet. The prior “fixed” statement was scoped to `#qheadresidue`, which is the completed guard for an already-answered free-text queue head that still appears active after a binary-owned `agent-doc` closeout. That guard shipped in `v0.34.40` (`50c10480`), and this machine is running `agent-doc 0.34.42`.
-
-`#directchatpb2` is a different failure class: a direct-chat / owned-pane Codex response can still escape without crossing `agent-doc finalize` or `agent-doc write --commit`. The backlog entry and `tasks/agent-doc/plan-direct-chat-owned-pane-response-loss-2026-06-23.md` both say the fix is still open and explicitly gated: add an enforced Codex final/Stop gate plus regression coverage for consecutive direct-chat prompts in one owned pane. The previous turn only recorded that recurrence; it did not implement the gate.
-
-So the correct status is:
-- `#qheadresidue`: fixed and verified in the installed build.
-- `#directchatpb2`: reproduced, recorded, and still open until scheduled. The last turn is evidence for this item, not evidence that `#qheadresidue` failed again.
-
-Proof:
-- changed_paths: this session document via `agent-doc finalize` only
-- commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent-doc --version`, `git status --short`, `git -C src/agent-doc log --oneline -5`, `rg` over the tracker/plan, `sed` on the direct-chat plan, `git -C src/agent-doc log -S free_text_queue_completed_residue_guard_fired --oneline --all`, `gh run list --workflow CI --limit 1`
-- verification: no code/spec changed, so I did not run `make check`; latest `src/agent-doc` CI run for `v0.34.42` is `completed/success`
-- escalation: none
-- confidence: high
-<!-- agent:boundary:9faa2d84 -->
+- Archived 6 response topic(s): lazily-rs session sync; JB Sync Tmux Layout deferral; lazily-rs.md crash recovery -- gpt-5; 3 more
+- Prior summary/context: prior compacted content: Archived 1 response topic(s): durable recycle checkpointing
+<!-- agent:boundary:2554699c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~[#directchatpb2]: If it's fixed, why did the last turn reproduce the issue in this document?~~
+- #qheadresidue
+- #directchatpb2
 ---
 :round_pushpin: JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
 ```

@@ -175,11 +175,6 @@ Verification:
 
 ### Re: stale #pzjy replay drift — gpt-5
 
-> **Queue prompt:**
->
-> Can we have annotated queue item(s) that runs when there are no other queue items? So this would effectively be a running loop. This should also support multiple annotated loop queue items that run in a sequence loop. Also, can we have an emoji annotate which queue item is currently being run? There can be a default poll period with configurable override. Also, the loop item can intelligently schedule based on the frequency of events.
-
-
 This cycle did not require new source work. Preflight surfaced stale editor replay/prompt-prefix drift in the just-committed `#pzjy` exchange tail, not a new actionable queue item. I’m closing that drift through the binary-owned path so the queue can continue from a clean boundary.
 
 Verification:
@@ -189,7 +184,7 @@ Verification:
 ### Re: queue restoration repair — gpt-5
 
 Restored the next queue head that was accidentally marked complete during stale closeout cleanup. No source work was performed in this repair cycle.
-<!-- agent:boundary:63b854cc -->
+<!-- agent:boundary:63f0d786 -->
 <!-- /agent:exchange -->
 
 ## Queue

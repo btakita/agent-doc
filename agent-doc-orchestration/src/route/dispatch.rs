@@ -279,8 +279,9 @@ pub(crate) fn direct_pane_existing_draft_visible(
     let recent_lines: Vec<String> = content
         .lines()
         .rev()
-        .take(8)
         .map(crate::prompt::strip_ansi)
+        .filter(|line| !line.trim().is_empty())
+        .take(16)
         .collect();
     let lines: Vec<&String> = recent_lines.iter().rev().collect();
     for start in 0..lines.len() {
@@ -1145,7 +1146,7 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
             timeout.as_secs()
         );
     }
-    Ok(RoutedDispatchStartProof::CommandAcceptedOnly)
+    Ok(RoutedDispatchStartProof::DispatchStartUnproven)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1702,7 +1703,7 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
                     timeout.as_secs()
                 );
             }
-            Ok(RoutedDispatchStartProof::CommandAcceptedOnly)
+            Ok(RoutedDispatchStartProof::DispatchStartUnproven)
         }
         CommandDispatchStatus::TimedOut => {
             log_route_latency(
@@ -2069,6 +2070,39 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
         assert!(
             direct_pane_existing_draft_visible(content, trigger, &harness),
             "wrapped current drafts should be submitted with the profile submit key rather than appended again"
+        );
+    }
+
+    #[test]
+    fn direct_pane_existing_draft_detection_ignores_codex_blank_padding() {
+        let harness = HarnessConfig::codex();
+        let trigger =
+            "agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md";
+        let content = "\
+╭─────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.141.0)                  │
+╰─────────────────────────────────────────────╯
+
+  Tip: Use /side to start a side conversation in a temporary fork without polluting the main thread.
+
+
+› agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+
+
+  gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
+
+
+
+
+
+
+
+
+";
+
+        assert!(
+            direct_pane_existing_draft_visible(content, trigger, &harness),
+            "blank-padded Codex composer captures should still expose the current draft for late Enter retry"
         );
     }
 

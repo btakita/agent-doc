@@ -868,7 +868,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // (`auto_install_reexec` / `restart_reexec`) so a deferred-then-settled
         // or fail-closed dispatch is auditable against the marker that gated it.
         ("agent-doc-orchestration/src/route/dispatch_only.rs", "reason=") => 6,
-        ("agent-doc-orchestration/src/route/dispatch_only.rs", "accepted_only") => 9,
+        // +1 (#3x90): regression coverage for tracked dispatch-start timeouts
+        // asserts that `DispatchStartUnproven` fails closed even though plain
+        // `CommandAcceptedOnly` remains allowed for harnesses with no tracker.
+        ("agent-doc-orchestration/src/route/dispatch_only.rs", "accepted_only") => 10,
         // +1 (`reason=in_flight_coalesce`): #qflood2 `route_dispatch_deduped_pane`
         // logs the benign in-flight dedup before returning deduped-success without a
         // re-send. Routed through the `RouteDispatchAuthorization::CoalescedDeduped`

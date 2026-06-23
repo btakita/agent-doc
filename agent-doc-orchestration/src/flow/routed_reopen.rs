@@ -221,6 +221,7 @@ impl DispatchOnlyReopenDelivery {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoutedDispatchStartProof {
     CommandAcceptedOnly,
+    DispatchStartUnproven,
     HookPromptMatched,
     HookStateAdvanced,
     PaneStateChanged,
@@ -230,6 +231,7 @@ impl RoutedDispatchStartProof {
     pub const fn dispatch_stage_label(self) -> &'static str {
         match self {
             Self::CommandAcceptedOnly => "accepted",
+            Self::DispatchStartUnproven => "accepted_without_dispatch_start_proof",
             Self::HookPromptMatched => "consumed",
             Self::HookStateAdvanced => "submitted",
             Self::PaneStateChanged => "pane_state_changed",
@@ -238,7 +240,7 @@ impl RoutedDispatchStartProof {
 
     pub const fn proof_scope_label(self) -> &'static str {
         match self {
-            Self::CommandAcceptedOnly => "accepted_only",
+            Self::CommandAcceptedOnly | Self::DispatchStartUnproven => "accepted_only",
             Self::HookPromptMatched | Self::HookStateAdvanced | Self::PaneStateChanged => {
                 "dispatch_start"
             }
@@ -250,6 +252,7 @@ impl RoutedDispatchStartProof {
             Self::CommandAcceptedOnly => {
                 "accepted-only; no harness dispatch-start proof was available"
             }
+            Self::DispatchStartUnproven => "accepted-only; harness dispatch-start proof timed out",
             Self::HookPromptMatched => "dispatch-start proof matched the routed prompt",
             Self::HookStateAdvanced => "dispatch-start proof observed newer harness prompt state",
             Self::PaneStateChanged => "dispatch-start proof observed pane state leave idle chrome",
@@ -259,6 +262,7 @@ impl RoutedDispatchStartProof {
     pub const fn startup_miss_label(self) -> &'static str {
         match self {
             Self::CommandAcceptedOnly => "acceptance",
+            Self::DispatchStartUnproven => "accepted-without-dispatch-proof",
             Self::HookPromptMatched => "consumption",
             Self::HookStateAdvanced => "submission",
             Self::PaneStateChanged => "pane-state-change",
@@ -267,7 +271,7 @@ impl RoutedDispatchStartProof {
 
     pub const fn typed_proof(self) -> DispatchProof {
         match self {
-            Self::CommandAcceptedOnly => DispatchProof::AcceptedOnly,
+            Self::CommandAcceptedOnly | Self::DispatchStartUnproven => DispatchProof::AcceptedOnly,
             Self::HookPromptMatched => DispatchProof::Consumed,
             Self::HookStateAdvanced | Self::PaneStateChanged => DispatchProof::DispatchStarted,
         }
@@ -295,7 +299,9 @@ pub fn decide_dispatch_start_proof(
     proof: RoutedDispatchStartProof,
     dispatch_start_proof_required: bool,
 ) -> DispatchStartProofDecision {
-    if proof == RoutedDispatchStartProof::CommandAcceptedOnly && dispatch_start_proof_required {
+    if proof == RoutedDispatchStartProof::DispatchStartUnproven
+        || proof == RoutedDispatchStartProof::CommandAcceptedOnly && dispatch_start_proof_required
+    {
         DispatchStartProofDecision::FailClosedAcceptedOnly
     } else {
         DispatchStartProofDecision::Accepted
@@ -1361,6 +1367,10 @@ mod tests {
         assert_eq!(
             decide_dispatch_start_proof(RoutedDispatchStartProof::CommandAcceptedOnly, false),
             DispatchStartProofDecision::Accepted
+        );
+        assert_eq!(
+            decide_dispatch_start_proof(RoutedDispatchStartProof::DispatchStartUnproven, false),
+            DispatchStartProofDecision::FailClosedAcceptedOnly
         );
         assert_eq!(
             decide_dispatch_start_proof(RoutedDispatchStartProof::HookPromptMatched, true),

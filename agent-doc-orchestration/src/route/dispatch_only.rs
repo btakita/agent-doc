@@ -992,6 +992,27 @@ mod tests {
         }
     }
     #[test]
+    fn dispatch_only_tracked_timeout_fails_closed_even_when_accepted_only_is_allowed() {
+        let err = require_dispatch_only_dispatch_start_proof(
+            Path::new("/tmp/agent-doc-bugs2.md"),
+            "%4",
+            &HarnessConfig::codex(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::DispatchStartUnproven,
+        )
+        .expect_err("tracked dispatch-start timeouts must not report route success");
+
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("only pane-input acceptance proof"),
+            "{message}"
+        );
+        assert!(
+            message.contains("no dispatch-start proof was recorded"),
+            "{message}"
+        );
+    }
+    #[test]
     fn dispatch_only_sent_log_marks_claude_accepted_only_scope() {
         let message = route_dispatch_only_sent_log_message(
             Path::new("/tmp/robert-ross.md"),

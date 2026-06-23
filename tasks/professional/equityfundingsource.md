@@ -69,7 +69,7 @@ Confidence: medium. The observed log evidence is concrete, but Cloudflare's hist
 
 Escalation: none.
 
-### Re: TMO sync delete risk + soft-disable trail — gpt-5 (HEAD)
+### Re: TMO sync delete risk + soft-disable trail — gpt-5
 
 > **Queue prompt:**
 >
@@ -132,7 +132,7 @@ Confidence: high for preventing future hard deletes through these app/DB paths. 
 
 Escalation: none.
 
-### Re: application logging + deploy — gpt-5 (HEAD)
+### Re: application logging + deploy — gpt-5
 
 > **Queue prompt:**
 >
@@ -185,7 +185,7 @@ Confidence: high for Worker request logging, scheduled task logging, migration c
 
 Escalation: none.
 
-### Re: deploy — gpt-5 (HEAD)
+### Re: deploy — gpt-5
 
 > **Queue prompt:**
 >
@@ -226,7 +226,7 @@ Verification:
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:7267188f -->
+<!-- agent:boundary:8e7ec897 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -246,21 +246,22 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Could the delete event have occured from a TMO sync bug?~~
-- ~~We should log all web requests, api calls, migrations, etc. in the application logs.~~
-- ~~No record should be deleted, only disabled. Create a migration. The durable app audit table should be deployed. Do we have sufficient logging to track deletion events? The delete borrower should not cascade. No deleted records. Only disabled records. We need a trail.~~ — auto-struck: answered this cycle (#ftstrike) 
-- ~~deploy~~
+- [#dialog-state-cta]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#dialog-state-cta] [recommended] Dialog-state CTA coverage: add a pure dialog-state contract for the admin/lender pipeline dialogs that maps each state-machine state and blocker to dialog component, visible state tag, primary CTA, secondary CTA, and transition target; refactor `InvestorCardModal` / `AdvanceLenderModal` to consume it; add Bun tests that fail when any `INVESTOR_PIPELINE_COLUMN_IDS` state, requirements status, or lender-account blocker has no clear CTA. Start with `/admin/lender-pipeline`, then generalize the same pattern to loan/application/payment dialogs.
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#apply-invite-fail-ux] Public `/apply` invite-failure UX: when the borrower invite email fails or is skipped after lead persistence, stop telling the borrower to check their inbox; show a received/follow-up message, keep the failed invite status visible to admins, and add a regression test.
+- [/] [#email-bg-outbox] Durable email delivery observability/retry: record lifecycle, secure-message, broker, lending-group, investor-interest, login-link, invite, reminder, and feedback email results in D1 with status/error/retry/dead-letter instead of relying on console-only warnings for background notifications.
+- [/] [#email-prod-ready] Email production-readiness hardening: provision a dedicated `CLOUDFLARE_EMAIL_API_TOKEN` secret with Email Sending scope, verify `BROKER_EMAIL_NOTIFICATIONS_ENABLED` if broker email is expected, add an admin/CI diagnostic that fails when production delivery would fall back to local capture, and document that `MESSAGE_EMAIL_INBOUND_SECRET` is only needed for the HTTP parsed-inbound route.
 - [/] [#mcme] [recommended] #msg-read-status Email-open-based read receipts — DEFERRED: Cloudflare Email Sending has no open-tracking webhook, and transactional mail should stay on Cloudflare Email Sending. If email-open receipts become mandatory, design a Cloudflare-compatible tracking-pixel/event subsystem or accept portal-only read cursors. In-app portal read cursors already exist for borrower chat (`chat_sessions.*_last_read_at`) but are not email reads.
 - [/] [#msg-unify4] [gated: awaiting dual-write prod soak] Lender cutover — dual-write (best-effort mirror into messages, both lender sources) + backfill (migration 0098) SHIPPED (EFS b5a6a55). Remaining: after soak, switch the inbox to read lender data from messages (dual-read), then drop deal_interest_lender_messages + lender_account_messages. Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [/] [#msg-unify3] [gated: awaiting dual-write prod soak] Borrower cutover — dual-write (best-effort mirror into messages) + backfill (migration 0097) SHIPPED (EFS 411a4da). Remaining: after the dual-write soaks live, switch the unified inbox to read borrower data from messages (dual-read), then drop chat_messages. Plan: src/equityfundingsource-dev/prds/message-unification.md.

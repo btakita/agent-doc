@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -151,7 +151,7 @@ Test function names (`machine_transitions_through_all_states`, `machine_rejects_
 - superproject `cb34daaca` (`chore(lazily-rs): bump gitlink for Machine -> StateMachine rename`) → `btakita/agent-loop` main (`788335c03..cb34daaca`).
 
 The module path `state_machine::StateMachine` is mildly redundant as predicted in the prior turn's analysis, but the public surface is `lazily::StateMachine` (crate-root re-export), so the stutter is contained to one line in `lib.rs`. Queue drained.
-<!-- agent:boundary:77dcce82 -->
+<!-- agent:boundary:f80ae72b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -161,11 +161,16 @@ The module path `state_machine::StateMachine` is mildly redundant as predicted i
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - Rename to StateMachine.
+- Would StateMachine be a useful architectural backbone for agent-doc realtime state management?
+- do [#c7j5]
+- do [#w4pq]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#c7j5] #lzadocsm=[recommended] Pilot lazily::StateMachine on agent-doc RunContext CyclePhase. graph.rs already holds a lazily::Context; replace the manually-threaded cycle_state phase mutation with StateMachine<CyclePhase, CycleEvent> (states: Idle→PreflightStarted→ResponseCaptured→WriteApplied→Committed + Interrupted(FaultPoint)). Win: on_transition logging + state_is(WriteApplied) reactive guard + batch atomicity. Scope: in-process only — does NOT touch cross-process supervisor/pane/queue state (those live in JSON sidecars + tmux). Plan: tasks/agent-doc/plan-pilot-statemachine-cyclephase.md. Blocked on: lazily ships no ThreadSafeStateMachine yet — pilot is single-process RunContext only.
+- [ ] [#w4pq] #lzadocsm=[recommended] Pilot lazily::StateMachine on agent-doc's RunContext CyclePhase. graph.rs already holds a lazily::Context; replace the manually-threaded cycle_state phase mutation with a StateMachine<CyclePhase, CycleEvent> (states: Idle→PreflightStarted→ResponseCaptured→WriteApplied→Committed, plus Interrupted(FaultPoint)). Win: on_transition logging + state_is(WriteApplied) reactive guard + batch atomicity for multi-step transitions. Scope: in-process only — does NOT touch cross-process supervisor/pane/queue state (those live in JSON sidecars + tmux). Plan: tasks/agent-doc/plan-pilot-statemachine-cyclephase.md. Blocked on: no ThreadSafeStateMachine in lazily yet — this pilot is single-process RunContext only.
 <!-- /agent:backlog -->
 
 ## Review

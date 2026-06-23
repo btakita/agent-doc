@@ -92,7 +92,7 @@ Verification:
 Confidence: high.
 
 Escalation: none. Production was not deployed in this cycle; `deploy` remains as the next queue prompt.
-<!-- agent:boundary:392f852f -->
+<!-- agent:boundary:d1ffe7ae -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -113,7 +113,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender > Link TMO account...there should be a Sync with TMO button with a closed Manually Link Account `<details>` that has the link form.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~deploy~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

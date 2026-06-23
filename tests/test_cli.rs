@@ -2266,9 +2266,37 @@ fn test_cli_bare_file_path_aliases_to_run() {
 
     let mut cmd = agent_doc_cmd();
     cmd.arg(&missing);
+    cmd.env_remove("CLAUDECODE");
+    cmd.env_remove("CLAUDE_CODE");
+    cmd.env_remove("CLAUDE_CODE_SESSION");
+    cmd.env_remove("OPENCODE");
+    cmd.env_remove("OPENCODE_CLIENT");
+    cmd.env_remove("CODEX");
+    cmd.env_remove("CODEX_CLI");
+    cmd.env_remove("CODEX_THREAD_ID");
+    cmd.env("CODEX_SESSION", "codex-session");
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("file not found"));
+
+    let mut plain_shell = agent_doc_cmd();
+    plain_shell.arg(&missing);
+    plain_shell.env_remove("CLAUDECODE");
+    plain_shell.env_remove("CLAUDE_CODE");
+    plain_shell.env_remove("CLAUDE_CODE_SESSION");
+    plain_shell.env_remove("OPENCODE");
+    plain_shell.env_remove("OPENCODE_CLIENT");
+    plain_shell.env_remove("CODEX");
+    plain_shell.env_remove("CODEX_CLI");
+    plain_shell.env_remove("CODEX_SESSION");
+    plain_shell.env_remove("CODEX_THREAD_ID");
+    plain_shell.assert().failure().stderr(
+        predicate::str::contains("bare `agent-doc <FILE>` must be run")
+            .and(predicate::str::contains(
+                "supported harness (Codex, Claude Code, or OpenCode)",
+            ))
+            .and(predicate::str::contains("agent-doc run <FILE>")),
+    );
 }
 
 #[test]

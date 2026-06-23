@@ -412,7 +412,35 @@ Proof:
 - Verification: confirmed Deal Pipeline source paths; confirmed `TST113` TMO cache row contains `EmailAddress='stormrunner06106@gmail.com'` / `ShortName='Huang, Lucas'`; confirmed no current matching EFS loan row and no current `stormrunner` match in the obvious app-owned email/audit tables.
 - Confidence: high that the current proven stale source is `tmo_cache_entities` for `TST113`; medium on whether that exact row is the same evidence you saw, because I did not inspect the external UI/log that reported the deletion.
 - Escalation: none. I did not use Time Travel restore, mutate D1, deploy, or modify EFS source.
-<!-- agent:boundary:4ed93d3d -->
+## full-app-soft-delete #ktqk — gpt-5
+
+Implemented the full-application delete replacement in `src/equityfundingsource-dev`; submodule commit `68346f4` is `Archive full applications instead of deleting`.
+
+### changed_paths — gpt-5
+
+- `app/equityfundingsource/migrations/0102_full_application_soft_delete.sql`: adds archive metadata, active-draft partial indexes scoped to `archived_at IS NULL`, and a guard trigger that rejects hard deletes from `full_applications`.
+- `app/equityfundingsource/lib/borrower/applications/repo.ts`: replaces admin hard delete with archive semantics, durable `audit_logs` writes, optional linked-lead archival, and active-only reads/updates for borrower/admin flows.
+- Admin, borrower, dashboard, pipeline, nav-count, investor-activity, and publish-eligibility queries now exclude archived full applications while preserving existing child section rows.
+- Regression tests updated for admin archive behavior, audit rows, preserved child data, active-only counts, and the migration hard-delete guard.
+
+### commands — gpt-5
+
+- `bun run check` in `src/equityfundingsource-dev`: passed (`1146 pass`, `0 fail`; build and worker build passed).
+- `git -C src/equityfundingsource-dev diff --check`: passed.
+- `make check` at `/home/brian/work/btakita/agent-loop`: passed.
+
+### verification — gpt-5
+
+The admin delete route now archives the full application instead of deleting the root or child application-section rows. Current pipeline/list/count/activity/publication queries only consider `full_applications.archived_at IS NULL`, so archived applications stop showing in active admin and borrower surfaces without losing the application history.
+
+### confidence — gpt-5
+
+High. The full EFS test suite/builds and the repo-level check passed after the migration and query updates.
+
+### escalation — gpt-5
+
+No escalation or external services were required.
+<!-- agent:boundary:a06717f3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -433,13 +461,13 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - do [#ktqk]
+- Is Lucas Huang in the TMO sandbox? Or only in the EFS database?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
-- [ ] [#ktqk] full-app-soft-delete: Replace full-application hard delete surfaces with soft-delete/archive semantics plus durable audit logs; preserve child application section rows and add regression tests for admin delete and borrower/user cascade paths.
 <!-- /agent:backlog -->
 
 ## Review

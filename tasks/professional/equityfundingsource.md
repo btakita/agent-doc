@@ -55,7 +55,30 @@ Key gaps found:
 Verification passed with the focused email-related `bun test` suite. I did not change EFS source code; the EFS submodule remained clean. I added the follow-up items as gated review work: `#email-prod-ready`, `#email-bg-outbox`, and `#apply-invite-fail-ux`.
 
 Agent-doc closeout is still blocked by the harness: the response is captured, but the editor IPC proof never ACKed, so agent-doc refused to write/commit the exchange body. `agent-doc admin recycle` has been requested, and `restart-supervisor` refused because this pane is still busy. The pending response is retained for retry once the supervisor can recycle at idle.
-<!-- agent:boundary:b33911a9 -->
+
+### Re: [#vjcv] Email sending audit — gpt-5
+
+I audited the email-sending paths in `src/equityfundingsource-dev`. This is not complete/reliable in all use cases yet.
+
+What looks sound:
+- Shared sender normalization and local capture are centralized in `app/equityfundingsource/lib/email/index.ts` and `local_capture.ts`.
+- Public contact/apply flows persist records before sending and record notification status.
+- Secure-message outbound and inbound email routing use the unified inbound path and Worker `email()` handler.
+- Explicit admin sends for application feedback and payment reminders surface errors on failed sends.
+- Login-link flows use single-use tokens, and admin-triggered login links expire the token if the email cannot be sent.
+
+Main reliability gaps:
+- Production secrets include `CLOUDFLARE_API_TOKEN`, but not a dedicated `CLOUDFLARE_EMAIL_API_TOKEN`; code falls back to the generic token, so Email Sending is coupled to broader Cloudflare API scope.
+- Broker email notifications are gated by `BROKER_EMAIL_NOTIFICATIONS_ENABLED`, and production `wrangler.toml` does not set it. Broker in-app notifications still work, but broker email is not clearly production-enabled.
+- Many background notification sends only log failures; there is no durable retry/dead-letter/status path for lifecycle, secure-message, broker, group invite/reminder, investor-interest, or similar notifications.
+- Public `/apply` can tell the borrower to check their inbox even when the borrower invite email failed/skipped. It records the failure for admins, but the borrower-facing UX can be wrong.
+- `MESSAGE_EMAIL_INBOUND_SECRET` is not in the production secret list. The Cloudflare Email Worker `email()` path does not need it, but the parsed JSON `/api/email/inbound` route will reject requests unless this is configured.
+
+Verification run passed:
+`bun test tests/email-local-capture.test.ts tests/email-login.test.ts tests/admin-provisioning-email.test.ts tests/application-leads.test.ts tests/contact-messages.test.ts tests/borrower-message-notify.test.ts tests/msgmail2-lender-reply-to.test.ts tests/msgmail3-inbound-unified.test.ts tests/msgmail4-inbound-email-handler.test.ts tests/lending-group-notify.test.ts tests/lender-group-invite-reminder.test.ts tests/admin-payment-reminder.test.ts tests/lender-account-messages.test.ts`
+
+I did not change EFS source code during this audit. I added the follow-up work as gated review items: `#email-prod-ready`, `#email-bg-outbox`, and `#apply-invite-fail-ux`.
+<!-- agent:boundary:4c05b01d -->
 <!-- /agent:exchange -->
 ###
 <!--

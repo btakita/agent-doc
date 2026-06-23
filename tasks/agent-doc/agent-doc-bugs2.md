@@ -39,6 +39,25 @@ done
 Compacted content:
 - Archived 10 response topic(s): ack-mismatch shorter recovered response loss; #directchatpb2; JB Run Agent Doc submit path; 7 more
 - Prior summary/context: prior compacted content: Archived 6 response topic(s): JB Run Agent Doc submit latency; #turnstuck-readybusy; answere...
+❯ - `src/agent-doc` commit `644d7b12 fix: guard queued clear dispatch`
+❯ - Clean sibling worktree at `644d7b12`: `make check` passed, including clippy, 5039 nextest tests, doctests, and the ignored medium sim check.
+❯ - `cargo test -p agent-doc-orchestration context_clear_marker_resubmits_visible_pending_clear_once -- --nocapture`
+❯ - `cargo test -p agent-doc-orchestration drain_settle_gate_blocks_until_pane_idles_after_clear -- --nocapture`
+❯ - `cargo test -p agent-doc-orchestration focused_cycle_head_drains_for_supervisor_not_in_session_loop -- --nocapture`
+❯ - `cargo test -p agent-doc-orchestration supervisor_drains_focused_cycle_but_loop_defers_it -- --nocapture`
+❯ - `cargo test repeated_busy_session_clear_keeps_single_deferred_clear -- --nocapture`
+❯ - `cargo test busy_clear -- --nocapture`
+❯ - `cargo test queue_dispatch -- --nocapture`
+❯ - Added a dispatcher regression proving a queued `/clear` does not reach raw supervisor injection, and retargeted the generic supervisor-inject test to `/doctor` so it still covers non-clear command dispatch.
+❯ - Non-clear queued commands still use the existing supervisor IPC path.
+❯ - That reuses the current busy-pane/active-auto-queue behavior: the first non-interrupting busy clear writes the deferred handoff/cooldown, duplicates are suppressed, and raw `/clear` is not injected into an active response.
+❯ - Queued `/clear` commands now leave `queue_dispatch` before generic supervisor IPC or tmux fallback and call the existing guarded `session_actor_cmd::clear` path.
+❯ - `src/agent-doc/src/queue_dispatch.rs`
+❯ - Latest GitHub Actions CI for `main` was green: run `28060207399`, `fix: preserve prose queue heads`, completed 2026-06-23T22:03:57Z.
+❯ - `make install-full` passed from that isolated worktree and installed `agent-doc 0.34.43`; install marked two controllers for recycle at next idle boundary.
+❯ - Full `make check` passed in an isolated worktree containing only this patch: 5042 tests passed, 241 skipped, medium simulator passed.
+❯ - Targeted regressions passed for queue preemption, session-clear messages, and SimWorld duplicate suppression.
+❯ - `cargo fmt --check` passed in the working tree.
 
 ### Re: #mbd4 IPC issue dogfooding log — gpt-5
 
@@ -77,22 +96,48 @@ The live worktree still has pre-existing unrelated dirty files in `agent-doc-orc
 > **Queue prompt:** JB Run Agent Doc still not submitting. Can we track when this happens and automatically file a bug so I don't have to endlessly repeat myself when you fail to fix the issue?
 
 I did not fold that separate auto-filing behavior into `#p6a0`. I added it as a new backlog item so the route failure path can be designed with the right diagnostic capture and dedupe contract instead of being mixed into the deferred-clear fix.
-<!-- agent:boundary:f51c2cff -->
+Implemented and pushed `#p6a0`.
+
+Code commits:
+- `src/agent-doc`: `ef365e4b fix: dedupe deferred session clears`
+- parent gitlink: `8042b8955 chore: update agent-doc submodule`
+- session closeout: `76ca6e39b agent-doc(agent-doc-bugs2): 2026-06-23 18:51:43`
+
+What changed:
+- Busy `agent-doc session clear` now queues one deferred clear for the next idle boundary.
+- Repeat clears while pending now report already deferred and do not inject another `/clear`.
+- Added queue-preemption, session message, and SimWorld regression coverage.
+- Updated README/spec/editor specs/`VERSIONS.md`.
+- Added backlog item `#3ygp` for automatic bug filing on repeated JetBrains Run route failures.
+
+Verification:
+- `cargo fmt --check` passed.
+- Targeted regressions passed.
+- Full `make check` passed in an isolated worktree containing only this patch: 5042 passed, 241 skipped, medium sim passed.
+- `make install-full` passed and installed `agent-doc 0.34.43`.
+- `src/agent-doc` CI was green before push.
+- Root `Agent Doc` workflow failed in 4s with empty job steps and no logs, matching an external CI-start/no-log blocker rather than a test failure.
+
+Notes:
+- I left pre-existing unrelated dirty files unstaged, including `agent-doc-orchestration/src/write.rs` and `write/queue_consume.rs`.
+- `session-check` is ok; it still warns that the route-owned supervisor is stale and should recycle at the next idle boundary.
+<!-- agent:boundary:30b031e6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#p6a0]: Broaden to any agent-doc issues detected in this project PCP...dogfood `#agent-doc-bug`~~
-- do [#mbd4]
+- ~~do [#mbd4]~~
 - :pushpin: do [#pzjy]
-- [#mbd4]
+- JB `Run Agent Doc` still not submitting. Can we track when this happens and automatically file a bug so I don't have to endlessly repeat myself when you fail to fix the issue? [dogfooding] Can we also have the supervisor detect if the turn started? And if the turn has not started, send Enter and continue retrying until the turn starts?
+- ~~do [#p6a0]~~
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
 - :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#tb4q]: please check logs
 - :pushpin: do [#qcm1verify]: Use the logs to verify.
 - :pushpin: do [#qstrikework]
-- do [#1jec]
+- :pushpin: do [#1jec]
+- do [#3ygp]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

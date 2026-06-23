@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -34,126 +34,19 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260623-011244.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260623-024747.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #qpinfl - gpt-5
-- Prior summary/context: prior compacted content: Archived 4 response topic(s): stale-supervisor materialization queue head; ACK-mismatch queu...
-
-### Re: #fccd - gpt-5
-
-> **Queue prompt:**
->
-> [#fccd]
-
-
-Restored and completed the accidentally consumed `#fccd` investigation.
-
-Findings: the installed CLI is `agent-doc 0.34.38`, and the current code already uses the structural clear preflight path in `src/session_actor_cmd.rs`: it classifies idle/clean-exit/no-live-pane/protected/busy states, refuses protected prompt input, and defers non-interrupting clears under an active auto-queue loop instead of delivering `/clear` into an in-flight turn. I did not find a current code path that would require a new structural/node merge fix for stale Clear Session Cache dialogs.
-
-Runtime remediation: `agent-doc-bugs2.md`, `agent-loop.md`, `equityfundingsource.md`, and the project controller were fresh. One foreign route-owned supervisor, `src/boost-client/tasks/monsterrodholders.md`, was still mapped to the deleted old binary (`/proc/3965752/exe`). I verified the dry-run target and retired it with the supported admin path; after that, the remaining live route-owned supervisors and controller all resolve to `/home/brian/.cargo/bin/agent-doc`.
-
-Verification:
-- `agent-doc --version` -> `agent-doc 0.34.38`
-- `agent-doc admin inspect ...agent-doc-bugs2.md` -> `freshness=controller:fresh,supervisor:fresh`
-- `agent-doc admin inspect ...agent-loop.md` -> `freshness=controller:fresh,supervisor:fresh`
-- `agent-doc admin inspect ...equityfundingsource.md` -> `freshness=controller:fresh,supervisor:fresh`
-- `agent-doc admin kill-supervisor ...monsterrodholders.md --dry-run --json` -> target PID `3965752`
-- `agent-doc admin kill-supervisor ...monsterrodholders.md --grace-secs 5 --json` -> `status=forced`
-- `readlink /proc/1517469/exe /proc/1669401/exe /proc/4005077/exe /proc/2635572/exe` -> all `/home/brian/.cargo/bin/agent-doc`
-- `git status --short` in `src/agent-doc` -> clean
-
-Remaining unrelated admin diagnostics: `agent-doc admin detect` still reports two stale dead-pane actor bindings for `tasks/sift.md` and `tasks/software/tsift.md`; those are orphaned bindings, not live stale supervisors and not part of the Clear Session Cache dialog path.
-
-### Re: bare agent-doc shell invocation — gpt-5
-
-> **Queue prompt:**
->
-> equityfundingsource.md turn is getting IPC ack status errors
-> ```
-> • The backup answer is straightforward: Cloudflare Time Travel is active for the live D1 DB, but I found no project-
->   managed long-retention export job. I’m writing the response now and will let agent-doc commit it.
->
-> • Ran cat <<'RESPONSE' | agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/professional/
->   │ equityfundingsource.md --baseline-file /home/brian/work/btakita/agent-loop/.agent-doc/
->   │ baselines/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.md --stream --origin skill
->   │ … +51 lines
->   └ [write] socket IPC failed: IPC ack status error: {"type":"ack","status":"error"} — falling back to file IPC
->     [template] pre-patch boundary 36d8e74a:equityfundingsource inserted at end of exchange
->     … +9 lines (ctrl + t to view transcript)
->     Error: editor IPC did not prove the write for /home/brian/work/btakita/agent-loop/tasks/professional/
->     equityfundingsource.md; pending response retained for retry; refusing direct document write
->
-> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
->
-> • The second finalize hit the same editor IPC timeout and left a pending response for retry. I’m invoking preflight
->   again because it successfully recovered the previous pending response through the normal repair-and-commit path.
-> ```
-
-
-> **Queue prompt:**
->
-> Running `agent-doc file-name.md` directly in the CLI should return in an immediate error explaining it needs to be run within a supported harness (Codex, Claude, or Opencode). Instead, it said "Submitting to Codex..." and locks the shell. Now I cannot sync monsterrodholders.md.
-
-Implemented and shipped the direct-shell guard.
-
-Changed paths:
-- `src/agent-doc/src/main.rs`
-- `src/agent-doc/tests/run_integration.rs`
-- `src/agent-doc/specs/07-core-commands.md`
-- `src/agent-doc/specs/07-commands.md`
-- `src/agent-doc` superproject gitlink
-
-What changed: bare `agent-doc <FILE>` now checks the active harness before rewriting to `run`. Inside Codex, Claude Code, or OpenCode it keeps the harness-native behavior. In a normal shell with no supported harness env, it fails before parsing into `run`, before opening a cycle, and tells the operator to use an explicit subcommand such as `agent-doc run <FILE>`, `agent-doc route <FILE>`, or `agent-doc start <FILE>`.
-
-Verification:
-- `cargo fmt`
-- `cargo test bare_file_invocation_outside_supported_harness_fails_before_run_cycle`
-- `cargo test codex_bare_run_inside_owning_pane_with_unresolved_prompt_fails_before_pre_commit`
-- `cargo test codex_owned_pane_active_auto_queue_hands_off_without_drift`
-- `make check` -> 5002 tests passed, 241 skipped, SimWorld medium seed passed
-- `make install` -> installed `agent-doc 0.34.38` and refreshed `libagent_doc.so`
-- `env -u ... agent-doc tasks/agent-doc/agent-doc-bugs2.md` -> immediate error: bare `agent-doc <FILE>` must be run from a supported harness
-
-Commits / push:
-- agent-doc submodule: `3a8e304d` (`fix: guard bare agent-doc shell invocation`) pushed to `btakita/agent-doc main`
-- superproject pointer: `edcd0d452` (`chore: update agent-doc submodule`) pushed to `btakita/agent-loop main` from a clean temporary worktree because the local superproject `main` has a long unrelated divergence
-
-CI:
-- agent-doc `CI` run `27995577311` was still `in_progress` at closeout check.
-- superproject has no workflow named `CI`; its `Agent Doc` workflow run `27995642188` failed before runner startup. Both jobs had zero steps and GitHub annotated: recent account payments failed or the spending limit needs to be increased. Local verification above is the code evidence for this turn.
-
-Escalation: none.
-
-The earlier queue heads about the equityfundingsource IPC ack status and the JB Run Agent Doc harness switch remain open; this response intentionally handled only the quoted direct-shell CLI prompt.
-
-### Re: bare agent-doc shell invocation follow-up — gpt-5
-
-Follow-up after the remote CI failures: the production guard stayed the same, but two legacy tests still assumed bare `agent-doc <FILE>` was valid from a normal shell. I updated those tests so the harness-native alias path runs with an explicit Codex marker, and the plain-shell path asserts the new immediate supported-harness error.
-
-Additional changed paths:
-- `src/agent-doc/tests/run_integration.rs`
-- `src/agent-doc/tests/test_cli.rs`
-- `src/agent-doc` superproject gitlink
-
-Final commits / pushes:
-- agent-doc submodule: `3a8e304d` (`fix: guard bare agent-doc shell invocation`), `c393b1dd` (`test: mark bare path alias harness-native`), and `970ee577` (`test: cover bare path shell rejection`) pushed to `btakita/agent-doc main`
-- superproject pointer: `8e6b05ffb` (`chore: update agent-doc submodule`) pushed to `btakita/agent-loop main`
-
-Final verification:
-- `env -u CLAUDECODE -u CLAUDE_CODE -u CLAUDE_CODE_SESSION -u OPENCODE -u OPENCODE_CLIENT -u CODEX -u CODEX_CLI -u CODEX_SESSION -u CODEX_THREAD_ID cargo test test_cli_bare_file_path_aliases_to_run`
-- `env -u CLAUDECODE -u CLAUDE_CODE -u CLAUDE_CODE_SESSION -u OPENCODE -u OPENCODE_CLIENT -u CODEX -u CODEX_CLI -u CODEX_SESSION -u CODEX_THREAD_ID cargo test bare_path_alias_uses_same_template_safe_path`
-- `env -u CLAUDECODE -u CLAUDE_CODE -u CLAUDE_CODE_SESSION -u OPENCODE -u OPENCODE_CLIENT -u CODEX -u CODEX_CLI -u CODEX_SESSION -u CODEX_THREAD_ID make check` -> 5002 tests passed, 241 skipped, SimWorld medium seed passed
-- agent-doc GitHub Actions `CI` run `27996252411` -> success (`make check` and `make tmux-ci` passed)
-- superproject `Agent Doc` run `27996268409` still failed before runner startup because GitHub reported account billing/spending-limit restrictions; no test steps started
-
-Runtime cleanup: ran `agent-doc admin recycle`; it marked the project controller to recycle at the next idle boundary so stale-binary supervisors can refresh without discarding live turns.
-<!-- agent:boundary:5d781c03 -->
+❯ - Archived 3 response topic(s): #fccd - gpt-5; bare agent-doc shell invocation; bare agent-doc shell invocation follow-up
+❯ - Prior summary/context: prior compacted content: Archived 1 response topic(s): #qpinfl - gpt-5
+<!-- agent:boundary:677d7336 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- do [#ws55]
+- do [#3x90]
 <!-- /agent:queue -->
 <!--
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.
@@ -185,6 +78,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#ws55] If agent-doc was run from the shell, is it supposed to start the agent harness and run the document?
+- [ ] [#3x90] JB `Run Agent Doc` still fails to submit. This is a chronic condition that you don't seem to be able to solve. Please dig deeper and isolate the cause(s).
 <!-- /agent:backlog -->
 
 ## Review

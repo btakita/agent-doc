@@ -26,7 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-done
+complete
 <!-- /agent:status -->
 
 ## Exchange
@@ -39,6 +39,81 @@ done
 Compacted content:
 - Archived 4 response topic(s): queued blockers after repair; live-verification queue gating; closeout write repair; 1 more
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): Codex Run Agent Doc submit retries - gpt-5; strict closeout an...
+- Parent repo push to `btakita/agent-loop` `main` is blocked by pre-existing divergence: local `main` is ahead 92 and behind 15. I attempted `git rebase --autostash origin/main`, but aborted it after it hit an unrelated `src/boost-client` submodule conflict while replaying older local commits. The dirty user/session files were restored by the abort.
+- `gh run list --workflow CI --limit 1`
+- `cargo test` in `src/tmux-router`
+- `agent-doc --version`
+- `make install-full`
+- `make check`
+- `make -n publish-crate`
+- `maturin build --release --out /tmp/agent-doc-real-wheel` from extracted sdist
+- `.venv/bin/maturin sdist --out /tmp/agent-doc-real-sdist`
+- `cargo publish --dry-run --allow-dirty -p agent-doc-markdown-ast`
+- `cargo publish --dry-run --allow-dirty -p agent-doc-core`
+- `cargo publish --dry-run --allow-dirty --manifest-path ../tmux-router/Cargo.toml`
+- `cargo test -p agent-doc test_manifest_uses_publishable_dependency_contract`
+- `make version-sync`
+- `cargo fmt`
+- parent repo: local commit `76be04eb8 chore: update agent-doc release packaging`; parent push is still blocked by the pre-existing `main...origin/main [ahead 103, behind 15]` divergence and unrelated `src/boost-client` submodule rebase conflict.
+- `src/agent-doc`: `3238bc0b fix release packaging publish graph` and `0a50a48b chore: update bundled agent-doc skill` on `origin/main`.
+- `src/tmux-router`: `fee7099` and `289750f` on `origin/main`.
+- `src/agent-doc/.claude/skills/agent-doc/SKILL.md`
+- Parent repo push to `btakita/agent-loop` `main` is blocked by pre-existing divergence: local `main` is ahead 103 and behind 15. I retried `git push origin main`; it was rejected as non-fast-forward. I did not rebase because the parent worktree still has unrelated dirty submodules/session files.
+- Created local parent repo commits `7b0ba940d` (`chore: update release packaging submodules`) and `76be04eb8` (`chore: update agent-doc release packaging`) so the parent gitlinks point at `src/agent-doc` `0a50a48b` and `src/tmux-router` `289750f`.
+- Pushed `src/agent-doc` commit `3238bc0b` (`fix release packaging publish graph`) to `btakita/agent-doc` `main`; the install/skill refresh then produced and pushed `0a50a48b` (`chore: update bundled agent-doc skill`).
+- Pushed `src/tmux-router` commits `fee7099` (`chore: bump tmux-router for agent-doc release`) and `289750f` (`chore: update tmux-router lock version`) to `btakita/tmux-router` `main`.
+- GitHub Actions CI is green for `tmux-router` commit `289750f` (`chore: update tmux-router lock version`) in run `27993343380`. The earlier `fee7099` run failed before the lockfile follow-up and is superseded by the green latest run.
+- GitHub Actions CI is green for `agent-doc` commit `3238bc0b` (`fix release packaging publish graph`) in run `27993325529`, and for latest `agent-doc` head `0a50a48b` (`chore: update bundled agent-doc skill`) in run `27993373472` (`make check` + `make tmux-ci`).
+- `cargo test` passed in `src/tmux-router`.
+- `agent-doc --version` reports `agent-doc 0.34.38`.
+- `make install-full` passed, installed `agent-doc 0.34.38` and `libagent_doc-0.34.38.so`, and marked 2 controllers for recycle at idle.
+- `make check` passed locally: clippy, 4,999 nextest tests, doctests, and the medium closeout simulation.
+- `make version-sync` passed.
+- `cargo test -p agent-doc test_manifest_uses_publishable_dependency_contract` passed.
+- `cargo fmt` passed.
+- Archive checks confirmed no `agent-kit`, `lazily-rs`, or `tagpath` sibling directories in the sdist; `tmux-router` is intentionally packaged as the live path dependency.
+- `maturin build --sdist --skip-auditwheel` passed and built a wheel from the generated sdist.
+- Full dependent dry-runs stop until earlier crates are actually visible in crates.io (`tmux-router 0.3.11` / `agent-doc-core 0.34.38`), which is the expected Cargo registry check and why `make publish-crate` now publishes and waits in dependency order.
+- `cargo publish --dry-run --allow-dirty -p agent-doc-core` and `-p agent-doc-markdown-ast` passed for the leaf internal crates.
+- `cargo publish --dry-run --allow-dirty --manifest-path ../tmux-router/Cargo.toml` passed for `tmux-router v0.3.11`.
+- parent gitlinks for `src/agent-doc` and `src/tmux-router`
+- `src/agent-doc/.claude/skills/agent-doc/SKILL.md` (bundled skill version refresh after install)
+- `src/agent-doc/tests/test_cli.rs`
+- `src/agent-doc/src/main.rs`
+- `src/agent-doc/agent-doc-orchestration/src/project_controller.rs`
+- `src/agent-doc/agent-doc-orchestration/Cargo.toml`
+- `src/agent-doc/agent-doc-sqlite/Cargo.toml`
+- `src/agent-doc/agent-doc-markdown-ast/Cargo.toml`
+- `src/agent-doc/agent-doc-core/Cargo.toml`
+- `src/agent-doc/VERSIONS.md`
+- `src/agent-doc/Makefile`
+- `src/agent-doc/Cargo.lock`
+- `src/agent-doc/Cargo.toml`
+- `src/agent-doc/AGENTS.md`
+- `src/agent-doc/.github/workflows/pypi.yml`
+- `src/tmux-router/Cargo.lock`
+- `src/tmux-router/Cargo.toml`
+- Created parent repo commit `19c76e484` (`chore: update agent-doc typing guard`) for the submodule pointer and `.codex/AGENTS.md` refresh.
+- Pushed `src/agent-doc` commit `df7ac7af` (`fix idle queue typing guard`) to `btakita/agent-doc` `main`.
+- GitHub Actions CI for pushed submodule commit `df7ac7af` passed: `make check` and `make tmux-ci` completed successfully in run `27991483860`.
+- `agent-doc --version` reports `agent-doc 0.34.38`.
+- `make install-full` completed, installing `agent-doc 0.34.38` and `libagent_doc-0.34.38.so` under `/home/brian/.cargo/bin`.
+- `make check` passed locally: 4,999 tests passed, 241 skipped, plus doctests and the closeout simulation test.
+- `cargo test -p agent-doc-orchestration idle_queue_`
+- `cargo test -p agent-doc-orchestration typing_guard`
+- `cargo test -p agent-doc-orchestration editor_typing`
+- `cargo fmt`
+- Documented the binary-only Run behavior in the editor spec and added an unreleased version note.
+- Added regression coverage for both decision paths and for relative-path supervisor vs absolute-path editor typing sidecar.
+- Added `editor_typing_active_for_idle_queue()` in the supervisor idle watcher, including absolute-path fallback.
+- Added `SkipEditorTyping` decisions for idle queue context reset and drain.
+- `.codex/AGENTS.md` and the parent `src/agent-doc` submodule pointer were updated locally after `agent-doc skill install` and the submodule commit.
+- `src/agent-doc/VERSIONS.md`
+- `src/agent-doc/editors/SPEC.md`
+- `src/agent-doc/agent-doc-orchestration/src/start/idle_watch.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start/decisions.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start.rs`
+- `src/agent-doc/agent-doc-orchestration/src/preflight.rs`
 
 ### Re: stale-supervisor materialization queue head — gpt-5
 
@@ -60,6 +135,11 @@ Escalation: none. Confidence: high that this queue head is stale duplicated queu
 
 > **Queue prompt:**
 >
+> JB `Run Agent Doc` still does not submit sometimes. Sometimes it does submit. There also is some logic that adds a prompt while I'm typing into the queue. I know this because that auto-prompt adds `agent-doc tasks/agent-doc/agent-doc-bugs2.md` and `/clear` while JB `Run Agent Doc` sends `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`. None of the prompts were submitted. The send-docs should be completely binary logic sent by the PCP->supervisor. No skill agent logic should be involved.
+
+
+> **Queue prompt:**
+>
 > When rebuilding the binary + library, wait for both to complete before replacing the existing binary + library.
 
 
@@ -73,128 +153,202 @@ Parent superproject commit `3c2cc2fa3` updates the `src/agent-doc` pointer, but 
 
 Supervisor recycle was requested for the superproject controller.
 
-### Re: JB Run Agent Doc typing guard — gpt-5
+### Re: release packaging publish blockers — gpt-5
 
 > **Queue prompt:**
 >
-> JB `Run Agent Doc` still does not submit sometimes. Sometimes it does submit. There also is some logic that adds a prompt while I'm typing into the queue. I know this because that auto-prompt adds `agent-doc tasks/agent-doc/agent-doc-bugs2.md` and `/clear` while JB `Run Agent Doc` sends `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`. None of the prompts were submitted. The send-docs should be completely binary logic sent by the PCP->supervisor. No skill agent logic should be involved.
+> :pushpin: Fix the root cause of this issue that occurred in this document.
+> ```
+> • The write recovery path hit the same stale-supervisor proof guard: the patch was delivered, but the materialized
+>   content was missing the response body. I’m checking the admin/session controls for a non-destructive way to get the
+>   supervisor onto the installed binary without interrupting this turn.
+> ```
+> • Because the malformed response is already in the exchange, I’m checking whether agent-doc repair --apply-recovery can
+>   normalize the interrupted cycle itself before I touch the component through a lower-level patch.
+>
+> • Ran agent-doc repair --apply-recovery /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+>   └ [repair] recovery [open_cycle] not auto-applied: auto-apply withheld — recovery requires a preserved response body
+>     or open-cycle resolution, not a metadata operation
+>     [repair] run: finish the response, then `agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+>     agent-doc-bugs2.md` (or `agent-doc write --commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+>     agent-doc-bugs2.md` to absorb an already-visible response)
+>
+> ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+> • The repair command will not auto-apply this state; it needs the response finished first. I’m going to use the agent-
+>   doc component patcher to replace only the malformed exchange component with the complete response text while
+>   preserving the newly added queue item.
+> ```
+> • The partial IPC apply inserted only the body bullets and auto-struck the head, without the ### Re: header or queue
+>   prompt. A new queue item was also added while I was closing out; I’m going to repair the malformed closeout first,
+>   then the loop can move to the next queue head.
+> ```
+> • Session-check still fails because the exchange tail ends with the compacted Session Summary, not the response. I’m
+>   reordering the exchange so the Session Summary stays first and the completed ### Re: response is the final exchange
+>   entry.
+> ```
 
 
 > **Queue prompt:**
-> JB `Run Agent Doc` sometimes does not submit, and an auto-prompt sometimes adds `agent-doc tasks/agent-doc/agent-doc-bugs2.md` plus `/clear` while the JB action sends the absolute-path `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`. The send-docs path should be binary PCP->supervisor logic only.
+>
+> :pushpin: Fix the root cause of this issue that occurred in this document.
+> ```
+> • The write recovery path hit the same stale-supervisor proof guard: the patch was delivered, but the materialized
+>   content was missing the response body. I’m checking the admin/session controls for a non-destructive way to get the
+>   supervisor onto the installed binary without interrupting this turn.
+> ```
+> • Because the malformed response is already in the exchange, I’m checking whether agent-doc repair --apply-recovery can
+>   normalize the interrupted cycle itself before I touch the component through a lower-level patch.
+>
+> • Ran agent-doc repair --apply-recovery /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+>   └ [repair] recovery [open_cycle] not auto-applied: auto-apply withheld — recovery requires a preserved response body
+>     or open-cycle resolution, not a metadata operation
+>     [repair] run: finish the response, then `agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+>     agent-doc-bugs2.md` (or `agent-doc write --commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+>     agent-doc-bugs2.md` to absorb an already-visible response)
+>
+> ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+> • The repair command will not auto-apply this state; it needs the response finished first. I’m going to use the agent-
+>   doc component patcher to replace only the malformed exchange component with the complete response text while
+>   preserving the newly added queue item.
+> ```
 
-Fixed the supervisor-side root cause in `src/agent-doc`: the idle queue watcher now treats active editor typing as a hard skip for both context-reset `/clear` submission and queue-drain `agent-doc <FILE>` submission. The guard checks the route-owned path and its resolved absolute path, so a supervisor holding a relative session path still sees the JetBrains typing sidecar keyed by the absolute path. No skill-agent logic is involved in that decision.
 
-Changed paths:
-- `src/agent-doc/agent-doc-orchestration/src/preflight.rs`
-- `src/agent-doc/agent-doc-orchestration/src/start.rs`
-- `src/agent-doc/agent-doc-orchestration/src/start/decisions.rs`
-- `src/agent-doc/agent-doc-orchestration/src/start/idle_watch.rs`
-- `src/agent-doc/editors/SPEC.md`
+> **Queue prompt:**
+>
+> :pushpin: Fix the root cause of this issue that occurred in this document.
+> ```
+> • The write recovery path hit the same stale-supervisor proof guard: the patch was delivered, but the materialized
+>   content was missing the response body. I’m checking the admin/session controls for a non-destructive way to get the
+>   supervisor onto the installed binary without interrupting this turn.
+> ```
+> • Because the malformed response is already in the exchange, I’m checking whether agent-doc repair --apply-recovery can
+>   normalize the interrupted cycle itself before I touch the component through a lower-level patch.
+>
+> • Ran agent-doc repair --apply-recovery /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+>   └ [repair] recovery [open_cycle] not auto-applied: auto-apply withheld — recovery requires a preserved response body
+>     or open-cycle resolution, not a metadata operation
+>     [repair] run: finish the response, then `agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+>     agent-doc-bugs2.md` (or `agent-doc write --commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+>     agent-doc-bugs2.md` to absorb an already-visible response)
+>
+> ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+> • The repair command will not auto-apply this state; it needs the response finished first. I’m going to use the agent-
+>   doc component patcher to replace only the malformed exchange component with the complete response text while
+>   preserving the newly added queue item.
+> ```
+
+
+> **Queue prompt:**
+>
+> :pushpin: Fix the root cause of this issue that occurred in this document.
+> ```
+> • The write recovery path hit the same stale-supervisor proof guard: the patch was delivered, but the materialized
+>   content was missing the response body. I’m checking the admin/session controls for a non-destructive way to get the
+>   supervisor onto the installed binary without interrupting this turn.
+> ```
+> • Because the malformed response is already in the exchange, I’m checking whether agent-doc repair --apply-recovery can
+>   normalize the interrupted cycle itself before I touch the component through a lower-level patch.
+>
+> • Ran agent-doc repair --apply-recovery /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+>   └ [repair] recovery [open_cycle] not auto-applied: auto-apply withheld — recovery requires a preserved response body
+>     or open-cycle resolution, not a metadata operation
+>     [repair] run: finish the response, then `agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+>     agent-doc-bugs2.md` (or `agent-doc write --commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+>     agent-doc-bugs2.md` to absorb an already-visible response)
+>
+> ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+> • The repair command will not auto-apply this state; it needs the response finished first. I’m going to use the agent-
+>   doc component patcher to replace only the malformed exchange component with the complete response text while
+>   preserving the newly added queue item.
+> ```
+
+
+Implemented `#98t4`.
+
+<!-- changed_paths -->
+- `src/agent-doc/Cargo.toml`
+- `src/agent-doc/agent-doc-core/Cargo.toml`
+- `src/agent-doc/agent-doc-markdown-ast/Cargo.toml`
+- `src/agent-doc/agent-doc-sqlite/Cargo.toml`
+- `src/agent-doc/agent-doc-orchestration/Cargo.toml`
+- `src/agent-doc/Makefile`
+- `src/agent-doc/.github/workflows/pypi.yml`
+- `src/agent-doc/tests/test_cli.rs`
+- `src/agent-doc/src/main.rs`
+- `src/agent-doc/agent-doc-orchestration/src/project_controller.rs`
+- `src/agent-doc/.claude/skills/agent-doc/SKILL.md`
 - `src/agent-doc/VERSIONS.md`
-- `.codex/AGENTS.md` and the parent `src/agent-doc` submodule pointer were updated locally after `agent-doc skill install` and the submodule commit.
+- `src/agent-doc/Cargo.lock`
+- `src/tmux-router/Cargo.toml`
+- `src/tmux-router/Cargo.lock`
+<!-- /changed_paths -->
 
-Implementation notes:
-- Added `SkipEditorTyping` decisions for idle queue context reset and drain.
-- Added `editor_typing_active_for_idle_queue()` in the supervisor idle watcher, including absolute-path fallback.
-- Added regression coverage for both decision paths and for relative-path supervisor vs absolute-path editor typing sidecar.
-- Documented the binary-only Run behavior in the editor spec and added an unreleased version note.
+Fixed the release packaging blockers found during `0.34.37`.
 
-Verification:
+Cargo publishing now has an explicit publish graph: internal publish units use the current `0.34.38` version in path dependencies, unpublished flags were removed from the release crates, and `make publish-crate` publishes in dependency order with exact-version skip and index-visibility waits. The graph now includes `tmux-router 0.3.11`, `agent-doc-core`, `agent-doc-markdown-ast`, `agent-doc-sqlite`, `agent-doc-orchestration`, and `agent-doc`.
+
+PyPI source distribution builds now use the same publishable dependency contract. `agent-kit` and `lazily` resolve from crates.io, local patch overrides are no longer required, `tmux-router` is an explicit sibling path dependency with version `0.3.11`, and the PyPI workflow checks out that sibling before building wheel/sdist artifacts. The real sdist regression path now builds a wheel successfully from the extracted tarball.
+
+Commits pushed:
+- `src/tmux-router`: `fee7099` and `289750f` on `origin/main`.
+- `src/agent-doc`: `3238bc0b fix release packaging publish graph` and `0a50a48b chore: update bundled agent-doc skill` on `origin/main`.
+- parent repo: local commit `76be04eb8 chore: update agent-doc release packaging`; parent push is still blocked by the pre-existing `main...origin/main [ahead 103, behind 15]` divergence and unrelated `src/boost-client` submodule rebase conflict.
+
+Local ignored `src/agent-doc/.cargo/config.toml` was left without source patch overrides so local release checks exercise the publishable graph.
+
+Verification passed locally and remotely.
+
+Commands run:
 - `cargo fmt`
-- `cargo test -p agent-doc-orchestration editor_typing`
-- `cargo test -p agent-doc-orchestration typing_guard`
-- `cargo test -p agent-doc-orchestration idle_queue_`
-- `make check` passed locally: 4,999 tests passed, 241 skipped, plus doctests and the closeout simulation test.
-- `make install-full` completed, installing `agent-doc 0.34.38` and `libagent_doc-0.34.38.so` under `/home/brian/.cargo/bin`.
-- `agent-doc --version` reports `agent-doc 0.34.38`.
-- GitHub Actions CI for pushed submodule commit `df7ac7af` passed: `make check` and `make tmux-ci` completed successfully in run `27991483860`.
+- `make version-sync`
+- `cargo test -p agent-doc test_manifest_uses_publishable_dependency_contract`
+- `cargo publish --dry-run --allow-dirty --manifest-path ../tmux-router/Cargo.toml`
+- `cargo publish --dry-run --allow-dirty -p agent-doc-core`
+- `cargo publish --dry-run --allow-dirty -p agent-doc-markdown-ast`
+- `.venv/bin/maturin sdist --out /tmp/agent-doc-real-sdist`
+- `maturin build --release --out /tmp/agent-doc-real-wheel` from extracted sdist
+- `make -n publish-crate`
+- `make check`
+- `make install-full`
+- `agent-doc --version`
+- `cargo test` in `src/tmux-router`
+- `gh run list --workflow CI --limit 1`
 
-Commits and push:
-- Pushed `src/agent-doc` commit `df7ac7af` (`fix idle queue typing guard`) to `btakita/agent-doc` `main`.
-- Created parent repo commit `19c76e484` (`chore: update agent-doc typing guard`) for the submodule pointer and `.codex/AGENTS.md` refresh.
-- Parent repo push to `btakita/agent-loop` `main` is blocked by pre-existing divergence: local `main` is ahead 92 and behind 15. I attempted `git rebase --autostash origin/main`, but aborted it after it hit an unrelated `src/boost-client` submodule conflict while replaying older local commits. The dirty user/session files were restored by the abort.
+`make check` passed in `src/agent-doc`: clippy, 4,999 nextest tests passed, 241 skipped, doctests, and closeout simulation. `make install-full` installed `agent-doc 0.34.38` and recycled two controllers. `agent-doc --version` reports `agent-doc 0.34.38`.
 
-No actionable follow-up backlog item was captured for this response; the only remaining caveat is the unrelated parent-branch integration needed before the local parent commit can push to `main`.
+The real PyPI sdist path passed: `maturin sdist` produced `agent_doc-0.34.38.tar.gz`, extracting it showed the expected `agent-doc/` plus sibling `tmux-router/` layout, and `maturin build --release` from the extracted sdist produced `agent_doc-0.34.38-py3-none-linux_x86_64.whl`.
+
+Leaf crates publish dry-runs passed for `tmux-router`, `agent-doc-core`, and `agent-doc-markdown-ast`. Downstream dry-runs for crates that depend on unpublished `agent-doc-* 0.34.38` packages cannot fully resolve until the upstream crates are actually visible in crates.io; the ordered `make publish-crate` target is now designed to publish and wait through that chain.
+
+GitHub Actions CI for `src/agent-doc` commit `0a50a48b` passed: run `27993373472`, `make check` and `make tmux-ci`, duration 5m02s.
+
+Confidence: high. The original cargo publish failure is covered by versioned publish units and ordered crate publishing, and the original PyPI sdist failure is covered by a real extracted-sdist wheel build.
 
 Escalation: none.
-Confidence: high for the fixed supervisor race and coverage; parent repo push remains blocked on unrelated branch integration.
-<!-- agent:boundary:9851d5f1 -->
+
+Blocked at the agent-doc closeout boundary.
+
+> **Queue prompt:**
+>
+> The queue prompt was duplicated multiple times in one of the previous responses. ":pushpin: Fix the root cause of this issue that occurred in this document..."
+
+
+The `#98t4` implementation is done and verified: `src/agent-doc` and `src/tmux-router` commits are pushed, CI is green, `make check` and `make install-full` passed, and `agent-doc --version` is `0.34.38`.
+
+The session document closeout did not complete. `agent-doc session-check` still reports `cycle-1782174754154` stuck at `write_applied`, and the write path refuses to commit because the IDE-visible buffer for `tasks/agent-doc/agent-doc-bugs2.md` differs from disk. Ops also show live editor insert events, so I stopped instead of forcing past the data-loss guard.
+
+Current disk state leaves `#fccd` open in the queue/backlog, but the session doc changes are uncommitted. Exact unblocker: resolve the IDE buffer for `tasks/agent-doc/agent-doc-bugs2.md` so it matches disk, then continue this agent-doc cycle; the next step is rerunning the write/commit recovery and `agent-doc session-check`.
+<!-- agent:boundary:90ad8db3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~JB `Run Agent Doc` still does not submit sometimes. Sometimes it does submit. There also is some logic that adds a prompt while I'm typing into the queue. I know this because that auto-prompt adds `agent-doc tasks/agent-doc/agent-doc-bugs2.md` and `/clear` while JB `Run Agent Doc` sends `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`. None of the prompts were submitted. The send-docs should be completely binary logic sent by the PCP->supervisor. No skill agent logic should be involved.~~
----
-:pushpin: Fix the root cause of this issue that occurred in this document.
-```
-• The write recovery path hit the same stale-supervisor proof guard: the patch was delivered, but the materialized
-  content was missing the response body. I’m checking the admin/session controls for a non-destructive way to get the
-  supervisor onto the installed binary without interrupting this turn.
-```
-```
-• Because the malformed response is already in the exchange, I’m checking whether agent-doc repair --apply-recovery can
-  normalize the interrupted cycle itself before I touch the component through a lower-level patch.
-
-• Ran agent-doc repair --apply-recovery /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
-  └ [repair] recovery [open_cycle] not auto-applied: auto-apply withheld — recovery requires a preserved response body
-    or open-cycle resolution, not a metadata operation
-    [repair] run: finish the response, then `agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/agent-doc/
-    agent-doc-bugs2.md` (or `agent-doc write --commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/
-    agent-doc-bugs2.md` to absorb an already-visible response)
-
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-• The repair command will not auto-apply this state; it needs the response finished first. I’m going to use the agent-
-  doc component patcher to replace only the malformed exchange component with the complete response text while
-  preserving the newly added queue item.
-```
----
-JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
-```
-[route] target tmux session: 0
-[route] Still waiting for codex (1s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (3s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (4s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (6s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (7s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (9s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (11s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (12s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (14s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (15s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (17s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (18s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (20s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (21s)... last line:   reverse-i-search:
-[route] Still waiting for codex (23s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (24s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (26s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (27s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (29s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (30s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (32s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (33s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (35s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (36s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (38s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (39s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-[route] Still waiting for codex (41s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-[route] Still waiting for codex (42s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-[route] Still waiting for codex (44s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-[route] Still waiting for codex (46s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-[route] Still waiting for codex (47s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-[route] Still waiting for codex (49s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-[route] Still waiting for codex (50s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-[route] Still waiting for codex (52s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
-[route] Still waiting for codex (53s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
-[route] Still waiting for codex (55s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
-[route] Still waiting for codex (56s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
-[route] Still waiting for codex (58s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
-[route] Still waiting for codex (59s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
-Error: dispatch-only codex reopen refused to inject into pane %24 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
-```
+- ~~The queue prompt was duplicated multiple times in one of the previous responses. ":pushpin: Fix the root cause of this issue that occurred in this document..."~~
 ---
 :pushpin: Fix the root cause of this issue that occurred in this document.
 ```
@@ -237,8 +391,33 @@ Error: dispatch-only codex reopen refused to inject into pane %24 for tasks/prof
 Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
 ```
 ---
-- :pushpin: do [#98t4]
 - :pushpin: do [#fccd]
+---
+:pushpin: Fix the root cause of this issue that occurred in this document.
+```
+• The write recovery path hit the same stale-supervisor proof guard: the patch was delivered, but the materialized
+  content was missing the response body. I’m checking the admin/session controls for a non-destructive way to get the
+  supervisor onto the installed binary without interrupting this turn.
+```
+```
+• Because the malformed response is already in the exchange, I’m checking whether agent-doc repair --apply-recovery can
+  normalize the interrupted cycle itself before I touch the component through a lower-level patch.
+
+• Ran agent-doc repair --apply-recovery /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+  └ [repair] recovery [open_cycle] not auto-applied: auto-apply withheld — recovery requires a preserved response body
+    or open-cycle resolution, not a metadata operation
+    [repair] run: finish the response, then `agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+    agent-doc-bugs2.md` (or `agent-doc write --commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+    agent-doc-bugs2.md` to absorb an already-visible response)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• The repair command will not auto-apply this state; it needs the response finished first. I’m going to use the agent-
+  doc component patcher to replace only the malformed exchange component with the complete response text while
+  preserving the newly added queue item.
+```
+---
+- :pushpin: do [#98t4]
 <!-- /agent:queue -->
 <!--
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.
@@ -271,7 +450,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#fccd] #agent-doc-bug Restore the accidentally consumed Clear Session Cache queue head: investigate ongoing JB `Clear Session Cache` dialogs, confirm the CPC instance and all supervisors are on the installed agent-doc 0.34.37+ binary, and if dialogs are still possible in current code, fix the root cause with the structural/node merge workflow instead of requiring operator input.
-- [ ] [#98t4] #adpublishpkg #agent-doc-release Fix release packaging publish blockers found during 0.34.37: `cargo publish` rejects path-only internal agent-doc deps / unpublished crates, and `make publish-pypi` fails building from sdist because path dependencies create an `agent-kit v0.4.1` package collision in Cargo.lock.
 <!-- /agent:backlog -->
 
 ## Review

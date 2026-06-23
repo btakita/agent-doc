@@ -62,26 +62,35 @@ Proof:
 - verification: no code/spec changed, so I did not run `make check`; installed version is `agent-doc 0.34.42`, and the latest `src/agent-doc` CI run for `v0.34.42` is `completed/success`
 - escalation: none
 - confidence: high
-<!-- agent:boundary:45cc20ec -->
+
+### Re: paused queue cleanup — gpt-5
+
+I picked up the queue-only edit. The struck residue that was removed from the queue stayed removed, and preflight then re-converged the managed queue from the backlog mirror.
+
+I did not start any backlog implementation from this turn. The binary reports `queue_paused=true`, `queue_continuation_required=false`, and `queue_drainable_head_count=0`; the current queue is halted by the existing phantom-pin churn guard, so this cycle is a closeout/acknowledgement rather than an auto-drain. The active backlog still contains operator-verify items, and `#directchatpb2` remains explicitly marked `DO NOT IMPLEMENT until scheduled` in the backlog text.
+
+Preflight also surfaced semantic-completion candidates worth checking before future scheduling: `#1jec` against `#yzer`, `#arsm` against `#pcwcwarn`, `#qcm1verify` against `#qnodemerge1`, review `#ftqpartialdup` against `#hap7`, and review `#j9ja` against `#optverify`.
+
+Proof:
+- changed_paths: this session document via `agent-doc finalize` only
+- commands: `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc finalize`
+- verification: no code/spec changes; no test suite was needed for this prompt-response cycle
+- escalation: none
+- confidence: high
+<!-- agent:boundary:59c3697d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~[#directchatpb2]: If it's fixed, why did the last turn reproduce the issue in this document?~~
-- ~~#qheadresidue~~
-- ~~#directchatpb2~~
----
 - :pushpin: do [#1jec]
 - :pushpin: do [#fbwireverify]
 - :pushpin: do [#qnodemerge4verify]
 - :pushpin: do [#tb4q]
----
 - do [#cancelturnverify]
 - do [#qcm1verify]
 - do [#arsm]
-- ~~do [#qheadresidue]~~
-- ~~do [#gsf5]~~
+- do [#directchatpb2]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

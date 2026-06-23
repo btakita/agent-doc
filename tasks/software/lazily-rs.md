@@ -199,7 +199,7 @@ The module path `state_machine::StateMachine` is mildly redundant as predicted i
 3. If the pilot proves the reactive-transition pattern, the next enabling step in lazily would be ThreadSafeStateMachine (mirror `state_machine.rs` on ThreadSafeContext) — but that's a lazily-rs feature, not an agent-doc decision, and only unlocks the watch-daemon in-process cache (still not the cross-process surfaces).
 
 Queue drained. No code changes this cycle (the rename is already shipped; the architectural answer is "pilot, deferred").
-<!-- agent:boundary:76135621 -->
+<!-- agent:boundary:077af862 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -208,8 +208,7 @@ Queue drained. No code changes this cycle (the rename is already shipped; the ar
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Add 
-- do [#2npk]
+- Add ThreadSafeStateMachine and AsyncStateMachine (Tokio).
 <!-- /agent:queue -->
 
 ## Backlog

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -199,7 +199,47 @@ The module path `state_machine::StateMachine` is mildly redundant as predicted i
 3. If the pilot proves the reactive-transition pattern, the next enabling step in lazily would be ThreadSafeStateMachine (mirror `state_machine.rs` on ThreadSafeContext) — but that's a lazily-rs feature, not an agent-doc decision, and only unlocks the watch-daemon in-process cache (still not the cross-process surfaces).
 
 Queue drained. No code changes this cycle (the rename is already shipped; the architectural answer is "pilot, deferred").
-<!-- agent:boundary:077af862 -->
+
+### Re: ThreadSafeStateMachine + AsyncStateMachine shipped — glm-5.2
+
+> **Queue prompt:** Add ThreadSafeStateMachine and AsyncStateMachine (Tokio).
+
+Executed the full `#spec-test-build-install-commit-push` cycle. Both primitives mirror the single-threaded `StateMachine<S, E>` design — a `CellHandle<S>` as current state + a pure `Fn(&S, &E) -> Option<S>` transition function — over their respective multi-context backends.
+
+**What shipped** (`src/state_machine.rs`, +~370 lines):
+
+| Primitive | Backend | State handle | `send`/`state` | `on_transition` | `state_is` | Gate |
+|---|---|---|---|---|---|---|
+| `ThreadSafeStateMachine<S, E>` | `ThreadSafeContext` (lock-backed) | `CellHandle<S>` (shared id) | sync | `-> EffectHandle` (dispose via `ctx.dispose_effect`) | `-> ThreadSafeSignalHandle<bool>` | always available |
+| `AsyncStateMachine<S, E>` | `AsyncContext` (Tokio) | `AsyncCellHandle<S>` | sync (cells are the sync input layer) | `-> AsyncEffectHandle` | `-> AsyncSignalHandle<bool>` | `#[cfg(feature = "async")]` |
+
+Both require `S: PartialEq + Clone + Send + Sync + 'static` and `E: Send + Sync + 'static`; the transition fn is `Arc<dyn Fn(&S, &E) -> Option<S> + Send + Sync>`. Both implement `Clone` (clone = another handle to the same state cell + transition fn), which is what lets a `ThreadSafeStateMachine` be shared across OS threads.
+
+**Design notes:**
+- `ThreadSafeStateMachine` observers (`on_transition`/`state_is`) fire **synchronously** within the invalidating `send`/`batch` call — preserving `ThreadSafeContext`'s glitch-free pull-based ordering. Previous-state tracking in `on_transition` uses `parking_lot::Mutex<Option<S>>` (the crate's existing non-optional dep) instead of the single-threaded `RefCell`.
+- `AsyncStateMachine.send`/`state` are synchronous by design: `AsyncContext` cells are the synchronous input layer. Only derived slots/effects/signals are async. `on_transition`'s handler closure is sync `Fn(&S, &S)` (it observes the transition, not async resolution); the effect body reads the cell via `AsyncComputeContext::get_cell` which registers the dependency. Eager recomputation settles on the runtime rather than within `send`.
+- No new feature gate for the thread-safe variant (`thread_safe` is always compiled; `parking_lot` is a non-optional dep). The async variant rides the existing `async` feature.
+
+**Tests** (22 new):
+- `tests/thread_safe_state_machine.rs` — 12 tests mirroring the 11 single-threaded FSM tests + a cross-thread sharing test (`Arc<ThreadSafeContext>` + `m.clone()` across `std::thread::spawn`).
+- `tests/async_state_machine.rs` (`#![cfg(feature = "async")]`) — 10 tests using `#[tokio::test]`, settling spawned effects via the crate's established `tokio::time::sleep(50ms)` convention.
+
+**Verification:**
+- `cargo fmt --check` — clean.
+- `cargo clippy --all-features --all-targets -- -D warnings` — clean.
+- `cargo test --all-features` — all suites green, incl. 22 new tests + 4 doc-test compile checks (`StateMachine`, `ThreadSafeStateMachine`, `AsyncStateMachine` + the existing `state_machine::StateMachine` line 41). 0 failures across every target.
+- `make check` — green except the known environmental `benchmark-check` (`#lzbenchbudget`: missing Criterion p50/p95 latency rows for `thread_safe_*_contention`/`graph_propagation` benches). Confirmed **pre-existing on clean HEAD** (`git stash` + `make benchmark-check` reproduces identically) — state_machine.rs touches zero benchmarked code, so this is not a regression.
+- lazily-rs CI run `28040292195` was `in_progress` at closeout; continuing from local evidence per the closeout rule (not blocking on `gh run watch`).
+
+**Commits + push (executed):**
+- lazily-rs submodule `b724817` (`feat: add ThreadSafeStateMachine and AsyncStateMachine`) → `lazily-hub/lazily-rs` main (`2948b78..b724817`).
+- superproject `55b1ebc17` (`chore(lazily-rs): bump gitlink`) → `btakita/agent-loop` main (`ce8fe30a5..55b1ebc17`).
+- (`cargo build --all-features` is the install-equivalent — lazily is a library crate, no binaries.)
+
+**Unblock note:** the `#lzadocsm` review items (#c7j5 / #w4pq — pilot `StateMachine` on agent-doc's `RunContext::CyclePhase`) were "Blocked on: lazily ships no `ThreadSafeStateMachine` yet." That blocker is now **lifted** — the thread-safe primitive exists. The pilot itself is agent-doc-repo work, separate from this cycle; the two review items are duplicates and could be deduped into one actionable follow-up when that pilot is taken on.
+
+Queue drained.
+<!-- agent:boundary:060cd3c3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -208,7 +248,6 @@ Queue drained. No code changes this cycle (the rename is already shipped; the ar
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Add ThreadSafeStateMachine and AsyncStateMachine (Tokio).
 <!-- /agent:queue -->
 
 ## Backlog

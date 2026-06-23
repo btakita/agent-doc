@@ -476,7 +476,7 @@ pub fn reexec_escalation_within_bound(attempts: u32, max: u32) -> bool {
 ///
 /// `#supselfheal` Phase 1 (`#supselfheal-adminrecycle`): `explicit_admin` is set
 /// when an operator/agent explicitly requested `agent-doc admin recycle` for this
-/// supervisor. Explicit intent **overrides the default-OFF opt-out** — a stale
+/// supervisor. Explicit intent **overrides an explicit auto-recycle opt-out** — a stale
 /// supervisor recycles immediately at the next turn boundary even when
 /// `auto_recycle` is false, so `admin recycle` (the gentle fix the closeout path
 /// itself recommends) can actually clear a stale-binary supervisor wedge. It still
@@ -489,7 +489,7 @@ pub fn reexec_escalation_within_bound(attempts: u32, max: u32) -> bool {
 /// fact derived in the write/converge closeout path from repeated
 /// `send_failed`/`no_ack`/`retry_without_disk_write` against a nominally-active
 /// editor IPC listener. A wedge is the clearest possible proof the live binary is
-/// bad, so — like `explicit_admin` — it **overrides the default-OFF opt-out** and
+/// bad, so — like `explicit_admin` — it **overrides an explicit auto-recycle opt-out** and
 /// recycles immediately at the next turn boundary instead of sitting in `Detect`.
 /// The wedge never has to wait for an opt-in or an idle-grace debounce; the only
 /// gate it still respects is `turn_boundary` (never drop a live turn).
@@ -524,7 +524,7 @@ pub fn supervisor_recycle_action(
         }
         if explicit_admin || write_wedged {
             // Operator/agent explicit `admin recycle`, or a wedged editor-IPC write —
-            // recycle now, overriding the default-OFF opt-out. The next turn boundary
+            // recycle now, overriding an explicit auto-recycle opt-out. The next turn boundary
             // is the deliberate restart point; a wedge must never stay `Detect`.
             return SupervisorRecycleAction::RecycleImmediate;
         }
@@ -1132,7 +1132,7 @@ mod tests {
     fn supervisor_recycle_action_explicit_admin_overrides_opt_out() {
         use SupervisorRecycleAction::*;
         // `#supselfheal` Phase 1: an explicit `admin recycle` overrides the
-        // default-OFF opt-out and recycles a stale supervisor immediately at the
+        // explicit auto-recycle opt-out and recycles a stale supervisor immediately at the
         // next turn boundary — the gentle, non-disruptive supervisor-recycle path.
         // Auto-recycle OFF + explicit admin → RecycleImmediate (overrides Detect),
         // regardless of whether a head is pending.
@@ -1178,7 +1178,7 @@ mod tests {
         use SupervisorRecycleAction::*;
         // `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`): a wedged editor-IPC
         // write against a nominally-active listener is the clearest proof the live
-        // binary is bad. Like explicit admin, it overrides the default-OFF opt-out
+        // binary is bad. Like explicit admin, it overrides an explicit auto-recycle opt-out
         // and recycles immediately at the boundary — a wedge must never stay Detect.
         // Auto-recycle OFF + write_wedged → RecycleImmediate (overrides Detect).
         assert_eq!(

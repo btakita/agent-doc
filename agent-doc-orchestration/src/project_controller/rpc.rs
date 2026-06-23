@@ -4890,6 +4890,32 @@ mod tests {
     }
 
     #[test]
+    fn queue_boundary_self_recycle_makes_stale_content_ours_refusal_ineligible() {
+        use crate::start::decisions::{SupervisorRecycleAction, supervisor_recycle_action};
+
+        let installed_inode = 4242u64;
+        assert!(
+            host_supervisor_is_stale(Some(installed_inode + 1), installed_inode),
+            "an old mapped inode is the prerequisite for stale content_ours refusal"
+        );
+
+        assert_eq!(
+            supervisor_recycle_action(
+                /* stale */ true, /* auto_recycle */ true, /* turn_boundary */ true,
+                /* head_pending */ true, /* explicit_admin */ false,
+                /* write_wedged */ false, /* reexec_failed */ false,
+            ),
+            SupervisorRecycleAction::RecycleImmediate,
+            "a stale supervisor with a pending queue head must self-recycle before the next item"
+        );
+
+        assert!(
+            !host_supervisor_is_stale(Some(installed_inode), installed_inode),
+            "after supervisor_binary_stale_self_recycled maps the installed inode, stale-supervisor content_ours refusal is no longer eligible"
+        );
+    }
+
+    #[test]
     fn host_supervisor_stale_warning_message_uses_non_destructive_refresh() {
         // #fccsupwarn3 — a routine stale-binary refresh must never tell an agent to
         // discard a live turn. Force/interrupt-clear remain explicit wedged-owner

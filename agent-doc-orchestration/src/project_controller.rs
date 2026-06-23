@@ -76,14 +76,14 @@ const STALE_PREPARING_CONTROLLER_SECS_ENV: &str = "AGENT_DOC_STALE_PREPARING_CON
 /// short gap between queue items never triggers a recycle.
 const DEFAULT_RECYCLE_IDLE_GRACE_SECS: u64 = 5;
 const RECYCLE_IDLE_GRACE_SECS_ENV: &str = "AGENT_DOC_RECYCLE_IDLE_GRACE_SECS";
-/// `#ctlrecycle` R3 — opt-in flag for the `start --route-owned` supervisor to
+/// `#ctlrecycle` R3 — opt-out flag for the `start --route-owned` supervisor to
 /// hot-reload onto a fresh binary when idle via an in-place `execve` that PRESERVES
 /// the live harness child + tmux pane (`start.rs::supervisor_perform_reexec` +
-/// `PtySession::adopt`). Default OFF: the in-place image swap of a live interactive
-/// supervisor is high blast-radius and the two-process round-trip can only be proven
-/// with a live editor + harness, so it stays a deliberate opt-in until that live
-/// validation lands; when off the supervisor only logs `supervisor_binary_stale_detected`
-/// and the operator restarts the session to pick up the new build.
+/// `PtySession::adopt`). Default ON: a stale supervisor self-recycles at the next
+/// idle / inter-queue-item boundary so a fresh install takes effect without manual
+/// `admin recycle`; when explicitly off, the supervisor only logs
+/// `supervisor_binary_stale_detected` and the operator restarts the session to pick
+/// up the new build.
 const SUPERVISOR_AUTO_RECYCLE_ENV: &str = "AGENT_DOC_SUPERVISOR_AUTO_RECYCLE";
 /// `#agentreloadrestart` — env override for the agent-change-restart knob
 /// (truthy enables, `0`/`false`/`off` force-disables). Default ON.

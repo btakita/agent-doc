@@ -531,7 +531,7 @@ pub struct Frontmatter {
     /// that swap so a stale supervisor only logs `supervisor_binary_stale_detected`.
     /// Resolution: env `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE`, then this frontmatter
     /// value, then the project config `agent_doc_supervisor_auto_recycle`, then
-    /// the built-in default of OFF.
+    /// the built-in default of ON.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",

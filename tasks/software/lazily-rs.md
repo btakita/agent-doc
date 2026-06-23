@@ -39,7 +39,7 @@ queue: start
 Compacted content:
 ❯ - Archived 7 response topic(s): #advance-review; do #lzwebrtcrunbook; do #lzholonsscan; 4 more
 ❯ - Prior summary/context: prior compacted content: Archived 3 response topic(s): #next-steps to fix lazily bugs; do #lzstr0mframe; do #lzstr0mp...
-<!-- agent:boundary:be0f9d87 -->
+<!-- agent:boundary:0ca25272 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,7 +48,8 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- How can lazily-rs support state machine architecture?
+- ~~How can lazily-rs support state machine architecture?~~ — auto-struck: answered this cycle (#ftstrike)
+- do [#438b]
 <!-- /agent:queue -->
 
 ## Backlog

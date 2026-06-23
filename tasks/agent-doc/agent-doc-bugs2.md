@@ -444,7 +444,22 @@ Verification: focused regressions passed before this latest flood report; latest
 Confidence: high that the document is currently exhibiting a distinct recovery/duplication bug and should not be auto-drained until `#qpinfl` is fixed.
 
 Escalation: none.
-<!-- agent:boundary:652b3491 -->
+
+### Re: duplicate pin flood halt — gpt-5
+
+I confirmed the live document is in a bad recovery state: the old `:pushpin: Fix the root cause of this issue that occurred in this document.` queue text is duplicated, exchange content has generated drift, and the earlier closeout response was not stable in the editor buffer. I restored `queue: stop` so this session does not keep auto-draining over the corrupted head.
+
+`#qpinfl` is already present in the backlog as the actionable item for the real fix. It covers the repeated `queue consume: failed to write document` / `live_prompt_drift_after_preflight` recovery path, captured-response replay, stale free-text queue duplication, and preservation of open id-backed heads like `#fccd`.
+
+I did not run the apparent sequential command list from the drifted exchange text; that list is generated "commands run" content from a prior response, not a fresh operator command.
+
+Changed paths: session document/backlog bookkeeping only.
+
+Verification: focused regressions run earlier in this turn passed, latest `src/agent-doc` CI is green (`27993373472`, `completed/success`), and this closeout preserves the flood report as backlog item `#qpinfl` instead of continuing the queue.
+
+Escalation: none.
+
+<!-- agent:boundary:5d7164f0 -->
 <!-- /agent:exchange -->
 
 ## Queue

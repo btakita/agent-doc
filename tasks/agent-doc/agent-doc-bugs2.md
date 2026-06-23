@@ -53,7 +53,17 @@ Proof:
 Compacted content:
 ❯ - Archived 3 response topic(s): #fccd - gpt-5; bare agent-doc shell invocation; bare agent-doc shell invocation follow-up
 ❯ - Prior summary/context: prior compacted content: Archived 1 response topic(s): #qpinfl - gpt-5
-<!-- agent:boundary:a6c9c224 -->
+
+### Re: #ws55 — gpt-5
+
+> **Queue prompt:**
+>
+> [#ws55] If agent-doc was run from the shell, is it supposed to start the agent harness and run the document?
+
+No. Bare `agent-doc <FILE>` is not supposed to launch a harness from a normal shell. It is a harness-native alias: inside Codex, Claude Code, or OpenCode it can run the document in that already-active harness; outside those harnesses it must fail immediately and direct the operator to explicit commands such as `agent-doc run <FILE>`, `agent-doc route <FILE>`, or `agent-doc start <FILE>`.
+
+Verification: after reinstalling `agent-doc 0.34.38`, a stripped-environment shell invocation exited 1 with the supported-harness error and did not hang. `#ws55` is resolved; `#3x90` remains the next queue item.
+<!-- agent:boundary:e629e878 -->
 <!-- /agent:exchange -->
 
 ## Queue

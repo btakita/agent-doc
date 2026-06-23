@@ -38,7 +38,29 @@ complete
 Compacted content:
 - Archived 17 response topic(s): Advance Lender TMO sync action; Advance Lender TMO sync action - gpt-5; Deploy - gpt-5; 14 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:789c1c3c -->
+
+### Re: TMO sandbox check and LSS wrapper revert — gpt-5
+
+> **Queue prompt:**
+>
+> ~~I have passage equityfundingsource/TMO_API_DATABASE. Please ensure this is our sandbox database and not the actual database that TMO is using.~~ — answered this cycle (#ftstrike)
+
+No new evidence changed the sandbox conclusion: the passage value is readable, but local evidence still cannot certify it is a TMO sandbox database. I made no live TMO calls and no TMO mutations.
+
+> **Queue prompt:**
+>
+> ~~Revert the LSS.svc wrapper. We want LOS.svc only. I did not ask you to implement, but the task was scheduled in the queue.~~ — answered this cycle (#ftstrike)
+
+Reverted the LSS lender wrapper implementation and restored the Advance Lender path to LOS-only TMO sync plus manual exact account-number linking. Active `app/` and `lib/` code now has no `LSS.svc`, `tmo_lender_`, or `/tmo-lender-link` executable references.
+
+Commits: EFS `84fdb75 revert: remove tmo lss lender wrapper` pushed to `origin/main`; parent `081679b30 chore: update equityfundingsource submodule` pushed to `origin/main`.
+
+Verification: focused EFS tests passed for `tmo-api`, `tmo-sim`, `advance-lender-dialog`, and `admin-investor-pipeline`; EFS `make check` exited 0 with 1,159 pass / 0 fail plus app and Worker builds; parent `make check` exited 0. EFS has no GitHub workflows. Parent has no `CI` workflow; the only `Agent Doc` workflow failed before executing any steps because GitHub Actions billing/spending-limit blocked runner startup.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:39645944 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -527,7 +527,7 @@ Verification: documentation/API-shape inspection only; no code changed, so no te
 Escalation: none.
 
 Confidence: medium. The endpoint split and shared `Account` field are clear in the public docs; the cross-service visibility/lookup behavior is not documented and needs tenant validation.
-<!-- agent:boundary:1f228bf5 -->
+<!-- agent:boundary:ce3bcc7a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -547,6 +547,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#04v8]
 <!-- /agent:queue -->
 
 ## Backlog

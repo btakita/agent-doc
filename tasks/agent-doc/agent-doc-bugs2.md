@@ -26,7 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-complete
+blocked
 <!-- /agent:status -->
 
 ## Exchange
@@ -207,13 +207,41 @@ Verification:
 - Parent `agent-loop` has no `CI` workflow; its `Agent Doc` workflow for `f72795c21` failed before running any steps because GitHub reported account billing/spending-limit failure. Local `make check` and `make tmux-ci` are green.
 
 Confidence: high for the `#fccsup` regression class. The remaining external risk is the pending submodule CI run and the parent workflow billing block, neither of which is a code failure from this change.
-<!-- agent:boundary:89d74d84 -->
+
+### Re: #fcccap blocked by stale-supervisor recycle boundary — gpt-5
+
+> **Queue prompt:** do [#fcccap]
+
+Blocked before implementation, not skipped. The current cycle `cycle-1782219323112` was opened after `#fccsup` to reconcile queue metadata, and the same preflight/session state reports `queue_continuation_required=false` with the route-owned supervisor pid `179547` still mapping a stale `agent-doc` binary after `make install` installed `agent-doc 0.34.38`.
+
+Running `#fcccap` now would exercise the File Cache Conflict capture path under the stale supervisor that `#fccsup` just proved must self-recycle at the next idle boundary before another FCC-family queue item runs. I am also not executing `agent-doc admin recycle` here because the install already marked the controller for recycle at the idle boundary; this turn needs to yield so the hot-reload can happen on the normal supervisor path.
+
+Concrete unblocker: let this cycle close and allow the supervisor to reach the idle boundary, then rerun the queue on the refreshed `agent-doc 0.34.38` supervisor. `#fcccap` remains open for that fresh-supervisor cycle.
+
+`#qfocsupguard` is also not implemented in this cycle because its backlog line explicitly says `DO NOT IMPLEMENT until scheduled`; this response only records the current blocker for the active `do [#fcccap]` prompt.
+
+No new actionable follow-up backlog item was discovered in this closeout beyond the already-open `#fcccap` and scheduled `#qfocsupguard` entries.
+<!-- agent:boundary:0c14f6fb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~:round_pushpin: do [#fccsup]~~
 - [#qfocsupguard]
+JB `Run Ageent Doc` on equityfundingsource.md stalled...prompt but no submit.
+```
+[sync] recovered live pane %3 for session 62fe1f41 via supervisor pid 140998
+[sync] recovered live pane %6 for session b26b9957 via supervisor pid 179547
+resync: purged 1 orphaned stash pane(s)
+[route] target tmux session: 0
+[route] latency budget exceeded: phase dispatch_start_proof took 10103ms (budget 10000ms, pane=%3, harness=codex, outcome=unproven_but_accepted)
+[route] preserved dispatch-start proof snapshot for tasks/professional/equityfundingsource.md pane %3 harness=codex phase=direct_pane_dispatch_start_unproven capture_len=882 capture_hash=5fb74bfdecf6 snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782217842260-direct_pane_dispatch_start_unproven-codex-_3-5fb74bfdecf6.txt editor_attempt_id=1782217830623-7
+[route] bare codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %3, but no routed submission proof appeared after 10s
+Error: dispatch-only codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %3 via direct_pane_submit (tmux_text_enter), but only pane-input acceptance proof was available after waiting 10s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle codex prompt or restart the session and reroute again
+```
+---
+- Why is sending a prompt to tmux significantly more reliable than sending Enter to tmux?
 ---
 I rebooted. JB `Run Agent Doc` stalled without dispatching. Prompt has `/clear` from another watcher. `/clear` should not have been added.
 ```
@@ -265,29 +293,16 @@ resync: purged 1 orphaned stash pane(s)
 Error: dispatch-only codex reopen refused to inject into pane %6 for tasks/agent-doc/agent-doc-bugs2.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
 ```
 ---
-JB `Run Ageent Doc` on equityfundingsource.md stalled...prompt but no submit.
-```
-[sync] recovered live pane %3 for session 62fe1f41 via supervisor pid 140998
-[sync] recovered live pane %6 for session b26b9957 via supervisor pid 179547
-resync: purged 1 orphaned stash pane(s)
-[route] target tmux session: 0
-[route] latency budget exceeded: phase dispatch_start_proof took 10103ms (budget 10000ms, pane=%3, harness=codex, outcome=unproven_but_accepted)
-[route] preserved dispatch-start proof snapshot for tasks/professional/equityfundingsource.md pane %3 harness=codex phase=direct_pane_dispatch_start_unproven capture_len=882 capture_hash=5fb74bfdecf6 snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782217842260-direct_pane_dispatch_start_unproven-codex-_3-5fb74bfdecf6.txt editor_attempt_id=1782217830623-7
-[route] bare codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %3, but no routed submission proof appeared after 10s
-Error: dispatch-only codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %3 via direct_pane_submit (tmux_text_enter), but only pane-input acceptance proof was available after waiting 10s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle codex prompt or restart the session and reroute again
-```
----
-- Why is sending a prompt to tmux significantly more reliable than sending Enter to tmux?
-- do [#fccsup]
-- do [#fccendpoint]
-- do [#fccforce]
-- do [#fccnoack]
-- do [#fccpatch]
-- do [#fccowner]
-- do [#fccack]
-- do [#fccsave]
-- do [#fccreconnect]
-- do [#fccaudit2]
+- :pushpin: do [#fccendpoint]
+- :pushpin: do [#fccforce]
+- :pushpin: do [#fccnoack]
+- :pushpin: do [#fccpatch]
+- :pushpin: do [#fccowner]
+- :pushpin: do [#fccack]
+- :pushpin: do [#fccsave]
+- :pushpin: do [#fccreconnect]
+- :pushpin: do [#fccaudit2]
+- do [#fcccap]
 <!-- /agent:queue -->
 <!--
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.

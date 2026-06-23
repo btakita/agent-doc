@@ -200,7 +200,23 @@ Verification:
 
 Confidence: medium; this is a decomposition/architecture closeout for a multi-part feature, not an implementation patch.
 Escalation: none.
-<!-- agent:boundary:150574e6 -->
+
+### Re: telemetry observer for agent-doc bugs — gpt-5
+
+> **Queue prompt:** How can we give agent-doc more telemetry access to identify bugs? Should we have an observer in the supervisor that takes periodic snapshots to process either with the subscription or a local model to identify bugs? Could we have an agent doc run a dedicated loop to schedule observation + bug fixes? So there would be a sidecar agent doc to this session that can observe all running project sessions to add bugs as they are seen. Could we also have a deterministic observer detect any annotated issues & deterministic patterns of issues?
+
+Yes. The right shape is a two-layer observer: deterministic telemetry first, model triage second. The supervisor should publish compact snapshot artifacts for each live session; a deterministic observer should scan those snapshots plus `session-check`, preflight warnings, and ops-log markers for known issue fingerprints; a sidecar agent-doc loop can then file deduped bug backlog items without touching active panes. Model processing should consume compact snapshot/context-pack handles and remain advisory unless a deterministic rule or explicit operator gate proves the bug.
+
+Captured this as four backlog items: `#qobs1` snapshot surface, `#qobs2` deterministic issue rules, `#qobs3` sidecar observer loop, and `#qobs4` model-assisted advisory triage. No source files changed in this cycle.
+
+Verification:
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+- `agent-doc read ... --component queue`
+- `agent-doc read ... --component backlog`
+
+Confidence: medium; this is a design/backlog closeout for a cross-cutting observability feature, not implementation.
+Escalation: none.
+<!-- agent:boundary:237ea1af -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -209,7 +225,7 @@ Escalation: none.
 - ~~do [#mbd4]~~
 - ~~:pushpin: do [#pzjy]~~
 - ~~Can we have annotated queue item(s) that runs when there are no other queue items? So this would effectively be a running loop. This should also support multiple annotated loop queue items that run in a sequence loop. Also, can we have an emoji annotate which queue item is currently being run? There can be a default poll period with configurable override. Also, the loop item can intelligently schedule based on the frequency of events.~~
-- How can we give agent-doc more telemetry access to identify bugs? Should we have an observer in the supervisor that takes periodic snapshots to process either with the subscription or a local model to identify bugs? Could we have an agent doc run a dedicated loop to schedule observation + bug fixes? So there would be a sidecar agent doc to this session that can observe all running project sessions to add bugs as they are seen. Could we also have a deterministic observer detect any annotated issues & deterministic patterns of issues?
+- ~~How can we give agent-doc more telemetry access to identify bugs? Should we have an observer in the supervisor that takes periodic snapshots to process either with the subscription or a local model to identify bugs? Could we have an agent doc run a dedicated loop to schedule observation + bug fixes? So there would be a sidecar agent doc to this session that can observe all running project sessions to add bugs as they are seen. Could we also have a deterministic observer detect any annotated issues & deterministic patterns of issues?~~
 - Allow dispatching of queue items, such as loop items, use local models.
 - JB `Run Agent Doc` still not submitting. Can we track when this happens and automatically file a bug so I don't have to endlessly repeat myself when you fail to fix the issue? [dogfooding] Can we also have the supervisor detect if the turn started? And if the turn has not started, send Enter and continue retrying until the turn starts?
 - ~~do [#p6a0]~~
@@ -220,6 +236,10 @@ Escalation: none.
 - :pushpin: do [#qstrikework]
 - :pushpin: do [#1jec]
 - do [#3ygp]
+- do [#qloop1]
+- do [#qloop2]
+- do [#qloop3]
+- do [#qloop4]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -259,6 +279,10 @@ What are #next-steps to fix bugs?
 - [ ] [#qloop2] #agent-doc-feature Implement idle-loop scheduling for annotated loop items: when normal drainable queue work is empty, dispatch loop items in deterministic sequence, persist the loop cursor/last-run state, and prove regular queue items always preempt loop work.
 - [ ] [#qloop3] #agent-doc-feature Add loop poll controls: global default poll period plus per-loop override, next-run time gates, bounded backoff/jitter, and tests proving no tight spin when there are no relevant events.
 - [ ] [#qloop4] #agent-doc-feature Add event-aware loop scheduling: record deterministic event counters/timestamps and let loop items schedule earlier/later based on event frequency before any model-assisted scheduling hook.
+- [ ] [#qobs1] #agent-doc-feature Add a bounded observer telemetry snapshot surface: supervisor/session actors expose compact per-document state (cycle phase, queue head, actor readiness, IPC inflight, recent typed ops-log markers, and artifact handles) without dumping raw transcripts by default.
+- [ ] [#qobs2] #agent-doc-feature Implement deterministic observer rules that scan session-check/preflight/ops-log snapshots for annotated issues and recurring failure patterns, then file deduped session-doc backlog bugs with evidence paths and stable issue fingerprints.
+- [ ] [#qobs3] #agent-doc-feature Add a sidecar observer agent-doc loop that can monitor all running project sessions from snapshot artifacts, rate-limit bug filing, avoid pane interference, and route created bug items to the correct session document or a configured observer inbox.
+- [ ] [#qobs4] #agent-doc-feature Add model-assisted observer triage as advisory-only: feed compact snapshot/context-pack handles to a subscription or local model, require deterministic evidence before auto-filing bugs, and record model provenance/confidence on suggestions.
 <!-- /agent:backlog -->
 
 ## Review

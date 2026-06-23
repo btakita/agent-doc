@@ -65,13 +65,46 @@ Commits:
 - parent: `9069d9fc7 fix: recover agent-doc shorter ack mismatches`
 
 CI was sampled but not awaited: agent-doc CI run `28051475833` was still `in_progress` when checked.
-<!-- agent:boundary:48e281b1 -->
+
+### Re: #directchatpb2 — gpt-5
+
+> **Queue prompt:**
+>
+> [#directchatpb2]
+
+
+Implemented `#directchatpb2`.
+
+The fix adds a Codex Stop-hook final gate for active session-document work that is still only a chat answer: if the owned pane has an unresolved exchange prompt or current queue head and the response has not crossed `agent-doc finalize` / `agent-doc write --commit`, the hook blocks final success, captures the replayable answer into the pending/capture ledger, and prints the concrete recovery commands including `agent-doc session-check`.
+
+It also tightens the free-text queue provenance guard: `<!-- no-free-text-queue-head-guard -->` still suppresses intentional removals, but not the malformed `no-free-text...` plus bare `###` interrupted-closeout residue.
+
+Coverage added:
+- direct-chat manual queue answer after recursive direct-invocation guard
+- consecutive direct-chat answers in the same owned Codex pane
+- marker plus bare-heading residue in `session-check`
+- preservation of existing clear-command/slash-command queue behavior
+
+Commits:
+- `src/agent-doc`: `c2a37292 fix: block direct-chat agent-doc closeout loss`
+- parent: `58c7f0076 fix: update agent-doc direct-chat closeout guard`
+
+Verification:
+- `cargo test -p agent-doc-orchestration direct_chat`
+- `cargo test -p agent-doc-orchestration free_text_queue_marker`
+- `cargo test -p agent-doc-orchestration codex_hook::tests::`
+- `cargo test -p agent-doc flowcore_hot_path_guard_and_proof_tokens_are_budgeted`
+- `make check`
+- `git diff --check`
+- `gh run list --workflow CI --limit 1` -> latest CI was `completed success` (`28051475833`)
+<!-- agent:boundary:364ad400 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- [#directchatpb2]
+- ~~[#directchatpb2]~~
+- JB `Run Agent Doc` still does not quickly submit.
 - :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
 - :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀
@@ -106,7 +139,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#directchatpb2] #agent-doc-bug Direct-chat owned-pane response loss recurred on 2026-06-23: Codex answered the MRH "2300 words" lint prompt in chat after recursive direct invocation was refused, then recurred again on the follow-up "Remove the max character count cap" prompt; `tasks/monsterrodholders.md` still lacked a matching `### Re:` response and retained queue residue (`no-free-text-queue-head-guard` + bare heading). Add enforced Codex final/Stop gate + recovery regression so each active session-document prompt, including consecutive prompts in one owned pane, cannot complete without `agent-doc finalize/write --commit`. Plan: tasks/agent-doc/plan-direct-chat-owned-pane-response-loss-2026-06-23.md. DO NOT IMPLEMENT until scheduled.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.
 - [ ] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.

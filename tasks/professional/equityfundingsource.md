@@ -185,7 +185,22 @@ Verification:
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:d8f09af7 -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:** deploy
+
+Deployed the current EFS `main` (`4689c03 fix: make advance lender account hold actionable`) to production. This queue item looks like the completed free-text deploy head that resurfaced; I treated the current document directive literally and deployed the current pushed code, which includes the Advance Lender account-hold fix.
+
+Verification:
+- `make check` passed: 1,157 tests, app build, and Worker build.
+- Remote D1 preflight: no pending migrations; D1 info returned normally; Time Travel bookmark `000004e3-00000008-00005093-c45fdd0d82a8dacc1e87d4241e2575a1` is available.
+- `make deploy` succeeded; no migrations were applied; Worker Version ID `0a855687-9c60-4952-a5f6-36dc4d42dfcf` is live.
+- Post-deploy: no pending migrations; `/` returns `200`; `/admin/lender-pipeline` returns `303`; the live root HTML references `/index.browser-IVLH656B.js`.
+- EFS worktree is clean. `gh run list --workflow CI --limit 1` found no `CI` workflow, and `gh workflow list` returned no workflows.
+
+Escalation: none.
+<!-- agent:boundary:b9d50cad -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -205,7 +220,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Advance Lender > What clears this hold > Open Lender Requests page ![img_35.png](img_35.png) leads to an empty page with nothing actionable. How does a lender "request a lender saccount"? Why can't the admin do his directly? The lender is also missing documents. Is that the real reason for the hold? Or does the admin simply need to sync the lender account with TMO?
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

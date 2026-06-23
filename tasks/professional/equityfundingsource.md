@@ -256,7 +256,66 @@ Verification:
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:ff94ff6a -->
+
+### Re: TMO lender API behavior — gpt-5
+
+> **Queue prompt:**
+>
+> Please investigate if TMO api has the create/search/link behavior.
+
+Confirmed: TMO does have lender create/read/list/update behavior, but EFS had documented the local portal workflow as manual-only and had no wrappers for those lender endpoints.
+
+Findings:
+- Create exists: `POST /LSS.svc/NewLender` creates a lender/vendor account. TMO docs say `Account` must be unique and successful create returns the new lender/vendor `RecID`.
+- Lookup exists: `GET /LSS.svc/GetLender/:Account` returns one lender/vendor by account number. I verified this read-only against the public sandbox with `GetLender/BROKER`.
+- Search/list exists, but not as a direct name/email search endpoint: `GET /LSS.svc/GetLenders` is paginated with `PageSize`/`Offset`, and `GET /LSS.svc/GetLendersByTimestamp/:FromDate/:ToDate` supports changed-record sync. Practical name/email matching would be client-side over those list results.
+- Link behavior is two separate concepts: EFS account linking is local, by storing the exact TMO account number in `users.lender_account`; TMO loan/funding association uses lender account numbers in loan funding/writeback flows. I did not find a TMO endpoint that directly links an EFS user to TMO.
+
+I corrected the local docs to reflect that distinction and added a regression test so this does not drift back to “no lender API exists.” I also added a recommended backlog item for the actual admin-only find/create/link automation.
+
+Sources:
+- TMO developer docs: https://developers.themortgageoffice.com/
+- TMO API test portal: https://api.themortgageoffice.com/APITest.html
+
+Commits:
+- EFS: `6e70df8 docs: document tmo lender api surface`, pushed to `origin/main`.
+- Parent submodule pointer: `41328e0f5 chore: update equityfundingsource submodule`, not pushed because the parent repo is already ahead of origin with unrelated committed history and dirty paths.
+
+Changed paths:
+- `src/equityfundingsource-dev/docs/TMO/get-lender.md`
+- `src/equityfundingsource-dev/docs/TMO/new-lender.md`
+- `src/equityfundingsource-dev/tests/tmo-api.test.ts`
+- `src/equityfundingsource-dev` submodule pointer in the parent repo
+
+Commands:
+- `tsift status` / `tsift status --fix`
+- `agent-doc preflight`, `agent-doc plan`, `agent-doc read`
+- targeted `rg`, `sed`, `curl`, and `jq` inspections of local TMO docs, EFS TMO wrappers, simulator routes, public TMO docs, and API test portal
+- read-only sandbox `GET /LSS.svc/GetLenders` and `GET /LSS.svc/GetLender/BROKER`
+- `bun test tests/tmo-api.test.ts`
+- `git diff --check`
+- EFS `make check` through `tsift --envelope digest-runner`
+- EFS `gh run list --workflow CI --limit 1` and `gh workflow list`
+- EFS `git commit` and `git push origin main`
+- parent `make check` through `tsift --envelope digest-runner`
+- parent `gh run list --workflow CI --limit 1` and `gh workflow list`
+- parent submodule pointer commit
+
+Verification:
+- Focused EFS test passed: `tests/tmo-api.test.ts` 8 tests, 0 failures.
+- `git diff --check` passed.
+- Full EFS `make check` exited 0: 1,159 tests passed, 0 failed, app build and Worker build completed. The digest grouped one logged `error: d1 down` string, but the raw suite summary was `1159 pass / 0 fail`.
+- Read-only sandbox checks confirmed `GetLenders` and `GetLender/BROKER` return successful `Status: 0` responses.
+- EFS has no GitHub workflows; `gh run list --workflow CI --limit 1` reported no `CI` workflow and `gh workflow list` returned none.
+- Parent `make check` passed with no failure signatures.
+- Parent has no `CI` workflow; `gh workflow list` shows only `Agent Doc`.
+- EFS submodule is clean on `main...origin/main` after push.
+- Parent repo remains ahead of origin with unrelated dirty paths; only the EFS submodule pointer was committed by this cycle.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:5a97f45f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -276,6 +335,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Please investigate if TMO api has the create/search/link behavior.
 <!-- /agent:queue -->
 
 ## Backlog

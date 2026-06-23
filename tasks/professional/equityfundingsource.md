@@ -583,7 +583,45 @@ Verification: secret-path readability only; no secret values were printed, no co
 Escalation: none.
 
 Confidence: high for the local secret-path result.
-<!-- agent:boundary:df44642f -->
+
+### Re: TMO API database sandbox check — gpt-5
+
+> **Queue prompt:** I have passage equityfundingsource/TMO_API_DATABASE. Please ensure this is our sandbox database and not the actual database that TMO is using.
+
+I can verify the secret exists, but I cannot honestly certify from local evidence that it is the sandbox database.
+
+What I checked without printing the secret value:
+- `passage equityfundingsource/TMO_API_DATABASE` is readable.
+- The value is not exactly the public TMO docs example `API Sandbox`.
+- The value does not contain obvious environment markers like `sandbox`, `test`, or `dev`.
+- It also does not contain obvious production markers like `prod`, `production`, or `live`.
+- Its local classification is therefore `unknown_name`, not `sandbox_like`.
+
+I also checked the public TMO Postman collection for a non-mutating database-identification/status endpoint. I did not find one. The docs describe the `Database` header as “the name of your company database,” and all examples use `Database: API Sandbox`, but the API collection does not expose a way to ask TMO whether an arbitrary database header is sandbox or production.
+
+Practical conclusion: do not use `equityfundingsource/TMO_API_DATABASE` for any lender creation, loan funding write, or other TMO mutation until a human verifies it in TMO admin/support or provides explicit written confirmation that this exact database value is sandbox. Read-only calls would still touch whichever TMO database this header selects, so I avoided live API calls here.
+
+One implementation note: the EFS app code expects the environment variable `TMO_DATABASE`, not `TMO_API_DATABASE`. If this passage entry is the intended source, deployment/runtime wiring needs to map `passage equityfundingsource/TMO_API_DATABASE` into `TMO_DATABASE`; that name mapping does not prove sandbox safety.
+
+Changed paths: none.
+
+Commands run:
+- `agent-doc --version`
+- `tsift status`
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- Non-printing `passage equityfundingsource/TMO_API_DATABASE` readability/classification checks
+- `rg -n "TMO_API_DATABASE|TMO_DATABASE|Database" ...`
+- Official TMO Postman collection inspection with `curl`/`jq` for database/status-style endpoints
+- `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc write --commit /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` attempted replay after baseline drift; it still rejected the stale captured baseline
+
+Verification: secret-path readability and documentation/API-shape inspection only. No code changed, no tests/build were run, and no live TMO API calls were made.
+
+Escalation: none.
+
+Confidence: high that the available local evidence is insufficient to prove sandbox; medium that the value may be sandbox only because it may use an opaque tenant-specific database name.
+<!-- agent:boundary:9145e98d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -603,6 +641,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- I have passage equityfundingsource/TMO_API_DATABASE. Please ensure this is our sandbox database and not the actual database that TMO is using.
 <!-- /agent:queue -->
 
 ## Backlog

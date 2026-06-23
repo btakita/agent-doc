@@ -39,7 +39,30 @@ completed
 Compacted content:
 - Archived 6 response topic(s): lazily-rs session sync; JB Sync Tmux Layout deferral; lazily-rs.md crash recovery -- gpt-5; 3 more
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): durable recycle checkpointing
-<!-- agent:boundary:2554699c -->
+
+### Re: actor-switch rebind already covered — gpt-5
+
+> **Queue prompt:**
+>
+> :round_pushpin: JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
+> ```
+> [route] target tmux session: 0
+> Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
+> ```
+
+This exact failure is already fixed in the installed build. It is the `#actor-switch-rebind` entry shipped in `v0.34.40`: when a document explicitly changes `agent:` from `claude` to `codex`, route now treats the old healthy `claude-code` authoritative actor as stale, logs `route_authoritative_actor_harness_mismatch_stale`, and falls back to the normal create/rebind path for the newly resolved harness instead of hard-failing with `bound to harness claude-code, not codex`.
+
+The current local binary is `agent-doc 0.34.42`, so it includes that fix. The route decision is in `route/authoritative_actor.rs`: a mismatched actor can be replaced when the document frontmatter declares the expected harness, when supervisor health is not healthy, or when the actor is closed. The exact queue shape is also covered by queue parsing/continuation regressions so prose plus fenced route diagnostics drains as real work instead of being pruned as log noise.
+
+I did not add another backlog item because this report is covered by the shipped `#actor-switch-rebind` behavior. A recurrence on `0.34.42` or newer would be a fresh live regression, and the proof to capture would be an ops line missing `route_authoritative_actor_harness_mismatch_stale` during an explicit `agent: claude` -> `agent: codex` frontmatter switch.
+
+Proof:
+- changed_paths: this session document via `agent-doc finalize` only
+- commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc session-check`, `agent-doc repair --apply-recovery`, `agent-doc patch`, `git diff -- tasks/agent-doc/agent-doc-bugs2.md`, `git show HEAD:tasks/agent-doc/agent-doc-bugs2.md`, `rg` over route/version/queue text, `sed` on `VERSIONS.md`, `route/authoritative_actor.rs`, `queue.rs`, `queue_continuation.rs`, and `write/queue_consume.rs`, `agent-doc --version`, `gh run list --workflow CI --limit 1`
+- verification: no code/spec changed, so I did not run `make check`; installed version is `agent-doc 0.34.42`, and the latest `src/agent-doc` CI run for `v0.34.42` is `completed/success`
+- escalation: none
+- confidence: high
+<!-- agent:boundary:e463d682 -->
 <!-- /agent:exchange -->
 
 ## Queue

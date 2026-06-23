@@ -136,14 +136,34 @@ For `#cancelturnverify`, I accepted the operator verification and marked the bac
 > **Queue prompt:** If we merge the sidecar logic into the PCP instead of relying on the disk for IPC, would that help with agent-doc cycle reliability? If yes, let's merge sidecar logic into the PCP. Use lazily-rs new StateMachine, ThreadedStateMachine, and/or AsyncStateMachine for a cycle state machine. See [#c7j5], which was originally created in lazily-rs.md...Except, merge the Sidecar into the PCP. I want to eventually have a master State Machine for an agent document. Note that [#lzsidecaratomic] and [#lzsidecarlock] was done on agent-doc from lazily-rs.md. See lazily-rs.done.md
 
 Closeout repair after the recovered IPC-drift cycle: the preceding response already answered this queue head and rewrote `#c7j5` to the new PCP/session-actor state-machine plan at `tasks/agent-doc/plan-cycle-state-pcp-state-machine.md`. This cycle only consumes the free-text queue head against the fresh baseline and commits the resolved `#cancelturnverify` archive/queue convergence. No code changes.
-<!-- agent:boundary:ac7b9efc -->
+
+### Re: sidecar/CPC IPC state sync — gpt-5
+
+> **Queue prompt:**
+>
+> Should the sidecar <-> CPC IPC use lazily-rs IPC to sync state? Should lazily-rs implement a state sync mechanism to support sidecar <-> CPC IPC state sync?
+
+
+Short answer: no, not yet. I would not make sidecar <-> CPC synchronization a lazily-rs IPC feature right now, and I would not add a second generic state-sync channel between the sidecar and the control plane for agent-doc.
+
+The cleaner shape is narrower:
+
+- The CPC/session actor owns live cycle state and accepts ordered `CycleEvent`s.
+- The sidecar remains the durable crash-recovery journal and compatibility artifact, not a peer authority.
+- On startup or recovery, the CPC seeds from the sidecar; after that, accepted actor events emit the sidecar snapshot/journal.
+- If cross-process sync is needed, implement an agent-doc-specific snapshot plus event stream first, with explicit ownership and monotonic sequence/epoch checks.
+
+I would only promote a generic IPC state-sync mechanism into lazily-rs after a second real consumer needs it. Lazily-rs should keep providing the state-machine primitives and maybe small reusable serialization/event-log helpers, but it should not own the agent-doc sidecar wire protocol prematurely.
+
+Per the operator note, I stopped waiting on agent-doc CI. Lazily `0.12.2` CI was green; agent-doc CI for `f76e01c5` was still running when I stopped watching. No code changes in this architecture-answer cycle.
+<!-- agent:boundary:f71d2d73 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#c7j5]: tasks/agent-doc/plan-cycle-state-pcp-state-machine.md~~
-- Should the sidecar <-> CPC IPC use lazily-rs IPC to sync state? Should lazily-rs implement a state sync mechanism to support sidecar <-> CPC IPC state sync?
+- ~~Should the sidecar <-> CPC IPC use lazily-rs IPC to sync state? Should lazily-rs implement a state sync mechanism to support sidecar <-> CPC IPC state sync?~~
 - do tasks/agent-doc/plan-ack-mismatch-shorter-recovered-response-loss-2026-06-23.md
 - :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.

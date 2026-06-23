@@ -134,7 +134,58 @@ Verification:
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:bebb06a2 -->
+
+### Re: Advance lender hold action — gpt-5
+
+> **Queue prompt:**
+>
+> Advance Lender > What clears this hold > Open Lender Requests page ![img_35.png](img_35.png) leads to an empty page with nothing actionable. How does a lender "request a lender saccount"? Why can't the admin do his directly? The lender is also missing documents. Is that the real reason for the hold? Or does the admin simply need to sync the lender account with TMO?
+
+Fixed the dead-end in the Advance lender hold flow. The answer is: the actual funding hold is the missing linked TMO lender account. Missing lender documents are still shown in the checklist for follow-up, but they are not what clears this specific account-link hold. If a lender has already submitted a lender request, the admin should still use the Lender Requests tab because that marks the request done and stores the completion metadata. If no request is pending, the Lender Requests page can legitimately be empty, so the admin should not be sent there as the primary action.
+
+The Advance Lender modal now handles the no-request case directly: it explains that the requests page may be empty, shows an inline `TMO lender account number` field, calls the existing `PUT /api/admin/users/:id/lender-account` endpoint, refreshes the pipeline after success, and keeps the message composer + lender-document checklist visible for any missing setup details. The pending-request case still deep-links to the Lenders tab with the pending-request attention filter.
+
+EFS commit: `4689c03 fix: make advance lender account hold actionable`, pushed to `origin/main`.
+
+Parent repo submodule pointer commit: `028f13cfa chore: update equityfundingsource submodule`. I did not push the parent repo because `main` already has unrelated local commits ahead of `origin/main`; pushing from here would publish unrelated concurrent work. A separate session also committed `661ab209f agent-doc(monsterrodholders): repair Hermes safety response pointer` after my pointer commit, so parent `HEAD` is not the EFS pointer commit.
+
+Changed paths:
+
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `src/equityfundingsource-dev/tests/advance-lender-dialog.test.ts`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev` submodule pointer in the parent repo
+
+Commands:
+
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `view_image /home/brian/work/btakita/agent-loop/tasks/professional/img_35.png`
+- targeted `rg` / `sed` inspections of lender pipeline, lender request, document, and account-link code
+- `bun test tests/advance-lender-dialog.test.ts tests/admin-investor-pipeline.test.ts tests/advance-lender-documents.test.ts`
+- `make check` in `src/equityfundingsource-dev`
+- `gh run list --workflow CI --limit 1` in `src/equityfundingsource-dev`
+- `gh workflow list` in `src/equityfundingsource-dev`
+- `git commit -m "fix: make advance lender account hold actionable"` in `src/equityfundingsource-dev`
+- `git push origin main` in `src/equityfundingsource-dev`
+- `git commit -m "chore: update equityfundingsource submodule"` in the parent repo
+- `gh run list --workflow CI --limit 1` in the parent repo
+- `gh workflow list` in the parent repo
+- `make check` in the parent repo
+
+Verification:
+
+- Focused EFS tests passed: 107 tests across `advance-lender-dialog`, `admin-investor-pipeline`, and `advance-lender-documents`.
+- Full EFS `make check` passed: 1,157 tests, app build, and Worker build.
+- EFS `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` returned no workflows.
+- Parent `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
+- Parent `make check` passed.
+- EFS submodule is clean on `main...origin/main` after push.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:d8f09af7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -154,6 +205,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Advance Lender > What clears this hold > Open Lender Requests page ![img_35.png](img_35.png) leads to an empty page with nothing actionable. How does a lender "request a lender saccount"? Why can't the admin do his directly? The lender is also missing documents. Is that the real reason for the hold? Or does the admin simply need to sync the lender account with TMO?
 <!-- /agent:queue -->
 
 ## Backlog

@@ -376,7 +376,11 @@ Verification:
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:44e1e97b -->
+
+### Re: Queue cleanup — gpt-5
+
+Removed the answered `NewLender` docs-location free-text queue head so the active queue can advance to `do [#s6y6]` without re-running the answered source-location prompt.
+<!-- agent:boundary:3eefee83 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -396,7 +400,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Where is the reference to POST /LSS.svc/NewLender in the developer docs?
 - do [#s6y6]
 <!-- /agent:queue -->
 

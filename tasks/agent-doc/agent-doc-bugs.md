@@ -73,6 +73,7 @@ Done. AGENTS.md reduced from **20,740 bytes (160 lines)** to **1,445 bytes (24 l
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
+- [ ] [#owned-pane-chat-writeback] [P1 Codex/closeout] Fix direct-chat owned-pane response loss: when a Codex pane already owns an agent-doc document and recursive direct invocation is blocked, a chat-only final response must fail closed or cross the `agent-doc write --commit` / finalize boundary before success. Repro: 2026-06-23 Big Bear species task in `src/boost-client/tasks/monsterrodholders.md` completed and pushed commits, but the final response was not added to the document. Plan: `tasks/agent-doc/plan-direct-chat-owned-pane-response-loss-2026-06-23.md`. Advances `#codex-final-response-not-written` / `#codex-queue-drain-no-response-body`.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:backlog -->
 

@@ -6,6 +6,13 @@ On 2026-06-23, a Codex turn answered a prompt from
 `src/boost-client/tasks/monsterrodholders.md` in chat, but the answer did not
 land in the session document.
 
+The failure recurred on a later Big Bear Lake species prompt from the same
+document. Codex updated and pushed the species data, ran focused validation and
+the waterways app test/build suite, and answered the GBIF primary-source question
+in chat, but the operator reported:
+
+> Response was not added to the document.
+
 The same document then hit the same failure again on the follow-up prompt:
 
 > Remove the max character count cap.
@@ -30,6 +37,12 @@ The failure is the closeout boundary: the answer was delivered to chat while
 
 - Document: `src/boost-client/tasks/monsterrodholders.md`
 - Session: `b04ec6ec-0a5c-4afb-b92e-c5448bce5969`
+- Later repro prompt: Big Bear Lake species task for
+  `https://monsterrodholders.com/reservoirs/big-bear-lake-ca-269807/`.
+- Later repro side effects completed outside the document writeback boundary:
+  submodule commit `1ea4b054e` and parent commit `762b01e6` were pushed after
+  the species data update, but no matching response was appended to
+  `agent:exchange`.
 - `agent-doc <file>` from the owning Codex pane failed with the recursive direct
   invocation guard:
   `recursive direct invocation would deadlock`.

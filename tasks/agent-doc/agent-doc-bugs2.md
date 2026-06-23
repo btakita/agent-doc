@@ -51,15 +51,29 @@ I checked the `lazily-rs.md` session directly. The crash left cycle `cycle-17822
 Preflight on this bug tracker also emitted semantic-completion warnings for `#1jec`, `#arsm`, `#qcm1verify`, review `#ftqpartialdup`, and review `#j9ja`; I left those unchanged because this queue prompt was about recovering `lazily-rs.md` sync.
 
 Proof: changed paths were `tasks/software/lazily-rs.md` via the agent-doc repair commit and this session document via finalize. Commands used: `tsift status`, `tsift index --workspace .`, agent-doc preflight/plan/read, `agent-doc session-check` on `lazily-rs.md`, probe preflight on `lazily-rs.md`, and `git status`/`git log`. No code changed, so I did not run `make check`. CI status check was attempted with `gh run list --workflow CI --limit 1`, but this repo has no workflow named `CI`. Escalation: none. Confidence: high.
-<!-- agent:boundary:16005813 -->
+
+### Re: JB Sync Tmux Layout deferral — gpt-5
+
+> **Queue prompt:** JB `Sync Tmux Layout` on lazily-rs.md `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.`
+
+I treated this as a sync-guard health check, not a new implementation item. The current `lazily-rs.md` session is healthy: `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md` reports cycle `cycle-1782226316184` committed, with the next queue prompt ready (`Add ThreadSafeStateMachine and AsyncStateMachine (Tokio).`).
+
+The warning text comes from the JetBrains plugin-local sync guard in `SyncLayoutAction.kt`: a second/manual sync request is deferred while an existing sync owns the guard, and the current code bumps a generation so the in-flight holder reruns with the latest layout afterward. The permanent-wedge version of this symptom is already covered by `tasks/agent-doc/plan-pcp-recycle-no-restart-sync-block.md` / `#recyclerestart`: the FFI guard now has a 45s stale-holder supersede path, above the plugin's 30s sync-process timeout.
+
+Current evidence says this instance was transient rather than wedged. The recent ops log for `lazily-rs.md` shows repeated safe-passive syncs at `2026-06-23T15:03:14Z`-`15:03:16Z` with `sync_lock_wait elapsed_ms=0 status=ok`, and I did not find current `sync_lock_contention` / `safe_passive_sync_lock_contention_retry` / `stale_holder` evidence in the active ops log. So I left backlog/review unchanged and did not add a duplicate bug item.
+
+If the same JB notification persists past the plugin timeout/stale-bound window, that is a live-plugin guard regression against the `#recyclerestart` contract. This captured instance, though, matches the intended "another sync is in flight; retry newest layout" behavior and the binary-side lock is no longer stuck.
+
+Proof: changed paths are this session document via finalize only. Commands used: `agent-doc preflight`/`plan`/`read`, `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md`, `rg` over sync warning/source/log text, `sed` on `plan-pcp-recycle-no-restart-sync-block.md`, `SyncLayoutAction.kt`, and `ffi.rs`, `tail`/`rg` on `.agent-doc/logs/ops.log`, and `git status`. No code changed, so I did not run `make check`. CI status check was attempted with `gh run list --workflow CI --limit 1`, but this repo has no workflow named `CI`. Escalation: none. Confidence: medium-high; terminal evidence proves the binary-side sync lock was not wedged, while the exact JB notification lifecycle lives in the IDE log/UI.
+<!-- agent:boundary:dcbb7bfe -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~My PC had a hard crash. Now I cannot sync the lazily-rs.md session.~~
+- ~~JB `Sync Tmux Layout` on lazily-rs.md `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.`~~
 ---
-JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
+:round_pushpin: JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
 ```
 [route] target tmux session: 0
 Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
@@ -70,7 +84,7 @@ Error: authoritative actor record for tasks/software/agent-loop.md is bound to h
 - :pushpin: do [#qnodemerge4verify]
 - :pushpin: do [#tb4q]
 ---
-:round_pushpin: JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
+JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
 ```
 [route] target tmux session: 0
 Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
@@ -87,7 +101,7 @@ Please make backlog replacements for all gated review items. We need to complete
 ---
 `'/clear' is disabled while a task is in progress
 ---~~~~
-A recent monsterrodholders.md session had much churn after I edited the queue while a turn was running. One churn item included deleting a queue item that I added.
+A recent monsterrodholders.md session had much churn after I edited the queue while a turn was running. One churn item included deleting a queue item that I added
 ---
 agent-doc reentrant run on equityfundingsource.md had recovery churn.
 ```

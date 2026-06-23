@@ -368,6 +368,17 @@ fn bare_path_alias_uses_same_template_safe_path() {
     agent_doc()
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
+        // Bare `agent-doc <FILE>` is a harness-native alias. Simulate Codex
+        // explicitly so this positive path is deterministic in plain CI shells.
+        .env_remove("CLAUDECODE")
+        .env_remove("CLAUDE_CODE")
+        .env_remove("CLAUDE_CODE_SESSION")
+        .env_remove("OPENCODE")
+        .env_remove("OPENCODE_CLIENT")
+        .env_remove("CODEX")
+        .env_remove("CODEX_CLI")
+        .env_remove("CODEX_THREAD_ID")
+        .env("CODEX_SESSION", "codex-session")
         .arg(doc.to_str().unwrap())
         .assert()
         .success();

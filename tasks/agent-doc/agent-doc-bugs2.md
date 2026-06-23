@@ -91,12 +91,41 @@ Other real paths:
 - ACK-content sidecar writes are probably not themselves the visible Markdown-file dialog: they write under `.agent-doc/ack-content/`. But if the plugin cannot write ACK content, the binary loses proof and can move into the blocked/fallback/error paths above.
 
 The next useful capture is exactly what `#cyh0` asks for: when the dialog appears, capture the nearest ops line naming `transport=...`, `action=...`, `reason=...`, plus whether JB logged `File Cache Conflict pending/kept memory changes`.
-<!-- agent:boundary:6bb1cfa6 -->
+
+### Re: File Cache Conflict backlog — gpt-5
+
+> **Queue prompt:**
+>
+> Add items into the backlog to address all the possible causes of JB `File Cache Conflict` dialogs.
+
+Added backlog coverage for each currently identified File Cache Conflict path: stale supervisors, missing/stale editor ownership, force-disk fallback, no-ACK listener behavior, PatchWatcher conflict handling, multi-window plugin consumers, ACK-content proof loss, plugin save/VCS refresh, reconnect stale buffers, and a final write-site audit with cause-labeled logs.
+
+Changed paths: session document backlog only.
+
+Commands: `tsift status`; `tsift index --workspace .`; `agent-doc preflight`; `agent-doc plan`; targeted `rg`/`sed` review of existing FCC review/done/spec/code references.
+
+Verification: confirmed the open backlog was empty before insertion, confirmed existing FCC review items `#cyh0` and `#8bfz` so the new backlog items explicitly cover actionable follow-up instead of only re-filing manual proof, and added backlog items for every path listed in the prior FCC response.
+
+Confidence: high for backlog coverage of the known paths; medium that the list is exhaustive because the remaining live dialog still needs the `transport/action/reason` capture to prove which path is firing.
+
+Escalation: none.
+<!-- agent:boundary:6c682a6a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- do [#fcccap]
+- do [#fccsup]
+- do [#fccendpoint]
+- do [#fccforce]
+- do [#fccnoack]
+- do [#fccpatch]
+- do [#fccowner]
+- do [#fccack]
+- do [#fccsave]
+- do [#fccreconnect]
+- do [#fccaudit2]
 <!-- /agent:queue -->
 <!--
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.
@@ -128,6 +157,17 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#fcccap] #agent-doc-bug Replace manual-only File Cache Conflict capture (#cyh0) with an automated trigger bundle: on every JB File Cache Conflict/pending-memory event, write a correlated artifact containing the nearest agent-doc command, ops.log `transport=... action=... reason=...`, patch id/editor id, plugin event (`pending`, `kept-memory`, `cancelled`, `saveDocument`), and document hash so the remaining trigger is provable without operator log scraping.
+- [ ] [#fccsup] #agent-doc-bug Close the stale-binary supervisor FCC path: make stale route-owned supervisors recycle at the next safe boundary without requiring a manual `admin recycle`, and add a regression/ops assertion that `content_ours_adoption_refused_stale_supervisor reason=supervisor_binary_stale` cannot recur after install+boundary recycle.
+- [ ] [#fccendpoint] #agent-doc-bug Harden the `apply_template_writeback transport=disk_fallback reason=send_failed editor_endpoint=absent action=editorless_disk_fallback` path: distinguish true no-editor CLI sessions from JB-open-but-missing/stale owner lease, fail closed or restore editor ownership for the latter, and add coverage so an open JB buffer is never externally overwritten as an editorless disk fallback.
+- [ ] [#fccforce] #agent-doc-bug Contain `convergence_gate_force_disk_fallback reason=editor_ipc_convergence_boundary_failed`: make the fallback write require a loadable playback artifact plus editor-open safety proof, prefer blocked/error with exact unblocker when JB has the file open, and prove the force-disk path cannot surface a File Cache Conflict silently.
+- [ ] [#fccnoack] #agent-doc-bug Trace and harden active-listener/no-ACK behavior: when `transport=blocked reason=no_ack_content` fires, prove no plugin/VFS side effect (`saveDocument`, VCS refresh, stale patch apply) can still raise a JB File Cache Conflict; add ops markers and a regression for the blocked path staying non-mutating.
+- [ ] [#fccpatch] #agent-doc-bug Fix PatchWatcher conflict-pending flow: when IntelliJ already has a File Cache Conflict / memory-vs-disk prompt, defer patch application and deletion until the conflict resolves, then either rebase/retry the patch with fresh base proof or discard with an explicit logged reason instead of leaving the original external-write source ambiguous.
+- [ ] [#fccowner] #agent-doc-bug Finish the multi-window plugin-consumer cause beyond #8bfz operator proof: make the single-owner lease fail-closed or loudly degraded for untargeted patches when the owner lease is absent/stale/FFI-unavailable, log owner/non-owner decisions with document hash and editor id, and add a live/simulated multi-window regression that only one JB process calls `saveDocument` per patch.
+- [ ] [#fccack] #agent-doc-bug Prove and harden ACK-content sidecar behavior: label `.agent-doc/ack-content` writes separately from session-doc writes, assert sidecar writes themselves never target the visible markdown file, and when ACK-content is missing or stale, route to blocked/error recovery instead of any fallback that can cause an external file change under JB.
+- [ ] [#fccsave] #agent-doc-bug Instrument and gate plugin `saveDocument` / VCS-refresh signals as possible FCC triggers: log source action and before/after hashes for every plugin save/refresh after patch application, suppress saves when the editor buffer is stale vs HEAD/disk, and add coverage for the stale-buffer save not reintroducing disk/editor divergence.
+- [ ] [#fccreconnect] #agent-doc-bug Complete the plugin reconnect stale-buffer half of #evmh: on JB plugin reconnect, if the editor buffer is stale relative to HEAD/disk and has no proven user edit, re-read disk/HEAD instead of pushing the stale buffer via `saveDocument`; cover reconnect-after-binary-write and reconnect-after-user-edit separately.
+- [ ] [#fccaudit2] #agent-doc-bug Run a remaining File Cache Conflict write-site audit: enumerate every session-document mutation path (reset/repair/preflight/status/queue/done/finalize/compact/route recovery/plugin refresh), require each to use the converge-or-disk gate or a documented editorless proof, and add a `write_authority` ops marker with a stable cause label for any path that can still touch disk.
 <!-- /agent:backlog -->
 
 ## Review

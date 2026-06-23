@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -559,7 +559,7 @@ Verification: non-destructive local inspection only; no code changed and no live
 Escalation: none.
 
 Confidence: high that this cannot be proven from public docs or local simulator tests alone; medium on the vendor behavior itself until live tenant/support validation is available.
-<!-- agent:boundary:9e049cf7 -->
+<!-- agent:boundary:c683a855 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -579,7 +579,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#04v8]
 <!-- /agent:queue -->
 
 ## Backlog

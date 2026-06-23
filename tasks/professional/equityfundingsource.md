@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -100,7 +100,7 @@ Commits:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:657bafa7 -->
+<!-- agent:boundary:c2da402e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -120,6 +120,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~Add the unified chat interface to the admin portal. This chat portal should detect which borrower, lender(s), or broker that is being viewed and display the appropriate conversation(s). For example, if an available deal dialog is open, show the chat with the borrower. If viewing interested lender(s), the chat should be with the lender(s) and the borrower in a separate tab. Size the admin message dialog appropriately to see the conversation and tabs if there are multiple participants. Lender groups should allow messaging with the entire group as a multiway conversation or with an individual lender via tabs.~~ — auto-struck: answered this cycle (#ftstrike)
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

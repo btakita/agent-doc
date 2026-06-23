@@ -252,7 +252,7 @@ Verification:
 
 Confidence: high for backlog capture; implementation remains queued as `do [#3ygp]`.
 Escalation: none.
-<!-- agent:boundary:328d272e -->
+<!-- agent:boundary:a88088bb -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -265,7 +265,7 @@ Escalation: none.
 - :pushpin: do [#qcm1verify]: Use the logs to verify.
 - :pushpin: do [#qstrikework]
 - :pushpin: do [#1jec]
-- ~~do [#3ygp]~~
+- do [#3ygp]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

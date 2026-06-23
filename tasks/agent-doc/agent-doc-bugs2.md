@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -32,89 +32,69 @@ complete
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-### Re: #ws55 — gpt-5
-
-> **Queue prompt:**
->
-> [#ws55] If agent-doc was run from the shell, is it supposed to start the agent harness and run the document?
-
-No. Bare `agent-doc <FILE>` is a harness-native entrypoint, not a normal-shell harness launcher. Inside Codex, Claude Code, or OpenCode it may run the document through that active harness. From a normal shell it should fail immediately and point the operator at explicit commands such as `agent-doc run <FILE>`, `agent-doc route <FILE>`, or `agent-doc start <FILE>`.
-
-Proof:
-- Changed paths: no source changes for `#ws55`; preflight/reset repaired session sidecars, and this finalize marks `#ws55` done.
-- Commands: `agent-doc reset --from-current /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`; `make install`; `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`; `env -u ... timeout 10s agent-doc tasks/agent-doc/agent-doc-bugs2.md`; `agent-doc --version`.
-- Verification: stripped-env bare path exits 1 with the supported-harness error and did not hang; installed CLI reports `agent-doc 0.34.38`.
-- Confidence: high.
-- Escalation: none.
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260623-024747.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260623-040841.md`*
 
 Compacted content:
-❯ - Archived 3 response topic(s): #fccd - gpt-5; bare agent-doc shell invocation; bare agent-doc shell invocation follow-up
-❯ - Prior summary/context: prior compacted content: Archived 1 response topic(s): #qpinfl - gpt-5
-
-### Re: #ws55 — gpt-5
-
-> **Queue prompt:**
->
-> [#ws55] If agent-doc was run from the shell, is it supposed to start the agent harness and run the document?
-
-No. Bare `agent-doc <FILE>` is not supposed to launch a harness from a normal shell. It is a harness-native alias: inside Codex, Claude Code, or OpenCode it can run the document in that already-active harness; outside those harnesses it must fail immediately and direct the operator to explicit commands such as `agent-doc run <FILE>`, `agent-doc route <FILE>`, or `agent-doc start <FILE>`.
-
-Verification: after reinstalling `agent-doc 0.34.38`, a stripped-environment shell invocation exited 1 with the supported-harness error and did not hang. `#ws55` is resolved.
-
-### Re: #3x90 — gpt-5
-
-I isolated and fixed two concrete `Run Agent Doc` submit causes in `agent-doc` submodule commit `341baf44` (`fix route submit proof failures`), pushed to `btakita/agent-doc` `main`.
-
-1. The route could falsely report success after Codex only accepted pane input. The failing attempt logged `accepted_without_dispatch_start_proof` and preserved a snapshot with the `agent-doc ...agent-doc-bugs2.md` prompt still in the Codex composer, but the Rust route collapsed that tracked timeout back to `CommandAcceptedOnly`. Because dispatch-only accepted-only proof was globally allowed, JetBrains recorded `route_success` instead of `route_dispatch_start_unproven`.
-2. The late-Enter recovery was skipped because current-draft detection only looked at the last 8 raw capture lines. Codex left enough blank padding below the footer that the composer line fell outside that window, so `try_late_direct_pane_enter_resubmit_after_unproven_dispatch` did not press Enter even though the prompt was visible and safe.
-
-The fix adds a distinct `DispatchStartUnproven` outcome. Unsupported/no-tracker harnesses can still use accepted-only proof, but a tracked Codex/OpenCode timeout now fails closed through the existing `accepted_without_dispatch_start_proof` path that JetBrains already classifies as `DISPATCH_START_UNPROVEN`. Current-draft detection now uses recent non-empty stripped lines, with the exact blank-padded Codex snapshot shape covered by a regression test.
-
-Verification: focused route tests passed; local `make check` passed (`5004` nextest tests + doctests + medium closeout sim); `make install` rebuilt/installed `agent-doc 0.34.38` and `libagent_doc.so`; `agent-doc admin recycle` marked the route controller for idle recycle; GitHub Actions CI passed on run `27999559170` (`make check` + `make tmux-ci`).
-
-### Re: JB File Cache Conflict dialogs — gpt-5
-
-There are still multiple distinct paths; we were treating them as one symptom.
-
-The currently proven path in this document is stale-supervisor IPC drift. The logs repeatedly show `content_ours_adoption_refused_stale_supervisor ... reason=supervisor_binary_stale` for `agent-doc-bugs2.md`, with guards `live_prompt_drift` and `prompt_duplication`. That means the editor ACK content looked like a state the current binary would normally repair/adopt, but the owning route supervisor was still mapped to an older binary, so the code refused to trust it and warned that the stale owner can keep producing File Cache Conflict / IPC-drift dialogs. `make install` and `agent-doc admin recycle` are done, but this busy turn prevents pid `3120960` from recycling until idle.
-
-Other real paths:
-
-- `apply_template_writeback transport=disk_fallback reason=send_failed editor_endpoint=absent action=editorless_disk_fallback`: the binary believes no live editor endpoint owns the document, so it writes the markdown file directly. If IntelliJ actually has that file open but the plugin owner lease is absent/stale, IntelliJ can raise the dialog.
-- `convergence_gate_force_disk_fallback reason=editor_ipc_convergence_boundary_failed`: the convergence gate times out waiting for commit/editor convergence and records a force-disk fallback. If the file is open in JB, this is another direct external-write source.
-- Active listener without ACK content is supposed to be blocked, not written: the guarded path logs `transport=blocked reason=no_ack_content` and avoids `transport=disk_fallback`. So if a dialog appears while that guard is active, the trigger is likely plugin/VFS-side, not the binary taking the blocked fallback.
-- JB `PatchWatcher` intentionally defers when IntelliJ already has a pending memory-vs-disk conflict, then rejects the patch after Cancel/Keep-memory. That handles the conflict after IntelliJ surfaces it; it does not prove the original external modification source.
-- Multi-window plugin consumers remain a plausible unresolved source: before/when the `#8bfz` single-owner lease is absent, stale, or fails open, more than one JB process can watch `.agent-doc/patches`, apply the same untargeted patch, and call `saveDocument`.
-- ACK-content sidecar writes are probably not themselves the visible Markdown-file dialog: they write under `.agent-doc/ack-content/`. But if the plugin cannot write ACK content, the binary loses proof and can move into the blocked/fallback/error paths above.
-
-The next useful capture is exactly what `#cyh0` asks for: when the dialog appears, capture the nearest ops line naming `transport=...`, `action=...`, `reason=...`, plus whether JB logged `File Cache Conflict pending/kept memory changes`.
-
-### Re: File Cache Conflict backlog — gpt-5
-
-> **Queue prompt:**
->
-> Add items into the backlog to address all the possible causes of JB `File Cache Conflict` dialogs.
-
-Added backlog coverage for each currently identified File Cache Conflict path: stale supervisors, missing/stale editor ownership, force-disk fallback, no-ACK listener behavior, PatchWatcher conflict handling, multi-window plugin consumers, ACK-content proof loss, plugin save/VCS refresh, reconnect stale buffers, and a final write-site audit with cause-labeled logs.
-
-Changed paths: session document backlog only.
-
-Commands: `tsift status`; `tsift index --workspace .`; `agent-doc preflight`; `agent-doc plan`; targeted `rg`/`sed` review of existing FCC review/done/spec/code references.
-
-Verification: confirmed the open backlog was empty before insertion, confirmed existing FCC review items `#cyh0` and `#8bfz` so the new backlog items explicitly cover actionable follow-up instead of only re-filing manual proof, and added backlog items for every path listed in the prior FCC response.
-
-Confidence: high for backlog coverage of the known paths; medium that the list is exhaustive because the remaining live dialog still needs the `transport/action/reason` capture to prove which path is firing.
-
-Escalation: none.
-<!-- agent:boundary:6c682a6a -->
+❯ - Archived 5 response topic(s): #ws55; #ws55; #3x90; 2 more
+<!-- agent:boundary:db95c05d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+I rebooted. JB `Run Agent Doc` stalled without dispatching. Prompt has `/clear` from another watcher. `/clear` should not have been added.
+```
+resync: pruned 3 stale session(s)
+[sync] recovered live pane %6 for session b26b9957 via path provenance pid=179547 instance=f14e0d0d-a615-46dc-9372-095c6f262ee8
+[sync] recovered live pane %3 for session 62fe1f41 via supervisor pid 140998
+resync: purged 1 orphaned stash pane(s)
+[route] target tmux session: 0
+[route] activated existing inactive agent:queue head "do [#fcccap]" for tasks/agent-doc/agent-doc-bugs2.md (already_present=true, activated=true) before dispatch-only reopen
+[route] Still waiting for codex (1s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (3s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (4s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (6s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (7s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (9s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (10s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (12s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (14s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (15s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (17s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (18s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (20s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (21s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (23s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (24s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (26s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (27s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (29s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (30s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (32s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (33s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (35s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (36s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (38s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (39s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (41s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (42s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (44s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (46s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (47s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (49s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (50s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (52s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (53s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (55s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (56s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (58s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (59s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+Error: dispatch-only codex reopen refused to inject into pane %6 for tasks/agent-doc/agent-doc-bugs2.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
+```
+---
+- Extending the timeout is not the solution. The panes were up is less than 2s. Codex was running and idle. I am able to use Codex manually. This is an agent-doc dispatch bug.
 - do [#fcccap]
 - do [#fccsup]
 - do [#fccendpoint]
@@ -157,6 +137,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#jbrunclear] #agent-doc-bug Fix the remaining JetBrains Run Agent Doc `/clear` interference: when an editor-initiated route is pending or a recovered pane is still booting, supervisor/PCP context-reset handoff must not leave `/clear` or `/new` in the composer; add ops proof that distinguishes route-submit-in-flight, context-clear marker, prompt-ready ordering, and the 2026-06-23 reboot shape.
 - [ ] [#fcccap] #agent-doc-bug Replace manual-only File Cache Conflict capture (#cyh0) with an automated trigger bundle: on every JB File Cache Conflict/pending-memory event, write a correlated artifact containing the nearest agent-doc command, ops.log `transport=... action=... reason=...`, patch id/editor id, plugin event (`pending`, `kept-memory`, `cancelled`, `saveDocument`), and document hash so the remaining trigger is provable without operator log scraping.
 - [ ] [#fccsup] #agent-doc-bug Close the stale-binary supervisor FCC path: make stale route-owned supervisors recycle at the next safe boundary without requiring a manual `admin recycle`, and add a regression/ops assertion that `content_ours_adoption_refused_stale_supervisor reason=supervisor_binary_stale` cannot recur after install+boundary recycle.
 - [ ] [#fccendpoint] #agent-doc-bug Harden the `apply_template_writeback transport=disk_fallback reason=send_failed editor_endpoint=absent action=editorless_disk_fallback` path: distinguish true no-editor CLI sessions from JB-open-but-missing/stale owner lease, fail closed or restore editor ownership for the latter, and add coverage so an open JB buffer is never externally overwritten as an editorless disk fallback.

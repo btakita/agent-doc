@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -592,7 +592,7 @@ High that the `passage` token was tried and failed authentication. Low for curre
 ### escalation — gpt-5
 
 None. No production D1 writes, TMO mutations, deploys, or Time Travel restore were performed.
-<!-- agent:boundary:f010aa46 -->
+<!-- agent:boundary:35563495 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -612,7 +612,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Look in the TMO sandbox. Is Lucas Huang in the TMO sandbox?
+- Look in the TMO sandbox. Is Lucas Huang in the TMO sandbox? Use `passage equityfundingsource/TMO_API_TOKEN`.
 <!-- /agent:queue -->
 
 ## Backlog

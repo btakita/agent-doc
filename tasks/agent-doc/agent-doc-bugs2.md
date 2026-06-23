@@ -246,7 +246,7 @@ Installed state:
 - JetBrains and VS Code plugins were rebuilt and installed; IntelliJ still needs a restart before the newly installed JetBrains plugin code is active.
 
 Verification completed in this session includes the VS Code test suite, JetBrains plugin tests/build, focused Rust IPC tests, `make check`, and the latest green GitHub Actions CI run.
-<!-- agent:boundary:39e654e3 -->
+<!-- agent:boundary:1da9717a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -312,6 +312,8 @@ Error: authoritative actor record for tasks/software/agent-loop.md is bound to h
 - :pushpin: do [#tb4q]
 - do [#cancelturnverify]
 - ~~do [#mrh-response-loss-stalled-queue]~~
+- do [#qcm1verify]
+- Running `agent-doc file-name.md` directly in the CLI should return in an immediate error explaining it needs to be run within a supported harness (Codex, Claude, or Opencode). Instead, it said "Submitting to Codex..." and locks the shell. Now I cannot sync monsterrodholders.md.
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

@@ -218,7 +218,45 @@ Verification passed:
 - Parent `make check`
 
 One closeout issue remains: `agent-doc` could not get editor IPC proof to write the response into `tasks/professional/equityfundingsource.md`; it queued the patch but the editor did not acknowledge/apply it. I did not force a disk write because that would bypass the active editor/CRDT path.
-<!-- agent:boundary:d4c5869c -->
+
+### Re: TMO lender sync rationale — gpt-5
+
+> **Queue prompt:**
+>
+> "The local TMO docs still say lender creation is manual and not to call TMO lender endpoints from the investor portal, so this uses the existing admin `POST /api/admin/tmo-sync` path and leaves exact-account-number entry as fallback.". Why?
+
+Because the repo currently has two different concepts that look similar in the UI but are not the same integration.
+
+`POST /api/admin/tmo-sync` is an admin-only TMO loan-data refresh. The implementation starts from local loans that already have `tmo_loan_number`, fetches TMO loan/payment-schedule/funding data, updates EFS read models, and writes cache/change-log records. It does not search TMO for lender accounts, create lenders, or link a newly created TMO lender back to an EFS user.
+
+The local lender onboarding contract is still manual: investor submits lender info to EFS, admin reviews it, admin creates or finds the lender in TMO, then EFS stores the exact TMO account number in `users.lender_account`. `docs/TMO/new-lender.md` is explicit about that boundary: do not call TMO lender endpoints from the investor portal; lender creation is manual in TMO; the sync refreshes loan/funding/schedule/cache data and does not auto-discover newly created lender account numbers.
+
+So the reason I left manual exact-account entry as the fallback is risk control, not preference. We do not yet have a confirmed TMO lender create/search/link API contract, field map, duplicate-prevention rule, idempotency key, or error semantics for mutating TMO lender master records from EFS. If we guessed at those endpoints from the investor portal or from the Advance Lender dialog, the likely failure mode would be duplicate or incorrectly linked TMO lender records.
+
+I added a recommended backlog item for the separate real automation: confirm the TMO lender endpoint/search/create/link contract, then build an admin-only idempotent flow that can safely create or find the TMO lender and store the exact account number automatically. Until that exists, the current button should be understood as "refresh known TMO loan data," not "create/link this lender account in TMO."
+
+Changed paths:
+- None in repo code. This was a document response plus one recommended backlog item.
+
+Commands:
+- `tsift status`
+- `tsift status --fix`
+- `agent-doc --version`
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc read` for `exchange` and `queue`
+- targeted `rg` and `sed` inspections of `docs/TMO/new-lender.md`, `prds/investor-pipeline-admin.md`, `app/equityfundingsource/lib/tmo-sync.ts`, `app/equityfundingsource/lib/admin/loan_management/index.ts`, and `app/equityfundingsource/lib/admin/routes.ts`
+
+Verification:
+- Documentation and source inspection only; no code changed, so no test suite was run.
+- Confirmed `POST /api/admin/tmo-sync` routes to `admin_tmo_sync_POST_`, which calls `tmo_sync_all_`.
+- Confirmed `tmo_sync_all_` iterates existing local loans with `tmo_loan_number`, syncs TMO loan/payment-schedule/funding/cache data, and has no lender account create/search/link behavior.
+- Confirmed `docs/TMO/new-lender.md` says lender creation is manual in TMO, TMO lender endpoints should not be called from the investor portal, and manual account-number entry remains required when sync does not link the lender.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:5ba0b308 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -238,6 +276,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- "The local TMO docs still say lender creation is manual and not to call TMO lender endpoints from the investor portal, so this uses the existing admin `POST /api/admin/tmo-sync` path and leaves exact-account-number entry as fallback.". Why?
 <!-- /agent:queue -->
 
 ## Backlog

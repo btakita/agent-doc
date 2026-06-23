@@ -11,6 +11,24 @@ The new report is narrower than inactive context pollution: the user is seeing
 items that should be completed still present in the queue itself, making the
 document look executable even after the work has already closed.
 
+### Fresh repro — 2026-06-23
+
+`tasks/professional/equityfundingsource.md` still shows a live free-text queue
+item:
+
+```md
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- deploy
+<!-- /agent:queue -->
+```
+
+That `deploy` head was answered in a committed cycle that reported successful
+deploy, `session-check ok`, and no queue continuation. A later EFS queue cycle
+also committed successfully, but the old answered `deploy` head remained live
+instead of being struck/removed. This is a regression against the `#ftstrike` /
+`#qheadstrike` contract: an answered free-text head must not reappear as ready
+work after a proven closeout.
+
 ## Likely Gap
 
 The existing tests cover finalize/preflight drain behavior for some happy-path
@@ -27,6 +45,8 @@ Likely failure modes:
   cleanup before launching or stopping
 - repair/preflight normalizes `queue_active` while leaving completed prompt rows
   in place
+- recovery/finalize can consume the current new prompt while preserving a stale,
+  already-answered free-text head from an older snapshot or live editor buffer
 
 ## Desired Behavior
 
@@ -51,7 +71,10 @@ When a queue item is completed:
    continuation for inconsistent drain ordering.
 4. Ensure IPC queue convergence sends the fully drained queue body after
    closeout, not only the `auto` attribute or `queue_active` state.
-5. Add live verification against the reported session document before marking
+5. Add a targeted regression that models a prior answered free-text head
+   (`deploy`) plus a later manually-added free-text head in the same queue:
+   the later closeout must not revive the older answered head.
+6. Add live verification against the reported session document before marking
    the fix complete.
 
 ## Verification

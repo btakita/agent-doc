@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -249,7 +249,25 @@ Post-deploy checks:
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:1cad9792 -->
+
+### Re: Residual deploy queue closeout — gpt-5
+
+> **Queue prompt:**
+>
+> ~~deploy~~ — answered this cycle (#ftstrike)
+
+The deploy request was completed in the immediately preceding work and this cycle only clears the residual queue head. Current deployed EFS Worker version remains `03d62884-84a8-4610-b135-6b0fd3d61e16` at `https://equityfundingsource.brian-takita.workers.dev/` from EFS commit `fc51cb4` and parent commit `ef98ad64d`.
+
+Changed paths: none in this residual closeout.
+
+Commands: no new repo or deploy commands were needed in this residual closeout; the prior closeout recorded the completed `make deploy`, migration checks, live smoke checks, commits, and local verification.
+
+Verification: queue-residue only; prior verification remains EFS `make check` passing, parent `make check` passing, remote migrations none pending, public live smoke `200`, and `/admin/pipeline` auth redirect `303`.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:84c91033 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -269,8 +287,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~During the call, the Deal Pipeline "reset". A deal that I was advancing was reset after I dragged the deal across several states. When it moved to closed, it disappeared from the Deal Pipeline.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

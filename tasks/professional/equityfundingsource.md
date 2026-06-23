@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -319,7 +319,7 @@ Escalation: none.
 ### Re: Queue repair — gpt-5
 
 Struck the answered preset-backed queue head left active after the response commit so the same TMO lender API investigation does not re-run.
-<!-- agent:boundary:c0544bed -->
+<!-- agent:boundary:5a620c11 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -345,6 +345,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#s6y6] [recommended] Implement admin-only TMO lender find-or-create/link flow using `LSS.svc` `GetLender`, paginated `GetLenders`, and `NewLender`, with duplicate review, audit logging, tests/simulator coverage, and final save of the approved TMO `Account` into `users.lender_account`; keep investor-portal lender creation read-only/manual until that admin flow ships.
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 

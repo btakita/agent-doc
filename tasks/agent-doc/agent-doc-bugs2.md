@@ -95,12 +95,34 @@ Proof:
 - commit: `2612c5f46` (`agent-doc response: #directchatpb2 direct-chat response-loss recurrence`)
 - changed_files: `tasks/agent-doc/agent-doc-bugs2.md`, `tasks/agent-doc/plan-direct-chat-owned-pane-response-loss-2026-06-23.md`
 - escalation: none (implementation is gated behind scheduling)
-<!-- agent:boundary:2431080d -->
+
+### Re: #qheadresidue and #gsf5 — gpt-5
+
+> **Queue prompt:**
+>
+> [#directchatpb2]. The last turn had the response partially deleted in an uncommitted state.
+
+
+Closed both requested items.
+
+For `#qheadresidue`, I verified this bug class is already fixed in the installed/newer build rather than adding a duplicate patch. `session-check` now interrupts when a free-text `agent:queue` head is still active but exchange history contains the `> **Queue prompt:**` echo proving that head was answered, and it logs `free_text_queue_completed_residue_guard_fired` with the `#qheadresidue` hint. `git log -S free_text_queue_completed_residue_guard_fired` points to release commit `50c10480` (`v0.34.40`), and this machine is running `agent-doc 0.34.42`.
+
+For `#gsf5`, `tasks/software/lazily-rs.md` is no longer stuck. `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md` reports cycle `cycle-1782231717317` committed with `queue_continuation_required=false`, and an explicit sync against that file reused/recovered live pane `%32`, verified the layout, and logged `safe_passive_total status=ok` for `doc=lazily-rs`. I also restored the working tmux layout afterward so this bug tracker pane and `lazily-rs.md` are visible together again.
+
+Proof:
+- changed_paths: no source files changed this cycle; this session document is updated by finalize only
+- tests: `cargo test -p agent-doc-orchestration completed_free_text_queue_residue_guard_fires_for_answered_active_head -- --nocapture` passed; `cargo test --test finalize_integration finalize_echoes_consumed_free_text_queue_prompt_into_response -- --nocapture` passed; `cargo test --test finalize_integration finalize_keeps_free_text_queue_head_when_cycle_answers_foreign_exchange_prompt -- --nocapture` passed
+- sync/session proof: `agent-doc sync --no-autostart --exact-visible --focus ...lazily-rs.md --col ...lazily-rs.md` succeeded; follow-up sync restored the multi-pane layout; `agent-doc session-check ...lazily-rs.md` remained OK
+- CI: `gh run list --workflow CI --limit 1` shows the latest submodule CI for `v0.34.42` completed successfully
+- escalation: none
+- confidence: high for the binary/session state and medium-high for the editor sync path; the terminal proves the same underlying sync path and live pane recovery, while the JetBrains notification surface itself was not human-observed in this turn
+<!-- agent:boundary:79f91ead -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~[#directchatpb2]. The last turn had the response partially deleted in an uncommitted state.~~
 ---
 :round_pushpin: JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
 ```
@@ -122,6 +144,8 @@ Error: authoritative actor record for tasks/software/agent-loop.md is bound to h
 - do [#cancelturnverify]
 - do [#qcm1verify]
 - do [#arsm]
+- ~~do [#qheadresidue]~~
+- ~~do [#gsf5]~~
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -151,7 +175,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#directchatpb2] #agent-doc-bug Direct-chat owned-pane response loss recurred on 2026-06-23: Codex answered the MRH "2300 words" lint prompt in chat after recursive direct invocation was refused, then recurred again on the follow-up "Remove the max character count cap" prompt; `tasks/monsterrodholders.md` still lacked a matching `### Re:` response and retained queue residue (`no-free-text-queue-head-guard` + bare heading). Add enforced Codex final/Stop gate + recovery regression so each active session-document prompt, including consecutive prompts in one owned pane, cannot complete without `agent-doc finalize/write --commit`. Plan: tasks/agent-doc/plan-direct-chat-owned-pane-response-loss-2026-06-23.md. DO NOT IMPLEMENT until scheduled.
-- [ ] [#qheadresidue] #agent-doc-bug Completed free-text queue item was not struck and resurfaced as live work: `tasks/professional/equityfundingsource.md` still has `- deploy` in `agent:queue` after a successful deploy response, committed closeout, and `session-check` reporting no continuation. Reopen the completed-queue-residue class against `#ftstrike`/`#qheadstrike`: add a regression for older answered free-text heads surviving a later queue cycle, audit finalize/write/preflight/run drain ordering, and make session-check fail closed on provable completed queue residue. Plan: tasks/agent-doc/plan-completed-queue-residue-regression.md.
 - [ ] [#cancelturnverify] [operator-verify] #agent-doc-bug Live-verify Cancel Turn (agent-doc submodule b4471d05; committed+pushed, make check green, JB 0.2.176 + VS Code 0.2.31 built, NOT installed). After installing the plugins: (1) while a turn is RUNNING, invoke Cancel Turn (JB menu / VS Code command) and confirm the turn is interrupted (ops.log cancel_turn_performed action=interrupt_active_turn) and the agent stays open; (2) while the agent is IDLE, invoke Cancel Turn (even repeatedly) and confirm it is a NO-OP (ops.log cancel_turn_noop reason=idle_no_active_turn) and the agent is NOT closed — the core safety requirement. Verify per harness: Codex/OpenCode (Escape/C-c, never raw Ctrl+C that would close on idle) and Claude.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.
@@ -159,7 +182,6 @@ What are #next-steps to fix bugs?
 - [ ] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.
 - [ ] [#qcm1verify] [operator-verify] #agent-doc-bug Install + live-verify the #qnodemerge1 component-scoped merge (agent-doc submodule 52458f47). Code shipped+pushed, make check green (4853). Operator-gated remainder (mid-session install causes finalize-client-newer drift; STOP-cutting-releases gate): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then drive one edit-during-finalize cycle (type into a queue item while the agent writes an exchange response) and confirm ZERO cross-component splice + no console-output-in-queue corruption.
 - [ ] [#1jec] [operator-verify] #yzerverify #agent-doc-bug Live-verify the #yzer/#evmhplugin plugin reconnect re-read (agent-doc 0.34.28 / submodule f6b8ae17, plugin 0.2.172). Code shipped+pushed: binary FFI agent_doc_reconnect_buffer_decision (disk==HEAD via ffi_show_head + buffer==prior-commit via ffi_show_prior_blobs) + pure decide_reconnect_buffer + PatchWatcher.registerRoot reconcile-on-connect (applyReconnectReread) + SimWorld coverage; make check green (4832). Operator-gated remainder (install is unsafe mid-session = finalize-client-newer drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), reinstall plugin 0.2.172, agent-doc admin recycle. Then repro: open a session doc in JB, kill/restart the supervisor so the binary commits while the plugin is disconnected, and on reconnect confirm ops.log shows 'reconnect_buffer_decision decision=reread_disk #yzer' and the editor buffer == HEAD with NO File Cache Conflict; a buffer holding genuine unsaved user edits must instead log decision=keep_buffer and be preserved (editor wins).
-- [ ] [#gsf5] [operator-verify] Live-check editor Sync Tmux Layout against `tasks/software/lazily-rs.md` on the installed v0.34.39 build after a crash-left response/snapshot drift.
 <!-- /agent:backlog -->
 
 ## Review

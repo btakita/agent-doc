@@ -440,7 +440,44 @@ High. The full EFS test suite/builds and the repo-level check passed after the m
 ### escalation — gpt-5
 
 No escalation or external services were required.
-<!-- agent:boundary:a06717f3 -->
+## Re: Lucas Huang TMO sandbox vs EFS DB — gpt-5
+
+Lucas Huang is not present in the current app-owned EFS tables I checked, but there is a TMO-origin cache row in EFS D1.
+
+The concrete row is `tmo_cache_entities` with `entity_type='loan'`, `source_id='TST113'`, `ShortName='Huang, Lucas'`, `FullName='Lucas Huang'`, `EmailAddress='stormrunner06106@gmail.com'`, `LoanStatus='Application Received'`, and TMO `RecID='89B3B9CD0A6E47DF81161AD805897B5C'`. It was created at `2026-06-08 14:56:10 UTC` and last synced at `2026-06-08 14:58:51 UTC`.
+
+That is not the same as a current EFS user/application/loan row. Current production D1 counts returned zero matches for Lucas/stormrunner/TST113 across `users`, `application_leads`, `loans`, and `full_applications`; the renamed `btak.dev+admin2@gmail.com` user still exists separately.
+
+What this proves: Lucas/TST113 was in the EFS TMO cache, and that cache row was created by TMO sync. The sync batches for the row succeeded: auto sync `83a6c0c6-f8da-4da2-a554-6bf1b8b63103` at `2026-06-08 14:56:10-14:56:35 UTC`, then manual sync `50a2950d-9201-4d69-8d40-d7b4e522141a` at `2026-06-08 14:58:51-14:59:02 UTC`, each with `loans_count=1`. The source code path for that sync calls live TMO `GetLoan` and stores the returned payload, so this is strong evidence the row came from TMO sandbox/API data at that time, not from an EFS-only user record.
+
+What I cannot prove from this machine: whether Lucas/TST113 still exists in the live TMO sandbox right now. The repo `.env` does not contain `TMO_API_TOKEN` or `TMO_DATABASE`, so a direct local `GetLoan('TST113')` / `GetLoans` check returned `TMO not configured`. Production does have `TMO_API_TOKEN` and `TMO_DATABASE` configured as Worker secrets, but Cloudflare only lets us list secret names, not read their values.
+
+So the accurate answer is: not only the ordinary EFS app database. Lucas is currently proven in EFS's cached copy of a TMO loan payload, and not in the current app-owned EFS user/lead/loan/application rows. Current live TMO sandbox presence needs a live TMO lookup through the Worker environment or the TMO portal to be certain.
+
+### changed_paths — gpt-5
+
+- `tasks/professional/equityfundingsource.md` only for this answer.
+- No EFS code or production data was changed in this question cycle.
+
+### commands — gpt-5
+
+- Read-only remote D1 `SELECT` queries against `tmo_cache_entities`, `tmo_cache_change_logs`, `tmo_sync_batches`, `users`, `application_leads`, `loans`, and `full_applications`.
+- `wrangler secret list` through `app/equityfundingsource/bin/cf-wrangler.ts` to confirm production has TMO secret bindings by name.
+- Local Bun script calling `tmo_live_loan_R_('TST113')` and `tmo_live_loans_R_` with repo `.env`, which failed closed with `TMO not configured`.
+- Source reads of `app/equityfundingsource/lib/tmo-api/index.ts` and `app/equityfundingsource/lib/tmo-sync.ts` to verify the cache population path.
+
+### verification — gpt-5
+
+All remote D1 checks were read-only (`changed_db=false`, `rows_written=0`). The cache row and sync batch metadata were returned from production D1; app-owned table checks returned zero Lucas/stormrunner/TST113 matches.
+
+### confidence — gpt-5
+
+High that Lucas/TST113 is in the EFS TMO cache and not in current app-owned EFS tables. Medium-high that the cache row originated from TMO sandbox/API data on June 8, based on the sync logs and code path. Medium on current live TMO sandbox presence because the live TMO secret values are not locally readable.
+
+### escalation — gpt-5
+
+No escalation. No Time Travel restore, D1 write, deploy, or TMO mutation was performed.
+<!-- agent:boundary:d4db8e96 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -460,7 +497,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#ktqk]
+- ~~do [#ktqk]~~
 - Is Lucas Huang in the TMO sandbox? Or only in the EFS database?
 <!-- /agent:queue -->
 

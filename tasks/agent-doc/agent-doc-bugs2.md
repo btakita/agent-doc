@@ -39,17 +39,44 @@ completed
 Compacted content:
 - Archived 4 response topic(s): actor-switch rebind already covered; paused queue cleanup; #qnodemerge4verify / #arsm / #cancelturnverify; 1 more
 - Prior summary/context: prior compacted content: Archived 6 response topic(s): lazily-rs session sync; JB Sync Tmux Layout deferral; lazily-r...
-<!-- agent:boundary:88d901e2 -->
+
+### Re: JB Run Agent Doc submit latency — gpt-5
+
+> **Queue prompt:** JB `Run Agent Doc` takes a long time to submit. ~10s
+
+Fixed and shipped.
+
+Root cause: dispatch-only reroutes already treated tmux text+Enter acceptance as sufficient, but the direct-pane path still waited for optional Codex/OpenCode dispatch-start proof when a tracker existed. That made the JetBrains action pay the 10s Codex proof timeout after accepted input, which matches the reported delay.
+
+Changed:
+- `agent-doc-orchestration/src/route/dispatch.rs`: added `DirectPaneDispatchOptions`, returned immediately after accepted direct-pane input when proof is optional, and added a regression for the accepted-submit fast path.
+- `agent-doc-orchestration/src/route/dispatch_only.rs`: wired dispatch-only delivery to the current proof-required policy for both supervisor IPC and direct-pane submit.
+- `agent-doc-orchestration/src/route.rs`: documented that editor dispatch-only returns after accepted input while startup/fresh dispatch still waits for stronger proof.
+
+Verification:
+- `cargo test -p agent-doc-orchestration dispatch_only_direct_pane_accepted_submit_skips_optional_proof_wait`
+- `cargo test -p agent-doc-orchestration dispatch_only_codex_accepts_enter_delivery_without_start_proof_even_with_visible_hooks`
+- `make check` green: clippy, 5020 nextest tests, doctests, and medium SimWorld ignored check.
+- `make install` completed; `agent-doc --version` reports `0.34.42`; `agent-doc lib-install` auto-marked 2 controllers to recycle at next idle boundary.
+- `gh run list --workflow CI --limit 1` in `src/agent-doc`: new run `28045434769` is in progress after push; previous CI run was green. Superproject has no workflow named `CI`.
+
+Commits pushed:
+- `btakita/agent-doc` main: `b3ea06fc` (`fix: avoid optional proof wait for editor dispatch`)
+- `btakita/agent-loop` main: `f9d01ee2b` (`chore: update agent-doc submodule`)
+
+Changed paths: `agent-doc-orchestration/src/route.rs`, `agent-doc-orchestration/src/route/dispatch.rs`, `agent-doc-orchestration/src/route/dispatch_only.rs`, plus the superproject `src/agent-doc` pointer. Confidence: high. Escalation: none.
+<!-- agent:boundary:c7341b2e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~JB `Run Agent Doc` takes a long time to submit. ~10s~~
 - do [#cancelturnverify]: Verified
 - do tasks/agent-doc/plan-ack-mismatch-shorter-recovered-response-loss-2026-06-23.md
 - :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
-- ~~:pushpin: do [#qnodemerge4verify]~~
+- :pushpin: do [#qnodemerge4verify]: 日本 😀日本 😀
 - :pushpin: do [#tb4q]: please check logs
 - do [#qcm1verify]: Use the logs to verify.
 - ~~do [#arsm]~~
@@ -82,6 +109,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#turnstuck-readybusy] #agent-doc-bug Owned Codex pane got stuck on 2026-06-23 with split-brain status: actor/supervisor/controller all `ready`, but live pane probe `alive-busy`/`prompt_ready=false` and route kept it alive as `live_pane_busy_blocked_prompt` after `commit_already_current`. Add bounded reconcile/status diagnostics so stale pane-busy probes cannot indefinitely block the next prompt when the controller lease is ready, while still protecting real active turns. Plan: tasks/agent-doc/plan-owned-pane-ready-busy-stuck-turn-2026-06-23.md. DO NOT IMPLEMENT until scheduled.
 - [ ] [#directchatpb2] #agent-doc-bug Direct-chat owned-pane response loss recurred on 2026-06-23: Codex answered the MRH "2300 words" lint prompt in chat after recursive direct invocation was refused, then recurred again on the follow-up "Remove the max character count cap" prompt; `tasks/monsterrodholders.md` still lacked a matching `### Re:` response and retained queue residue (`no-free-text-queue-head-guard` + bare heading). Add enforced Codex final/Stop gate + recovery regression so each active session-document prompt, including consecutive prompts in one owned pane, cannot complete without `agent-doc finalize/write --commit`. Plan: tasks/agent-doc/plan-direct-chat-owned-pane-response-loss-2026-06-23.md. DO NOT IMPLEMENT until scheduled.
 - [ ] [#cancelturnverify] [operator-verify] #agent-doc-bug Live-verify Cancel Turn (agent-doc submodule b4471d05; committed+pushed, make check green, JB 0.2.176 + VS Code 0.2.31 built, NOT installed). After installing the plugins: (1) while a turn is RUNNING, invoke Cancel Turn (JB menu / VS Code command) and confirm the turn is interrupted (ops.log cancel_turn_performed action=interrupt_active_turn) and the agent stays open; (2) while the agent is IDLE, invoke Cancel Turn (even repeatedly) and confirm it is a NO-OP (ops.log cancel_turn_noop reason=idle_no_active_turn) and the agent is NOT closed — the core safety requirement. Verify per harness: Codex/OpenCode (Escape/C-c, never raw Ctrl+C that would close on idle) and Claude.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.

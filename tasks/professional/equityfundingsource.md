@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -305,7 +305,37 @@ Verification: remote D1 query directly confirmed the renamed app-user rows and c
 Confidence: high that the EFS app database did not revert. Medium on the exact current Cloudflare Email Routing destination list because the API token lacks access to that endpoint, but the local session history strongly points to that as the `stormrunner` source.
 
 Escalation: none.
-<!-- agent:boundary:22b91141 -->
+
+### Re: D1 backups — gpt-5
+
+> **Queue prompt:**
+>
+> Do we have database backups?
+
+Yes, for the production D1 database we have Cloudflare D1 Time Travel / point-in-time recovery. I verified the live `equityfundingsource` D1 database responds to `wrangler d1 time-travel info` and returned a current bookmark:
+
+`000004cd-0000002e-00005093-712f588e6a4644f31de6c58da8484d1c`
+
+I also retrieved a timestamp bookmark for `2026-06-22T00:00:00Z`:
+
+`00000487-0000001a-00005092-96db74e790c4f0a3f31f27f3e46f9311`
+
+Cloudflare's current D1 docs say Time Travel is D1's backup/point-in-time recovery mechanism, is always on, automatically creates bookmarks, and can restore to a minute-level point in the retention window. The limit is 30 days on Workers Paid or 7 days on Free. Sources: https://developers.cloudflare.com/d1/reference/time-travel/ and https://developers.cloudflare.com/d1/platform/limits/ .
+
+Important caveat: restoring Time Travel is destructive in-place. Cloudflare's docs say restore overwrites the database and cancels in-flight queries. I did not run a restore. If we need to recover specific missing rows, the safer first move is to identify the timestamp/bookmark, export or inspect what we can, and only restore production with an explicit recovery plan and current bookmark captured for rollback.
+
+What we do not appear to have yet: a separate long-retention D1 export backup job. I searched the EFS repo and this session history for `d1 export`, `time-travel`, backup jobs, and R2 database exports. I found prior Time Travel inspection notes and Cloudflare's `wrangler d1 export` support, but no scheduled Worker/Workflow/R2/offsite SQL export implemented for this project. Cloudflare's docs explicitly mention D1-to-R2 exports as useful when you want to keep database state longer than the Time Travel retention window.
+
+Changed paths: session document only; no EFS code or production data was changed.
+
+Commands: `agent-doc plan ...`; `bun ./app/equityfundingsource/bin/cf-wrangler.ts d1 --help`; `bun ./app/equityfundingsource/bin/cf-wrangler.ts d1 info equityfundingsource -c ../../wrangler.toml --json`; `bun ./app/equityfundingsource/bin/cf-wrangler.ts d1 time-travel info equityfundingsource -c ../../wrangler.toml`; `bun ./app/equityfundingsource/bin/cf-wrangler.ts d1 time-travel info equityfundingsource -c ../../wrangler.toml --timestamp 2026-06-22T00:00:00Z --json`; `bun ./app/equityfundingsource/bin/cf-wrangler.ts d1 export --help`; targeted `rg` for backup/export jobs.
+
+Verification: live D1 metadata returned database `280e1539-b940-4c59-8988-fbed63c12ac0`, 80 tables, size 1,683,456 bytes, and Time Travel returned valid bookmarks. No restore, export, or write operation was run.
+
+Confidence: high that Cloudflare Time Travel backups are available for the live D1 database; medium that no separate long-retention export job exists, based on repo/session search rather than Cloudflare dashboard configuration.
+
+Escalation: none.
+<!-- agent:boundary:a6adadff -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -325,8 +355,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~I see stormrunner06106@gmail.com as user emails. We previously chanegd the user emails. Did the database revert to a previous state?~~
-- Do we have database backups?
 <!-- /agent:queue -->
 
 ## Backlog

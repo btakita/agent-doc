@@ -6,6 +6,13 @@ On 2026-06-23, a Codex turn answered a prompt from
 `src/boost-client/tasks/monsterrodholders.md` in chat, but the answer did not
 land in the session document.
 
+The same document then hit the same failure again on the follow-up prompt:
+
+> Remove the max character count cap.
+
+Codex removed the upper-bound prose lint, verified the focused self-test, and
+again the operator reported that the response was not added to the document.
+
 The live prompt was a free-text queue head:
 
 > I'm getting lint rejected for too long. Is 2300 words too long? Why
@@ -34,6 +41,10 @@ The failure is the closeout boundary: the answer was delivered to chat while
 - The runbook already states that direct-chat session responses must be written
   with `agent-doc write --commit <FILE>` before success, but the final chat answer
   still escaped without that writeback.
+- A second same-day direct-chat response in the same owned pane also escaped the
+  document writeback path after the max-character-cap follow-up, so the
+  regression must cover consecutive prompts in one live session, not just the
+  first missed closeout.
 
 ## Related Work
 
@@ -53,6 +64,9 @@ gate or Stop-hook block for owner-pane direct-chat turns.
   - answers manually in chat,
   - and attempts to complete without `agent-doc finalize` or
     `agent-doc write --commit`.
+- [ ] Extend the regression to cover two consecutive direct-chat answers from
+  the same owned pane, where the second answer also must not reach final success
+  unless it crosses the `agent-doc` write boundary.
 - [ ] Make the Codex final gate fail closed when a known active session document
   has an unresolved prompt or queue head and the final assistant message has not
   crossed the `agent-doc` write boundary.
@@ -71,6 +85,8 @@ gate or Stop-hook block for owner-pane direct-chat turns.
 
 - A direct-chat response to an active `agent-doc` prompt cannot reach final
   success while the session document still lacks a matching `### Re:` response.
+- Consecutive direct-chat responses in one owned-pane session are each checked
+  independently for document writeback.
 - The final gate distinguishes chat-only answers from binary-owned closeout and
   prints a single actionable recovery command.
 - `agent-doc session-check` catches the `no-free-text-queue-head-guard` / bare

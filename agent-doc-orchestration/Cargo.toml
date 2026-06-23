@@ -19,7 +19,7 @@ test-support = []
 agent-doc-core = { path = "../agent-doc-core", version = "0.34.42" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.42" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.42" }
-lazily = "0.12.1"
+lazily = "0.12.2"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 fs2 = "0.4"

@@ -62,15 +62,44 @@ Compacted content:
 
 No. Bare `agent-doc <FILE>` is not supposed to launch a harness from a normal shell. It is a harness-native alias: inside Codex, Claude Code, or OpenCode it can run the document in that already-active harness; outside those harnesses it must fail immediately and direct the operator to explicit commands such as `agent-doc run <FILE>`, `agent-doc route <FILE>`, or `agent-doc start <FILE>`.
 
-Verification: after reinstalling `agent-doc 0.34.38`, a stripped-environment shell invocation exited 1 with the supported-harness error and did not hang. `#ws55` is resolved; `#3x90` remains the next queue item.
-<!-- agent:boundary:60ebc0f8 -->
+Verification: after reinstalling `agent-doc 0.34.38`, a stripped-environment shell invocation exited 1 with the supported-harness error and did not hang. `#ws55` is resolved.
+
+### Re: #3x90 — gpt-5
+
+I isolated and fixed two concrete `Run Agent Doc` submit causes in `agent-doc` submodule commit `341baf44` (`fix route submit proof failures`), pushed to `btakita/agent-doc` `main`.
+
+1. The route could falsely report success after Codex only accepted pane input. The failing attempt logged `accepted_without_dispatch_start_proof` and preserved a snapshot with the `agent-doc ...agent-doc-bugs2.md` prompt still in the Codex composer, but the Rust route collapsed that tracked timeout back to `CommandAcceptedOnly`. Because dispatch-only accepted-only proof was globally allowed, JetBrains recorded `route_success` instead of `route_dispatch_start_unproven`.
+2. The late-Enter recovery was skipped because current-draft detection only looked at the last 8 raw capture lines. Codex left enough blank padding below the footer that the composer line fell outside that window, so `try_late_direct_pane_enter_resubmit_after_unproven_dispatch` did not press Enter even though the prompt was visible and safe.
+
+The fix adds a distinct `DispatchStartUnproven` outcome. Unsupported/no-tracker harnesses can still use accepted-only proof, but a tracked Codex/OpenCode timeout now fails closed through the existing `accepted_without_dispatch_start_proof` path that JetBrains already classifies as `DISPATCH_START_UNPROVEN`. Current-draft detection now uses recent non-empty stripped lines, with the exact blank-padded Codex snapshot shape covered by a regression test.
+
+Verification: focused route tests passed; local `make check` passed (`5004` nextest tests + doctests + medium closeout sim); `make install` rebuilt/installed `agent-doc 0.34.38` and `libagent_doc.so`; `agent-doc admin recycle` marked the route controller for idle recycle; GitHub Actions CI passed on run `27999559170` (`make check` + `make tmux-ci`).
+
+### Re: JB File Cache Conflict dialogs — gpt-5
+
+There are still multiple distinct paths; we were treating them as one symptom.
+
+The currently proven path in this document is stale-supervisor IPC drift. The logs repeatedly show `content_ours_adoption_refused_stale_supervisor ... reason=supervisor_binary_stale` for `agent-doc-bugs2.md`, with guards `live_prompt_drift` and `prompt_duplication`. That means the editor ACK content looked like a state the current binary would normally repair/adopt, but the owning route supervisor was still mapped to an older binary, so the code refused to trust it and warned that the stale owner can keep producing File Cache Conflict / IPC-drift dialogs. `make install` and `agent-doc admin recycle` are done, but this busy turn prevents pid `3120960` from recycling until idle.
+
+Other real paths:
+
+- `apply_template_writeback transport=disk_fallback reason=send_failed editor_endpoint=absent action=editorless_disk_fallback`: the binary believes no live editor endpoint owns the document, so it writes the markdown file directly. If IntelliJ actually has that file open but the plugin owner lease is absent/stale, IntelliJ can raise the dialog.
+- `convergence_gate_force_disk_fallback reason=editor_ipc_convergence_boundary_failed`: the convergence gate times out waiting for commit/editor convergence and records a force-disk fallback. If the file is open in JB, this is another direct external-write source.
+- Active listener without ACK content is supposed to be blocked, not written: the guarded path logs `transport=blocked reason=no_ack_content` and avoids `transport=disk_fallback`. So if a dialog appears while that guard is active, the trigger is likely plugin/VFS-side, not the binary taking the blocked fallback.
+- JB `PatchWatcher` intentionally defers when IntelliJ already has a pending memory-vs-disk conflict, then rejects the patch after Cancel/Keep-memory. That handles the conflict after IntelliJ surfaces it; it does not prove the original external modification source.
+- Multi-window plugin consumers remain a plausible unresolved source: before/when the `#8bfz` single-owner lease is absent, stale, or fails open, more than one JB process can watch `.agent-doc/patches`, apply the same untargeted patch, and call `saveDocument`.
+- ACK-content sidecar writes are probably not themselves the visible Markdown-file dialog: they write under `.agent-doc/ack-content/`. But if the plugin cannot write ACK content, the binary loses proof and can move into the blocked/fallback/error paths above.
+
+The next useful capture is exactly what `#cyh0` asks for: when the dialog appears, capture the nearest ops line naming `transport=...`, `action=...`, `reason=...`, plus whether JB logged `File Cache Conflict pending/kept memory changes`.
+<!-- agent:boundary:d496174c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#ws55]~~
-- :pushpin: do [#3x90]
+- ~~:pushpin: do [#3x90]~~
+- ~~JB `File Cache Conflict` dialogs are still appearing. Why? We have spend many turns on this. What are the paths that would cause this?~~
 <!-- /agent:queue -->
 <!--
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.

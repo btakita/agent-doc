@@ -116,13 +116,19 @@ Yes, with one important constraint: this should merge cycle-state mutation order
 I added the implementation plan at `tasks/agent-doc/plan-cycle-state-pcp-state-machine.md` and rewrote backlog `#c7j5` to point at it. The plan supersedes the older narrow RunContext-only pilot: use a PCP/session-actor cycle-state machine, seed it from the sidecar, serialize accepted `CycleEvent`s through the document actor, and emit the sidecar from that owner job as the durable journal. `ThreadSafeStateMachine` is the right lazily primitive for the controller/session actor; `StateMachine` is only appropriate for single-threaded pure tests or local caches, and `AsyncStateMachine` only matters if the controller state graph moves onto an async context. One prerequisite remains explicit: `agent-doc-orchestration` currently consumes registry `lazily = "0.12.0"`, while the local lazily-rs checkout is what exposes the newer multi-context state-machine APIs, so the dependency source/release has to be resolved in the first implementation slice.
 
 For `#cancelturnverify`, I accepted the operator verification and marked the backlog item done. No code was changed in this cycle; verification was inspection plus the committed plan/backlog update. Plan commit: `00599652e` (`agent-doc: plan cycle state pcp state machine`). Escalation: none. Confidence: high on the architecture direction; implementation still needs the staged gate and test plan in the new plan file.
-<!-- agent:boundary:7f44f107 -->
+
+### Re: #c7j5 closeout repair — gpt-5
+
+> **Queue prompt:** If we merge the sidecar logic into the PCP instead of relying on the disk for IPC, would that help with agent-doc cycle reliability? If yes, let's merge sidecar logic into the PCP. Use lazily-rs new StateMachine, ThreadedStateMachine, and/or AsyncStateMachine for a cycle state machine. See [#c7j5], which was originally created in lazily-rs.md...Except, merge the Sidecar into the PCP. I want to eventually have a master State Machine for an agent document. Note that [#lzsidecaratomic] and [#lzsidecarlock] was done on agent-doc from lazily-rs.md. See lazily-rs.done.md
+
+Closeout repair after the recovered IPC-drift cycle: the preceding response already answered this queue head and rewrote `#c7j5` to the new PCP/session-actor state-machine plan at `tasks/agent-doc/plan-cycle-state-pcp-state-machine.md`. This cycle only consumes the free-text queue head against the fresh baseline and commits the resolved `#cancelturnverify` archive/queue convergence. No code changes.
+<!-- agent:boundary:d6467b72 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~After the restart after the last turn, the prompt was not submitted until ~30s later.日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀~~
+- ~~If we merge the sidecar logic into the PCP instead of relying on the disk for IPC, would that help with agent-doc cycle reliability? If yes, let's merge sidecar logic into the PCP. Use lazily-rs new StateMachine, ThreadedStateMachine, and/or AsyncStateMachine for a cycle state machine. See [#c7j5], which was originally created in lazily-rs.md...Except, merge the Sidecar into the PCP. I want to eventually have a master State Machine for an agent document. Note that [#lzsidecaratomic] and [#lzsidecarlock] was done on agent-doc from lazily-rs.md. See lazily-rs.done.md~~
 - ~~do [#cancelturnverify]: Verified~~
 - do tasks/agent-doc/plan-ack-mismatch-shorter-recovered-response-loss-2026-06-23.md
 - :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
@@ -135,7 +141,6 @@ For `#cancelturnverify`, I accepted the operator verification and marked the bac
 - ~~do [#turnstuck-readybusy]~~
 - ~~After the restart after the last turn, the prompt was not submitted until ~30s later.~~
 - ~~After the restart after the last turn, the prompt was not submitted until ~30s later.~~
-- :pushpin: do [#qnodemerge4verify]: 日本 😀日本 😀
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

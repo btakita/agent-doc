@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,258 +33,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260623-041604.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260623-131649.md`*
 
 Compacted content:
-- Archived 15 response topic(s): production deletion logs; TMO sync delete risk + soft-disable trail; application logging + deploy; 12 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: Does the TMO sandbox have any loan records? — gpt-5
-
-> **Queue prompt:**
->
-> Does the TMO sandbox have any loan records? Or were they cleaned out?
-
-Short answer: the public/documented TMO `API Sandbox` is not cleaned out, but the EFS-specific/private TMO sandbox state is still not directly verifiable from the local `passage equityfundingsource/TMO_API_TOKEN` token.
-
-What I verified:
-
-- Public documented TMO sandbox: `GET https://api.themortgageoffice.com/LOS.svc/GetLoans` with `Token: TMO` and `Database: API Sandbox` returned `37` loan records. So that sandbox has loans.
-- The EFS-specific local Passage token is present, but `GetLoans` returned `401 Not authenticated` for `Database: API Sandbox` and the likely alternate database header values I tried. There is no local `passage equityfundingsource/TMO_DATABASE` entry.
-- The deployed Worker has `TMO_API_TOKEN` and `TMO_DATABASE` secret names configured, but Cloudflare does not let us read secret values back. So I cannot use those production secret values for a direct local live `GetLoans` count.
-- Production EFS app-owned D1 tables are cleaned out for the main loan/application surfaces: `loans=0`, `investment_deals=0`, `full_applications=0`; `application_leads=6` still exist.
-- Production EFS `tmo_cache_entities` still has cached TMO loan payloads: `11` non-deleted `loan` cache rows and `1` deleted cache row. That includes old cached rows such as `TST113` / Lucas Huang and the prior `FTM631` / `GQI751` cache rows.
-- Those EFS cache rows are not proof that the live TMO sandbox still contains those loans today. The current sync code loops local EFS `loans` with a `tmo_loan_number`; because EFS currently has zero local loans, recent sync batches with `loans_count=0` do not mean live TMO returned zero loans.
-- The public documented sandbox does not currently contain `TST113`, `FTM631`, `GQI751`, Lucas, Huang, or stormrunner in `GetLoans`; direct `GetLoan/TST113`, `GetLoan/FTM631`, and `GetLoan/GQI751` all returned `Loan not found`. `GetLoan/1010` does exist in the public sandbox, but it is a generic sample record, not the old EFS cached `1010` payload.
-
-So the precise read is: public TMO sandbox has records; EFS app-owned production tables are cleaned out for loans/deals/full applications; EFS has stale/cached TMO-origin rows; current live EFS-specific TMO sandbox contents are still unknown until we have a valid token/database pair or a production-safe read-only diagnostic that runs inside the Worker with its existing secrets.
-
-### changed_paths — gpt-5
-
-- `tasks/professional/equityfundingsource.md` only.
-- No EFS source files, production D1 rows, TMO records, deploys, or migrations were changed.
-
-### commands — gpt-5
-
-- `agent-doc preflight`, `agent-doc plan`, `agent-doc read`.
-- `tsift status` in the workspace and EFS submodule.
-- Source reads for `tmo_live_loans_R_`, `tmo_loans_R_`, `tmo_sync_all_`, and the admin TMO-loans route.
-- Read-only live TMO `GetLoans` / `GetLoan` checks against the public documented sandbox and the local Passage token.
-- Read-only remote D1 `SELECT` queries against `tmo_sync_batches`, `tmo_cache_entities`, `loans`, `investment_deals`, `full_applications`, and `application_leads`.
-- `wrangler secret list` to verify the deployed Worker secret names.
-- `passage ls` to check available local TMO credential entries without printing secret values.
-
-### verification — gpt-5
-
-All D1 checks reported `changed_db=false` and `rows_written=0`. The public TMO sandbox returned 37 loans; the local EFS Passage token returned authentication failures; production D1 confirmed zero app loans/deals/full applications and existing cached TMO rows.
-
-### confidence — gpt-5
-
-High that the public documented TMO sandbox is not empty and that EFS app-owned production tables currently have zero loans/deals/full applications. Medium-high that EFS cache rows are stale historical TMO-origin data. Low for current live EFS-specific TMO sandbox contents because the available local private token/database did not authenticate and production secret values are not readable.
-
-### escalation — gpt-5
-
-None.
-
-### Re: 0099 lender role/schema — gpt-5
-
-> **Queue prompt:**
->
-> Lucas found 0099_lender_role_and_schema as the likely culprit. Can you confirm? Why were you not able to find this out?
-
-Yes, with a narrower reading: `0099_lender_role_and_schema.sql` is very likely the culprit if the symptom Lucas found was an investor-vs-lender role/table mismatch. It is not a plausible culprit for TMO sandbox loan deletion or EFS loan-table cleanup.
-
-What `0099` does:
-
-- Rebuilds `users` with `role IN ('lender','borrower','broker','admin')`.
-- Converts existing `users.role = 'investor'` rows to `lender`.
-- Renames the persisted investor schema tables to lender names: `investor_documents`, `investor_document_requests`, `investor_accreditation_verifications`, `investor_vestings`, `investor_special_instructions`, `investor_deal_signatures`, and `investor_deal_interests` become the corresponding `lender_*` tables.
-- Recreates the renamed `lender_*` indexes.
-
-Production confirms that migration boundary is already crossed: remote migration list says only `0102_full_application_soft_delete.sql` is pending, so `0099` has already applied. Remote `sqlite_master` contains `lender_deal_interests`, `lender_documents`, `lender_vestings`, and `users`; the checked old `investor_*` table names are absent. Remote `users` role counts are `admin=5`, `borrower=4`, `broker=2`, `lender=3`, with no `investor` role rows.
-
-So if any live code, diagnostic query, or support/debug script still expects `users.role='investor'` or old `investor_*` table names, `0099` explains the failure. Current runtime source appears mostly aligned with the rename: the direct SQL DML search for old `investor_documents` / `investor_deal_interests`-style table references found only historical migrations, not active app/lib query code. The remaining `investor` names are mostly public route/module/API names like `/api/investor/...`, TypeScript names, UI ids, comments, and backward-compatible role normalization.
-
-Why I did not find it before: I scoped the previous pass around the TMO question and app-owned loan/application data. I checked live TMO endpoints, `tmo_cache_entities`, `loans`, `investment_deals`, `full_applications`, and `application_leads`, but I did not audit the migration boundary or compare production `sqlite_master` against the deployed code schema. That was the miss. The repo also has a noisy naming transition: routes and functions still say `investor` in many places while the persisted schema now says `lender`, so a plain text search for `investor` does not isolate the schema mismatch cleanly. The right first check should have been migration list + table-name/role counts.
-
-### changed_paths — gpt-5
-
-- `tasks/professional/equityfundingsource.md` only.
-- No EFS source files, migrations, production D1 rows, TMO records, deploys, or secrets were changed.
-
-### commands — gpt-5
-
-- `agent-doc preflight`, `agent-doc plan`, `agent-doc read`.
-- `tsift status` in the workspace and EFS submodule.
-- `rg` / `sed` / `git show` reads for `0099_lender_role_and_schema.sql`, commit `071a93f`, and old/new investor/lender SQL references.
-- `bun run cf:d1:migrations:list:remote`.
-- Read-only remote D1 queries against `sqlite_master` and grouped `users.role` counts.
-
-### verification — gpt-5
-
-Remote D1 checks were read-only and reported `changed_db=false`, `rows_written=0`. Migration list shows `0099` is applied in production. Remote schema and role counts match the post-`0099` lender naming state.
-
-### confidence — gpt-5
-
-High that `0099` explains investor/lender role or table-name mismatch symptoms. High that it does not explain TMO sandbox loan deletion or EFS loan cleanup because it does not touch the loan/TMO tables or external TMO. Medium for Lucas's exact production symptom only because the prompt did not include the specific failing request, stack, or SQL error.
-
-### escalation — gpt-5
-
-Used `force_disk` only after two failed IPC finalizes plus an unchanged no-ACK patch file; no source/prod escalation.
-
-### Re: destructive migration — gpt-5
-
-> **Queue prompt:**
->
-> Why did you build the migration to be destructive?
-
-I built it that way because I treated `0099_lender_role_and_schema.sql` as a one-time terminology cutover from `investor` to `lender`, and I used the standard SQLite/D1 workaround for changing a `CHECK` constraint on `users.role`: create a replacement `users` table, copy rows with `investor` mapped to `lender`, drop the old `users`, then rename the replacement. For the other persisted investor entities, I used direct table renames from `investor_*` to `lender_*` and rebuilt indexes under the new names.
-
-That explains the mechanics, but it does not make the migration good enough. The mistake was treating a semantic rename as if it were safe to do as a hard schema cutover in production. It removed the old table names and old role value as compatibility surfaces in one migration, and the `users` rebuild used a `DROP TABLE users` step. Even though the script copies user rows first and is not written as a deliberate data wipe, it is still destructive in the operational sense: rollback is hard, stale deployed code or support SQL using `investor_*` breaks immediately, and a production-shaped migration safety test should have existed before this landed.
-
-The safer version should have been additive/compatible first: keep the old names working while introducing the lender terminology, prove deployed code and diagnostics no longer depend on `investor_*`, then remove compatibility only after a soak. At minimum, this migration needed a production-shaped fixture with users plus dependent rows, `foreign_key_check` before/after, row-count assertions for every renamed table, and a rollback or alias/compatibility plan. I did not do that; I relied on text-level tests that only asserted the migration contained the intended role/table rename statements. That was the wrong bar for a production D1 migration.
-
-So the direct answer is: I built it destructive because I optimized for completing the naming cutover and SQLite constraint change, not for production migration safety. That was my miss. The immediate fix should be a follow-up migration/safety patch that either restores compatibility aliases where D1 supports them or updates every remaining diagnostic/support path to the new schema, plus tests that execute the migration against prod-shaped data instead of only checking strings.
-
-### changed_paths — gpt-5
-
-- `tasks/professional/equityfundingsource.md` only.
-- No EFS source files, migrations, production D1 rows, TMO records, deploys, or secrets were changed in this cycle.
-
-### commands — gpt-5
-
-- `agent-doc preflight`, `agent-doc plan`, `agent-doc read`.
-- `tsift status` from the workspace root.
-- Source/history reads for `src/equityfundingsource-dev/app/equityfundingsource/migrations/0099_lender_role_and_schema.sql`, commit `071a93f`, and the tests that reference the migration.
-- `rg` checks for migration users-table rebuilds, old/new lender table references, and foreign-key-dependent schema.
-
-### verification — gpt-5
-
-No code was changed, so I did not run the EFS test suite. I verified from the checked-in SQL that `0099` copies `users`, drops `users`, renames the replacement, renames the `investor_*` tables to `lender_*`, and recreates indexes; I also verified the tests I inspected are string/shape checks rather than a production-shaped migration execution test.
-
-### confidence — gpt-5
-
-High that the migration is operationally destructive/compatibility-breaking even if not intended as a data wipe. High that the reason was the lender terminology cutover plus SQLite/D1 constraint-rebuild pattern. Medium on the exact production blast radius without Lucas's concrete failing query/request/stack in this prompt.
-
-### escalation — gpt-5
-
-Used `force_disk` only after two failed IPC finalizes plus the same no-ACK patch-file closeout state; no source/prod escalation.
-
-### Re: migration safety guardrails — gpt-5
-
-> **Queue prompt:**
->
-> How do we prevent destructive migrations from ever happening again?
-
-We prevent this class of mistake by making destructive migrations fail closed in CI and deployment, not by relying on memory or review discipline.
-
-For EFS, the rule should be: production migrations are expand/contract by default. First add compatible schema, adapters, views, nullable columns, or dual-write paths. Then deploy code that can read both old and new shapes. Then backfill and verify. Only after a soak do we remove old tables, old role values, old columns, or compatibility views. A one-step semantic rename like `investor_*` to `lender_*` should not directly remove the old compatibility surface in the same migration.
-
-The concrete guardrails I would put in place:
-
-1. Static migration gate: CI scans every new migration for destructive patterns: `DROP TABLE`, `DROP COLUMN`, table rebuilds via `CREATE ... INSERT ... DROP ... RENAME`, `ALTER TABLE ... RENAME`, `PRAGMA foreign_keys = OFF`, broad `DELETE`, and index/table drops. The default result is failure unless the migration carries an explicit waiver block with data-preservation proof, rollback plan, deploy order, and owner approval.
-
-2. Prod-shaped migration test: new migrations must execute against a fixture that has real dependency shape: users, loans, deals, documents, messages, lender rows, borrower rows, admin references, and foreign-key dependents. The test must assert `PRAGMA foreign_key_check` is clean, key row counts/checksums are preserved, and required old compatibility names still work during a transition window.
-
-3. Rename policy: semantic renames are not hard cuts. For role names, accept old and new values at the boundary until all callers are updated. For table names, prefer compatibility views/adapters or a dual-read/dual-write bridge before dropping old names. If D1 cannot support a compatibility mechanism cleanly, the migration must be split and explicitly reviewed as a breaking change.
-
-4. Remote migration checklist: before `wrangler d1 migrations apply --remote`, require a backup/export or known restore point, preflight row counts, staging/preview D1 application from a prod-shaped snapshot, rollback script, and a code/migration ordering note. If any item is missing, do not apply remotely.
-
-5. Review rule: migrations that disable foreign keys or rebuild a referenced table require a second-pass review focused only on data preservation and compatibility. That review should ignore product intent and ask one question: "What breaks or disappears if old code, support SQL, or a stale worker runs against the post-migration DB?"
-
-I added a backlog item to implement this as an actual EFS guardrail: migration linter + prod-shaped migration execution tests + deployment checklist. That is the right next step because a written policy alone would not have stopped `0099`.
-
-### changed_paths — gpt-5
-
-- `tasks/professional/equityfundingsource.md` only.
-- Added one actionable EFS backlog item for destructive-migration guardrails through agent-doc pending ops.
-- No EFS source files, migrations, production D1 rows, TMO records, deploys, or secrets were changed in this cycle.
-
-### commands — gpt-5
-
-- `agent-doc preflight` via CLI after the MCP wrapper returned a generic failure.
-- `agent-doc plan`, `agent-doc read`.
-- `agent-doc finalize`; first retry detected the backlog item had already been applied, so the final retry omitted the duplicate `pending_add`.
-
-### verification — gpt-5
-
-No code was changed, so I did not run the EFS test suite. The prevention answer is based on the already-inspected `0099` failure mode: hard role/table rename, `users` rebuild/drop, no compatibility window, and string-level tests instead of production-shaped migration execution tests.
-
-### confidence — gpt-5
-
-High that these guardrails would have blocked or forced explicit review of the `0099` pattern before production. Medium that this exact checklist is complete for all future D1 risks; it should evolve as migrations expose new failure modes.
-
-### escalation — gpt-5
-
-Used `force_disk` only after repeated IPC finalizes failed with the same no-ACK captured-response state; no source/prod escalation.
-
-### Re: regular db backups — gpt-5
-
-> **Queue prompt:**
->
-> Do we have regular db backups?
-
-Yes for short-term D1 point-in-time recovery; no, not previously as an EFS-owned long-retention scheduled archive.
-
-What I verified live on 2026-06-23:
-
-- `bun run cf:d1:info` resolved the configured production D1 database `equityfundingsource` / `280e1539-b940-4c59-8988-fbed63c12ac0` and reported it as a remote D1 database with 80 tables and ~1.67 MB of data.
-- `bun run cf:d1:time-travel:info` succeeded and returned a current remote restore bookmark. That proves the production D1 database is on the Time Travel path.
-- Cloudflare's current D1 docs describe Time Travel as D1's backup/point-in-time recovery system, always on for supported production-backend D1 databases, with automatically created restore bookmarks. Docs: https://developers.cloudflare.com/d1/reference/time-travel/ and https://developers.cloudflare.com/d1/wrangler-commands/#d1-time-travel-info.
-- Cloudflare documents the restore window as the provider retention window: up to 30 days on Workers Paid, or 7 days on Workers Free. I did not verify the account billing plan in this cycle.
-
-The gap was that EFS did not have a project-owned backup runbook or a regular SQL export policy checked into the repo. I added that now:
-
-- `docs/database-backups.md` records the current answer, the live Time Travel proof, and the operator cadence.
-- `docs/deploy.md` and `runbooks/deployment.md` now require `cf:d1:info` + `cf:d1:time-travel:info` before risky database work, and require an operator-owned SQL export before approved destructive/compatibility-breaking migrations.
-- Root and app package scripts now expose `cf:d1:info`, `cf:d1:time-travel:info`, and `cf:d1:export:remote`.
-- The PRD and tests now lock the backup posture: current Time Travel bookmark, destructive-restore caution, and monthly/operator-owned SQL export cadence.
-
-I intentionally did not add a restore shortcut script. D1 Time Travel restore overwrites the live database in place, so it should stay a deliberate owner-approved operation, not an easy package command.
-
-Important boundary: this covers the D1 database only. `R2_DOCUMENTS`, `R2_ASSETS`, and `R2_TMO_CACHE` need a separate retention/export policy. I added a recommended backlog item to automate long-retention D1 exports and define the R2 backup policy.
-
-### changed_paths — gpt-5
-
-- `src/equityfundingsource-dev/docs/database-backups.md`
-- `src/equityfundingsource-dev/docs/deploy.md`
-- `src/equityfundingsource-dev/runbooks/deployment.md`
-- `src/equityfundingsource-dev/package.json`
-- `src/equityfundingsource-dev/app/equityfundingsource/package.json`
-- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
-- `src/equityfundingsource-dev/tests/prd.test.ts`
-- `src/equityfundingsource-dev/tests/database-backups-docs.test.ts`
-- `src/equityfundingsource-dev` submodule pointer in the session repo.
-- `tasks/professional/equityfundingsource.md` via agent-doc closeout.
-
-No migrations, production D1 rows, R2 objects, secrets, TMO records, or Worker deploys were changed.
-
-### commands — gpt-5
-
-- `agent-doc preflight`, `agent-doc plan`, `agent-doc read`.
-- `tsift status` in the workspace and EFS submodule.
-- Official Cloudflare docs lookup for current D1 Time Travel/export behavior.
-- Read-only live D1 checks: `bun run cf:d1:info`, `bun run cf:d1:time-travel:info`.
-- Focused tests: `bun test tests/prd.test.ts tests/database-backups-docs.test.ts`.
-- Full local gate, twice after rebase: `make check`.
-- GitHub Actions check: `gh run list --workflow CI --limit 1` returned no workflow named `CI`; `gh workflow list` returned no workflows for this repo.
-- Git: committed EFS as `a5342cd docs(ops): document D1 backup posture`; push initially rejected because remote `main` moved, then `git pull --rebase origin main`, reran `make check`, and `git push origin main` succeeded. The push also carried the existing local ahead commit `c883d44 Archive full applications instead of deleting`.
-
-### verification — gpt-5
-
-- `bun run cf:d1:time-travel:info` returned a current remote D1 Time Travel bookmark for production `equityfundingsource`.
-- `make check` passed on the rebased EFS tree: 1151 Bun tests, app build, and Worker build all green.
-- Focused backup/PRD tests passed before the full gate.
-- No GitHub CI workflow exists in the EFS repo to inspect.
-
-### confidence — gpt-5
-
-High that EFS production D1 has provider-managed short-term Time Travel recovery available today. High that the repo now documents and tests the D1 backup posture. Medium on “regular backups” as an operational fact: the repo now requires monthly/operator-owned SQL exports, but I did not find or verify historical monthly export artifacts.
-
-### escalation — gpt-5
-
-None.
-<!-- agent:boundary:33dfca13 -->
+❯ - Archived 5 response topic(s): Does the TMO sandbox have any loan records?; 0099 lender role/schema; destructive migration; 2 more
+❯ - Prior summary/context: prior compacted content: Archived 15 response topic(s): production deletion logs; TMO sync delete risk + soft-disable...
+<!-- agent:boundary:474096cf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -304,13 +58,18 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~How do we prevent destructive migrations from ever happening again?~~
-- [#vjcv]
+- [#vjcv]: Is this complete. I have tested the email sending and it seems to work. Could you audit all email sending to ensure it will work reliably in all use cases?
+- In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, btak.dev+lender2@gmail.com
+ is on hold because it is not linked with TMO. The admin message says "Link a lender account — the lender must request one (no request is pending), then assign the TMO account number.". But the "Advance Lender" opens the lender page. It should have a Sync with TMO button instead since that is how we advance the lender. The dialog should also have a "Sync with TMO" since that is a necessary step to advance the lender in the pipeline.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#email-prod-ready] Email production-readiness hardening: provision a dedicated `CLOUDFLARE_EMAIL_API_TOKEN` secret with Email Sending scope, verify `BROKER_EMAIL_NOTIFICATIONS_ENABLED` if broker email is expected, add an admin/CI diagnostic that fails when production delivery would fall back to local capture, and document that `MESSAGE_EMAIL_INBOUND_SECRET` is only needed for the HTTP parsed-inbound route.
+- [ ] [#email-bg-outbox] Durable email delivery observability/retry: record lifecycle, secure-message, broker, lending-group, investor-interest, login-link, invite, reminder, and feedback email results in D1 with status/error/retry/dead-letter instead of relying on console-only warnings for background notifications.
+- [ ] [#apply-invite-fail-ux] Public `/apply` invite-failure UX: when the borrower invite email fails or is skipped after lead persistence, stop telling the borrower to check their inbox; show a received/follow-up message, keep the failed invite status visible to admins, and add a regression test.
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 

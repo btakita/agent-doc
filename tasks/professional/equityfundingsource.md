@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -69,7 +69,7 @@ Confidence: medium. The observed log evidence is concrete, but Cloudflare's hist
 
 Escalation: none.
 
-### Re: TMO sync delete risk + soft-disable trail — gpt-5 (HEAD)
+### Re: TMO sync delete risk + soft-disable trail — gpt-5
 
 > **Queue prompt:**
 >
@@ -131,7 +131,7 @@ Verification:
 Confidence: high for preventing future hard deletes through these app/DB paths. It does not prove the historical missing rows were caused by one specific actor because the durable app audit table was not present then.
 
 Escalation: none.
-<!-- agent:boundary:44b5ab1f -->
+<!-- agent:boundary:7bba6bc6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -154,7 +154,6 @@ After 20:30
 - ~~Could the delete event have occured from a TMO sync bug?~~
 - We should log all web requests, api calls, migrations, etc. in the application logs.
 - ~~No record should be deleted, only disabled. Create a migration. The durable app audit table should be deployed. Do we have sufficient logging to track deletion events? The delete borrower should not cascade. No deleted records. Only disabled records. We need a trail.~~ — auto-struck: answered this cycle (#ftstrike) 
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -25,7 +25,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-complete
+blocked
 <!-- /agent:status -->
 
 ## Exchange
@@ -38,7 +38,24 @@ complete
 Compacted content:
 ❯ - Archived 5 response topic(s): Does the TMO sandbox have any loan records?; 0099 lender role/schema; destructive migration; 2 more
 ❯ - Prior summary/context: prior compacted content: Archived 15 response topic(s): production deletion logs; TMO sync delete risk + soft-disable...
-<!-- agent:boundary:474096cf -->
+Audit completed. Email is working in the tested paths, but it is not reliable for all production use cases yet.
+
+> **Queue prompt:**
+>
+> [#vjcv]: Is this complete. I have tested the email sending and it seems to work. Could you audit all email sending to ensure it will work reliably in all use cases?
+
+
+Key gaps found:
+- No dedicated `CLOUDFLARE_EMAIL_API_TOKEN` secret in production; code falls back to generic `CLOUDFLARE_API_TOKEN`.
+- Broker email notifications require `BROKER_EMAIL_NOTIFICATIONS_ENABLED`, but production config does not clearly enable it.
+- Many background emails only log failures; there is no durable retry/dead-letter/status path.
+- Public `/apply` can tell borrowers to check email even if the invite email failed.
+- `MESSAGE_EMAIL_INBOUND_SECRET` is missing from the production secret list for the parsed JSON inbound route.
+
+Verification passed with the focused email-related `bun test` suite. I did not change EFS source code; the EFS submodule remained clean. I added the follow-up items as gated review work: `#email-prod-ready`, `#email-bg-outbox`, and `#apply-invite-fail-ux`.
+
+Agent-doc closeout is still blocked by the harness: the response is captured, but the editor IPC proof never ACKed, so agent-doc refused to write/commit the exchange body. `agent-doc admin recycle` has been requested, and `restart-supervisor` refused because this pane is still busy. The pending response is retained for retry once the supervisor can recycle at idle.
+<!-- agent:boundary:058aa211 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,24 +75,28 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- [#vjcv]: Is this complete. I have tested the email sending and it seems to work. Could you audit all email sending to ensure it will work reliably in all use cases?
+- ~~[#vjcv]: Is this complete. I have tested the email sending and it seems to work. Could you audit all email sending to ensure it will work reliably in all use cases?~~
 - In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, btak.dev+lender2@gmail.com
  is on hold because it is not linked with TMO. The admin message says "Link a lender account — the lender must request one (no request is pending), then assign the TMO account number.". But the "Advance Lender" opens the lender page. It should have a Sync with TMO button instead since that is how we advance the lender. The dialog should also have a "Sync with TMO" since that is a necessary step to advance the lender in the pipeline.
 - deploy
+- do [#email-prod-ready]
+- do [#email-bg-outbox]
+- do [#apply-invite-fail-ux]
+- Using our state machine, can we tag each dialog components with a state? Can we link dialogs with states and cross-reference the UX to ensure every state transition has a clear CTA in the state dialog?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#email-prod-ready] Email production-readiness hardening: provision a dedicated `CLOUDFLARE_EMAIL_API_TOKEN` secret with Email Sending scope, verify `BROKER_EMAIL_NOTIFICATIONS_ENABLED` if broker email is expected, add an admin/CI diagnostic that fails when production delivery would fall back to local capture, and document that `MESSAGE_EMAIL_INBOUND_SECRET` is only needed for the HTTP parsed-inbound route.
-- [ ] [#email-bg-outbox] Durable email delivery observability/retry: record lifecycle, secure-message, broker, lending-group, investor-interest, login-link, invite, reminder, and feedback email results in D1 with status/error/retry/dead-letter instead of relying on console-only warnings for background notifications.
-- [ ] [#apply-invite-fail-ux] Public `/apply` invite-failure UX: when the borrower invite email fails or is skipped after lead persistence, stop telling the borrower to check their inbox; show a received/follow-up message, keep the failed invite status visible to admins, and add a regression test.
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#apply-invite-fail-ux] Public `/apply` invite-failure UX: when the borrower invite email fails or is skipped after lead persistence, stop telling the borrower to check their inbox; show a received/follow-up message, keep the failed invite status visible to admins, and add a regression test.
+- [/] [#email-bg-outbox] Durable email delivery observability/retry: record lifecycle, secure-message, broker, lending-group, investor-interest, login-link, invite, reminder, and feedback email results in D1 with status/error/retry/dead-letter instead of relying on console-only warnings for background notifications.
+- [/] [#email-prod-ready] Email production-readiness hardening: provision a dedicated `CLOUDFLARE_EMAIL_API_TOKEN` secret with Email Sending scope, verify `BROKER_EMAIL_NOTIFICATIONS_ENABLED` if broker email is expected, add an admin/CI diagnostic that fails when production delivery would fall back to local capture, and document that `MESSAGE_EMAIL_INBOUND_SECRET` is only needed for the HTTP parsed-inbound route.
 - [/] [#mcme] [recommended] #msg-read-status Email-open-based read receipts — DEFERRED: Cloudflare Email Sending has no open-tracking webhook, and transactional mail should stay on Cloudflare Email Sending. If email-open receipts become mandatory, design a Cloudflare-compatible tracking-pixel/event subsystem or accept portal-only read cursors. In-app portal read cursors already exist for borrower chat (`chat_sessions.*_last_read_at`) but are not email reads.
 - [/] [#msg-unify4] [gated: awaiting dual-write prod soak] Lender cutover — dual-write (best-effort mirror into messages, both lender sources) + backfill (migration 0098) SHIPPED (EFS b5a6a55). Remaining: after soak, switch the inbox to read lender data from messages (dual-read), then drop deal_interest_lender_messages + lender_account_messages. Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [/] [#msg-unify3] [gated: awaiting dual-write prod soak] Borrower cutover — dual-write (best-effort mirror into messages) + backfill (migration 0097) SHIPPED (EFS 411a4da). Remaining: after the dual-write soaks live, switch the unified inbox to read borrower data from messages (dual-read), then drop chat_messages. Plan: src/equityfundingsource-dev/prds/message-unification.md.

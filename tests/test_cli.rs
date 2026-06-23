@@ -821,7 +821,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // when it defers ALL queue mutation while a different live process holds a
         // fresh queue-edit lease (a direct `queue prune-noise`/`consume` in flight;
         // #sqedit-race Phase 2).
-        ("agent-doc-orchestration/src/preflight/maintenance.rs", "reason=") => 4,
+        // 4 -> 5 (`reason=force_disk`): closeout pending maintenance now logs
+        // the explicit operator escape hatch used by `finalize --force-disk` when
+        // it bypasses a stale active editor listener instead of failing before
+        // the binary-owned closeout boundary (#pzjy closeout recovery).
+        ("agent-doc-orchestration/src/preflight/maintenance.rs", "reason=") => 5,
         ("agent-doc-orchestration/src/repair.rs", "guard_") => 10,
         ("agent-doc-orchestration/src/repair.rs", "reason=") => 5,
         ("agent-doc-orchestration/src/route.rs", "accepted_only") => 2,

@@ -848,11 +848,19 @@ pub(crate) fn auto_apply_pending_done_id(file: &Path, id: &str) -> Result<()> {
     crate::pending_cmd::done(file, id)
 }
 
-pub(crate) fn run_closeout_pending_maintenance(file: &Path, commit_mode: CommitMode) -> Result<()> {
+pub(crate) fn run_closeout_pending_maintenance(
+    file: &Path,
+    commit_mode: CommitMode,
+    force_disk: bool,
+) -> Result<()> {
     if commit_mode != CommitMode::Required {
         return Ok(());
     }
-    crate::preflight::run_pending_maintenance(file).map(|_| ())
+    if force_disk {
+        crate::preflight::run_pending_maintenance_force_disk(file).map(|_| ())
+    } else {
+        crate::preflight::run_pending_maintenance(file).map(|_| ())
+    }
 }
 
 #[cfg(test)]

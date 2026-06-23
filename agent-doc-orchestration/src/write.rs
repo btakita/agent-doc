@@ -1923,7 +1923,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     }
 
     if options.pending_only {
-        run_closeout_pending_maintenance(file, commit_mode)?;
+        run_closeout_pending_maintenance(file, commit_mode, options.force_disk)?;
         if commit_mode != CommitMode::None {
             crate::lint_gate::run(file, options.lint_override)?;
         }
@@ -2048,7 +2048,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     }
 
     if write_result.is_ok() {
-        run_closeout_pending_maintenance(file, commit_mode)?;
+        run_closeout_pending_maintenance(file, commit_mode, options.force_disk)?;
     }
 
     // Phase 3b: pre-commit pending closeout gates (strict mode only).
@@ -4963,6 +4963,74 @@ mod tests {
         assert!(
             result.contains("> do the fix"),
             "force-disk recovery must retain the answered prompt in the response quote:\n{result}"
+        );
+    }
+
+    #[test]
+    fn force_disk_closeout_pending_maintenance_bypasses_active_listener() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let source = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [x] [#done1] Reap me\n",
+            "- [ ] [#keep1] Keep me\n",
+            "<!-- /agent:backlog -->\n",
+        )
+        .to_string();
+        fs::write(&doc, &source).unwrap();
+        snapshot::save(&doc, &source).unwrap();
+
+        let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
+        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        crate::plugin_owner::write_plugin_owner_lease_for_test(
+            doc.to_str().unwrap(),
+            std::process::id(),
+        );
+
+        let err = run_closeout_pending_maintenance(&doc, CommitMode::Required, false).unwrap_err();
+        let err = format!("{err:?}");
+        assert!(
+            err.contains("refused direct disk write"),
+            "non-force closeout pending maintenance must protect the active listener: {err}"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            source,
+            "non-force closeout must not write behind an active listener"
+        );
+
+        run_closeout_pending_maintenance(&doc, CommitMode::Required, true)
+            .expect("force-disk closeout pending maintenance should write directly");
+
+        let result = fs::read_to_string(&doc).unwrap();
+        let backlog_after = crate::component::parse(&result)
+            .unwrap()
+            .into_iter()
+            .find(|component| crate::component::is_backlog_component(&component.name))
+            .unwrap()
+            .content(&result)
+            .to_string();
+        assert!(
+            !backlog_after.contains("[#done1]"),
+            "force-disk maintenance must reap the completed item:\n{result}"
+        );
+        assert!(
+            result.contains("[#keep1]"),
+            "force-disk maintenance must retain unrelated active items:\n{result}"
+        );
+        assert!(
+            result.contains("## Completed / Reaped") && result.contains("[#done1] Reap me"),
+            "force-disk maintenance must archive the reaped item:\n{result}"
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let reason_marker = ["reason", "force_disk"].join("=");
+        assert!(
+            log.contains("pending_maintenance_writeback")
+                && log.contains("transport=disk_force")
+                && log.contains(&reason_marker),
+            "force-disk maintenance should leave an attributable transport log:\n{log}"
         );
     }
     #[test]

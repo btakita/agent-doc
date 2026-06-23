@@ -29,11 +29,27 @@ pub struct PendingMaintenanceReport {
     pub legacy_gated_in_backlog_count: usize,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct PendingMaintenanceOptions {
+    force_disk: bool,
+}
+
 /// Run pending-component maintenance: lazy backfill, reap `[x]`, and reorder detection.
 ///
 /// Any write-through (backfill / reap) is persisted and committed in the same pass.
 /// Silent no-op when the document has no tracked-work component.
 pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> {
+    run_pending_maintenance_with_options(file, PendingMaintenanceOptions::default())
+}
+
+pub(crate) fn run_pending_maintenance_force_disk(file: &Path) -> Result<PendingMaintenanceReport> {
+    run_pending_maintenance_with_options(file, PendingMaintenanceOptions { force_disk: true })
+}
+
+fn run_pending_maintenance_with_options(
+    file: &Path,
+    options: PendingMaintenanceOptions,
+) -> Result<PendingMaintenanceReport> {
     let content = match std::fs::read_to_string(file) {
         Ok(c) => c,
         Err(_) => return Ok(PendingMaintenanceReport::default()),
@@ -317,11 +333,12 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
         // Falls back to the same plain disk write otherwise. The post-write reap
         // verification below reads `current_content` (not disk), so converging here
         // introduces no read-after-write race.
-        crate::write::converge_or_disk_write(
+        persist_pending_maintenance_doc(
             file,
             &content,
             &current_content,
             "pending_maintenance",
+            options.force_disk,
         )?;
     }
     if (mutated || snapshot_mutated)
@@ -402,6 +419,32 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
         review_gated_count,
         legacy_gated_in_backlog_count: pending_gated_count,
     })
+}
+
+fn persist_pending_maintenance_doc(
+    file: &Path,
+    current: &str,
+    target: &str,
+    source: &str,
+    force_disk: bool,
+) -> Result<()> {
+    if force_disk {
+        std::fs::write(file, target)
+            .with_context(|| format!("{source}: failed to write {}", file.display()))?;
+        crate::write::record_document_write_provenance(file, target);
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "{source}_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
+                file.display(),
+                target.len(),
+                crate::ops_log::content_hash(target)
+            ),
+        );
+        return Ok(());
+    }
+
+    crate::write::converge_or_disk_write(file, current, target, source)
 }
 
 pub(crate) fn component_matches_tracked_surface(name: &str, surface: &str) -> bool {

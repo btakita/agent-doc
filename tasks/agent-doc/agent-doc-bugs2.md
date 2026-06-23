@@ -97,14 +97,29 @@ Verification:
 - `make check`
 - `git diff --check`
 - `gh run list --workflow CI --limit 1` -> latest CI was `completed success` (`28051475833`)
-<!-- agent:boundary:364ad400 -->
+
+### Re: JB Run Agent Doc submit path — gpt-5
+
+> **Queue prompt:** JB `Run Agent Doc` still does not quickly submit.
+
+> **Queue prompt:** auto-restart session does restart the agent-doc turn.
+
+That narrows the remaining failure: the restart/turn-start path is working, but the post-restart submit path is still late or dropped. I would not treat this as another auto-restart failure; the next useful proof is the route/dispatch window around JB `Run Agent Doc`:
+
+- harness restart or ready prompt observed
+- dispatch-ready proof emitted
+- submit/send proof emitted or missing
+- elapsed time between ready and submit
+
+This keeps `#jbrundispatch` scoped correctly: capture the live stall at submit time and compare ops.log route trace against `route_dispatch_submit_recycle_settle`, `auto_start_dispatch_ready_confirmed`, and any missing dispatch-start or submit proof. If the turn starts but prompt text is not submitted quickly, the fix belongs in the JB route/submit readiness path, not the restart boundary.
+<!-- agent:boundary:784a1bac -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~[#directchatpb2]~~
-- JB `Run Agent Doc` still does not quickly submit.
+- ~~JB `Run Agent Doc` still does not quickly submit.~~
+- auto-restart session does restart the agent-doc turn.
 - :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
 - :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀

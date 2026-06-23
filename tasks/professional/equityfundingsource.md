@@ -131,7 +131,42 @@ Preflight warnings were legacy review/backlog hygiene and semantic-completion ca
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:a9c61f06 -->
+
+### Re: Advance Lender TMO sync failure — gpt-5
+
+> **Queue prompt:**
+>
+> In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender > Sync with TMO, on sync failure, the Advance Lender dialog is closed. It should remain open with the error message in the form. 
+
+
+> **Queue prompt:**
+>
+> ~~In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender > Sync with TMO, on sync failure, the Advance Lender dialog is closed. It should remain open with the error message in the form.~~ — answered this cycle (#ftstrike)
+
+Fixed the Advance Lender modal sync path so a TMO sync failure remains local to the open dialog and renders the error beside the form controls. The modal no longer reloads the parent lender board after the sync helper returns, which avoids losing the nested dialog state; the shared TMO sync helper now also treats `{ ok: false, error }` payloads as failures even when the HTTP status is 200.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/tmo_los.tsx`
+- `src/equityfundingsource-dev/tests/advance-lender-dialog.test.ts`
+
+Verification:
+- `bun test tests/advance-lender-dialog.test.ts` — 11 pass / 0 fail.
+- `git -C src/equityfundingsource-dev diff --check` — clean.
+- `make check` — passed.
+- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists in this repo.
+- Nearest available workflow `Agent Doc` latest run `28051518463` is already failed on `main` with empty job steps/logs (`log not found: 83043079956`), so there was no CI failure log to act on; local verification is green.
+
+Commits pushed:
+- EFS `319ff6c fix(admin): keep advance lender dialog open on sync errors`
+- Parent `9dc701ffb chore: update equityfundingsource submodule`
+
+Not deployed; the active preset was `#spec-test-commit-push`, not deploy.
+
+Preflight warnings were stale supervisor / legacy review hygiene / semantic-completion candidates; none blocked the fix. Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:8038d2dc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -151,7 +186,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

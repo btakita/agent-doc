@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,144 +33,51 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260623-144439.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260623-155553.md`*
 
 Compacted content:
-❯ - Archived 6 response topic(s): production deletion logs; TMO sync delete risk + soft-disable trail; application logging + deploy; 3 more
+❯ - Archived 4 response topic(s): Message lender textarea label; deploy; Advance lender hold action; 1 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
-### Re: Message lender textarea label — gpt-5
+### Re: Advance Lender TMO sync action — gpt-5
 
 > **Queue prompt:**
 >
-> https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance lender > Message lender has "Message EFS" as a label over the textarea. That label is contrary to the design since we are messaging the lender. Let's remove it.
+> ~~https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender > Link TMO account...there should be a Sync with TMO button with a closed Manually Link Account `<details>` that has the link form.~~ — auto-struck: answered this cycle (#ftstrike)
 
-Removed the visible `Message EFS` label from the shared `PortalMessages` composer. The textarea now keeps an accessible name via `aria-label={`Message ${config.other_label.toLowerCase()}`}`, so the Advance lender dialog's admin-to-lender composer is no longer visibly labeled as messaging EFS while still remaining accessible.
-
-EFS commit: `f41c7ff fix: remove visible portal message composer label`, pushed to `origin/main`.
-
-Parent repo submodule pointer commit: `4d0b7ae1f chore: update equityfundingsource submodule`. I did not push the parent repo because `main` already had unrelated local commits ahead of `origin/main`, and another session committed on top of this pointer update during the cycle; pushing parent `main` from here would publish unrelated concurrent work.
-
-Changed paths:
-
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/portal_messages.tsx`
-- `src/equityfundingsource-dev/tests/portal-messages-component.test.ts`
-- `src/equityfundingsource-dev` submodule pointer in the parent repo
-
-Commands:
-
-- `tsift status`
-- `agent-doc reset --from-current /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
-- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
-- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
-- `bun test tests/portal-messages-component.test.ts`
-- `make check`
-- `gh run list --workflow CI --limit 1`
-- `gh workflow list`
-- `git commit -m "fix: remove visible portal message composer label"` in EFS
-- `git push origin main` in EFS
-- `git commit -m "chore: update equityfundingsource submodule"` in the parent repo
-
-Verification:
-
-- `bun test tests/portal-messages-component.test.ts` — 10 tests passed.
-- `make check` — 1,156 tests passed, app build passed, Worker build passed.
-- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists in the EFS repo.
-- `gh workflow list` — no workflows listed for the EFS repo.
-- EFS status is clean on `main...origin/main` after push.
-
-Confidence: high.
-
-Escalation: none. Production was not deployed in this cycle because the queue item requested the code/design fix, not deployment.
-
-### Re: deploy — gpt-5
 
 > **Queue prompt:**
 >
-> deploy
+> https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender > Link TMO account...there should be a Sync with TMO button with a closed Manually Link Account `<details>` that has the link form.
 
-Deployed the current `src/equityfundingsource-dev` `main` branch to the production Cloudflare Worker via `make deploy`, per the EFS deployment runbook. Cloudflare activated Worker Version ID `00e4715e-973d-4bf3-b333-97481fb5bd65` at `https://equityfundingsource.brian-takita.workers.dev`.
+Updated the Advance Lender hold dialog so the no-request path now leads with a `Sync with TMO` primary button. The button calls the existing `POST /api/admin/tmo-sync` endpoint, shows success/error toast feedback, and refreshes the lender pipeline after a successful sync.
 
-No code files changed in this cycle. The EFS submodule is clean on `main...origin/main`; the parent repo still has unrelated pre-existing dirty/ahead state, which I left untouched.
+The direct account-number form is still available, but it now lives inside a default-closed `Manually Link Account` `<details>` block with the existing `PUT /api/admin/users/:id/lender-account` flow. The copy now tells the admin to sync first, then use manual linking only when the exact TMO lender account number is known.
 
-Changed paths: none.
+EFS commit: `bc64531 fix: add tmo sync to advance lender hold`, pushed to `origin/main`.
 
-Commands:
-
-- `tsift status` in the parent repo
-- `tsift status --fix` in the parent repo
-- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
-- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
-- `agent-doc read /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
-- `git status --short --branch` in parent and EFS repos
-- `tsift status` in EFS
-- `make check`
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`
-- `bun run cf:d1:info`
-- `bun run cf:d1:time-travel:info`
-- `make deploy`
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline`
-- `curl -fsS -o /tmp/efs-index.browser-HDSOPHFU.js https://equityfundingsource.brian-takita.workers.dev/index.browser-HDSOPHFU.js`
-- `rg -n 'Message EFS' /tmp/efs-index.browser-HDSOPHFU.js`
-- `rg -n "Message EFS" app lib tests`
-- `rg -n "pm-input|other_label|aria-label" /tmp/efs-index.browser-HDSOPHFU.js`
-- `sed -n '8948,8964p' /tmp/efs-index.browser-HDSOPHFU.js`
-- `gh run list --workflow CI --limit 1`
-- `gh workflow list`
-
-Verification:
-
-- `make check` passed: 1,156 tests, app build, and Worker build.
-- Pre-deploy remote D1 migration check: no migrations to apply.
-- D1 info succeeded for `equityfundingsource` database `280e1539-b940-4c59-8988-fbed63c12ac0`.
-- D1 Time Travel reported current bookmark `000004e3-00000008-00005093-c45fdd0d82a8dacc1e87d4241e2575a1`.
-- `make deploy` rebuilt the Worker/assets, applied remote migrations (none pending), uploaded one changed static asset, deployed triggers, and activated Worker Version ID `00e4715e-973d-4bf3-b333-97481fb5bd65`.
-- Post-deploy migration check: no migrations to apply.
-- Live smoke: `/` returned `200`; `/admin/lender-pipeline` returned `303` through auth, as expected for admin routes.
-- Downloaded deployed browser asset `/index.browser-HDSOPHFU.js`; the `PortalMessages` composer around `pm-input` has no visible label and keeps only `aria-label={\`Message ${config.other_label.toLowerCase()}\`}` on the textarea. The remaining `Message EFS` strings in the bundle are from the separate investor deal-detail composer and shared intro/ARIA copy, not the removed Advance lender visible label.
-- `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` returned no workflows.
-
-Confidence: high.
-
-Escalation: none.
-
-### Re: Advance lender hold action — gpt-5
-
-> **Queue prompt:**
->
-> Advance Lender > What clears this hold > Open Lender Requests page ![img_35.png](img_35.png) leads to an empty page with nothing actionable. How does a lender "request a lender saccount"? Why can't the admin do his directly? The lender is also missing documents. Is that the real reason for the hold? Or does the admin simply need to sync the lender account with TMO?
-
-Fixed the dead-end in the Advance lender hold flow. The answer is: the actual funding hold is the missing linked TMO lender account. Missing lender documents are still shown in the checklist for follow-up, but they are not what clears this specific account-link hold. If a lender has already submitted a lender request, the admin should still use the Lender Requests tab because that marks the request done and stores the completion metadata. If no request is pending, the Lender Requests page can legitimately be empty, so the admin should not be sent there as the primary action.
-
-The Advance Lender modal now handles the no-request case directly: it explains that the requests page may be empty, shows an inline `TMO lender account number` field, calls the existing `PUT /api/admin/users/:id/lender-account` endpoint, refreshes the pipeline after success, and keeps the message composer + lender-document checklist visible for any missing setup details. The pending-request case still deep-links to the Lenders tab with the pending-request attention filter.
-
-EFS commit: `4689c03 fix: make advance lender account hold actionable`, pushed to `origin/main`.
-
-Parent repo submodule pointer commit: `028f13cfa chore: update equityfundingsource submodule`. I did not push the parent repo because `main` already has unrelated local commits ahead of `origin/main`; pushing from here would publish unrelated concurrent work. A separate session also committed `661ab209f agent-doc(monsterrodholders): repair Hermes safety response pointer` after my pointer commit, so parent `HEAD` is not the EFS pointer commit.
+Parent repo submodule pointer commit: `37eda0485 chore: update equityfundingsource submodule`. I did not push the parent repo because it was already ahead of `origin/main` and has unrelated dirty worktree state; pushing from here would publish unrelated work.
 
 Changed paths:
 
 - `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
 - `src/equityfundingsource-dev/tests/advance-lender-dialog.test.ts`
-- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
 - `src/equityfundingsource-dev` submodule pointer in the parent repo
 
 Commands:
 
+- `tsift status` in the parent repo and EFS submodule
 - `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
 - `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
-- `view_image /home/brian/work/btakita/agent-loop/tasks/professional/img_35.png`
-- targeted `rg` / `sed` inspections of lender pipeline, lender request, document, and account-link code
+- `agent-doc reset --from-current /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- targeted `tsift --envelope search`, `tsift --envelope source-read`, `rg`, and `sed` inspections for Advance Lender, TMO sync, and lender-account code
 - `bun test tests/advance-lender-dialog.test.ts tests/admin-investor-pipeline.test.ts tests/advance-lender-documents.test.ts`
 - `make check` in `src/equityfundingsource-dev`
-- `gh run list --workflow CI --limit 1` in `src/equityfundingsource-dev`
-- `gh workflow list` in `src/equityfundingsource-dev`
-- `git commit -m "fix: make advance lender account hold actionable"` in `src/equityfundingsource-dev`
+- `gh run list --workflow CI --limit 1` and `gh workflow list` in `src/equityfundingsource-dev`
+- `git commit -m "fix: add tmo sync to advance lender hold"` in `src/equityfundingsource-dev`
 - `git push origin main` in `src/equityfundingsource-dev`
 - `git commit -m "chore: update equityfundingsource submodule"` in the parent repo
-- `gh run list --workflow CI --limit 1` in the parent repo
-- `gh workflow list` in the parent repo
+- `gh run list --workflow CI --limit 1` and `gh workflow list` in the parent repo
 - `make check` in the parent repo
 
 Verification:
@@ -179,28 +86,13 @@ Verification:
 - Full EFS `make check` passed: 1,157 tests, app build, and Worker build.
 - EFS `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` returned no workflows.
 - Parent `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
-- Parent `make check` passed.
+- Parent `make check` passed, including instruction-files, agent-doc, and corky suites.
 - EFS submodule is clean on `main...origin/main` after push.
 
 Confidence: high.
 
-Escalation: none.
-
-### Re: deploy — gpt-5
-
-> **Queue prompt:** deploy
-
-Deployed the current EFS `main` (`4689c03 fix: make advance lender account hold actionable`) to production. This queue item looks like the completed free-text deploy head that resurfaced; I treated the current document directive literally and deployed the current pushed code, which includes the Advance Lender account-hold fix.
-
-Verification:
-- `make check` passed: 1,157 tests, app build, and Worker build.
-- Remote D1 preflight: no pending migrations; D1 info returned normally; Time Travel bookmark `000004e3-00000008-00005093-c45fdd0d82a8dacc1e87d4241e2575a1` is available.
-- `make deploy` succeeded; no migrations were applied; Worker Version ID `0a855687-9c60-4952-a5f6-36dc4d42dfcf` is live.
-- Post-deploy: no pending migrations; `/` returns `200`; `/admin/lender-pipeline` returns `303`; the live root HTML references `/index.browser-IVLH656B.js`.
-- EFS worktree is clean. `gh run list --workflow CI --limit 1` found no `CI` workflow, and `gh workflow list` returned no workflows.
-
-Escalation: none.
-<!-- agent:boundary:07555119 -->
+Escalation: none. Production was not deployed in this cycle; `deploy` remains as the next queue prompt.
+<!-- agent:boundary:392f852f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -220,6 +112,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender > Link TMO account...there should be a Sync with TMO button with a closed Manually Link Account `<details>` that has the link form.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~deploy~~
 <!-- /agent:queue -->
 
 ## Backlog

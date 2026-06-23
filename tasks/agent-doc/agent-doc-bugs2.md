@@ -56,7 +56,28 @@ Verification: all listed commands passed except an earlier main-worktree `make c
 Commit: `src/agent-doc` `dad06399 fix: log IPC proof failures in session exchange`
 Confidence: high
 Escalation: none.
-<!-- agent:boundary:d596a06d -->
+
+### Re: #p6a0 deferred session clear dedupe — gpt-5
+
+Completed `#p6a0`.
+
+`agent-doc session clear` now treats a busy active auto-loop as a single deferred handoff: the first non-interrupting clear records one pending clear for the next proven idle boundary, and repeated clears while that marker exists report `session_clear already deferred` without refreshing cooldown or injecting another `/clear` into the active turn. The supervisor simulator now covers that duplicate suppression and the later idle-boundary delivery.
+
+Updated the shared and editor specs, README, `VERSIONS.md`, and the installed agent-doc skill text. I committed and pushed the agent-doc submodule fix as `ef365e4b` (`fix: dedupe deferred session clears`) and committed the parent submodule pointer as `8042b8955`.
+
+Verification:
+- `cargo fmt --check` passed in the working tree.
+- Targeted regressions passed for queue preemption, session-clear messages, and SimWorld duplicate suppression.
+- Full `make check` passed in an isolated worktree containing only this patch: 5042 tests passed, 241 skipped, medium simulator passed.
+- `make install-full` passed from that isolated worktree and installed `agent-doc 0.34.43`; install marked two controllers for recycle at next idle boundary.
+- Latest GitHub Actions CI for `main` was green: run `28060207399`, `fix: preserve prose queue heads`, completed 2026-06-23T22:03:57Z.
+
+The live worktree still has pre-existing unrelated dirty files in `agent-doc-orchestration/src/write.rs` and `agent-doc-orchestration/src/write/queue_consume.rs`; I did not stage or commit them. A direct `make check` in the dirty worktree is currently blocked by those queue-consumption edits, so I used the isolated-patch worktree for the full check.
+
+> **Queue prompt:** JB Run Agent Doc still not submitting. Can we track when this happens and automatically file a bug so I don't have to endlessly repeat myself when you fail to fix the issue?
+
+I did not fold that separate auto-filing behavior into `#p6a0`. I added it as a new backlog item so the route failure path can be designed with the right diagnostic capture and dedupe contract instead of being mixed into the deferred-clear fix.
+<!-- agent:boundary:f51c2cff -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -100,8 +121,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#3ygp] #jbrunautobug #agent-doc-bug Automatically file a session-doc backlog item when JetBrains Run Agent Doc route/dispatch fails after retries; include the saved route diagnostic path, failure class, pane/generation, and ops.log marker, and dedupe repeated failures for the same document/stage so the operator does not have to retype the bug.
 - [ ] [#pzjy] #agent-doc-bug Prevent stale live editor buffers from resurrecting answered queue prompts after IPC-proof recovery: when `live_prompt_drift_after_preflight` / `content_ours_snapshot_next_cycle` recovery commits a captured response, preserve the committed queue strike state or fail closed instead of accepting stale unstruck queue heads from the editor buffer. Add regression coverage for answered free-text and pinned queue items reappearing unstruck after recovery.
-- [ ] [#p6a0] #agent-doc-bug Guard `/clear` dispatch against active-turn flooding: `/clear` may be sent only at a proven reset/supervisor handoff boundary, never repeatedly into an active tmux pane while an agent turn is running. Add turn-state/dedupe gating plus regression coverage for repeated `/clear` text being injected during an active response, while preserving the intended focused-cycle supervisor clear-and-continue behavior.
 - [ ] [#qstrikework] #agent-doc-bug Prevent queue items from being struck unless the current cycle proves that exact head was worked: the response quotes the exact free-text head, or a --done/--pending-gate/--review-resolve targets the backing id. Add regression coverage for interrupted finalize recovery where a later operator-verify or free-text head is auto-quoted/struck while the response only repairs an earlier prompt.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.

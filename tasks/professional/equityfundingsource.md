@@ -184,7 +184,49 @@ Verification:
 Confidence: high for Worker request logging, scheduled task logging, migration command logging, and the existing TMO/Dropbox API log capture path. This does not retroactively create historical request logs before this deployment.
 
 Escalation: none.
-<!-- agent:boundary:53ca4457 -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> ~~No record should be deleted, only disabled. Create a migration. The durable app audit table should be deployed. Do we have sufficient logging to track deletion events? The delete borrower should not cascade. No deleted records. Only disabled records. We need a trail.~~ — auto-struck: answered this cycle (#ftstrike) 
+
+
+> **Queue prompt:**
+>
+> deploy
+
+The logging changes are deployed.
+
+Deployment details:
+
+- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Worker version: `8bc3cffa-e2d8-403c-9344-7ebd02f30c48`
+- EFS commit deployed: `f0ccec3 feat: add structured application logging`
+- Remote D1 migrations: no pending migrations to apply.
+
+Changed paths: none in this follow-up cycle; the deployed code paths were recorded in the prior logging response.
+
+Commands:
+
+- `make deploy`
+- `bun run cf:d1:migrations:list:remote`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/admin`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/api/admin/pipeline`
+
+Verification:
+
+- Deployment succeeded.
+- Migration list reported `No migrations to apply`.
+- Public home returned `200`.
+- `/admin` returned `303` through Access/login flow.
+- `/api/admin/pipeline` returned `401` unauthenticated.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:7267188f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -207,7 +249,7 @@ After 20:30
 - ~~Could the delete event have occured from a TMO sync bug?~~
 - ~~We should log all web requests, api calls, migrations, etc. in the application logs.~~
 - ~~No record should be deleted, only disabled. Create a migration. The durable app audit table should be deployed. Do we have sufficient logging to track deletion events? The delete borrower should not cascade. No deleted records. Only disabled records. We need a trail.~~ — auto-struck: answered this cycle (#ftstrike) 
-- deploy
+- ~~deploy~~
 <!-- /agent:queue -->
 
 ## Backlog

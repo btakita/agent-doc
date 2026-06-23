@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -33,34 +33,11 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260623-215335.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260623-220137.md`*
 
 Compacted content:
-❯ - Archived 1 response topic(s): Email reply visibility and realtime message updates
+❯ - Archived 1 response topic(s): Queue drain after email reply visibility closeout
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: Queue drain after email reply visibility closeout — gpt-5
-
-> **Queue prompt:**
->
-> Ensure message updates are realtime.
-
-
-> **Queue prompt:**
->
-> ~~The email replies to a message did not show up in the messages.~~ — already answered by the committed EFS fix and closeout above (#ftstrike)
-
-> **Queue prompt:**
->
-> ~~Ensure message updates are realtime.~~ — already answered by the committed EFS fix and closeout above (#ftstrike)
-
-No additional code changes were made in this drain cycle. The implementation remains EFS `08810e9`, with parent submodule pointer `63806f887`; the session closeout was committed as `612871564` after repairing stale agent-doc sidecar state.
-
-Verification remains unchanged: focused Bun tests passed, EFS `make check` passed, parent `make check` passed, and both EFS/parent `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
-
-Escalation: none.
-
-Confidence: high.
 
 ### Re: Unified admin chat interface — gpt-5
 
@@ -105,7 +82,40 @@ Commits:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:6a3e7487 -->
+**IPC proof issue dogfood log**
+
+Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=902510d1-f73b-4fa8-a60b-bb0abfc69bb2 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782254690087
+```
+
+### Re: Deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Deployed the current EFS Worker build after the unified admin chat interface commit.
+
+Changed paths: none from deployment; `src/equityfundingsource-dev` is clean after deploy.
+
+Commands:
+- `make deploy`
+
+Verification:
+- Worker build completed.
+- Remote D1 migration check completed with `No migrations to apply!`.
+- Cloudflare asset upload completed with 1 updated browser asset.
+- Worker deployed at `https://equityfundingsource.brian-takita.workers.dev`.
+- Current Cloudflare Worker version: `e787a040-70c7-45e0-a1d8-087c924c363c`.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:31722cc6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -125,8 +135,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Add the unified chat interface to the admin portal. This chat portal should detect which borrower, lender(s), or broker that is being viewed and display the appropriate conversation(s). For example, if an available deal dialog is open, show the chat with the borrower. If viewing interested lender(s), the chat should be with the lender(s) and the borrower in a separate tab. Size the admin message dialog appropriately to see the conversation and tabs if there are multiple participants. Lender groups should allow messaging with the entire group as a multiway conversation or with an individual lender via tabs.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~deploy~~
 <!-- /agent:queue -->
 
 ## Backlog

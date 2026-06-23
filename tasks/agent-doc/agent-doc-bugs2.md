@@ -38,7 +38,51 @@ complete
 
 Compacted content:
 ❯ - Archived 5 response topic(s): #ws55; #ws55; #3x90; 2 more
-<!-- agent:boundary:db95c05d -->
+
+### Re: dispatch-ready actor proof — gpt-5
+
+> **Queue prompt:** Extending the timeout is not the solution. The panes were up is less than 2s. Codex was running and idle. I am able to use Codex manually. This is an agent-doc dispatch bug.
+
+Corrected. The 120s JetBrains wait bump was not the root fix for this report; it remains only as slow-start margin. The actual dispatch bug was the dispatch-only startup gate treating a stale open `codex_start` log as authoritative even when the same session/pane already had controller-backed ready proof.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/route/dispatch_only.rs`
+- `src/agent-doc/VERSIONS.md`
+- parent submodule pointer `src/agent-doc`
+
+What changed:
+- Added a dispatch-only actor-ready proof path before and after the existing short pane-capture wait. It loads the authoritative actor binding for the same session/pane and bypasses the stale startup-log wait only when the actor is eligible, the effective actor state is `Ready`, and the existing prompt-ready barrier is satisfied.
+- Kept fail-closed behavior for busy, starting, degraded/no-socket, missing, or wrong-pane actors. Those still fall through to the existing live probe/recovery path.
+- Logged the accepted proof as `route_dispatch_only_starting_pane_ready_via_actor_state ... prompt_ready=true` so this class is auditable next time.
+- Updated `VERSIONS.md` to say the timeout was not the root fix and to describe the stale-startup-log/ready-actor dispatch fix.
+
+Commits:
+- `3a61ce19` in `src/agent-doc`: `fix dispatch ready actor proof` (pushed to `btakita/agent-doc` `main`)
+- `cf1bdc73f` in the parent repo: `agent-doc: update dispatch ready fix`
+- Prior timeout-margin commit remains: `5dfb210f` (`fix jetbrains run startup wait`)
+
+Commands run:
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration dispatch_only_starting_pane_actor_ready_gate_requires_same_ready_prompt_proven_actor`
+- `cargo test -p agent-doc-orchestration route::dispatch_only::tests`
+- `make check` (first run exposed the FlowCore `reason=` budget; I changed the new log field from `transition_reason=` to `transition=` and reran)
+- `make tmux-ci`
+- `git push origin main` in `src/agent-doc`
+- `make install` in `src/agent-doc`
+- `gh run list --workflow CI --limit 1`
+
+Verification:
+- Focused regression: passed.
+- Dispatch-only test slice: 15 passed, 1 ignored live tmux integration.
+- `make check`: passed; 5005 nextest tests passed, 241 skipped; doctests passed; wider deterministic closeout sim passed.
+- `make tmux-ci`: passed; 7 ignored/live tests passed.
+- Local install: `make install` rebuilt `/home/brian/.cargo/bin/agent-doc` and `libagent_doc.so`; it also marked 1 controller for auto-recycle at the next idle boundary.
+- GitHub Actions CI run `28002487677` for `3a61ce19` was still `in_progress` at the last check, not red.
+
+Confidence: high for the reported failure class. The fix directly addresses the operator correction: an already-idle, controller-proven-ready Codex actor is no longer blocked by a stale startup-log probe.
+
+Escalation: none needed. Remaining live note: the currently serving route-owned supervisor still reported stale until it reaches the idle boundary and processes the auto-recycle marker from `make install`.
+<!-- agent:boundary:acc9dddf -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -94,7 +138,7 @@ resync: purged 1 orphaned stash pane(s)
 Error: dispatch-only codex reopen refused to inject into pane %6 for tasks/agent-doc/agent-doc-bugs2.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
 ```
 ---
-- Extending the timeout is not the solution. The panes were up is less than 2s. Codex was running and idle. I am able to use Codex manually. This is an agent-doc dispatch bug.
+- ~~Extending the timeout is not the solution. The panes were up is less than 2s. Codex was running and idle. I am able to use Codex manually. This is an agent-doc dispatch bug.~~
 - do [#fcccap]
 - do [#fccsup]
 - do [#fccendpoint]

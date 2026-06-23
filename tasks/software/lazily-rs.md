@@ -32,6 +32,16 @@ queue: start
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
+1. **Glitch-free transitions** — signals pull-compute in dependency order, so observers never see transient intermediate states during a transition.
+2. **Zero-wiring derived state** — any memo/signal/effect that reads the state Cell automatically tracks and recomputes on transition.
+3. **Cleanup = on-exit** — the EffectCallbackResult cleanup pattern is exactly on-exit semantics, already proven in the AsyncSlotState lifecycle.
+4. **Batch for atomic transitions** — `ctx.batch()` processes multiple events with all derived state settling before effects fire.
+5. **Lazy vs eager choice** — `memo` for cheap derived state (recompute on read), `signal` for expensive/explicitly-materialized state (always current).
+6. **Thread-safe machines** — `ThreadSafeContext` gives the same primitive surface for Send + Sync state machines; `AsyncContext` for async-driven transitions.
+- **`Machine<S, E>`** — wraps `CellHandle<S>` + transition function; exposes `send(event) -> bool`, `state()`, and a reactive handle so other slots/signals can depend on it.
+- **`on_transition(old, new)`** — typed transition observer (fires only when state actually changes).
+- **`state_is(target)`** — a `SignalHandle<bool>` for "machine is in state X" (useful for hierarchical guards and conditional rendering).
+- Feature-gated behind `state_machine` to keep the core minimal (same pattern as `async`, `ipc`, `webrtc-str0m`).
 ### Session Summary
 
 ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260623-132716.md`*
@@ -39,7 +49,7 @@ queue: start
 Compacted content:
 ❯ - Archived 7 response topic(s): #advance-review; do #lzwebrtcrunbook; do #lzholonsscan; 4 more
 ❯ - Prior summary/context: prior compacted content: Archived 3 response topic(s): #next-steps to fix lazily bugs; do #lzstr0mframe; do #lzstr0mp...
-<!-- agent:boundary:0ca25272 -->
+<!-- agent:boundary:53b75860 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -49,7 +59,7 @@ Compacted content:
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~How can lazily-rs support state machine architecture?~~ — auto-struck: answered this cycle (#ftstrike)
-- do [#438b]
+- ~~do [#438b]~~
 <!-- /agent:queue -->
 
 ## Backlog

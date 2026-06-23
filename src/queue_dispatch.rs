@@ -175,6 +175,10 @@ pub fn dispatch_command(item: &QueueItem, ctx: &DispatchContext) -> Result<Dispa
         return dispatch_inline(item, ctx);
     }
 
+    if command == "clear" {
+        return dispatch_clear(ctx);
+    }
+
     // Try supervisor IPC
     if let Some(result) = try_supervisor_dispatch(item, ctx)? {
         return Ok(result);
@@ -189,6 +193,20 @@ pub fn dispatch_command(item: &QueueItem, ctx: &DispatchContext) -> Result<Dispa
         "cannot dispatch command `{}`: no supervisor socket or tmux pane available",
         item.raw
     );
+}
+
+fn dispatch_clear(ctx: &DispatchContext) -> Result<DispatchResult> {
+    log_dispatch_progress(
+        ctx,
+        "queue_dispatch_progress transport=session_clear command=clear".to_string(),
+    );
+    crate::session_actor_cmd::clear(&ctx.file).with_context(|| {
+        format!(
+            "failed to dispatch guarded /clear for {}",
+            ctx.file.display()
+        )
+    })?;
+    Ok(DispatchResult::Ok)
 }
 
 /// Execute an inline-eligible command.
@@ -501,7 +519,7 @@ mod tests {
 
     #[test]
     fn unknown_command_without_dispatch_path_fails() {
-        let item = classify("/clear");
+        let item = classify("/unknown");
         let ctx = test_dispatch_context();
         let result = dispatch_command(&item, &ctx);
         assert!(result.is_err());
@@ -545,13 +563,13 @@ mod tests {
         )
         .unwrap();
 
-        let item = classify("/clear");
+        let item = classify("/doctor");
         let ctx = DispatchContext::from_file(&doc).unwrap();
         let result = dispatch_command(&item, &ctx).unwrap();
         assert!(matches!(result, DispatchResult::Ok));
         assert_eq!(
             captured.lock().unwrap().as_slice(),
-            &[agent_doc_orchestration::supervisor::ipc::normalize_submit_text("/clear")]
+            &[agent_doc_orchestration::supervisor::ipc::normalize_submit_text("/doctor")]
         );
 
         let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
@@ -559,9 +577,9 @@ mod tests {
             ops.contains("queue_dispatch_progress transport=supervisor_ipc"),
             "{ops}"
         );
-        assert!(ops.contains("command=clear bytes=6"), "{ops}");
+        assert!(ops.contains("command=doctor bytes=7"), "{ops}");
         assert!(
-            ops.contains(&agent_doc_orchestration::ops_log::content_hash("/clear")),
+            ops.contains(&agent_doc_orchestration::ops_log::content_hash("/doctor")),
             "{ops}"
         );
         assert!(
@@ -569,8 +587,60 @@ mod tests {
             "{ops}"
         );
         assert!(
-            !ops.contains("/clear"),
+            !ops.contains("/doctor"),
             "ops progress must not contain raw queue command text:\n{ops}"
+        );
+
+        ipc.stop();
+    }
+
+    #[test]
+    fn dispatch_clear_uses_session_clear_guard_instead_of_raw_supervisor_inject() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "---\nagent_doc_session: queue-session\n---\n").unwrap();
+
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let captured_for_ipc = captured.clone();
+        let mut ipc = agent_doc_orchestration::supervisor::ipc::SupervisorIpc::start(
+            dir.path(),
+            "queue-session",
+            move |method| match method {
+                agent_doc_orchestration::supervisor::ipc::IpcMethod::Inject { bytes }
+                | agent_doc_orchestration::supervisor::ipc::IpcMethod::Clear { bytes } => {
+                    captured_for_ipc.lock().unwrap().push(bytes);
+                    agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty()
+                }
+                agent_doc_orchestration::supervisor::ipc::IpcMethod::State
+                | agent_doc_orchestration::supervisor::ipc::IpcMethod::Pid
+                | agent_doc_orchestration::supervisor::ipc::IpcMethod::Restart { .. }
+                | agent_doc_orchestration::supervisor::ipc::IpcMethod::Stop { .. }
+                | agent_doc_orchestration::supervisor::ipc::IpcMethod::StopAgent { .. } => {
+                    agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty()
+                }
+            },
+        )
+        .unwrap();
+
+        let item = classify("/clear");
+        let ctx = DispatchContext::from_file(&doc).unwrap();
+        let result = dispatch_command(&item, &ctx);
+
+        assert!(result.is_err());
+        assert!(
+            captured.lock().unwrap().is_empty(),
+            "queued /clear must go through session clear guards, not raw supervisor/tmux injection"
+        );
+
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("queue_dispatch_progress transport=session_clear command=clear"),
+            "{ops}"
+        );
+        assert!(
+            !ops.contains("queue_dispatch_progress transport=supervisor_ipc"),
+            "{ops}"
         );
 
         ipc.stop();

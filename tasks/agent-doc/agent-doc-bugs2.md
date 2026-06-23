@@ -162,7 +162,11 @@ This cycle did not require new source work. Preflight surfaced stale editor repl
 Verification:
 - `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` opened cycle `cycle-1782257556456` and identified the stale `#pzjy` exchange drift.
 - No source files changed in this cleanup cycle.
-<!-- agent:boundary:7300fe17 -->
+
+### Re: queue restoration repair — gpt-5
+
+Restored the next queue head that was accidentally marked complete during stale closeout cleanup. No source work was performed in this repair cycle.
+<!-- agent:boundary:25d4488f -->
 <!-- /agent:exchange -->
 
 ## Queue

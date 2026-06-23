@@ -43,18 +43,25 @@ pub(crate) fn load_authoritative_actor_binding(
     {
         let runtime = query_supervisor_runtime(file, session_id);
         let effective_state = runtime.actor_state.unwrap_or(record.state);
-        if mismatched_authoritative_actor_can_be_replaced(&runtime, effective_state) {
+        let frontmatter_harness_changed =
+            document_declares_expected_harness(file, &expected_harness);
+        if mismatched_authoritative_actor_can_be_replaced(
+            &runtime,
+            effective_state,
+            frontmatter_harness_changed,
+        ) {
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "route_authoritative_actor_harness_mismatch_stale file={} pane={} stored_harness={} expected_harness={} generation={} supervisor_health={} actor_state={}",
+                    "route_authoritative_actor_harness_mismatch_stale file={} pane={} stored_harness={} expected_harness={} generation={} supervisor_health={} actor_state={} frontmatter_harness_changed={}",
                     file.display(),
                     record.pane_id,
                     record.harness,
                     expected_harness,
                     record.generation,
                     supervisor_health_label(runtime.health),
-                    effective_state.as_str()
+                    effective_state.as_str(),
+                    frontmatter_harness_changed
                 ),
             );
             return Ok(None);
@@ -119,9 +126,24 @@ pub(crate) fn load_authoritative_actor_binding(
 pub(crate) fn mismatched_authoritative_actor_can_be_replaced(
     runtime: &SupervisorRuntime,
     actor_state: crate::session_actor::ActorState,
+    frontmatter_harness_changed: bool,
 ) -> bool {
-    runtime.health != SupervisorHealth::Healthy
+    frontmatter_harness_changed
+        || runtime.health != SupervisorHealth::Healthy
         || actor_state == crate::session_actor::ActorState::Closed
+}
+
+fn document_declares_expected_harness(file: &Path, expected_harness: &str) -> bool {
+    let Ok(content) = std::fs::read_to_string(file) else {
+        return false;
+    };
+    let Ok((fm, _)) = crate::frontmatter::parse(&content) else {
+        return false;
+    };
+    let Some(agent) = fm.agent.as_deref() else {
+        return false;
+    };
+    crate::session_actor::normalize_harness_name(agent) == expected_harness
 }
 
 pub(crate) fn promote_starting_authoritative_actor_if_dispatch_ready(
@@ -817,8 +839,17 @@ mod tests {
             !mismatched_authoritative_actor_can_be_replaced(
                 &healthy_ready,
                 crate::session_actor::ActorState::Ready,
+                false,
             ),
             "a healthy ready actor from another harness is still authoritative and must block"
+        );
+        assert!(
+            mismatched_authoritative_actor_can_be_replaced(
+                &healthy_ready,
+                crate::session_actor::ActorState::Ready,
+                true,
+            ),
+            "an explicit frontmatter harness switch should replace even a healthy old-harness actor"
         );
 
         let healthy_closed = SupervisorRuntime {
@@ -829,6 +860,7 @@ mod tests {
             mismatched_authoritative_actor_can_be_replaced(
                 &healthy_closed,
                 crate::session_actor::ActorState::Closed,
+                false,
             ),
             "a closed actor from another harness should not strand a fresh harness start"
         );
@@ -841,9 +873,19 @@ mod tests {
             mismatched_authoritative_actor_can_be_replaced(
                 &unreachable,
                 crate::session_actor::ActorState::Ready,
+                false,
             ),
             "an unreachable supervisor cannot prove live cross-harness ownership"
         );
+    }
+
+    #[test]
+    fn document_declares_expected_harness_normalizes_claude_alias() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "---\nagent: claude\n---\n").unwrap();
+        assert!(document_declares_expected_harness(&doc, "claude-code"));
+        assert!(!document_declares_expected_harness(&doc, "codex"));
     }
 
     fn ready_target_with_reason(reason: &str) -> AuthoritativeActorDispatchTarget {

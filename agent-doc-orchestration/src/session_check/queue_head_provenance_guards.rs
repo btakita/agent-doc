@@ -328,29 +328,52 @@ pub(crate) fn check_free_text_queue_head_provenance(
     let Ok(components) = crate::component::parse(&content) else {
         return Ok(GuardResult::None);
     };
-    let committed_queue_text: String = components
+    let exchange_text: String = components
         .iter()
-        .find(|c| c.name == "queue")
+        .find(|c| c.name == "exchange")
         .map(|c| c.content(&content).to_string())
         .unwrap_or_default();
     let mut unresolved: Vec<String> = Vec::new();
     let mut response_proven_removed: Vec<String> = Vec::new();
+    let mut completed_residue: Vec<String> = Vec::new();
     for head in &state.active_free_text_queue_heads {
         let normalized = head.trim().to_ascii_lowercase();
         if normalized.is_empty() {
             continue;
         }
-        if committed_queue_text
-            .to_ascii_lowercase()
-            .contains(&normalized)
-        {
+        let still_queued = committed_queue_contains_active_free_text_head(&content, head);
+        if still_queued {
+            if crate::write::free_text_head_answered_by_response(&exchange_text, head) {
+                completed_residue.push(head.clone());
+            }
             continue;
         }
-        if response_head_plausibly_answers(&content, head) {
+        if crate::write::free_text_head_answered_by_response(&exchange_text, head)
+            || response_head_plausibly_answers(&exchange_text, head)
+        {
             response_proven_removed.push(head.clone());
             continue;
         }
         unresolved.push(head.clone());
+    }
+    if !completed_residue.is_empty() {
+        let heads_text = completed_residue
+            .iter()
+            .map(|h| format!("{:?}", h))
+            .collect::<Vec<_>>()
+            .join("; ");
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "free_text_queue_completed_residue_guard_fired file={} residue={}",
+                file.display(),
+                heads_text
+            ),
+        );
+        return Ok(GuardResult::Error(format!(
+            "[session-check] INTERRUPTED: completed free-text agent:queue head(s) {heads_text} are still active in the committed queue even though exchange history contains a `Queue prompt` echo proving they were already answered — completed queue residue would re-run stale work\n[session-check] hint: remove or strike the answered head(s), then re-run `agent-doc write --commit {}`; add `<!-- no-free-text-queue-head-guard -->` only if keeping the answered row active is intentional (see #qheadresidue)",
+            file.display()
+        )));
     }
     if !response_proven_removed.is_empty() {
         let heads_text = response_proven_removed
@@ -400,6 +423,33 @@ pub(crate) fn check_free_text_queue_head_provenance(
             warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
         )),
         crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
+    })
+}
+
+fn normalized_free_text_queue_head_identity(text: &str) -> String {
+    crate::queue::strip_priority_markers(text)
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn committed_queue_contains_active_free_text_head(content: &str, head: &str) -> bool {
+    let Ok(components) = crate::component::parse(content) else {
+        return false;
+    };
+    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
+        return false;
+    };
+    let Ok(entries) = crate::queue::parse(queue.content(content)) else {
+        return false;
+    };
+    let target = normalized_free_text_queue_head_identity(head);
+    if target.is_empty() {
+        return false;
+    }
+    crate::queue::prompts(&entries).into_iter().any(|prompt| {
+        let text = prompt.text.trim();
+        crate::write::queue_prompt_text_is_free_text(content, text)
+            && normalized_free_text_queue_head_identity(text) == target
     })
 }
 
@@ -683,6 +733,39 @@ mod tests {
                 && log.contains("Please explain the churn")
                 && log.contains("proof_source=committed_response"),
             "free-text removal proof should name the head and source:\n{log}"
+        );
+    }
+
+    #[test]
+    fn completed_free_text_queue_residue_guard_fires_for_answered_active_head() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\npending_done_guard: warn\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: deploy -- gpt-5\n\n",
+            "> **Queue prompt:**\n>\n> deploy\n\n",
+            "Deployed successfully.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- deploy\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let doc = make_doc(tmp.path(), committed);
+        mark_cycle_committed(&doc, committed, committed);
+
+        let rc = run_context(&doc, committed);
+        match check_free_text_queue_head_provenance(&doc, &rc).unwrap() {
+            GuardResult::Error(message) => {
+                assert!(message.contains("completed free-text"), "got: {message}");
+                assert!(message.contains("#qheadresidue"), "got: {message}");
+                assert!(message.contains("deploy"), "got: {message}");
+            }
+            other => panic!("completed queue residue must interrupt, got {other:?}"),
+        }
+        let log = ops_log(tmp.path());
+        assert!(
+            log.contains("free_text_queue_completed_residue_guard_fired") && log.contains("deploy"),
+            "residue guard should log the proved completed head:\n{log}"
         );
     }
 }

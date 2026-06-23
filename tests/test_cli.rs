@@ -993,8 +993,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `queue_head_removal_guard_proof` diagnostic plus two regression test
         // names proving removed id-backed/free-text queue heads log their proof
         // source instead of disappearing silently.
+        // +3 (#qheadresidue): the audited
+        // `free_text_queue_completed_residue_guard_fired` diagnostic plus two
+        // regression test names proving answered free-text heads cannot remain
+        // active queue residue.
         ("agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs", "guard_") => {
-            9
+            12
         }
         ("agent-doc-orchestration/src/session_check/pending_guards.rs", "guard_") => 8,
         ("agent-doc-orchestration/src/session_check/queue_head_guards.rs", "guard_") => 2,
@@ -1702,7 +1706,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         );
         assert_eq!(
             dependency.get("version").and_then(toml::Value::as_str),
-            Some("0.34.39"),
+            Some("0.34.40"),
             "{crate_name} must also carry a registry version for cargo publish"
         );
     }

@@ -740,6 +740,51 @@ fn response_blockquote_text(response_body: &str) -> String {
     normalize_for_answer_match(&joined)
 }
 
+/// True when a response contains an explicit `> **Queue prompt:**` echo whose
+/// normalized line exactly matches `head_text`. This is the conservative short
+/// prompt path: a one-word head like `deploy` is proof only when it appears in
+/// the labeled queue-prompt echo, not just anywhere in assistant prose.
+fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &str) -> bool {
+    let head_clean = crate::queue::strip_priority_markers(head_text);
+    let head_norm = normalize_for_answer_match(&free_text_head_match_prose(&head_clean));
+    if head_norm.is_empty() {
+        return false;
+    }
+
+    let mut in_queue_prompt_echo = false;
+    for line in response_body.lines() {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with('>') {
+            if !trimmed.trim().is_empty() {
+                in_queue_prompt_echo = false;
+            }
+            continue;
+        }
+
+        let quoted = trimmed.trim_start_matches('>').trim_start();
+        let candidate = if let Some(rest) = quoted
+            .strip_prefix("**Queue prompt:**")
+            .or_else(|| quoted.strip_prefix("**Queue prompts:**"))
+        {
+            in_queue_prompt_echo = true;
+            rest.trim_start()
+        } else if in_queue_prompt_echo {
+            quoted
+        } else {
+            continue;
+        };
+
+        let candidate = normalize_prompt_echo_presence_line(candidate);
+        if candidate.is_empty() {
+            continue;
+        }
+        if normalize_for_answer_match(&candidate) == head_norm {
+            return true;
+        }
+    }
+    false
+}
+
 /// The prose prefix of a free-text queue head used for answer-matching: every
 /// line before the first fenced code block (` ``` ` or `~~~`). A head whose body
 /// is dominated by a pasted console/route log (the common shape of an operator
@@ -772,6 +817,9 @@ pub(crate) fn free_text_head_answered_by_response(response_body: &str, head_text
     // Strip the leading operator/agent pin (`:pushpin:` …) first — its literal
     // shortcode word would otherwise survive normalization and break the match.
     let head_clean = crate::queue::strip_priority_markers(head_text);
+    if response_explicit_queue_prompt_echoes_head(response_body, &head_clean) {
+        return true;
+    }
     // `#ftstrike-fence`: match on the prose prefix, not the full node text — a head
     // whose body is a pasted log is only ever quoted by its lead line(s).
     let head_prose = free_text_head_match_prose(&head_clean);
@@ -3441,6 +3489,27 @@ mod core_tests {
     }
 
     #[test]
+    fn short_free_text_head_matches_explicit_queue_prompt_echo_only() {
+        let labeled = "### Re: deploy\n\n> **Queue prompt:**\n>\n> deploy\n\nDone.\n";
+        assert!(
+            free_text_head_answered_by_response(labeled, "deploy"),
+            "a short head is proof when it is the explicit queue-prompt echo"
+        );
+
+        let one_line = "### Re: deploy\n\n> **Queue prompt:** deploy\n\nDone.\n";
+        assert!(
+            free_text_head_answered_by_response(one_line, ":pushpin: deploy"),
+            "same-line queue-prompt echo should also prove a pinned short head"
+        );
+
+        let unlabeled = "### Re: deploy\n\n> deploy\n\nDone.\n";
+        assert!(
+            !free_text_head_answered_by_response(unlabeled, "deploy"),
+            "an unlabeled blockquote is not enough proof for a short head"
+        );
+    }
+
+    #[test]
     fn code_fenced_free_text_head_strikes_on_prose_lead_match() {
         // #ftstrike-fence regression: an operator bug report whose body is a short
         // prose lead followed by a pasted console/route log. The response quotes ONLY
@@ -4156,15 +4225,15 @@ Old.
     }
 
     #[test]
-    fn prune_noise_excises_multiline_fenced_paste_blocks_under_a_preset() {
-        // #qnoise-multiline-strike: operator-pasted `:round_pushpin:` console dumps
+    fn prune_noise_excises_only_all_log_multiline_blocks_under_a_preset() {
+        // #qnoise-multiline-strike: operator-pasted console dumps
         // land in the queue as multiline `---`-fenced Prompt blocks. They are NOT
         // bulleted list items and contain a ``` fence, so the bullet-only
         // `item_nodes` strike path never enumerated them — `queue prune-noise`
-        // reported "nothing to prune" while the flood persisted on disk forever
-        // (only an editor reload appeared to clear it). They must now be excised by
-        // byte range. A `preset` attr makes bare free-text drainable, so the ONLY
-        // thing pruned here is the fenced paste block; id-backed heads survive.
+        // reported "nothing to prune" while the flood persisted on disk forever.
+        // They must still be excised by byte range. A `preset` attr makes prose
+        // reports drainable even when followed by fenced diagnostics, so prune
+        // must preserve those operator prompts and delete only all-log blocks.
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("s.md");
         let content = concat!(
@@ -4173,32 +4242,29 @@ Old.
             "<!-- agent:queue preset=\"#spec-test-build-install-commit-push\" go -->\n",
             "- [#sqedit-race]\n", // id-backed → preserved
             "- [#keepme]\n",      // id-backed → preserved
-            // Shape 1: `---`-wrapped block whose text contains a nested ``` fence.
+            // Shape 1: all-log `---`-wrapped block whose text contains a nested
+            // ``` fence and no prose lead.
             "---\n",
-            ":round_pushpin: Fix the root cause of the HEAD issue with already done items.\n",
             "```\n",
-            "  The one thing I can't fix from here — please reload the doc in IDEA.\n",
+            "[route] target tmux session: 0\n",
+            "Error: dispatch blocked: only the gated #5eq8 remains.\n",
             "```\n",
             "---\n",
-            // Shape 2: bare ```-fenced console dump whose text carries a stray `#id`
-            // (`#5eq8`) — previously misclassified as a drainable id-backed head, so it
-            // evaded both the noise counter and prune-noise.
-            ":pushpin: JB `Run Agent Doc` on equityfundingsource.md did not start.\n",
+            // Shape 2: prose report with diagnostic evidence. Under a preset this
+            // is real drainable work and must not be pruned.
+            "---\n",
+            ":pushpin: JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The actor record did not switch.\n",
             "```\n",
-            "Error: dispatch blocked: only the gated #5eq8 (design-blocked) remains.\n",
+            "Error: authoritative actor record is bound to harness claude-code, not codex\n",
             "```\n",
+            "---\n",
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        // 5 noise entries: the `---`-wrapped block (1) + the bare-```-fenced block's
-        // 4 `Freeform` lines (`:pushpin:` head, ```, console line, ```).
         let struck = prune_noise_queue_heads(&doc).unwrap();
-        assert_eq!(
-            struck, 5,
-            "both pasted blocks (all their lines) must be excised"
-        );
+        assert_eq!(struck, 1, "only the all-log pasted block must be excised");
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -4206,16 +4272,13 @@ Old.
             "id-backed heads must survive:\n{result}"
         );
         assert!(
-            !result.contains(":round_pushpin: Fix the root cause"),
-            "the `---`-wrapped block head must be gone:\n{result}"
+            !result.contains("[route] target tmux session: 0") && !result.contains("#5eq8"),
+            "the all-log block must be gone:\n{result}"
         );
         assert!(
-            !result.contains("please reload the doc in IDEA"),
-            "the `---`-wrapped block body must be gone:\n{result}"
-        );
-        assert!(
-            !result.contains("dispatch blocked") && !result.contains("#5eq8"),
-            "the bare-fenced console dump (with stray #id) must be gone:\n{result}"
+            result.contains("JB `Run Agent Doc` on agent-loop.md")
+                && result.contains("bound to harness claude-code, not codex"),
+            "the prose diagnostic report must be preserved as drainable work:\n{result}"
         );
 
         // Idempotent: a second prune finds nothing left to strike.

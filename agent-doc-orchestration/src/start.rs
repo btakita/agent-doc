@@ -3453,7 +3453,7 @@ Done.
 
         // Fresh lease: the supervisor (idle, fresh head) must defer.
         let now = current_epoch_secs();
-        let fresh = crate::drain_owner::fresh_drain_owner_lease(&file, now);
+        let fresh = crate::drain_owner::fresh_loop_drain_owner_lease(&file, now);
         assert!(fresh.is_some(), "just-claimed lease must read fresh");
         assert_eq!(
             idle_queue_drain_decision(
@@ -3469,7 +3469,7 @@ Done.
         );
 
         // Expired heartbeat (far past the TTL): ownership returns to the supervisor.
-        let expired = crate::drain_owner::fresh_drain_owner_lease(&file, now + 100_000);
+        let expired = crate::drain_owner::fresh_loop_drain_owner_lease(&file, now + 100_000);
         assert!(
             expired.is_none(),
             "an expired heartbeat must not read fresh"

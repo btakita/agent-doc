@@ -950,32 +950,29 @@ pub(crate) fn is_noise_queue_head(text: &str, preset_supplies_directive: bool) -
 
 fn is_drainable_queue_head_with_context(text: &str, preset_supplies_directive: bool) -> bool {
     // Pasted console-output / agent-response-fragment evidence is NOISE, not a drain
-    // target — even under a preset, and even if it incidentally contains a directive
-    // word like "run", a directive verb, or a stray `[#id]`. None of these markers
-    // appears in a genuine operator directive:
-    //   1. a fenced ``` code block (#cleardrainsignal) — pasted logs / error reports;
-    //   2. an agent component or boundary comment (`<!-- agent:` / `agent:boundary`)
+    // target when it has no operator prose lead. Under a queue-level preset, a
+    // prose bug report followed by fenced diagnostics is still drainable: the
+    // preset supplies the verb and the prose lead is the object to act on.
+    //
+    // The non-prose markers below still demote the head even under a preset:
+    //   1. an agent component or boundary comment (`<!-- agent:` / `agent:boundary`)
     //      — a spliced agent response artifact;
-    //   3. a leading markdown bold summary span (`**…**`) — an agent response bullet
+    //   2. a leading markdown bold summary span (`**…**`) — an agent response bullet
     //      (e.g. a cross-doc `**migrate** — folded … agent:review` fragment that a
     //      CRDT merge split out of its fence into this queue). (#qcontam)
-    // These otherwise churn no-op go-mode cycles forever; the `preset` short-circuit
-    // below made it worse by promoting *every* non-fenced line to a drainable
-    // directive. Checked BEFORE the `#id` fast-path so a fragment carrying a stray
-    // cross-doc id is still demoted.
-    //   4. a MULTI-LINE head (text spans more than one line) — a pasted console dump
-    //      or a `---`-wrapped multi-bullet response paste, even when a line carries a
-    //      stray `[#id]` (the `#5eq8`-in-a-console-dump false positive). A genuine
-    //      directive is a single line; a single-line head wrapped in `---` fences is
-    //      still classified normally below, so a real `---`-wrapped `do [#id]` survives.
-    //      (#qnoise-multiline-strike)
-    if text.contains('\n')
-        || text.contains("```")
-        || text.contains("<!-- agent:")
+    // Checked BEFORE the `#id` fast-path so a fragment carrying a stray cross-doc
+    // id is still demoted.
+    if text.contains("<!-- agent:")
         || text.contains("agent:boundary")
         || leads_with_markdown_bold_report(text)
     {
         return false;
+    }
+    if text.contains('\n') || text.contains("```") || text.contains("~~~") {
+        if !preset_supplies_directive || !multiline_head_has_prose_lead(text) {
+            return false;
+        }
+        return true;
     }
     if extract_head_id(text).is_some() {
         return true;
@@ -999,6 +996,28 @@ fn is_drainable_queue_head_with_context(text: &str, preset_supplies_directive: b
     lowered
         .split(|c: char| !c.is_alphanumeric())
         .any(|word| QUEUE_DIRECTIVE_VERBS.contains(&word))
+}
+
+fn multiline_head_has_prose_lead(text: &str) -> bool {
+    let lead = text
+        .lines()
+        .take_while(|line| {
+            let trimmed = line.trim_start();
+            !trimmed.starts_with("```") && !trimmed.starts_with("~~~")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let normalized = normalize_queue_head_text(&lead);
+    normalized
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| word.len() > 2)
+        .any(|word| {
+            let lowered = word.to_ascii_lowercase();
+            !matches!(
+                lowered.as_str(),
+                "route" | "error" | "warning" | "warn" | "info" | "debug" | "trace" | "target"
+            )
+        })
 }
 
 /// Count of active queue `Prompt` heads that are non-drainable **noise**
@@ -1980,10 +1999,78 @@ mod tests {
     }
 
     #[test]
-    fn preset_queue_still_treats_fenced_paste_as_noise() {
-        // #goqnoise: preset context must not re-admit pasted console evidence.
+    fn preset_queue_treats_prose_plus_fenced_diagnostics_as_drainable() {
+        // A queue-level preset supplies the directive; a prose bug report followed
+        // by fenced diagnostics is real work, not stale noise.
         let dir = tempfile::tempdir().unwrap();
-        let fenced = ":pushpin: JB `Run Agent Doc` should self-heal.\n```\n[route] target tmux session: 0\nError: dispatch blocked\n```";
+        let fenced = ":pushpin: JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The actor record did not switch.\n```\n[route] target tmux session: 0\nError: authoritative actor record is bound to harness claude-code, not codex\n```";
+        let queue_body = format!("~~~prompt\n{fenced}\n~~~\n");
+        let doc = write_doc_with_queue_body(
+            dir.path(),
+            &queue_body,
+            true,
+            " auto preset=\"#spec-test-commit-push\" go",
+        );
+        let content = std::fs::read_to_string(&doc).unwrap();
+
+        assert_eq!(
+            detect(&doc)
+                .unwrap()
+                .map(|continuation| continuation.head_prompt),
+            Some(fenced.to_string())
+        );
+        assert_eq!(
+            live_drainable_continuation_head(&doc, &content).as_deref(),
+            Some(fenced)
+        );
+        assert_eq!(drainable_head_count(&doc, &content), 1);
+        assert_eq!(queue_stale_noise_lines(&doc), 0);
+    }
+
+    #[test]
+    fn preset_separator_freetext_drains_ahead_of_operator_verify_pins() {
+        // Live regression: a free-text bug report typed before a `---` separator
+        // must not be skipped as Freeform/noise, or preflight sees only the
+        // operator-verify mirror heads and stalls with 0 drainable work.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("task.md");
+        let prompt = concat!(
+            "JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. ",
+            "The session switched from claude to codex, but the actor record did not switch.\n",
+            "```\n",
+            "[route] target tmux session: 0\n",
+            "Error: authoritative actor record is bound to harness claude-code, not codex\n",
+            "```",
+        );
+        let content = format!(
+            "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n\
+## Queue\n\n<!-- agent:queue priority preset=\"#spec-test-build-install-commit-push\" priority go -->\n{prompt}\n---\n- :pushpin: do [#ov]\n<!-- /agent:queue -->\n\n\
+## Backlog\n\n<!-- agent:backlog priority queue -->\n- [ ] [#ov] [operator-verify] live drive\n<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, &content).unwrap();
+        crate::snapshot::save(&doc, &content).unwrap();
+
+        assert_eq!(
+            detect(&doc)
+                .unwrap()
+                .map(|continuation| continuation.head_prompt),
+            Some(prompt.to_string())
+        );
+        assert_eq!(
+            live_drainable_continuation_head(&doc, &content).as_deref(),
+            Some(prompt)
+        );
+        assert_eq!(drainable_head_count(&doc, &content), 1);
+        assert_eq!(queue_stale_noise_lines(&doc), 0);
+    }
+
+    #[test]
+    fn preset_queue_treats_all_log_fenced_paste_as_noise() {
+        // #goqnoise: preset context must not re-admit pure console evidence.
+        let dir = tempfile::tempdir().unwrap();
+        let fenced = "```\n[route] target tmux session: 0\nError: dispatch blocked\n```";
         let queue_body = format!("~~~prompt\n{fenced}\n~~~\n");
         let doc = write_doc_with_queue_body(
             dir.path(),

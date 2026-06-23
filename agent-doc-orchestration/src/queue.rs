@@ -353,6 +353,28 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
             continue;
         }
 
+        // Operator-entered diagnostic queue heads are often typed as prose plus a
+        // fenced log followed by a `---` separator rather than wrapped in an
+        // opening `---` fence. Treat that block as one multiline prompt and
+        // consume the separator with it so closeout can strike/consume the exact
+        // visible head (#qfreetext-sep). Keep ordinary malformed prose without a
+        // diagnostic fence as Freeform so legacy fixed-point cleanup does not
+        // promote stray notes into runnable prompts.
+        if let Some(close_idx) = (i + 1..lines.len()).find(|&j| lines[j].trim() == "---") {
+            let text = lines[i..close_idx].join("\n");
+            if !text.trim().is_empty() && (text.contains("```") || text.contains("~~~")) {
+                entries.push((
+                    QueueEntry::Prompt(QueuePrompt {
+                        text,
+                        multiline: true,
+                    }),
+                    span(start_i, close_idx + 1),
+                ));
+                i = close_idx + 1;
+                continue;
+            }
+        }
+
         // Unrecognized line: preserve verbatim instead of failing the parse so
         // queue consume/resume/dispatch guards stay resilient to a polluted
         // queue body (#jb-run-agent-doc-response-queue-contamination). The line
@@ -3132,6 +3154,25 @@ mod tests {
         );
         assert!(first_prompt(&entries).is_none());
         assert_eq!(render(&entries), body);
+    }
+
+    #[test]
+    fn parse_separator_terminated_freetext_as_multiline_prompt() {
+        let body = concat!(
+            "JB `Run Agent Doc` on agent-loop.md after switching from claude to codex.\n",
+            "The actor record did not switch.\n",
+            "```\n",
+            "Error: authoritative actor record is bound to harness claude-code, not codex\n",
+            "```\n",
+            "---\n",
+            "- do [#next]\n",
+        );
+        let entries = parse(body).unwrap();
+        let prompts = prompts(&entries);
+        assert_eq!(prompts.len(), 2);
+        assert!(prompts[0].multiline);
+        assert!(prompts[0].text.contains("actor record did not switch"));
+        assert_eq!(prompts[1].text, "do [#next]");
     }
 
     #[test]

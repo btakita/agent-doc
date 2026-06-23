@@ -127,6 +127,13 @@ pub fn fresh_drain_owner_lease(file: &str, now: u64) -> Option<DrainOwnerLease> 
     drain_owner_lease_is_fresh(lease.heartbeat_secs, now, drain_owner_ttl()).then_some(lease)
 }
 
+/// Return the drain-owner lease iff a self-driving in-session loop currently
+/// owns the drain. Supervisor-side fallback dispatches must not count here: the
+/// lease gates only the external loop owner that can race the supervisor.
+pub fn fresh_loop_drain_owner_lease(file: &str, now: u64) -> Option<DrainOwnerLease> {
+    fresh_drain_owner_lease(file, now).filter(|lease| lease.owner == DRAIN_OWNER_CLAUDE_LOOP)
+}
+
 /// Best-effort release of the drain-owner lease (e.g. when the loop terminates).
 pub fn clear_drain_owner_lease(file: &str) {
     let path = drain_owner_lease_path(file);
@@ -181,6 +188,26 @@ mod tests {
         assert!(
             fresh_drain_owner_lease(&file, lease.heartbeat_secs + 10_000).is_none(),
             "an old heartbeat must hand ownership back to the supervisor"
+        );
+    }
+
+    #[test]
+    fn fresh_loop_lease_ignores_supervisor_failsafe_owner() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file = file.to_string_lossy().to_string();
+
+        refresh_drain_owner_lease(&file, "supervisor-failsafe").unwrap();
+        let lease = read_drain_owner_lease(&file).expect("lease present after refresh");
+        assert!(
+            fresh_drain_owner_lease(&file, lease.heartbeat_secs).is_some(),
+            "raw freshness still sees the sidecar"
+        );
+        assert!(
+            fresh_loop_drain_owner_lease(&file, lease.heartbeat_secs).is_none(),
+            "a supervisor failsafe sidecar must not suppress later supervisor drains"
         );
     }
 

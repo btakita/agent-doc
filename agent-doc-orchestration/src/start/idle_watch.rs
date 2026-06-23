@@ -1430,7 +1430,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // recycle fire on its own. After the recycle the fresh supervisor
                 // (no longer stale) clears the request and the drain resumes.
                 {
-                    let drain_owner_active = crate::drain_owner::fresh_drain_owner_lease(
+                    let drain_owner_active = crate::drain_owner::fresh_loop_drain_owner_lease(
                         &file,
                         current_epoch_secs(),
                     )
@@ -2170,26 +2170,24 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // the attended in-session `/loop` continues to drain via
                 // `queue_continuation_required` (a pause does not stall it).
                 // `resume`/`drain` are not `paused` and do not block here.
-                // Single-owner tie-break (computed ONCE, before the pause gate so the
-                // gate and the drain decision agree): a fresh drain-owner lease means
-                // either the Claude Code `/loop` auto-loop owns this drain (#kp5z /
-                // #qflood) OR the supervisor's OWN failsafe claim from a recent tick is
-                // still live (`#qstallguard` Layer C rate-limit). Either way the
-                // supervisor must defer this tick rather than re-dispatching.
+                // Single-owner tie-break: only a fresh self-driving `/loop` lease
+                // defers the supervisor. A supervisor-side failsafe dispatch is not
+                // a competing owner; treating it as one stranded paused queues behind
+                // the lease TTL after a clean closeout (#qstallguard Layer D).
                 let drain_owner_lease =
-                    crate::drain_owner::fresh_drain_owner_lease(&file, current_epoch_secs());
+                    crate::drain_owner::fresh_loop_drain_owner_lease(&file, current_epoch_secs());
 
+                let mut paused_failsafe_active = false;
                 if active_head.is_some()
                     && crate::queue_continuation::document_queue_controller_paused(&path)
                 {
-                    // `#qstallguard` Layer C: pause throttles to single-owner; it does
-                    // not disable the failsafe. Skip when a fresh lease exists (an
-                    // in-session `/loop` owner OR our own recent failsafe claim — the
-                    // rate-limit) or nothing is drainable. With NO fresh lease and a
-                    // drainable head, claim the lease as `supervisor-failsafe` so this
-                    // fires at most once per drain-owner TTL (single-owner cadence,
-                    // NOT the per-tick #rt83 flood), then fall through to dispatch ONCE
-                    // using the pre-claim lease value below.
+                    // `#qstallguard` Layer C/D: pause throttles to the in-session
+                    // loop owner; it does not disable the supervisor failsafe. Skip
+                    // when a real `/loop` lease exists or nothing is drainable. With
+                    // no loop owner and a drainable head, fall through to the normal
+                    // dispatch decision. Do not claim a drain-owner lease here: a
+                    // later gate may still skip dispatch, and a self-lease would
+                    // suppress the next valid attempt until TTL expiry.
                     if paused_idle_watch_should_skip(
                         true,
                         active_head.is_some(),
@@ -2213,34 +2211,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         );
                         continue;
                     }
-                    // No fresh lease + drainable head: single-owner failsafe. Claim the
-                    // lease NOW so the NEXT tick sees it fresh and defers (rate-limit).
-                    if let Err(err) =
-                        crate::drain_owner::refresh_drain_owner_lease(&file, "supervisor-failsafe")
-                    {
-                        eprintln!(
-                            "[agent-doc] warning: failed to claim failsafe drain lease for {}: {err}",
-                            path.display()
-                        );
-                    }
-                    log_event(
-                        &mut session_log,
-                        &format!(
-                            "idle_queue_watch_paused_failsafe_drain harness={} reason=queue_paused_no_loop_owner file={}",
-                            harness.binary,
-                            path.display()
-                        ),
-                    );
-                    crate::ops_log::log_op(
-                        &path,
-                        &format!(
-                            "queue_paused_failsafe_single_owner_drain file={} harness={} reason=no_in_session_loop_owner cadence=drain_owner_ttl (#qstallguard Layer C)",
-                            path.display(),
-                            harness.binary
-                        ),
-                    );
-                    // fall through to the guarded drain decision below, which uses the
-                    // PRE-CLAIM `drain_owner_lease` (None this tick) so it dispatches once.
+                    // fall through to the guarded drain decision below.
+                    paused_failsafe_active = true;
                 }
 
                 // #sqedit-race Phase 2: a direct `queue prune-noise` / `queue
@@ -2418,24 +2390,42 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 &head,
                                 &drain_payload,
                             ) {
-                        AutoTriggerOutcome::Sent => {
-                            last_pending_enter_resubmitted = Some(resubmit_key);
-                            last_dispatched = Some(head.clone());
-                            if slash_command
-                                .as_deref()
-                                .is_some_and(crate::queue_command::is_context_clear_command)
-                            {
-                                record_context_clear_in_flight_marker(
-                                    &path,
-                                    &shared,
-                                    &harness,
-                                    &drain_payload,
-                                    Some(&head),
-                                );
-                            }
-                            log_event(
-                                &mut session_log,
-                                &format!(
+                                AutoTriggerOutcome::Sent => {
+                                    if paused_failsafe_active {
+                                        log_event(
+                                            &mut session_log,
+                                            &format!(
+                                                "idle_queue_watch_paused_failsafe_drain harness={} reason=queue_paused_no_loop_owner action=resubmit file={}",
+                                                harness.binary,
+                                                path.display()
+                                            ),
+                                        );
+                                        crate::ops_log::log_op(
+                                            &path,
+                                            &format!(
+                                                "queue_paused_failsafe_single_owner_drain file={} harness={} reason=no_in_session_loop_owner action=resubmit (#qstallguard Layer D)",
+                                                path.display(),
+                                                harness.binary
+                                            ),
+                                        );
+                                    }
+                                    last_pending_enter_resubmitted = Some(resubmit_key);
+                                    last_dispatched = Some(head.clone());
+                                    if slash_command
+                                        .as_deref()
+                                        .is_some_and(crate::queue_command::is_context_clear_command)
+                                    {
+                                        record_context_clear_in_flight_marker(
+                                            &path,
+                                            &shared,
+                                            &harness,
+                                            &drain_payload,
+                                            Some(&head),
+                                        );
+                                    }
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
                                             "idle_queue_watch_drain_resubmit harness={} reason=trigger_already_pending payload_kind={}",
                                             harness.binary, payload_kind
                                         ),
@@ -2478,6 +2468,24 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                         match auto_trigger_submit_queue_command(&shared, &stop, &drain_payload) {
                             AutoTriggerOutcome::Sent => {
+                                if paused_failsafe_active {
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
+                                            "idle_queue_watch_paused_failsafe_drain harness={} reason=queue_paused_no_loop_owner action=dispatch file={}",
+                                            harness.binary,
+                                            path.display()
+                                        ),
+                                    );
+                                    crate::ops_log::log_op(
+                                        &path,
+                                        &format!(
+                                            "queue_paused_failsafe_single_owner_drain file={} harness={} reason=no_in_session_loop_owner action=dispatch (#qstallguard Layer D)",
+                                            path.display(),
+                                            harness.binary
+                                        ),
+                                    );
+                                }
                                 context_reset_in_flight = false;
                                 if last_context_reset_head.as_deref() == Some(head.as_str())
                                     && !crate::queue_command::is_context_clear_command(

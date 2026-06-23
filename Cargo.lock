@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc"
-version = "0.34.39"
+version = "0.34.40"
 dependencies = [
  "agent-doc-core",
  "agent-doc-markdown-ast",
@@ -60,7 +60,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-core"
-version = "0.34.39"
+version = "0.34.40"
 dependencies = [
  "anyhow",
  "clap",
@@ -79,7 +79,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-markdown-ast"
-version = "0.34.39"
+version = "0.34.40"
 dependencies = [
  "tree-sitter",
  "tree-sitter-md",
@@ -88,7 +88,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-orchestration"
-version = "0.34.39"
+version = "0.34.40"
 dependencies = [
  "agent-doc-core",
  "agent-doc-markdown-ast",
@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-sqlite"
-version = "0.34.39"
+version = "0.34.40"
 dependencies = [
  "agent-doc-core",
  "anyhow",

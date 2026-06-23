@@ -380,7 +380,61 @@ Escalation: none.
 ### Re: Queue cleanup — gpt-5
 
 Removed the answered `NewLender` docs-location free-text queue head so the active queue can advance to `do [#s6y6]` without re-running the answered source-location prompt.
-<!-- agent:boundary:3eefee83 -->
+
+### Re: TMO Loan Origination lender endpoint — gpt-5
+
+> **Queue prompt:**
+>
+> ~~LSS.svc is for Loan Servicing. We are doing Loan Origination. Is there an add/update lender TMO endpoint?~~ — answered this cycle (#ftstrike)
+
+Short answer: I do not see a Loan Origination lender-master add/update endpoint. In the official TMO published collection as checked on 2026-06-23, the `Loan Origination` group has `LOS.svc` endpoints for loan applications, loans, loan funding, loan attachments, borrowers, collateral, and products. It does not list `LOS.svc/NewLender`, `LOS.svc/UpdateLender`, or a `Lender/Vendor` section.
+
+There is an origination-side lender-related endpoint pair, but it is for funding rows on a loan, not the lender account itself:
+
+- `POST /LOS.svc/AddLoanFunding`
+- `POST /LOS.svc/UpdateLoanFunding`
+
+Those payloads include fields such as `LoanNumber`, `Account`, `AmountFunded`, `FullName`, `LegalVesting`, and `RecID`. That looks like adding/updating a lender funding record for a specific originated loan, using an existing lender account value, not creating or updating the lender/vendor master account.
+
+For lender/vendor master records, the official collection still puts the endpoints under `Loan Servicing > Lender/Vendor`:
+
+- `POST /LSS.svc/NewLender`
+- `GET /LSS.svc/GetLender/:Account`
+- `GET /LSS.svc/GetLenders`
+- `POST /LSS.svc/UpdateLender`
+
+So the practical distinction for EFS is:
+
+- To create/update the TMO lender account record itself, the documented surface is `LSS.svc/NewLender` / `LSS.svc/UpdateLender`, even though the business flow begins in origination/onboarding.
+- To attach a lender/funding record to an originated loan, the documented Loan Origination surface is `LOS.svc/AddLoanFunding` / `LOS.svc/UpdateLoanFunding`.
+
+Source checked:
+
+- Official TMO developer docs: https://developers.themortgageoffice.com/
+- Official published Postman collection API behind those docs: `https://developers.themortgageoffice.com/api/collections/37774064/2sAXjGcE4E?environment=28403304-b9b941d0-8d12-427d-80c7-46429d5af299&segregateAuth=true&versionTag=latest`
+
+Changed paths:
+- None. This was source/documentation inspection only.
+
+Commands:
+- `tsift status` in the parent repo and EFS submodule
+- `agent-doc --version`
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc read` for the exchange
+- targeted `rg` and `sed` inspections of local EFS TMO docs/tests and TMO API wrappers
+- `curl` + `jq` inspections of the official TMO published Postman collection, grouped by `Loan Origination` and `Loan Servicing`
+
+Verification:
+- Confirmed the official collection has top-level groups `Loan Origination`, `Loan Servicing`, and `Mortgage Pools`.
+- Confirmed `Loan Origination` lists `LOS.svc/AddLoanFunding` and `LOS.svc/UpdateLoanFunding`, but no `LOS.svc/*Lender*` lender-master endpoints.
+- Confirmed `Loan Servicing > Lender/Vendor` lists `LSS.svc/NewLender`, `GetLender`, `GetLenders`, and `UpdateLender`.
+- No code changed, so no test suite was run.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:a63b9a7e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -400,6 +454,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- LSS.svc is for Loan Servicing. We are doing Loan Origination. Is there an add/update lender TMO endpoint?
 - do [#s6y6]
 <!-- /agent:queue -->
 

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -632,7 +632,7 @@ High that the specified passage token was tried and failed authentication. Low f
 ### escalation — gpt-5
 
 None.
-<!-- agent:boundary:b6a84b64 -->
+<!-- agent:boundary:926977bb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -652,6 +652,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Does the TMO sandbox have any loan records? Or were they cleaned out?
 <!-- /agent:queue -->
 
 ## Backlog

@@ -61,7 +61,46 @@ Verification remains unchanged: focused Bun tests passed, EFS `make check` passe
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:74e738ee -->
+
+### Re: Unified admin chat interface — gpt-5
+
+> **Queue prompt:**
+>
+> Add the unified chat interface to the admin portal. This chat portal should detect which borrower, lender(s), or broker that is being viewed and display the appropriate conversation(s). For example, if an available deal dialog is open, show the chat with the borrower. If viewing interested lender(s), the chat should be with the lender(s) and the borrower in a separate tab. Size the admin message dialog appropriately to see the conversation and tabs if there are multiple participants. Lender groups should allow messaging with the entire group as a multiway conversation or with an individual lender via tabs.
+
+Implemented and pushed the unified admin chat interface.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/portal_messages.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/deal_detail.tsx`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/routes.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/investor_management/index.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/lending_groups/routes.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/messages_unified.ts`
+- `src/equityfundingsource-dev/tests/portal-messages-component.test.ts`
+- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
+
+What changed:
+- Added `AdminConversationTabs` and admin-scoped message contexts for borrower, broker, deal-interest lender, and lending-group conversations.
+- Added a dedicated admin Deal Detail `Messages` tab plus contextual inline chat tabs in Loan Detail, Interested Lenders, and Multi-Lender Groups.
+- Added borrower deal-level admin message endpoints backed by persisted borrower chat sessions and borrower notifications.
+- Added lending-group deal message endpoints backed by live `messages` storage, including group broadcast fanout to active linked members and individual lender tabs.
+- Included lending-group message rows in the lender unified inbox aggregation.
+
+Verification:
+- `bun test tests/portal-messages-component.test.ts` — passed, 13 tests.
+- `bun test tests/investor-portal-e2e.test.ts tests/admin-investor-pipeline.test.ts tests/lender-deal-allocation-dialog.test.ts` — passed, 143 tests.
+- `git diff --check` — passed.
+- `make check` — passed, 1167 tests plus app build and worker build.
+- `gh run list --workflow CI --limit 1` — could not run because this repository has no workflow named `CI`.
+
+Commits:
+- EFS submodule: `f91141d68cc3e391acec29cfdd92c41fe2acc3e8` (`feat(admin): add context-aware chat tabs`), pushed to `equityfundingsource-dev/main`.
+- Parent submodule pointer: `cc31cce25` (`chore: update equityfundingsource submodule`), pushed to `agent-loop/main`.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:657bafa7 -->
 <!-- /agent:exchange -->
 ###
 <!--

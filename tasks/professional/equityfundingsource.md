@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -198,7 +198,58 @@ Existing unrelated parent worktree changes remain untouched.
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:e2b37bfc -->
+
+### Re: Deal Pipeline closed-card visibility + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> During the call, the Deal Pipeline "reset". A deal that I was advancing was reset after I dragged the deal across several states. When it moved to closed, it disappeared from the Deal Pipeline.
+
+
+> **Queue prompt:**
+>
+> ~~During the call, the Deal Pipeline "reset". A deal that I was advancing was reset after I dragged the deal across several states. When it moved to closed, it disappeared from the Deal Pipeline.~~ — answered this cycle (#ftstrike)
+
+Fixed the Deal Pipeline default board scope so terminal milestone cards remain visible after a status move. The bug was that the UI's default `Active` scope excluded `closed`/`funded`, while the board still renders a `Funded / Closed` lane; after a card moved to `Closed`, the optimistic update immediately filtered it out until switching to `All`. The server-side action-needed/nav badge count still excludes terminal and parked statuses.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+
+Commits pushed:
+- EFS `fc51cb4 fix(admin): keep closed pipeline cards visible`
+- Parent `ef98ad64d chore: update equityfundingsource submodule`
+
+Verification:
+- `bun test tests/admin-pipeline.test.ts` — 62 pass / 0 fail.
+- EFS `make check` — 1,164 pass / 0 fail plus app and Worker builds.
+- Parent `make check` — passed.
+- `gh run list --workflow CI --limit 1` — no `CI` workflow in EFS or parent.
+- Parent `Agent Doc` workflow run `28058300020` failed with empty `check` and `tmux-ci` step lists and `log not found: 83066083281`, so this matches the external runner-start failure pattern rather than a code/test failure.
+
+> **Queue prompt:**
+>
+> ~~deploy~~ — answered this cycle (#ftstrike)
+
+Deployed the current EFS `main` Worker from clean submodule commit `fc51cb4`.
+
+Deployment:
+- Pre-deploy remote migrations: none pending.
+- D1 DB reachable: `280e1539-b940-4c59-8988-fbed63c12ac0`.
+- D1 Time Travel current bookmark: `000004f5-00000012-00005093-67f9788933bda53e192e9ad56c5e0339`.
+- `make deploy` rebuilt the Worker, confirmed no remote D1 migrations to apply, uploaded one updated browser asset, and deployed Worker version `03d62884-84a8-4610-b135-6b0fd3d61e16`.
+- Live URL: `https://equityfundingsource.brian-takita.workers.dev/`.
+
+Post-deploy checks:
+- Remote migrations after deploy: none pending.
+- `curl https://equityfundingsource.brian-takita.workers.dev/` — `200`.
+- `curl https://equityfundingsource.brian-takita.workers.dev/admin/pipeline` — `303`, expected auth/access redirect.
+- EFS worktree is clean; unrelated parent worktree changes remain untouched.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:1cad9792 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -218,6 +269,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~During the call, the Deal Pipeline "reset". A deal that I was advancing was reset after I dragged the deal across several states. When it moved to closed, it disappeared from the Deal Pipeline.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

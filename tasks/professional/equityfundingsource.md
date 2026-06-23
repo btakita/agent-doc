@@ -85,7 +85,53 @@ High that the public documented TMO sandbox is not empty and that EFS app-owned 
 ### escalation — gpt-5
 
 None.
-<!-- agent:boundary:4d9f593a -->
+
+### Re: 0099 lender role/schema — gpt-5
+
+> **Queue prompt:**
+>
+> Lucas found 0099_lender_role_and_schema as the likely culprit. Can you confirm? Why were you not able to find this out?
+
+Yes, with a narrower reading: `0099_lender_role_and_schema.sql` is very likely the culprit if the symptom Lucas found was an investor-vs-lender role/table mismatch. It is not a plausible culprit for TMO sandbox loan deletion or EFS loan-table cleanup.
+
+What `0099` does:
+
+- Rebuilds `users` with `role IN ('lender','borrower','broker','admin')`.
+- Converts existing `users.role = 'investor'` rows to `lender`.
+- Renames the persisted investor schema tables to lender names: `investor_documents`, `investor_document_requests`, `investor_accreditation_verifications`, `investor_vestings`, `investor_special_instructions`, `investor_deal_signatures`, and `investor_deal_interests` become the corresponding `lender_*` tables.
+- Recreates the renamed `lender_*` indexes.
+
+Production confirms that migration boundary is already crossed: remote migration list says only `0102_full_application_soft_delete.sql` is pending, so `0099` has already applied. Remote `sqlite_master` contains `lender_deal_interests`, `lender_documents`, `lender_vestings`, and `users`; the checked old `investor_*` table names are absent. Remote `users` role counts are `admin=5`, `borrower=4`, `broker=2`, `lender=3`, with no `investor` role rows.
+
+So if any live code, diagnostic query, or support/debug script still expects `users.role='investor'` or old `investor_*` table names, `0099` explains the failure. Current runtime source appears mostly aligned with the rename: the direct SQL DML search for old `investor_documents` / `investor_deal_interests`-style table references found only historical migrations, not active app/lib query code. The remaining `investor` names are mostly public route/module/API names like `/api/investor/...`, TypeScript names, UI ids, comments, and backward-compatible role normalization.
+
+Why I did not find it before: I scoped the previous pass around the TMO question and app-owned loan/application data. I checked live TMO endpoints, `tmo_cache_entities`, `loans`, `investment_deals`, `full_applications`, and `application_leads`, but I did not audit the migration boundary or compare production `sqlite_master` against the deployed code schema. That was the miss. The repo also has a noisy naming transition: routes and functions still say `investor` in many places while the persisted schema now says `lender`, so a plain text search for `investor` does not isolate the schema mismatch cleanly. The right first check should have been migration list + table-name/role counts.
+
+### changed_paths — gpt-5
+
+- `tasks/professional/equityfundingsource.md` only.
+- No EFS source files, migrations, production D1 rows, TMO records, deploys, or secrets were changed.
+
+### commands — gpt-5
+
+- `agent-doc preflight`, `agent-doc plan`, `agent-doc read`.
+- `tsift status` in the workspace and EFS submodule.
+- `rg` / `sed` / `git show` reads for `0099_lender_role_and_schema.sql`, commit `071a93f`, and old/new investor/lender SQL references.
+- `bun run cf:d1:migrations:list:remote`.
+- Read-only remote D1 queries against `sqlite_master` and grouped `users.role` counts.
+
+### verification — gpt-5
+
+Remote D1 checks were read-only and reported `changed_db=false`, `rows_written=0`. Migration list shows `0099` is applied in production. Remote schema and role counts match the post-`0099` lender naming state.
+
+### confidence — gpt-5
+
+High that `0099` explains investor/lender role or table-name mismatch symptoms. High that it does not explain TMO sandbox loan deletion or EFS loan cleanup because it does not touch the loan/TMO tables or external TMO. Medium for Lucas's exact production symptom only because the prompt did not include the specific failing request, stack, or SQL error.
+
+### escalation — gpt-5
+
+Used `force_disk` only after two failed IPC finalizes plus an unchanged no-ACK patch file; no source/prod escalation.
+<!-- agent:boundary:08919315 -->
 <!-- /agent:exchange -->
 ###
 <!--

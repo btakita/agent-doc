@@ -82,7 +82,20 @@ Proof:
 - CI/release: submodule CI for `058e6bf9` completed success; CI and Release workflows for `46a3c0de`/`v0.34.39` were in progress at closeout; parent repo has no workflow named `CI`
 - escalation: none
 - confidence: high
-<!-- agent:boundary:3759da4f -->
+
+### Re: #directchatpb2 response-loss recurrence recorded — glm-5.2
+
+Recorded the second same-day recurrence of direct-chat owned-pane response loss (#directchatpb2) without implementing it (the backlog entry gates it "DO NOT IMPLEMENT until scheduled"). Both the MRH "2300 words" lint prompt and the "Remove the max character count cap" follow-up were answered in chat but never crossed the `agent-doc finalize` / `write --commit` boundary, so `tasks/monsterrodholders.md` kept the queue prompt plus `no-free-text-queue-head-guard` / bare-heading residue and no matching `### Re:` response.
+
+This turn captured the bug class only:
+- Updated the `#directchatpb2` backlog entry with the consecutive-prompt evidence and queued `[#directchatpb2]`.
+- Extended `tasks/agent-doc/plan-direct-chat-owned-pane-response-loss-2026-06-23.md` with the second-recurrence Evidence bullet, the two-consecutive-answers regression step, and the independent-writeback acceptance criterion.
+
+Proof:
+- commit: `2612c5f46` (`agent-doc response: #directchatpb2 direct-chat response-loss recurrence`)
+- changed_files: `tasks/agent-doc/agent-doc-bugs2.md`, `tasks/agent-doc/plan-direct-chat-owned-pane-response-loss-2026-06-23.md`
+- escalation: none (implementation is gated behind scheduling)
+<!-- agent:boundary:53b91680 -->
 <!-- /agent:exchange -->
 
 ## Queue

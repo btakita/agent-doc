@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -82,7 +82,59 @@ Verification:
 Confidence: high.
 
 Escalation: none. Production was not deployed in this cycle because the queue item requested the code/design fix, not deployment.
-<!-- agent:boundary:237b5fa1 -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Deployed the current `src/equityfundingsource-dev` `main` branch to the production Cloudflare Worker via `make deploy`, per the EFS deployment runbook. Cloudflare activated Worker Version ID `00e4715e-973d-4bf3-b333-97481fb5bd65` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+No code files changed in this cycle. The EFS submodule is clean on `main...origin/main`; the parent repo still has unrelated pre-existing dirty/ahead state, which I left untouched.
+
+Changed paths: none.
+
+Commands:
+
+- `tsift status` in the parent repo
+- `tsift status --fix` in the parent repo
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc read /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `git status --short --branch` in parent and EFS repos
+- `tsift status` in EFS
+- `make check`
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`
+- `bun run cf:d1:info`
+- `bun run cf:d1:time-travel:info`
+- `make deploy`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline`
+- `curl -fsS -o /tmp/efs-index.browser-HDSOPHFU.js https://equityfundingsource.brian-takita.workers.dev/index.browser-HDSOPHFU.js`
+- `rg -n 'Message EFS' /tmp/efs-index.browser-HDSOPHFU.js`
+- `rg -n "Message EFS" app lib tests`
+- `rg -n "pm-input|other_label|aria-label" /tmp/efs-index.browser-HDSOPHFU.js`
+- `sed -n '8948,8964p' /tmp/efs-index.browser-HDSOPHFU.js`
+- `gh run list --workflow CI --limit 1`
+- `gh workflow list`
+
+Verification:
+
+- `make check` passed: 1,156 tests, app build, and Worker build.
+- Pre-deploy remote D1 migration check: no migrations to apply.
+- D1 info succeeded for `equityfundingsource` database `280e1539-b940-4c59-8988-fbed63c12ac0`.
+- D1 Time Travel reported current bookmark `000004e3-00000008-00005093-c45fdd0d82a8dacc1e87d4241e2575a1`.
+- `make deploy` rebuilt the Worker/assets, applied remote migrations (none pending), uploaded one changed static asset, deployed triggers, and activated Worker Version ID `00e4715e-973d-4bf3-b333-97481fb5bd65`.
+- Post-deploy migration check: no migrations to apply.
+- Live smoke: `/` returned `200`; `/admin/lender-pipeline` returned `303` through auth, as expected for admin routes.
+- Downloaded deployed browser asset `/index.browser-HDSOPHFU.js`; the `PortalMessages` composer around `pm-input` has no visible label and keeps only `aria-label={\`Message ${config.other_label.toLowerCase()}\`}` on the textarea. The remaining `Message EFS` strings in the bundle are from the separate investor deal-detail composer and shared intro/ARIA copy, not the removed Advance lender visible label.
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` returned no workflows.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:bebb06a2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -102,8 +154,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance lender > Message lender has "Message EFS" as a label over the textarea. That label is contrary to the design since we are messaging the lender. Let's remove it.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

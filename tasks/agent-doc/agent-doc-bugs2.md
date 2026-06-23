@@ -100,19 +100,23 @@ Proof:
 - verification: focused JetBrains popup test passed; `make check` passed, including 5019 nextest tests plus the medium SimWorld check; `make bump-plugin` built `agent-doc-jetbrains-0.2.178.zip` and `agent-doc-jetbrains-0.2.178-signed.zip`; latest `btakita/agent-doc` CI run `28043989387` was `in_progress` after the push; root `btakita/agent-loop` reported no workflow named `CI`
 - escalation: none
 - confidence: high
-<!-- agent:boundary:3270b984 -->
+
+### Re: closeout guard repair — gpt-5
+
+I repaired the closeout bookkeeping from the previous response: `#qnodemerge4verify` and `#arsm` are explicitly narrowed to their remaining proof, `#cancelturnverify` records the new JB plugin build, and the unhandled `#1jec` / `#fbwireverify` queue prompts are restored instead of silently struck or flattened.
+<!-- agent:boundary:88822d3c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#1jec]: Works except the prompt still does not submit.~~
-- :pushpin: do [#fbwireverify]
-- :pushpin: do [#qnodemerge4verify]
-- :pushpin: do [#tb4q]
+- :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
+- :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
+- ~~:pushpin: do [#qnodemerge4verify]~~
+- :pushpin: do [#tb4q]: please check logs
 - ~~do [#cancelturnverify]: I don't see Cancel Turn in the JB Plugin menu.~~
 - do [#qcm1verify]: Use the logs to verify.
-- do [#arsm]
+- ~~do [#arsm]~~
 - do [#directchatpb2]
 <!-- /agent:queue -->
 <!--

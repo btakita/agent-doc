@@ -512,7 +512,50 @@ High for the EFS D1/cache conclusion; medium for current live TMO sandbox presen
 ### escalation — gpt-5
 
 None.
-<!-- agent:boundary:c1cf3eac -->
+
+### Re: Look in the TMO sandbox. Is Lucas Huang in the TMO sandbox? — gpt-5
+
+I could not verify current live TMO sandbox presence from this machine. The live TMO API checks were blocked by authentication, so the answer is not a reliable yes/no.
+
+What I did verify:
+
+- The current EFS D1 cache still has the TMO-origin loan payload for `TST113`: `ShortName='Huang, Lucas'`, `FullName='Lucas Huang'`, `EmailAddress='stormrunner06106@gmail.com'`, `LoanStatus='Application Received'`, and TMO `RecID='89B3B9CD0A6E47DF81161AD805897B5C'`.
+- That cache row was populated by TMO sync on `2026-06-08`, so Lucas was represented in data returned from TMO at that time.
+- A direct read-only call to live TMO `GetLoan/TST113` using the local password-store token and `Database: API Sandbox` returned `401 Not authenticated`.
+- A direct read-only live `GetLoans` call with the same token/database also returned `401 Not authenticated`.
+- I tried likely alternate database header values (`Equity Funding Source`, `EquityFundingSource`, `EFS`, `equityfundingsource`) and they all returned `401 Not authenticated`; an empty database header returned `400 Database is missing`.
+- Production Worker secrets include `TMO_API_TOKEN` and `TMO_DATABASE` by name, but Cloudflare does not expose secret values. Wrangler remote-dev also used local `.dev.vars`, did not expose those TMO secrets, and did not serve the temporary diagnostic entrypoint because the project config requires Durable Object exports.
+
+So the most precise answer is: Lucas Huang is proven in EFS's cached TMO payload for `TST113`, and that cache came from TMO sync on June 8. I cannot prove whether he is still in the live TMO sandbox today without a valid readable TMO token/database pair or a production-safe read-only diagnostic route that runs inside the Worker environment using its existing TMO secrets.
+
+### changed_paths — gpt-5
+
+- `tasks/professional/equityfundingsource.md` only.
+- The temporary diagnostic Worker file was created and removed; the EFS submodule is clean and has no code changes from this answer.
+
+### commands — gpt-5
+
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `tsift status`
+- Source reads for TMO API/admin route behavior.
+- Password-store key checks for TMO credentials without printing secret values.
+- Direct read-only TMO API checks against `GetLoan/TST113` and `GetLoans`.
+- `wrangler secret list` / `wrangler dev --remote` capability checks.
+- `git status --short tasks/professional/equityfundingsource.md src/equityfundingsource-dev`
+
+### verification — gpt-5
+
+The only live TMO responses available from this machine were authentication failures, so they do not prove absence from TMO. They prove the locally available TMO token/database combination is not sufficient to query the live sandbox. The EFS submodule working tree is clean after removing the temporary diagnostic file.
+
+### confidence — gpt-5
+
+High that the cache evidence exists and came from prior TMO sync. Low for current live TMO sandbox membership because valid live TMO credentials were not available to the local process.
+
+### escalation — gpt-5
+
+None. No production D1 writes, TMO mutations, deploys, or Time Travel restore were performed.
+<!-- agent:boundary:ca7c2db4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -532,6 +575,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Look in the TMO sandbox. Is Lucas Huang in the TMO sandbox?
 <!-- /agent:queue -->
 
 ## Backlog

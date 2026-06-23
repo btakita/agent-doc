@@ -34,137 +34,17 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260623-173806.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260623-212044.md`*
 
 Compacted content:
-- Archived 4 response topic(s): actor-switch rebind already covered; paused queue cleanup; #qnodemerge4verify / #arsm / #cancelturnverify; 1 more
-- Prior summary/context: prior compacted content: Archived 6 response topic(s): lazily-rs session sync; JB Sync Tmux Layout deferral; lazily-r...
-
-### Re: JB Run Agent Doc submit latency — gpt-5
-
-> **Queue prompt:** JB `Run Agent Doc` takes a long time to submit. ~10s
-
-Fixed and shipped.
-
-Root cause: dispatch-only reroutes already treated tmux text+Enter acceptance as sufficient, but the direct-pane path still waited for optional Codex/OpenCode dispatch-start proof when a tracker existed. That made the JetBrains action pay the 10s Codex proof timeout after accepted input, which matches the reported delay.
-
-Changed:
-- `agent-doc-orchestration/src/route/dispatch.rs`: added `DirectPaneDispatchOptions`, returned immediately after accepted direct-pane input when proof is optional, and added a regression for the accepted-submit fast path.
-- `agent-doc-orchestration/src/route/dispatch_only.rs`: wired dispatch-only delivery to the current proof-required policy for both supervisor IPC and direct-pane submit.
-- `agent-doc-orchestration/src/route.rs`: documented that editor dispatch-only returns after accepted input while startup/fresh dispatch still waits for stronger proof.
-
-Verification:
-- `cargo test -p agent-doc-orchestration dispatch_only_direct_pane_accepted_submit_skips_optional_proof_wait`
-- `cargo test -p agent-doc-orchestration dispatch_only_codex_accepts_enter_delivery_without_start_proof_even_with_visible_hooks`
-- `make check` green: clippy, 5020 nextest tests, doctests, and medium SimWorld ignored check.
-- `make install` completed; `agent-doc --version` reports `0.34.42`; `agent-doc lib-install` auto-marked 2 controllers to recycle at next idle boundary.
-- `gh run list --workflow CI --limit 1` in `src/agent-doc`: new run `28045434769` is in progress after push; previous CI run was green. Superproject has no workflow named `CI`.
-
-Commits pushed:
-- `btakita/agent-doc` main: `b3ea06fc` (`fix: avoid optional proof wait for editor dispatch`)
-- `btakita/agent-loop` main: `f9d01ee2b` (`chore: update agent-doc submodule`)
-
-Changed paths: `agent-doc-orchestration/src/route.rs`, `agent-doc-orchestration/src/route/dispatch.rs`, `agent-doc-orchestration/src/route/dispatch_only.rs`, plus the superproject `src/agent-doc` pointer. Confidence: high. Escalation: none.
-
-### Re: #turnstuck-readybusy — gpt-5
-
-> **Queue prompt:**
->
-> After the restart after the last turn, the prompt was not submitted until ~30s later.日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
-
-
-> **Queue prompt:** After the restart after the last turn, the prompt was not submitted until ~30s later.
-> **Completed:** do [#turnstuck-readybusy]
-
-Fixed and pushed. I treated the restart/no-submit queue head as the same ready/busy owned-pane stall: the managed Codex pane could report `alive-busy` / `prompt_ready=false` from a stale queued-draft composer cue after actor, supervisor, and controller state had all returned to ready, so route-owned completion kept the pane alive and delayed the next prompt instead of advancing.
-
-Changed:
-- Added ready/busy conflict classification and debounce for route-owned completion and idle queue dispatch.
-- Limited automatic reconciliation to the recoverable stale `queued draft in composer` blocker; real active-turn, permission, shell-search, hook-review, help, and clean-exit blockers still stop dispatch.
-- Added `agent-doc status` warning and recovery guidance for actor/controller/supervisor ready while the live pane probe still says busy.
-- Documented the ready/busy invariant in README, SPEC, session routing, and supervisor docs.
-
-Verification:
-- `cargo test -p agent-doc-orchestration ready_busy`
-- `cargo test -p agent-doc status_flags_owned_pane_ready_busy_conflict`
-- `cargo test -p agent-doc-orchestration route_owned_live_pane_busy`
-- `make check` passed: clippy, 5025 tests, doctests, and the medium ignored simulation test.
-- `make install-full` installed `agent-doc 0.34.42` and the shared library.
-- GitHub Actions CI run `28046746235` passed after push.
-
-Pushed commits:
-- `src/agent-doc`: `2aa04685 fix: reconcile ready busy owned panes`
-- parent repo: `73ee575f1 chore: update agent-doc submodule`
-- `git diff --check` passed.
-- `make install-full` completed and installed `agent-doc 0.34.42`.
-- `make check` in `src/agent-doc` passed: clippy, 5031 nextest tests, doctests, and the medium closeout simulation.
-- `cargo test -p agent-doc-orchestration cycle_state`.
-- `cargo test -p agent-doc-orchestration cycle_state_machine`.
-- `cargo publish --dry-run` and `cargo publish` for `lazily 0.12.2`.
-- `cargo test --locked` in `src/lazily-rs`.
-- parent repo: `648efcd2f chore: bump agent-doc and lazily submodules`.
-- `src/agent-doc`: `d8b0298e feat: route cycle state through lazily state machine` and `f76e01c5 chore: use lazily 0.12.2`.
-- `src/lazily-rs`: `36bb381 chore: release lazily v0.12.2`; crate published, tag `v0.12.2` pushed, GitHub release created.
-- If cross-process sync is needed, implement an agent-doc-specific snapshot plus event stream first, with explicit ownership and monotonic sequence/epoch checks.
-- On startup or recovery, the CPC seeds from the sidecar; after that, accepted actor events emit the sidecar snapshot/journal.
-- The sidecar remains the durable crash-recovery journal and compatibility artifact, not a peer authority.
-- The CPC/session actor owns live cycle state and accepts ordered `CycleEvent`s.
-
-Note: I left an unrelated unstaged submodule change in `agent-doc-orchestration/src/cycle_state.rs` (`#lzsidecaratomic`) untouched.
-
-### Re: answered queue residue cleanup — gpt-5
-
-> **Queue prompt:**
->
-> do [#cancelturnverify]: Verified
-
-
-Closeout repair: struck the duplicate answered free-text queue row so the already-handled restart/no-submit prompt cannot rerun as stale work. No code changes in this repair commit.
-
-### Re: #c7j5 + #cancelturnverify — gpt-5
-
-> **Queue prompt:** If we merge the sidecar logic into the PCP instead of relying on the disk for IPC, would that help with agent-doc cycle reliability? If yes, let's merge sidecar logic into the PCP. Use lazily-rs new StateMachine, ThreadedStateMachine, and/or AsyncStateMachine for a cycle state machine. See [#c7j5], which was originally created in lazily-rs.md...Except, merge the Sidecar into the PCP. I want to eventually have a master State Machine for an agent document. Note that [#lzsidecaratomic] and [#lzsidecarlock] was done on agent-doc from lazily-rs.md. See lazily-rs.done.md
-
-Yes, with one important constraint: this should merge cycle-state mutation order into the PCP/session actor, but keep the JSON sidecar as the durable crash-recovery log. That gives reliability from one in-process owner and a lazily transition table without making every closeout depend on a live controller socket or losing recovery when the controller is down.
-
-I added the implementation plan at `tasks/agent-doc/plan-cycle-state-pcp-state-machine.md` and rewrote backlog `#c7j5` to point at it. The plan supersedes the older narrow RunContext-only pilot: use a PCP/session-actor cycle-state machine, seed it from the sidecar, serialize accepted `CycleEvent`s through the document actor, and emit the sidecar from that owner job as the durable journal. `ThreadSafeStateMachine` is the right lazily primitive for the controller/session actor; `StateMachine` is only appropriate for single-threaded pure tests or local caches, and `AsyncStateMachine` only matters if the controller state graph moves onto an async context. One prerequisite remains explicit: `agent-doc-orchestration` currently consumes registry `lazily = "0.12.0"`, while the local lazily-rs checkout is what exposes the newer multi-context state-machine APIs, so the dependency source/release has to be resolved in the first implementation slice.
-
-For `#cancelturnverify`, I accepted the operator verification and marked the backlog item done. No code was changed in this cycle; verification was inspection plus the committed plan/backlog update. Plan commit: `00599652e` (`agent-doc: plan cycle state pcp state machine`). Escalation: none. Confidence: high on the architecture direction; implementation still needs the staged gate and test plan in the new plan file.
-
-### Re: #c7j5 closeout repair — gpt-5
-
-> **Queue prompt:** If we merge the sidecar logic into the PCP instead of relying on the disk for IPC, would that help with agent-doc cycle reliability? If yes, let's merge sidecar logic into the PCP. Use lazily-rs new StateMachine, ThreadedStateMachine, and/or AsyncStateMachine for a cycle state machine. See [#c7j5], which was originally created in lazily-rs.md...Except, merge the Sidecar into the PCP. I want to eventually have a master State Machine for an agent document. Note that [#lzsidecaratomic] and [#lzsidecarlock] was done on agent-doc from lazily-rs.md. See lazily-rs.done.md
-
-Closeout repair after the recovered IPC-drift cycle: the preceding response already answered this queue head and rewrote `#c7j5` to the new PCP/session-actor state-machine plan at `tasks/agent-doc/plan-cycle-state-pcp-state-machine.md`. This cycle only consumes the free-text queue head against the fresh baseline and commits the resolved `#cancelturnverify` archive/queue convergence. No code changes.
-
-### Re: sidecar/CPC IPC state sync — gpt-5
-
-> **Queue prompt:**
->
-> Should the sidecar <-> CPC IPC use lazily-rs IPC to sync state? Should lazily-rs implement a state sync mechanism to support sidecar <-> CPC IPC state sync?
-
-
-Short answer: no, not yet. I would not make sidecar <-> CPC synchronization a lazily-rs IPC feature right now, and I would not add a second generic state-sync channel between the sidecar and the control plane for agent-doc.
-
-The cleaner shape is narrower:
-
-- The CPC/session actor owns live cycle state and accepts ordered `CycleEvent`s.
-- The sidecar remains the durable crash-recovery journal and compatibility artifact, not a peer authority.
-- On startup or recovery, the CPC seeds from the sidecar; after that, accepted actor events emit the sidecar snapshot/journal.
-- If cross-process sync is needed, implement an agent-doc-specific snapshot plus event stream first, with explicit ownership and monotonic sequence/epoch checks.
-
-I would only promote a generic IPC state-sync mechanism into lazily-rs after a second real consumer needs it. Lazily-rs should keep providing the state-machine primitives and maybe small reusable serialization/event-log helpers, but it should not own the agent-doc sidecar wire protocol prematurely.
-
-Per the operator note, I stopped waiting on agent-doc CI. Lazily `0.12.2` CI was green; agent-doc CI for `f76e01c5` was still running when I stopped watching. No code changes in this architecture-answer cycle.
-<!-- agent:boundary:f71d2d73 -->
+- Archived 6 response topic(s): JB Run Agent Doc submit latency; #turnstuck-readybusy; answered queue residue cleanup; 3 more
+- Prior summary/context: prior compacted content: Archived 4 response topic(s): actor-switch rebind already covered; paused queue cleanup; #qn...
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#c7j5]: tasks/agent-doc/plan-cycle-state-pcp-state-machine.md~~
-- ~~Should the sidecar <-> CPC IPC use lazily-rs IPC to sync state? Should lazily-rs implement a state sync mechanism to support sidecar <-> CPC IPC state sync?~~
-- do tasks/agent-doc/plan-ack-mismatch-shorter-recovered-response-loss-2026-06-23.md
+- ~~do tasks/agent-doc/plan-ack-mismatch-shorter-recovered-response-loss-2026-06-23.md~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
 - :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀

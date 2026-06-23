@@ -217,7 +217,74 @@ High that these guardrails would have blocked or forced explicit review of the `
 ### escalation — gpt-5
 
 Used `force_disk` only after repeated IPC finalizes failed with the same no-ACK captured-response state; no source/prod escalation.
-<!-- agent:boundary:aee61adb -->
+
+### Re: regular db backups — gpt-5
+
+> **Queue prompt:**
+>
+> Do we have regular db backups?
+
+Yes for short-term D1 point-in-time recovery; no, not previously as an EFS-owned long-retention scheduled archive.
+
+What I verified live on 2026-06-23:
+
+- `bun run cf:d1:info` resolved the configured production D1 database `equityfundingsource` / `280e1539-b940-4c59-8988-fbed63c12ac0` and reported it as a remote D1 database with 80 tables and ~1.67 MB of data.
+- `bun run cf:d1:time-travel:info` succeeded and returned a current remote restore bookmark. That proves the production D1 database is on the Time Travel path.
+- Cloudflare's current D1 docs describe Time Travel as D1's backup/point-in-time recovery system, always on for supported production-backend D1 databases, with automatically created restore bookmarks. Docs: https://developers.cloudflare.com/d1/reference/time-travel/ and https://developers.cloudflare.com/d1/wrangler-commands/#d1-time-travel-info.
+- Cloudflare documents the restore window as the provider retention window: up to 30 days on Workers Paid, or 7 days on Workers Free. I did not verify the account billing plan in this cycle.
+
+The gap was that EFS did not have a project-owned backup runbook or a regular SQL export policy checked into the repo. I added that now:
+
+- `docs/database-backups.md` records the current answer, the live Time Travel proof, and the operator cadence.
+- `docs/deploy.md` and `runbooks/deployment.md` now require `cf:d1:info` + `cf:d1:time-travel:info` before risky database work, and require an operator-owned SQL export before approved destructive/compatibility-breaking migrations.
+- Root and app package scripts now expose `cf:d1:info`, `cf:d1:time-travel:info`, and `cf:d1:export:remote`.
+- The PRD and tests now lock the backup posture: current Time Travel bookmark, destructive-restore caution, and monthly/operator-owned SQL export cadence.
+
+I intentionally did not add a restore shortcut script. D1 Time Travel restore overwrites the live database in place, so it should stay a deliberate owner-approved operation, not an easy package command.
+
+Important boundary: this covers the D1 database only. `R2_DOCUMENTS`, `R2_ASSETS`, and `R2_TMO_CACHE` need a separate retention/export policy. I added a recommended backlog item to automate long-retention D1 exports and define the R2 backup policy.
+
+### changed_paths — gpt-5
+
+- `src/equityfundingsource-dev/docs/database-backups.md`
+- `src/equityfundingsource-dev/docs/deploy.md`
+- `src/equityfundingsource-dev/runbooks/deployment.md`
+- `src/equityfundingsource-dev/package.json`
+- `src/equityfundingsource-dev/app/equityfundingsource/package.json`
+- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
+- `src/equityfundingsource-dev/tests/prd.test.ts`
+- `src/equityfundingsource-dev/tests/database-backups-docs.test.ts`
+- `src/equityfundingsource-dev` submodule pointer in the session repo.
+- `tasks/professional/equityfundingsource.md` via agent-doc closeout.
+
+No migrations, production D1 rows, R2 objects, secrets, TMO records, or Worker deploys were changed.
+
+### commands — gpt-5
+
+- `agent-doc preflight`, `agent-doc plan`, `agent-doc read`.
+- `tsift status` in the workspace and EFS submodule.
+- Official Cloudflare docs lookup for current D1 Time Travel/export behavior.
+- Read-only live D1 checks: `bun run cf:d1:info`, `bun run cf:d1:time-travel:info`.
+- Focused tests: `bun test tests/prd.test.ts tests/database-backups-docs.test.ts`.
+- Full local gate, twice after rebase: `make check`.
+- GitHub Actions check: `gh run list --workflow CI --limit 1` returned no workflow named `CI`; `gh workflow list` returned no workflows for this repo.
+- Git: committed EFS as `a5342cd docs(ops): document D1 backup posture`; push initially rejected because remote `main` moved, then `git pull --rebase origin main`, reran `make check`, and `git push origin main` succeeded. The push also carried the existing local ahead commit `c883d44 Archive full applications instead of deleting`.
+
+### verification — gpt-5
+
+- `bun run cf:d1:time-travel:info` returned a current remote D1 Time Travel bookmark for production `equityfundingsource`.
+- `make check` passed on the rebased EFS tree: 1151 Bun tests, app build, and Worker build all green.
+- Focused backup/PRD tests passed before the full gate.
+- No GitHub CI workflow exists in the EFS repo to inspect.
+
+### confidence — gpt-5
+
+High that EFS production D1 has provider-managed short-term Time Travel recovery available today. High that the repo now documents and tests the D1 backup posture. Medium on “regular backups” as an operational fact: the repo now requires monthly/operator-owned SQL exports, but I did not find or verify historical monthly export artifacts.
+
+### escalation — gpt-5
+
+None.
+<!-- agent:boundary:33dfca13 -->
 <!-- /agent:exchange -->
 ###
 <!--

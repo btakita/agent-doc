@@ -324,7 +324,59 @@ Escalation: none.
 
 
 Struck the answered preset-backed queue head left active after the response commit so the same TMO lender API investigation does not re-run.
-<!-- agent:boundary:7ee0047e -->
+
+### Re: TMO NewLender docs location — gpt-5
+
+> **Queue prompt:**
+>
+> ~~Where is the reference to POST /LSS.svc/NewLender in the developer docs?~~ — answered this cycle (#ftstrike)
+
+It is in the public TMO Postman developer docs at `https://developers.themortgageoffice.com/`, under:
+
+`TMO API` -> `Loan Servicing` -> `Lender/Vendor` -> `NewLender`
+
+The backing collection item I extracted is:
+
+- Name: `NewLender`
+- Method: `POST`
+- URL: `https://api.themortgageoffice.com/LSS.svc/NewLender`
+- Postman item id: `60a10d54-d879-4f7b-933d-27440c1bf948`
+- Published collection id: `219aac9f-bf17-40cd-b3ae-acb46f0a0fb7`
+- Published docs id: `2sAXjGcE4E`
+
+I did not find a reliable rendered deep link in the static HTML, because the site is Postman Documenter and loads the endpoint tree from the collection JSON. The stable human path is the navigation path above. The static metadata also mentions `NewLender` in the October 30, 2025 release notes, but the actual endpoint reference is the `Loan Servicing > Lender/Vendor > NewLender` item.
+
+Local EFS references are:
+
+- `src/equityfundingsource-dev/docs/TMO/new-lender.md`
+- `src/equityfundingsource-dev/docs/TMO/get-lender.md`
+- `src/equityfundingsource-dev/tests/tmo-api.test.ts`
+
+Changed paths:
+- None. This was a documentation/source-location answer only.
+
+Commands:
+- `tsift status`
+- `agent-doc --version`
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc read /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `rg -n "NewLender|LSS\\.svc/NewLender|LSS\\.svc|New Lender" tasks src/equityfundingsource-dev`
+- `sed -n '1,120p' src/equityfundingsource-dev/docs/TMO/new-lender.md`
+- `sed -n '1,80p' src/equityfundingsource-dev/docs/TMO/get-lender.md`
+- `curl -L https://developers.themortgageoffice.com/`
+- `curl -sL 'https://developers.themortgageoffice.com/api/collections/37774064/2sAXjGcE4E?environment=28403304-b9b941d0-8d12-427d-80c7-46429d5af299&segregateAuth=true&versionTag=latest' | jq ...`
+- `curl -sL 'https://developers.themortgageoffice.com/view/metadata/2sAXjGcE4E'`
+
+Verification:
+- Confirmed the live TMO docs base page is the Postman Documenter publication for collection `219aac9f-bf17-40cd-b3ae-acb46f0a0fb7`.
+- Confirmed the loaded collection contains exactly the `Loan Servicing > Lender/Vendor > NewLender` item with `POST https://api.themortgageoffice.com/LSS.svc/NewLender`.
+- No code changed, so no tests were run.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:44e1e97b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -344,6 +396,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Where is the reference to POST /LSS.svc/NewLender in the developer docs?
+- do [#s6y6]
 <!-- /agent:queue -->
 
 ## Backlog

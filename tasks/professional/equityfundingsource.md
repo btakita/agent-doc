@@ -438,7 +438,67 @@ Escalation: none.
 ### Re: Queue cleanup — gpt-5
 
 Removed the answered Loan Origination lender-endpoint free-text queue head so the active queue can advance to `do [#s6y6]`.
-<!-- agent:boundary:357fe8e0 -->
+
+### Re: TMO lender find/create/link — gpt-5
+
+> **Queue prompt:** do [#s6y6]
+
+Implemented the admin-only TMO lender find/create/link flow in `src/equityfundingsource-dev` and pushed it to EFS `origin/main`.
+
+Changed paths:
+- `app/equityfundingsource/lib/tmo-api/index.ts`
+- `app/equityfundingsource/lib/tmo-sim/routes.ts`
+- `app/equityfundingsource/lib/admin/user_management/index.ts`
+- `app/equityfundingsource/lib/admin/routes.ts`
+- `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `docs/TMO/new-lender.md`
+- `docs/TMO/get-lender.md`
+- `prds/investor-pipeline-admin.md`
+- `tests/tmo-api.test.ts`
+- `tests/tmo-sim.test.ts`
+- `tests/advance-lender-dialog.test.ts`
+- `tests/admin-investor-pipeline.test.ts`
+
+Behavior shipped:
+- Added `LSS.svc` wrappers for `GetLender/:Account`, paginated `GetLenders`, and `NewLender`, while keeping existing loan-origination wrappers on `LOS.svc`.
+- Extended the TMO simulator with LSS lender state and routes for `GetLender`, `GetLenders`, `NewLender`, and `UpdateLender`.
+- Added `POST /api/admin/users/:id/tmo-lender-link`, registered under the existing admin route stack. It checks the generated/requested account, scans paginated lenders for duplicates, requires duplicate review when needed, creates a lender only when no candidate exists, saves the final approved TMO `Account` to `users.lender_account`, emits a `tmo_lender_link` audit log, and notifies the admin SSE channel.
+- Updated the admin Advance Lender dialog so `Sync with TMO` calls the new link endpoint, shows duplicate candidates for admin approval, and keeps the existing exact-account manual fallback.
+- Kept investor-portal lender creation out of scope: docs/PRD now describe the portal as request/read-only/manual until the admin flow is used.
+
+Commits and repo state:
+- EFS commit: `7b16a43 feat: add tmo lender find create link flow`, pushed to `origin/main`.
+- The parent repo HEAD already points `src/equityfundingsource-dev` at `7b16a43` via `dbab844dc agent-doc(lazily-rs): 2026-06-23 14:01:38`; a separate parent pointer commit was not created because the pointer update was already in HEAD when I went to commit it.
+- EFS submodule status is clean on `main...origin/main`.
+- The parent repo still has unrelated dirty files/submodules from other work; I left them untouched.
+
+Commands run:
+- `tsift status` from the parent repo, then `tsift status` in `src/equityfundingsource-dev`.
+- Official TMO Postman collection inspection with `curl`/`jq` for `Loan Origination` and `Loan Servicing` endpoint groups.
+- Focused source/test inspection with `rg`, `sed`, and targeted file reads.
+- `bun test tests/tmo-api.test.ts tests/tmo-sim.test.ts tests/advance-lender-dialog.test.ts tests/admin-investor-pipeline.test.ts`
+- `make check` in `src/equityfundingsource-dev`
+- `git diff --check` in `src/equityfundingsource-dev`
+- `gh run list --workflow CI --limit 1` and `gh workflow list` in `src/equityfundingsource-dev`
+- `git add ...`, `git commit -m "feat: add tmo lender find create link flow"`, and `git push origin main` in `src/equityfundingsource-dev`
+- `make check` in the parent repo
+- `gh run list --workflow CI --limit 1` and `gh workflow list` in the parent repo
+- Parent tree verification with `git ls-tree HEAD src/equityfundingsource-dev` and `git ls-tree HEAD^ src/equityfundingsource-dev`
+
+Verification:
+- Focused EFS tests passed: 116 tests, 0 failures.
+- Full EFS `make check` passed: 1161 tests, app build, and Worker build all succeeded.
+- EFS `git diff --check` passed.
+- EFS has no GitHub workflow named `CI`; `gh workflow list` returned no workflows.
+- Parent `make check` passed.
+- Parent has no GitHub workflow named `CI`; the only listed workflow is `Agent Doc active 275631565`.
+
+Deployment: not performed.
+
+Escalation: none.
+
+Confidence: high. The new path is covered at the TMO wrapper layer, simulator layer, admin route/static checks, and admin dialog behavior, with full project checks passing after the changes.
+<!-- agent:boundary:d051fe7d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -464,7 +524,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#s6y6] [recommended] Implement admin-only TMO lender find-or-create/link flow using `LSS.svc` `GetLender`, paginated `GetLenders`, and `NewLender`, with duplicate review, audit logging, tests/simulator coverage, and final save of the approved TMO `Account` into `users.lender_account`; keep investor-portal lender creation read-only/manual until that admin flow ships.
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 

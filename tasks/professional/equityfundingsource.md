@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,241 +33,47 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260623-184958.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260623-213216.md`*
 
 Compacted content:
-- Archived 17 response topic(s): Advance Lender TMO sync action; Advance Lender TMO sync action - gpt-5; Deploy - gpt-5; 14 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
-### Re: TMO sandbox check and LSS wrapper revert — gpt-5
+### Re: Email reply visibility and realtime message updates — gpt-5
 
 > **Queue prompt:**
 >
-> ~~I have passage equityfundingsource/TMO_API_DATABASE. Please ensure this is our sandbox database and not the actual database that TMO is using.~~ — answered this cycle (#ftstrike)
+> ~~The email replies to a message did not show up in the messages.~~ — answered this cycle (#ftstrike)
 
-No new evidence changed the sandbox conclusion: the passage value is readable, but local evidence still cannot certify it is a TMO sandbox database. I made no live TMO calls and no TMO mutations.
+❯ > **Queue prompt:**
+❯ >
+> ~~Ensure message updates are realtime.~~ — answered this cycle (#ftstrike)
 
-> **Queue prompt:**
->
-> ~~Revert the LSS.svc wrapper. We want LOS.svc only. I did not ask you to implement, but the task was scheduled in the queue.~~ — answered this cycle (#ftstrike)
-
-Reverted the LSS lender wrapper implementation and restored the Advance Lender path to LOS-only TMO sync plus manual exact account-number linking. Active `app/` and `lib/` code now has no `LSS.svc`, `tmo_lender_`, or `/tmo-lender-link` executable references.
-
-Commits: EFS `84fdb75 revert: remove tmo lss lender wrapper` pushed to `origin/main`; parent `081679b30 chore: update equityfundingsource submodule` pushed to `origin/main`.
-
-Verification: focused EFS tests passed for `tmo-api`, `tmo-sim`, `advance-lender-dialog`, and `admin-investor-pipeline`; EFS `make check` exited 0 with 1,159 pass / 0 fail plus app and Worker builds; parent `make check` exited 0. EFS has no GitHub workflows. Parent has no `CI` workflow; the only `Agent Doc` workflow failed before executing any steps because GitHub Actions billing/spending-limit blocked runner startup.
-
-Escalation: none.
-
-Confidence: high.
-
-### Re: TMO lender-account LOS link and sync — gpt-5
-
-> **Queue prompt:**
->
-> Whever there is an input to add a TMO lender id, add a direct link to the TMO LOS portal to add the lender. We should also attempt a sync in case the lender is in TMO LOS.
-
-
-> **Queue prompt:**
->
-> ~~Whever there is an input to add a TMO lender id, add a direct link to the TMO LOS portal to add the lender. We should also attempt a sync in case the lender is in TMO LOS.~~ — answered this cycle (#ftstrike)
-
-Implemented this across the admin lender-account entry points without reintroducing the reverted LSS wrapper. The flow is now: sync TMO first, open the TMO LOS portal if the lender needs to be added/found, then paste the exact lender account number.
+Fixed inbound email replies for lender account/deal threads so they append through the same visible message repositories the current panels read, while preserving the existing `messages` dual-write mirror for the unification cutover. Successful inbound appends still notify the counterparty and now have regression coverage proving the portal realtime Durable Object gets a message tick.
 
 Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/tmo_los.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/lender_detail.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/deal_detail.tsx`
-- `src/equityfundingsource-dev/tests/advance-lender-dialog.test.ts`
-- `src/equityfundingsource-dev/tests/tmo-lender-link-ui.test.ts`
-
-Details:
-- Added shared `TMO_LOS_PORTAL_HREF = "https://app.themortgageoffice.com/"` and a reusable `TmoLosPortalLink`.
-- Added/kept `Sync with TMO` at each manual lender-account input: Lender Request detail, Advance Lender modal, and Deal Detail interested-lender card.
-- Extracted the TMO sync request/toast so all three forms share the same LOS-only sync guidance.
-- Added regression coverage that every lender-account input offers both TMO sync and the LOS portal link.
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/messages/inbound.ts`
+- `src/equityfundingsource-dev/tests/msgmail3-inbound-unified.test.ts`
+- `src/equityfundingsource-dev/prds/message-email-roundtrip.md`
 
 Verification:
-- `bun test tests/advance-lender-dialog.test.ts tests/tmo-lender-link-ui.test.ts tests/admin-investor-pipeline.test.ts tests/lender-request-labels-docs.test.ts` — 108 pass / 0 fail.
-- EFS `make check` — 1,162 pass / 0 fail plus app and Worker builds.
-- Parent `make check` — passed; printed pre-existing `src/agent-doc` test warnings but exited 0.
-- `gh run list --workflow CI --limit 1` — no workflow named `CI` in EFS or parent.
+- `bun test tests/msgmail3-inbound-unified.test.ts tests/portal-messages-realtime.test.ts tests/lender-account-messages.test.ts tests/msg-unify4-lender-cutover.test.ts` — 26 pass / 0 fail.
+- EFS `git diff --check` — clean.
+- EFS `make check` — passed: 1,164 tests pass / 0 fail, plus app and Worker builds.
+- Parent `make check` — passed.
+- EFS `gh run list --workflow CI --limit 1` — no workflow named `CI` found.
+- Parent `gh run list --workflow CI --limit 1` — no workflow named `CI` found.
 
 Commits pushed:
-- EFS `e955ad1 feat(admin): link TMO LOS from lender account forms`
-- Parent `bbee7eef1 chore: update equityfundingsource submodule`
-
-Source checked for the LOS portal URL: https://app.themortgageoffice.com/
-
-Escalation: none.
-
-Confidence: high.
-
-### Re: Deploy — gpt-5
-
-> **Queue prompt:**
->
-> ~~deploy~~ — answered this cycle (#ftstrike)
-
-Deployed the current EFS `main` Worker from a clean submodule state. EFS `origin/main` was already up to date at `e955ad1fc57332c3d4edff49a2271e0467ce1e3b`, so there were no code changes to commit or push. Parent worktree had unrelated local edits; I left them untouched.
-
-Deployment:
-- Ran the runbook-prescribed `make deploy` path.
-- Remote D1 migrations: none pending before deploy; the deploy migration step also found none.
-- Activated Worker version `90ce3391-49e5-4a52-aac4-36cff1fa68eb`.
-- Live URL: `https://equityfundingsource.brian-takita.workers.dev/`.
-
-Verification:
-- `make check` passed: 1,162 tests, app build, Worker build.
-- Pre-deploy D1 info succeeded for DB `280e1539-b940-4c59-8988-fbed63c12ac0`; Time Travel bookmark was current: `000004ee-00000000-00005093-b1bbae3446a143c42ee210c9ddc61884`.
-- Post-deploy remote migrations list: no migrations to apply.
-- Smoke test `curl ... https://equityfundingsource.brian-takita.workers.dev/` returned `200`.
-- EFS worktree remained clean.
-- `gh run list --workflow CI --limit 1` found no workflow named `CI` in EFS or parent repo.
-
-Preflight warnings were legacy review/backlog hygiene and semantic-completion candidates; none blocked this deploy.
-
-Escalation: none.
-
-Confidence: high.
-
-### Re: Advance Lender TMO sync failure — gpt-5
-
-> **Queue prompt:**
->
-> In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender > Sync with TMO, on sync failure, the Advance Lender dialog is closed. It should remain open with the error message in the form. 
-
-
-> **Queue prompt:**
->
-> ~~In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender > Sync with TMO, on sync failure, the Advance Lender dialog is closed. It should remain open with the error message in the form.~~ — answered this cycle (#ftstrike)
-
-Fixed the Advance Lender modal sync path so a TMO sync failure remains local to the open dialog and renders the error beside the form controls. The modal no longer reloads the parent lender board after the sync helper returns, which avoids losing the nested dialog state; the shared TMO sync helper now also treats `{ ok: false, error }` payloads as failures even when the HTTP status is 200.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/tmo_los.tsx`
-- `src/equityfundingsource-dev/tests/advance-lender-dialog.test.ts`
-
-Verification:
-- `bun test tests/advance-lender-dialog.test.ts` — 11 pass / 0 fail.
-- `git -C src/equityfundingsource-dev diff --check` — clean.
-- `make check` — passed.
-- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists in this repo.
-- Nearest available workflow `Agent Doc` latest run `28051518463` is already failed on `main` with empty job steps/logs (`log not found: 83043079956`), so there was no CI failure log to act on; local verification is green.
-
-Commits pushed:
-- EFS `319ff6c fix(admin): keep advance lender dialog open on sync errors`
-- Parent `9dc701ffb chore: update equityfundingsource submodule`
+- EFS `08810e9 fix(messages): show inbound lender replies in message threads`
+- Parent `63806f887 chore: update equityfundingsource submodule`
 
 Not deployed; the active preset was `#spec-test-commit-push`, not deploy.
 
-Preflight warnings were stale supervisor / legacy review hygiene / semantic-completion candidates; none blocked the fix. Escalation: none.
+❯ Escalation: none.
 
-Confidence: high.
-
-### Re: Deploy — gpt-5
-
-> **Queue prompt:**
->
-> deploy
-
-
-> **Queue prompt:**
->
-> ~~deploy~~ — answered this cycle (#ftstrike)
-
-Deployed the current EFS `main` Worker from clean submodule commit `319ff6c` (`fix(admin): keep advance lender dialog open on sync errors`). No source files changed in this cycle, and there were no new commits to make before deploy.
-
-Deployment:
-- Ran pre-deploy D1 checks: DB `280e1539-b940-4c59-8988-fbed63c12ac0` was reachable; remote migrations had no pending work.
-- Ran `make deploy`, which rebuilt the Worker, confirmed no remote D1 migrations to apply, uploaded one updated browser asset, and deployed Worker version `6d990010-04f4-4b5a-ae37-dcac64e39b91`.
-- Live URL: `https://equityfundingsource.brian-takita.workers.dev/`.
-
-Verification:
-- EFS `make check` — 1,164 pass / 0 fail plus app and Worker builds.
-- Post-deploy remote migration list — no migrations to apply.
-- Live smoke test `curl https://equityfundingsource.brian-takita.workers.dev/` — `200`.
-- EFS submodule worktree stayed clean.
-- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists in the parent repo.
-- Only available workflow is `Agent Doc`; latest run `28051857174` was already red from the prior session-doc push, with empty `check` and `tmux-ci` job step lists, so there were no failure logs to act on.
-
-Existing unrelated parent worktree changes remain untouched.
-
-Escalation: none.
-
-Confidence: high.
-
-### Re: Deal Pipeline closed-card visibility + deploy — gpt-5
-
-> **Queue prompt:**
->
-> During the call, the Deal Pipeline "reset". A deal that I was advancing was reset after I dragged the deal across several states. When it moved to closed, it disappeared from the Deal Pipeline.
-
-
-> **Queue prompt:**
->
-> ~~During the call, the Deal Pipeline "reset". A deal that I was advancing was reset after I dragged the deal across several states. When it moved to closed, it disappeared from the Deal Pipeline.~~ — answered this cycle (#ftstrike)
-
-Fixed the Deal Pipeline default board scope so terminal milestone cards remain visible after a status move. The bug was that the UI's default `Active` scope excluded `closed`/`funded`, while the board still renders a `Funded / Closed` lane; after a card moved to `Closed`, the optimistic update immediately filtered it out until switching to `All`. The server-side action-needed/nav badge count still excludes terminal and parked statuses.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
-- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
-
-Commits pushed:
-- EFS `fc51cb4 fix(admin): keep closed pipeline cards visible`
-- Parent `ef98ad64d chore: update equityfundingsource submodule`
-
-Verification:
-- `bun test tests/admin-pipeline.test.ts` — 62 pass / 0 fail.
-- EFS `make check` — 1,164 pass / 0 fail plus app and Worker builds.
-- Parent `make check` — passed.
-- `gh run list --workflow CI --limit 1` — no `CI` workflow in EFS or parent.
-- Parent `Agent Doc` workflow run `28058300020` failed with empty `check` and `tmux-ci` step lists and `log not found: 83066083281`, so this matches the external runner-start failure pattern rather than a code/test failure.
-
-> **Queue prompt:**
->
-> ~~deploy~~ — answered this cycle (#ftstrike)
-
-Deployed the current EFS `main` Worker from clean submodule commit `fc51cb4`.
-
-Deployment:
-- Pre-deploy remote migrations: none pending.
-- D1 DB reachable: `280e1539-b940-4c59-8988-fbed63c12ac0`.
-- D1 Time Travel current bookmark: `000004f5-00000012-00005093-67f9788933bda53e192e9ad56c5e0339`.
-- `make deploy` rebuilt the Worker, confirmed no remote D1 migrations to apply, uploaded one updated browser asset, and deployed Worker version `03d62884-84a8-4610-b135-6b0fd3d61e16`.
-- Live URL: `https://equityfundingsource.brian-takita.workers.dev/`.
-
-Post-deploy checks:
-- Remote migrations after deploy: none pending.
-- `curl https://equityfundingsource.brian-takita.workers.dev/` — `200`.
-- `curl https://equityfundingsource.brian-takita.workers.dev/admin/pipeline` — `303`, expected auth/access redirect.
-- EFS worktree is clean; unrelated parent worktree changes remain untouched.
-
-Escalation: none.
-
-Confidence: high.
-
-### Re: Residual deploy queue closeout — gpt-5
-
-> **Queue prompt:**
->
-> ~~deploy~~ — answered this cycle (#ftstrike)
-
-The deploy request was completed in the immediately preceding work and this cycle only clears the residual queue head. Current deployed EFS Worker version remains `03d62884-84a8-4610-b135-6b0fd3d61e16` at `https://equityfundingsource.brian-takita.workers.dev/` from EFS commit `fc51cb4` and parent commit `ef98ad64d`.
-
-Changed paths: none in this residual closeout.
-
-Commands: no new repo or deploy commands were needed in this residual closeout; the prior closeout recorded the completed `make deploy`, migration checks, live smoke checks, commits, and local verification.
-
-Verification: queue-residue only; prior verification remains EFS `make check` passing, parent `make check` passing, remote migrations none pending, public live smoke `200`, and `/admin/pipeline` auth redirect `303`.
-
-Escalation: none.
-
-Confidence: high.
-<!-- agent:boundary:84c91033 -->
+❯ Confidence: high.
+❯ - Archived 7 response topic(s): TMO sandbox check and LSS wrapper revert; TMO lender-account LOS link and sync; Deploy; 4 more
+❯ - Prior summary/context: prior compacted content: Archived 17 response topic(s): Advance Lender TMO sync action; Advance Lender TMO sync actio...
+<!-- agent:boundary:78503f2d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -287,6 +93,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~The email replies to a message did not show up in the messages.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Ensure message updates are realtime.~~ — auto-struck: answered this cycle (#ftstrike) 
 <!-- /agent:queue -->
 
 ## Backlog

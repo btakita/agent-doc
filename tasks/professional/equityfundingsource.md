@@ -55,7 +55,7 @@ Key gaps found:
 Verification passed with the focused email-related `bun test` suite. I did not change EFS source code; the EFS submodule remained clean. I added the follow-up items as gated review work: `#email-prod-ready`, `#email-bg-outbox`, and `#apply-invite-fail-ux`.
 
 Agent-doc closeout is still blocked by the harness: the response is captured, but the editor IPC proof never ACKed, so agent-doc refused to write/commit the exchange body. `agent-doc admin recycle` has been requested, and `restart-supervisor` refused because this pane is still busy. The pending response is retained for retry once the supervisor can recycle at idle.
-<!-- agent:boundary:058aa211 -->
+<!-- agent:boundary:b33911a9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -76,9 +76,9 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~[#vjcv]: Is this complete. I have tested the email sending and it seems to work. Could you audit all email sending to ensure it will work reliably in all use cases?~~
-- In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, btak.dev+lender2@gmail.com
+- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, btak.dev+lender2@gmail.com~~
  is on hold because it is not linked with TMO. The admin message says "Link a lender account — the lender must request one (no request is pending), then assign the TMO account number.". But the "Advance Lender" opens the lender page. It should have a Sync with TMO button instead since that is how we advance the lender. The dialog should also have a "Sync with TMO" since that is a necessary step to advance the lender in the pipeline.
-- deploy
+- ~~deploy~~
 - do [#email-prod-ready]
 - do [#email-bg-outbox]
 - do [#apply-invite-fail-ux]

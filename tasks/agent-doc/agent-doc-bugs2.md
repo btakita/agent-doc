@@ -32,6 +32,20 @@ complete
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+### Re: #ws55 — gpt-5
+
+> **Queue prompt:**
+>
+> [#ws55] If agent-doc was run from the shell, is it supposed to start the agent harness and run the document?
+
+No. Bare `agent-doc <FILE>` is a harness-native entrypoint, not a normal-shell harness launcher. Inside Codex, Claude Code, or OpenCode it may run the document through that active harness. From a normal shell it should fail immediately and point the operator at explicit commands such as `agent-doc run <FILE>`, `agent-doc route <FILE>`, or `agent-doc start <FILE>`.
+
+Proof:
+- Changed paths: no source changes for `#ws55`; preflight/reset repaired session sidecars, and this finalize marks `#ws55` done.
+- Commands: `agent-doc reset --from-current /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`; `make install`; `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`; `env -u ... timeout 10s agent-doc tasks/agent-doc/agent-doc-bugs2.md`; `agent-doc --version`.
+- Verification: stripped-env bare path exits 1 with the supported-harness error and did not hang; installed CLI reports `agent-doc 0.34.38`.
+- Confidence: high.
+- Escalation: none.
 ### Session Summary
 
 ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260623-024747.md`*
@@ -39,7 +53,7 @@ complete
 Compacted content:
 ❯ - Archived 3 response topic(s): #fccd - gpt-5; bare agent-doc shell invocation; bare agent-doc shell invocation follow-up
 ❯ - Prior summary/context: prior compacted content: Archived 1 response topic(s): #qpinfl - gpt-5
-<!-- agent:boundary:677d7336 -->
+<!-- agent:boundary:a6c9c224 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -78,7 +92,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ws55] If agent-doc was run from the shell, is it supposed to start the agent harness and run the document?
 - [ ] [#3x90] JB `Run Agent Doc` still fails to submit. This is a chronic condition that you don't seem to be able to solve. Please dig deeper and isolate the cause(s).
 <!-- /agent:backlog -->
 

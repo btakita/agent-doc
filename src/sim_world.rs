@@ -648,6 +648,7 @@ struct Coverage {
     /// (`attempt=1`), never `attempt=2+`.
     dispatch_injects: usize,
     session_clears: usize,
+    deferred_clear_duplicate_suppressed: usize,
     session_restart_busy_refusals: usize,
     session_restart_force_used: usize,
     session_restart_busy_pre_interrupt_idle: usize,
@@ -873,6 +874,7 @@ impl Coverage {
         self.route_dispatch_coalesced += other.route_dispatch_coalesced;
         self.dispatch_injects += other.dispatch_injects;
         self.session_clears += other.session_clears;
+        self.deferred_clear_duplicate_suppressed += other.deferred_clear_duplicate_suppressed;
         self.session_restart_busy_refusals += other.session_restart_busy_refusals;
         self.session_restart_force_used += other.session_restart_force_used;
         self.session_restart_busy_pre_interrupt_idle +=
@@ -3410,6 +3412,45 @@ fn deferred_operator_clear_settles_before_resuming_drain() {
     assert_eq!(
         world.coverage.go_drain_dispatches, 1,
         "the queue resumes only after the deferred clear settles"
+    );
+}
+
+#[test]
+fn repeated_busy_session_clear_keeps_single_deferred_clear() {
+    // #p6a0: repeated non-interrupting clears during an active turn must not
+    // inject or queue multiple `/clear` commands. The first request records the
+    // supervisor handoff; later requests are idempotent until the idle boundary.
+    let mut world = SimWorld::new(2_031);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::ActivateGoModeQueueHead).unwrap();
+    world.apply(SimCommand::SupervisorBusy).unwrap();
+
+    world.apply(SimCommand::SessionClear).unwrap();
+    assert!(world.recycle_clear.deferred_operator_clear_pending);
+    assert!(world.recycle_clear.clear_cooldown_active);
+    assert_eq!(world.coverage.session_clears, 1);
+
+    world.apply(SimCommand::SessionClear).unwrap();
+    world.apply(SimCommand::SessionClear).unwrap();
+    assert!(world.recycle_clear.deferred_operator_clear_pending);
+    assert_eq!(
+        world.coverage.session_clears, 1,
+        "duplicate clears while the turn is active must not rearm the clear"
+    );
+    assert_eq!(world.coverage.deferred_clear_duplicate_suppressed, 2);
+    assert_eq!(world.coverage.recycle_session_reclear_proofs, 1);
+
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert!(
+        !world.recycle_clear.deferred_operator_clear_pending,
+        "the single queued clear is delivered at the next idle boundary"
+    );
+    assert!(world.recycle_clear.awaiting_clear_settle);
+    assert_eq!(
+        world.coverage.recycle_session_reclear_proofs, 2,
+        "one proof for queued handoff, one proof for delivery"
     );
 }
 

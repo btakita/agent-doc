@@ -487,6 +487,11 @@ impl SimWorld {
             }
             SimCommand::DeferOperatorClearPending => {
                 self.recycle_clear.deferred_operator_clear_pending = true;
+                self.recycle_clear.clear_cooldown_active = true;
+                self.recycle_clear.clear_cooldown_idle_ticks = 0;
+                self.record_ops_proof(
+                    "recycle_session_reclear action=deferred_clear result=queued",
+                );
             }
             SimCommand::SupervisorIdleQueueTick => {
                 self.supervisor_idle_queue_tick()?;
@@ -701,6 +706,28 @@ impl SimWorld {
     pub(crate) fn clear_session_context(&mut self) -> Result<()> {
         self.current_dispatch_pane()?;
         self.route.pending_dispatch = None;
+        if self.recycle_clear.deferred_operator_clear_pending {
+            self.coverage.deferred_clear_duplicate_suppressed += 1;
+            self.record_ops_proof(
+                "recycle_session_reclear action=session_clear_duplicate result=already_deferred",
+            );
+            return Ok(());
+        }
+        let turn_active = matches!(
+            self.route.durable.lifecycle,
+            SupervisorLifecycle::Busy | SupervisorLifecycle::WaitingInput
+        );
+        if turn_active && self.recycle_clear.queue_active_head.is_some() {
+            self.recycle_clear.deferred_operator_clear_pending = true;
+            self.recycle_clear.clear_cooldown_active = true;
+            self.recycle_clear.clear_cooldown_idle_ticks = 0;
+            self.coverage.session_clears += 1;
+            self.coverage.recycle_session_reclear_proofs += 1;
+            self.record_ops_proof(
+                "recycle_session_reclear action=session_clear result=deferred_until_idle",
+            );
+            return Ok(());
+        }
         // `#clearcontresume`: an operator `session clear` / JB `Clear Exchange`
         // writes the manual clear cooldown (`queue_continuation::write_clear_cooldown`).
         // It suppresses passive queue dispatch until the cleared pane settles to a

@@ -69,13 +69,20 @@ pub enum BusyClearOutcome {
     /// instead of hard-blocking, so the command becomes runnable without
     /// silently killing the in-flight turn.
     PauseAndDefer,
+    /// A prior non-interrupting clear is already queued for the supervisor's
+    /// next idle gap. Do not refresh the marker, rewrite cooldown state, or send
+    /// another clear into the live pane.
+    AlreadyDeferred,
 }
 
 /// Decide what a non-interrupting `clear` does against a busy pane: a busy pane
 /// driven by an active auto-queue loop defers (pause → idle gap → run), while a
 /// busy pane with no loop keeps the existing hard block. The destructive
 /// "Interrupt and Clear" path never reaches here — it interrupts immediately.
-pub fn plan_busy_clear(queue_active: bool) -> BusyClearOutcome {
+pub fn plan_busy_clear(queue_active: bool, deferred_clear_pending: bool) -> BusyClearOutcome {
+    if deferred_clear_pending {
+        return BusyClearOutcome::AlreadyDeferred;
+    }
     if queue_active {
         BusyClearOutcome::PauseAndDefer
     } else {
@@ -183,7 +190,7 @@ mod tests {
     #[test]
     fn busy_clear_on_active_loop_pauses_and_defers() {
         assert_eq!(
-            plan_busy_clear(true),
+            plan_busy_clear(true, false),
             BusyClearOutcome::PauseAndDefer,
             "a busy pane driven by an active auto-loop must defer, not hard-block"
         );
@@ -192,9 +199,23 @@ mod tests {
     #[test]
     fn busy_clear_without_active_loop_hard_blocks() {
         assert_eq!(
-            plan_busy_clear(false),
+            plan_busy_clear(false, false),
             BusyClearOutcome::HardBlock,
             "a busy pane with no loop keeps the existing fail-closed block"
+        );
+    }
+
+    #[test]
+    fn busy_clear_already_deferred_does_not_refresh_or_send() {
+        assert_eq!(
+            plan_busy_clear(true, true),
+            BusyClearOutcome::AlreadyDeferred,
+            "a repeated non-interrupting clear must not stack another clear while the first is queued"
+        );
+        assert_eq!(
+            plan_busy_clear(false, true),
+            BusyClearOutcome::AlreadyDeferred,
+            "the pending deferred-clear marker owns delivery even if queue state changed"
         );
     }
 

@@ -866,7 +866,15 @@ fn reconcile_idle_projection_before_clear(
                 agent_doc_orchestration::queue_continuation::detect(&ctx.canonical_file)
                     .unwrap_or(None)
                     .is_some();
-            match agent_doc_orchestration::queue_preemption::plan_busy_clear(queue_active) {
+            let deferred_clear_pending =
+                agent_doc_orchestration::queue_continuation::read_deferred_operator_clear(
+                    &ctx.canonical_file,
+                )?
+                .is_some();
+            match agent_doc_orchestration::queue_preemption::plan_busy_clear(
+                queue_active,
+                deferred_clear_pending,
+            ) {
                 agent_doc_orchestration::queue_preemption::BusyClearOutcome::PauseAndDefer => {
                     // Pause the loop (the idle-queue watch honors this cooldown)
                     // AND record the deferred clear so the supervisor delivers it
@@ -895,6 +903,25 @@ fn reconcile_idle_projection_before_clear(
                     eprintln!(
                         "{}",
                         busy_clear_deferred_message(&ctx.canonical_file, &evidence)
+                    );
+                    return Ok(ClearPreflightOutcome::DeferredPreempt);
+                }
+                agent_doc_orchestration::queue_preemption::BusyClearOutcome::AlreadyDeferred => {
+                    agent_doc_orchestration::ops_log::log_op(
+                        &ctx.canonical_file,
+                        &format!(
+                            "session_clear_queue_preempt_already_deferred file={} pane={} source={} reason={} current_command={} tail={:?}",
+                            ctx.canonical_file.display(),
+                            evidence.pane_id.as_deref().unwrap_or("unknown"),
+                            evidence.source,
+                            busy_reason.replace(char::is_whitespace, "_"),
+                            evidence.current_command.as_deref().unwrap_or("unknown"),
+                            evidence.tail.as_deref().unwrap_or("unknown")
+                        ),
+                    );
+                    eprintln!(
+                        "{}",
+                        busy_clear_already_deferred_message(&ctx.canonical_file, &evidence)
                     );
                     return Ok(ClearPreflightOutcome::DeferredPreempt);
                 }
@@ -929,10 +956,19 @@ fn reconcile_idle_projection_before_clear(
 fn busy_clear_deferred_message(file: &Path, evidence: &LivePaneEvidence) -> String {
     let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
     format!(
-        "session_clear deferred for {} — pane {} is alive-busy under an active `agent:queue auto` loop, so the clear cannot run mid-turn without discarding in-flight work. Paused the loop (clear cooldown); retry `agent-doc session clear {}` once the pane reaches an idle prompt, or run `agent-doc session interrupt-clear {}` to interrupt the turn and clear now.",
+        "session_clear deferred for {} — pane {} is alive-busy under an active `agent:queue auto` loop, so the clear cannot run mid-turn without discarding in-flight work. Queued one clear for automatic delivery at the next idle prompt; the loop resumes after the clear settles. Run `agent-doc session interrupt-clear {}` to interrupt the turn and clear now.",
         file.display(),
         pane,
+        file.display()
+    )
+}
+
+fn busy_clear_already_deferred_message(file: &Path, evidence: &LivePaneEvidence) -> String {
+    let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
+    format!(
+        "session_clear already deferred for {} — pane {} still has a queued clear waiting for the next idle prompt. Not sending another clear into the active turn. Run `agent-doc session interrupt-clear {}` to interrupt the turn and clear now.",
         file.display(),
+        pane,
         file.display()
     )
 }
@@ -3923,6 +3959,43 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert!(message.contains("session_clear refused"));
         assert!(message.contains("pane %7 is alive-busy"));
         assert!(message.contains("reason=active codex turn"));
+        assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
+    }
+
+    #[test]
+    fn busy_clear_deferred_message_names_automatic_single_delivery() {
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveBusy,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: Some(false),
+            tail: Some("Working...".to_string()),
+        };
+
+        let message = busy_clear_deferred_message(Path::new("/tmp/doc.md"), &evidence);
+
+        assert!(message.contains("session_clear deferred"));
+        assert!(message.contains("Queued one clear for automatic delivery"));
+        assert!(!message.contains("retry `agent-doc session clear"));
+        assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
+    }
+
+    #[test]
+    fn busy_clear_already_deferred_message_refuses_duplicate_clear() {
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveBusy,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: Some(false),
+            tail: Some("Working...".to_string()),
+        };
+
+        let message = busy_clear_already_deferred_message(Path::new("/tmp/doc.md"), &evidence);
+
+        assert!(message.contains("session_clear already deferred"));
+        assert!(message.contains("Not sending another clear into the active turn"));
         assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
     }
 

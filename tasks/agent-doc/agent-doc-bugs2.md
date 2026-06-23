@@ -284,7 +284,7 @@ CI:
 Escalation: none.
 
 Other unhandled queue heads remain open; this response intentionally handled only the quoted direct-shell CLI prompt.
-<!-- agent:boundary:00b6710c -->
+<!-- agent:boundary:1312cf63 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -343,7 +343,7 @@ JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The se
 Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
 ```
 ---
-- ~~:pushpin: do [#arsm]~~
+- :pushpin: do [#arsm]
 - :pushpin: do [#1jec]
 - :pushpin: do [#fbwireverify]
 - :pushpin: do [#qnodemerge4verify]
@@ -351,7 +351,6 @@ Error: authoritative actor record for tasks/software/agent-loop.md is bound to h
 - do [#cancelturnverify]
 - ~~do [#mrh-response-loss-stalled-queue]~~
 - do [#qcm1verify]
-- ~~Running `agent-doc file-name.md` directly in the CLI should return in an immediate error explaining it needs to be run within a supported harness (Codex, Claude, or Opencode). Instead, it said "Submitting to Codex..." and locks the shell. Now I cannot sync monsterrodholders.md.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

@@ -53,11 +53,11 @@ Compacted content:
 ❯ - That reuses the current busy-pane/active-auto-queue behavior: the first non-interrupting busy clear writes the deferred handoff/cooldown, duplicates are suppressed, and raw `/clear` is not injected into an active response.
 ❯ - Queued `/clear` commands now leave `queue_dispatch` before generic supervisor IPC or tmux fallback and call the existing guarded `session_actor_cmd::clear` path.
 ❯ - `src/agent-doc/src/queue_dispatch.rs`
-❯ - Latest GitHub Actions CI for `main` was green: run `28060207399`, `fix: preserve prose queue heads`, completed 2026-06-23T22:03:57Z.
-❯ - `make install-full` passed from that isolated worktree and installed `agent-doc 0.34.43`; install marked two controllers for recycle at next idle boundary.
-❯ - Full `make check` passed in an isolated worktree containing only this patch: 5042 tests passed, 241 skipped, medium simulator passed.
-❯ - Targeted regressions passed for queue preemption, session-clear messages, and SimWorld duplicate suppression.
-❯ - `cargo fmt --check` passed in the working tree.
+- Latest GitHub Actions CI for `main` was green: run `28060207399`, `fix: preserve prose queue heads`, completed 2026-06-23T22:03:57Z.
+- `make install-full` passed from that isolated worktree and installed `agent-doc 0.34.43`; install marked two controllers for recycle at next idle boundary.
+- Full `make check` passed in an isolated worktree containing only this patch: 5042 tests passed, 241 skipped, medium simulator passed.
+- Targeted regressions passed for queue preemption, session-clear messages, and SimWorld duplicate suppression.
+- `cargo fmt --check` passed in the working tree.
 
 ### Re: #mbd4 IPC issue dogfooding log — gpt-5
 
@@ -149,6 +149,29 @@ Commits:
 - `src/agent-doc` `63edca4d` (`fix: preserve completed queue heads after stale editor drift`), pushed to `origin/main`.
 - `src/agent-doc` `a58eb3e8` (`fix: force pending maintenance under force-disk closeout`), pushed to `origin/main`.
 - Parent gitlink `9d0c6b5c3` (`chore: update agent-doc submodule`).
+- Added focused low-level and post-commit regressions, plus spec and version notes.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test -p agent-doc-orchestration postcommit_queue -- --nocapture`
+- `cargo test -p agent-doc-orchestration postcommit_worktree_reconciles_stale_queue_unstrikes_before_flush -- --nocapture`
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
+❯ - Clean isolated worktree `make check`: clippy, 5046 nextest tests, doctests, and medium simulation passed.
+- Installed the verified clean build with `make install-full`.
+
+❯ Commits:
+- `src/agent-doc` `63edca4d` (`fix: preserve completed queue heads after stale editor drift`), pushed to `origin/main`.
+- Parent gitlink `dbed747e1` (`chore: update agent-doc submodule`).
+- `src/agent-doc` `63edca4d` (`fix: preserve completed queue heads after stale editor drift`), pushed to `origin/main`.
+- Installed the verified clean build with `make install-full`.
+❯ - Clean isolated worktree `make check`: clippy, 5046 nextest tests, doctests, and medium simulation passed.
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
+- `cargo test -p agent-doc-orchestration postcommit_worktree_reconciles_stale_queue_unstrikes_before_flush -- --nocapture`
+- `cargo test -p agent-doc-orchestration postcommit_queue -- --nocapture`
+- `cargo fmt --check`
+- Added focused low-level and post-commit regressions, plus spec and version notes.
+- Wired the reconcile into the post-commit match decision before transient replay-hash equality can hide strike-only queue drift, with editor-IPC/disk transports and FlowCore audit coverage.
+- Added post-commit queue reconciliation so committed `agent:queue` completions stay completed when a stale editor buffer reappears with the same prompt active again. This covers pinned/id-backed rows and answered free-text rows, preserves unrelated new queue work, and keeps the existing editor-owned direction where a newly struck live row wins over an active HEAD row.
 
 ### Re: stale #pzjy replay drift — gpt-5
 
@@ -166,7 +189,7 @@ Verification:
 ### Re: queue restoration repair — gpt-5
 
 Restored the next queue head that was accidentally marked complete during stale closeout cleanup. No source work was performed in this repair cycle.
-<!-- agent:boundary:25d4488f -->
+<!-- agent:boundary:63b854cc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -174,7 +197,7 @@ Restored the next queue head that was accidentally marked complete during stale 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#mbd4]~~
 - ~~:pushpin: do [#pzjy]~~
-- ~~Can we have annotated queue item(s) that runs when there are no other queue items? So this would effectively be a running loop. This should also support multiple annotated loop queue items that run in a sequence loop. Also, can we have an emoji annotate which queue item is currently being run? There can be a default poll period with configurable override. Also, the loop item can intelligently schedule based on the frequency of events.~~
+- Can we have annotated queue item(s) that runs when there are no other queue items? So this would effectively be a running loop. This should also support multiple annotated loop queue items that run in a sequence loop. Also, can we have an emoji annotate which queue item is currently being run? There can be a default poll period with configurable override. Also, the loop item can intelligently schedule based on the frequency of events.
 - How can we give agent-doc more telemetry access to identify bugs? Should we have an observer in the supervisor that takes periodic snapshots to process either with the subscription or a local model to identify bugs? Could we have an agent doc run a dedicated loop to schedule observation + bug fixes? So there would be a sidecar agent doc to this session that can observe all running project sessions to add bugs as they are seen. Could we also have a deterministic observer detect any annotated issues & deterministic patterns of issues?
 - Allow dispatching of queue items, such as loop items, use local models.
 - JB `Run Agent Doc` still not submitting. Can we track when this happens and automatically file a bug so I don't have to endlessly repeat myself when you fail to fix the issue? [dogfooding] Can we also have the supervisor detect if the turn started? And if the turn has not started, send Enter and continue retrying until the turn starts?

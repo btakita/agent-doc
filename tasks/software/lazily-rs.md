@@ -102,7 +102,29 @@ impl<S: PartialEq + Clone + 'static, E: 'static> Machine<S, E> {
 - superproject `9cab2c72b` (merge + gitlink bump) → `btakita/agent-loop` main.
 
 **`#438b` done.** Queue drained.
-<!-- agent:boundary:b038164f -->
+
+### Re: `Machine` naming — recommendation: keep it — glm-5.2
+
+> **Queue prompt:** Is the abstraction name `Machine` too generic? Consider `StateMachine` or `StateTransitions`?
+
+**Recommendation: keep `Machine<S, E>`.** No rename, so the `#spec-test-build-install-commit-push` preset has no work to drive this cycle.
+
+**Why `Machine` fits this crate (not too generic in context):**
+
+| Lens | Evidence |
+|---|---|
+| Crate naming convention | Every primitive is a short noun: `Context`, `Cell`/`CellHandle`, `Slot`/`SlotHandle`, `Signal`/`SignalHandle`, `Effect`/`EffectHandle`, `BridgeHub`. `Machine` matches; `StateMachine` is the outlier. |
+| Module path disambiguates | Fully qualified `lazily::state_machine::Machine` already says "state machine". The crate-root re-export `lazily::Machine` is short, but so is `lazily::Cell` — brevity is the contract. |
+| Use-site verbosity | `StateMachine<MyState, MyEvent>` stutters (`State…State`). `StateTransitions<MyState, MyEvent>` reads as a behavior, not a value you hold. `Machine<Door, DoorEvent>` is the cleanest at the call site. |
+| Doc discovery | The doc comment opens "A finite state machine backed by a reactive `Context`." `grep`/doc-search for "state machine" lands here regardless of the type name. |
+| Ecosystem split, not consensus | `statig`/`finny`/`smlang` use `StateMachine`, but those are FSM-only crates where the prefix carries the load. XState (JS) ships `createMachine` → `machine`. In a reactive-signals crate, `Machine` is a peer primitive, not the crate's identity. |
+
+**Where `StateMachine` would win:** if `Machine` were re-exported from the crate root with *no* module context and *no* doc string — then a bare `lazily::Machine` is genuinely ambiguous. Neither holds: `state_machine::Machine` is the path, and the doc declares "finite state machine" in its first line.
+
+**Where `StateTransitions` would win:** nowhere I can find. It names the transition table, not the entity; `let m = StateTransitions::new(...)` does not read as constructing a stateful object. I'd rule this one out regardless.
+
+**My call:** keep `Machine`. If you'd prefer `StateMachine` for discoverability/parity with other Rust FSM crates, that's a defensible override — say the word and I'll run the rename through spec + tests + build + install + commit + push under the `#spec-test-build-install-commit-push` preset (touches `src/state_machine.rs`, `src/lib.rs`, `tests/state_machine.rs`, doc-test). Default action this cycle: **none**.
+<!-- agent:boundary:c05bd03e -->
 <!-- /agent:exchange -->
 ###
 <!--

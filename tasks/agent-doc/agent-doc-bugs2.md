@@ -284,7 +284,29 @@ CI:
 Escalation: none.
 
 Other unhandled queue heads remain open; this response intentionally handled only the quoted direct-shell CLI prompt.
-<!-- agent:boundary:1312cf63 -->
+
+### Re: bare agent-doc shell invocation follow-up — gpt-5
+
+Follow-up after the remote CI failures: the production guard stayed the same, but two legacy tests still assumed bare `agent-doc <FILE>` was valid from a normal shell. I updated those tests so the harness-native alias path runs with an explicit Codex marker, and the plain-shell path asserts the new immediate supported-harness error.
+
+Additional changed paths:
+- `src/agent-doc/tests/run_integration.rs`
+- `src/agent-doc/tests/test_cli.rs`
+- `src/agent-doc` superproject gitlink
+
+Final commits / pushes:
+- agent-doc submodule: `3a8e304d` (`fix: guard bare agent-doc shell invocation`), `c393b1dd` (`test: mark bare path alias harness-native`), and `970ee577` (`test: cover bare path shell rejection`) pushed to `btakita/agent-doc main`
+- superproject pointer: `8e6b05ffb` (`chore: update agent-doc submodule`) pushed to `btakita/agent-loop main`
+
+Final verification:
+- `env -u CLAUDECODE -u CLAUDE_CODE -u CLAUDE_CODE_SESSION -u OPENCODE -u OPENCODE_CLIENT -u CODEX -u CODEX_CLI -u CODEX_SESSION -u CODEX_THREAD_ID cargo test test_cli_bare_file_path_aliases_to_run`
+- `env -u CLAUDECODE -u CLAUDE_CODE -u CLAUDE_CODE_SESSION -u OPENCODE -u OPENCODE_CLIENT -u CODEX -u CODEX_CLI -u CODEX_SESSION -u CODEX_THREAD_ID cargo test bare_path_alias_uses_same_template_safe_path`
+- `env -u CLAUDECODE -u CLAUDE_CODE -u CLAUDE_CODE_SESSION -u OPENCODE -u OPENCODE_CLIENT -u CODEX -u CODEX_CLI -u CODEX_SESSION -u CODEX_THREAD_ID make check` -> 5002 tests passed, 241 skipped, SimWorld medium seed passed
+- agent-doc GitHub Actions `CI` run `27996252411` -> success (`make check` and `make tmux-ci` passed)
+- superproject `Agent Doc` run `27996268409` still failed before runner startup because GitHub reported account billing/spending-limit restrictions; no test steps started
+
+Runtime cleanup: ran `agent-doc admin recycle`; it marked the project controller to recycle at the next idle boundary so stale-binary supervisors can refresh without discarding live turns.
+<!-- agent:boundary:3394c4d6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -343,7 +365,7 @@ JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The se
 Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
 ```
 ---
-- :pushpin: do [#arsm]
+- ~~:pushpin: do [#arsm]~~
 - :pushpin: do [#1jec]
 - :pushpin: do [#fbwireverify]
 - :pushpin: do [#qnodemerge4verify]

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,54 @@ complete
 Compacted content:
 - Archived 15 response topic(s): production deletion logs; TMO sync delete risk + soft-disable trail; application logging + deploy; 12 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:cd6f6f9c -->
+
+### Re: Does the TMO sandbox have any loan records? — gpt-5
+
+> **Queue prompt:**
+>
+> Does the TMO sandbox have any loan records? Or were they cleaned out?
+
+Short answer: the public/documented TMO `API Sandbox` is not cleaned out, but the EFS-specific/private TMO sandbox state is still not directly verifiable from the local `passage equityfundingsource/TMO_API_TOKEN` token.
+
+What I verified:
+
+- Public documented TMO sandbox: `GET https://api.themortgageoffice.com/LOS.svc/GetLoans` with `Token: TMO` and `Database: API Sandbox` returned `37` loan records. So that sandbox has loans.
+- The EFS-specific local Passage token is present, but `GetLoans` returned `401 Not authenticated` for `Database: API Sandbox` and the likely alternate database header values I tried. There is no local `passage equityfundingsource/TMO_DATABASE` entry.
+- The deployed Worker has `TMO_API_TOKEN` and `TMO_DATABASE` secret names configured, but Cloudflare does not let us read secret values back. So I cannot use those production secret values for a direct local live `GetLoans` count.
+- Production EFS app-owned D1 tables are cleaned out for the main loan/application surfaces: `loans=0`, `investment_deals=0`, `full_applications=0`; `application_leads=6` still exist.
+- Production EFS `tmo_cache_entities` still has cached TMO loan payloads: `11` non-deleted `loan` cache rows and `1` deleted cache row. That includes old cached rows such as `TST113` / Lucas Huang and the prior `FTM631` / `GQI751` cache rows.
+- Those EFS cache rows are not proof that the live TMO sandbox still contains those loans today. The current sync code loops local EFS `loans` with a `tmo_loan_number`; because EFS currently has zero local loans, recent sync batches with `loans_count=0` do not mean live TMO returned zero loans.
+- The public documented sandbox does not currently contain `TST113`, `FTM631`, `GQI751`, Lucas, Huang, or stormrunner in `GetLoans`; direct `GetLoan/TST113`, `GetLoan/FTM631`, and `GetLoan/GQI751` all returned `Loan not found`. `GetLoan/1010` does exist in the public sandbox, but it is a generic sample record, not the old EFS cached `1010` payload.
+
+So the precise read is: public TMO sandbox has records; EFS app-owned production tables are cleaned out for loans/deals/full applications; EFS has stale/cached TMO-origin rows; current live EFS-specific TMO sandbox contents are still unknown until we have a valid token/database pair or a production-safe read-only diagnostic that runs inside the Worker with its existing secrets.
+
+### changed_paths — gpt-5
+
+- `tasks/professional/equityfundingsource.md` only.
+- No EFS source files, production D1 rows, TMO records, deploys, or migrations were changed.
+
+### commands — gpt-5
+
+- `agent-doc preflight`, `agent-doc plan`, `agent-doc read`.
+- `tsift status` in the workspace and EFS submodule.
+- Source reads for `tmo_live_loans_R_`, `tmo_loans_R_`, `tmo_sync_all_`, and the admin TMO-loans route.
+- Read-only live TMO `GetLoans` / `GetLoan` checks against the public documented sandbox and the local Passage token.
+- Read-only remote D1 `SELECT` queries against `tmo_sync_batches`, `tmo_cache_entities`, `loans`, `investment_deals`, `full_applications`, and `application_leads`.
+- `wrangler secret list` to verify the deployed Worker secret names.
+- `passage ls` to check available local TMO credential entries without printing secret values.
+
+### verification — gpt-5
+
+All D1 checks reported `changed_db=false` and `rows_written=0`. The public TMO sandbox returned 37 loans; the local EFS Passage token returned authentication failures; production D1 confirmed zero app loans/deals/full applications and existing cached TMO rows.
+
+### confidence — gpt-5
+
+High that the public documented TMO sandbox is not empty and that EFS app-owned production tables currently have zero loans/deals/full applications. Medium-high that EFS cache rows are stale historical TMO-origin data. Low for current live EFS-specific TMO sandbox contents because the available local private token/database did not authenticate and production secret values are not readable.
+
+### escalation — gpt-5
+
+None.
+<!-- agent:boundary:4d9f593a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,7 +105,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Does the TMO sandbox have any loan records? Or were they cleaned out?
 <!-- /agent:queue -->
 
 ## Backlog

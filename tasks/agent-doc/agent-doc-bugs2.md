@@ -39,7 +39,24 @@ done
 Compacted content:
 - Archived 10 response topic(s): ack-mismatch shorter recovered response loss; #directchatpb2; JB Run Agent Doc submit path; 7 more
 - Prior summary/context: prior compacted content: Archived 6 response topic(s): JB Run Agent Doc submit latency; #turnstuck-readybusy; answere...
-<!-- agent:boundary:0c4d65d1 -->
+
+### Re: #mbd4 IPC issue dogfooding log — gpt-5
+
+> **Queue prompt:** do [#mbd4]
+
+Implemented `#mbd4` in `src/agent-doc`.
+
+IPC proof failures now get mirrored into the session document during interrupted-cycle recovery: preflight reads the latest matching `ipc_proof_insufficient` ops-log diagnostic, appends a deduped visible IPC dogfood note inside `agent:exchange`, and commits it through the normal recovery/commit path. The note is deliberately not a markdown heading or `### Re:` block, so session-check does not treat the automatic log as a new prompt or unowned assistant response.
+
+The write-path direct-append approach was tested and rejected during this cycle because it created post-commit working-tree drift; the landed implementation keeps the note on the recovery side of the commit boundary.
+
+Changed paths: `src/agent-doc/agent-doc-orchestration/src/preflight.rs`
+Commands: `tsift status`; `cargo test -p agent-doc-orchestration ipc_dogfood_note`; `cargo test -p agent-doc-orchestration route_queue_commit_boundary`; `cargo test -p agent-doc-orchestration ipc_proof`; `cargo test -p agent-doc-orchestration ipc_`; clean-worktree `make check` at `dad06399`
+Verification: all listed commands passed except an earlier main-worktree `make check` was blocked by unrelated unstaged queue-consumption edits; the clean sibling worktree at commit `dad06399` passed `make check`.
+Commit: `src/agent-doc` `dad06399 fix: log IPC proof failures in session exchange`
+Confidence: high
+Escalation: none.
+<!-- agent:boundary:d596a06d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -85,7 +102,6 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue -->
 - [ ] [#pzjy] #agent-doc-bug Prevent stale live editor buffers from resurrecting answered queue prompts after IPC-proof recovery: when `live_prompt_drift_after_preflight` / `content_ours_snapshot_next_cycle` recovery commits a captured response, preserve the committed queue strike state or fail closed instead of accepting stale unstruck queue heads from the editor buffer. Add regression coverage for answered free-text and pinned queue items reappearing unstruck after recovery.
 - [ ] [#p6a0] #agent-doc-bug Guard `/clear` dispatch against active-turn flooding: `/clear` may be sent only at a proven reset/supervisor handoff boundary, never repeatedly into an active tmux pane while an agent turn is running. Add turn-state/dedupe gating plus regression coverage for repeated `/clear` text being injected during an active response, while preserving the intended focused-cycle supervisor clear-and-continue behavior.
-- [ ] [#mbd4] #agent-doc-bug Dogfood IPC issue surfacing in session docs: when an operator types into this document's queue during a live agent-doc turn and editor IPC degrades, times out, ACK mismatches, retries, falls back, or makes a reconnect/stale-buffer decision, append a visible note to the current session exchange immediately with issue class, affected component, recovery path, and ops.log marker so the session document itself captures the IPC bug.
 - [ ] [#qstrikework] #agent-doc-bug Prevent queue items from being struck unless the current cycle proves that exact head was worked: the response quotes the exact free-text head, or a --done/--pending-gate/--review-resolve targets the backing id. Add regression coverage for interrupted finalize recovery where a later operator-verify or free-text head is auto-quoted/struck while the response only repairs an earlier prompt.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.

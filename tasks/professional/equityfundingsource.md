@@ -621,7 +621,7 @@ Verification: secret-path readability and documentation/API-shape inspection onl
 Escalation: none.
 
 Confidence: high that the available local evidence is insufficient to prove sandbox; medium that the value may be sandbox only because it may use an opaque tenant-specific database name.
-<!-- agent:boundary:9145e98d -->
+<!-- agent:boundary:0e12f825 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -641,7 +641,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- I have passage equityfundingsource/TMO_API_DATABASE. Please ensure this is our sandbox database and not the actual database that TMO is using.
 <!-- /agent:queue -->
 
 ## Backlog

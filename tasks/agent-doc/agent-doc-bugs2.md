@@ -183,25 +183,49 @@ Commands: `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read` for queue/ba
 Verification: session-check pending after finalize
 Confidence: high
 Escalation: none; implementation remains tracked in the new backlog item.
-<!-- agent:boundary:a599780a -->
+
+### Re: IPC dogfood incident after clear-flood closeout — gpt-5
+
+> **Queue prompt:**
+>
+> do [#p6a0]: Broaden to any agent-doc issues detected in this project PCP...dogfood `#agent-doc-bug`
+
+
+This session hit the exact class of issue that `#mbd4` is meant to make visible in the document.
+
+Issue class: `ipc_proof_insufficient`
+Affected component: `queue` / editor writeback
+Invariant: `live_prompt_drift_after_preflight`
+Recovery path reported: `content_ours_snapshot_next_cycle`
+Ops/session marker: `patch_id=0141387b-14e6-43ae-bd99-822d683d4756`, `turn=cycle-1782252992410`
+
+Observed behavior: the clear-flood response was captured, the first finalize failed because the snapshot head and live document head disagreed, and the recovery preflight later committed the captured response. During that recovery, the live buffer also reintroduced several previously answered queue prompts as unstruck items, and preflight logged `postcommit_worktree_check match=false` with `#postcommit-ipc-worktree-corruption`.
+
+A separate backlog item now tracks the stale-live-buffer queue resurrection. I am not marking `#mbd4` done here because the automation that should log this kind of incident automatically is still open; this entry is the manual dogfooding log for the current failure.
+
+Changed paths: `tasks/agent-doc/agent-doc-bugs2.md`
+Commands: `agent_doc_session_check`, `agent_doc_preflight`, `agent_doc_read`, `agent_doc_finalize`
+Verification: session-check pending after finalize
+Confidence: high
+Escalation: none; continue through the session-check result, but do not treat the interrupted IPC proof as a successful closeout by itself.
+<!-- agent:boundary:df4d746d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~JB `Run Agent Doc` still does not quickly submit.~~
-- ~~auto-restart session does restart the agent-doc turn.~~
-- ~~:pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀~~
-- ~~Turn response is overwriting parts of the previous response in an uncommitted state...so presumably during the finalize step.~~
-- ~~Queue items are being struck without being worked on.~~
-- ~~Immediately log IPC issues in this document's sessions for dogfooding when I type into the queue.~~
-- ~~`/clear` is being incorrectly flooded into the tmux pane during a turn.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do [#p6a0]: Broaden to any agent-doc issues detected in this project PCP...dogfood `#agent-doc-bug`~~
+- do [#mbd4]
+- JB `Run Agent Doc` still does not quickly submit.
+- auto-restart session does restart the agent-doc turn.
+- :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
+- Turn response is overwriting parts of the previous response in an uncommitted state...so presumably during the finalize step.
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
 - :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#tb4q]: please check logs
-- ~~:round_pushpin: do [#arsm]~~
 - do [#qcm1verify]: Use the logs to verify.
 - do [#qstrikework]
+- do [#pzjy]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -230,6 +254,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#pzjy] #agent-doc-bug Prevent stale live editor buffers from resurrecting answered queue prompts after IPC-proof recovery: when `live_prompt_drift_after_preflight` / `content_ours_snapshot_next_cycle` recovery commits a captured response, preserve the committed queue strike state or fail closed instead of accepting stale unstruck queue heads from the editor buffer. Add regression coverage for answered free-text and pinned queue items reappearing unstruck after recovery.
 - [ ] [#p6a0] #agent-doc-bug Guard `/clear` dispatch against active-turn flooding: `/clear` may be sent only at a proven reset/supervisor handoff boundary, never repeatedly into an active tmux pane while an agent turn is running. Add turn-state/dedupe gating plus regression coverage for repeated `/clear` text being injected during an active response, while preserving the intended focused-cycle supervisor clear-and-continue behavior.
 - [ ] [#mbd4] #agent-doc-bug Dogfood IPC issue surfacing in session docs: when an operator types into this document's queue during a live agent-doc turn and editor IPC degrades, times out, ACK mismatches, retries, falls back, or makes a reconnect/stale-buffer decision, append a visible note to the current session exchange immediately with issue class, affected component, recovery path, and ops.log marker so the session document itself captures the IPC bug.
 - [ ] [#qstrikework] #agent-doc-bug Prevent queue items from being struck unless the current cycle proves that exact head was worked: the response quotes the exact free-text head, or a --done/--pending-gate/--review-resolve targets the backing id. Add regression coverage for interrupted finalize recovery where a later operator-verify or free-text head is auto-quoted/struck while the response only repairs an earlier prompt.

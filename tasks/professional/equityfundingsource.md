@@ -25,7 +25,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-completed
+complete
 <!-- /agent:status -->
 
 ## Exchange
@@ -33,60 +33,116 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260622-194330.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260622-234611.md`*
 
 Compacted content:
-❯ - Archived 18 response topic(s): hide wiring instructions until lender selected; deploy; wiring instructions still visible + deploy; 15 more
+❯ - Archived 4 response topic(s): Available Deals missing; audit rows + due-diligence packet; were the two Available Deals deleted?; 1 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
-### Re: optional admin-created passwords + deploy — gpt-5
+### Re: production deletion logs — gpt-5
 
 > **Queue prompt:**
 >
-> The admin create user flow should make the temporary password optional. The new user should set their own password.
+> Look in the production logs. Are there any deletion events that occurred in the production logs?
 
-> **Queue prompt:**
->
-> deploy
+Yes, but only one clear domain-level deletion event showed up, and it is older than the two missing Available Deals: production `tmo_cache_change_logs` has one `operation='deleted'` row for `entity_type='loan'`, `source_id='TST042'`, `mode='efs'`, created at `2026-06-08 15:08:43 UTC`.
 
-Implemented and deployed. The admin Create user dialog now labels `Temporary Password` as optional. If an admin leaves it blank, the backend creates the user with an empty `password_hash`, sends the existing one-time sign-in link, and the existing first-time account-completion gate forces the new user to set their own password before entering the portal. If the setup email cannot be sent, the user is still created, the unsent token is expired, and the admin gets a warning to use `Send login link` later.
+For the two missing Available Deals we have been tracing (`FTM631` and `GQI751`), I did not find a production log record proving that either one was deleted. The stronger evidence is still that their EFS-local `loans` rows are gone while TMO cache still has active `Application Received` loan records for them.
 
-The manual `Send login link` action now uses the same helper and also expires an unsent token on delivery failure, so a failed email does not leave a recent inactive setup link blocking retry.
+What I found in production logs/audit sources:
 
-Changed paths:
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/user_management/index.ts`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/user_management.tsx`
-- `src/equityfundingsource-dev/tests/admin-dashboard.test.ts`
-- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
-- `src/equityfundingsource-dev` parent submodule pointer
+- App DB fallback logs: `loan_activity_logs` has no rows matching delete text/kinds. The newer durable `audit_logs` table is not present in production yet (`no such table: audit_logs`), so it could not have preserved the missing-row deletion evidence.
+- TMO cache change log: exactly one delete event exists in the current cache log set: `TST042` at `2026-06-08 15:08:43 UTC`.
+- Cloudflare account audit logs: in the `2026-06-20T00:00:00Z` to `2026-06-22T23:30:00Z` window, `raw_method=DELETE` returned one Cloudflare control-plane event: `Delete script secret` for the Worker, not a D1/app row deletion.
+- Cloudflare D1 audit logs: cursor pagination over `resource_product=d1` scanned 350 D1 API query audit rows from `2026-06-20T02:31:27.650Z` through `2026-06-22T23:06:24.279Z`. Thirteen were write-bearing (`changed_db`/`changes`/`rows_written`), but Cloudflare audit payloads do not include the SQL body, so those cannot be classified as delete vs insert/update from audit logs alone. These are Cloudflare API/D1 query audit records, not necessarily Worker-internal D1 calls.
+- Worker logs: live `wrangler tail` works and captured a read-only `GET /admin/pipeline` request, but historical persisted Worker log queries through Workers Observability returned zero events for the checked windows. Cloudflare docs distinguish real-time logs from stored Workers Logs: real-time logs do not store history, while Query Builder searches stored Workers Logs. Sources: https://developers.cloudflare.com/workers/observability/logs/real-time-logs/ and https://developers.cloudflare.com/workers/observability/query-builder/ . Cloudflare Audit Logs are account/API/dashboard action logs, not app-domain audit logs: https://developers.cloudflare.com/fundamentals/account/account-security/audit-logs/ .
 
-Commands:
-- `bun test tests/admin-dashboard.test.ts`
-- `bun test tests/admin-dashboard.test.ts tests/email-login.test.ts tests/invite-autologin-wiring.test.ts tests/auth.test.ts`
-- `git diff --check`
-- `make check`
-- `gh run list --workflow CI --limit 1`
-- `git push origin main` in `src/equityfundingsource-dev`
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` before and after deploy
-- `make deploy`
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
+So the direct answer is: yes, production has one recorded loan deletion event, `TST042` on June 8. No, I did not find a production deletion log for the two missing Available Deals (`FTM631`, `GQI751`). The absence is not definitive because the durable app audit table is not deployed in production and the historical Worker log query path is returning no stored invocation events.
 
-Verification: focused admin/auth suites passed. Full `make check` passed with 1122 tests plus app and Worker builds; the suite still logs the intentional non-fatal `d1 down` outbox test. GitHub still has no workflow named `CI`, so there was no CI run to inspect. Remote D1 reported `No migrations to apply` before and after deployment, and the live Worker root returned HTTP `200`.
+Changed paths: none outside the agent-doc session document; no EFS code or production data was changed.
 
-Commits:
-- EFS submodule: `fed7c2f` (`fix(admin): make created-user passwords optional`) pushed to `origin/main`.
-- Parent local pointer: `df101d29d` (`chore: update efs submodule for optional passwords`) committed in the current divergent parent worktree.
-- Parent remote pointer: `40bda6d55` (`chore: update efs submodule for optional passwords`) pushed to parent `origin/main` from a clean temporary worktree, so unrelated parent local divergence/dirty files were not touched.
+Commands: `agent-doc reset --from-current ...`; `agent-doc preflight ...`; `agent-doc plan`; `tsift status`; `tsift status --fix`; `tsift --envelope session-review ...`; Cloudflare Observability API checks via `bun -e`; Cloudflare Audit Logs API checks via `bun -e`; `bun ./bin/cf-wrangler.ts tail -c ../../wrangler.toml --format json`; read-only `curl` to `/admin/pipeline`; read-only `bun ./bin/cf-wrangler.ts d1 execute ...` queries against `audit_logs`, `loan_activity_logs`, `tmo_cache_change_logs`, and `sqlite_master`; targeted `rg`/`sed` review of the delete handlers and TMO delete helper.
 
-Deploy: activated Worker version `5b272145-5b9a-4bca-aa37-22a392c49670` at `https://equityfundingsource.brian-takita.workers.dev`.
+Verification: read-only production D1 queries returned one `tmo_cache_change_logs.operation='deleted'` row (`TST042`, `2026-06-08 15:08:43 UTC`), zero delete-matching `loan_activity_logs` rows, no production `audit_logs` table, one Cloudflare control-plane `DELETE` event for a Worker secret, and 13 D1 write-bearing account audit events that lack SQL bodies. Live Worker tail was verified with a fresh `/admin/pipeline` request; historical persisted Worker log queries returned zero rows.
+
+Confidence: medium. The observed log evidence is concrete, but Cloudflare's historical Worker log query path did not return stored app request events, and production lacks the durable `audit_logs` table that would make this attribution high-confidence.
 
 Escalation: none.
 
-Confidence: high.
-<!-- agent:boundary:9fd44a5f -->
+### Re: TMO sync delete risk + soft-disable trail — gpt-5 (HEAD)
+
+> **Queue prompt:**
+>
+> Could the delete event have occured from a TMO sync bug?
+>
+> **Queue prompt:**
+>
+> No record should be deleted, only disabled. Create a migration. The durable app audit table should be deployed. Do we have sufficient logging to track deletion events? The delete borrower should not cascade. No deleted records. Only disabled records. We need a trail.
+
+A scheduled TMO sync bug is unlikely to have hard-deleted the missing EFS rows. The read-side TMO sync updates local loan/deal fields and cache records; the cache delete helper only marks `tmo_cache_entities.deleted_at` and logs `tmo_cache_change_logs.operation='deleted'`. The real hard-delete risks were explicit app paths: admin loan delete, admin TMO-loan delete/bulk-delete, borrower loan delete, and admin user delete with the old borrower loan cascade chain.
+
+I changed those paths so records are disabled, not deleted:
+
+- Added `0101_soft_delete_guards.sql`, an additive D1 migration that adds `disabled_at`, `disabled_by_user_id`, and `disabled_reason` metadata, plus `disabled_route` on loans.
+- Added D1 triggers that abort hard deletes on `users`, `loans`, and `investment_deals`, so deleting a borrower cannot cascade into loans/deals.
+- Changed admin loan, TMO-loan, borrower loan, and admin user delete handlers to write audit rows and update disable metadata/status instead of issuing hard deletes or TMO `DeleteLoan` calls.
+- Changed deal rows to disable by `disabled_at` metadata, while active deal lists filter disabled deals out without changing the existing checked deal status values.
+- Kept app audit insertions durable now that `0100_audit_logs.sql` is deployed; audit insert failures are logged instead of masking the primary disable operation.
+- Updated the admin UI copy from delete to disable and updated docs/spec tests to require row preservation and audit trails.
+
+Logging is sufficient going forward for these app paths: loan disables write `loan_disabled` / `borrower_loan_disabled`, user disables write `user_disabled`, TMO-cache orphan detection still writes app audit rows, and production now has the durable `audit_logs` table. It is not retroactive for the previously missing rows because that table was not deployed at the time.
+
+Deployed production changes:
+
+- Applied remote D1 migrations `0100_audit_logs.sql` and `0101_soft_delete_guards.sql`.
+- Deployed Worker version `3c6745a6-d281-458e-a937-d25c203c5cc9` to `https://equityfundingsource.brian-takita.workers.dev`.
+- Verified remote schema contains `audit_logs`, `prevent_users_hard_delete`, `prevent_loans_hard_delete`, and `prevent_investment_deals_hard_delete`.
+
+EFS commit: `aa4cf71 fix: disable loans and users instead of deleting`, pushed to `origin/main`.
+
+Changed paths:
+
+- `app/equityfundingsource/migrations/0101_soft_delete_guards.sql`
+- `app/equityfundingsource/lib/admin/repo.ts`
+- `app/equityfundingsource/lib/admin/loan_management/index.ts`
+- `app/equityfundingsource/lib/admin/user_management/index.ts`
+- `app/equityfundingsource/lib/borrower/loans/index.ts`
+- `lib/ui--browser--efs/portal/admin/loans.tsx`
+- `lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `docs/business-logic.md`
+- `docs/current_progress.md`
+- `tests/admin-pipeline.test.ts`
+- `tests/portal-table-dialog.test.ts`
+
+Verification:
+
+- `bun test tests/admin-pipeline.test.ts --test-name-pattern "loan disable and TMO-cache orphaning"`
+- `bun test tests/admin-pipeline.test.ts --test-name-pattern "disable actions|loan disable"`
+- `bun test tests/portal-table-dialog.test.ts --test-name-pattern "admin loan dialogs use PortalModal"`
+- `bun test tests/admin-deal-publish-gate.test.ts`
+- `bun run cf:d1:migrate:local`
+- `make check` — 1,142 tests passed, app build passed, worker build passed.
+- `make deploy` — final deploy succeeded with no pending migrations.
+- `bun run cf:d1:migrations:list:remote` — no migrations to apply.
+- `curl /` returned `200`; `curl /admin` returned `303` through Access.
+- Remote D1 schema query confirmed the audit table and delete-prevention triggers.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for this repo.
+
+Confidence: high for preventing future hard deletes through these app/DB paths. It does not prove the historical missing rows were caused by one specific actor because the durable app audit table was not present then.
+
+Escalation: none.
+<!-- agent:boundary:44b5ab1f -->
 <!-- /agent:exchange -->
 ###
 <!--
+- Admin loan delete: /api/admin/loans/:id
+- Admin bulk loan delete: /api/admin/loans/bulk-delete
+- Admin TMO loan delete: /api/admin/tmo-loans/:loan_number
+- Admin TMO bulk delete: /api/admin/tmo-loans/bulk-delete
+- Borrower self-delete: /api/borrower/loans/:id
+- Admin user delete: /api/admin/users/:id, because loans.user_id cascades from users, then investment_deals.loan_id
+  cascades from loans
+---
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 ---
 After 20:30
@@ -95,7 +151,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~The admin create user flow should make the temporary password optional. The new user should set their own password.~~
+- ~~Could the delete event have occured from a TMO sync bug?~~
+- We should log all web requests, api calls, migrations, etc. in the application logs.
+- ~~No record should be deleted, only disabled. Create a migration. The durable app audit table should be deployed. Do we have sufficient logging to track deletion events? The delete borrower should not cascade. No deleted records. Only disabled records. We need a trail.~~ — auto-struck: answered this cycle (#ftstrike)
 - deploy
 <!-- /agent:queue -->
 

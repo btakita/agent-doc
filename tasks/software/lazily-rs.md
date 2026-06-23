@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -315,7 +315,26 @@ A live phase projection in the PCP lets the supervisor *notice* a cycle stuck at
 *Restated (the prior Sidecar↔PCP answer was lost to the wedged-capture closeout):* no Sidecar↔PCP IPC exists — they share only the filesystem one-way; the PCP reads the sidecar at `:1489` and never writes it (writes go to its own SQLite store). The real race is among the ~42 sidecar writers via non-atomic save — now fixed for the torn-read class; the lost-update class remains (`#lzsidecarlock`).
 
 Queue drained.
-<!-- agent:boundary:c78fe419 -->
+
+### Re: do [#lzsidecarlock] — deadlock analysis clean; plan recorded, deferred to a focused session — glm-5.2
+
+> **Queue prompt:** do [#lzsidecarlock]
+
+**This cycle: (1) `#lzsidecaratomic` installed/active; (2) `#lzsidecarlock` analyzed — safe to implement, plan recorded, deferred.**
+
+**`#lzsidecaratomic` activated.** `make install` in `src/agent-doc` → fresh `agent-doc` binary + cdylib at `~/.cargo/bin` (release-local, v0.34.42). Atomic `cycle_state::save` is now live for every CLI writer; the supervisor auto-recycles at the next idle boundary (gentle — no active-session disruption). `stale_install` warning cleared.
+
+**`#lzsidecarlock` deadlock analysis: CLEAN.** Grepping `cycle_state.rs`, **no production mutator calls another public mutator** — every nested `mark_*` / `start_preflight` call is in `#[cfg(test)]`. So a non-reentrant `flock` is deadlock-safe. Design recorded in `tasks/agent-doc/plan-cycle-state-flock.md`:
+
+- Lock a dedicated `.json.lock` **sibling**, NOT the state file — the state file is atomically *renamed* each save (inode changes), so locking it would race on the old inode and fail to exclude new writers.
+- Bounded `try_lock_exclusive` (~5s total, `fs2`) + RAII guard → no indefinite block if a writer wedges; `fcntl` advisory locks auto-release on process exit (even `kill -9`).
+- Add `let _lock = acquire_state_lock(file)?;` as the first statement of each of the ~24 public mutators that do load→mutate→save.
+- Concurrency regression test: two threads (`record_pending_done_ids` vs `mark_committed`) → assert both mutations land (serialized: the second writer loads the first's saved state).
+
+**Why deferred (not laziness):** `cycle_state` is closeout-critical — every cycle touches it. A 24-function edit surface + a brand-new lock-contention failure mode deserve a focused session with a dedicated test/review pass, not a tail-of-session rush. And it's **hardening, not live fire**: `cycle_phase_rank` already protects phase; only the ~30 non-phase fields are exposed, and only under concurrent writers (rare — codex `Stop` hook vs another writer, editor-IPC convergence vs `git::commit`, watch-daemon vs CLI). The torn-read class — the one with observable symptoms, including this session's churn — is already fixed and installed.
+
+`#lzsidecarlock` stays open in the backlog with the plan reference + the (now-finished) deadlock analysis. Queue drained.
+<!-- agent:boundary:c025578e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -324,16 +343,12 @@ Queue drained.
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Does the Sidecar <-> PCP IPC create race conditions?~~
-- ~~Would it benefit the agent-doc lifecycle if the CyclePhase were visible in the PCP? Would this visibility help to fix issues chronic to agent-doc? The PCP/Supervisor are running from `agent-doc start`.~~
-- ~~do [#lzsidecaratomic]~~
-- do [#lzsidecarlock]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzsidecarlock] [recommended] agent-doc-repo: close the lost-update window among concurrent cycle_state writers (load->mutate->save across ~42 call sites has no lock/CAS). cycle_phase_rank (:1273) guards only monotonic phase, not the ~30 non-phase fields (pending_done_ids, active_queue_heads, capture_id, file_hash...). Approach: advisory flock (fs2 is already a prod dep) or CAS on mtime/etag around the load->mutate->save window — deadlock-prone across many call sites, so centralize the pattern. Split from #lzsidecaratomic (atomic-write/torn-read half is DONE in agent-doc 647af082).
+- [ ] [#lzsidecarlock] [recommended] agent-doc-repo: close the lost-update window among concurrent cycle_state writers. Deadlock analysis DONE (tasks/agent-doc/plan-cycle-state-flock.md): NO production mutator calls another (only test code) -> non-reentrant flock is safe. Design: bounded try_lock_exclusive (~5s, fs2) + RAII guard on a dedicated .json.lock sibling (state file is atomically renamed each save -> cannot lock it directly); add `let _lock = acquire_state_lock(file)?;` to each of the ~24 public mutators in cycle_state.rs. cycle_phase_rank (:1273) guards only monotonic phase, not the ~30 non-phase fields. Hardening (not live-fire). Split from #lzsidecaratomic (DONE in agent-doc 647af082 + installed).
 <!-- /agent:backlog -->
 
 ## Review

@@ -2654,6 +2654,64 @@ fn try_postcommit_exchange_reconcile(
     }
 }
 
+/// `#pzjy` — persist a queue-to-HEAD strike repair for stale editor buffers that
+/// resurrect already-answered queue heads. Mirrors the exchange reconcile
+/// transport contract: prefer guarded editor refresh, fall back to disk.
+fn try_postcommit_queue_reconcile(
+    file: &Path,
+    reconciled: &str,
+    stale_working: &str,
+    head_sha: &str,
+    tree_sha: &str,
+) -> bool {
+    let listener_active = file
+        .canonicalize()
+        .ok()
+        .map(|canonical| {
+            let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
+            crate::ipc_socket::is_listener_active(&project_root)
+        })
+        .unwrap_or(false);
+    if listener_active && send_postcommit_editor_refresh(file, reconciled, stale_working) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "postcommit_queue_reconciled file={} head={} tree_before={} reason=stale_editor_queue_resurrection transport=editor_ipc_skipped_disk_write",
+                file.display(),
+                &head_sha[..head_sha.len().min(12)],
+                &tree_sha[..tree_sha.len().min(12)],
+            ),
+        );
+        eprintln!(
+            "[commit] postcommit_worktree_check match=false for {} — editor IPC acked HEAD queue refresh; skipping disk write (#pzjy)",
+            file.display()
+        );
+        return true;
+    }
+    match std::fs::write(file, reconciled) {
+        Ok(()) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "postcommit_queue_reconciled file={} head={} tree_before={} reason=stale_editor_queue_resurrection transport=disk",
+                    file.display(),
+                    &head_sha[..head_sha.len().min(12)],
+                    &tree_sha[..tree_sha.len().min(12)],
+                ),
+            );
+            eprintln!(
+                "[commit] postcommit_worktree_check match=false for {} — reconciled stale editor queue completions to HEAD on disk (#pzjy)",
+                file.display()
+            );
+            true
+        }
+        Err(e) => {
+            eprintln!("[commit] postcommit queue reconcile write failed: {e}");
+            false
+        }
+    }
+}
+
 fn emit_postcommit_worktree_check(file: &Path) {
     let head_doc = match show_head(file) {
         Ok(Some(head)) => head,
@@ -2676,7 +2734,9 @@ fn emit_postcommit_worktree_check(file: &Path) {
     let tree_norm = normalize_for_replay_hash(&working);
     let head_sha = crate::ops_log::content_hash(&head_norm);
     let tree_sha = crate::ops_log::content_hash(&tree_norm);
-    let matches = head_norm == tree_norm;
+    let queue_reconciled =
+        crate::write::reconcile_postcommit_queue_strikes_to_head(&working, &head_doc);
+    let matches = head_norm == tree_norm && queue_reconciled.is_none();
     crate::ops_log::log_op(
         file,
         &format!(
@@ -2750,6 +2810,23 @@ fn emit_postcommit_worktree_check(file: &Path) {
                     send_postcommit_editor_refresh(file, &head_doc, &working);
                 }
             }
+            return;
+        }
+        // #pzjy: a stale editor buffer can preserve every committed line except
+        // queue strike markers by rewriting `- ~~do [#x]~~` as `- do [#x]`.
+        // That looks like carry-forward queue work, so the lost-content repair
+        // above correctly refuses to clobber it. But accepting the buffer via
+        // the generic editor flush would resurrect already-answered work. Repair
+        // only the committed queue completion state, preserving unrelated queue
+        // additions, before the safe-flush path can run.
+        if let Some(mut reconciled) = queue_reconciled {
+            if let Some(exchange_reconciled) =
+                crate::write::reconcile_postcommit_exchange_to_head(&reconciled, &head_doc)
+            {
+                reconciled = exchange_reconciled;
+            }
+            let _ =
+                try_postcommit_queue_reconcile(file, &reconciled, &working, &head_sha, &tree_sha);
             return;
         }
         // #pcwcwarn: the carry-forward superset can be a STALE editor buffer that
@@ -6426,6 +6503,70 @@ Duplicate replay should stay live.
             fs::read_to_string(&doc).unwrap(),
             drifted,
             "ambiguous drift with pinned queue work must be preserved"
+        );
+    }
+
+    #[test]
+    fn postcommit_worktree_reconciles_stale_queue_unstrikes_before_flush() {
+        // #pzjy: a stale editor buffer can turn committed completed queue rows
+        // back into live prompts. That must not be accepted by the generic
+        // carry-forward editor flush, but unrelated new queue work must remain.
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+
+        let head_doc = "---\nagent_doc_session: test\nqueue_active: true\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: :pushpin: do [#pzjy]\n\
+            response body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:queue priority go -->\n\
+            - ~~:pushpin: do [#pzjy]~~\n\
+            - ~~plain queued report~~\n\
+            <!-- /agent:queue -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+        commit_file(root, "session.md", head_doc, "agent-doc: commit response");
+        let doc = root.join("session.md");
+
+        let stale_editor = "---\nagent_doc_session: test\nqueue_active: true\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: :pushpin: do [#pzjy]\n\
+            response body\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:queue priority go -->\n\
+            - :pushpin: do [#pzjy]\n\
+            - plain queued report\n\
+            - do [#next]\n\
+            <!-- /agent:queue -->\n\
+            <!-- agent:boundary:abc123 -->\n";
+        fs::write(&doc, stale_editor).unwrap();
+
+        emit_postcommit_worktree_check(&doc);
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("postcommit_queue_reconciled")
+                && log.contains("stale_editor_queue_resurrection"),
+            "stale queue unstrikes should take the queue reconcile path:\n{log}"
+        );
+        assert!(
+            !log.contains("postcommit_editor_save_flushed"),
+            "the generic editor flush must not accept resurrected queue heads:\n{log}"
+        );
+        let after = fs::read_to_string(&doc).unwrap();
+        assert!(
+            after.contains("- ~~:pushpin: do [#pzjy]~~\n"),
+            "committed pinned completion should be restored:\n{after}"
+        );
+        assert!(
+            after.contains("- ~~plain queued report~~\n"),
+            "committed free-text completion should be restored:\n{after}"
+        );
+        assert!(
+            after.contains("- do [#next]\n"),
+            "new queue work should stay live:\n{after}"
         );
     }
 

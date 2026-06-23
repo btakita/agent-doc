@@ -70,6 +70,11 @@ CI was sampled but not awaited: agent-doc CI run `28051475833` was still `in_pro
 
 > **Queue prompt:**
 >
+❯ > JB `Run Agent Doc` still does not quickly submit.
+
+
+> **Queue prompt:**
+>
 > [#directchatpb2]
 
 
@@ -131,7 +136,18 @@ That keeps the next investigation scoped to the route/submit readiness path, not
 > **Recovered prompt:** JB `Run Agent Doc` still does not quickly submit.
 
 This is the same remaining JB route issue, now with auto-restart narrowed out. The queue evidence says the agent-doc turn restarts; the unresolved failure is prompt submission after readiness. I am treating the restarted-turn evidence as accepted and leaving the remaining work with the existing live-submit capture items rather than adding a duplicate backlog entry.
-<!-- agent:boundary:0fc417e6 -->
+
+### Re: recovered JB submit prompt — gpt-5
+
+> **Queue prompt:**
+>
+> Turn response is overwriting parts of the previous response in an uncommitted state...so presumably during the finalize step.
+
+
+> **Recovered prompt:** `> JB Run Agent Doc still does not quickly submit.`
+
+The recovered prompt is preserved and answered as the same JB submit-latency report. Current interpretation: auto-restart does restart the agent-doc turn, so the remaining defect is after readiness, where submit either arrives late or lacks proof. No new backlog item is needed because the existing live-submit capture work already covers that narrowed failure.
+<!-- agent:boundary:7fe3f7a0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -140,6 +156,9 @@ This is the same remaining JB route issue, now with auto-restart narrowed out. T
 - ~~JB `Run Agent Doc` still does not quickly submit.~~
 - ~~auto-restart session does restart the agent-doc turn.~~
 - ~~:pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀~~
+- ~~Turn response is overwriting parts of the previous response in an uncommitted state...so presumably during the finalize step.~~
+- Immediately log IPC issues in this document's sessions for dogfooding when I type into the queue.
+- `/clear` is being incorrectly flooded into the tmux pane during a turn.
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
 - :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#tb4q]: please check logs

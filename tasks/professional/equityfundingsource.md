@@ -103,7 +103,35 @@ Source checked for the LOS portal URL: https://app.themortgageoffice.com/
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:25e9e268 -->
+
+### Re: Deploy — gpt-5
+
+> **Queue prompt:**
+>
+> ~~deploy~~ — answered this cycle (#ftstrike)
+
+Deployed the current EFS `main` Worker from a clean submodule state. EFS `origin/main` was already up to date at `e955ad1fc57332c3d4edff49a2271e0467ce1e3b`, so there were no code changes to commit or push. Parent worktree had unrelated local edits; I left them untouched.
+
+Deployment:
+- Ran the runbook-prescribed `make deploy` path.
+- Remote D1 migrations: none pending before deploy; the deploy migration step also found none.
+- Activated Worker version `90ce3391-49e5-4a52-aac4-36cff1fa68eb`.
+- Live URL: `https://equityfundingsource.brian-takita.workers.dev/`.
+
+Verification:
+- `make check` passed: 1,162 tests, app build, Worker build.
+- Pre-deploy D1 info succeeded for DB `280e1539-b940-4c59-8988-fbed63c12ac0`; Time Travel bookmark was current: `000004ee-00000000-00005093-b1bbae3446a143c42ee210c9ddc61884`.
+- Post-deploy remote migrations list: no migrations to apply.
+- Smoke test `curl ... https://equityfundingsource.brian-takita.workers.dev/` returned `200`.
+- EFS worktree remained clean.
+- `gh run list --workflow CI --limit 1` found no workflow named `CI` in EFS or parent repo.
+
+Preflight warnings were legacy review/backlog hygiene and semantic-completion candidates; none blocked this deploy.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:a9c61f06 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -123,6 +151,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

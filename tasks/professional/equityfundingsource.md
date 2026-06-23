@@ -559,7 +559,31 @@ Verification: non-destructive local inspection only; no code changed and no live
 Escalation: none.
 
 Confidence: high that this cannot be proven from public docs or local simulator tests alone; medium on the vendor behavior itself until live tenant/support validation is available.
-<!-- agent:boundary:c683a855 -->
+
+### Re: passage TMO token — gpt-5
+
+> **Queue prompt:** Does `passage equityfundingsource/TMO_API_TOKEN` not work?
+
+It does work. I verified it without printing the secret value: `passage` is installed and `passage equityfundingsource/TMO_API_TOKEN` is readable.
+
+The analogous database secret did not resolve here: `passage equityfundingsource/TMO_DATABASE` was not readable, and the `btak/equityfundingsource/...` variants I checked were not readable either. The EFS TMO wrapper needs both `TMO_API_TOKEN` and `TMO_DATABASE`, so the token alone is not enough to make a live TMO validation call through the app path.
+
+That also does not remove the side-effect concern from `#04v8`: validating cross-service LOS/LSS behavior still requires approval to create/link a lender and write funding to a disposable test loan in a real TMO tenant or sandbox. The token path answers the credential-access question; it does not by itself identify the safe database/test loan or authorize mutation.
+
+Changed paths: none.
+
+Commands run:
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc commit /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` for queue metadata drift recovery
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- Non-printing `passage` readability checks for `equityfundingsource/TMO_API_TOKEN`, `equityfundingsource/TMO_DATABASE`, and `btak/equityfundingsource/...` variants
+
+Verification: secret-path readability only; no secret values were printed, no code changed, and no live TMO API calls were made.
+
+Escalation: none.
+
+Confidence: high for the local secret-path result.
+<!-- agent:boundary:df44642f -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -105,6 +105,10 @@ Pushed commits:
 - parent repo: `648efcd2f chore: bump agent-doc and lazily submodules`.
 - `src/agent-doc`: `d8b0298e feat: route cycle state through lazily state machine` and `f76e01c5 chore: use lazily 0.12.2`.
 - `src/lazily-rs`: `36bb381 chore: release lazily v0.12.2`; crate published, tag `v0.12.2` pushed, GitHub release created.
+- If cross-process sync is needed, implement an agent-doc-specific snapshot plus event stream first, with explicit ownership and monotonic sequence/epoch checks.
+- On startup or recovery, the CPC seeds from the sidecar; after that, accepted actor events emit the sidecar snapshot/journal.
+- The sidecar remains the durable crash-recovery journal and compatibility artifact, not a peer authority.
+- The CPC/session actor owns live cycle state and accepts ordered `CycleEvent`s.
 
 Note: I left an unrelated unstaged submodule change in `agent-doc-orchestration/src/cycle_state.rs` (`#lzsidecaratomic`) untouched.
 
@@ -132,22 +136,22 @@ For `#cancelturnverify`, I accepted the operator verification and marked the bac
 > **Queue prompt:** If we merge the sidecar logic into the PCP instead of relying on the disk for IPC, would that help with agent-doc cycle reliability? If yes, let's merge sidecar logic into the PCP. Use lazily-rs new StateMachine, ThreadedStateMachine, and/or AsyncStateMachine for a cycle state machine. See [#c7j5], which was originally created in lazily-rs.md...Except, merge the Sidecar into the PCP. I want to eventually have a master State Machine for an agent document. Note that [#lzsidecaratomic] and [#lzsidecarlock] was done on agent-doc from lazily-rs.md. See lazily-rs.done.md
 
 Closeout repair after the recovered IPC-drift cycle: the preceding response already answered this queue head and rewrote `#c7j5` to the new PCP/session-actor state-machine plan at `tasks/agent-doc/plan-cycle-state-pcp-state-machine.md`. This cycle only consumes the free-text queue head against the fresh baseline and commits the resolved `#cancelturnverify` archive/queue convergence. No code changes.
-<!-- agent:boundary:33b5f2b4 -->
+<!-- agent:boundary:ac7b9efc -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- do [#c7j5]: tasks/agent-doc/plan-cycle-state-pcp-state-machine.md
+- ~~do [#c7j5]: tasks/agent-doc/plan-cycle-state-pcp-state-machine.md~~
 - Should the sidecar <-> CPC IPC use lazily-rs IPC to sync state? Should lazily-rs implement a state sync mechanism to support sidecar <-> CPC IPC state sync?
 - do tasks/agent-doc/plan-ack-mismatch-shorter-recovered-response-loss-2026-06-23.md
 - :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
 - :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#tb4q]: please check logs
+- ~~:round_pushpin: do [#arsm]~~
 - do [#qcm1verify]: Use the logs to verify.
 - do [#directchatpb2]
-- do [#arsm]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

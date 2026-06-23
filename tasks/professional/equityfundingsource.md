@@ -200,7 +200,7 @@ Verification:
 - EFS worktree is clean. `gh run list --workflow CI --limit 1` found no `CI` workflow, and `gh workflow list` returned no workflows.
 
 Escalation: none.
-<!-- agent:boundary:b9d50cad -->
+<!-- agent:boundary:07555119 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -220,7 +220,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

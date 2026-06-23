@@ -527,7 +527,39 @@ Verification: documentation/API-shape inspection only; no code changed, so no te
 Escalation: none.
 
 Confidence: medium. The endpoint split and shared `Account` field are clear in the public docs; the cross-service visibility/lookup behavior is not documented and needs tenant validation.
-<!-- agent:boundary:ce3bcc7a -->
+
+### Re: TMO cross-service validation gate — gpt-5
+
+> **Queue prompt:** do [#04v8]
+
+I cannot honestly complete `#04v8` from this environment because the requested proof requires a live TMO sandbox/tenant mutation: create or link a lender through `LSS.svc`, confirm it with `GetLender`, then attempt `LOS.svc` `AddLoanFunding`/`UpdateLoanFunding` on a test loan, or get written TMO support confirmation.
+
+I did the non-destructive checks available here:
+- Re-read the execution contract for `#04v8`.
+- Re-inspected the EFS TMO docs/code references for `NewLender`, `GetLender`, `GetLenders`, `AddLoanFunding`, and `UpdateLoanFunding`.
+- Checked this shell for visible TMO/Mortgage/EFS credential variable names without printing secret values; none were present.
+- Confirmed `src/equityfundingsource-dev` is clean on `main...origin/main`.
+
+I did not call live TMO mutation endpoints. Creating a lender or writing loan funding, even in a sandbox, needs explicit tenant credentials, a known disposable/test loan, and approval to make those external side effects.
+
+I am gating `#04v8` rather than marking it done. Unblock condition: provide or confirm a TMO sandbox/tenant, token/database configuration, and a disposable loan/test procedure, or provide written TMO support confirmation that LOS funding resolves the LSS lender/vendor master `Account`.
+
+Changed paths: none.
+
+Commands run:
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `rg -n "TMO_|themortgageoffice|AddLoanFunding|UpdateLoanFunding|NewLender|GetLender" ...`
+- `env | cut -d= -f1 | rg 'TMO|MORTGAGE|EFS'`
+- `git -C src/equityfundingsource-dev status --short --branch`
+- `agent-doc session restart-supervisor /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` (refused because the current pane is alive-busy; no force restart was used)
+
+Verification: non-destructive local inspection only; no code changed and no live TMO writes were attempted.
+
+Escalation: none.
+
+Confidence: high that this cannot be proven from public docs or local simulator tests alone; medium on the vendor behavior itself until live tenant/support validation is available.
+<!-- agent:boundary:9e049cf7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -553,13 +585,13 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#04v8] [recommended] Validate TMO cross-service lender visibility in a real TMO sandbox/tenant before relying on automated LOS funding writes: create or link a lender through `LSS.svc`, confirm `GetLender`, then attempt `LOS.svc` `AddLoanFunding`/`UpdateLoanFunding` on a test loan or get written TMO support confirmation that LOS funding resolves the LSS lender/vendor master `Account`.
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#04v8] [recommended] Validate TMO cross-service lender visibility in a real TMO sandbox/tenant before relying on automated LOS funding writes: create or link a lender through `LSS.svc`, confirm `GetLender`, then attempt `LOS.svc` `AddLoanFunding`/`UpdateLoanFunding` on a test loan or get written TMO support confirmation that LOS funding resolves the LSS lender/vendor master `Account`.
 - [/] [#apply-invite-fail-ux] Public `/apply` invite-failure UX: when the borrower invite email fails or is skipped after lead persistence, stop telling the borrower to check their inbox; show a received/follow-up message, keep the failed invite status visible to admins, and add a regression test.
 - [/] [#email-bg-outbox] Durable email delivery observability/retry: record lifecycle, secure-message, broker, lending-group, investor-interest, login-link, invite, reminder, and feedback email results in D1 with status/error/retry/dead-letter instead of relying on console-only warnings for background notifications.
 - [/] [#email-prod-ready] Email production-readiness hardening: provision a dedicated `CLOUDFLARE_EMAIL_API_TOKEN` secret with Email Sending scope, verify `BROKER_EMAIL_NOTIFICATIONS_ENABLED` if broker email is expected, add an admin/CI diagnostic that fails when production delivery would fall back to local capture, and document that `MESSAGE_EMAIL_INBOUND_SECRET` is only needed for the HTTP parsed-inbound route.

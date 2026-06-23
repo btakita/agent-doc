@@ -216,7 +216,23 @@ Verification:
 
 Confidence: medium; this is a design/backlog closeout for a cross-cutting observability feature, not implementation.
 Escalation: none.
-<!-- agent:boundary:237ea1af -->
+
+### Re: local-model queue item dispatch — gpt-5
+
+> **Queue prompt:** Allow dispatching of queue items, such as loop items, use local models.
+
+Agreed. The existing queue dispatch surface already supports `/model <tier>` as an inline command, but that only changes the model override for later harness work. The missing feature is per-item backend selection: a queue or loop item should be able to declare that it is eligible for a local-model executor, run through that backend, and still close through the same response/commit/session-check proof boundary as normal queue work.
+
+Captured this as three backlog items: `#qlm1` backend-selection syntax, `#qlm2` local-model dispatcher, and `#qlm3` safety/telemetry gates. No source files changed in this cycle.
+
+Verification:
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+- `sed -n '1,260p' src/agent-doc/src/queue_dispatch.rs`
+- `rg -n "local model|/model|queue.*model" src/agent-doc ...`
+
+Confidence: medium; existing `/model` support is confirmed, but local-model execution requires a new backend path.
+Escalation: none.
+<!-- agent:boundary:08a5ce81 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -226,7 +242,7 @@ Escalation: none.
 - ~~:pushpin: do [#pzjy]~~
 - ~~Can we have annotated queue item(s) that runs when there are no other queue items? So this would effectively be a running loop. This should also support multiple annotated loop queue items that run in a sequence loop. Also, can we have an emoji annotate which queue item is currently being run? There can be a default poll period with configurable override. Also, the loop item can intelligently schedule based on the frequency of events.~~
 - ~~How can we give agent-doc more telemetry access to identify bugs? Should we have an observer in the supervisor that takes periodic snapshots to process either with the subscription or a local model to identify bugs? Could we have an agent doc run a dedicated loop to schedule observation + bug fixes? So there would be a sidecar agent doc to this session that can observe all running project sessions to add bugs as they are seen. Could we also have a deterministic observer detect any annotated issues & deterministic patterns of issues?~~
-- Allow dispatching of queue items, such as loop items, use local models.
+- ~~Allow dispatching of queue items, such as loop items, use local models.~~ — auto-struck: answered this cycle (#ftstrike)
 - JB `Run Agent Doc` still not submitting. Can we track when this happens and automatically file a bug so I don't have to endlessly repeat myself when you fail to fix the issue? [dogfooding] Can we also have the supervisor detect if the turn started? And if the turn has not started, send Enter and continue retrying until the turn starts?
 - ~~do [#p6a0]~~
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
@@ -283,6 +299,9 @@ What are #next-steps to fix bugs?
 - [ ] [#qobs2] #agent-doc-feature Implement deterministic observer rules that scan session-check/preflight/ops-log snapshots for annotated issues and recurring failure patterns, then file deduped session-doc backlog bugs with evidence paths and stable issue fingerprints.
 - [ ] [#qobs3] #agent-doc-feature Add a sidecar observer agent-doc loop that can monitor all running project sessions from snapshot artifacts, rate-limit bug filing, avoid pane interference, and route created bug items to the correct session document or a configured observer inbox.
 - [ ] [#qobs4] #agent-doc-feature Add model-assisted observer triage as advisory-only: feed compact snapshot/context-pack handles to a subscription or local model, require deterministic evidence before auto-filing bugs, and record model provenance/confidence on suggestions.
+- [ ] [#qlm1] #agent-doc-feature Define queue item backend-selection syntax for local-model execution, separate from queued `/model <tier>` switches: support explicit per-item backend/model annotations on normal and loop queue items without changing prompt text or completion proof.
+- [ ] [#qlm2] #agent-doc-feature Implement a local-model queue dispatcher backend that can run eligible queue/loop items through a configured local model, capture stdout/structured results, and write responses through the normal agent-doc closeout boundary.
+- [ ] [#qlm3] #agent-doc-feature Add local-model dispatch safety gates and telemetry: capability checks, GPU/resource lease integration, fallback policy, provenance logs, and tests proving local-model queue items cannot be silently marked complete without a committed response/proof.
 <!-- /agent:backlog -->
 
 ## Review

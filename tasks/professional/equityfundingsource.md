@@ -38,7 +38,51 @@ complete
 Compacted content:
 ❯ - Archived 6 response topic(s): production deletion logs; TMO sync delete risk + soft-disable trail; application logging + deploy; 3 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:f9e945f8 -->
+
+### Re: Message lender textarea label — gpt-5
+
+> **Queue prompt:**
+>
+> https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance lender > Message lender has "Message EFS" as a label over the textarea. That label is contrary to the design since we are messaging the lender. Let's remove it.
+
+Removed the visible `Message EFS` label from the shared `PortalMessages` composer. The textarea now keeps an accessible name via `aria-label={`Message ${config.other_label.toLowerCase()}`}`, so the Advance lender dialog's admin-to-lender composer is no longer visibly labeled as messaging EFS while still remaining accessible.
+
+EFS commit: `f41c7ff fix: remove visible portal message composer label`, pushed to `origin/main`.
+
+Parent repo submodule pointer commit: `4d0b7ae1f chore: update equityfundingsource submodule`. I did not push the parent repo because `main` already had unrelated local commits ahead of `origin/main`, and another session committed on top of this pointer update during the cycle; pushing parent `main` from here would publish unrelated concurrent work.
+
+Changed paths:
+
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/portal_messages.tsx`
+- `src/equityfundingsource-dev/tests/portal-messages-component.test.ts`
+- `src/equityfundingsource-dev` submodule pointer in the parent repo
+
+Commands:
+
+- `tsift status`
+- `agent-doc reset --from-current /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `bun test tests/portal-messages-component.test.ts`
+- `make check`
+- `gh run list --workflow CI --limit 1`
+- `gh workflow list`
+- `git commit -m "fix: remove visible portal message composer label"` in EFS
+- `git push origin main` in EFS
+- `git commit -m "chore: update equityfundingsource submodule"` in the parent repo
+
+Verification:
+
+- `bun test tests/portal-messages-component.test.ts` — 10 tests passed.
+- `make check` — 1,156 tests passed, app build passed, Worker build passed.
+- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists in the EFS repo.
+- `gh workflow list` — no workflows listed for the EFS repo.
+- EFS status is clean on `main...origin/main` after push.
+
+Confidence: high.
+
+Escalation: none. Production was not deployed in this cycle because the queue item requested the code/design fix, not deployment.
+<!-- agent:boundary:237b5fa1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,7 +102,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance lender > Message lender has "Message EFS" as a label over the textarea. That label is contrary to the design since we are messaging the lender. Let's remove it.
+- ~~https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance lender > Message lender has "Message EFS" as a label over the textarea. That label is contrary to the design since we are messaging the lender. Let's remove it.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

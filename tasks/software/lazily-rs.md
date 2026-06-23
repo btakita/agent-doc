@@ -334,7 +334,31 @@ Queue drained.
 **Why deferred (not laziness):** `cycle_state` is closeout-critical — every cycle touches it. A 24-function edit surface + a brand-new lock-contention failure mode deserve a focused session with a dedicated test/review pass, not a tail-of-session rush. And it's **hardening, not live fire**: `cycle_phase_rank` already protects phase; only the ~30 non-phase fields are exposed, and only under concurrent writers (rare — codex `Stop` hook vs another writer, editor-IPC convergence vs `git::commit`, watch-daemon vs CLI). The torn-read class — the one with observable symptoms, including this session's churn — is already fixed and installed.
 
 `#lzsidecarlock` stays open in the backlog with the plan reference + the (now-finished) deadlock analysis. Queue drained.
-<!-- agent:boundary:c025578e -->
+
+
+### Re: next-steps — state machines are healthy; one real MSRV gap — glm-5.2
+
+> **Prompt (#ygqv):** What are #next-steps to fix lazily-rs bugs...particularly with the state machines.
+
+**Headline: the state-machine code has no bugs.** I verified rather than assumed it — ran the full state-machine suite (11 `StateMachine` + 12 `ThreadSafeStateMachine` + async, all green) and traced the one path that looked wrong.
+
+**The suspected reentrancy bug is not reachable.** `on_transition` holds the `prev` borrow/lock across the user `handler` (`state_machine.rs:141`, `:291`), which *looks* like a panic/deadlock if the handler calls `send()` on the same machine. It isn't: every backend guards recursive flushes — `flushing_effects` early-return at `src/context.rs:738` and `src/thread_safe.rs:2709`; async defers via `tokio::spawn` at `src/async_context.rs:1157`. A re-entrant `send` only *schedules* the next effect run; it executes after the current handler returns and the guard drops. No panic, no deadlock.
+
+**Rest of the state-machine surface checked, all correct:** handler skips on registration (identical `if let Some(..) &&` gating across all 3 variants), `send` returns `true` for `Some(equal_state)` while `PartialEq` suppresses invalidation, `state_is` eagerness, `Clone` (Arc-clone transition + `Copy` handle), `Send/Sync` bounds, disposal semantics. Naming is uniformly `StateMachine` — the `Machine<S,E>` references in this doc's older entries are pre-rename history (`src/lib.rs:114` exports only `StateMachine`; zero `Machine` hits in src/tests/examples/benches).
+
+**The one real bug → `#lzmsrv` (MSRV portability).** `Cargo.toml` declares `edition = "2024"` but **no `rust-version`**, while the crate uses `let_chains` everywhere (`context.rs:376`, `async_context.rs:1044`, `state_machine.rs:142`). `let_chains` stabilized in Rust **1.88**. A downstream crate pinning `rust-version = "1.85"` (the edition floor) resolves lazily silently, then fails with `let_chains are unstable`. Fix: add `rust-version = "1.88"`.
+
+**Minor cosmetic → `#lzdisposedrain`.** Single-threaded `Context::dispose_effect` (`context.rs:676`) clears `scheduled_effects` but doesn't drain `pending_effects`; the thread-safe variant does (`thread_safe.rs:2578`). Stale entries are skipped harmlessly by `effect_should_run` — cosmetic, but a one-liner for backend parity.
+
+**Everything else open is feature/integration, not bugs.** The 4 review items are `#kb9b` (lazily-py publish), `#kabc` (LinkedIn post), `#h6qb` (WebRTC cross-host e2e — operator-only live run), `#xccx` (Holons — blocked on operator answers). No `TODO`/`FIXME`/`BUG` markers anywhere in `src/`; all `unsafe` is gated on prior `TypeId` asserts.
+
+**Next-steps (priority order):**
+1. `#lzmsrv` — declare MSRV (the only real bug; one line in `Cargo.toml`).
+2. `#lzdisposedrain` — drain `pending_effects` in single-threaded `dispose_effect` (cosmetic parity).
+3. Advance operator-gated review (`#h6qb` live WebRTC run, `#xccx` Holons answers) — this is the real forward progress, none of it a bug fix.
+
+**Top of backlog: `#lzmsrv`.** `#ygqv` answered → done.
+<!-- agent:boundary:ddc9161a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -348,7 +372,8 @@ Queue drained.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzsidecarlock] [recommended] agent-doc-repo: close the lost-update window among concurrent cycle_state writers. Deadlock analysis DONE (tasks/agent-doc/plan-cycle-state-flock.md): NO production mutator calls another (only test code) -> non-reentrant flock is safe. Design: bounded try_lock_exclusive (~5s, fs2) + RAII guard on a dedicated .json.lock sibling (state file is atomically renamed each save -> cannot lock it directly); add `let _lock = acquire_state_lock(file)?;` to each of the ~24 public mutators in cycle_state.rs. cycle_phase_rank (:1273) guards only monotonic phase, not the ~30 non-phase fields. Hardening (not live-fire). Split from #lzsidecaratomic (DONE in agent-doc 647af082 + installed).
+- [ ] [#lzmsrv] [recommended] lazily-rs: declare MSRV in Cargo.toml. Crate declares edition = "2024" but no rust-version, while it uses let_chains pervasively (context.rs:376, async_context.rs:1044, state_machine.rs:142) which stabilized in Rust 1.88. A downstream crate pinning rust-version = "1.85" (the edition floor) resolves lazily silently then fails to compile with "let_chains are unstable". One-line fix: add rust-version = "1.88" to Cargo.toml.
+- [ ] [#lzdisposedrain] [recommended] lazily-rs: single-threaded Context::dispose_effect (src/context.rs:676) clears scheduled_effects but does not drain pending_effects, unlike the thread-safe variant (src/thread_safe.rs:2578). Stale entries are skipped harmlessly by effect_should_run so this is cosmetic, but add the missing remove_pending_effect call for backend parity.
 <!-- /agent:backlog -->
 
 ## Review
@@ -363,6 +388,7 @@ Queue drained.
 ## Icebox
 
 <!-- agent:icebox -->
+- [ ] [#lzsidecarlock] [recommended] agent-doc-repo: close the lost-update window among concurrent cycle_state writers. Deadlock analysis DONE (tasks/agent-doc/plan-cycle-state-flock.md): NO production mutator calls another (only test code) -> non-reentrant flock is safe. Design: bounded try_lock_exclusive (~5s, fs2) + RAII guard on a dedicated .json.lock sibling (state file is atomically renamed each save -> cannot lock it directly); add `let _lock = acquire_state_lock(file)?;` to each of the ~24 public mutators in cycle_state.rs. cycle_phase_rank (:1273) guards only monotonic phase, not the ~30 non-phase fields. Hardening (not live-fire). Split from #lzsidecaratomic (DONE in agent-doc 647af082 + installed).
 - [ ] [#pw26] #lzmapspike=[recommended] Spike: lazily-rs as a host-side reactive derivation + Snapshot/Delta UI-sync cache for MAP holons (evomimic/map-holons, Holochain). Model committed holons as reactive graph nodes; derived holon views/relationships as memoized computeds that recompute only on upstream change; stream lazily-ipc Snapshot/Delta to the TS UI / DAHN graph visualizers. Native host/ layer only (AsyncContext needs tokio; zomes are wasm32/short-lived/single-threaded so in-zome use is limited to single-threaded Context). Do NOT use lazily distributed/signaling — Holochain DHT owns P2P/persistence/validation/consensus. Gate on MAP host-layer actually recomputing derived holon state.
 <!-- /agent:icebox -->
 

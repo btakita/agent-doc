@@ -6683,6 +6683,44 @@ Body\n\
             "marker suppresses guard"
         );
     }
+
+    #[test]
+    fn free_text_queue_marker_does_not_suppress_bare_heading_residue() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let head = "I'm getting lint rejected for too long. Is 2300 words too long? Why";
+        let with_head = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue auto -->\n- {head}\n<!-- /agent:queue -->\n",
+            ),
+            head = head,
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), &with_head);
+
+        let interrupted = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n<!-- /agent:queue -->\n",
+            "<!-- no-free-text-queue-head-guard -->\n",
+            "###\n",
+        );
+        fs::write(&doc, interrupted).unwrap();
+        crate::snapshot::save(&doc, interrupted).unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("bare `###` heading"), "{message}");
+                assert!(message.contains("interrupted closeout"), "{message}");
+                assert!(message.contains("agent-doc write --commit"), "{message}");
+                assert!(message.contains("agent-doc session-check"), "{message}");
+            }
+            other => panic!("expected bare-heading residue interruption, got {other:?}"),
+        }
+    }
+
     #[test]
     fn queue_contamination_guard_flags_response_prose_in_queue() {
         let tmp = tempfile::TempDir::new().unwrap();

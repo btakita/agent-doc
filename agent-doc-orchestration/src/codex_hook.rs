@@ -232,6 +232,10 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             )? {
                 return Ok(response);
             }
+            if let Some(response) = active_session_prompt_requires_writeback(&file, &state, input)?
+            {
+                return Ok(response);
+            }
             clear_state_across_roots(&cleanup_roots, &loaded_root, &input.session_id)?;
             Ok(StopResponse::Continue { continue_: true })
         }
@@ -321,6 +325,58 @@ fn is_committed_prompt_diff_interruption(reason: &str) -> bool {
             ))
         && (reason.contains("no new agent-doc cycle started")
             || reason.contains("without reopening the binary-owned write/commit path"))
+}
+
+fn active_session_prompt_requires_writeback(
+    file: &Path,
+    state: &SessionState,
+    input: &StopInput,
+) -> Result<Option<StopResponse>> {
+    let Some(prompt) = active_session_prompt_or_queue_head(file)? else {
+        return Ok(None);
+    };
+    let capture_note = if input.stop_hook_active {
+        String::new()
+    } else {
+        capture_assistant_text(file, state, input)
+    };
+    Ok(Some(StopResponse::Block {
+        decision: "block",
+        reason: format!(
+            "agent-doc Stop hook found active session-document work for {disp} that has not crossed the binary-owned write boundary. Active prompt: {prompt:?}. Continue THIS turn in-pane and persist with `agent-doc finalize {disp}` or `agent-doc write --commit {disp}`, then run `agent-doc session-check {disp}`. Do not send the final answer yet.{capture_note}",
+            disp = file.display(),
+            prompt = first_nonempty_prompt_line(&prompt),
+        ),
+    }))
+}
+
+fn active_session_prompt_or_queue_head(file: &Path) -> Result<Option<String>> {
+    if let Some(prompt) = crate::session_check::unresolved_exchange_prompt(file)? {
+        return Ok(Some(prompt));
+    }
+    let content = match std::fs::read_to_string(file) {
+        Ok(content) => content,
+        Err(_) => return Ok(None),
+    };
+    Ok(first_active_queue_prompt_in_content(&content))
+}
+
+fn first_active_queue_prompt_in_content(content: &str) -> Option<String> {
+    let components = crate::component::parse(content).ok()?;
+    let queue = components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    let entries = crate::queue::parse(queue.content(content)).ok()?;
+    let prompt = crate::queue::prompts(&entries)
+        .into_iter()
+        .map(|prompt| prompt.text.trim().to_string())
+        .find(|prompt| !prompt.is_empty())?;
+    if is_context_clear_prompt(&prompt)
+        || crate::queue_command::slash_command_text(&prompt).is_some()
+    {
+        return None;
+    }
+    Some(prompt)
 }
 
 fn prompt_target_from_interruption_reason(reason: &str) -> Option<String> {
@@ -1729,6 +1785,33 @@ Done.\n\
         doc
     }
 
+    fn write_manual_queue_doc(dir: &tempfile::TempDir, prompts: &[&str]) -> PathBuf {
+        let doc = dir.path().join("task.md");
+        let queue = prompts
+            .iter()
+            .map(|prompt| format!("- {prompt}\n"))
+            .collect::<String>();
+        let content = format!(
+            "---\n\
+session: sid\n\
+agent_doc_format: template\n\
+---\n\n\
+## Exchange\n\n\
+<!-- agent:exchange patch=append -->\n\
+### Re: prior — gpt-5\n\n\
+Done.\n\
+<!-- /agent:exchange -->\n\n\
+## Queue\n\n\
+<!-- agent:queue -->\n\
+{queue}\
+<!-- /agent:queue -->\n\
+<!-- no-free-text-queue-head-guard -->\n"
+        );
+        fs::write(&doc, &content).unwrap();
+        crate::snapshot::save(&doc, &content).unwrap();
+        doc
+    }
+
     fn write_nested_doc(dir: &tempfile::TempDir) -> PathBuf {
         let nested = dir.path().join("nested");
         fs::create_dir_all(nested.join(".agent-doc")).unwrap();
@@ -2032,6 +2115,123 @@ agent-doc {}\n",
             }
             other => panic!("expected committed session-check status, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn stop_blocks_direct_chat_manual_queue_response_after_recursive_guard() {
+        let dir = setup_project();
+        let doc = write_manual_queue_doc(
+            &dir,
+            &["I'm getting lint rejected for too long. Is 2300 words too long? Why"],
+        );
+        init_git_repo(dir.path(), &doc);
+        let original = fs::read_to_string(&doc).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        crate::cycle_state::mark_abandoned(
+            &doc,
+            "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "The lint failure is counting characters, not words."
+                .to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("active session-document work"), "{reason}");
+                assert!(reason.contains("2300 words"), "{reason}");
+                assert!(reason.contains("agent-doc finalize"), "{reason}");
+                assert!(reason.contains("agent-doc write --commit"), "{reason}");
+                assert!(reason.contains("agent-doc session-check"), "{reason}");
+                assert!(reason.contains("pending/capture ledger"), "{reason}");
+            }
+            other => panic!("expected direct-chat writeback block, got {other:?}"),
+        }
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(
+            !content.contains("counting characters"),
+            "chat-only answer must not be treated as document closeout"
+        );
+        let pending = crate::snapshot::pending_path_for(&doc).unwrap();
+        assert!(
+            fs::read_to_string(&pending)
+                .unwrap()
+                .contains("counting characters"),
+            "the hook should capture the replayable answer for recovery"
+        );
+    }
+
+    #[test]
+    fn stop_blocks_consecutive_direct_chat_manual_queue_answers() {
+        let dir = setup_project();
+        let doc = write_manual_queue_doc(&dir, &["Remove the max character count cap"]);
+        init_git_repo(dir.path(), &doc);
+        let original = fs::read_to_string(&doc).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        crate::cycle_state::mark_abandoned(
+            &doc,
+            "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let first = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "First direct-chat answer.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+        assert!(
+            matches!(first, StopResponse::Block { .. }),
+            "first direct-chat closeout must be blocked"
+        );
+
+        apply_user_prompt_submit(&UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-2".to_string(),
+            cwd: dir.path().display().to_string(),
+            prompt: "Remove the max character count cap".to_string(),
+        })
+        .unwrap();
+
+        let second = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-2".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Second direct-chat answer.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        match second {
+            StopResponse::Block { reason, .. } => {
+                assert!(
+                    reason.contains("Remove the max character count cap"),
+                    "{reason}"
+                );
+                assert!(reason.contains("agent-doc write --commit"), "{reason}");
+                assert!(reason.contains("agent-doc session-check"), "{reason}");
+            }
+            other => panic!("expected second direct-chat writeback block, got {other:?}"),
+        }
+        let pending = crate::snapshot::pending_path_for(&doc).unwrap();
+        let pending_body = fs::read_to_string(&pending).unwrap();
+        assert!(pending_body.contains("Second direct-chat answer."));
+        assert!(!pending_body.contains("First direct-chat answer."));
     }
 
     #[test]

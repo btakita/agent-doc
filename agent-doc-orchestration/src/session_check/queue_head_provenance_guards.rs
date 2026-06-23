@@ -323,6 +323,22 @@ pub(crate) fn check_free_text_queue_head_provenance(
     }
     let content = rc.doc_content();
     if content.contains("<!-- no-free-text-queue-head-guard -->") {
+        if free_text_queue_marker_has_bare_heading_residue(&content) {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "free_text_queue_marker_residue_fired file={} residue=bare_heading",
+                    file.display()
+                ),
+            );
+            return Ok(GuardResult::Error(format!(
+                "[session-check] INTERRUPTED: {} contains `<!-- no-free-text-queue-head-guard -->` plus a bare `###` heading, which is interrupted closeout evidence rather than committed response proof. Finish the response through `agent-doc finalize {}` or `agent-doc write --commit {}`, then run `agent-doc session-check {}`. (see #directchatpb2)",
+                file.display(),
+                file.display(),
+                file.display(),
+                file.display()
+            )));
+        }
         return Ok(GuardResult::None);
     }
     let Ok(components) = crate::component::parse(&content) else {
@@ -451,6 +467,11 @@ fn committed_queue_contains_active_free_text_head(content: &str, head: &str) -> 
         crate::write::queue_prompt_text_is_free_text(content, text)
             && normalized_free_text_queue_head_identity(text) == target
     })
+}
+
+pub(crate) fn free_text_queue_marker_has_bare_heading_residue(content: &str) -> bool {
+    content.contains("<!-- no-free-text-queue-head-guard -->")
+        && content.lines().any(|line| line.trim() == "###")
 }
 
 pub(crate) fn response_head_plausibly_answers(content: &str, head: &str) -> bool {

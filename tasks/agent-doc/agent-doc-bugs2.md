@@ -213,6 +213,40 @@ Supervisor recycle was requested for the superproject controller.
 >   doc component patcher to replace only the malformed exchange component with the complete response text while
 >   preserving the newly added queue item.
 > ```
+> • The partial IPC apply inserted only the body bullets and auto-struck the head, without the ### Re: header or queue
+>   prompt. A new queue item was also added while I was closing out; I’m going to repair the malformed closeout first,
+>   then the loop can move to the next queue head.
+> ```
+> • Session-check still fails because the exchange tail ends with the compacted Session Summary, not the response. I’m
+>   reordering the exchange so the Session Summary stays first and the completed ### Re: response is the final exchange
+>   entry.
+> ```
+
+
+> **Queue prompt:**
+>
+> :pushpin: Fix the root cause of this issue that occurred in this document.
+> ```
+> • The write recovery path hit the same stale-supervisor proof guard: the patch was delivered, but the materialized
+>   content was missing the response body. I’m checking the admin/session controls for a non-destructive way to get the
+>   supervisor onto the installed binary without interrupting this turn.
+> ```
+> • Because the malformed response is already in the exchange, I’m checking whether agent-doc repair --apply-recovery can
+>   normalize the interrupted cycle itself before I touch the component through a lower-level patch.
+>
+> • Ran agent-doc repair --apply-recovery /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+>   └ [repair] recovery [open_cycle] not auto-applied: auto-apply withheld — recovery requires a preserved response body
+>     or open-cycle resolution, not a metadata operation
+>     [repair] run: finish the response, then `agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+>     agent-doc-bugs2.md` (or `agent-doc write --commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+>     agent-doc-bugs2.md` to absorb an already-visible response)
+>
+> ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+> • The repair command will not auto-apply this state; it needs the response finished first. I’m going to use the agent-
+>   doc component patcher to replace only the malformed exchange component with the complete response text while
+>   preserving the newly added queue item.
+> ```
 
 
 > **Queue prompt:**
@@ -317,6 +351,9 @@ Commands run:
 - `agent-doc --version`
 - `cargo test` in `src/tmux-router`
 - `gh run list --workflow CI --limit 1`
+- `cargo test -p agent-doc-orchestration ready_prompt_candidate_accepts_codex_context_use_footer_without_prompt`
+- `cargo test -p agent-doc-orchestration direct_pane_enter_resubmit_retries_at_least_once_per_second`
+- `cargo test -p agent-doc-orchestration repair_materialization_requires_captured_response_block`
 
 `make check` passed in `src/agent-doc`: clippy, 4,999 nextest tests passed, 241 skipped, doctests, and closeout simulation. `make install-full` installed `agent-doc 0.34.38` and recycled two controllers. `agent-doc --version` reports `agent-doc 0.34.38`.
 
@@ -342,13 +379,12 @@ The `#98t4` implementation is done and verified: `src/agent-doc` and `src/tmux-r
 The session document closeout did not complete. `agent-doc session-check` still reports `cycle-1782174754154` stuck at `write_applied`, and the write path refuses to commit because the IDE-visible buffer for `tasks/agent-doc/agent-doc-bugs2.md` differs from disk. Ops also show live editor insert events, so I stopped instead of forcing past the data-loss guard.
 
 Current disk state leaves `#fccd` open in the queue/backlog, but the session doc changes are uncommitted. Exact unblocker: resolve the IDE buffer for `tasks/agent-doc/agent-doc-bugs2.md` so it matches disk, then continue this agent-doc cycle; the next step is rerunning the write/commit recovery and `agent-doc session-check`.
-<!-- agent:boundary:90ad8db3 -->
+<!-- agent:boundary:a7ea09ac -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~The queue prompt was duplicated multiple times in one of the previous responses. ":pushpin: Fix the root cause of this issue that occurred in this document..."~~
 ---
 :pushpin: Fix the root cause of this issue that occurred in this document.
 ```
@@ -391,7 +427,7 @@ Current disk state leaves `#fccd` open in the queue/backlog, but the session doc
 Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
 ```
 ---
-- :pushpin: do [#fccd]
+- ~~:pushpin: do [#fccd]~~
 ---
 :pushpin: Fix the root cause of this issue that occurred in this document.
 ```
@@ -417,7 +453,7 @@ Error: authoritative actor record for tasks/software/agent-loop.md is bound to h
   preserving the newly added queue item.
 ```
 ---
-- :pushpin: do [#98t4]
+- ~~:pushpin: do [#98t4]~~
 <!-- /agent:queue -->
 <!--
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.

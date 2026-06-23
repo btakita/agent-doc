@@ -335,7 +335,39 @@ Verification: live D1 metadata returned database `280e1539-b940-4c59-8988-fbed63
 Confidence: high that Cloudflare Time Travel backups are available for the live D1 database; medium that no separate long-retention export job exists, based on repo/session search rather than Cloudflare dashboard configuration.
 
 Escalation: none.
-<!-- agent:boundary:becc01c8 -->
+
+### Re: Time Travel check — gpt-5
+
+> **Queue prompt:**
+>
+> Did we use Timetravel incorrectly? It seems that the deal data is from the past.
+
+I do not see evidence that we used D1 Time Travel incorrectly or restored production to a past point.
+
+The Time Travel commands I found were `d1 time-travel info` calls and help text checks. `time-travel info --timestamp ...` only returns a bookmark for a timestamp; it does not query through the application, change current reads, or mutate the database. I did find `time-travel restore ... --help` / `time-travel restore --help` command history, but no executed restore against `equityfundingsource` and no restore-by-bookmark command.
+
+The current production D1 state also does not look like a whole-database rollback:
+
+- `users` still has recent state: 14 rows, with `MAX(updated_at)=2026-06-23 01:09:10 UTC`.
+- `audit_logs` exists and has rows at `2026-06-23 00:33:43 UTC`.
+- latest remote migrations include `0100_audit_logs.sql` and `0101_soft_delete_guards.sql`.
+- `tmo_cache_entities` for loans still has 12 cached loan records, 11 active, with `MAX(updated_at)=2026-06-22 20:00:23 UTC`.
+- `loans` is still empty and `investment_deals` is still empty.
+
+So the “deal data is from the past” signal is more likely old TMO/cache/business data surfacing, not a Time Travel restore. The old TMO cache rows can carry historical loan/application values even while the local EFS `loans` and `investment_deals` tables are empty. That matches the earlier diagnosis: local EFS deal rows are gone/orphaned, while TMO cache still has active-looking older records.
+
+I did not run any restore, export, or write operation in this cycle. I only ran read-only production D1 `SELECT` checks and command-history searches.
+
+Changed paths: session document only; no EFS code or production data was changed.
+
+Commands: `tsift status`; `tsift index --workspace .`; `agent-doc preflight ...`; `agent-doc plan ...`; `agent-doc read ...`; `tsift --envelope context-pack ...`; targeted `rg`/`jq` searches for Time Travel restore usage; `bun ./app/equityfundingsource/bin/cf-wrangler.ts d1 time-travel info ... --json`; read-only remote D1 `SELECT` queries against `audit_logs`, `users`, `loans`, `investment_deals`, `d1_migrations`, and `tmo_cache_entities`.
+
+Verification: current D1 bookmark lookup succeeded; all production D1 queries reported `changed_db=false` and `rows_written=0`; current D1 has recent user/audit/migration/cache evidence but still has zero `loans` and zero `investment_deals`; command-history search found Time Travel info/help usage, not a production restore command.
+
+Confidence: high that no agent-run Time Travel restore caused the current state. Medium-high that the past-looking deal data is stale/orphaned TMO cache rather than D1 rollback; proving the original row-loss cause remains limited by the missing pre-fix app audit trail.
+
+Escalation: none.
+<!-- agent:boundary:334d612b -->
 <!-- /agent:exchange -->
 ###
 <!--

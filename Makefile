@@ -9,6 +9,7 @@ LOCAL_INSTALL_TARGET_DIR ?= target/local-install
 LOCAL_LINKER ?= $(shell if command -v mold >/dev/null 2>&1; then printf '%s' mold; elif command -v ld.lld >/dev/null 2>&1 || command -v lld >/dev/null 2>&1; then printf '%s' lld; fi)
 LOCAL_RUSTFLAGS ?= $(if $(LOCAL_LINKER),-C link-arg=-fuse-ld=$(LOCAL_LINKER),)
 LOCAL_CARGO_ENV = CARGO_INCREMENTAL=1
+CRATES_IO_PUBLISH_ORDER = tmux-router agent-doc-core agent-doc-markdown-ast agent-doc-sqlite agent-doc-orchestration agent-doc
 ifneq ($(strip $(LOCAL_RUSTFLAGS)),)
 LOCAL_CARGO_ENV += RUSTFLAGS="$(LOCAL_RUSTFLAGS)"
 endif
@@ -60,14 +61,21 @@ tmux-ci:
 clippy:
 	cargo clippy -- -D warnings
 
-# Verify Cargo.toml and pyproject.toml versions match
+# Verify Cargo.toml, pyproject.toml, and internal publish-unit versions match
 version-sync:
 	@cargo_ver=$$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
 	pypi_ver=$$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
 	if [ "$$cargo_ver" != "$$pypi_ver" ]; then \
 		echo "ERROR: version mismatch — Cargo.toml=$$cargo_ver pyproject.toml=$$pypi_ver"; \
 		exit 1; \
-	fi
+	fi; \
+	for manifest in agent-doc-core/Cargo.toml agent-doc-markdown-ast/Cargo.toml agent-doc-sqlite/Cargo.toml agent-doc-orchestration/Cargo.toml; do \
+		crate_ver=$$(grep '^version' "$$manifest" | head -1 | sed 's/.*"\(.*\)"/\1/'); \
+		if [ "$$cargo_ver" != "$$crate_ver" ]; then \
+			echo "ERROR: version mismatch — Cargo.toml=$$cargo_ver $$manifest=$$crate_ver"; \
+			exit 1; \
+		fi; \
+	done
 
 # Bump JB plugin patch version and build both zips
 bump-plugin:
@@ -145,7 +153,35 @@ wheel:
 
 # Publish to crates.io
 publish-crate:
-	cargo publish
+	@set -e; \
+	for crate in $(CRATES_IO_PUBLISH_ORDER); do \
+		if [ "$$crate" = "tmux-router" ]; then \
+			manifest="../tmux-router/Cargo.toml"; \
+			publish_cmd="cargo publish --manifest-path ../tmux-router/Cargo.toml"; \
+		else \
+			manifest="Cargo.toml"; \
+			publish_cmd="cargo publish -p $$crate"; \
+		fi; \
+		version=$$(awk 'found && /^version[[:space:]]*=/ { gsub(/"/, "", $$3); print $$3; exit } /^\[package\]/ { found=1 }' "$$manifest"); \
+		if cargo search "$$crate" --limit 5 | grep -Eq "^$$crate = \"$$version\""; then \
+			echo "[publish-crate] $$crate $$version already exists on crates.io; skipping"; \
+			continue; \
+		fi; \
+		echo "[publish-crate] publishing $$crate $$version"; \
+		$$publish_cmd; \
+		echo "[publish-crate] waiting for $$crate $$version in crates.io index"; \
+		for attempt in $$(seq 1 60); do \
+			if cargo search "$$crate" --limit 5 | grep -Eq "^$$crate = \"$$version\""; then \
+				echo "[publish-crate] $$crate $$version visible in crates.io index"; \
+				break; \
+			fi; \
+			if [ "$$attempt" = "60" ]; then \
+				echo "ERROR: $$crate $$version did not appear in crates.io index after publish"; \
+				exit 1; \
+			fi; \
+			sleep 5; \
+		done; \
+	done
 
 # Publish to PyPI
 publish-pypi:

@@ -1,11 +1,10 @@
 [package]
 name = "agent-doc-orchestration"
-version = "0.1.0"
+version = "0.34.38"
 edition = "2024"
 description = "Orchestration layer for agent-doc (routing, git, sessions, IPC, supervision, sync) — sits between the CLI and agent-doc-core"
 license = "MIT"
 repository = "https://github.com/btakita/agent-doc"
-publish = false
 
 [lib]
 name = "agent_doc_orchestration"
@@ -17,10 +16,10 @@ name = "agent_doc_orchestration"
 test-support = []
 
 [dependencies]
-agent-doc-core = { path = "../agent-doc-core" }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite" }
-lazily = { path = "../../lazily-rs" }
+agent-doc-core = { path = "../agent-doc-core", version = "0.34.38" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.38" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.38" }
+lazily = "0.12.0"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 fs2 = "0.4"
@@ -36,9 +35,9 @@ tempfile = "3"
 zip = "8"
 uuid = { version = "1", features = ["v4"] }
 notify = "8"
-agent-kit = { path = "../../agent-kit", version = "0.4.0", features = ["hooks"] }
+agent-kit = { version = "0.4.1", features = ["hooks"] }
 instruction-files = "0.3"
-tmux-router = "0.3.10"
+tmux-router = { path = "../../tmux-router", version = "0.3.11" }
 pulldown-cmark = "0.13"
 regex = "1"
 yrs = "0.27"

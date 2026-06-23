@@ -146,15 +146,10 @@ pub struct ControllerBinaryIdentity {
     pub modified_nanos: u32,
 }
 
-/// `#orchver` — the orchestration crate's own `CARGO_PKG_VERSION` is `0.1.0`: it is an
-/// internal workspace crate that is never version-bumped in lockstep with the top-level
-/// `agent-doc` binary (currently `0.34.x`). Recording `env!("CARGO_PKG_VERSION")` directly
-/// in [`ControllerBinaryIdentity`] therefore stamped EVERY controller/supervisor as
-/// "launched as 0.1.0" in the stale-binary warning (`supervisor_stale_warning_message`),
-/// which misled the operator into thinking an ancient build was running when only the
-/// len/mtime comparison actually drives staleness. The binary crate injects its real
-/// `CARGO_PKG_VERSION` here once at startup; library-only callers / tests fall back to the
-/// orchestration crate version.
+/// `#orchver` — stamp the binary crate's `CARGO_PKG_VERSION` into controller identity.
+/// This keeps stale-binary warnings tied to the installed `agent-doc` executable even if
+/// an internal crate version diverges in a future packaging layout. Library-only callers
+/// and tests fall back to the orchestration crate version.
 static BINARY_VERSION: OnceLock<String> = OnceLock::new();
 
 /// Record the real top-level `agent-doc` binary version for identity reporting. Called once

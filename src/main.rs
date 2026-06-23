@@ -2129,8 +2129,7 @@ fn main() -> anyhow::Result<()> {
     init_tracing();
 
     // `#orchver` — stamp the real top-level binary version into controller/supervisor
-    // identities so the stale-binary warning reports the true version instead of the
-    // orchestration crate's perennial `0.1.0`.
+    // identities so the stale-binary warning reports the installed executable version.
     agent_doc_orchestration::project_controller::set_binary_version(env!("CARGO_PKG_VERSION"));
 
     let raw_args: Vec<OsString> = std::env::args_os().collect();

@@ -154,7 +154,7 @@ editors/
 5. **No operator gate on agent-doable steps (`#deploy-just-do-it`):** proceed straight through steps 6-10 without asking. The only operator-gated step is a live human eyeball of the changed behavior in a real editor/pane — record it as a non-blocking `[operator-verify]` follow-up; it never blocks the build/install/push/publish/recycle.
 6. Branch → PR → squash merge to main (or commit + push to main directly in this dogfooding repo)
 7. Tag: `git tag v<version> && git push origin v<version>`
-8. `cargo publish` (crates.io)
+8. `make publish-crate` (crates.io; publishes dependency graph in order)
 9. `maturin publish` (PyPI)
 10. `gh release create v<version> --generate-notes` with prebuilt binary (GitHub Release)
 

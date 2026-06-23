@@ -29,6 +29,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check out tmux-router path dependency
+        run: git clone --depth 1 https://github.com/btakita/tmux-router ../tmux-router
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -49,6 +52,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check out tmux-router path dependency
+        run: git clone --depth 1 https://github.com/btakita/tmux-router ../tmux-router
 
       - name: Build sdist
         uses: PyO3/maturin-action@v1

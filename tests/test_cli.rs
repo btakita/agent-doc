@@ -1667,19 +1667,51 @@ fn test_cli_audit_docs_reports_missing_tree_path() {
 }
 
 #[test]
-fn test_manifest_uses_local_agent_kit_path_for_direct_install() {
+fn test_manifest_uses_publishable_dependency_contract() {
     let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
     let manifest = fs::read_to_string(manifest_path).unwrap();
     let parsed: toml::Value = toml::from_str(&manifest).unwrap();
-    let dependency = parsed["dependencies"]["agent-kit"].as_table().unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    let agent_kit = dependencies["agent-kit"].as_table().unwrap();
 
     assert_eq!(
-        dependency.get("path").and_then(toml::Value::as_str),
-        Some("../agent-kit")
+        agent_kit.get("path").and_then(toml::Value::as_str),
+        None,
+        "published manifests must not depend on a sibling-only agent-kit path"
     );
     assert_eq!(
-        dependency.get("version").and_then(toml::Value::as_str),
-        Some("0.4.0")
+        agent_kit.get("version").and_then(toml::Value::as_str),
+        Some("0.4.1")
+    );
+
+    for crate_name in [
+        "agent-doc-core",
+        "agent-doc-markdown-ast",
+        "agent-doc-orchestration",
+    ] {
+        let dependency = dependencies[crate_name].as_table().unwrap();
+        assert!(
+            dependency
+                .get("path")
+                .and_then(toml::Value::as_str)
+                .is_some(),
+            "{crate_name} should keep a local path for workspace builds"
+        );
+        assert_eq!(
+            dependency.get("version").and_then(toml::Value::as_str),
+            Some("0.34.38"),
+            "{crate_name} must also carry a registry version for cargo publish"
+        );
+    }
+
+    let tmux_router = dependencies["tmux-router"].as_table().unwrap();
+    assert_eq!(
+        tmux_router.get("path").and_then(toml::Value::as_str),
+        Some("../tmux-router")
+    );
+    assert_eq!(
+        tmux_router.get("version").and_then(toml::Value::as_str),
+        Some("0.3.11")
     );
 }
 

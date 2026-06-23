@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -438,7 +438,7 @@ Escalation: none.
 ### Re: Queue cleanup — gpt-5
 
 Removed the answered Loan Origination lender-endpoint free-text queue head so the active queue can advance to `do [#s6y6]`.
-<!-- agent:boundary:682375c8 -->
+<!-- agent:boundary:357fe8e0 -->
 <!-- /agent:exchange -->
 ###
 <!--

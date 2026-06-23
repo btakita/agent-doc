@@ -64,13 +64,74 @@ Verification:
 - `git status --short` in `src/agent-doc` -> clean
 
 Remaining unrelated admin diagnostics: `agent-doc admin detect` still reports two stale dead-pane actor bindings for `tasks/sift.md` and `tasks/software/tsift.md`; those are orphaned bindings, not live stale supervisors and not part of the Clear Session Cache dialog path.
-<!-- agent:boundary:f7dcad79 -->
+
+### Re: bare agent-doc shell invocation — gpt-5
+
+> **Queue prompt:**
+>
+> equityfundingsource.md turn is getting IPC ack status errors
+> ```
+> • The backup answer is straightforward: Cloudflare Time Travel is active for the live D1 DB, but I found no project-
+>   managed long-retention export job. I’m writing the response now and will let agent-doc commit it.
+>
+> • Ran cat <<'RESPONSE' | agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/professional/
+>   │ equityfundingsource.md --baseline-file /home/brian/work/btakita/agent-loop/.agent-doc/
+>   │ baselines/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.md --stream --origin skill
+>   │ … +51 lines
+>   └ [write] socket IPC failed: IPC ack status error: {"type":"ack","status":"error"} — falling back to file IPC
+>     [template] pre-patch boundary 36d8e74a:equityfundingsource inserted at end of exchange
+>     … +9 lines (ctrl + t to view transcript)
+>     Error: editor IPC did not prove the write for /home/brian/work/btakita/agent-loop/tasks/professional/
+>     equityfundingsource.md; pending response retained for retry; refusing direct document write
+>
+> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+> • The second finalize hit the same editor IPC timeout and left a pending response for retry. I’m invoking preflight
+>   again because it successfully recovered the previous pending response through the normal repair-and-commit path.
+> ```
+
+
+> **Queue prompt:**
+>
+> Running `agent-doc file-name.md` directly in the CLI should return in an immediate error explaining it needs to be run within a supported harness (Codex, Claude, or Opencode). Instead, it said "Submitting to Codex..." and locks the shell. Now I cannot sync monsterrodholders.md.
+
+Implemented and shipped the direct-shell guard.
+
+Changed paths:
+- `src/agent-doc/src/main.rs`
+- `src/agent-doc/tests/run_integration.rs`
+- `src/agent-doc/specs/07-core-commands.md`
+- `src/agent-doc/specs/07-commands.md`
+- `src/agent-doc` superproject gitlink
+
+What changed: bare `agent-doc <FILE>` now checks the active harness before rewriting to `run`. Inside Codex, Claude Code, or OpenCode it keeps the harness-native behavior. In a normal shell with no supported harness env, it fails before parsing into `run`, before opening a cycle, and tells the operator to use an explicit subcommand such as `agent-doc run <FILE>`, `agent-doc route <FILE>`, or `agent-doc start <FILE>`.
+
+Verification:
+- `cargo fmt`
+- `cargo test bare_file_invocation_outside_supported_harness_fails_before_run_cycle`
+- `cargo test codex_bare_run_inside_owning_pane_with_unresolved_prompt_fails_before_pre_commit`
+- `cargo test codex_owned_pane_active_auto_queue_hands_off_without_drift`
+- `make check` -> 5002 tests passed, 241 skipped, SimWorld medium seed passed
+- `make install` -> installed `agent-doc 0.34.38` and refreshed `libagent_doc.so`
+- `env -u ... agent-doc tasks/agent-doc/agent-doc-bugs2.md` -> immediate error: bare `agent-doc <FILE>` must be run from a supported harness
+
+Commits / push:
+- agent-doc submodule: `3a8e304d` (`fix: guard bare agent-doc shell invocation`) pushed to `btakita/agent-doc main`
+- superproject pointer: `edcd0d452` (`chore: update agent-doc submodule`) pushed to `btakita/agent-loop main` from a clean temporary worktree because the local superproject `main` has a long unrelated divergence
+
+CI:
+- agent-doc `CI` run `27995577311` was still `in_progress` at closeout check.
+- superproject has no workflow named `CI`; its `Agent Doc` workflow run `27995642188` failed before runner startup. Both jobs had zero steps and GitHub annotated: recent account payments failed or the spending limit needs to be increased. Local verification above is the code evidence for this turn.
+
+Escalation: none.
+
+The earlier queue heads about the equityfundingsource IPC ack status and the JB Run Agent Doc harness switch remain open; this response intentionally handled only the quoted direct-shell CLI prompt.
+<!-- agent:boundary:44f8303f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~[#fccd]~~
 ---
 equityfundingsource.md turn is getting IPC ack status errors
 ```
@@ -99,6 +160,7 @@ equityfundingsource.md turn is getting IPC ack status errors
 Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
 ```
 ---
+- ~~Running `agent-doc file-name.md` directly in the CLI should return in an immediate error explaining it needs to be run within a supported harness (Codex, Claude, or Opencode). Instead, it said "Submitting to Codex..." and locks the shell. Now I cannot sync monsterrodholders.md.~~
 <!-- /agent:queue -->
 <!--
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.

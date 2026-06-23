@@ -65,13 +65,29 @@ Current evidence says this instance was transient rather than wedged. The recent
 If the same JB notification persists past the plugin timeout/stale-bound window, that is a live-plugin guard regression against the `#recyclerestart` contract. This captured instance, though, matches the intended "another sync is in flight; retry newest layout" behavior and the binary-side lock is no longer stuck.
 
 Proof: changed paths are this session document via finalize only. Commands used: `agent-doc preflight`/`plan`/`read`, `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md`, `rg` over sync warning/source/log text, `sed` on `plan-pcp-recycle-no-restart-sync-block.md`, `SyncLayoutAction.kt`, and `ffi.rs`, `tail`/`rg` on `.agent-doc/logs/ops.log`, and `git status`. No code changed, so I did not run `make check`. CI status check was attempted with `gh run list --workflow CI --limit 1`, but this repo has no workflow named `CI`. Escalation: none. Confidence: medium-high; terminal evidence proves the binary-side sync lock was not wedged, while the exact JB notification lifecycle lives in the IDE log/UI.
-<!-- agent:boundary:dcbb7bfe -->
+
+### Re: lazily-rs.md crash recovery -- gpt-5
+
+> **Queue prompt:** I still cannot get lazily-rs.md to sync. Please make recovery from machine crashes more robust. The state of lazily-rs.md is stuck. Please fix this recovery scenario.
+
+Fixed the recovery gap in full/manual sync. Preflight already knew how to close the stuck `jb_cache_conflict_cancel` shape, but editor/manual `agent-doc sync` could return early after tmux layout or pane-liveness checks and never close the commit boundary. `repair_file_state_with_tmux` now runs the same recoverable detector and narrow `git::commit(file)` repair before pane liveness can short-circuit, then proves the recoverable shape is gone before continuing.
+
+I also recovered the live `tasks/software/lazily-rs.md` stuck state first. Its visible response/snapshot drift was committed by preflight as `4bf7b2d88`.
+
+Proof:
+- changed_paths: `src/agent-doc/agent-doc-orchestration/src/sync.rs`, `README.md`, `SPEC.md`, `editors/SPEC.md`, `specs/07-session-tmux-commands.md`, `VERSIONS.md`, release version manifests/lockfile, `tests/test_cli.rs`, and parent gitlink `src/agent-doc`
+- commits: `058e6bf9` (`agent-doc: repair sync closeout crash recovery`), `46a3c0de` (`chore: release v0.34.39`), parent `bbc76e2dc` (`chore: update agent-doc submodule`)
+- commands: `cargo fmt`; `cargo test -p agent-doc-orchestration sync_repair_closes_jb_cache_conflict_cancel_commit_boundary -- --nocapture`; `cargo test -p agent-doc-orchestration jb_cache_conflict_cancel -- --nocapture`; `cargo test -p agent-doc test_manifest_uses_publishable_dependency_contract -- --nocapture`; `make check`; `make install-full`; `agent-doc admin recycle --all-projects`; submodule and parent `git push origin main`; `git tag v0.34.39`; `git push origin v0.34.39`
+- verification: final `make check` passed clippy, 5017 nextest tests, doctests, and the medium closeout simulator; local install replaced `agent-doc` with v0.34.39 and installed `libagent_doc-0.34.39.so`
+- CI/release: submodule CI for `058e6bf9` completed success; CI and Release workflows for `46a3c0de`/`v0.34.39` were in progress at closeout; parent repo has no workflow named `CI`
+- escalation: none
+- confidence: high
+<!-- agent:boundary:324d7560 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~JB `Sync Tmux Layout` on lazily-rs.md `Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.`~~
 ---
 :round_pushpin: JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
 ```
@@ -129,6 +145,7 @@ What are #next-steps to fix bugs?
 - [ ] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.
 - [ ] [#qcm1verify] [operator-verify] #agent-doc-bug Install + live-verify the #qnodemerge1 component-scoped merge (agent-doc submodule 52458f47). Code shipped+pushed, make check green (4853). Operator-gated remainder (mid-session install causes finalize-client-newer drift; STOP-cutting-releases gate): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then drive one edit-during-finalize cycle (type into a queue item while the agent writes an exchange response) and confirm ZERO cross-component splice + no console-output-in-queue corruption.
 - [ ] [#1jec] [operator-verify] #yzerverify #agent-doc-bug Live-verify the #yzer/#evmhplugin plugin reconnect re-read (agent-doc 0.34.28 / submodule f6b8ae17, plugin 0.2.172). Code shipped+pushed: binary FFI agent_doc_reconnect_buffer_decision (disk==HEAD via ffi_show_head + buffer==prior-commit via ffi_show_prior_blobs) + pure decide_reconnect_buffer + PatchWatcher.registerRoot reconcile-on-connect (applyReconnectReread) + SimWorld coverage; make check green (4832). Operator-gated remainder (install is unsafe mid-session = finalize-client-newer drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), reinstall plugin 0.2.172, agent-doc admin recycle. Then repro: open a session doc in JB, kill/restart the supervisor so the binary commits while the plugin is disconnected, and on reconnect confirm ops.log shows 'reconnect_buffer_decision decision=reread_disk #yzer' and the editor buffer == HEAD with NO File Cache Conflict; a buffer holding genuine unsaved user edits must instead log decision=keep_buffer and be preserved (editor wins).
+- [ ] [#gsf5] [operator-verify] Live-check editor Sync Tmux Layout against `tasks/software/lazily-rs.md` on the installed v0.34.39 build after a crash-left response/snapshot drift.
 <!-- /agent:backlog -->
 
 ## Review

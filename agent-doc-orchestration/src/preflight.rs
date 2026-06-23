@@ -1687,6 +1687,17 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
             false
         }
     };
+    let ipc_dogfood_note_appended = if recovered {
+        match append_latest_ipc_dogfood_note(file) {
+            Ok(appended) => appended,
+            Err(e) => {
+                eprintln!("[preflight] IPC dogfood note warning: {}", e);
+                false
+            }
+        }
+    } else {
+        false
+    };
 
     let committed = match git::commit(file) {
         Ok(did_commit) => did_commit,
@@ -1735,7 +1746,69 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         );
     }
 
-    Ok((recovered, committed))
+    Ok((recovered || ipc_dogfood_note_appended, committed))
+}
+
+fn append_latest_ipc_dogfood_note(file: &Path) -> Result<bool> {
+    let Some(diagnostic) = crate::session_check::latest_ipc_proof_diagnostic(file)? else {
+        return Ok(false);
+    };
+    append_ipc_dogfood_note_for_diagnostic(file, &diagnostic)
+}
+
+pub(crate) fn append_ipc_dogfood_note_for_diagnostic(
+    file: &Path,
+    diagnostic: &str,
+) -> Result<bool> {
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {} for IPC dogfood note", file.display()))?;
+    let Some(updated) = append_ipc_dogfood_note_to_content(&content, diagnostic)? else {
+        return Ok(false);
+    };
+    std::fs::write(file, updated)
+        .with_context(|| format!("failed to write IPC dogfood note to {}", file.display()))?;
+    crate::ops_log::log_op(
+        file,
+        &format!("ipc_dogfood_note_appended file={}", file.display()),
+    );
+    eprintln!(
+        "[preflight] IPC dogfood note appended to {}",
+        file.display()
+    );
+    Ok(true)
+}
+
+fn append_ipc_dogfood_note_to_content(content: &str, diagnostic: &str) -> Result<Option<String>> {
+    if content.contains(diagnostic) {
+        return Ok(None);
+    }
+    let components =
+        crate::component::parse(content).context("failed to parse document components")?;
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return Ok(None);
+    };
+    let note = format_ipc_dogfood_note(diagnostic);
+    let updated = exchange.append_with_caret(content, &note, None);
+    if updated == content {
+        Ok(None)
+    } else {
+        Ok(Some(updated))
+    }
+}
+
+fn format_ipc_dogfood_note(diagnostic: &str) -> String {
+    let diagnostic = diagnostic.replace("```", "'''");
+    format!(
+        "**IPC proof issue dogfood log**\n\n\
+Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.\n\n\
+Issue class: `ipc_proof_insufficient`\n\
+Affected component: editor IPC / writeback\n\n\
+```text\n{}\n```",
+        diagnostic
+    )
 }
 
 fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunContext) -> Result<()> {
@@ -3642,6 +3715,88 @@ mod tests {
         // diff::compute should detect changes → no_changes = false.
         let diff_result = diff::compute(&doc).unwrap();
         assert!(diff_result.is_some(), "diff should detect new content");
+    }
+    #[test]
+    fn ipc_dogfood_note_appends_to_exchange_and_dedupes() {
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior - gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#next]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let diagnostic = "ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle";
+
+        let updated = super::append_ipc_dogfood_note_to_content(content, diagnostic)
+            .unwrap()
+            .expect("expected IPC note to append");
+
+        assert!(updated.contains("IPC proof issue dogfood log"));
+        assert!(updated.contains("Issue class: `ipc_proof_insufficient`"));
+        assert!(updated.contains(diagnostic));
+        assert!(
+            updated.find("IPC proof issue dogfood log").unwrap()
+                < updated.find("<!-- /agent:exchange -->").unwrap(),
+            "note must stay inside agent:exchange"
+        );
+        assert!(
+            updated.contains("- do [#next]\n<!-- /agent:queue -->"),
+            "queue content must be preserved"
+        );
+
+        let second = super::append_ipc_dogfood_note_to_content(&updated, diagnostic).unwrap();
+        assert!(second.is_none(), "same diagnostic should not duplicate");
+    }
+
+    #[test]
+    fn ipc_dogfood_note_noops_without_exchange_component() {
+        let content = "<!-- agent:queue -->\n- do [#next]\n<!-- /agent:queue -->\n";
+        let diagnostic = "ipc_proof_insufficient file=/tmp/session.md source=file_ipc patch_id=- invariant=missing_response recovery=retry_without_disk_write";
+
+        let updated = super::append_ipc_dogfood_note_to_content(content, diagnostic).unwrap();
+
+        assert!(updated.is_none());
+    }
+
+    #[test]
+    fn append_latest_ipc_dogfood_note_reads_matching_ops_log_entry() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let canonical = doc.canonicalize().unwrap();
+        let diagnostic = format!(
+            "ipc_proof_insufficient file={} source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle",
+            canonical.display()
+        );
+        write_ops_log(
+            &dir,
+            &format!(
+                "older irrelevant line\n[2026-06-23T00:00:00Z] {}\n",
+                diagnostic
+            ),
+        );
+
+        assert!(super::append_latest_ipc_dogfood_note(&doc).unwrap());
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("IPC proof issue dogfood log"));
+        assert!(updated.contains(&diagnostic));
+
+        assert!(!super::append_latest_ipc_dogfood_note(&doc).unwrap());
     }
     /// #drained-done-queue-clear: a standalone no-diff preflight that drains a
     /// fully-resolved auto-queue writes the drained shape to disk + snapshot

@@ -226,7 +226,52 @@ Verification:
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:eef5677c -->
+
+### Re: Claude/Codex session-history delete attribution — gpt-5
+
+> **Queue prompt:**
+>
+> Please look through the Claude + Codex session history. Did the deletions occur from one of these sessions?
+
+I do not see evidence that the missing EFS loans/deals were deleted by a Claude or Codex session.
+
+What I found in the recorded agent history is consistent with investigation, smoke checks, deployments, and later guardrail/logging work, not destructive production data operations. The relevant sessions include GET requests against protected loan/admin pages, read-only D1/log/schema queries, source-code searches for delete paths, and deploys for the auto-publish, soft-disable, and logging fixes. I did not find an actual recorded `curl -X DELETE`, inline `fetch(... method: 'DELETE' ...)` execution, remote D1 `DELETE FROM loans/users/investment_deals`, or TMO `DeleteLoan` operation against the missing production records.
+
+Important caveats:
+
+- This answers what appears in the local Claude/Codex command/session history. It cannot rule out a manual browser action, an external user, a Cloudflare-dashboard action, an older unrecorded session, or a path that predated durable app-side deletion logging.
+- The prior production-log finding still stands: the only clear production-domain delete event found was `TST042` in `tmo_cache_change_logs` at `2026-06-08 15:08:43 UTC`. I still do not have a production delete log tying `FTM631` or `GQI751` to Claude/Codex.
+- The historical app did have hard-delete routes that could remove loans and cascade `investment_deals`; those paths were the risk that the later soft-disable guards addressed. I just did not find evidence that the agents invoked those paths for these records.
+
+**Changed Paths**
+
+- Session document only: `tasks/professional/equityfundingsource.md`
+- No EFS app/source files changed for this answer.
+
+**Commands**
+
+- `tsift status`
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc read /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- Targeted `rg` searches across `/home/brian/.claude/projects/-home-brian-work-btakita-agent-loop`, `/home/brian/.codex/sessions`, `/home/brian/.codex/history.jsonl`, `.agent-doc/archives`, `.agent-doc/ack-content`, `.agent-doc/op-capture`, and this session document for `FTM631`, `GQI751`, `45ddae53`, `7a0c1463`, `TST042`, delete routes, `DELETE FROM`, `bulk-delete`, and `DeleteLoan`.
+- `jq` extraction of actual Codex `exec_command` calls and Claude `Bash` tool calls, followed by destructive-command filters for `curl -X DELETE`, remote D1 `DELETE FROM loans/users/investment_deals`, app loan delete endpoints, bulk delete, and TMO `DeleteLoan` patterns.
+- `git status --short`
+
+**Verification**
+
+- The broad destructive-pattern searches initially found false positives: code searches, read-only audit queries containing `raw_method: "DELETE"` as a filter, prior written analysis, and unrelated local code-edit text.
+- The refined checks over actual Claude/Codex executed command records completed with no matches for real destructive execution shapes: no `curl -X DELETE`, no inline DELETE fetch script, and no remote D1 hard delete against `loans`, `users`, or `investment_deals`.
+- I inspected the relevant EFS agent-session context around the June 2026 work. The agent activity I found was GET smoke checks, code review/search, read-only production checks, migrations/deploys, and logging/soft-disable changes.
+
+**Confidence**
+
+Medium-high. The recorded agent command history is a strong negative signal for Claude/Codex-caused deletions. The remaining uncertainty is that the production app lacked durable deletion logging before the later fixes, and local transcripts cannot prove what happened outside recorded agent tool calls.
+
+**Escalation**
+
+None.
+<!-- agent:boundary:7ab9ceae -->
 <!-- /agent:exchange -->
 ###
 <!--

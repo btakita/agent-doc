@@ -391,7 +391,28 @@ Proof:
 - Verification: confirmed mapped current users; confirmed current app/audit counts; confirmed hard-delete route and repository implementation in source. Two broad `UNION ALL` count attempts failed with D1 `too many terms in compound SELECT`, then narrower multi-statement read-only counts succeeded.
 - Confidence: medium-high for the old-email explanation and hard-delete gap; medium for the exact actor because current app audit rows do not include the original deletion event.
 - Escalation: none. I did not use Time Travel restore, mutate D1, deploy, or modify EFS source.
-<!-- agent:boundary:de555b85 -->
+❯ The deal pipeline did not display the stormrunner email address when the email address was changed.
+
+### Re: deal pipeline did not show stormrunner — gpt-5
+
+> The deal pipeline did not display the stormrunner email address when the email address was changed.
+
+That correction makes sense. It means my prior `application_personal.email` explanation is probably too broad for the specific thing you observed in the Deal Pipeline. The Deal Pipeline card path does not primarily read `users.email`: loan cards use `loans.borrower_email`, open lead cards use `application_leads.email`, and incomplete full-application cards use a `COALESCE(ap.email, al.email, borrower.email, bi.email, broker.email)` query. If the board was already showing the `btak.dev+...` address after the rename, then the visible Deal Pipeline surface was not the stale `stormrunner` source.
+
+I found a more concrete source: current production `tmo_cache_entities` contains a raw TMO loan cache row for `source_id='TST113'` with `ShortName='Huang, Lucas'` and `EmailAddress='stormrunner06106@gmail.com'`. That row has `efs_id=NULL`, `sync_status='fresh'`, was created `2026-06-08 14:56:10 UTC`, and last synced `2026-06-08 14:58:51 UTC`. There is no matching current EFS `loans` row for `TST113`, and exact current-D1 searches found no `stormrunner` rows in `users`, `application_leads`, `application_feedback_reports`, `audit_logs`, or `tmo_cache_change_logs`.
+
+So the better explanation is: the stale `stormrunner` email is coming from an external/source cache record, not from the current EFS user account or necessarily from the Deal Pipeline UI. The EFS rename only updates app-owned `users.email`; it does not rewrite historical TMO loan payloads already cached from TMO. If the deletion evidence named `lucas-huang` with the stormrunner address, it may have been reading from that TMO payload or another external identity/cache surface, while the Deal Pipeline display was already clean.
+
+This does not change the destructive-delete finding. Full applications still have a hard-delete admin path, and production currently has zero `full_applications` plus zero rows in the application section tables I checked. But the email mismatch should now be read as a cross-source identity/cache artifact, not evidence that the Deal Pipeline reverted or that the EFS `users` rename failed.
+
+Proof:
+
+- Changed paths: `tasks/professional/equityfundingsource.md` only; no code or production data writes.
+- Commands: `agent-doc preflight`, `agent-doc plan`, `tsift status`; source reads with `rg`, `sed`, and `nl`; read-only production D1 queries through `bun ./app/equityfundingsource/bin/cf-wrangler.ts d1 execute ... --remote --command ...`.
+- Verification: confirmed Deal Pipeline source paths; confirmed `TST113` TMO cache row contains `EmailAddress='stormrunner06106@gmail.com'` / `ShortName='Huang, Lucas'`; confirmed no current matching EFS loan row and no current `stormrunner` match in the obvious app-owned email/audit tables.
+- Confidence: high that the current proven stale source is `tmo_cache_entities` for `TST113`; medium on whether that exact row is the same evidence you saw, because I did not inspect the external UI/log that reported the deletion.
+- Escalation: none. I did not use Time Travel restore, mutate D1, deploy, or modify EFS source.
+<!-- agent:boundary:dc840f1f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -411,6 +432,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#ktqk]
 <!-- /agent:queue -->
 
 ## Backlog

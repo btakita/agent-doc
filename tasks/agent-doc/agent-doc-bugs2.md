@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -126,41 +126,34 @@ CI:
 Escalation: none.
 
 The earlier queue heads about the equityfundingsource IPC ack status and the JB Run Agent Doc harness switch remain open; this response intentionally handled only the quoted direct-shell CLI prompt.
-<!-- agent:boundary:44f8303f -->
+
+### Re: bare agent-doc shell invocation follow-up — gpt-5
+
+Follow-up after the remote CI failures: the production guard stayed the same, but two legacy tests still assumed bare `agent-doc <FILE>` was valid from a normal shell. I updated those tests so the harness-native alias path runs with an explicit Codex marker, and the plain-shell path asserts the new immediate supported-harness error.
+
+Additional changed paths:
+- `src/agent-doc/tests/run_integration.rs`
+- `src/agent-doc/tests/test_cli.rs`
+- `src/agent-doc` superproject gitlink
+
+Final commits / pushes:
+- agent-doc submodule: `3a8e304d` (`fix: guard bare agent-doc shell invocation`), `c393b1dd` (`test: mark bare path alias harness-native`), and `970ee577` (`test: cover bare path shell rejection`) pushed to `btakita/agent-doc main`
+- superproject pointer: `8e6b05ffb` (`chore: update agent-doc submodule`) pushed to `btakita/agent-loop main`
+
+Final verification:
+- `env -u CLAUDECODE -u CLAUDE_CODE -u CLAUDE_CODE_SESSION -u OPENCODE -u OPENCODE_CLIENT -u CODEX -u CODEX_CLI -u CODEX_SESSION -u CODEX_THREAD_ID cargo test test_cli_bare_file_path_aliases_to_run`
+- `env -u CLAUDECODE -u CLAUDE_CODE -u CLAUDE_CODE_SESSION -u OPENCODE -u OPENCODE_CLIENT -u CODEX -u CODEX_CLI -u CODEX_SESSION -u CODEX_THREAD_ID cargo test bare_path_alias_uses_same_template_safe_path`
+- `env -u CLAUDECODE -u CLAUDE_CODE -u CLAUDE_CODE_SESSION -u OPENCODE -u OPENCODE_CLIENT -u CODEX -u CODEX_CLI -u CODEX_SESSION -u CODEX_THREAD_ID make check` -> 5002 tests passed, 241 skipped, SimWorld medium seed passed
+- agent-doc GitHub Actions `CI` run `27996252411` -> success (`make check` and `make tmux-ci` passed)
+- superproject `Agent Doc` run `27996268409` still failed before runner startup because GitHub reported account billing/spending-limit restrictions; no test steps started
+
+Runtime cleanup: ran `agent-doc admin recycle`; it marked the project controller to recycle at the next idle boundary so stale-binary supervisors can refresh without discarding live turns.
+<!-- agent:boundary:5d781c03 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
----
-equityfundingsource.md turn is getting IPC ack status errors
-```
-• The backup answer is straightforward: Cloudflare Time Travel is active for the live D1 DB, but I found no project-
-  managed long-retention export job. I’m writing the response now and will let agent-doc commit it.
-
-• Ran cat <<'RESPONSE' | agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/professional/
-  │ equityfundingsource.md --baseline-file /home/brian/work/btakita/agent-loop/.agent-doc/
-  │ baselines/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.md --stream --origin skill
-  │ … +51 lines
-  └ [write] socket IPC failed: IPC ack status error: {"type":"ack","status":"error"} — falling back to file IPC
-    [template] pre-patch boundary 36d8e74a:equityfundingsource inserted at end of exchange
-    … +9 lines (ctrl + t to view transcript)
-    Error: editor IPC did not prove the write for /home/brian/work/btakita/agent-loop/tasks/professional/
-    equityfundingsource.md; pending response retained for retry; refusing direct document write
-
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-• The second finalize hit the same editor IPC timeout and left a pending response for retry. I’m invoking preflight
-  again because it successfully recovered the previous pending response through the normal repair-and-commit path.
-```
----
-:pushpin: JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
-```
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
-```
----
-- ~~Running `agent-doc file-name.md` directly in the CLI should return in an immediate error explaining it needs to be run within a supported harness (Codex, Claude, or Opencode). Instead, it said "Submitting to Codex..." and locks the shell. Now I cannot sync monsterrodholders.md.~~
 <!-- /agent:queue -->
 <!--
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.

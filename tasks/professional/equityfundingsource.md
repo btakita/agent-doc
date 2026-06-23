@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -477,7 +477,42 @@ High that Lucas/TST113 is in the EFS TMO cache and not in current app-owned EFS 
 ### escalation — gpt-5
 
 No escalation. No Time Travel restore, D1 write, deploy, or TMO mutation was performed.
-<!-- agent:boundary:d4db8e96 -->
+
+### Re: Is Lucas Huang in the TMO sandbox? Or only in the EFS database? — gpt-5
+
+> **Queue prompt:**
+>
+> Is Lucas Huang in the TMO sandbox? Or only in the EFS database?
+
+
+Direct answer: Lucas Huang is not in the current app-owned EFS tables I checked. He is in EFS D1 only as a cached TMO loan payload for `TST113`, and that cache row was populated by TMO sync on `2026-06-08`.
+
+That means this is not just an EFS user/application row. It is a cached copy of TMO-origin data: `TST113`, `ShortName='Huang, Lucas'`, `EmailAddress='stormrunner06106@gmail.com'`, `LoanStatus='Application Received'`, and TMO `RecID='89B3B9CD0A6E47DF81161AD805897B5C'`. The live app-owned tables returned zero matches for Lucas/stormrunner/TST113 in `users`, `application_leads`, `loans`, and `full_applications`.
+
+I cannot prove from this machine whether `TST113` still exists in the live TMO sandbox right now, because the local repo `.env` does not include TMO credentials. Production has `TMO_API_TOKEN` and `TMO_DATABASE` configured as Worker secrets, but Cloudflare does not expose secret values. So the current proven state is: in EFS's TMO cache, not in current app-owned EFS tables; live TMO sandbox still needs a direct TMO portal/API lookup through credentials.
+
+### changed_paths — gpt-5
+
+- `tasks/professional/equityfundingsource.md` only.
+
+### commands — gpt-5
+
+- Read-only production D1 `SELECT` checks for TMO cache, sync logs, sync batches, and app-owned EFS tables.
+- `wrangler secret list` to confirm TMO secret bindings by name.
+- Local TMO API wrapper check, which failed closed with `TMO not configured`.
+
+### verification — gpt-5
+
+Remote D1 query metadata reported `changed_db=false` and `rows_written=0`; no production data was changed.
+
+### confidence — gpt-5
+
+High for the EFS D1/cache conclusion; medium for current live TMO sandbox presence because a live TMO lookup was not possible with locally available credentials.
+
+### escalation — gpt-5
+
+None.
+<!-- agent:boundary:c1cf3eac -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -497,8 +532,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#ktqk]~~
-- Is Lucas Huang in the TMO sandbox? Or only in the EFS database?
 <!-- /agent:queue -->
 
 ## Backlog

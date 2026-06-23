@@ -289,14 +289,40 @@ Verification:
 Confidence: medium-high. This preserves the live document content and closes the prompt-bearing drift through the required finalize path.
 
 Escalation: none.
-<!-- agent:boundary:c392025f -->
+
+### Re: closeout drift recovery — gpt-5
+
+This is a narrow recovery closeout for the stale prompt-bearing exchange drift from the previous writebacks. I am not claiming `#fcccap`, `#clearresubmitproof`, or `#durablerecycle` are implemented in this recovery cycle.
+
+The prior auto-clear answer is already captured in the document, and the actionable implementation item is `#clearresubmitproof`. The mid-turn recycle request is captured as `#durablerecycle`. No additional backlog item is needed from this repair response.
+
+
+Changed paths:
+- session document only: `tasks/agent-doc/agent-doc-bugs2.md`
+
+Commands run:
+- `agent-doc repair --apply-recovery tasks/agent-doc/agent-doc-bugs2.md`
+- `agent-doc preflight/plan/read` through the MCP workflow
+- `agent-doc session-check` through the MCP workflow
+
+Verification:
+- Source tests were not run because this recovery changed no source files.
+- Verified the backlog contains `#clearresubmitproof` and `#durablerecycle`.
+
+Confidence: medium. The remaining risk is the live editor/writeback drift itself; this closeout intentionally avoids adding another queue-prompt blockquote.
+
+Escalation: none.
+<!-- agent:boundary:04a1f3e1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~agent-doc should support reliable recycle mid-turn. The turn state should be durable to survive a restart.~~
-- auto clear did not submit the prompt. Why is sending a prompt to tmux significantly more reliable than sending Enter to tmux?
+- ~~auto clear did not submit the prompt. Why is sending a prompt to tmux significantly more reliable than sending Enter to tmux?~~
+- :pushpin: do [#durablerecycle]
+- do [#fcccap]
+- do [#clearresubmitproof]
 - Why is there so much overhead in reading the agent doc and running the first task? About a minute of thrashing and ~20% context is used just to begin the work. The binary should read the document and immediately hand the agent the work that needs to be done. The binary should track what has already been done. We need to reliably mark all completed tasks
 - [#qfocsupguard]
 JB `Run Ageent Doc` on equityfundingsource.md stalled...prompt but no submit.
@@ -369,9 +395,6 @@ Error: dispatch-only codex reopen refused to inject into pane %6 for tasks/agent
 - :pushpin: do [#fccsave]
 - :pushpin: do [#fccreconnect]
 - :pushpin: do [#fccaudit2]
-- do [#fcccap]
-- do [#clearresubmitproof]
-- do [#durablerecycle]
 <!-- /agent:queue -->
 <!--
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.

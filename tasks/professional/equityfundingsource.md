@@ -69,7 +69,7 @@ Confidence: medium. The observed log evidence is concrete, but Cloudflare's hist
 
 Escalation: none.
 
-### Re: TMO sync delete risk + soft-disable trail — gpt-5 (HEAD)
+### Re: TMO sync delete risk + soft-disable trail — gpt-5
 
 > **Queue prompt:**
 >
@@ -132,7 +132,7 @@ Confidence: high for preventing future hard deletes through these app/DB paths. 
 
 Escalation: none.
 
-### Re: application logging + deploy — gpt-5 (HEAD)
+### Re: application logging + deploy — gpt-5
 
 > **Queue prompt:**
 >
@@ -185,7 +185,7 @@ Confidence: high for Worker request logging, scheduled task logging, migration c
 
 Escalation: none.
 
-### Re: deploy — gpt-5 (HEAD)
+### Re: deploy — gpt-5
 
 > **Queue prompt:**
 >
@@ -226,7 +226,7 @@ Verification:
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:7267188f -->
+<!-- agent:boundary:eef5677c -->
 <!-- /agent:exchange -->
 ###
 <!--

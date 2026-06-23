@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -592,7 +592,47 @@ High that the `passage` token was tried and failed authentication. Low for curre
 ### escalation — gpt-5
 
 None. No production D1 writes, TMO mutations, deploys, or Time Travel restore were performed.
-<!-- agent:boundary:35563495 -->
+
+### Re: Look in the TMO sandbox. Is Lucas Huang in the TMO sandbox? Use `passage equityfundingsource/TMO_API_TOKEN`. — gpt-5
+
+> **Queue prompt:**
+>
+> Look in the TMO sandbox. Is Lucas Huang in the TMO sandbox? Use `passage equityfundingsource/TMO_API_TOKEN`.
+
+
+I used `passage equityfundingsource/TMO_API_TOKEN` for the live TMO sandbox lookup. The token was present, but TMO rejected the read-only requests, so I could not verify whether Lucas Huang is currently in the live sandbox.
+
+Results:
+
+- `GetLoan/TST113` with `Database: API Sandbox`: `401 Not authenticated`.
+- `GetLoans` with `Database: API Sandbox`: `401 Not authenticated`.
+- `GetLoan/TST113` with likely alternate database names also returned `401 Not authenticated`; no database header returned `400 Database is missing`.
+
+The strongest verified fact remains the EFS D1 TMO cache row for `TST113`, populated by TMO sync on `2026-06-08`, with `Huang, Lucas` and `stormrunner06106@gmail.com`. That proves Lucas existed in cached TMO-origin data then. It does not prove current live TMO sandbox presence today because the live API lookup did not authenticate.
+
+### changed_paths — gpt-5
+
+- `tasks/professional/equityfundingsource.md` only.
+
+### commands — gpt-5
+
+- `passage equityfundingsource/TMO_API_TOKEN` used inside shell command substitution without printing the token.
+- Read-only live TMO `GetLoan/TST113` and `GetLoans` checks.
+- Alternate database-header checks.
+- `git status --short tasks/professional/equityfundingsource.md src/equityfundingsource-dev`.
+
+### verification — gpt-5
+
+The live TMO API returned authentication failures, not data. No TMO mutation, D1 write, deploy, or Time Travel restore was performed.
+
+### confidence — gpt-5
+
+High that the specified passage token was tried and failed authentication. Low for current live TMO sandbox membership because the live lookup did not authenticate.
+
+### escalation — gpt-5
+
+None.
+<!-- agent:boundary:b6a84b64 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -612,7 +652,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Look in the TMO sandbox. Is Lucas Huang in the TMO sandbox? Use `passage equityfundingsource/TMO_API_TOKEN`.
 <!-- /agent:queue -->
 
 ## Backlog

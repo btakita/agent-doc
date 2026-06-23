@@ -39,12 +39,26 @@ completed
 Compacted content:
 - Archived 1 response topic(s): durable recycle checkpointing
 - Prior summary/context: prior compacted content: Archived 7 response topic(s): editor stale-state rollback and slow Run Agent Doc; build and ...
-<!-- agent:boundary:463efc7e -->
+
+### Re: lazily-rs session sync — gpt-5
+
+> **Queue prompt:** My PC had a hard crash. Now I cannot sync the lazily-rs.md session.
+
+I checked the `lazily-rs.md` session directly. The crash left cycle `cycle-1782226316184` stuck at `preflight_started` with an insufficient IPC proof (`live_prompt_drift_after_preflight`). Running an agent-doc probe closed that stale empty preflight cycle and committed the repair as `5c90b7c0d agent-doc(lazily-rs): 2026-06-23 11:00:20`.
+
+`agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md` now reports OK: that cycle is `committed`, and the next queue prompt is ready: `Add ThreadSafeStateMachine and AsyncStateMachine (Tokio).` So the sync blocker is cleared; the remaining `tasks/software/lazily-rs.md` working-tree change is the live queue edit/prompt waiting to be drained, not the stale crash state.
+
+Preflight on this bug tracker also emitted semantic-completion warnings for `#1jec`, `#arsm`, `#qcm1verify`, review `#ftqpartialdup`, and review `#j9ja`; I left those unchanged because this queue prompt was about recovering `lazily-rs.md` sync.
+
+Proof: changed paths were `tasks/software/lazily-rs.md` via the agent-doc repair commit and this session document via finalize. Commands used: `tsift status`, `tsift index --workspace .`, agent-doc preflight/plan/read, `agent-doc session-check` on `lazily-rs.md`, probe preflight on `lazily-rs.md`, and `git status`/`git log`. No code changed, so I did not run `make check`. CI status check was attempted with `gh run list --workflow CI --limit 1`, but this repo has no workflow named `CI`. Escalation: none. Confidence: high.
+<!-- agent:boundary:16005813 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~My PC had a hard crash. Now I cannot sync the lazily-rs.md session.~~
+---
 JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
 ```
 [route] target tmux session: 0
@@ -55,6 +69,13 @@ Error: authoritative actor record for tasks/software/agent-loop.md is bound to h
 - :pushpin: do [#fbwireverify]
 - :pushpin: do [#qnodemerge4verify]
 - :pushpin: do [#tb4q]
+---
+:round_pushpin: JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
+```
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
+```
+---
 - do [#cancelturnverify]
 - do [#qcm1verify]
 - do [#arsm]

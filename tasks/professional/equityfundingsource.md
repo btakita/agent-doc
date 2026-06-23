@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -131,7 +131,102 @@ Verification:
 Confidence: high for preventing future hard deletes through these app/DB paths. It does not prove the historical missing rows were caused by one specific actor because the durable app audit table was not present then.
 
 Escalation: none.
-<!-- agent:boundary:44b5ab1f -->
+
+### Re: application logging + deploy — gpt-5 (HEAD)
+
+> **Queue prompt:**
+>
+> We should log all web requests, api calls, migrations, etc. in the application logs.
+>
+> **Queue prompt:**
+>
+> deploy
+
+Implemented and deployed structured application logging for the production Worker paths we can control directly.
+
+What changed:
+
+- Every Worker web request now emits a structured `[app-log]` `web_request` line with method, path, route kind (`api`, `auth`, `portal`, `public`, etc.), status, duration, Cloudflare ray, and user agent. Errors include exception fields and use `warn`/`error` severity based on response status.
+- Unhandled Worker errors now emit a structured `[app-log]` `web_request_error` line before returning the existing error response.
+- Scheduled Worker runs now emit `[app-log]` `scheduled_event`, `scheduled_task_started`, `scheduled_task_done`, and `scheduled_task_failed` lines for TMO sync and auth-token cleanup.
+- D1 migration wrapper commands now emit `[app-log]` `migration_command` entries for `d1 migrations ...`, including whether the command is local or remote.
+- The local dev Worker log sidecar now captures `[app-log]` alongside existing `[tmo-api]` and `[dropbox-api]` API logs.
+- Added a regression test that keeps request logging, scheduled task logging, migration logging, and API log capture wired.
+
+I kept the logs metadata-oriented: no request bodies, authorization headers, tokens, or secrets are logged.
+
+Deployed production changes:
+
+- Deployed Worker version `8bc3cffa-e2d8-403c-9344-7ebd02f30c48` to `https://equityfundingsource.brian-takita.workers.dev`.
+- Remote D1 migration check reported `No migrations to apply`; the migration command itself emitted the new `[app-log]` `migration_command` entry.
+
+EFS commit: `f0ccec3 feat: add structured application logging`, pushed to `origin/main`.
+
+Changed paths:
+
+- `app/equityfundingsource/lib/app-log.ts`
+- `app/equityfundingsource/worker.ts`
+- `app/equityfundingsource/bin/cf-wrangler.ts`
+- `app/equityfundingsource/bin/dev-worker.ts`
+- `tests/app-logging.test.ts`
+- `tests/email-login.test.ts`
+
+Verification:
+
+- `bun test tests/email-login.test.ts --test-name-pattern "scheduled worker purges stale auth token rows"`
+- `bun test tests/app-logging.test.ts`
+- `make check` — 1,145 tests passed, app build passed, worker build passed.
+- `make deploy` — succeeded; deployed Worker version `8bc3cffa-e2d8-403c-9344-7ebd02f30c48`.
+- `bun run cf:d1:migrations:list:remote` — no migrations to apply, and the wrapper logged the migration command.
+- Production smoke checks: `/` returned `200`; `/admin` returned `303`; `/api/admin/pipeline` returned `401` unauthenticated.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for the EFS repo.
+
+Confidence: high for Worker request logging, scheduled task logging, migration command logging, and the existing TMO/Dropbox API log capture path. This does not retroactively create historical request logs before this deployment.
+
+Escalation: none.
+
+### Re: deploy — gpt-5 (HEAD)
+
+> **Queue prompt:**
+>
+> ~~No record should be deleted, only disabled. Create a migration. The durable app audit table should be deployed. Do we have sufficient logging to track deletion events? The delete borrower should not cascade. No deleted records. Only disabled records. We need a trail.~~ — auto-struck: answered this cycle (#ftstrike) 
+
+
+> **Queue prompt:**
+>
+> deploy
+
+The logging changes are deployed.
+
+Deployment details:
+
+- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Worker version: `8bc3cffa-e2d8-403c-9344-7ebd02f30c48`
+- EFS commit deployed: `f0ccec3 feat: add structured application logging`
+- Remote D1 migrations: no pending migrations to apply.
+
+Changed paths: none in this follow-up cycle; the deployed code paths were recorded in the prior logging response.
+
+Commands:
+
+- `make deploy`
+- `bun run cf:d1:migrations:list:remote`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/admin`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/api/admin/pipeline`
+
+Verification:
+
+- Deployment succeeded.
+- Migration list reported `No migrations to apply`.
+- Public home returned `200`.
+- `/admin` returned `303` through Access/login flow.
+- `/api/admin/pipeline` returned `401` unauthenticated.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:7267188f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -152,9 +247,9 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~Could the delete event have occured from a TMO sync bug?~~
-- We should log all web requests, api calls, migrations, etc. in the application logs.
-- ~~No record should be deleted, only disabled. Create a migration. The durable app audit table should be deployed. Do we have sufficient logging to track deletion events? The delete borrower should not cascade. No deleted records. Only disabled records. We need a trail.~~ — auto-struck: answered this cycle (#ftstrike)
-- deploy
+- ~~We should log all web requests, api calls, migrations, etc. in the application logs.~~
+- ~~No record should be deleted, only disabled. Create a migration. The durable app audit table should be deployed. Do we have sufficient logging to track deletion events? The delete borrower should not cascade. No deleted records. Only disabled records. We need a trail.~~ — auto-struck: answered this cycle (#ftstrike) 
+- ~~deploy~~
 <!-- /agent:queue -->
 
 ## Backlog

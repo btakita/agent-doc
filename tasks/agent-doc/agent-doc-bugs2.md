@@ -234,6 +234,27 @@ Verification:
 3. inject the exact `agent-doc <FILE>` prompt;
 2. wait for clear completion and a fresh dispatch-ready prompt;
 1. submit `/clear` or `/new` with harness-specific handling;
+- Parent remote pointer pushed from a clean worktree: `c331479d3 agent-doc: update durable checkpoint pointer` to `btakita/agent-loop:main`, avoiding the unrelated divergent local parent history.
+- Submodule commit pushed: `906890a0 agent-doc: persist durable turn checkpoints` to `btakita/agent-doc:main`.
+- Latest `agent-doc` CI for `906890a0` was `in_progress`, not red, at closeout check.
+- `make install` installed `agent-doc 0.34.38` locally and marked 2 controllers for recycle at the next idle boundary.
+- `make check` passed: clippy, nextest, doctests, and deterministic medium closeout sim.
+- `cargo fmt -- --check`
+- `git diff --check`
+- `cargo test -p agent-doc-orchestration`
+- `cargo test -p agent-doc-orchestration preflight_persists_durable_turn_checkpoint`
+- `cargo test -p agent-doc-orchestration open_cycle_recovery_command_names_durable_checkpoint`
+- `cargo test -p agent-doc-orchestration record_turn_checkpoint_persists_resume_identity_and_baseline`
+- Doctor facts now surface the checkpoint fields for debugging/recovery tooling.
+- Open-cycle recovery diagnostics now name the durable checkpoint, phase, target, pending-mutation status, capture id, and `--baseline-file` finalize command when available.
+- Preflight now records that checkpoint after baseline and prompt-target analysis, so recycle/restart during preflight, repo work, tests-before-finalize, finalize/writeback, or done-marking has enough disk state to resume or fail closed.
+- Added durable turn checkpoint fields to cycle state: preflight baseline path, prompt targets, queue head/turn identity, alongside the existing phase/completion, response hash/capture, and pending-mutation fields.
+- parent gitlink `src/agent-doc`
+- `src/agent-doc/agent-doc-orchestration/src/start.rs`
+- `src/agent-doc/agent-doc-orchestration/src/doctor.rs`
+- `src/agent-doc/agent-doc-orchestration/src/flow/closeout.rs`
+- `src/agent-doc/agent-doc-orchestration/src/preflight/run.rs`
+- `src/agent-doc/agent-doc-orchestration/src/cycle_state.rs`
 
 Confidence: high for the `#fccsup` regression class. The remaining external risk is the pending submodule CI run and the parent workflow billing block, neither of which is a code failure from this change.
 
@@ -300,7 +321,7 @@ Commits and deployment:
 - Parent remote pointer pushed from a clean worktree: `c331479d3 agent-doc: update durable checkpoint pointer` to `btakita/agent-loop:main`, avoiding the unrelated divergent local parent history.
 
 The newer free-text queue prompts about startup overhead and skill-surface/data-driven context remain queued for later turns; this closeout only completes `#durablerecycle`.
-<!-- agent:boundary:96922d24 -->
+<!-- agent:boundary:6a005532 -->
 <!-- /agent:exchange -->
 
 ## Queue

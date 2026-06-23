@@ -315,7 +315,7 @@ A live phase projection in the PCP lets the supervisor *notice* a cycle stuck at
 *Restated (the prior Sidecar↔PCP answer was lost to the wedged-capture closeout):* no Sidecar↔PCP IPC exists — they share only the filesystem one-way; the PCP reads the sidecar at `:1489` and never writes it (writes go to its own SQLite store). The real race is among the ~42 sidecar writers via non-atomic save — now fixed for the torn-read class; the lost-update class remains (`#lzsidecarlock`).
 
 Queue drained.
-<!-- agent:boundary:90e1aa9a -->
+<!-- agent:boundary:c78fe419 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -339,7 +339,6 @@ Queue drained.
 ## Review
 
 <!-- agent:review -->
-- [ ] [#c7j5] #lzadocsm Pilot lazily::StateMachine on RunContext CyclePhase — RE-SCOPED (no longer [recommended]). Re-evaluation (#lzevalsm): CyclePhase authority is the JSON sidecar (cycle_state.rs load/save, e.g. mark_committed:1041); RunContext only caches it (graph.rs:222 slot). A pilot is viable but narrow: StateMachine<CyclePhase,CycleEvent> in RunContext seeded from sidecar + on_transition->sidecar persist + a state_is guard; single-threaded Context suffices (already shipped). NOT blocked on ThreadSafeStateMachine — that targets long-lived ActorContext which has no FSM needs today, and isn't in lazily 0.12.0 agent-doc consumes anyway. Small ergonomic win, not a priority.
 - [/] [#kb9b] #lzpypub011=[operator-drive] Publish lazily-py v0.11.0: SHIP-STOPPER #lzpysigfix is FIXED (commit 30907ea). Build artifacts rebuilt in src/lazily-py/dist/ (lazily-0.11.0-{whl,tar.gz}, twine check PASSED, fresh-venv install round-trip verified). From src/lazily-py: tag v0.11.0 + push, gh release create v0.11.0 --generate-notes, then python -m twine upload dist/* (needs PyPI token + browser/passkey 2FA). Gated on the pre-publish live-test confirm per the testing-gate rule. Commit 30907ea + superproject gitlink eb93a75ac already pushed.
 - [/] [#kabc] #lipostlazilyarch=[operator-drive] Main LinkedIn post is published and repaired: Corky edit updated mail/social/20260616-lazily-architecture-linkedin.md / https://www.linkedin.com/feed/update/urn:li:share:7472666756810190848 with the full body after the public post truncated at "The core is small: three primitives". Local metadata is committed in mail commit 07a9ea1 and superproject gitlink e7e0b08c1. Remaining operator follow-up: post the first comment from mail/drafts/linkedin/2026-06-16-lazily-architecture.md via `corky linkedin comment <published-file> <comment-body>` if still desired.
 - [/] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet backend through the LIVE #yxjw signaling Worker (two real hosts / NAT). Agent-doable slice (#lzwebrtcwire) is DONE: src/webrtc_signaling.rs wires SignalingClient↔Str0mNet and tests/webrtc_signaling.rs covers the localhost handshake. Remaining: live two-host/NAT run via deployed Worker — operator-only.

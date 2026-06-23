@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -239,7 +239,7 @@ Both require `S: PartialEq + Clone + Send + Sync + 'static` and `E: Send + Sync 
 **Unblock note:** the `#lzadocsm` review items (#c7j5 / #w4pq — pilot `StateMachine` on agent-doc's `RunContext::CyclePhase`) were "Blocked on: lazily ships no `ThreadSafeStateMachine` yet." That blocker is now **lifted** — the thread-safe primitive exists. The pilot itself is agent-doc-repo work, separate from this cycle; the two review items are duplicates and could be deduped into one actionable follow-up when that pilot is taken on.
 
 Queue drained.
-<!-- agent:boundary:060cd3c3 -->
+<!-- agent:boundary:ed405f50 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -248,6 +248,7 @@ Queue drained.
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Reevaluate using state machines as the agent-doc backbone.
 <!-- /agent:queue -->
 
 ## Backlog

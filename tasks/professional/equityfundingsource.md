@@ -131,7 +131,45 @@ High that `0099` explains investor/lender role or table-name mismatch symptoms. 
 ### escalation — gpt-5
 
 Used `force_disk` only after two failed IPC finalizes plus an unchanged no-ACK patch file; no source/prod escalation.
-<!-- agent:boundary:08919315 -->
+
+### Re: destructive migration — gpt-5
+
+> **Queue prompt:**
+>
+> Why did you build the migration to be destructive?
+
+I built it that way because I treated `0099_lender_role_and_schema.sql` as a one-time terminology cutover from `investor` to `lender`, and I used the standard SQLite/D1 workaround for changing a `CHECK` constraint on `users.role`: create a replacement `users` table, copy rows with `investor` mapped to `lender`, drop the old `users`, then rename the replacement. For the other persisted investor entities, I used direct table renames from `investor_*` to `lender_*` and rebuilt indexes under the new names.
+
+That explains the mechanics, but it does not make the migration good enough. The mistake was treating a semantic rename as if it were safe to do as a hard schema cutover in production. It removed the old table names and old role value as compatibility surfaces in one migration, and the `users` rebuild used a `DROP TABLE users` step. Even though the script copies user rows first and is not written as a deliberate data wipe, it is still destructive in the operational sense: rollback is hard, stale deployed code or support SQL using `investor_*` breaks immediately, and a production-shaped migration safety test should have existed before this landed.
+
+The safer version should have been additive/compatible first: keep the old names working while introducing the lender terminology, prove deployed code and diagnostics no longer depend on `investor_*`, then remove compatibility only after a soak. At minimum, this migration needed a production-shaped fixture with users plus dependent rows, `foreign_key_check` before/after, row-count assertions for every renamed table, and a rollback or alias/compatibility plan. I did not do that; I relied on text-level tests that only asserted the migration contained the intended role/table rename statements. That was the wrong bar for a production D1 migration.
+
+So the direct answer is: I built it destructive because I optimized for completing the naming cutover and SQLite constraint change, not for production migration safety. That was my miss. The immediate fix should be a follow-up migration/safety patch that either restores compatibility aliases where D1 supports them or updates every remaining diagnostic/support path to the new schema, plus tests that execute the migration against prod-shaped data instead of only checking strings.
+
+### changed_paths — gpt-5
+
+- `tasks/professional/equityfundingsource.md` only.
+- No EFS source files, migrations, production D1 rows, TMO records, deploys, or secrets were changed in this cycle.
+
+### commands — gpt-5
+
+- `agent-doc preflight`, `agent-doc plan`, `agent-doc read`.
+- `tsift status` from the workspace root.
+- Source/history reads for `src/equityfundingsource-dev/app/equityfundingsource/migrations/0099_lender_role_and_schema.sql`, commit `071a93f`, and the tests that reference the migration.
+- `rg` checks for migration users-table rebuilds, old/new lender table references, and foreign-key-dependent schema.
+
+### verification — gpt-5
+
+No code was changed, so I did not run the EFS test suite. I verified from the checked-in SQL that `0099` copies `users`, drops `users`, renames the replacement, renames the `investor_*` tables to `lender_*`, and recreates indexes; I also verified the tests I inspected are string/shape checks rather than a production-shaped migration execution test.
+
+### confidence — gpt-5
+
+High that the migration is operationally destructive/compatibility-breaking even if not intended as a data wipe. High that the reason was the lender terminology cutover plus SQLite/D1 constraint-rebuild pattern. Medium on the exact production blast radius without Lucas's concrete failing query/request/stack in this prompt.
+
+### escalation — gpt-5
+
+Used `force_disk` only after two failed IPC finalizes plus the same no-ACK patch-file closeout state; no source/prod escalation.
+<!-- agent:boundary:fab36e65 -->
 <!-- /agent:exchange -->
 ###
 <!--

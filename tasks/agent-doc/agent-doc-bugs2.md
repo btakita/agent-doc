@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -39,7 +39,7 @@ complete
 Compacted content:
 - Archived 4 response topic(s): stale-supervisor materialization queue head; ACK-mismatch queue consume recovery and 0.34.38 install; release packaging publish blockers; 1 more
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): queued blockers after repair; live-verification queue gating; ...
-<!-- agent:boundary:8643fef4 -->
+<!-- agent:boundary:f1102ae7 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -305,7 +305,7 @@ Verification:
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:217a72a0 -->
+<!-- agent:boundary:3f316de0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -325,7 +325,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

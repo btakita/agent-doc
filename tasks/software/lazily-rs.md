@@ -65,7 +65,13 @@ Compacted content:
 **Closeout note:** the editor-IPC path was wedged for this file (`live_prompt_drift_after_preflight`; two refused commits with partial corrupt writes). Recovered by restoring the doc to HEAD + `agent-doc repair --apply-recovery` (`queue_metadata_drift`), then finalized with `--force-disk` (direct disk write) to bypass the broken IPC.
 
 Queue drained.
-<!-- agent:boundary:8dfa0ad2 -->
+
+### Re: closeout — session-check resync — glm-5.2
+
+Final closeout commit for the `#lzmsrv` + `#lzdisposedrain` drain. The response and queue drain landed at `f7238365e`; this commit persists the `queue: stop` frontmatter flip + boundary resync so `session-check` matches HEAD. Editor-IPC stayed wedged for this file (`live_prompt_drift_after_preflight`), so all closeout writes used `--force-disk`.
+
+**Substantive work (already committed/pushed earlier this cycle):** lazily-rs `e16cf71` (MSRV 1.88) + `f0884f0` (dispose drain) → `lazily-hub/lazily-rs` main; superproject gitlink `1d5fccf10` → `btakita/agent-loop` main.
+<!-- agent:boundary:1dee5b5c -->
 <!-- /agent:exchange -->
 ###
 <!--

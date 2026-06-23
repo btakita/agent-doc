@@ -1187,11 +1187,29 @@ fn save(file: &Path, state: &CycleState) -> Result<()> {
     let Some(path) = state_path(file)? else {
         return Ok(());
     };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     let json = serde_json::to_string_pretty(state)?;
-    std::fs::write(path, json)?;
+    write_atomic(&path, &json)?;
+    Ok(())
+}
+
+/// `#lzsidecaratomic`: write `bytes` to `path` via a temp file in the same
+/// directory plus an atomic `rename`, so a concurrent reader (including the PCP
+/// closeout projection) can never observe a partial file (torn read). `load()`
+/// maps `NotFound` to clean absence, but a truncated mid-write file surfaces as
+/// a parse error; the atomic persist closes that window. Falls back to a direct
+/// write only when the path has no parent to stage a temp file in.
+fn write_atomic(path: &Path, bytes: &str) -> Result<()> {
+    match path.parent() {
+        Some(parent) => {
+            std::fs::create_dir_all(parent)?;
+            let temp = tempfile::NamedTempFile::new_in(parent)?;
+            std::fs::write(temp.path(), bytes)?;
+            temp.persist(path)?;
+        }
+        None => {
+            std::fs::write(path, bytes)?;
+        }
+    }
     Ok(())
 }
 
@@ -1376,6 +1394,40 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         dir
+    }
+
+    #[test]
+    fn save_is_atomic_leaves_no_temp_residue() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+
+        let cycles_dir = state_path(&doc)
+            .unwrap()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let entry_count = || fs::read_dir(&cycles_dir).unwrap().count();
+
+        let _ = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        assert_eq!(
+            entry_count(),
+            1,
+            "exactly one cycle file after the first atomic save"
+        );
+
+        let state = mark_committed(&doc, "evt", Some("snap"), Some("body")).unwrap();
+        assert_eq!(state.phase, CyclePhase::Committed);
+        assert_eq!(
+            entry_count(),
+            1,
+            "atomic overwrite leaves no temp-file residue"
+        );
+        assert_eq!(
+            load(&doc).unwrap().unwrap().phase,
+            CyclePhase::Committed
+        );
     }
 
     #[test]

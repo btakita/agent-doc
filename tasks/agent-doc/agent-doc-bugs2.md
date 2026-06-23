@@ -26,7 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-completed
+done
 <!-- /agent:status -->
 
 ## Exchange
@@ -34,181 +34,12 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260623-212044.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260623-222916.md`*
 
 Compacted content:
-- Archived 6 response topic(s): JB Run Agent Doc submit latency; #turnstuck-readybusy; answered queue residue cleanup; 3 more
-- Prior summary/context: prior compacted content: Archived 4 response topic(s): actor-switch rebind already covered; paused queue cleanup; #qn...
-
-### Re: ack-mismatch shorter recovered response loss — gpt-5
-
-> **Queue prompt:** do tasks/agent-doc/plan-ack-mismatch-shorter-recovered-response-loss-2026-06-23.md
-
-Implemented `tasks/agent-doc/plan-ack-mismatch-shorter-recovered-response-loss-2026-06-23.md` and continued without waiting on CI per operator instruction.
-
-In `agent-doc-orchestration/src/write/converge.rs`, shorter editor ACKs that are missing only a newly materialized `### Re:` block now replay the missing target response back into the editor and complete as editor IPC convergence. The existing stale extra-prompt artifact path and real user-drift path remain fail-closed.
-
-In `agent-doc-orchestration/src/snapshot.rs`, stale overlay CRDT projection mismatches now rebuild the overlay sidecar from the fallback baseline on first detection. The next merge-base read uses the repaired overlay, so repeated stale-overlay logs and the hot loop stop.
-
-Verification:
-- `cargo test -p agent-doc-orchestration pending_write_shorter_ack_replays_missing_agent_response`
-- `cargo test -p agent-doc-orchestration crdt_merge_base_state_rebuilds_stale_overlay_after_first_fallback`
-- `cargo test -p agent-doc-orchestration ack_mismatch`
-- `cargo test -p agent-doc-orchestration crdt_merge_base_state`
-- `make check`
-- `make install-full`
-- `agent-doc --version` -> `agent-doc 0.34.42`
-- `git diff --check`
-
-Commits:
-- `src/agent-doc`: `08c2c8f3 fix: recover shorter ack mismatches`
-- parent: `9069d9fc7 fix: recover agent-doc shorter ack mismatches`
-
-CI was sampled but not awaited: agent-doc CI run `28051475833` was still `in_progress` when checked.
-
-### Re: #directchatpb2 — gpt-5
-
-> **Queue prompt:**
->
-❯ > JB `Run Agent Doc` still does not quickly submit.
-
-
-> **Queue prompt:**
->
-> [#directchatpb2]
-
-
-Implemented `#directchatpb2`.
-
-The fix adds a Codex Stop-hook final gate for active session-document work that is still only a chat answer: if the owned pane has an unresolved exchange prompt or current queue head and the response has not crossed `agent-doc finalize` / `agent-doc write --commit`, the hook blocks final success, captures the replayable answer into the pending/capture ledger, and prints the concrete recovery commands including `agent-doc session-check`.
-
-It also tightens the free-text queue provenance guard: `<!-- no-free-text-queue-head-guard -->` still suppresses intentional removals, but not the malformed `no-free-text...` plus bare `###` interrupted-closeout residue.
-
-Coverage added:
-- direct-chat manual queue answer after recursive direct-invocation guard
-- consecutive direct-chat answers in the same owned Codex pane
-- marker plus bare-heading residue in `session-check`
-- preservation of existing clear-command/slash-command queue behavior
-
-Commits:
-- `src/agent-doc`: `c2a37292 fix: block direct-chat agent-doc closeout loss`
-- parent: `58c7f0076 fix: update agent-doc direct-chat closeout guard`
-
-Verification:
-- `cargo test -p agent-doc-orchestration direct_chat`
-- `cargo test -p agent-doc-orchestration free_text_queue_marker`
-- `cargo test -p agent-doc-orchestration codex_hook::tests::`
-- `cargo test -p agent-doc flowcore_hot_path_guard_and_proof_tokens_are_budgeted`
-- `make check`
-- `git diff --check`
-- `gh run list --workflow CI --limit 1` -> latest CI was `completed success` (`28051475833`)
-
-### Re: JB Run Agent Doc submit path — gpt-5
-
-> **Queue prompt:** JB `Run Agent Doc` still does not quickly submit.
-
-> **Queue prompt:** auto-restart session does restart the agent-doc turn.
-
-That narrows the remaining failure: the restart/turn-start path is working, but the post-restart submit path is still late or dropped. I would not treat this as another auto-restart failure; the next useful proof is the route/dispatch window around JB `Run Agent Doc`:
-
-- harness restart or ready prompt observed
-- dispatch-ready proof emitted
-- submit/send proof emitted or missing
-- elapsed time between ready and submit
-
-This keeps `#jbrundispatch` scoped correctly: capture the live stall at submit time and compare ops.log route trace against `route_dispatch_submit_recycle_settle`, `auto_start_dispatch_ready_confirmed`, and any missing dispatch-start or submit proof. If the turn starts but prompt text is not submitted quickly, the fix belongs in the JB route/submit readiness path, not the restart boundary.
-
-### Re: auto-restart narrows JB submit bug — gpt-5
-
-> **Queue prompt:** auto-restart session does restart the agent-doc turn.
-
-Confirmed. I will treat auto-restart as working for this report. The remaining failure is narrower: after the agent-doc turn restarts, JB `Run Agent Doc` still does not submit the prompt quickly enough, or the submit proof is missing.
-
-That keeps the next investigation scoped to the route/submit readiness path, not the restart boundary. The useful live capture is the moment after the restarted pane is ready: whether `auto_start_dispatch_ready_confirmed` appears, whether a dispatch-start/submit proof follows, and how long the gap is before input lands.
-
-### Re: repaired JB submit prompt — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
-
-
-> **Recovered prompt:** JB `Run Agent Doc` still does not quickly submit.
-
-This is the same remaining JB route issue, now with auto-restart narrowed out. The queue evidence says the agent-doc turn restarts; the unresolved failure is prompt submission after readiness. I am treating the restarted-turn evidence as accepted and leaving the remaining work with the existing live-submit capture items rather than adding a duplicate backlog entry.
-
-### Re: recovered JB submit prompt — gpt-5
-
-> **Queue prompt:**
->
-> Turn response is overwriting parts of the previous response in an uncommitted state...so presumably during the finalize step.
-
-
-> **Recovered prompt:** `> JB Run Agent Doc still does not quickly submit.`
-
-The recovered prompt is preserved and answered as the same JB submit-latency report. Current interpretation: auto-restart does restart the agent-doc turn, so the remaining defect is after readiness, where submit either arrives late or lacks proof. No new backlog item is needed because the existing live-submit capture work already covers that narrowed failure.
-
-### Re: queue items struck without work — gpt-5
-
-> **Queue prompt:** Queue items are being struck without being worked on.
-
-Confirmed. This happened in this recovery: `#1jec` was struck in the queue while the response was only repairing and narrowing the JB submit/restart prompt, not actually live-verifying `#1jec`. That is wrong behavior.
-
-I added `#qstrikework` to the backlog to make queue striking proof-scoped: a queue item should only be struck when the current response proves that exact head was handled, or when an explicit pending/review operation targets its backing id. Interrupted finalize recovery must not auto-quote or strike a later queue head just because it became visible after the earlier head was consumed.
-
-### Re: IPC issue dogfooding log — gpt-5
-
-> **Queue prompt:** Immediately log IPC issues in this document's sessions for dogfooding when I type into the queue.
-
-Captured. I added this as a concrete dogfooding requirement: when an operator types into this document's queue during a live agent-doc turn, editor IPC problems must be surfaced in this same session exchange immediately, with enough detail to debug from the document itself instead of only from `ops.log`.
-
-The expected note should include the issue class, affected component, recovery path, and any relevant ops-log marker. That covers ACK mismatch, IPC timeout, retry-without-disk-write, direct-write fallback, reconnect/stale-buffer decisions, and queue/editor merge anomalies observed while the queue is being edited.
-
-Changed paths: `tasks/agent-doc/agent-doc-bugs2.md`
-Commands: `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read` for queue/exchange/backlog, `agent_doc_finalize`
-Verification: session-check pending after finalize
-Confidence: high
-Escalation: none; implementation remains tracked in the new backlog item.
-
-### Re: `/clear` flooded during active turn — gpt-5
-
-> **Queue prompt:** `/clear` is being incorrectly flooded into the tmux pane during a turn.
-
-Captured as a distinct bug from the intended supervisor clear-and-continue path. `/clear` should only be injected at a proven reset or supervisor handoff boundary, not repeatedly sent into a pane while an agent turn is active.
-
-I added a backlog item for a turn-state flood guard: suppress duplicate `/clear` dispatch while a turn is running, require explicit session-check or supervisor-defer proof before sending it, and add regression coverage for repeated `/clear` text landing in tmux during an active response.
-
-Changed paths: `tasks/agent-doc/agent-doc-bugs2.md`
-Commands: `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read` for queue/backlog, `agent_doc_finalize`
-Verification: session-check pending after finalize
-Confidence: high
-Escalation: none; implementation remains tracked in the new backlog item.
-
-### Re: IPC dogfood incident after clear-flood closeout — gpt-5
-
-> **Queue prompt:**
->
-> do [#p6a0]: Broaden to any agent-doc issues detected in this project PCP...dogfood `#agent-doc-bug`
-
-
-This session hit the exact class of issue that `#mbd4` is meant to make visible in the document.
-
-Issue class: `ipc_proof_insufficient`
-Affected component: `queue` / editor writeback
-Invariant: `live_prompt_drift_after_preflight`
-Recovery path reported: `content_ours_snapshot_next_cycle`
-Ops/session marker: `patch_id=0141387b-14e6-43ae-bd99-822d683d4756`, `turn=cycle-1782252992410`
-
-Observed behavior: the clear-flood response was captured, the first finalize failed because the snapshot head and live document head disagreed, and the recovery preflight later committed the captured response. During that recovery, the live buffer also reintroduced several previously answered queue prompts as unstruck items, and preflight logged `postcommit_worktree_check match=false` with `#postcommit-ipc-worktree-corruption`.
-
-A separate backlog item now tracks the stale-live-buffer queue resurrection. I am not marking `#mbd4` done here because the automation that should log this kind of incident automatically is still open; this entry is the manual dogfooding log for the current failure.
-
-Changed paths: `tasks/agent-doc/agent-doc-bugs2.md`
-Commands: `agent_doc_session_check`, `agent_doc_preflight`, `agent_doc_read`, `agent_doc_finalize`
-Verification: session-check pending after finalize
-Confidence: high
-Escalation: none; continue through the session-check result, but do not treat the interrupted IPC proof as a successful closeout by itself.
-<!-- agent:boundary:df4d746d -->
+- Archived 10 response topic(s): ack-mismatch shorter recovered response loss; #directchatpb2; JB Run Agent Doc submit path; 7 more
+- Prior summary/context: prior compacted content: Archived 6 response topic(s): JB Run Agent Doc submit latency; #turnstuck-readybusy; answere...
+<!-- agent:boundary:0c4d65d1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -216,16 +47,14 @@ Escalation: none; continue through the session-check result, but do not treat th
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#p6a0]: Broaden to any agent-doc issues detected in this project PCP...dogfood `#agent-doc-bug`~~
 - do [#mbd4]
-- JB `Run Agent Doc` still does not quickly submit.
-- auto-restart session does restart the agent-doc turn.
-- :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
-- Turn response is overwriting parts of the previous response in an uncommitted state...so presumably during the finalize step.
+- :pushpin: do [#pzjy]
+- [#mbd4]
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
 - :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#tb4q]: please check logs
-- do [#qcm1verify]: Use the logs to verify.
-- do [#qstrikework]
-- do [#pzjy]
+- :pushpin: do [#qcm1verify]: Use the logs to verify.
+- :pushpin: do [#qstrikework]
+- do [#1jec]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

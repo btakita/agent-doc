@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -198,7 +198,7 @@ Verification:
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:ae7de96e -->
+<!-- agent:boundary:22afa38c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -218,6 +218,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- I synced the lender with TMO but got "TMO sync complete" "Updated 0 loans, 0 fundings, 0 schedules. Refreshing the lender pipeline."
 <!-- /agent:queue -->
 
 ## Backlog

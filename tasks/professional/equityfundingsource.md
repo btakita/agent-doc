@@ -687,7 +687,11 @@ Verification:
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:e5d46706 -->
+
+### Re: Queue cleanup — gpt-5
+
+Struck the two answered free-text queue heads left active after the LSS wrapper revert closeout, so they do not rerun as stale queue work.
+<!-- agent:boundary:e4c61690 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -707,8 +711,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- I have passage equityfundingsource/TMO_API_DATABASE. Please ensure this is our sandbox database and not the actual database that TMO is using.
-- Revert the LSS.svc wrapper. We want LOS.svc only. I did not ask you to implement, but the task was scheduled in the queue.
+- ~~I have passage equityfundingsource/TMO_API_DATABASE. Please ensure this is our sandbox database and not the actual database that TMO is using.~~
+- ~~Revert the LSS.svc wrapper. We want LOS.svc only. I did not ask you to implement, but the task was scheduled in the queue.~~
 <!-- /agent:queue -->
 
 ## Backlog

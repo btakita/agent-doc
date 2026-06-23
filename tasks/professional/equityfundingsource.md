@@ -177,7 +177,57 @@ feat(admin): add shareable pipeline dialog links
 
 Add pushState-backed Deal Pipeline dialog URLs for loan, deal, lead, and incomplete-application cards, plus a bottom-right admin Messages launcher that opens the existing searchable Messages hub without rewriting the current page URL. Covers the wiring with admin pipeline tests and deploys the Worker.
 ```
-<!-- agent:boundary:473b0a16 -->
+
+### Re: Admin message dialog full screen and deploy — gpt-5
+
+> **Queue prompt:**
+>
+> Esc key should close the admin message dialog. The admin message dialog should be the full screen.
+
+> **Queue prompt:**
+>
+> deploy
+
+Implemented, pushed, and deployed.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/messages.tsx`
+- `src/equityfundingsource-dev/lib/ui--server--efs/portal.ts`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- parent submodule pointer `src/equityfundingsource-dev`
+
+What changed:
+- The admin Messages launcher now opens through the shared full-screen `PortalModal`, so Escape, backdrop click, focus handoff, and the standard modal close affordance all use the central modal stack.
+- The launcher panel now fills the viewport and puts the embedded conversations in the standard `modal-body` scroll region.
+- The admin pipeline regression test now locks the full-screen launcher contract, close affordance, and viewport-height message body sizing.
+
+Verification:
+- `bun test tests/admin-pipeline.test.ts tests/portal-table-dialog.test.ts tests/portal-messages-component.test.ts` — passed, 91 tests; the expected non-fatal `d1 down` log is from the outbox failure test.
+- `git diff --check` — passed.
+- `make check` — passed; exit 0, with the same expected non-fatal `d1 down` log.
+- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists for this repo.
+- Pre-deploy remote migration list — `No migrations to apply!`.
+- Pre-deploy D1 info and Time Travel info — succeeded; current Time Travel bookmark `000004f6-00000010-00005093-7c700bcf75341d5877758c6abb5e3e0a`.
+- `make deploy` — passed; Worker deployed at `https://equityfundingsource.brian-takita.workers.dev`; current Worker version `31399fb1-fb21-4303-a294-d5f6ec6cc317`.
+- Post-deploy remote migration list — `No migrations to apply!`.
+- Post-deploy smoke tests: `/` returned `200`; `/admin/pipeline` returned expected auth redirect `303`.
+
+Commits:
+- EFS submodule: `416510e339ffb052844d34133e0b731a8e7eda33` (`fix(admin): make messages launcher full screen`), pushed to `equityfundingsource-dev/main`.
+- Parent repo: `bff48727e` (`chore: update equityfundingsource submodule`), pushed to `agent-loop/main`.
+
+Escalation: none.
+There were no actionable follow-up items to capture.
+Confidence: high.
+
+Suggested commit message:
+
+```txt
+fix(admin): make messages launcher full screen
+
+Render the admin Messages launcher in the shared full-screen PortalModal so Escape and the standard close affordance close it, and size the embedded conversation body with the modal-body scroll contract. Covers the launcher contract with admin pipeline tests and deploys the Worker.
+```
+<!-- agent:boundary:3f6fd7bd -->
 <!-- /agent:exchange -->
 ###
 <!--

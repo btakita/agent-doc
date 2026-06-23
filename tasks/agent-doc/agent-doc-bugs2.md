@@ -121,14 +121,45 @@ Verification:
 Notes:
 - I left pre-existing unrelated dirty files unstaged, including `agent-doc-orchestration/src/write.rs` and `write/queue_consume.rs`.
 - `session-check` is ok; it still warns that the route-owned supervisor is stale and should recycle at the next idle boundary.
-<!-- agent:boundary:30b031e6 -->
+
+### Re: :pushpin: do [#pzjy] — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#pzjy]
+
+
+Implemented `#pzjy`.
+
+- Added post-commit queue reconciliation so committed `agent:queue` completions stay completed when a stale editor buffer reappears with the same prompt active again. This covers pinned/id-backed rows and answered free-text rows, preserves unrelated new queue work, and keeps the existing editor-owned direction where a newly struck live row wins over an active HEAD row.
+- Wired the reconcile into the post-commit match decision before transient replay-hash equality can hide strike-only queue drift, with editor-IPC/disk transports and FlowCore audit coverage.
+- Added the missing `--force-disk` closeout path for pending-maintenance reap after this live closeout exposed that recovery gap; ordinary preflight/route maintenance still fails closed under active listeners.
+- Added focused low-level, post-commit, force-disk maintenance, and FlowCore regressions, plus spec and version notes.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test -p agent-doc-orchestration postcommit_queue -- --nocapture`
+- `cargo test -p agent-doc-orchestration postcommit_worktree_reconciles_stale_queue_unstrikes_before_flush -- --nocapture`
+- `cargo test -p agent-doc-orchestration force_disk_closeout_pending_maintenance_bypasses_active_listener -- --nocapture`
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
+- Clean isolated worktree `make check`: clippy, 5047 nextest tests, doctests, and medium simulation passed.
+- Installed the verified clean build with `make install-full`.
+
+Commits:
+- `src/agent-doc` `63edca4d` (`fix: preserve completed queue heads after stale editor drift`), pushed to `origin/main`.
+- `src/agent-doc` `a58eb3e8` (`fix: force pending maintenance under force-disk closeout`), pushed to `origin/main`.
+- Parent gitlink `9d0c6b5c3` (`chore: update agent-doc submodule`).
+<!-- agent:boundary:e87e1093 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#mbd4]~~
-- :pushpin: do [#pzjy]
+- ~~:pushpin: do [#pzjy]~~
+- Can we have annotated queue item(s) that runs when there are no other queue items? So this would effectively be a running loop. This should also support multiple annotated loop queue items that run in a sequence loop. Also, can we have an emoji annotate which queue item is currently being run? There can be a default poll period with configurable override. Also, the loop item can intelligently schedule based on the frequency of events.
+- How can we give agent-doc more telemetry access to identify bugs? Should we have an observer in the supervisor that takes periodic snapshots to process either with the subscription or a local model to identify bugs? Could we have an agent doc run a dedicated loop to schedule observation + bug fixes? So there would be a sidecar agent doc to this session that can observe all running project sessions to add bugs as they are seen. Could we also have a deterministic observer detect any annotated issues & deterministic patterns of issues?
+- Allow dispatching of queue items, such as loop items, use local models.
 - JB `Run Agent Doc` still not submitting. Can we track when this happens and automatically file a bug so I don't have to endlessly repeat myself when you fail to fix the issue? [dogfooding] Can we also have the supervisor detect if the turn started? And if the turn has not started, send Enter and continue retrying until the turn starts?
 - ~~do [#p6a0]~~
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
@@ -167,7 +198,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#3ygp] #jbrunautobug #agent-doc-bug Automatically file a session-doc backlog item when JetBrains Run Agent Doc route/dispatch fails after retries; include the saved route diagnostic path, failure class, pane/generation, and ops.log marker, and dedupe repeated failures for the same document/stage so the operator does not have to retype the bug.
-- [ ] [#pzjy] #agent-doc-bug Prevent stale live editor buffers from resurrecting answered queue prompts after IPC-proof recovery: when `live_prompt_drift_after_preflight` / `content_ours_snapshot_next_cycle` recovery commits a captured response, preserve the committed queue strike state or fail closed instead of accepting stale unstruck queue heads from the editor buffer. Add regression coverage for answered free-text and pinned queue items reappearing unstruck after recovery.
 - [ ] [#qstrikework] #agent-doc-bug Prevent queue items from being struck unless the current cycle proves that exact head was worked: the response quotes the exact free-text head, or a --done/--pending-gate/--review-resolve targets the backing id. Add regression coverage for interrupted finalize recovery where a later operator-verify or free-text head is auto-quoted/struck while the response only repairs an earlier prompt.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.

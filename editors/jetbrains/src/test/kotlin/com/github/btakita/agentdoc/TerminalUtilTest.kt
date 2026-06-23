@@ -22,7 +22,7 @@ class TerminalUtilTest {
                 "--debounce",
                 "0",
                 "--wait-for-ready",
-                "60",
+                "120",
                 "tasks/root.md",
             ),
             TerminalUtil.buildRunRouteCommand("/usr/local/bin/agent-doc", "tasks/root.md"),

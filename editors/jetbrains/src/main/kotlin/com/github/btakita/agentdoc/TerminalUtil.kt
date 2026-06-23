@@ -555,7 +555,7 @@ object TerminalUtil {
             "--debounce",
             "0",
             "--wait-for-ready",
-            "60",
+            "120",
             relativePath,
         )
 

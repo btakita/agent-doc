@@ -157,18 +157,39 @@ fn looks_like_document_path(arg: &str) -> bool {
     path.exists() || path.components().count() > 1 || path.extension().is_some()
 }
 
-fn rewrite_bare_file_invocation(mut args: Vec<OsString>) -> Vec<OsString> {
+fn is_known_subcommand(arg: &str) -> bool {
+    Cli::command()
+        .get_subcommands()
+        .any(|sub| sub.get_name() == arg || sub.get_all_aliases().any(|alias| alias == arg))
+}
+
+fn is_bare_document_invocation(args: &[OsString]) -> bool {
     let Some(first) = args.get(1).and_then(|arg| arg.to_str()) else {
-        return args;
+        return false;
     };
     if first.starts_with('-') {
-        return args;
+        return false;
     }
 
-    let is_known_subcommand = Cli::command()
-        .get_subcommands()
-        .any(|sub| sub.get_name() == first || sub.get_all_aliases().any(|alias| alias == first));
-    if !is_known_subcommand && looks_like_document_path(first) {
+    !is_known_subcommand(first) && looks_like_document_path(first)
+}
+
+fn reject_plain_shell_bare_file_invocation(args: &[OsString]) -> anyhow::Result<()> {
+    if !is_bare_document_invocation(args) {
+        return Ok(());
+    }
+
+    if agent_doc_core::model_tier::detect_harness() == "default" {
+        anyhow::bail!(
+            "bare `agent-doc <FILE>` must be run from a supported harness (Codex, Claude Code, or OpenCode). From a normal shell, use an explicit subcommand such as `agent-doc run <FILE>`, `agent-doc route <FILE>`, or `agent-doc start <FILE>`."
+        );
+    }
+
+    Ok(())
+}
+
+fn rewrite_bare_file_invocation(mut args: Vec<OsString>) -> Vec<OsString> {
+    if is_bare_document_invocation(&args) {
         args.insert(1, OsString::from("run"));
     }
     args
@@ -2135,6 +2156,7 @@ fn main() -> anyhow::Result<()> {
     let raw_args: Vec<OsString> = std::env::args_os().collect();
     let pending_alias_used = deprecated_pending_alias_used(&raw_args);
     let done_flag_alias_used = deprecated_done_flag_used(&raw_args);
+    reject_plain_shell_bare_file_invocation(&raw_args)?;
     let cli = Cli::parse_from(rewrite_bare_file_invocation(raw_args));
 
     // Warn about newer versions on startup, but skip if running the upgrade command itself.

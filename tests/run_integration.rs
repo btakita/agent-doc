@@ -843,6 +843,40 @@ fn run_heartbeats_redirect_stderr_under_managed_tui_but_persist_progress() {
 }
 
 #[test]
+fn bare_file_invocation_outside_supported_harness_fails_before_run_cycle() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, template_doc()).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env_remove("CLAUDECODE")
+        .env_remove("CLAUDE_CODE")
+        .env_remove("CLAUDE_CODE_SESSION")
+        .env_remove("OPENCODE")
+        .env_remove("OPENCODE_CLIENT")
+        .env_remove("CODEX")
+        .env_remove("CODEX_CLI")
+        .env_remove("CODEX_SESSION")
+        .env_remove("CODEX_THREAD_ID")
+        .arg(doc.to_str().unwrap())
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("bare `agent-doc <FILE>` must be run")
+                .and(predicate::str::contains(
+                    "supported harness (Codex, Claude Code, or OpenCode)",
+                ))
+                .and(predicate::str::contains("agent-doc run <FILE>")),
+        );
+
+    assert!(
+        !tmp.path().join(".agent-doc/state/cycles").exists(),
+        "plain-shell bare invocation must fail before opening a run cycle"
+    );
+}
+
+#[test]
 fn codex_bare_run_inside_owning_pane_with_unresolved_prompt_fails_before_pre_commit() {
     // #codex-owned-pane-prompt-miss: when the owner pane re-invokes
     // `agent-doc <FILE>` while an unresolved exchange prompt is still pending,

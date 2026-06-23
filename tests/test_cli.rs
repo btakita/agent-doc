@@ -1706,7 +1706,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         );
         assert_eq!(
             dependency.get("version").and_then(toml::Value::as_str),
-            Some("0.34.40"),
+            Some("0.34.41"),
             "{crate_name} must also carry a registry version for cargo publish"
         );
     }

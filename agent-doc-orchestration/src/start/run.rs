@@ -1,6 +1,8 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
 
 pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
     run_with_reap_policy(file, force, route_owned, RouteOwnedReapPolicy::Auto)
@@ -780,6 +782,7 @@ pub fn run_with_reap_policy(
 
     // Redirect stderr to a log file for TUI harnesses so that
     // supervisor eprintln! diagnostics do not bleed over the child TUI render.
+    #[cfg(unix)]
     if harness.is_tui_harness() {
         let logs_dir = project_root.join(".agent-doc").join("logs");
         if let Ok(()) = std::fs::create_dir_all(&logs_dir) {
@@ -972,12 +975,13 @@ pub fn run_with_reap_policy(
             size: initial_size,
         };
         child_launch_count += 1;
-        let mut session = match pending_adopt.take() {
+        let mut session = if let Some(state) = pending_adopt.take() {
             // `#ctlrecycle` R3 re-entry: adopt the harness child preserved across the
             // supervisor's self-`execve` rather than spawning a fresh one. `first_run`
             // is still true here, so `auto_trigger` is false — the adopted child is
             // mid-session and must not be re-triggered.
-            Some(state) => {
+            #[cfg(unix)]
+            {
                 log_event(
                     &mut session_log,
                     &format!(
@@ -988,8 +992,20 @@ pub fn run_with_reap_policy(
                 crate::supervisor::pty::PtySession::adopt(state.master_fd, state.child_pid)
                     .with_context(|| "failed to adopt harness child across supervisor reexec")?
             }
-            None => crate::supervisor::pty::PtySession::spawn(cfg)
-                .with_context(|| format!("failed to spawn {}", harness.binary))?,
+
+            #[cfg(not(unix))]
+            {
+                let _ = state;
+                log_event(
+                    &mut session_log,
+                    "supervisor_reexec_adopt_skipped reason=unsupported_platform",
+                );
+                crate::supervisor::pty::PtySession::spawn(cfg)
+                    .with_context(|| format!("failed to spawn {}", harness.binary))?
+            }
+        } else {
+            crate::supervisor::pty::PtySession::spawn(cfg)
+                .with_context(|| format!("failed to spawn {}", harness.binary))?
         };
 
         // Extract writer and reader for shared I/O

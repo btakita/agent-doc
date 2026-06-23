@@ -114,7 +114,6 @@ use anyhow::{Context, Result};
 use portable_pty::PtySize;
 use std::collections::VecDeque;
 use std::io::{self, Write};
-use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, TryLockError};

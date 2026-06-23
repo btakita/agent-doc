@@ -244,30 +244,38 @@ pub fn clear(file: &Path) -> Result<()> {
 }
 
 pub fn format_timestamp(epoch_secs: u64) -> String {
-    let epoch: libc::time_t = match epoch_secs.try_into() {
-        Ok(value) => value,
-        Err(_) => return epoch_secs.to_string(),
-    };
-    let mut tm = std::mem::MaybeUninit::<libc::tm>::uninit();
-    let mut buf = [0u8; 21];
-    let format = b"%Y-%m-%dT%H:%M:%SZ\0";
+    #[cfg(not(unix))]
+    {
+        return epoch_secs.to_string();
+    }
 
-    // Format persisted startup-miss timestamps without depending on shell `date`
-    // flags, which differ across Linux/macOS.
-    unsafe {
-        if libc::gmtime_r(&epoch, tm.as_mut_ptr()).is_null() {
-            return epoch_secs.to_string();
+    #[cfg(unix)]
+    {
+        let epoch: libc::time_t = match epoch_secs.try_into() {
+            Ok(value) => value,
+            Err(_) => return epoch_secs.to_string(),
+        };
+        let mut tm = std::mem::MaybeUninit::<libc::tm>::uninit();
+        let mut buf = [0u8; 21];
+        let format = b"%Y-%m-%dT%H:%M:%SZ\0";
+
+        // Format persisted startup-miss timestamps without depending on shell `date`
+        // flags, which differ across Linux/macOS.
+        unsafe {
+            if libc::gmtime_r(&epoch, tm.as_mut_ptr()).is_null() {
+                return epoch_secs.to_string();
+            }
+            let written = libc::strftime(
+                buf.as_mut_ptr().cast(),
+                buf.len(),
+                format.as_ptr().cast(),
+                tm.as_ptr(),
+            );
+            if written == 0 {
+                return epoch_secs.to_string();
+            }
+            String::from_utf8_lossy(&buf[..written]).into_owned()
         }
-        let written = libc::strftime(
-            buf.as_mut_ptr().cast(),
-            buf.len(),
-            format.as_ptr().cast(),
-            tm.as_ptr(),
-        );
-        if written == 0 {
-            return epoch_secs.to_string();
-        }
-        String::from_utf8_lossy(&buf[..written]).into_owned()
     }
 }
 

@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.41
+
+- **Windows release builds compile the supervisor hot-reload path again.** The `#ctlrecycle` Unix `execve` adoption path now keeps its stderr redirection, raw-fd adoption, and startup-miss UTC formatting behind platform guards, so non-Unix release builds fall back to the normal spawn/relaunch behavior instead of compiling POSIX-only symbols.
+
 ## 0.34.40
 
 - **Completed short free-text queue heads no longer survive as active queue residue (`#qheadresidue`).** Short heads such as `deploy` now count as answered when, and only when, exchange history contains an explicit labeled `> **Queue prompt:**` echo for that exact head. `session-check` now interrupts if that proved-answered free-text head is still active in `agent:queue`, preventing a later queue cycle from re-running stale completed work.

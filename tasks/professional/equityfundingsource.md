@@ -43,8 +43,8 @@ Compacted content:
 >
 > ~~The email replies to a message did not show up in the messages.~~ — answered this cycle (#ftstrike)
 
-❯ > **Queue prompt:**
-❯ >
+> **Queue prompt:**
+>
 > ~~Ensure message updates are realtime.~~ — answered this cycle (#ftstrike)
 
 Fixed inbound email replies for lender account/deal threads so they append through the same visible message repositories the current panels read, while preserving the existing `messages` dual-write mirror for the unification cutover. Successful inbound appends still notify the counterparty and now have regression coverage proving the portal realtime Durable Object gets a message tick.
@@ -68,12 +68,12 @@ Commits pushed:
 
 Not deployed; the active preset was `#spec-test-commit-push`, not deploy.
 
-❯ Escalation: none.
+Escalation: none.
 
-❯ Confidence: high.
-❯ - Archived 7 response topic(s): TMO sandbox check and LSS wrapper revert; TMO lender-account LOS link and sync; Deploy; 4 more
-❯ - Prior summary/context: prior compacted content: Archived 17 response topic(s): Advance Lender TMO sync action; Advance Lender TMO sync actio...
-<!-- agent:boundary:78503f2d -->
+Confidence: high.
+- Archived 7 response topic(s): TMO sandbox check and LSS wrapper revert; TMO lender-account LOS link and sync; Deploy; 4 more
+- Prior summary/context: prior compacted content: Archived 17 response topic(s): Advance Lender TMO sync action; Advance Lender TMO sync actio...
+<!-- agent:boundary:6e1b281d -->
 <!-- /agent:exchange -->
 ###
 <!--

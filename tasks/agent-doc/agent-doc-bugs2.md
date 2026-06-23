@@ -34,34 +34,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260623-005732.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260623-011244.md`*
 
 Compacted content:
-- Archived 4 response topic(s): stale-supervisor materialization queue head; ACK-mismatch queue consume recovery and 0.34.38 install; release packaging publish blockers; 1 more
-- Prior summary/context: prior compacted content: Archived 4 response topic(s): queued blockers after repair; live-verification queue gating; ...
-
-### Re: #qpinfl - gpt-5
-
-> **Queue prompt:**
->
-> do [#qpinfl]
-
-
-Implemented and shipped `#qpinfl`.
-
-Changed `agent-doc-orchestration/src/write/queue_consume.rs` so consumed-prompt echo idempotency normalizes stale blockquoted or one-line queue-prompt echoes, prompt prefixes, priority pins, and list/checkbox markers before deciding to insert another echo. Added regressions proving the stale free-text prompt is not duplicated into `agent:exchange` and that the following open id-backed `#fccd` head remains queued and unstruck. Updated `specs/07-orchestration-commands.md` with the recovery invariant.
-
-Verification:
-- `cargo test -p agent-doc-orchestration consumed_prompt_echo_skips_stale_blockquoted_echo_variant`
-- `cargo test -p agent-doc-orchestration free_text_consume_preserves_following_id_backed_head`
-- `make check`
-- `make install` (`agent-doc 0.34.38`, with controller recycle marker set)
-- `gh run list --workflow CI --limit 1` latest CI success: `27993373472`
-
-Commits:
-- `src/agent-doc`: `9b48d43724782fdc8526a6d8563c65d90c65e77d` (`fix queue prompt echo replay`)
-- Superproject pushed to `origin/main`: `50cd5f5bb` (`agent-doc: update queue prompt echo replay fix`)
-<!-- agent:boundary:4f77294d -->
+- Archived 1 response topic(s): #qpinfl - gpt-5
+- Prior summary/context: prior compacted content: Archived 4 response topic(s): stale-supervisor materialization queue head; ACK-mismatch queu...
+<!-- agent:boundary:5ca5a62c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -69,6 +47,27 @@ Commits:
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#qpinfl]~~
 - [#fccd]
+---
+equityfundingsource.md turn is getting IPC ack status errors
+```
+• The backup answer is straightforward: Cloudflare Time Travel is active for the live D1 DB, but I found no project-
+  managed long-retention export job. I’m writing the response now and will let agent-doc commit it.
+
+• Ran cat <<'RESPONSE' | agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/professional/
+  │ equityfundingsource.md --baseline-file /home/brian/work/btakita/agent-loop/.agent-doc/
+  │ baselines/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.md --stream --origin skill
+  │ … +51 lines
+  └ [write] socket IPC failed: IPC ack status error: {"type":"ack","status":"error"} — falling back to file IPC
+    [template] pre-patch boundary 36d8e74a:equityfundingsource inserted at end of exchange
+    … +9 lines (ctrl + t to view transcript)
+    Error: editor IPC did not prove the write for /home/brian/work/btakita/agent-loop/tasks/professional/
+    equityfundingsource.md; pending response retained for retry; refusing direct document write
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• The second finalize hit the same editor IPC timeout and left a pending response for retry. I’m invoking preflight
+  again because it successfully recovered the previous pending response through the normal repair-and-commit path.
+```
 ---
 :pushpin: JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
 ```

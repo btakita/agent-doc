@@ -443,6 +443,12 @@ distinct from the one-shot restart auto-trigger:
   - `SkipAlreadyDispatched` dedups a head that is still present after a dispatch
     (cycle not yet consumed, or the dispatch failed to drain), so a stuck head
     cannot hot-loop the watch every idle tick.
+- If actor state, supervisor runtime actor state, and controller lease are all
+  `ready` while a stale Codex queued-draft renderer cue still makes the pane
+  probe look `alive-busy`, the watch debounces that ready/busy conflict for the
+  stale-busy repair window, logs `owned_pane_ready_busy_conflict`, and treats the
+  pane as dispatchable. Active-turn, permission, hook-review, shell-search,
+  help, and clean-exit blockers still produce `SkipNotIdle`.
   - `SkipNoActiveHead` clears the dedup so a later re-enqueue of the same prompt
     text fires again.
 - Before dispatching a head, the watch starts a context reset for explicit

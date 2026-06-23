@@ -245,6 +245,7 @@ const STALE_BUSY_RECONCILE_TICKS: u32 = 4;
 /// lingering *manual* clear cooldown before it auto-expires the cooldown and
 const AUTO_TRIGGER_OUTPUT_BYTES_MAX: usize = 64 * 1024;
 const ROUTE_OWNED_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const ROUTE_OWNED_READY_BUSY_RECONCILE_TICKS: u32 = STALE_BUSY_RECONCILE_TICKS;
 const SHARED_WRITER_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const SHARED_WRITER_WRITE_POLL_INTERVAL_MS: i32 = 50;
 const SHARED_WRITER_CHUNK_MAX: usize = 1024;
@@ -938,6 +939,16 @@ fn route_owned_live_pane_busy_reason(
     Some(format!("live_pane_busy_no_idle_prompt tail={tail:?}"))
 }
 
+fn owned_pane_label(shared: &SupervisorShared) -> &str {
+    shared.inject_pane.as_deref().unwrap_or_else(|| {
+        shared
+            .actor_runtime
+            .as_ref()
+            .map(|runtime| runtime.pane_id.as_str())
+            .unwrap_or("<pty>")
+    })
+}
+
 fn spawn_route_owned_completion_thread(
     shared: Arc<SupervisorShared>,
     config: RouteOwnedCompletionConfig,
@@ -955,13 +966,60 @@ fn spawn_route_owned_completion_thread(
                 harness,
             } = config;
             let mut logged_busy_cycle: Option<String> = None;
+            let mut ready_busy_ticks: u32 = 0;
+            let mut ready_busy_key: Option<(String, String)> = None;
+            let mut ready_busy_logged_key: Option<(String, String)> = None;
             while !stop.load(Ordering::Relaxed) && !completed.load(Ordering::Relaxed) {
                 if let Ok(Some(state)) = crate::cycle_state::load(&file)
                     && route_owned_cycle_completed_after_start(&state, baseline.as_ref())
                 {
-                    let decision = if let Some(reason) =
-                        route_owned_live_pane_busy_reason(&shared, &harness)
+                    let actor_ready = actor_state_is_ready(&shared);
+                    let ready_busy_reason = if actor_ready {
+                        ready_busy_blocker_reason(&shared, &harness)
+                    } else {
+                        None
+                    };
+                    let key = ready_busy_reason
+                        .as_ref()
+                        .map(|reason| (state.cycle_id.clone(), reason.clone()));
+                    if key.is_some() && key == ready_busy_key {
+                        ready_busy_ticks = ready_busy_ticks.saturating_add(1);
+                    } else {
+                        ready_busy_key = key.clone();
+                        ready_busy_ticks = u32::from(key.is_some());
+                    }
+                    let ready_busy_reconciled = ready_busy_conflict_reconcile_decision(
+                        actor_ready,
+                        ready_busy_reason.as_deref(),
+                        false,
+                        ready_busy_ticks,
+                    );
+                    if ready_busy_reconciled
+                        && key.is_some()
+                        && ready_busy_logged_key.as_ref() != key.as_ref()
                     {
+                        let reason = ready_busy_reason.as_deref().unwrap_or("unknown");
+                        let event = format!(
+                            "owned_pane_ready_busy_conflict source=route_owned_completion harness={} pane={} reason={:?} after_ticks={} cycle={} event={}",
+                            harness.binary,
+                            owned_pane_label(&shared),
+                            reason,
+                            ROUTE_OWNED_READY_BUSY_RECONCILE_TICKS,
+                            state.cycle_id,
+                            state.last_event
+                        );
+                        log_event(&mut session_log, &event);
+                        crate::ops_log::log_op(&file, &event);
+                        ready_busy_logged_key = key.clone();
+                    }
+
+                    let live_pane_busy_reason = if ready_busy_reconciled {
+                        None
+                    } else {
+                        route_owned_live_pane_busy_reason(&shared, &harness)
+                    };
+
+                    let decision = if let Some(reason) = live_pane_busy_reason {
                         RouteOwnedReapDecision {
                             reap: false,
                             reason,

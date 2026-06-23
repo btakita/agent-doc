@@ -3335,6 +3335,40 @@ fn print_status_summary(ctx: &SessionContext) {
             );
         }
     }
+    if owned_pane_ready_busy_conflict(ctx, &evidence) {
+        println!(
+            "status_warning: owned_pane_ready_busy_conflict actor=ready supervisor_actor=ready controller_lease=ready live_pane=alive-busy prompt_ready=false current_command={}",
+            evidence.current_command.as_deref().unwrap_or("unknown")
+        );
+        println!(
+            "recovery_hint: supervisor will treat a stable stale ready/busy probe as recoverable after a bounded re-probe; if this persists, run `agent-doc session status {}` again, then `agent-doc session clear {}` from another pane when no real turn is active.",
+            ctx.canonical_file.display(),
+            ctx.canonical_file.display()
+        );
+    }
+}
+
+fn owned_pane_ready_busy_conflict(ctx: &SessionContext, evidence: &LivePaneEvidence) -> bool {
+    if evidence.state != LivePaneState::AliveBusy || evidence.prompt_ready != Some(false) {
+        return false;
+    }
+    let Some(record) = ctx.actor_record.as_ref() else {
+        return false;
+    };
+    if record.state != ActorState::Ready {
+        return false;
+    }
+    if ctx.supervisor_runtime.health != SupervisorHealth::Healthy
+        || ctx.supervisor_runtime.actor_state != Some(ActorState::Ready)
+    {
+        return false;
+    }
+    ctx.operator_status
+        .supervisor_lease
+        .as_ref()
+        .filter(|lease| lease.generation == record.generation)
+        .and_then(|lease| lease.runtime_state.as_deref())
+        .is_some_and(|state| state == ActorState::Ready.as_str())
 }
 
 fn capability_proof_status(ctx: &SessionContext) -> String {
@@ -4392,6 +4426,46 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             ..evidence
         };
         assert!(!idle_projection_needs_reconciliation(&ctx, &busy_evidence));
+    }
+
+    #[test]
+    fn status_flags_owned_pane_ready_busy_conflict() {
+        let record = test_actor_record(ActorState::Ready);
+        let ctx = test_session_context(
+            record,
+            test_supervisor_runtime(Some(ActorState::Ready)),
+            Some("ready"),
+        );
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveBusy,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: Some(false),
+            tail: Some("tab to queue message".to_string()),
+        };
+
+        assert!(owned_pane_ready_busy_conflict(&ctx, &evidence));
+    }
+
+    #[test]
+    fn status_does_not_flag_real_busy_actor_as_ready_busy_conflict() {
+        let record = test_actor_record(ActorState::Busy);
+        let ctx = test_session_context(
+            record,
+            test_supervisor_runtime(Some(ActorState::Busy)),
+            Some("busy"),
+        );
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveBusy,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: Some(false),
+            tail: Some("working".to_string()),
+        };
+
+        assert!(!owned_pane_ready_busy_conflict(&ctx, &evidence));
     }
 
     #[test]

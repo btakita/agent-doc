@@ -488,6 +488,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut editor_typing_active_logged = false;
             let mut context_reset_policy_error_logged = false;
             let mut idle_busy_ticks: u32 = 0;
+            let mut ready_busy_ticks: u32 = 0;
+            let mut ready_busy_logged_key: Option<(String, String)> = None;
             // `#clearcontresume`: consecutive idle-prompt polls observed while a
             // manual clear cooldown is active and a go-mode head is waiting.
             // Used to debounce the cooldown auto-expiry so a resumed drain never
@@ -656,7 +658,47 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     context_reset_in_flight = false;
                     last_context_reset_head = None;
                 }
-                let prompt_visible = idle_queue_prompt_visible(&shared, &harness);
+                let actor_ready = actor_state_is_ready(&shared);
+                let ready_busy_reason = if active_head.is_some()
+                    && actor_ready
+                    && !clear_cooldown_active
+                {
+                    ready_busy_blocker_reason(&shared, &harness)
+                } else {
+                    None
+                };
+                if ready_busy_reason.is_some() {
+                    ready_busy_ticks = ready_busy_ticks.saturating_add(1);
+                } else {
+                    ready_busy_ticks = 0;
+                    ready_busy_logged_key = None;
+                }
+                let ready_busy_reconciled = ready_busy_conflict_reconcile_decision(
+                    actor_ready,
+                    ready_busy_reason.as_deref(),
+                    clear_cooldown_active,
+                    ready_busy_ticks,
+                );
+                if ready_busy_reconciled {
+                    let reason = ready_busy_reason.as_deref().unwrap_or("unknown");
+                    let head = active_head.as_deref().unwrap_or("unknown");
+                    let key = (head.to_string(), reason.to_string());
+                    if ready_busy_logged_key.as_ref() != Some(&key) {
+                        let event = format!(
+                            "owned_pane_ready_busy_conflict source=idle_queue_watch harness={} pane={} reason={:?} after_ticks={} head={:?}",
+                            harness.binary,
+                            owned_pane_label(&shared),
+                            reason,
+                            STALE_BUSY_RECONCILE_TICKS,
+                            head
+                        );
+                        log_event(&mut session_log, &event);
+                        crate::ops_log::log_op(&path, &event);
+                        ready_busy_logged_key = Some(key);
+                    }
+                }
+                let prompt_visible =
+                    ready_busy_reconciled || idle_queue_prompt_visible(&shared, &harness);
                 let turn_active = turn_active_for_owned_pane(&path, &shared);
 
                 // `#agentreloadrestart` Phase 1a: detect a frontmatter `agent:`

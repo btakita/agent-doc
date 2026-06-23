@@ -120,6 +120,40 @@ pub(crate) fn idle_queue_prompt_visible(
     supervisor_pane_dispatch_ready(shared, harness).unwrap_or(true)
 }
 
+pub(crate) fn actor_state_is_ready(shared: &SupervisorShared) -> bool {
+    shared
+        .actor_state
+        .lock()
+        .unwrap()
+        .is_some_and(|state| state == crate::session_actor::ActorState::Ready)
+}
+
+pub(crate) fn recoverable_ready_busy_blocker_reason(reason: &str) -> bool {
+    matches!(reason, "queued draft in composer")
+}
+
+pub(crate) fn ready_busy_blocker_reason(
+    shared: &SupervisorShared,
+    harness: &crate::harness::HarnessConfig,
+) -> Option<String> {
+    let output = child_output_for_detection(shared);
+    harness
+        .dispatch_blocker_reason(&output)
+        .filter(|reason| recoverable_ready_busy_blocker_reason(reason))
+}
+
+pub(crate) fn ready_busy_conflict_reconcile_decision(
+    actor_ready: bool,
+    blocker_reason: Option<&str>,
+    clear_cooldown_active: bool,
+    consecutive_ready_busy_ticks: u32,
+) -> bool {
+    actor_ready
+        && !clear_cooldown_active
+        && blocker_reason.is_some_and(recoverable_ready_busy_blocker_reason)
+        && consecutive_ready_busy_ticks >= STALE_BUSY_RECONCILE_TICKS
+}
+
 /// `#runexitrestart`: fresh-tmux-capture dispatch-ready evidence for the
 /// supervisor idle-watch drain gate. Captures the owned pane live (mirroring
 /// [`supervisor_pane_has_busy_cue`], not the edge-triggered pty `terminal_screen`
@@ -809,6 +843,68 @@ cargo install — installed agent-doc 0.34.0
 
         assert!(reason.contains("live_pane_busy_blocked_prompt"));
         assert!(reason.contains("queued draft in composer"));
+    }
+    #[test]
+    fn ready_busy_conflict_reconcile_debounces_stale_queue_draft() {
+        for ticks in 0..STALE_BUSY_RECONCILE_TICKS {
+            assert!(
+                !ready_busy_conflict_reconcile_decision(
+                    true,
+                    Some("queued draft in composer"),
+                    false,
+                    ticks,
+                ),
+                "tick {ticks} should still wait for the bounded re-probe"
+            );
+        }
+        assert!(ready_busy_conflict_reconcile_decision(
+            true,
+            Some("queued draft in composer"),
+            false,
+            STALE_BUSY_RECONCILE_TICKS,
+        ));
+    }
+    #[test]
+    fn ready_busy_conflict_reconcile_protects_active_turns() {
+        assert!(!ready_busy_conflict_reconcile_decision(
+            true,
+            Some("active codex turn"),
+            false,
+            STALE_BUSY_RECONCILE_TICKS + 10,
+        ));
+        assert!(!ready_busy_conflict_reconcile_decision(
+            true,
+            Some("active permission prompt"),
+            false,
+            STALE_BUSY_RECONCILE_TICKS + 10,
+        ));
+    }
+    #[test]
+    fn ready_busy_blocker_reason_filters_to_recoverable_queue_draft() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::codex();
+        record_recent_output(&shared, "›\n".as_bytes());
+        record_recent_output(&shared, b"tab to queue message\n");
+        record_recent_output(
+            &shared,
+            "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n".as_bytes(),
+        );
+
+        assert_eq!(
+            ready_busy_blocker_reason(&shared, &harness).as_deref(),
+            Some("queued draft in composer")
+        );
+
+        let active_shared = SupervisorShared::new("test", "test-instance".to_string());
+        record_recent_output(
+            &active_shared,
+            "• Working (1m 34s • esc to interrupt)\n\n› Write tests\n".as_bytes(),
+        );
+        record_recent_output(
+            &active_shared,
+            "gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used\n".as_bytes(),
+        );
+        assert_eq!(ready_busy_blocker_reason(&active_shared, &harness), None);
     }
     #[test]
     fn route_owned_live_pane_busy_allows_idle_prompt_reap() {

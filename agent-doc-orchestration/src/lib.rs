@@ -74,6 +74,7 @@ pub mod context_pct;
 pub mod convergence_gate;
 pub mod convergence_playback;
 pub mod cycle_state;
+pub mod cycle_state_machine;
 pub mod dashboard;
 pub mod debounce;
 pub mod dedupe;

@@ -76,9 +76,18 @@ authorities once the controller record exists.
   registry entry from the actor row, and removes stale same-pane legacy entries
   that conflict with a live controller actor.
 - Session actor closeout persists the selected queue head, response/cycle
-  terminal state, and tracked pending mutations as one controller transaction
-  after strict closeout checks pass. Failed closeout must leave those controller
-  rows unadvanced.
+terminal state, and tracked pending mutations as one controller transaction
+after strict closeout checks pass. Failed closeout must leave those controller
+rows unadvanced.
+- Cycle-state authority is split into an accepted transition and a durable
+snapshot. `cycle_state_machine::CyclePhaseMachine` is the pure transition
+authority for `CycleEvent` phase changes (`StartPreflight`,
+`ResponseCaptured`, `WriteApplied`, `Committed`, `Abandoned`, and recovery
+rewinds). The compatibility `cycle_state` sidecar path applies that transition
+table before it writes `.agent-doc/state/cycles/<hash>.json`; later controller
+cutover must submit the same events through the session actor and emit the
+sidecar from the serialized owner job. The sidecar remains the crash-recovery
+journal and startup replay source; it is not deleted by controller cutover.
 
 ## Workflow state kernel
 

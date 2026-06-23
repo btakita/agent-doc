@@ -23,6 +23,9 @@
 //!   synthetic committed cycle if commit happens without a prior state file).
 //! - Lower-rank bookkeeping and duplicate terminal bookkeeping must never
 //!   mutate an already-committed or abandoned cycle.
+//! - Phase transitions are accepted through `cycle_state_machine`; the sidecar
+//!   remains the durable crash-recovery log emitted after that transition table
+//!   accepts an event.
 //! - `load()` returns the current persisted state when present.
 //!
 //! ## Agentic Contracts
@@ -38,6 +41,7 @@
 //! - `mark_committed_closes_cycle`
 //! - `mark_write_applied_creates_synthetic_cycle_when_missing`
 
+use crate::cycle_state_machine::{CycleEvent, CyclePhaseMachine};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -369,10 +373,12 @@ pub fn start_preflight_with_task(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let phase = CyclePhaseMachine::transition(CyclePhase::Committed, CycleEvent::StartPreflight)
+        .unwrap_or(CyclePhase::PreflightStarted);
     let state = CycleState {
         cycle_id: format!("cycle-{}", now_millis()),
         file: canonical.display().to_string(),
-        phase: CyclePhase::PreflightStarted,
+        phase,
         last_event: "preflight_started".to_string(),
         started_at: now,
         updated_at: now,
@@ -536,10 +542,11 @@ pub fn mark_write_applied(
 ) -> Result<CycleState> {
     let mut state =
         load(file)?.unwrap_or_else(|| synthetic_state(file, CyclePhase::PreflightStarted));
-    if cycle_phase_rank(CyclePhase::WriteApplied) < cycle_phase_rank(state.phase) {
+    let Some(next_phase) = CyclePhaseMachine::transition(state.phase, CycleEvent::WriteApplied)
+    else {
         return Ok(state);
-    }
-    state.phase = CyclePhase::WriteApplied;
+    };
+    state.phase = next_phase;
     state.last_event = event.to_string();
     state.updated_at = now_secs();
     state.snapshot_hash = snapshot_content.map(crate::ops_log::content_hash);
@@ -562,10 +569,11 @@ pub fn mark_response_captured(
     let mut state = load(file)?.unwrap_or_else(|| {
         synthetic_state_with_id(file, CyclePhase::PreflightStarted, cycle_id_hint)
     });
-    if cycle_phase_rank(CyclePhase::ResponseCaptured) < cycle_phase_rank(state.phase) {
+    let Some(next_phase) = CyclePhaseMachine::transition(state.phase, CycleEvent::ResponseCaptured)
+    else {
         return Ok(state);
-    }
-    state.phase = CyclePhase::ResponseCaptured;
+    };
+    state.phase = next_phase;
     state.last_event = event.to_string();
     state.updated_at = now_secs();
     state.snapshot_hash = snapshot_content.map(crate::ops_log::content_hash);
@@ -872,7 +880,12 @@ pub fn mark_recoverable_preflight_timeout(file: &Path, event: &str) -> Result<Op
     if !state.is_open() {
         return Ok(Some(state));
     }
-    state.phase = CyclePhase::PreflightStarted;
+    let Some(next_phase) =
+        CyclePhaseMachine::transition(state.phase, CycleEvent::RecoverablePreflightTimeout)
+    else {
+        return Ok(Some(state));
+    };
+    state.phase = next_phase;
     state.last_event = event.to_string();
     state.updated_at = now_secs();
     save(file, &state)?;
@@ -1050,7 +1063,10 @@ pub fn mark_committed(
     {
         return Ok(state);
     }
-    state.phase = CyclePhase::Committed;
+    let Some(next_phase) = CyclePhaseMachine::transition(state.phase, CycleEvent::Committed) else {
+        return Ok(state);
+    };
+    state.phase = next_phase;
     state.last_event = event.to_string();
     state.updated_at = now_secs();
     if let Some(snapshot) = snapshot_content {
@@ -1138,7 +1154,10 @@ pub fn mark_abandoned(
     if !state.is_open() {
         return Ok(state);
     }
-    state.phase = CyclePhase::Abandoned;
+    let Some(next_phase) = CyclePhaseMachine::transition(state.phase, CycleEvent::Abandoned) else {
+        return Ok(state);
+    };
+    state.phase = next_phase;
     state.last_event = event.to_string();
     state.updated_at = now_secs();
     if let Some(snapshot) = snapshot_content {
@@ -1288,16 +1307,6 @@ fn cycle_phase_label(phase: CyclePhase) -> &'static str {
     }
 }
 
-fn cycle_phase_rank(phase: CyclePhase) -> u8 {
-    match phase {
-        CyclePhase::PreflightStarted => 0,
-        CyclePhase::ResponseCaptured => 1,
-        CyclePhase::WriteApplied => 2,
-        CyclePhase::Committed => 3,
-        CyclePhase::Abandoned => 4,
-    }
-}
-
 fn is_stable_commit_event(event: &str) -> bool {
     matches!(
         event,
@@ -1424,10 +1433,7 @@ mod tests {
             1,
             "atomic overwrite leaves no temp-file residue"
         );
-        assert_eq!(
-            load(&doc).unwrap().unwrap().phase,
-            CyclePhase::Committed
-        );
+        assert_eq!(load(&doc).unwrap().unwrap().phase, CyclePhase::Committed);
     }
 
     #[test]

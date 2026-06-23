@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -318,8 +318,13 @@ Escalation: none.
 
 ### Re: Queue repair — gpt-5
 
+> **Queue prompt:**
+>
+> ~~Please investigate if TMO api has the create/search/link behavior.~~ — answered in `### Re: TMO lender API behavior` (#ftstrike)
+
+
 Struck the answered preset-backed queue head left active after the response commit so the same TMO lender API investigation does not re-run.
-<!-- agent:boundary:5a620c11 -->
+<!-- agent:boundary:7ee0047e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -339,7 +344,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Please investigate if TMO api has the create/search/link behavior.~~ — answered in `### Re: TMO lender API behavior` (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

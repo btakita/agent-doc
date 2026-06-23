@@ -184,7 +184,23 @@ Verification:
 ### Re: queue restoration repair — gpt-5
 
 Restored the next queue head that was accidentally marked complete during stale closeout cleanup. No source work was performed in this repair cycle.
-<!-- agent:boundary:63f0d786 -->
+
+### Re: annotated idle loop queue items — gpt-5
+
+> **Queue prompt:** Can we have annotated queue item(s) that runs when there are no other queue items? So this would effectively be a running loop. This should also support multiple annotated loop queue items that run in a sequence loop. Also, can we have an emoji annotate which queue item is currently being run? There can be a default poll period with configurable override. Also, the loop item can intelligently schedule based on the frequency of events.
+
+Yes, but this should be implemented as a scheduler feature rather than overloading ordinary `agent:queue` drain semantics. The safe shape is: normal drainable queue work always wins; loop items run only when no regular head is ready; loop order/cursor and last-run timestamps are persisted; visual/current-item state is metadata, not prompt text; poll periods and event-frequency decisions stay deterministic until a later local-model dispatch hook is added.
+
+Captured this as four backlog items: `#qloop1` syntax/state, `#qloop2` idle-loop sequencing, `#qloop3` poll controls, and `#qloop4` event-aware scheduling. No source files changed in this cycle.
+
+Verification:
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+- `agent-doc read ... --component queue`
+- `agent-doc read ... --component backlog`
+
+Confidence: medium; this is a decomposition/architecture closeout for a multi-part feature, not an implementation patch.
+Escalation: none.
+<!-- agent:boundary:150574e6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -192,7 +208,7 @@ Restored the next queue head that was accidentally marked complete during stale 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#mbd4]~~
 - ~~:pushpin: do [#pzjy]~~
-- Can we have annotated queue item(s) that runs when there are no other queue items? So this would effectively be a running loop. This should also support multiple annotated loop queue items that run in a sequence loop. Also, can we have an emoji annotate which queue item is currently being run? There can be a default poll period with configurable override. Also, the loop item can intelligently schedule based on the frequency of events.
+- ~~Can we have annotated queue item(s) that runs when there are no other queue items? So this would effectively be a running loop. This should also support multiple annotated loop queue items that run in a sequence loop. Also, can we have an emoji annotate which queue item is currently being run? There can be a default poll period with configurable override. Also, the loop item can intelligently schedule based on the frequency of events.~~
 - How can we give agent-doc more telemetry access to identify bugs? Should we have an observer in the supervisor that takes periodic snapshots to process either with the subscription or a local model to identify bugs? Could we have an agent doc run a dedicated loop to schedule observation + bug fixes? So there would be a sidecar agent doc to this session that can observe all running project sessions to add bugs as they are seen. Could we also have a deterministic observer detect any annotated issues & deterministic patterns of issues?
 - Allow dispatching of queue items, such as loop items, use local models.
 - JB `Run Agent Doc` still not submitting. Can we track when this happens and automatically file a bug so I don't have to endlessly repeat myself when you fail to fix the issue? [dogfooding] Can we also have the supervisor detect if the turn started? And if the turn has not started, send Enter and continue retrying until the turn starts?
@@ -239,6 +255,10 @@ What are #next-steps to fix bugs?
 - [ ] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.
 - [ ] [#qcm1verify] [operator-verify] #agent-doc-bug Install + live-verify the #qnodemerge1 component-scoped merge (agent-doc submodule 52458f47). Code shipped+pushed, make check green (4853). Operator-gated remainder (mid-session install causes finalize-client-newer drift; STOP-cutting-releases gate): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then drive one edit-during-finalize cycle (type into a queue item while the agent writes an exchange response) and confirm ZERO cross-component splice + no console-output-in-queue corruption.
 - [ ] [#1jec] [operator-verify] #yzerverify #agent-doc-bug Live-verify the #yzer/#evmhplugin plugin reconnect re-read (agent-doc 0.34.28 / submodule f6b8ae17, plugin 0.2.172). Code shipped+pushed: binary FFI agent_doc_reconnect_buffer_decision (disk==HEAD via ffi_show_head + buffer==prior-commit via ffi_show_prior_blobs) + pure decide_reconnect_buffer + PatchWatcher.registerRoot reconcile-on-connect (applyReconnectReread) + SimWorld coverage; make check green (4832). Operator-gated remainder (install is unsafe mid-session = finalize-client-newer drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), reinstall plugin 0.2.172, agent-doc admin recycle. Then repro: open a session doc in JB, kill/restart the supervisor so the binary commits while the plugin is disconnected, and on reconnect confirm ops.log shows 'reconnect_buffer_decision decision=reread_disk #yzer' and the editor buffer == HEAD with NO File Cache Conflict; a buffer holding genuine unsaved user edits must instead log decision=keep_buffer and be preserved (editor wins).
+- [ ] [#qloop1] #agent-doc-feature Define durable queue loop annotation syntax and parser/rendering behavior: mark loop-only queue/backlog entries, keep annotation/state out of prompt completion proof, and expose a stable current-item marker for editor/supervisor surfaces.
+- [ ] [#qloop2] #agent-doc-feature Implement idle-loop scheduling for annotated loop items: when normal drainable queue work is empty, dispatch loop items in deterministic sequence, persist the loop cursor/last-run state, and prove regular queue items always preempt loop work.
+- [ ] [#qloop3] #agent-doc-feature Add loop poll controls: global default poll period plus per-loop override, next-run time gates, bounded backoff/jitter, and tests proving no tight spin when there are no relevant events.
+- [ ] [#qloop4] #agent-doc-feature Add event-aware loop scheduling: record deterministic event counters/timestamps and let loop items schedule earlier/later based on event frequency before any model-assisted scheduling hook.
 <!-- /agent:backlog -->
 
 ## Review

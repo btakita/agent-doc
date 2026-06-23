@@ -149,14 +149,72 @@ Verification:
 - `make check` passed locally: 5007 tests passed, 241 skipped; deterministic closeout sim passed.
 - `make install` installed `agent-doc 0.34.38` locally and marked controllers for recycle at idle boundary.
 - GitHub Actions `CI` for `0d5c5bbd` passed: `make check` and `make tmux-ci` both green.
+- Parent `agent-loop` has no `CI` workflow; its `Agent Doc` workflow for `f72795c21` failed before running any steps because GitHub reported account billing/spending-limit failure. Local `make check` and `make tmux-ci` are green.
+- `agent-doc` repo CI for `f42a3daf` was `in_progress` at last check (`run 28027534299`), not red.
+- `make install` installed `agent-doc 0.34.38` locally and marked 1 controller for recycle at the next idle boundary.
+- `make tmux-ci` passed: 7 ignored/live tests passed.
+- `make check` passed: clippy, 5008 nextest tests passed, 241 skipped; doctests passed; wider deterministic closeout sim passed.
+- `cargo test -p agent-doc-orchestration resolve_supervisor_auto_recycle_precedence`
+- `cargo test -p agent-doc-orchestration supervisor_recycle_action_policy`
+- `cargo test -p agent-doc-orchestration queue_boundary_self_recycle_makes_stale_content_ours_refusal_ineligible`
+- `cargo fmt`
+- `f72795c21` in parent `agent-loop`: `agent-doc: update fccsup self-recycle proof` (pushed to `btakita/agent-loop:main` via a clean temporary worktree so unrelated local parent changes stayed unstaged)
+- `f42a3daf` in `src/agent-doc`: `test stale supervisor fcc self-recycle` (pushed to `btakita/agent-doc:main`)
+- Added an Unreleased note for `#fccsup`.
+- Corrected active code comments that still described supervisor auto-recycle as default-off; the resolver and spec already default it on.
+- Added `queue_boundary_self_recycle_makes_stale_content_ours_refusal_ineligible`, a regression tying the default-on queue-boundary self-recycle policy to the host-supervisor inode guard: stale host maps old inode -> stale `content_ours` refusal is eligible; pending queue head -> `RecycleImmediate`; after `supervisor_binary_stale_self_recycled` maps the installed inode -> stale-supervisor `content_ours` refusal is no longer eligible.
+- parent gitlink `src/agent-doc`
+- `src/agent-doc/agent-doc-orchestration/src/start/decisions.rs`
+- `src/agent-doc/agent-doc-orchestration/src/project_controller/rpc.rs`
+- `src/agent-doc/agent-doc-orchestration/src/project_controller.rs`
+- `src/agent-doc/agent-doc-core/src/frontmatter.rs`
+- `src/agent-doc/VERSIONS.md`
 
 Confidence: high. The remaining risk is live-editor timing variance, but the route ownership window is now represented by a durable marker with reason-specific TTL and covered by unit/integration and CI tmux proof.
-<!-- agent:boundary:d0c2d072 -->
+
+### Re: #jbrunclear struck + #fccsup — gpt-5
+
+> **Queue prompt:** I rebooted. JB `Run Agent Doc` stalled without dispatching. Prompt has `/clear` from another watcher. `/clear` should not have been added.
+
+Accepted the `#jbrunclear` strike as already handled by the prior dispatch-clear fence work, then completed `#fccsup`.
+
+Changed paths:
+- `src/agent-doc/VERSIONS.md`
+- `src/agent-doc/agent-doc-core/src/frontmatter.rs`
+- `src/agent-doc/agent-doc-orchestration/src/project_controller.rs`
+- `src/agent-doc/agent-doc-orchestration/src/project_controller/rpc.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start/decisions.rs`
+- parent gitlink `src/agent-doc`
+
+What changed:
+- Added `queue_boundary_self_recycle_makes_stale_content_ours_refusal_ineligible`, a regression tying the default-on queue-boundary self-recycle policy to the host-supervisor inode guard: stale host maps old inode -> stale `content_ours` refusal is eligible; pending queue head -> `RecycleImmediate`; after `supervisor_binary_stale_self_recycled` maps the installed inode -> stale-supervisor `content_ours` refusal is no longer eligible.
+- Corrected active code comments that still described supervisor auto-recycle as default-off; the resolver and spec already default it on.
+- Added an Unreleased note for `#fccsup`.
+
+Commits:
+- `f42a3daf` in `src/agent-doc`: `test stale supervisor fcc self-recycle` (pushed to `btakita/agent-doc:main`)
+- `f72795c21` in parent `agent-loop`: `agent-doc: update fccsup self-recycle proof` (pushed to `btakita/agent-loop:main` via a clean temporary worktree so unrelated local parent changes stayed unstaged)
+
+Verification:
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration queue_boundary_self_recycle_makes_stale_content_ours_refusal_ineligible`
+- `cargo test -p agent-doc-orchestration supervisor_recycle_action_policy`
+- `cargo test -p agent-doc-orchestration resolve_supervisor_auto_recycle_precedence`
+- `make check` passed: clippy, 5008 nextest tests passed, 241 skipped; doctests passed; wider deterministic closeout sim passed.
+- `make tmux-ci` passed: 7 ignored/live tests passed.
+- `make install` installed `agent-doc 0.34.38` locally and marked 1 controller for recycle at the next idle boundary.
+- `agent-doc` repo CI for `f42a3daf` was `in_progress` at last check (`run 28027534299`), not red.
+- Parent `agent-loop` has no `CI` workflow; its `Agent Doc` workflow for `f72795c21` failed before running any steps because GitHub reported account billing/spending-limit failure. Local `make check` and `make tmux-ci` are green.
+
+Confidence: high for the `#fccsup` regression class. The remaining external risk is the pending submodule CI run and the parent workflow billing block, neither of which is a code failure from this change.
+<!-- agent:boundary:89d74d84 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- [#qfocsupguard]
+---
 I rebooted. JB `Run Agent Doc` stalled without dispatching. Prompt has `/clear` from another watcher. `/clear` should not have been added.
 ```
 resync: pruned 3 stale session(s)
@@ -219,8 +277,7 @@ resync: purged 1 orphaned stash pane(s)
 Error: dispatch-only codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %3 via direct_pane_submit (tmux_text_enter), but only pane-input acceptance proof was available after waiting 10s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle codex prompt or restart the session and reroute again
 ```
 ---
-- ~~Extending the timeout is not the solution. The panes were up is less than 2s. Codex was running and idle. I am able to use Codex manually. This is an agent-doc dispatch bug.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~do [#fcccap]~~
+- Why is sending a prompt to tmux significantly more reliable than sending Enter to tmux?
 - do [#fccsup]
 - do [#fccendpoint]
 - do [#fccforce]
@@ -231,7 +288,6 @@ Error: dispatch-only codex reopen for tasks/professional/equityfundingsource.md 
 - do [#fccsave]
 - do [#fccreconnect]
 - do [#fccaudit2]
-- do [#jbrunclear]
 <!-- /agent:queue -->
 <!--
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.
@@ -263,8 +319,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#qfocsupguard] #agent-doc-bug Fail closed when `session-check` emits `deferred_for_supervisor_drain` without durable proof that the supervisor clear-and-continue path claimed and drained the current queue head. Live repro 2026-06-23: repeated `agent-doc src/boost-client/tasks/monsterrodholders.md` runs reported committed + `yield_to_supervisor_clear_and_continue` while `session-review` still showed active queue prompt `scripts/hermes-serve.sh should start ollama...`; operator reported the queue item was either not processed or the response was not written. Plan: tasks/agent-doc/plan-supervisor-drain-handoff-proof.md. Relates #qfocsup/#tb4q and archived #mrh-response-loss-stalled-queue. DO NOT IMPLEMENT until scheduled.
 - [ ] [#fcccap] #agent-doc-bug Replace manual-only File Cache Conflict capture (#cyh0) with an automated trigger bundle: on every JB File Cache Conflict/pending-memory event, write a correlated artifact containing the nearest agent-doc command, ops.log `transport=... action=... reason=...`, patch id/editor id, plugin event (`pending`, `kept-memory`, `cancelled`, `saveDocument`), and document hash so the remaining trigger is provable without operator log scraping.
-- [ ] [#fccsup] #agent-doc-bug Close the stale-binary supervisor FCC path: make stale route-owned supervisors recycle at the next safe boundary without requiring a manual `admin recycle`, and add a regression/ops assertion that `content_ours_adoption_refused_stale_supervisor reason=supervisor_binary_stale` cannot recur after install+boundary recycle.
 - [ ] [#fccendpoint] #agent-doc-bug Harden the `apply_template_writeback transport=disk_fallback reason=send_failed editor_endpoint=absent action=editorless_disk_fallback` path: distinguish true no-editor CLI sessions from JB-open-but-missing/stale owner lease, fail closed or restore editor ownership for the latter, and add coverage so an open JB buffer is never externally overwritten as an editorless disk fallback.
 - [ ] [#fccforce] #agent-doc-bug Contain `convergence_gate_force_disk_fallback reason=editor_ipc_convergence_boundary_failed`: make the fallback write require a loadable playback artifact plus editor-open safety proof, prefer blocked/error with exact unblocker when JB has the file open, and prove the force-disk path cannot surface a File Cache Conflict silently.
 - [ ] [#fccnoack] #agent-doc-bug Trace and harden active-listener/no-ACK behavior: when `transport=blocked reason=no_ack_content` fires, prove no plugin/VFS side effect (`saveDocument`, VCS refresh, stale patch apply) can still raise a JB File Cache Conflict; add ops markers and a regression for the blocked path staying non-mutating.

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -498,7 +498,7 @@ Deployment: not performed.
 Escalation: none.
 
 Confidence: high. The new path is covered at the TMO wrapper layer, simulator layer, admin route/static checks, and admin dialog behavior, with full project checks passing after the changes.
-<!-- agent:boundary:d051fe7d -->
+<!-- agent:boundary:14b7ae64 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -518,7 +518,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#s6y6]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -256,7 +256,7 @@ Verification:
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:5ba0b308 -->
+<!-- agent:boundary:ff94ff6a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -276,7 +276,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- "The local TMO docs still say lender creation is manual and not to call TMO lender endpoints from the investor portal, so this uses the existing admin `POST /api/admin/tmo-sync` path and leaves exact-account-number entry as fallback.". Why?
 <!-- /agent:queue -->
 
 ## Backlog

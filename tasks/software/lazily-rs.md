@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -39,7 +39,70 @@ queue: start
 Compacted content:
 ❯ - Archived 7 response topic(s): #advance-review; do #lzwebrtcrunbook; do #lzholonsscan; 4 more
 ❯ - Prior summary/context: prior compacted content: Archived 3 response topic(s): #next-steps to fix lazily bugs; do #lzstr0mframe; do #lzstr0mp...
-<!-- agent:boundary:8ba3ad43 -->
+
+### Re: state machine architecture + do #438b — Machine<S,E> shipped — glm-5.2
+
+> **Queue prompts:**
+>
+> - How can lazily-rs support state machine architecture?
+> - do [#438b]
+
+Implemented the `Machine<S, E>` state machine primitive — a thin wrapper over existing `Context` primitives that reduces FSM boilerplate while preserving full reactive integration.
+
+**What shipped** (`src/state_machine.rs`, +155 lines):
+
+```rust
+pub struct Machine<S, E> { ... }
+
+impl<S: PartialEq + Clone + 'static, E: 'static> Machine<S, E> {
+    pub fn new(ctx, initial: S, transition: Fn(&S, &E) -> Option<S>) -> Self;
+    pub fn send(&self, ctx, event: E) -> bool;        // true = accepted, false = rejected
+    pub fn state(&self, ctx) -> S;                     // read current state
+    pub fn state_handle(&self) -> CellHandle<S>;       // for reactive dependencies
+    pub fn on_transition(ctx, |old, new| ...) -> EffectHandle;  // state-change observer
+    pub fn state_is(ctx, target: S) -> SignalHandle<bool>;      // "is in state X"
+}
+```
+
+**Design mapping (answering "how can lazily-rs support state machines"):**
+
+| State machine concept | Implementation | Why |
+|---|---|---|
+| Current state | `CellHandle<S>` | `PartialEq` guard: only actual state changes invalidate dependents |
+| Transition table | Pure `Fn(&S, &E) -> Option<S>` | `None` = guard rejection; `Some` = valid transition |
+| On-enter / on-exit | `ctx.effect` body + cleanup | Body = on-enter; cleanup closure = on-exit (runs before rerun) |
+| Reactive derived state | `state_handle()` → `ctx.memo` / `ctx.signal` | Auto-recomputes on transition, zero wiring |
+| Transition observer | `on_transition(\|old, new\| ...)` | Fires with both states on each change; not on registration or rejection |
+| State predicate | `state_is(target)` → `SignalHandle<bool>` | Eager signal for hierarchical guards, conditional rendering |
+| Batch atomicity | `ctx.batch(\|ctx| { m.send(...); m.send(...); })` | Multiple transitions settle before effects fire |
+
+**No feature gate** — zero external dependencies, same rationale as `thread_safe.rs` (always available, dead-code-eliminated if unused). The design proposal suggested `state_machine` feature-gating; deviating here because the module uses only core `Context`/`CellHandle`/`EffectHandle`/`SignalHandle` types with no optional deps.
+
+**Tests** (`tests/state_machine.rs`, 11 tests, all pass):
+1. `machine_transitions_through_all_states` — basic FSM cycle
+2. `machine_rejects_invalid_transition` — guard returns `None`
+3. `machine_self_transition_is_accepted_but_no_invalidation` — `PartialEq` guard behavior
+4. `derived_slot_updates_on_transition` — `ctx.memo` reads `state_handle()`
+5. `eager_signal_tracks_machine_state` — `ctx.signal` auto-recomputes
+6. `on_transition_fires_with_old_and_new` — observer receives `(old, new)`
+7. `on_transition_does_not_fire_on_rejected_event` — guard rejection = no callback
+8. `state_is_signal_reflects_current_state` — `SignalHandle<bool>` predicate
+9. `effect_cleanup_runs_on_state_exit` — on-exit via cleanup closure
+10. `disposing_on_transition_stops_observing` — `EffectHandle::dispose`
+11. `batched_transactions_settle_before_effects_fire` — `ctx.batch` coalescing
+
+**Verification:**
+- `cargo fmt --check` clean.
+- `cargo clippy --all-features --all-targets -- -D warnings` clean (fixed `collapsible_if` + `type_complexity` via `TransitionFn<S, E>` alias).
+- `cargo test --all-features` — all suites green including 11 new tests + doc-test + 107 existing spec/integration/loom/stress/tokio/async/ffi/ipc/websocket/lean.
+- `make check` — all green except `benchmark-check` (environmental: `target/criterion` has no Criterion estimates; `#lzbenchbudget` confirmed this is not a regression — state_machine.rs touches zero benchmarked code).
+
+**Commits + push (executed):**
+- lazily-rs submodule `54439b5` (`feat: add Machine state machine primitive`) → `lazily-hub/lazily-rs` main (`ed4ce4a..54439b5`).
+- superproject `9cab2c72b` (merge + gitlink bump) → `btakita/agent-loop` main.
+
+**`#438b` done.** Queue drained.
+<!-- agent:boundary:b038164f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,14 +111,11 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~How can lazily-rs support state machine architecture?~~
-- do [#438b]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#438b] lzstatemachine=[recommended] Add state_machine feature module: Machine<S,E> wrapping CellHandle<S> + transition fn, exposing send(event)/state()/on_transition(). Maps on-enter/on-exit to effect+cleanup. Supports FSM, hierarchical (effect create/dispose for child graphs), and parallel regions (one Cell per region). Plan: tasks/software/plan-lazily-state-machine.md. Follows #spec-test-build-install-commit-push preset.
 <!-- /agent:backlog -->
 
 ## Review

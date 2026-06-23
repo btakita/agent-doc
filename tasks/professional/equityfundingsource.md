@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -412,7 +412,7 @@ Proof:
 - Verification: confirmed Deal Pipeline source paths; confirmed `TST113` TMO cache row contains `EmailAddress='stormrunner06106@gmail.com'` / `ShortName='Huang, Lucas'`; confirmed no current matching EFS loan row and no current `stormrunner` match in the obvious app-owned email/audit tables.
 - Confidence: high that the current proven stale source is `tmo_cache_entities` for `TST113`; medium on whether that exact row is the same evidence you saw, because I did not inspect the external UI/log that reported the deletion.
 - Escalation: none. I did not use Time Travel restore, mutate D1, deploy, or modify EFS source.
-<!-- agent:boundary:dc840f1f -->
+<!-- agent:boundary:4ed93d3d -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -246,7 +246,45 @@ Installed state:
 - JetBrains and VS Code plugins were rebuilt and installed; IntelliJ still needs a restart before the newly installed JetBrains plugin code is active.
 
 Verification completed in this session includes the VS Code test suite, JetBrains plugin tests/build, focused Rust IPC tests, `make check`, and the latest green GitHub Actions CI run.
-<!-- agent:boundary:1da9717a -->
+
+### Re: bare agent-doc shell invocation — gpt-5
+
+> **Queue prompt:**
+>
+> Running `agent-doc file-name.md` directly in the CLI should return in an immediate error explaining it needs to be run within a supported harness (Codex, Claude, or Opencode). Instead, it said "Submitting to Codex..." and locks the shell. Now I cannot sync monsterrodholders.md.
+
+Implemented and shipped the direct-shell guard.
+
+Changed paths:
+- `src/agent-doc/src/main.rs`
+- `src/agent-doc/tests/run_integration.rs`
+- `src/agent-doc/specs/07-core-commands.md`
+- `src/agent-doc/specs/07-commands.md`
+- `src/agent-doc` superproject gitlink
+
+What changed: bare `agent-doc <FILE>` now checks the active harness before rewriting to `run`. Inside Codex, Claude Code, or OpenCode it keeps the harness-native behavior. In a normal shell with no supported harness env, it fails before parsing into `run`, before opening a cycle, and tells the operator to use an explicit subcommand such as `agent-doc run <FILE>`, `agent-doc route <FILE>`, or `agent-doc start <FILE>`.
+
+Verification:
+- `cargo fmt`
+- `cargo test bare_file_invocation_outside_supported_harness_fails_before_run_cycle`
+- `cargo test codex_bare_run_inside_owning_pane_with_unresolved_prompt_fails_before_pre_commit`
+- `cargo test codex_owned_pane_active_auto_queue_hands_off_without_drift`
+- `make check` -> 5002 tests passed, 241 skipped, SimWorld medium seed passed
+- `make install` -> installed `agent-doc 0.34.38` and refreshed `libagent_doc.so`
+- `env -u ... agent-doc tasks/agent-doc/agent-doc-bugs2.md` -> immediate error: bare `agent-doc <FILE>` must be run from a supported harness
+
+Commits / push:
+- agent-doc submodule: `3a8e304d` (`fix: guard bare agent-doc shell invocation`) pushed to `btakita/agent-doc main`
+- superproject pointer: `edcd0d452` (`chore: update agent-doc submodule`) pushed to `btakita/agent-loop main` from a clean temporary worktree because the local superproject `main` has a long unrelated divergence
+
+CI:
+- agent-doc `CI` run `27995577311` was still `in_progress` at closeout check.
+- superproject has no workflow named `CI`; its `Agent Doc` workflow run `27995642188` failed before runner startup. Both jobs had zero steps and GitHub annotated: recent account payments failed or the spending limit needs to be increased. Local verification above is the code evidence for this turn.
+
+Escalation: none.
+
+Other unhandled queue heads remain open; this response intentionally handled only the quoted direct-shell CLI prompt.
+<!-- agent:boundary:291e2699 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -305,7 +343,7 @@ JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The se
 Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
 ```
 ---
-- :pushpin: do [#arsm]
+- ~~:pushpin: do [#arsm]~~
 - :pushpin: do [#1jec]
 - :pushpin: do [#fbwireverify]
 - :pushpin: do [#qnodemerge4verify]
@@ -313,7 +351,7 @@ Error: authoritative actor record for tasks/software/agent-loop.md is bound to h
 - do [#cancelturnverify]
 - ~~do [#mrh-response-loss-stalled-queue]~~
 - do [#qcm1verify]
-- Running `agent-doc file-name.md` directly in the CLI should return in an immediate error explaining it needs to be run within a supported harness (Codex, Claude, or Opencode). Instead, it said "Submitting to Codex..." and locks the shell. Now I cannot sync monsterrodholders.md.
+- ~~Running `agent-doc file-name.md` directly in the CLI should return in an immediate error explaining it needs to be run within a supported harness (Codex, Claude, or Opencode). Instead, it said "Submitting to Codex..." and locks the shell. Now I cannot sync monsterrodholders.md.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

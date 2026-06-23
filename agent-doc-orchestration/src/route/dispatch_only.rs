@@ -42,6 +42,74 @@ pub(crate) fn dispatch_only_starting_pane_not_ready_error(
     )
 }
 
+fn dispatch_only_starting_pane_actor_ready_gate(
+    actor: &AuthoritativeActorDispatchTarget,
+    pane: &str,
+    prompt_ready: bool,
+) -> bool {
+    if actor.record.pane_id != pane {
+        return false;
+    }
+    if actor.actor_state() != crate::session_actor::ActorState::Ready {
+        return false;
+    }
+    matches!(
+        classify_authoritative_prompt_ready_barrier(AuthoritativePromptReadyBarrierFacts {
+            ready_facts: &authoritative_actor_ready_facts_from_target(actor, prompt_ready),
+            dispatch_eligible: authoritative_actor_dispatch_target_eligible(actor),
+        }),
+        PromptReadyBarrierDecision::Ready
+    )
+}
+
+fn dispatch_only_starting_pane_ready_via_authoritative_actor(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    dispatch_pane: &str,
+    harness: &HarnessConfig,
+) -> bool {
+    let actor = match load_authoritative_actor_binding(
+        tmux, file, session_id, file_path, harness, false, false,
+    ) {
+        Ok(Some(actor)) => actor,
+        Ok(None) => return false,
+        Err(err) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_dispatch_only_starting_pane_actor_probe_failed file={} pane={} harness={} error={}",
+                    file.display(),
+                    dispatch_pane,
+                    harness.binary,
+                    crate::secret_redact::redact(&err.to_string())
+                ),
+            );
+            return false;
+        }
+    };
+    let prompt_ready = current_generation_ready_prompt_proven(tmux, &actor, harness);
+    if !dispatch_only_starting_pane_actor_ready_gate(&actor, dispatch_pane, prompt_ready) {
+        return false;
+    }
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_dispatch_only_starting_pane_ready_via_actor_state file={} pane={} harness={} generation={} runtime_state={} transition={} prompt_ready={}",
+            file.display(),
+            dispatch_pane,
+            harness.binary,
+            actor.record.generation,
+            runtime_actor_state_label(&actor.runtime),
+            actor.record.last_transition.reason,
+            prompt_ready
+        ),
+    );
+    true
+}
+
 /// `#jbdisprecycle` — refused-because-supervisor-recycling error. Distinct from
 /// the not-booted-yet error: the pane may already be at a prompt, but the
 /// project supervisor is mid-`execve` hot-reload, so a trigger typed now would
@@ -150,6 +218,17 @@ pub(crate) fn dispatch_only_send_reopen(
         dispatch_only_requires_ready_probe(log_status.as_ref(), &dispatch_pane, harness);
     if requires_ready_probe {
         loop {
+            if dispatch_only_starting_pane_ready_via_authoritative_actor(
+                tmux,
+                file,
+                session_id,
+                file_path,
+                &dispatch_pane,
+                harness,
+            ) {
+                break;
+            }
+
             let ready_outcome = wait_for_agent_ready_outcome(
                 tmux,
                 &dispatch_pane,
@@ -157,6 +236,16 @@ pub(crate) fn dispatch_only_send_reopen(
                 harness,
             );
             if ready_outcome.is_ready() {
+                break;
+            }
+            if dispatch_only_starting_pane_ready_via_authoritative_actor(
+                tmux,
+                file,
+                session_id,
+                file_path,
+                &dispatch_pane,
+                harness,
+            ) {
                 break;
             }
 
@@ -853,6 +942,51 @@ mod tests {
         assert!(message.contains("(active codex turn)"));
         assert!(message.contains("ui_outcome=blocked_with_exact_unblocker"));
         assert!(message.contains("unblocker=wait_for_dispatch_ready_prompt"));
+    }
+    #[test]
+    fn dispatch_only_starting_pane_actor_ready_gate_requires_same_ready_prompt_proven_actor() {
+        let mut record = test_actor_record("%42");
+        record.state = crate::session_actor::ActorState::Ready;
+        record.generation = 9;
+        record.last_transition.reason = "prompt_ready".to_string();
+        record.last_transition.new_generation = 9;
+        let ready_actor = AuthoritativeActorDispatchTarget {
+            record,
+            runtime: SupervisorRuntime {
+                health: SupervisorHealth::Healthy,
+                actor_state: Some(crate::session_actor::ActorState::Ready),
+            },
+        };
+
+        assert!(
+            dispatch_only_starting_pane_actor_ready_gate(&ready_actor, "%42", true),
+            "a healthy Ready actor for the same pane with prompt proof should satisfy the startup gate"
+        );
+        assert!(
+            !dispatch_only_starting_pane_actor_ready_gate(&ready_actor, "%99", true),
+            "a Ready actor for a different pane must not satisfy this dispatch pane's gate"
+        );
+        assert!(
+            !dispatch_only_starting_pane_actor_ready_gate(&ready_actor, "%42", false),
+            "Ready state without prompt/current-generation proof must still fail closed"
+        );
+
+        let mut busy_actor = ready_actor.clone();
+        busy_actor.runtime.actor_state = Some(crate::session_actor::ActorState::Busy);
+        assert!(
+            !dispatch_only_starting_pane_actor_ready_gate(&busy_actor, "%42", true),
+            "non-Ready runtime state must not bypass the startup probe"
+        );
+
+        let mut degraded_actor = ready_actor;
+        degraded_actor.runtime = SupervisorRuntime {
+            health: SupervisorHealth::NoSocket,
+            actor_state: None,
+        };
+        assert!(
+            !dispatch_only_starting_pane_actor_ready_gate(&degraded_actor, "%42", true),
+            "a persisted Ready record without healthy runtime authority must not bypass the startup probe"
+        );
     }
     #[test]
     fn dispatch_only_progress_policy_is_harness_neutral() {

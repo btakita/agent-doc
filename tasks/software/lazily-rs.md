@@ -39,7 +39,7 @@ queue: start
 Compacted content:
 ❯ - Archived 10 response topic(s): state machine architecture + do #438b; `Machine` naming; rename to `StateMachine`; 7 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-<!-- agent:boundary:3f4728c4 -->
+<!-- agent:boundary:c6bb9d55 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -55,8 +55,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzmsrv] [recommended] lazily-rs: declare MSRV in Cargo.toml. Crate declares edition = "2024" but no rust-version, while it uses let_chains pervasively (context.rs:376, async_context.rs:1044, state_machine.rs:142) which stabilized in Rust 1.88. A downstream crate pinning rust-version = "1.85" (the edition floor) resolves lazily silently then fails to compile with "let_chains are unstable". One-line fix: add rust-version = "1.88" to Cargo.toml.
-- [ ] [#lzdisposedrain] [recommended] lazily-rs: single-threaded Context::dispose_effect (src/context.rs:676) clears scheduled_effects but does not drain pending_effects, unlike the thread-safe variant (src/thread_safe.rs:2578). Stale entries are skipped harmlessly by effect_should_run so this is cosmetic, but add the missing remove_pending_effect call for backend parity.
 <!-- /agent:backlog -->
 
 ## Review

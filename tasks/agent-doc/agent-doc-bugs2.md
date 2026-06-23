@@ -106,14 +106,14 @@ Note: I left an unrelated unstaged submodule change in `agent-doc-orchestration/
 
 
 Closeout repair: struck the duplicate answered free-text queue row so the already-handled restart/no-submit prompt cannot rerun as stale work. No code changes in this repair commit.
-<!-- agent:boundary:4fb0b40a -->
+<!-- agent:boundary:f9a165a4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~After the restart after the last turn, the prompt was not submitted until ~30s later.日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀~~
-- do [#cancelturnverify]: Verified
+- ~~do [#cancelturnverify]: Verified~~
 - do tasks/agent-doc/plan-ack-mismatch-shorter-recovered-response-loss-2026-06-23.md
 - :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.

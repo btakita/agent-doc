@@ -621,7 +621,73 @@ Verification: secret-path readability and documentation/API-shape inspection onl
 Escalation: none.
 
 Confidence: high that the available local evidence is insufficient to prove sandbox; medium that the value may be sandbox only because it may use an opaque tenant-specific database name.
-<!-- agent:boundary:0e12f825 -->
+
+### Re: TMO sandbox check and LSS wrapper revert — gpt-5
+
+> **Queue prompt:**
+>
+> ~~I have passage equityfundingsource/TMO_API_DATABASE. Please ensure this is our sandbox database and not the actual database that TMO is using.~~ — already answered in `### Re: TMO API database sandbox check`; reaffirmed this cycle (#ftstrike)
+
+No new evidence changed the sandbox conclusion: `passage equityfundingsource/TMO_API_DATABASE` is readable, but local evidence still cannot certify that the value is a TMO sandbox database. I did not make live TMO calls or perform any TMO mutation.
+
+> **Queue prompt:**
+>
+> ~~Revert the LSS.svc wrapper. We want LOS.svc only. I did not ask you to implement, but the task was scheduled in the queue.~~ — answered this cycle (#ftstrike)
+
+Reverted the LSS lender wrapper implementation and restored the Advance Lender path to LOS-only TMO sync plus manual exact account-number linking. The active app/UI/API/simulator code now has no `LSS.svc`, `tmo_lender_`, or `/tmo-lender-link` executable references under `app/` or `lib/`.
+
+I kept the factual docs that TMO exposes LSS lender endpoints, but changed them to explicitly say EFS is not wiring those endpoints and current EFS TMO automation should remain LOS.svc-only unless that direction changes explicitly. That should prevent the previous investigation notes from being treated as permission to re-add the wrapper.
+
+The queue item in the live document also appears to have an incomplete trailing sentence (`Do we have a way to automatically add`). I did not treat that fragment as an executable request.
+
+Commits:
+- EFS: `84fdb75 revert: remove tmo lss lender wrapper`, pushed to `origin/main`.
+- Parent: `081679b30 chore: update equityfundingsource submodule`, pushed to `origin/main`.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/routes.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/user_management/index.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/tmo-api/index.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/tmo-sim/routes.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `src/equityfundingsource-dev/docs/TMO/get-lender.md`
+- `src/equityfundingsource-dev/docs/TMO/new-lender.md`
+- `src/equityfundingsource-dev/prds/investor-pipeline-admin.md`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/advance-lender-dialog.test.ts`
+- `src/equityfundingsource-dev/tests/tmo-api.test.ts`
+- `src/equityfundingsource-dev/tests/tmo-sim.test.ts`
+- `src/equityfundingsource-dev` parent submodule pointer
+
+Commands:
+- `tsift status` / `tsift index --workspace .`
+- `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc session-check`
+- targeted `rg`, `tsift --envelope source-read`, `tsift diff-digest`, and `sed` inspections
+- `git revert --no-commit 7b16a43`
+- `git diff --check`
+- focused EFS tests through `tsift --envelope digest-runner`: `bun test tests/tmo-api.test.ts tests/tmo-sim.test.ts tests/advance-lender-dialog.test.ts tests/admin-investor-pipeline.test.ts`
+- full EFS `make check` through `tsift --envelope digest-runner`
+- EFS `gh run list --workflow CI --limit 1` and `gh workflow list`
+- EFS `git commit` and `git push origin main`
+- parent `make check` through `tsift --envelope digest-runner`
+- parent `gh run list --workflow CI --limit 1`, `gh workflow list`, `gh run list --workflow "Agent Doc" --limit 1`, and `gh run view 28048977035`
+- parent `git commit` and `git push origin main`
+
+Verification:
+- Focused EFS tests passed for `tmo-api`, `tmo-sim`, `advance-lender-dialog`, and `admin-investor-pipeline`.
+- EFS `git diff --check` passed.
+- Full EFS `make check` exited 0: 1,159 tests passed, 0 failed, app build completed, and Worker build completed. The digest grouped one logged `error: d1 down` fixture string, but the raw test summary was `1159 pass / 0 fail`.
+- EFS has no GitHub workflows; `gh run list --workflow CI --limit 1` reported no `CI` workflow and `gh workflow list` returned none.
+- Parent `make check` exited 0 with no failure signatures.
+- Parent has no `CI` workflow; `gh workflow list` shows only `Agent Doc`.
+- Parent `Agent Doc` workflow run `28048977035` failed before executing any steps because GitHub Actions did not start the runner. Both jobs have the annotation: recent account payments failed or spending limit needs to be increased. This is an external CI-start blocker, not a code/test failure.
+- EFS submodule is clean on `main...origin/main` after push.
+- Parent repo is clean relative to origin for this work, but still has pre-existing unrelated dirty paths.
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:e5d46706 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -641,6 +707,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- I have passage equityfundingsource/TMO_API_DATABASE. Please ensure this is our sandbox database and not the actual database that TMO is using.
+- Revert the LSS.svc wrapper. We want LOS.svc only. I did not ask you to implement, but the task was scheduled in the queue.
 <!-- /agent:queue -->
 
 ## Backlog

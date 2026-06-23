@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -60,7 +60,50 @@ Verification: focused EFS tests passed for `tmo-api`, `tmo-sim`, `advance-lender
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:b09cabd7 -->
+
+### Re: TMO lender-account LOS link and sync — gpt-5
+
+> **Queue prompt:**
+>
+> Whever there is an input to add a TMO lender id, add a direct link to the TMO LOS portal to add the lender. We should also attempt a sync in case the lender is in TMO LOS.
+
+
+> **Queue prompt:**
+>
+> ~~Whever there is an input to add a TMO lender id, add a direct link to the TMO LOS portal to add the lender. We should also attempt a sync in case the lender is in TMO LOS.~~ — answered this cycle (#ftstrike)
+
+Implemented this across the admin lender-account entry points without reintroducing the reverted LSS wrapper. The flow is now: sync TMO first, open the TMO LOS portal if the lender needs to be added/found, then paste the exact lender account number.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/tmo_los.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/lender_detail.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/deal_detail.tsx`
+- `src/equityfundingsource-dev/tests/advance-lender-dialog.test.ts`
+- `src/equityfundingsource-dev/tests/tmo-lender-link-ui.test.ts`
+
+Details:
+- Added shared `TMO_LOS_PORTAL_HREF = "https://app.themortgageoffice.com/"` and a reusable `TmoLosPortalLink`.
+- Added/kept `Sync with TMO` at each manual lender-account input: Lender Request detail, Advance Lender modal, and Deal Detail interested-lender card.
+- Extracted the TMO sync request/toast so all three forms share the same LOS-only sync guidance.
+- Added regression coverage that every lender-account input offers both TMO sync and the LOS portal link.
+
+Verification:
+- `bun test tests/advance-lender-dialog.test.ts tests/tmo-lender-link-ui.test.ts tests/admin-investor-pipeline.test.ts tests/lender-request-labels-docs.test.ts` — 108 pass / 0 fail.
+- EFS `make check` — 1,162 pass / 0 fail plus app and Worker builds.
+- Parent `make check` — passed; printed pre-existing `src/agent-doc` test warnings but exited 0.
+- `gh run list --workflow CI --limit 1` — no workflow named `CI` in EFS or parent.
+
+Commits pushed:
+- EFS `e955ad1 feat(admin): link TMO LOS from lender account forms`
+- Parent `bbee7eef1 chore: update equityfundingsource submodule`
+
+Source checked for the LOS portal URL: https://app.themortgageoffice.com/
+
+Escalation: none.
+
+Confidence: high.
+<!-- agent:boundary:25e9e268 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -80,9 +123,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Whever there is an input to add a TMO lender id, add a direct link to the TMO LOS portal to add the lender. We should also attempt a sync in case the lender is in TMO LOS.
-- ~~I have passage equityfundingsource/TMO_API_DATABASE. Please ensure this is our sandbox database and not the actual database that TMO is using.~~
-- ~~Revert the LSS.svc wrapper. We want LOS.svc only. I did not ask you to implement, but the task was scheduled in the queue.~~
 <!-- /agent:queue -->
 
 ## Backlog

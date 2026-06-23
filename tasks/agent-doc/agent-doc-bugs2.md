@@ -39,19 +39,45 @@ completed
 Compacted content:
 - Archived 6 response topic(s): JB Run Agent Doc submit latency; #turnstuck-readybusy; answered queue residue cleanup; 3 more
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): actor-switch rebind already covered; paused queue cleanup; #qn...
+
+### Re: ack-mismatch shorter recovered response loss — gpt-5
+
+> **Queue prompt:** do tasks/agent-doc/plan-ack-mismatch-shorter-recovered-response-loss-2026-06-23.md
+
+Implemented `tasks/agent-doc/plan-ack-mismatch-shorter-recovered-response-loss-2026-06-23.md` and continued without waiting on CI per operator instruction.
+
+In `agent-doc-orchestration/src/write/converge.rs`, shorter editor ACKs that are missing only a newly materialized `### Re:` block now replay the missing target response back into the editor and complete as editor IPC convergence. The existing stale extra-prompt artifact path and real user-drift path remain fail-closed.
+
+In `agent-doc-orchestration/src/snapshot.rs`, stale overlay CRDT projection mismatches now rebuild the overlay sidecar from the fallback baseline on first detection. The next merge-base read uses the repaired overlay, so repeated stale-overlay logs and the hot loop stop.
+
+Verification:
+- `cargo test -p agent-doc-orchestration pending_write_shorter_ack_replays_missing_agent_response`
+- `cargo test -p agent-doc-orchestration crdt_merge_base_state_rebuilds_stale_overlay_after_first_fallback`
+- `cargo test -p agent-doc-orchestration ack_mismatch`
+- `cargo test -p agent-doc-orchestration crdt_merge_base_state`
+- `make check`
+- `make install-full`
+- `agent-doc --version` -> `agent-doc 0.34.42`
+- `git diff --check`
+
+Commits:
+- `src/agent-doc`: `08c2c8f3 fix: recover shorter ack mismatches`
+- parent: `9069d9fc7 fix: recover agent-doc shorter ack mismatches`
+
+CI was sampled but not awaited: agent-doc CI run `28051475833` was still `in_progress` when checked.
+<!-- agent:boundary:48e281b1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do tasks/agent-doc/plan-ack-mismatch-shorter-recovered-response-loss-2026-06-23.md~~ — auto-struck: answered this cycle (#ftstrike)
+- [#directchatpb2]
 - :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
 - :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#tb4q]: please check logs
 - ~~:round_pushpin: do [#arsm]~~
 - do [#qcm1verify]: Use the logs to verify.
-- do [#directchatpb2]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

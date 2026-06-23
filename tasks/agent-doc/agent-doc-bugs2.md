@@ -169,7 +169,21 @@ Commands: `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read` for queue/ex
 Verification: session-check pending after finalize
 Confidence: high
 Escalation: none; implementation remains tracked in the new backlog item.
-<!-- agent:boundary:64d4d25c -->
+
+### Re: `/clear` flooded during active turn — gpt-5
+
+> **Queue prompt:** `/clear` is being incorrectly flooded into the tmux pane during a turn.
+
+Captured as a distinct bug from the intended supervisor clear-and-continue path. `/clear` should only be injected at a proven reset or supervisor handoff boundary, not repeatedly sent into a pane while an agent turn is active.
+
+I added a backlog item for a turn-state flood guard: suppress duplicate `/clear` dispatch while a turn is running, require explicit session-check or supervisor-defer proof before sending it, and add regression coverage for repeated `/clear` text landing in tmux during an active response.
+
+Changed paths: `tasks/agent-doc/agent-doc-bugs2.md`
+Commands: `agent_doc_preflight`, `agent_doc_plan`, `agent_doc_read` for queue/backlog, `agent_doc_finalize`
+Verification: session-check pending after finalize
+Confidence: high
+Escalation: none; implementation remains tracked in the new backlog item.
+<!-- agent:boundary:a599780a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -181,7 +195,7 @@ Escalation: none; implementation remains tracked in the new backlog item.
 - ~~Turn response is overwriting parts of the previous response in an uncommitted state...so presumably during the finalize step.~~
 - ~~Queue items are being struck without being worked on.~~
 - ~~Immediately log IPC issues in this document's sessions for dogfooding when I type into the queue.~~
-- `/clear` is being incorrectly flooded into the tmux pane during a turn.
+- ~~`/clear` is being incorrectly flooded into the tmux pane during a turn.~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
 - :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#tb4q]: please check logs
@@ -216,6 +230,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#p6a0] #agent-doc-bug Guard `/clear` dispatch against active-turn flooding: `/clear` may be sent only at a proven reset/supervisor handoff boundary, never repeatedly into an active tmux pane while an agent turn is running. Add turn-state/dedupe gating plus regression coverage for repeated `/clear` text being injected during an active response, while preserving the intended focused-cycle supervisor clear-and-continue behavior.
 - [ ] [#mbd4] #agent-doc-bug Dogfood IPC issue surfacing in session docs: when an operator types into this document's queue during a live agent-doc turn and editor IPC degrades, times out, ACK mismatches, retries, falls back, or makes a reconnect/stale-buffer decision, append a visible note to the current session exchange immediately with issue class, affected component, recovery path, and ops.log marker so the session document itself captures the IPC bug.
 - [ ] [#qstrikework] #agent-doc-bug Prevent queue items from being struck unless the current cycle proves that exact head was worked: the response quotes the exact free-text head, or a --done/--pending-gate/--review-resolve targets the backing id. Add regression coverage for interrupted finalize recovery where a later operator-verify or free-text head is auto-quoted/struck while the response only repairs an earlier prompt.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.

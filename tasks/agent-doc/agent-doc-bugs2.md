@@ -120,7 +120,18 @@ This keeps `#jbrundispatch` scoped correctly: capture the live stall at submit t
 Confirmed. I will treat auto-restart as working for this report. The remaining failure is narrower: after the agent-doc turn restarts, JB `Run Agent Doc` still does not submit the prompt quickly enough, or the submit proof is missing.
 
 That keeps the next investigation scoped to the route/submit readiness path, not the restart boundary. The useful live capture is the moment after the restarted pane is ready: whether `auto_start_dispatch_ready_confirmed` appears, whether a dispatch-start/submit proof follows, and how long the gap is before input lands.
-<!-- agent:boundary:9fc7f86c -->
+
+### Re: repaired JB submit prompt — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
+
+
+> **Recovered prompt:** JB `Run Agent Doc` still does not quickly submit.
+
+This is the same remaining JB route issue, now with auto-restart narrowed out. The queue evidence says the agent-doc turn restarts; the unresolved failure is prompt submission after readiness. I am treating the restarted-turn evidence as accepted and leaving the remaining work with the existing live-submit capture items rather than adding a duplicate backlog entry.
+<!-- agent:boundary:0fc417e6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -128,7 +139,7 @@ That keeps the next investigation scoped to the route/submit readiness path, not
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~JB `Run Agent Doc` still does not quickly submit.~~
 - ~~auto-restart session does restart the agent-doc turn.~~
-- :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
+- ~~:pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀~~
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
 - :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#tb4q]: please check logs

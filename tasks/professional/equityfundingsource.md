@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -262,7 +262,7 @@ Verification:
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:7fb18274 -->
+<!-- agent:boundary:45f556eb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -282,7 +282,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- [#dialog-state-cta]
 <!-- /agent:queue -->
 
 ## Backlog

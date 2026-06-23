@@ -4,9 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
-## 0.34.38
+## 0.34.39
 
 - **Manual Sync Tmux Layout now closes crash-left response commit boundaries (`#sync-jbccc-repair`).** Full `agent-doc sync` / `session doctor --repair` now runs the existing `jb_cache_conflict_cancel` detector before pane-liveness checks can return early. When a machine crash or canceled editor writeback leaves the visible session document and snapshot containing the assistant response while `HEAD` still lacks it, the sync repair path performs the same narrow `git::commit(file)` recovery as preflight and proves the recoverable shape is gone before continuing with layout repair/reconcile. Coverage adds a deterministic sync repair regression for the committed-cycle/snapshot-drift shape, alongside the existing preflight recovery tests.
+
+## 0.34.38
 
 - **JetBrains `Run Agent Doc` now fences the full startup ready-probe from supervisor `/clear` injection (`#jbrunclear`).** Dispatch-only reroutes write a short-lived route-submit marker before the latest-run prompt-ready wait begins, not only after text injection starts, so the idle-queue supervisor cannot interleave a context-reset `/clear` or `/new` while an editor route is still proving the recovered pane is dispatch-ready. The marker records `reason=dispatch_only_ready_probe`, set/clear ops lines, and the idle watcher logs when a persisted or orphan context-clear draft waits on `reason=route_submit_in_flight`, giving the 2026-06-23 reboot shape direct proof instead of leaving a stray clear in the composer.
 

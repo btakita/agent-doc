@@ -95,6 +95,16 @@ Verification:
 Pushed commits:
 - `src/agent-doc`: `2aa04685 fix: reconcile ready busy owned panes`
 - parent repo: `73ee575f1 chore: update agent-doc submodule`
+- `git diff --check` passed.
+- `make install-full` completed and installed `agent-doc 0.34.42`.
+- `make check` in `src/agent-doc` passed: clippy, 5031 nextest tests, doctests, and the medium closeout simulation.
+- `cargo test -p agent-doc-orchestration cycle_state`.
+- `cargo test -p agent-doc-orchestration cycle_state_machine`.
+- `cargo publish --dry-run` and `cargo publish` for `lazily 0.12.2`.
+- `cargo test --locked` in `src/lazily-rs`.
+- parent repo: `648efcd2f chore: bump agent-doc and lazily submodules`.
+- `src/agent-doc`: `d8b0298e feat: route cycle state through lazily state machine` and `f76e01c5 chore: use lazily 0.12.2`.
+- `src/lazily-rs`: `36bb381 chore: release lazily v0.12.2`; crate published, tag `v0.12.2` pushed, GitHub release created.
 
 Note: I left an unrelated unstaged submodule change in `agent-doc-orchestration/src/cycle_state.rs` (`#lzsidecaratomic`) untouched.
 
@@ -122,25 +132,22 @@ For `#cancelturnverify`, I accepted the operator verification and marked the bac
 > **Queue prompt:** If we merge the sidecar logic into the PCP instead of relying on the disk for IPC, would that help with agent-doc cycle reliability? If yes, let's merge sidecar logic into the PCP. Use lazily-rs new StateMachine, ThreadedStateMachine, and/or AsyncStateMachine for a cycle state machine. See [#c7j5], which was originally created in lazily-rs.md...Except, merge the Sidecar into the PCP. I want to eventually have a master State Machine for an agent document. Note that [#lzsidecaratomic] and [#lzsidecarlock] was done on agent-doc from lazily-rs.md. See lazily-rs.done.md
 
 Closeout repair after the recovered IPC-drift cycle: the preceding response already answered this queue head and rewrote `#c7j5` to the new PCP/session-actor state-machine plan at `tasks/agent-doc/plan-cycle-state-pcp-state-machine.md`. This cycle only consumes the free-text queue head against the fresh baseline and commits the resolved `#cancelturnverify` archive/queue convergence. No code changes.
-<!-- agent:boundary:d6467b72 -->
+<!-- agent:boundary:33b5f2b4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~If we merge the sidecar logic into the PCP instead of relying on the disk for IPC, would that help with agent-doc cycle reliability? If yes, let's merge sidecar logic into the PCP. Use lazily-rs new StateMachine, ThreadedStateMachine, and/or AsyncStateMachine for a cycle state machine. See [#c7j5], which was originally created in lazily-rs.md...Except, merge the Sidecar into the PCP. I want to eventually have a master State Machine for an agent document. Note that [#lzsidecaratomic] and [#lzsidecarlock] was done on agent-doc from lazily-rs.md. See lazily-rs.done.md~~
-- ~~do [#cancelturnverify]: Verified~~
+- do [#c7j5]: tasks/agent-doc/plan-cycle-state-pcp-state-machine.md
+- Should the sidecar <-> CPC IPC use lazily-rs IPC to sync state? Should lazily-rs implement a state sync mechanism to support sidecar <-> CPC IPC state sync?
 - do tasks/agent-doc/plan-ack-mismatch-shorter-recovered-response-loss-2026-06-23.md
 - :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
 - :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#tb4q]: please check logs
 - do [#qcm1verify]: Use the logs to verify.
-- ~~do [#arsm]~~
 - do [#directchatpb2]
-- ~~do [#turnstuck-readybusy]~~
-- ~~After the restart after the last turn, the prompt was not submitted until ~30s later.~~
-- ~~After the restart after the last turn, the prompt was not submitted until ~30s later.~~
+- do [#arsm]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -169,11 +176,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#c7j5] #lzadocsm Merge cycle-state sidecar logic into the PCP/session actor via a lazily state machine. Plan: tasks/agent-doc/plan-cycle-state-pcp-state-machine.md. Direction: PCP/session actor owns in-process mutation order; the sidecar remains the durable crash-recovery log; use ThreadSafeStateMachine once agent-doc consumes a lazily version that exposes it; gate sidecar -> shadow -> dual-write -> controller, then remove only duplicate mutation code, not the durable sidecar.
 - [ ] [#directchatpb2] #agent-doc-bug Direct-chat owned-pane response loss recurred on 2026-06-23: Codex answered the MRH "2300 words" lint prompt in chat after recursive direct invocation was refused, then recurred again on the follow-up "Remove the max character count cap" prompt; `tasks/monsterrodholders.md` still lacked a matching `### Re:` response and retained queue residue (`no-free-text-queue-head-guard` + bare heading). Add enforced Codex final/Stop gate + recovery regression so each active session-document prompt, including consecutive prompts in one owned pane, cannot complete without `agent-doc finalize/write --commit`. Plan: tasks/agent-doc/plan-direct-chat-owned-pane-response-loss-2026-06-23.md. DO NOT IMPLEMENT until scheduled.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.
-- [ ] [#arsm] [operator-verify] #pcwcwarnverify #agent-doc-bug Live-verify the #pcwcwarn post-commit stale-exchange reconcile (agent-doc submodule 5f3fc07d, superproject db7fc3594). Code shipped+pushed+make-check-green (4947). Runs in the binary commit path + editor IPC, so it goes live once the supervisor adopts the new build (admin recycle done). REMAINING (operator-gated, needs a live editor): drive one edit-during-finalize cycle with a stale > Queue prompt blockquote left inside the exchange in a live JB/VS Code buffer; confirm ops.log shows postcommit_exchange_reconciled reason=stale_editor_exchange AND zero recurring postcommit_worktree_check match=false drift on the next cycle (no manual git checkout HEAD needed).
 - [ ] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.
 - [ ] [#qcm1verify] [operator-verify] #agent-doc-bug Install + live-verify the #qnodemerge1 component-scoped merge (agent-doc submodule 52458f47). Code shipped+pushed, make check green (4853). Operator-gated remainder (mid-session install causes finalize-client-newer drift; STOP-cutting-releases gate): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then drive one edit-during-finalize cycle (type into a queue item while the agent writes an exchange response) and confirm ZERO cross-component splice + no console-output-in-queue corruption.
 - [ ] [#1jec] [operator-verify] #yzerverify #agent-doc-bug Live-verify the #yzer/#evmhplugin plugin reconnect re-read (agent-doc 0.34.28 / submodule f6b8ae17, plugin 0.2.172). Code shipped+pushed: binary FFI agent_doc_reconnect_buffer_decision (disk==HEAD via ffi_show_head + buffer==prior-commit via ffi_show_prior_blobs) + pure decide_reconnect_buffer + PatchWatcher.registerRoot reconcile-on-connect (applyReconnectReread) + SimWorld coverage; make check green (4832). Operator-gated remainder (install is unsafe mid-session = finalize-client-newer drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), reinstall plugin 0.2.172, agent-doc admin recycle. Then repro: open a session doc in JB, kill/restart the supervisor so the binary commits while the plugin is disconnected, and on reconnect confirm ops.log shows 'reconnect_buffer_decision decision=reread_disk #yzer' and the editor buffer == HEAD with NO File Cache Conflict; a buffer holding genuine unsaved user edits must instead log decision=keep_buffer and be preserved (editor wins).

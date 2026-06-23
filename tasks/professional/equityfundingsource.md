@@ -367,7 +367,31 @@ Verification: current D1 bookmark lookup succeeded; all production D1 queries re
 Confidence: high that no agent-run Time Travel restore caused the current state. Medium-high that the past-looking deal data is stale/orphaned TMO cache rather than D1 rollback; proving the original row-loss cause remains limited by the missing pre-fix app audit trail.
 
 Escalation: none.
-<!-- agent:boundary:334d612b -->
+
+### Re: lucas-huang/stormrunner application deletion — gpt-5
+
+> The loan application records were deleted by lucas-huang. The strange thing about this is they had his old stormrunner email address. I changed the user email to a btak.dev+something email. Any other thoughts as to why this happened?
+
+Yes. The old `stormrunner06106@gmail.com` value does not require the current `users` row to have reverted. Current production D1 still has the mapped rows as `btak.dev+admin2@gmail.com`, `btak.dev+broker2@gmail.com`, and `btak.dev+lender2@gmail.com`; I did not find a current `stormrunner` user row. The account rename spec also only updates `users.email` (`stormrunner06106@gmail.com` -> `btak.dev+admin2@gmail.com`). It does not rewrite denormalized application data.
+
+The application flow has at least one denormalized email field: `application_personal.email`. Admin feedback code also prefers `sections.personal?.email` over the borrower user email. So an application created before the rename could still carry the old `stormrunner` email inside its application section payload, even while the login/user record now shows `btak.dev+admin2@gmail.com`. If the deletion view, payload, request log, or feedback/audit snapshot came from application section data, that explains the mismatch.
+
+The more important finding is that full applications still have a hard-delete surface. `DELETE /api/admin/full-applications/:id` calls `application_admin_delete_`, which explicitly deletes section rows (`application_personal`, addresses, signatures, employment, income, assets, liabilities, REO, subject property, declarations, etc.), then deletes `full_applications`, and also deletes the linked lead if present. This is separate from the prior soft-delete work on users/loans/investment deals.
+
+That matches current production state: `full_applications` is now `0`; checked section tables such as `application_personal`, `application_addresses`, `application_broker_info`, `application_change_logs`, `application_documents`, `application_feedback_reports`, and `application_subject_property` are also `0`; `application_leads` still has `6` rows. Loans and investment deals are still `0` too. So this looks like an actual full-application tree deletion, not just a UI filter or cache issue.
+
+The current app `audit_logs` do not prove the original deleter. The only recent rows I found are `tmo_cache_loan_orphaned` entries for `FTM631`, `GQI751`, and `TST042` at `2026-06-23 00:33:43`, created by `btak.dev+admin3@gmail.com`; those record orphan detection after the fact, not the delete action itself. If Cloudflare/request logs show `lucas-huang` invoking the delete, the code path above makes that plausible, but the D1 `audit_logs` table by itself does not establish it.
+
+My recommended next fix is to treat full applications as part of the same “no destructive production deletes” surface: replace admin full-application hard delete with soft-delete/archive semantics, preserve section rows, write a durable audit log with actor/id/reason, and add regression tests for admin deletion and user-cascade cases. I added that as a backlog item.
+
+Proof:
+
+- Changed paths: `tasks/professional/equityfundingsource.md` only; no code or production data writes.
+- Commands: `agent-doc preflight`, `agent-doc plan`, `tsift status`; read-only production D1 queries through `bun ./app/equityfundingsource/bin/cf-wrangler.ts d1 execute ... --remote --command ...`; local source reads with `rg`, `sed`, and `nl`.
+- Verification: confirmed mapped current users; confirmed current app/audit counts; confirmed hard-delete route and repository implementation in source. Two broad `UNION ALL` count attempts failed with D1 `too many terms in compound SELECT`, then narrower multi-statement read-only counts succeeded.
+- Confidence: medium-high for the old-email explanation and hard-delete gap; medium for the exact actor because current app audit rows do not include the original deletion event.
+- Escalation: none. I did not use Time Travel restore, mutate D1, deploy, or modify EFS source.
+<!-- agent:boundary:de555b85 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -393,6 +417,7 @@ After 20:30
 
 <!-- agent:backlog priority queue -->
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
+- [ ] [#ktqk] full-app-soft-delete: Replace full-application hard delete surfaces with soft-delete/archive semantics plus durable audit logs; preserve child application section rows and add regression tests for admin delete and borrower/user cascade paths.
 <!-- /agent:backlog -->
 
 ## Review

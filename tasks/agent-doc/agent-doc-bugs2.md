@@ -65,22 +65,57 @@ Commits pushed:
 - `btakita/agent-loop` main: `f9d01ee2b` (`chore: update agent-doc submodule`)
 
 Changed paths: `agent-doc-orchestration/src/route.rs`, `agent-doc-orchestration/src/route/dispatch.rs`, `agent-doc-orchestration/src/route/dispatch_only.rs`, plus the superproject `src/agent-doc` pointer. Confidence: high. Escalation: none.
-<!-- agent:boundary:c7341b2e -->
+
+### Re: #turnstuck-readybusy — gpt-5
+
+> **Queue prompt:**
+>
+> After the restart after the last turn, the prompt was not submitted until ~30s later.日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
+
+
+> **Queue prompt:** After the restart after the last turn, the prompt was not submitted until ~30s later.
+> **Completed:** do [#turnstuck-readybusy]
+
+Fixed and pushed. I treated the restart/no-submit queue head as the same ready/busy owned-pane stall: the managed Codex pane could report `alive-busy` / `prompt_ready=false` from a stale queued-draft composer cue after actor, supervisor, and controller state had all returned to ready, so route-owned completion kept the pane alive and delayed the next prompt instead of advancing.
+
+Changed:
+- Added ready/busy conflict classification and debounce for route-owned completion and idle queue dispatch.
+- Limited automatic reconciliation to the recoverable stale `queued draft in composer` blocker; real active-turn, permission, shell-search, hook-review, help, and clean-exit blockers still stop dispatch.
+- Added `agent-doc status` warning and recovery guidance for actor/controller/supervisor ready while the live pane probe still says busy.
+- Documented the ready/busy invariant in README, SPEC, session routing, and supervisor docs.
+
+Verification:
+- `cargo test -p agent-doc-orchestration ready_busy`
+- `cargo test -p agent-doc status_flags_owned_pane_ready_busy_conflict`
+- `cargo test -p agent-doc-orchestration route_owned_live_pane_busy`
+- `make check` passed: clippy, 5025 tests, doctests, and the medium ignored simulation test.
+- `make install-full` installed `agent-doc 0.34.42` and the shared library.
+- GitHub Actions CI run `28046746235` passed after push.
+
+Pushed commits:
+- `src/agent-doc`: `2aa04685 fix: reconcile ready busy owned panes`
+- parent repo: `73ee575f1 chore: update agent-doc submodule`
+
+Note: I left an unrelated unstaged submodule change in `agent-doc-orchestration/src/cycle_state.rs` (`#lzsidecaratomic`) untouched.
+<!-- agent:boundary:d21f8d2a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~JB `Run Agent Doc` takes a long time to submit. ~10s~~
+- ~~After the restart after the last turn, the prompt was not submitted until ~30s later.日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀~~
 - do [#cancelturnverify]: Verified
 - do tasks/agent-doc/plan-ack-mismatch-shorter-recovered-response-loss-2026-06-23.md
 - :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
-- :pushpin: do [#qnodemerge4verify]: 日本 😀日本 😀
+- :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#tb4q]: please check logs
 - do [#qcm1verify]: Use the logs to verify.
 - ~~do [#arsm]~~
 - do [#directchatpb2]
+- ~~do [#turnstuck-readybusy]~~
+- After the restart after the last turn, the prompt was not submitted until ~30s later.
+- :pushpin: do [#qnodemerge4verify]: 日本 😀日本 😀
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -109,7 +144,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#turnstuck-readybusy] #agent-doc-bug Owned Codex pane got stuck on 2026-06-23 with split-brain status: actor/supervisor/controller all `ready`, but live pane probe `alive-busy`/`prompt_ready=false` and route kept it alive as `live_pane_busy_blocked_prompt` after `commit_already_current`. Add bounded reconcile/status diagnostics so stale pane-busy probes cannot indefinitely block the next prompt when the controller lease is ready, while still protecting real active turns. Plan: tasks/agent-doc/plan-owned-pane-ready-busy-stuck-turn-2026-06-23.md. DO NOT IMPLEMENT until scheduled.
 - [ ] [#directchatpb2] #agent-doc-bug Direct-chat owned-pane response loss recurred on 2026-06-23: Codex answered the MRH "2300 words" lint prompt in chat after recursive direct invocation was refused, then recurred again on the follow-up "Remove the max character count cap" prompt; `tasks/monsterrodholders.md` still lacked a matching `### Re:` response and retained queue residue (`no-free-text-queue-head-guard` + bare heading). Add enforced Codex final/Stop gate + recovery regression so each active session-document prompt, including consecutive prompts in one owned pane, cannot complete without `agent-doc finalize/write --commit`. Plan: tasks/agent-doc/plan-direct-chat-owned-pane-response-loss-2026-06-23.md. DO NOT IMPLEMENT until scheduled.
 - [ ] [#cancelturnverify] [operator-verify] #agent-doc-bug Live-verify Cancel Turn (agent-doc submodule b4471d05; committed+pushed, make check green, JB 0.2.176 + VS Code 0.2.31 built, NOT installed). After installing the plugins: (1) while a turn is RUNNING, invoke Cancel Turn (JB menu / VS Code command) and confirm the turn is interrupted (ops.log cancel_turn_performed action=interrupt_active_turn) and the agent stays open; (2) while the agent is IDLE, invoke Cancel Turn (even repeatedly) and confirm it is a NO-OP (ops.log cancel_turn_noop reason=idle_no_active_turn) and the agent is NOT closed — the core safety requirement. Verify per harness: Codex/OpenCode (Escape/C-c, never raw Ctrl+C that would close on idle) and Claude.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.

@@ -418,13 +418,39 @@ The `#98t4` implementation is done and verified: `src/agent-doc` and `src/tmux-r
 The session document closeout did not complete. `agent-doc session-check` still reports `cycle-1782174754154` stuck at `write_applied`, and the write path refuses to commit because the IDE-visible buffer for `tasks/agent-doc/agent-doc-bugs2.md` differs from disk. Ops also show live editor insert events, so I stopped instead of forcing past the data-loss guard.
 
 Current disk state leaves `#fccd` open in the queue/backlog, but the session doc changes are uncommitted. Exact unblocker: resolve the IDE buffer for `tasks/agent-doc/agent-doc-bugs2.md` so it matches disk, then continue this agent-doc cycle; the next step is rerunning the write/commit recovery and `agent-doc session-check`.
-<!-- agent:boundary:84945efd -->
+
+### Re: duplicate pin flood — gpt-5
+
+> **Queue prompt:**
+>
+> `:pushpin: Fix the root cause of this issue that occurred in this document.` is duplicated in the queue now. agent-doc is flooding the document with that prompt in the exchange and in the queue.
+
+I see the same failure mode in the current document state: the old stale-supervisor `:pushpin:` head is present more than once in `agent:queue`, the recovery path has appended repeated exchange material, and the queue was stopped after the head was edited mid-cycle. I am not continuing the queue drain over that state.
+
+I added `#qpinfl` to the backlog to fix this as its own agent-doc bug: the recovery path needs a regression for repeated `queue consume: failed to write document` / `live_prompt_drift_after_preflight` closeouts with a modified queue head, and it must prove captured responses are committed at most once, stale free-text queue prompts are not replayed, and id-backed heads such as `#fccd` are preserved unless explicitly done or gated.
+
+Changed paths: session document/backlog bookkeeping only.
+
+Commands run:
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+- `cargo test -p agent-doc-orchestration repair_materialization_requires_captured_response_block`
+- `cargo test -p agent-doc-orchestration direct_pane_enter_resubmit_retries_at_least_once_per_second`
+- `cargo test -p agent-doc-orchestration ready_prompt_candidate_accepts_codex_context_use_footer_without_prompt`
+- `gh run list --workflow CI --limit 1`
+
+Verification: focused regressions passed before this latest flood report; latest `src/agent-doc` CI is green (`27993373472`, `completed/success`). This cycle captures the new bug and stops the drain rather than pretending the queue is healthy.
+
+Confidence: high that the document is currently exhibiting a distinct recovery/duplication bug and should not be auto-drained until `#qpinfl` is fixed.
+
+Escalation: none.
+<!-- agent:boundary:652b3491 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ":pushpin: Fix the root cause of this issue that occurred in this document." is duplicated in the queue now. agent-doc is flooding the document with ":pushpin: Fix the root cause of this issue that occurred in this document.".
+- ":pushpin: Fix the root cause of this issue that occurred in this document." is duplicated in the queue now. agent-doc is flooding the document with ":pushpin: Fix the root cause of this issue that occurred in this document." in the exchange and in the queue.
 ---
 :pushpin: Fix the root cause of this issue that occurred in this document.
 ```
@@ -494,6 +520,7 @@ Error: authoritative actor record for tasks/software/agent-loop.md is bound to h
 ```
 ---
 - ~~:pushpin: do [#98t4]~~
+- do [#qpinfl]
 <!-- /agent:queue -->
 <!--
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.
@@ -525,6 +552,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#qpinfl] #agent-doc-bug Fix the queue/exchange flood where the stale `:pushpin: Fix the root cause of this issue that occurred in this document.` prompt is replayed into both `agent:queue` and `agent:exchange` during captured-response / `live_prompt_drift_after_preflight` recovery. Add a regression for repeated `queue consume: failed to write document` recovery with a modified queue head, prove captured responses are committed at most once, prove stale free-text queue prompts are not duplicated, and preserve open id-backed heads like `#fccd` instead of striking them.
 - [ ] [#fccd] #agent-doc-bug Restore the accidentally consumed Clear Session Cache queue head: investigate ongoing JB `Clear Session Cache` dialogs, confirm the CPC instance and all supervisors are on the installed agent-doc 0.34.37+ binary, and if dialogs are still possible in current code, fix the root cause with the structural/node merge workflow instead of requiring operator input.
 <!-- /agent:backlog -->
 

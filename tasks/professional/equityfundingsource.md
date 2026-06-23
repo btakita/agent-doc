@@ -177,7 +177,7 @@ feat(admin): add shareable pipeline dialog links
 
 Add pushState-backed Deal Pipeline dialog URLs for loan, deal, lead, and incomplete-application cards, plus a bottom-right admin Messages launcher that opens the existing searchable Messages hub without rewriting the current page URL. Covers the wiring with admin pipeline tests and deploys the Worker.
 ```
-<!-- agent:boundary:36d79612 -->
+<!-- agent:boundary:473b0a16 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -197,9 +197,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline > Qualified Lead and every other pipeline item should have a unique url so links can be shared between admins. This should use pushState so the page does not reload.
-- The admin page should have the message bubble in the bottom right corner. The message bubble opens the "unified chat interface" implemented above. 
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

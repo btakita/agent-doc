@@ -434,7 +434,11 @@ Verification:
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:a63b9a7e -->
+
+### Re: Queue cleanup — gpt-5
+
+Removed the answered Loan Origination lender-endpoint free-text queue head so the active queue can advance to `do [#s6y6]`.
+<!-- agent:boundary:682375c8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -454,7 +458,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- LSS.svc is for Loan Servicing. We are doing Loan Origination. Is there an add/update lender TMO endpoint?
 - do [#s6y6]
 <!-- /agent:queue -->
 

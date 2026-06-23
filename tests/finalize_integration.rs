@@ -2679,7 +2679,7 @@ fn finalize_echoes_consumed_free_text_queue_prompt_into_response() {
             baseline.to_str().unwrap(),
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: queue prompt copy — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: queue prompt copy — gpt-5\n\n> **Queue prompt:**\n>\n> Make queue responses copy the originating prompt.\n> This line documents the request.\n\nImplemented and verified.\n<!-- /patch:exchange -->\n",
         )
         .assert()
         .success()

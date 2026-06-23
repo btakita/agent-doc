@@ -159,15 +159,15 @@ pub(crate) fn should_consume_queue_prompt_for_write(
     file: &Path,
     baseline: Option<&str>,
     current_content: &str,
-    done_ids: &[String],
+    completion_ids: &[String],
 ) -> Result<bool> {
-    // An explicit `--done` naming the queue head authorizes consumption
+    // An explicit closeout signal naming the queue head authorizes consumption
     // regardless of any pending mutations bundled into the same diff
     // (#pending-add-suppresses-queue-consume). Check it FIRST so a bundled
     // `--pending-add` cannot make the diff-based check below emit a misleading
     // "active prompt differs from queue head" diagnostic for a turn that does
     // in fact complete the head.
-    if queue_head_matches_done_ids(current_content, done_ids)? {
+    if queue_head_matches_done_ids(current_content, completion_ids)? {
         return Ok(true);
     }
     let Some(base) = baseline else {
@@ -195,12 +195,12 @@ pub(crate) fn queue_skip_diagnostic_for_content(content: &str) -> Result<String>
     let queue_head_display = display_queue_prompt_text(&queue_head);
     if queue_head_is_free_text_prompt(content)? {
         return Ok(format!(
-            "[queue] kept free-text head `{queue_head_display}` because free-text heads are consumed by an answering `### Re:` response, not a tracked id outcome. Confirm the response targets this head (heading/topic match) so the answered-response path can strike it; otherwise it stays queued."
+            "[queue] kept free-text head `{queue_head_display}` because free-text heads are consumed only when this cycle's response quotes that exact queue prompt. Add a `> **Queue prompt:**` echo for this head, or leave it queued."
         ));
     }
     if let Some(id) = queue_prompt_done_id(&queue_head) {
         return Ok(format!(
-            "[queue] kept head `{queue_head_display}` because the response did not record a completion outcome for #{id}. Reap it with `--done {id}`, gate it with `--pending-gate {id}`, or keep/narrow it with `--pending-edit \"{id}=...\"`. (missing proof: no done/gate/reap recorded for #{id} this cycle)"
+            "[queue] kept head `{queue_head_display}` because the response did not record a completion outcome for #{id}. Reap it with `--done {id}`, gate it with `--pending-gate {id}`, resolve review with `--review-resolve {id}`, or keep/narrow it with `--pending-edit \"{id}=...\"`. (missing proof: no done/gate/review-resolve/reap recorded for #{id} this cycle)"
         ));
     }
     Ok(GENERIC.to_string())
@@ -238,11 +238,11 @@ pub(crate) fn should_consume_queue_prompt_for_diff_content(
     }
 
     // Not a user-facing failure on its own: the caller still has explicit
-    // completion-signal fallbacks (`--done`/`--pending-gate`/`--pending-edit`,
-    // synthetic-head heading match). Only the caller's final "skipped
-    // consumption" line is the authoritative skip signal, so record this detail
-    // to ops_log instead of stderr to avoid a false-alarm during a turn that
-    // ultimately consumes the head (#pending-add-suppresses-queue-consume).
+    // completion-signal fallbacks (`--done`/`--pending-gate`/`--review-resolve`/
+    // `--pending-edit`, synthetic-head heading match). Only the caller's final
+    // "skipped consumption" line is the authoritative skip signal, so record this
+    // detail to ops_log instead of stderr to avoid a false-alarm during a turn
+    // that ultimately consumes the head (#pending-add-suppresses-queue-consume).
     // The {:?} quoting on prompt_changes/queue_head is load-bearing: the
     // gate-verify scan excludes double-quoted spans so this embedded document
     // prose cannot prove a gated review item (#gng8).
@@ -362,7 +362,8 @@ pub(crate) fn active_queue_head_text(content: &str) -> Result<Option<String>> {
 }
 
 /// True when a closeout flag in this cycle explicitly names the active queue
-/// head's `#id` — `--done`, `--pending-gate`, or `--pending-edit "<id>=…"`.
+/// head's `#id` — `--done`, `--pending-gate`, `--review-resolve`, or
+/// `--pending-edit "<id>=…"`.
 ///
 /// This is the explicit completion signal that authorizes queue-head consumption
 /// (#queue-strike-on-halt). A `### Re:` heading that merely mentions the head id
@@ -372,9 +373,7 @@ pub(crate) fn active_queue_head_text(content: &str) -> Result<Option<String>> {
 /// agent rewrote the item's tracked text as part of resolving it.
 pub(crate) fn queue_head_has_explicit_completion_signal(
     content: &str,
-    pending_done: &[String],
-    pending_gate: &[String],
-    pending_edit: &[String],
+    completion_ids: &[String],
 ) -> Result<bool> {
     let Some(queue_head) = active_queue_head_text(content)? else {
         return Ok(false);
@@ -382,28 +381,26 @@ pub(crate) fn queue_head_has_explicit_completion_signal(
     let Some(head_id) = queue_prompt_done_id(&queue_head) else {
         return Ok(false);
     };
-    // `--done`/`--pending-gate` entries are bare ids; `--pending-edit` entries are
-    // `"<id>=new text"`, so take the id segment before `=`.
+    // Callers usually pass normalized completion ids; tests and older helpers may
+    // still pass `"<id>=new text"`, so accept both forms.
     let names_head = |raw: &str| {
         let id = raw.split_once('=').map(|(id, _)| id).unwrap_or(raw);
         normalize_done_id(id) == head_id
     };
-    Ok(pending_done
-        .iter()
-        .chain(pending_gate.iter())
-        .chain(pending_edit.iter())
-        .any(|raw| names_head(raw)))
+    Ok(completion_ids.iter().any(|raw| names_head(raw)))
 }
 
 pub(crate) fn explicit_queue_completion_ids(
     pending_done: &[String],
     pending_gate: &[String],
     pending_edit: &[String],
+    review_resolve: &[String],
 ) -> Vec<String> {
     pending_done
         .iter()
         .chain(pending_gate.iter())
         .chain(pending_edit.iter())
+        .chain(review_resolve.iter())
         .map(|raw| {
             raw.split_once('=')
                 .map(|(id, _)| id)
@@ -1581,28 +1578,22 @@ fn head_id_names_open_backlog_item(content: &str, target_id: &str) -> bool {
 /// attempts fail before queue consumption and must be retried.
 ///
 /// Mirrors the layered signals: explicit `do queue` / prompt-target / `--done`
-/// triggers, explicit `--done`/`--pending-gate`/`--pending-edit` completion of an
-/// id-backed head, a response heading that resolves to a synthetic/preset head
-/// id, and a free-text head answered by this cycle's response (unless the cycle
-/// answered a foreign `agent:exchange` prompt instead).
+/// triggers, explicit `--done`/`--pending-gate`/`--review-resolve`/
+/// `--pending-edit` completion of an id-backed head, a response heading that
+/// resolves to a synthetic/preset head id, and a free-text head answered by this
+/// cycle's response (unless the cycle answered a foreign `agent:exchange` prompt
+/// instead).
 pub(crate) fn queue_consumption_allowed_for_response(
     file: &Path,
     baseline: Option<&str>,
     current_content: &str,
     response_body: &str,
-    pending_done: &[String],
-    pending_gate: &[String],
-    pending_edit: &[String],
+    completion_ids: &[String],
 ) -> Result<bool> {
-    if should_consume_queue_prompt_for_write(file, baseline, current_content, pending_done)? {
+    if should_consume_queue_prompt_for_write(file, baseline, current_content, completion_ids)? {
         return Ok(true);
     }
-    if queue_head_has_explicit_completion_signal(
-        current_content,
-        pending_done,
-        pending_gate,
-        pending_edit,
-    )? {
+    if queue_head_has_explicit_completion_signal(current_content, completion_ids)? {
         return Ok(true);
     }
     let has_response = !response_body.trim().is_empty();
@@ -1613,11 +1604,10 @@ pub(crate) fn queue_consumption_allowed_for_response(
         && queue_head_is_free_text_prompt(current_content)?
         && let Some(head_text) = active_queue_head_text(current_content)?
     {
-        return Ok(!cycle_answered_foreign_exchange_prompt(
-            baseline,
-            current_content,
-            &head_text,
-        ));
+        return Ok(
+            free_text_head_answered_by_response(response_body, &head_text)
+                && !cycle_answered_foreign_exchange_prompt(baseline, current_content, &head_text),
+        );
     }
     Ok(false)
 }
@@ -2710,13 +2700,8 @@ mod core_tests {
     fn explicit_signal_halt_without_flag_does_not_consume() {
         // (a) Halt response, no --done/--pending-gate/--pending-edit → no consume.
         assert!(
-            !queue_head_has_explicit_completion_signal(
-                crate::test_support::HALT_QUEUE_DOC,
-                &[],
-                &[],
-                &[]
-            )
-            .unwrap()
+            !queue_head_has_explicit_completion_signal(crate::test_support::HALT_QUEUE_DOC, &[])
+                .unwrap()
         );
     }
     #[test]
@@ -2726,8 +2711,6 @@ mod core_tests {
             queue_head_has_explicit_completion_signal(
                 crate::test_support::HALT_QUEUE_DOC,
                 &["foo".to_string()],
-                &[],
-                &[],
             )
             .unwrap()
         );
@@ -2737,9 +2720,7 @@ mod core_tests {
         assert!(
             queue_head_has_explicit_completion_signal(
                 crate::test_support::HALT_QUEUE_DOC,
-                &[],
                 &["foo".to_string()],
-                &[],
             )
             .unwrap(),
             "--pending-gate naming the head is a completion signal"
@@ -2747,12 +2728,18 @@ mod core_tests {
         assert!(
             queue_head_has_explicit_completion_signal(
                 crate::test_support::HALT_QUEUE_DOC,
-                &[],
-                &[],
                 &["foo=rewritten text".to_string()],
             )
             .unwrap(),
             "--pending-edit naming the head is a completion signal"
+        );
+        assert!(
+            queue_head_has_explicit_completion_signal(
+                crate::test_support::HALT_QUEUE_DOC,
+                &["foo".to_string()],
+            )
+            .unwrap(),
+            "--review-resolve naming the head is a completion signal"
         );
     }
     #[test]
@@ -2760,9 +2747,12 @@ mod core_tests {
         assert!(
             !queue_head_has_explicit_completion_signal(
                 crate::test_support::HALT_QUEUE_DOC,
-                &["bar".to_string()],
-                &["baz".to_string()],
-                &["qux=text".to_string()],
+                &[
+                    "bar".to_string(),
+                    "baz".to_string(),
+                    "qux=text".to_string(),
+                    "other-review".to_string(),
+                ],
             )
             .unwrap(),
             "flags for non-head ids must not consume the head"
@@ -2773,8 +2763,7 @@ mod core_tests {
         let inactive = crate::test_support::HALT_QUEUE_DOC
             .replace("queue_active: true", "queue_active: false");
         assert!(
-            !queue_head_has_explicit_completion_signal(&inactive, &["foo".to_string()], &[], &[],)
-                .unwrap()
+            !queue_head_has_explicit_completion_signal(&inactive, &["foo".to_string()]).unwrap()
         );
     }
     #[test]
@@ -3417,6 +3406,8 @@ mod core_tests {
     fn consume_decision_strikes_answered_free_text_head() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("s.md");
+        let head =
+            "JB `Run Agent Doc` on a `queue: stop` + `agent:queue go` doc should start the queue.";
         let content = concat!(
             "---\nqueue_active: true\n---\n\n",
             "<!-- agent:exchange -->\n",
@@ -3427,20 +3418,48 @@ mod core_tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        // baseline == current (no new exchange prompt this cycle), non-empty
-        // response → the free-text head is answered and must be consumed.
+        let response = format!(
+            "### Re: JB Run Agent Doc should start the queue\n\n> **Queue prompt:** {head}\n\nFixed."
+        );
+        // baseline == current (no new exchange prompt this cycle), and the
+        // response quotes this exact free-text head, so it may be consumed.
         assert!(
-            queue_consumption_allowed_for_response(
+            queue_consumption_allowed_for_response(&doc, Some(content), content, &response, &[],)
+                .unwrap(),
+            "an answered free-text head must be consumed on successful closeout"
+        );
+    }
+
+    #[test]
+    fn consume_decision_keeps_free_text_head_without_exact_response_proof() {
+        // #qstrikework: a generic repair/recovery response must not consume the
+        // current free-text queue head merely because the response body is non-empty.
+        // The response has to quote/target this exact head in the same way the
+        // free-text strike pass proves answered heads.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: earlier repair prompt\n\nNarrowed the repair path.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- Queue items are being struck without being worked on.\n",
+            "- do [#operatorverify]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+
+        assert!(
+            !queue_consumption_allowed_for_response(
                 &doc,
                 Some(content),
                 content,
-                "### Re: JB Run Agent Doc should start the queue\n\nFixed.",
-                &[],
-                &[],
+                "### Re: earlier repair prompt\n\nRepaired the interrupted closeout state.",
                 &[],
             )
             .unwrap(),
-            "an answered free-text head must be consumed on successful closeout"
+            "a free-text head must stay queued when this response never quotes it"
         );
     }
     // ---- #ftstrike: position-independent answered free-text head strike ----
@@ -3786,8 +3805,6 @@ mod core_tests {
                 content,
                 "### Re: #spec-test-build-install-commit-push\n\nDone.",
                 &[],
-                &[],
-                &[],
             )
             .unwrap(),
             "a preset head answered by a matching heading id must be consumed"
@@ -3813,8 +3830,6 @@ mod core_tests {
                 content,
                 "### Re: not doing this, here is why",
                 &[],
-                &[],
-                &[],
             )
             .unwrap(),
             "a bare do[#id] head must stay queued without an explicit completion flag"
@@ -3827,11 +3842,22 @@ mod core_tests {
                 content,
                 "### Re: do [#foo]\n\nDone.",
                 &["foo".to_string()],
-                &[],
-                &[],
             )
             .unwrap(),
             "--done naming the head id must consume it"
+        );
+        // Resolving a tracked review item is also explicit proof for an id-backed
+        // queue head that names the same id.
+        assert!(
+            queue_consumption_allowed_for_response(
+                &doc,
+                Some(content),
+                content,
+                "### Re: do [#foo]\n\nResolved the review item.",
+                &["foo".to_string()],
+            )
+            .unwrap(),
+            "--review-resolve naming the head id must consume it"
         );
     }
     #[test]
@@ -3861,8 +3887,6 @@ mod core_tests {
                 content,
                 "### Re: #ktw8 — destructive /clear live-verify (operator-drive log check)\n\nops.log shows 0 markers; stays open.",
                 &[],
-                &[],
-                &[],
             )
             .unwrap(),
             "an operator-pinned head naming a tracked backlog item must stay queued without an explicit completion flag"
@@ -3874,9 +3898,7 @@ mod core_tests {
                 Some(content),
                 content,
                 "### Re: #ktw8\n\nGated pending live verification.",
-                &[],
                 &["ktw8".to_string()],
-                &[],
             )
             .unwrap(),
             "--pending-gate naming the head id must consume it"
@@ -3936,6 +3958,7 @@ Old.
         assert!(id_message.contains("[queue] kept head `do #foo`"));
         assert!(id_message.contains("`--done foo`"));
         assert!(id_message.contains("`--pending-gate foo`"));
+        assert!(id_message.contains("`--review-resolve foo`"));
         assert!(id_message.contains("`--pending-edit \"foo=...\"`"));
         assert!(id_message.contains("missing proof"));
 
@@ -3950,7 +3973,7 @@ Old.
             free_text_message
                 .contains("[queue] kept free-text head `Review the queue diagnostics`")
         );
-        assert!(free_text_message.contains("answered-response path"));
+        assert!(free_text_message.contains("`> **Queue prompt:**` echo"));
     }
     #[test]
     fn heading_topic_matches_head_exactly_or_by_exact_id() {

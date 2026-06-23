@@ -2071,9 +2071,10 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     // Phase 3c: consume queue prompt after all other strict closeout gates
     // have passed so a rejected closeout cannot advance the queue early. The
     // layered completion signals — explicit `do queue`/prompt-target/`--done`
-    // triggers, explicit `--done`/`--pending-gate`/`--pending-edit` completion of
-    // an id-backed head, a synthetic/preset heading-id match, and a free-text head
-    // answered by this cycle's response — all resolve through
+    // triggers, explicit `--done`/`--pending-gate`/`--review-resolve`/
+    // `--pending-edit` completion of an id-backed head, a synthetic/preset
+    // heading-id match, and a free-text head answered by this cycle's response —
+    // all resolve through
     // `queue_consumption_allowed_for_response` so every successful closeout uses
     // an identical decision. Unproven IPC retries fail before this phase and do
     // not advance the queue.
@@ -2081,20 +2082,19 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         let response_body = crate::capture::load_active(file)?
             .map(|capture| capture.response_body)
             .unwrap_or_default();
+        let mut queue_completion_ids = explicit_queue_completion_ids(
+            &options.pending_done,
+            &options.pending_gate,
+            &options.pending_edit,
+            &options.review_resolve,
+        );
         let queue_consumption_allowed = queue_consumption_allowed_for_response(
             file,
             baseline.as_deref(),
             &current_content,
             &response_body,
-            &options.pending_done,
-            &options.pending_gate,
-            &options.pending_edit,
+            &queue_completion_ids,
         )?;
-        let mut queue_completion_ids = explicit_queue_completion_ids(
-            &options.pending_done,
-            &options.pending_gate,
-            &options.pending_edit,
-        );
         if queue_consumption_allowed
             && let Some(head_id) = queue_targeted_completion_id_for_current_head(
                 file,

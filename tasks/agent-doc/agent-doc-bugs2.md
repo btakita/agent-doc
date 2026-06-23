@@ -102,7 +102,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#3x90] JB `Run Agent Doc` still fails to submit. This is a chronic condition that you don't seem to be able to solve. Please dig deeper and isolate the cause(s).
 <!-- /agent:backlog -->
 
 ## Review

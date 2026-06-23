@@ -26,7 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-active
+completed
 <!-- /agent:status -->
 
 ## Exchange
@@ -34,319 +34,303 @@ active
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260623-040841.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260622-185240.md`*
 
 Compacted content:
-❯ - Archived 5 response topic(s): #ws55; #ws55; #3x90; 2 more
+❯ - Archived 26 response topic(s): do [#pendaddorder]; Clear Session Context delayed Run Agent Doc dispatch; Clear Session Context dispatch storm / no-submit report; 23 more
+❯ - Prior summary/context: prior compacted content: Archived 12 response topic(s): Validate/invalidate operator-verify items from the logs; do [...
 
-### Re: dispatch-ready actor proof — gpt-5
-
-> Queue prompt (answered): Extending the timeout is not the solution. The panes were up is less than 2s. Codex was running and idle. I am able to use Codex manually. This is an agent-doc dispatch bug.
-
-Corrected. The 120s JetBrains wait bump was not the root fix for this report; it remains only as slow-start margin. The actual dispatch bug was the dispatch-only startup gate treating a stale open `codex_start` log as authoritative even when the same session/pane already had controller-backed ready proof.
-
-Changed paths:
-- `src/agent-doc/agent-doc-orchestration/src/route/dispatch_only.rs`
-- `src/agent-doc/VERSIONS.md`
-- parent submodule pointer `src/agent-doc`
-
-What changed:
-- Added a dispatch-only actor-ready proof path before and after the existing short pane-capture wait. It loads the authoritative actor binding for the same session/pane and bypasses the stale startup-log wait only when the actor is eligible, the effective actor state is `Ready`, and the existing prompt-ready barrier is satisfied.
-- Kept fail-closed behavior for busy, starting, degraded/no-socket, missing, or wrong-pane actors. Those still fall through to the existing live probe/recovery path.
-- Logged the accepted proof as `route_dispatch_only_starting_pane_ready_via_actor_state ... prompt_ready=true` so this class is auditable next time.
-- Updated `VERSIONS.md` to say the timeout was not the root fix and to describe the stale-startup-log/ready-actor dispatch fix.
-
-Commits:
-- `3a61ce19` in `src/agent-doc`: `fix dispatch ready actor proof` (pushed to `btakita/agent-doc` `main`)
-- `cf1bdc73f` in the parent repo: `agent-doc: update dispatch ready fix`
-- Prior timeout-margin commit remains: `5dfb210f` (`fix jetbrains run startup wait`)
-
-Commands run:
-- `cargo fmt`
-- `cargo test -p agent-doc-orchestration dispatch_only_starting_pane_actor_ready_gate_requires_same_ready_prompt_proven_actor`
-- `cargo test -p agent-doc-orchestration route::dispatch_only::tests`
-- `make check` (first run exposed the FlowCore `reason=` budget; I changed the new log field from `transition_reason=` to `transition=` and reran)
-- `make tmux-ci`
-- `git push origin main` in `src/agent-doc`
-- `make install` in `src/agent-doc`
-- `gh run list --workflow CI --limit 1`
-
-Verification:
-- Focused regression: passed.
-- Dispatch-only test slice: 15 passed, 1 ignored live tmux integration.
-- `make check`: passed; 5005 nextest tests passed, 241 skipped; doctests passed; wider deterministic closeout sim passed.
-- `make tmux-ci`: passed; 7 ignored/live tests passed.
-- Local install: `make install` rebuilt `/home/brian/.cargo/bin/agent-doc` and `libagent_doc.so`; it also marked 1 controller for auto-recycle at the next idle boundary.
-- GitHub Actions CI run `28002487677` for `3a61ce19` was still `in_progress` at the last check, not red.
-- GitHub Actions `CI` for `0d5c5bbd` passed: `make check` and `make tmux-ci` both green.
-- `make install` installed `agent-doc 0.34.38` locally and marked controllers for recycle at idle boundary.
-- `make check` passed locally: 5007 tests passed, 241 skipped; deterministic closeout sim passed.
-- `cargo test -p agent-doc-orchestration idle_queue_context_reset_waits_for_route_submit_to_finish`
-- `cargo test -p agent-doc-orchestration context_clear`
-- `cargo test -p agent-doc-orchestration dispatch_only`
-- `cargo test -p agent-doc-orchestration ready_probe_route_submit_marker`
-- `cargo test -p agent-doc-orchestration route_submit_marker`
-- `cargo fmt`
-- Local parent `main` was already historically divergent from `origin/main`; I avoided force-push and avoided publishing the unrelated local backlog by using a clean temporary worktree for the single fast-forward gitlink update.
-- Parent remote pointer pushed: `d304bc3b5 agent-doc: update dispatch clear fence` to `btakita/agent-loop:main`; `origin/main:src/agent-doc` now points at `0d5c5bbd`.
-- Submodule commit pushed: `0d5c5bbd fix dispatch ready clear interference` to `btakita/agent-doc:main`.
-- Ops proof now distinguishes marker set/clear, ready-probe reason, context-clear marker wait, orphan visible clear wait, and the existing prompt-ready ordering.
-- Idle queue context clear recovery now logs and waits when `/clear` or `/new` is visible or persisted while a route submit marker is active, instead of pressing Enter into the route-owned composer.
-- Ready-probe markers carry reason `dispatch_only_ready_probe` and use a longer TTL than ordinary dispatch-submit markers; ordinary dispatch markers keep the shorter default TTL.
-- `route --dispatch-only` now creates a route-submit-in-flight marker before the startup ready probe, so supervisor/PCP context-reset handling treats the pane as route-owned while prompt readiness is still being established.
-- `src/agent-doc/{README.md,SPEC.md,VERSIONS.md,specs/07-session-tmux-commands.md}`
-- `src/agent-doc/agent-doc-orchestration/src/start/idle_watch.rs`
-- `src/agent-doc/agent-doc-orchestration/src/route/dispatch_only.rs`
-- `src/agent-doc/agent-doc-orchestration/src/route_in_flight.rs`
-
-Confidence: high for the reported failure class. The fix directly addresses the operator correction: an already-idle, controller-proven-ready Codex actor is no longer blocked by a stale startup-log probe.
-
-Escalation: none needed. Remaining live note: the currently serving route-owned supervisor still reported stale until it reaches the idle boundary and processes the auto-recycle marker from `make install`.
-
-### Re: #jbrunclear — gpt-5
-
-> Queue prompt (answered):
->
-> JB `Run Ageent Doc` on equityfundingsource.md stalled...prompt but no submit.
-> ```
-> [sync] recovered live pane %3 for session 62fe1f41 via supervisor pid 140998
-> [sync] recovered live pane %6 for session b26b9957 via supervisor pid 179547
-> resync: purged 1 orphaned stash pane(s)
-> [route] target tmux session: 0
-> [route] latency budget exceeded: phase dispatch_start_proof took 10103ms (budget 10000ms, pane=%3, harness=codex, outcome=unproven_but_accepted)
-> [route] preserved dispatch-start proof snapshot for tasks/professional/equityfundingsource.md pane %3 harness=codex phase=direct_pane_dispatch_start_unproven capture_len=882 capture_hash=5fb74bfdecf6 snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782217842260-direct_pane_dispatch_start_unproven-codex-_3-5fb74bfdecf6.txt editor_attempt_id=1782217830623-7
-> [route] bare codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %3, but no routed submission proof appeared after 10s
-> Error: dispatch-only codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %3 via direct_pane_submit (tmux_text_enter), but only pane-input acceptance proof was available after waiting 10s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle codex prompt or restart the session and reroute again
-> ```
-
-
-Implemented and verified.
-
-Changed paths:
-- `src/agent-doc/agent-doc-orchestration/src/route_in_flight.rs`
-- `src/agent-doc/agent-doc-orchestration/src/route/dispatch_only.rs`
-- `src/agent-doc/agent-doc-orchestration/src/start/idle_watch.rs`
-- `src/agent-doc/{README.md,SPEC.md,VERSIONS.md,specs/07-session-tmux-commands.md}`
-
-Behavior changed:
-- `route --dispatch-only` now creates a route-submit-in-flight marker before the startup ready probe, so supervisor/PCP context-reset handling treats the pane as route-owned while prompt readiness is still being established.
-- Ready-probe markers carry reason `dispatch_only_ready_probe` and use a longer TTL than ordinary dispatch-submit markers; ordinary dispatch markers keep the shorter default TTL.
-- Idle queue context clear recovery now logs and waits when `/clear` or `/new` is visible or persisted while a route submit marker is active, instead of pressing Enter into the route-owned composer.
-- Ops proof now distinguishes marker set/clear, ready-probe reason, context-clear marker wait, orphan visible clear wait, and the existing prompt-ready ordering.
-
-Commits and deployment:
-- Submodule commit pushed: `0d5c5bbd fix dispatch ready clear interference` to `btakita/agent-doc:main`.
-- Parent remote pointer pushed: `d304bc3b5 agent-doc: update dispatch clear fence` to `btakita/agent-loop:main`; `origin/main:src/agent-doc` now points at `0d5c5bbd`.
-- Local parent `main` was already historically divergent from `origin/main`; I avoided force-push and avoided publishing the unrelated local backlog by using a clean temporary worktree for the single fast-forward gitlink update.
-
-Verification:
-- `cargo fmt`
-- `cargo test -p agent-doc-orchestration route_submit_marker`
-- `cargo test -p agent-doc-orchestration ready_probe_route_submit_marker`
-- `cargo test -p agent-doc-orchestration dispatch_only`
-- `cargo test -p agent-doc-orchestration context_clear`
-- `cargo test -p agent-doc-orchestration idle_queue_context_reset_waits_for_route_submit_to_finish`
-- `make check` passed locally: 5007 tests passed, 241 skipped; deterministic closeout sim passed.
-- `make install` installed `agent-doc 0.34.38` locally and marked controllers for recycle at idle boundary.
-- GitHub Actions `CI` for `0d5c5bbd` passed: `make check` and `make tmux-ci` both green.
-- Parent `agent-loop` has no `CI` workflow; its `Agent Doc` workflow for `f72795c21` failed before running any steps because GitHub reported account billing/spending-limit failure. Local `make check` and `make tmux-ci` are green.
-- `agent-doc` repo CI for `f42a3daf` was `in_progress` at last check (`run 28027534299`), not red.
-- `make install` installed `agent-doc 0.34.38` locally and marked 1 controller for recycle at the next idle boundary.
-- `make tmux-ci` passed: 7 ignored/live tests passed.
-- `make check` passed: clippy, 5008 nextest tests passed, 241 skipped; doctests passed; wider deterministic closeout sim passed.
-- `cargo test -p agent-doc-orchestration resolve_supervisor_auto_recycle_precedence`
-- `cargo test -p agent-doc-orchestration supervisor_recycle_action_policy`
-- `cargo test -p agent-doc-orchestration queue_boundary_self_recycle_makes_stale_content_ours_refusal_ineligible`
-- `cargo fmt`
-- `f72795c21` in parent `agent-loop`: `agent-doc: update fccsup self-recycle proof` (pushed to `btakita/agent-loop:main` via a clean temporary worktree so unrelated local parent changes stayed unstaged)
-- `f42a3daf` in `src/agent-doc`: `test stale supervisor fcc self-recycle` (pushed to `btakita/agent-doc:main`)
-- Added an Unreleased note for `#fccsup`.
-- Corrected active code comments that still described supervisor auto-recycle as default-off; the resolver and spec already default it on.
-- Added `queue_boundary_self_recycle_makes_stale_content_ours_refusal_ineligible`, a regression tying the default-on queue-boundary self-recycle policy to the host-supervisor inode guard: stale host maps old inode -> stale `content_ours` refusal is eligible; pending queue head -> `RecycleImmediate`; after `supervisor_binary_stale_self_recycled` maps the installed inode -> stale-supervisor `content_ours` refusal is no longer eligible.
-- parent gitlink `src/agent-doc`
-- `src/agent-doc/agent-doc-orchestration/src/start/decisions.rs`
-- `src/agent-doc/agent-doc-orchestration/src/project_controller/rpc.rs`
-- `src/agent-doc/agent-doc-orchestration/src/project_controller.rs`
-- `src/agent-doc/agent-doc-core/src/frontmatter.rs`
-- `src/agent-doc/VERSIONS.md`
-
-Confidence: high. The remaining risk is live-editor timing variance, but the route ownership window is now represented by a durable marker with reason-specific TTL and covered by unit/integration and CI tmux proof.
-
-### Re: #jbrunclear struck + #fccsup — gpt-5
-
-> Queue prompt (answered): I rebooted. JB `Run Agent Doc` stalled without dispatching. Prompt has `/clear` from another watcher. `/clear` should not have been added.
-
-Accepted the `#jbrunclear` strike as already handled by the prior dispatch-clear fence work, then completed `#fccsup`.
-
-Changed paths:
-- `src/agent-doc/VERSIONS.md`
-- `src/agent-doc/agent-doc-core/src/frontmatter.rs`
-- `src/agent-doc/agent-doc-orchestration/src/project_controller.rs`
-- `src/agent-doc/agent-doc-orchestration/src/project_controller/rpc.rs`
-- `src/agent-doc/agent-doc-orchestration/src/start/decisions.rs`
-- parent gitlink `src/agent-doc`
-
-What changed:
-- Added `queue_boundary_self_recycle_makes_stale_content_ours_refusal_ineligible`, a regression tying the default-on queue-boundary self-recycle policy to the host-supervisor inode guard: stale host maps old inode -> stale `content_ours` refusal is eligible; pending queue head -> `RecycleImmediate`; after `supervisor_binary_stale_self_recycled` maps the installed inode -> stale-supervisor `content_ours` refusal is no longer eligible.
-- Corrected active code comments that still described supervisor auto-recycle as default-off; the resolver and spec already default it on.
-- Added an Unreleased note for `#fccsup`.
-
-Commits:
-- `f42a3daf` in `src/agent-doc`: `test stale supervisor fcc self-recycle` (pushed to `btakita/agent-doc:main`)
-- `f72795c21` in parent `agent-loop`: `agent-doc: update fccsup self-recycle proof` (pushed to `btakita/agent-loop:main` via a clean temporary worktree so unrelated local parent changes stayed unstaged)
-
-Verification:
-- `cargo fmt`
-- `cargo test -p agent-doc-orchestration queue_boundary_self_recycle_makes_stale_content_ours_refusal_ineligible`
-- `cargo test -p agent-doc-orchestration supervisor_recycle_action_policy`
-- `cargo test -p agent-doc-orchestration resolve_supervisor_auto_recycle_precedence`
-- `make check` passed: clippy, 5008 nextest tests passed, 241 skipped; doctests passed; wider deterministic closeout sim passed.
-- `make tmux-ci` passed: 7 ignored/live tests passed.
-- `make install` installed `agent-doc 0.34.38` locally and marked 1 controller for recycle at the next idle boundary.
-- `agent-doc` repo CI for `f42a3daf` was `in_progress` at last check (`run 28027534299`), not red.
-- Parent `agent-loop` has no `CI` workflow; its `Agent Doc` workflow for `f72795c21` failed before running any steps because GitHub reported account billing/spending-limit failure. Local `make check` and `make tmux-ci` are green.
-- Verified by code inspection that prompt submission carries visible payload/proof semantics while the clear path currently accepts on clear-command disappearance, which is weaker than dispatch-start proof.
-- Added `#durablerecycle` to backlog for the new mid-turn recycle request.
-- Verified the backlog contains `#clearresubmitproof` and `#durablerecycle`.
-- Source tests were not run because this recovery changed no source files.
-- `agent-doc session-check` through the MCP workflow
-- `agent-doc preflight/plan/read` through the MCP workflow
-- `agent-doc repair --apply-recovery tasks/agent-doc/agent-doc-bugs2.md`
-- session document only: `tasks/agent-doc/agent-doc-bugs2.md`
-- Confirmed `#clearresubmitproof` exists in backlog and review item `#26f9` is no longer present.
-- Source tests were not run because this recovery changed no source files.
-- `tsift diff-digest tasks/agent-doc/agent-doc-bugs2.md --revision HEAD --json`
-- `git show HEAD:tasks/agent-doc/agent-doc-bugs2.md`
-- `agent-doc preflight/plan/read` through the MCP workflow
-- `agent-doc repair --apply-recovery tasks/agent-doc/agent-doc-bugs2.md`
-- session document only: `tasks/agent-doc/agent-doc-bugs2.md`
-- No source files changed, so I did not run the source test suite.
-- `git status --short` in the parent repo and `src/agent-doc`
-- focused `tsift` searches and symbol/source reads for `send_submitted_text_for_harness`, `send_text_with_submit_key`, `verify_clear_submit_after_delivery`, `poll_clear_direct_submit_acceptance`, and dispatch-start proof classification
-- `agent-doc preflight/plan/read` through the MCP workflow
-- `tsift index --workspace .`
-- `tsift status`
-- `agent-doc --version`
-- session document only: `tasks/agent-doc/agent-doc-bugs2.md`
-6. require dispatch-start proof, or fail closed with an exact unblocker.
-5. stop retrying if the user edits the input;
-4. retry only while that exact autogenerated prompt remains unmodified;
-3. inject the exact `agent-doc <FILE>` prompt;
-2. wait for clear completion and a fresh dispatch-ready prompt;
-1. submit `/clear` or `/new` with harness-specific handling;
-
-Confidence: high for the `#fccsup` regression class. The remaining external risk is the pending submodule CI run and the parent workflow billing block, neither of which is a code failure from this change.
-
-### Re: #fcccap blocked by stale-supervisor recycle boundary — gpt-5
-
-> Queue prompt (answered):
->
-> agent-doc should support reliable recycle mid-turn. The turn state should be durable to survive a restart.
-
-
-> Queue prompt (answered):
->
-> auto clear did not submit the prompt. Why is sending a prompt to tmux significantly more reliable than sending Enter to tmux?
-
-
-> Queue prompt (answered): do [#fcccap]
-
-Blocked before implementation, not skipped. The current cycle `cycle-1782219323112` was opened after `#fccsup` to reconcile queue metadata, and the same preflight/session state reports `queue_continuation_required=false` with the route-owned supervisor pid `179547` still mapping a stale `agent-doc` binary after `make install` installed `agent-doc 0.34.38`.
-
-Running `#fcccap` now would exercise the File Cache Conflict capture path under the stale supervisor that `#fccsup` just proved must self-recycle at the next idle boundary before another FCC-family queue item runs. I am also not executing `agent-doc admin recycle` here because the install already marked the controller for recycle at the idle boundary; this turn needs to yield so the hot-reload can happen on the normal supervisor path.
-
-Concrete unblocker: let this cycle close and allow the supervisor to reach the idle boundary, then rerun the queue on the refreshed `agent-doc 0.34.38` supervisor. `#fcccap` remains open for that fresh-supervisor cycle.
-
-`#qfocsupguard` is also not implemented in this cycle because its backlog line explicitly says `DO NOT IMPLEMENT until scheduled`; this response only records the current blocker for the active `do [#fcccap]` prompt.
-
-No new actionable follow-up backlog item was discovered in this closeout beyond the already-open `#fcccap` and scheduled `#qfocsupguard` entries.
-
-### Re: durable recycle checkpointing — gpt-5
+### Re: editor stale-state rollback and slow Run Agent Doc — gpt-5
 
 > **Queue prompt:**
 >
-> :pushpin: do [#durablerecycle]
+> JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
+> ```
+> [route] target tmux session: 0
+> [route] Still waiting for codex (1s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (3s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (4s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (6s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (7s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (9s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (11s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (12s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (14s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (15s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (17s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (18s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (20s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (21s)... last line:   reverse-i-search:
+> [route] Still waiting for codex (23s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (24s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (26s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (27s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (29s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (30s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (32s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (33s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (35s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (36s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (38s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+> [route] Still waiting for codex (39s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (41s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (42s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (44s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (46s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (47s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (49s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (50s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (52s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+> [route] Still waiting for codex (53s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+> [route] Still waiting for codex (55s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+> [route] Still waiting for codex (56s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+> [route] Still waiting for codex (58s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+> [route] Still waiting for codex (59s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+> Error: dispatch-only codex reopen refused to inject into pane %24 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
+> ```
 
 
-Queue item `#durablerecycle` is implemented and shipped.
+> **Queue prompt:**
+>
+> I'm adding queue items into equityfundingsource.md and agent-doc keeps on reverting to a stale state...and I keep on losing my work. As I was typing in this queue item, a JB `File Cache Conflict` occurred and it deleted this entire item.
 
-Changed paths:
-- `src/agent-doc/agent-doc-orchestration/src/cycle_state.rs`
-- `src/agent-doc/agent-doc-orchestration/src/preflight/run.rs`
-- `src/agent-doc/agent-doc-orchestration/src/flow/closeout.rs`
-- `src/agent-doc/agent-doc-orchestration/src/doctor.rs`
-- `src/agent-doc/agent-doc-orchestration/src/start.rs`
-- parent gitlink `src/agent-doc`
 
-What changed:
-- Added durable turn checkpoint fields to cycle state: preflight baseline path, prompt targets, queue head/turn identity, alongside the existing phase/completion, response hash/capture, and pending-mutation fields.
-- Preflight now records that checkpoint after baseline and prompt-target analysis, so recycle/restart during preflight, repo work, tests-before-finalize, finalize/writeback, or done-marking has enough disk state to resume or fail closed.
-- Open-cycle recovery diagnostics now name the durable checkpoint, phase, target, pending-mutation status, capture id, and `--baseline-file` finalize command when available.
-- Doctor facts now surface the checkpoint fields for debugging/recovery tooling.
+> **Queue prompt:** I'm adding queue items into equityfundingsource.md and agent-doc keeps on reverting to a stale state...and I keep on losing my work. As I was typing in this queue item, a JB `File Cache Conflict` occurred and it deleted this entire item.
+
+Root cause confirmed: the editor plugin could consume and delete a file-IPC patch after mutating the live editor buffer even when it failed to write the required `*.ack-content` sidecar. That left the binary in the `no_ack` retry state with no patch file left to replay, which is exactly the stale-state/FCC shape shown by the live `equityfundingsource.md` diagnostics.
+
+Fix shipped locally:
+
+- JetBrains `PatchWatcher.writeAckContent(...)` now returns `Boolean`; response patch apply, no-op/dedupe apply, VFS apply, and `save_document` all return failure if ACK-content cannot be written.
+- VS Code patch apply and `save_document` now have the same ACK-gated behavior: document save must succeed, a patches dir must exist, and `writeAckContent(...)` must return true.
+- Because `processPatchFile` only deletes a patch file when `applyPatch(...)` returns true, a missing ACK-content proof now leaves the patch in place for binary retry instead of losing the replay source.
+- Added guard tests for both editor integrations, plus `VERSIONS.md` entry `#ackcontent-delete`.
+
+Commits:
+
+- agent-doc submodule `568755be` — `fix: ack-gate editor file ipc patches`
+- parent repo `dc575cd57` — `chore: update agent-doc ack-gated editor patches`
+
+I also installed the local JetBrains plugin build to `/home/brian/.config/JetBrains/IntelliJIdea2026.1`; IntelliJ needs a restart before that plugin code is active.
+
+> **Queue prompt:** JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
+
+I checked the specific route shape in the pasted log and the current source already treats a footer-only Codex line like `gpt-5.5 xhigh ... Context 0% use` as dispatch-ready; the focused route tests for that pass. I also checked the live `equityfundingsource.md` actor: it is not a footer-only idle pane right now, it is a real active Codex turn with `Working (... esc to interrupt)` and `prompt_ready=false`, so route must not inject another run into that pane until the turn finishes or is cancelled.
+
+So this cycle fixes the stale-state/patch-loss root cause. For the route complaint, I verified the current source covers the pasted footer-only readiness case and that the live stall now is an occupied actor pane, not an idle-readiness false negative.
 
 Verification:
-- `cargo test -p agent-doc-orchestration record_turn_checkpoint_persists_resume_identity_and_baseline`
-- `cargo test -p agent-doc-orchestration open_cycle_recovery_command_names_durable_checkpoint`
-- `cargo test -p agent-doc-orchestration preflight_persists_durable_turn_checkpoint`
-- `cargo test -p agent-doc-orchestration`
-- `git diff --check`
-- `cargo fmt -- --check`
-- `make check` passed: clippy, nextest, doctests, and deterministic medium closeout sim.
-- `make install` installed `agent-doc 0.34.38` locally and marked 2 controllers for recycle at the next idle boundary.
-- Latest `agent-doc` CI for `906890a0` was `in_progress`, not red, at closeout check.
 
-Commits and deployment:
-- Submodule commit pushed: `906890a0 agent-doc: persist durable turn checkpoints` to `btakita/agent-doc:main`.
-- Parent remote pointer pushed from a clean worktree: `c331479d3 agent-doc: update durable checkpoint pointer` to `btakita/agent-loop:main`, avoiding the unrelated divergent local parent history.
+- `npm test` in `editors/vscode` passed: 98 tests.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.NormalizeExchangePrefixesTest` passed.
+- `cargo test -p agent-doc-orchestration file_ipc_` passed: 13 tests.
+- `cargo test -p agent-doc-orchestration ready_prompt_candidate_accepts_codex` passed: 3 tests.
+- `cargo test -p agent-doc-orchestration has_busy_cue_detects_codex_working_status_with_idle_placeholder` passed.
+- `make check` passed: clippy plus 4,982 tests, doctests, and the ignored medium sim target.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` passed.
+- Latest GitHub Actions `CI` run was `completed success` at `2026-06-22T18:30:51Z`.
+- `make check` passed.
+- `cargo test -p agent-doc-orchestration has_busy_cue_detects_codex_working_status_with_idle_placeholder` passed.
+- `cargo test -p agent-doc-orchestration ready_prompt_candidate_accepts_codex` passed.
+- parent repo `dc575cd57` records the submodule pointer update.
+- agent-doc submodule `568755be` contains the ACK-gated editor patch fix.
+- Rebuilt the VS Code package with `npm run package` and installed the rebuilt `agent-doc-0.2.31.vsix` with `agent-doc plugin install --local vscode`; it installed via `codium`.
+- Built the JetBrains plugin with `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` and installed it to `/home/brian/.config/JetBrains/IntelliJIdea2026.1`. IntelliJ still needs a restart for that plugin code to load.
+- Installed the native library with `agent-doc lib-install`; it wrote `/home/brian/.cargo/bin/libagent_doc-0.34.35.so`, updated the `libagent_doc.so` symlink, and marked 2 controllers for recycle at the next idle boundary.
+- Rebuilt release artifacts with `cargo build --release`.
+- Reinstalled the CLI from this checkout with `cargo install --path .`; it replaced `/home/brian/.cargo/bin/agent-doc`.
 
-The newer free-text queue prompts about startup overhead and skill-surface/data-driven context remain queued for later turns; this closeout only completes `#durablerecycle`.
-<!-- agent:boundary:6a005532 -->
+Escalation: none.
+
+Confidence: high for the stale-state/File Cache Conflict patch-loss fix; medium for the route report because the currently observed live slowdown is a genuinely busy actor pane rather than the footer-only readiness case from the pasted log.
+
+### Re: build and install status — gpt-5
+
+> **Queue prompt:**
+>
+> equityfundingsource.md has MCP preflight error without diagnostics.
+> ```
+> • The MCP preflight retry failed without diagnostics, so I’m invoking the CLI preflight directly to get the recovery
+>   detail and avoid guessing at the next step.
+> ```
+
+
+> **Queue prompt:** Why did you not build + install the fixes for "Re: editor stale-state rollback and slow Run Agent Doc — gpt-5"?
+
+I should have made the install state explicit before the first closeout. The actual code fix was editor-side, so I initially treated the CLI binary as unchanged and focused on tests plus the JetBrains plugin build. I did build and install the JetBrains plugin during that cycle, but I had not reinstalled every local artifact yet.
+
+I completed the full local install path now.
+
+- Reinstalled the CLI from this checkout with `cargo install --path .`; it replaced `/home/brian/.cargo/bin/agent-doc`.
+- Rebuilt release artifacts with `cargo build --release`.
+- Installed the native library with `agent-doc lib-install`; it wrote `/home/brian/.cargo/bin/libagent_doc-0.34.35.so`, updated the `libagent_doc.so` symlink, and marked 2 controllers for recycle at the next idle boundary.
+- Built the JetBrains plugin with `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` and installed it to `/home/brian/.config/JetBrains/IntelliJIdea2026.1`. IntelliJ still needs a restart for that plugin code to load.
+- Rebuilt the VS Code package with `npm run package` and installed the rebuilt `agent-doc-0.2.31.vsix` with `agent-doc plugin install --local vscode`; it installed via `codium`.
+
+The source commits remain the same.
+
+- agent-doc submodule `568755be` contains the ACK-gated editor patch fix.
+- parent repo `dc575cd57` records the submodule pointer update.
+
+The package version still prints `agent-doc 0.34.35` because `Cargo.toml` was not version-bumped in this fix; the local binary and library are nevertheless rebuilt from the current checkout containing the editor integration changes and current source tree.
+
+Verification already completed in this session includes `npm test`, JetBrains targeted test, JetBrains `test buildPlugin`, the focused Rust IPC/route tests, `make check`, and the latest GitHub Actions `CI` run reporting success.
+
+### Re: install closeout repair — gpt-5
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
+> ```
+> [route] target tmux session: 0
+> Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
+> ```
+
+
+The build and install follow-up is now complete. The CLI was reinstalled from the current checkout, release artifacts were rebuilt, the native library was installed, the JetBrains plugin was built and installed for IntelliJ IDEA 2026.1, and the VS Code package was rebuilt and installed through `codium`.
+
+The JetBrains plugin still requires an IDE restart before the newly installed plugin code is active. The controller was also marked for recycle at the next idle boundary with `agent-doc admin recycle`.
+
+### Re: do [#mrh-response-loss-stalled-queue] — gpt-5
+
+> **Queue prompt:** do [#mrh-response-loss-stalled-queue]
+
+Implemented the response-loss guard for `#mrh-response-loss-stalled-queue`.
+
+What changed:
+- In `repair::run`, replayed orphan/captured responses now re-read the repaired document and require the normalized response block to be present before clearing pending/capture state.
+- The materialization check uses the shared response-materialization probe, so patch-wrapped and guard-prefixed payloads match their committed visible body while malformed body-only leaks still fail closed.
+- Added regression coverage for the MRH/install shape where only a body bullet lands under an older response and the `### Re:` heading is missing.
+
+Commits made:
+- `6f022d7b` in `src/agent-doc`: `fix: fail closed on missing repair materialization`
+- `788deb5f7` in the parent repo: `chore: update agent-doc repair guard`
+
+Verification completed:
+- `cargo test -p agent-doc-orchestration stop_auto_closes_guard_prefixed_patch_payload`
+- `cargo test -p agent-doc-orchestration repair_materialization_requires_captured_response_block`
+- `cargo test -p agent-doc-orchestration recover_replays_latest_committed_capture_when_matching_prompt_was_left_orphaned`
+- `make check`, including clippy, 4,983 tests, doctests, and the ignored medium sim
+- Latest GitHub Actions CI run was green at `2026-06-22T18:30:51Z`.
+
+Install state:
+- `cargo install --path .` replaced `/home/brian/.cargo/bin/agent-doc`.
+- `cargo build --release` completed.
+- `agent-doc lib-install` installed `libagent_doc-0.34.35.so` and marked two controllers for idle recycle.
+- `agent-doc --version` reports `agent-doc 0.34.35` because `Cargo.toml` still carries that version.
+
+I left the unrelated open operator-verify backlog items alone, including the existing `#qcm1verify` warning.
+
+### Re: queue typing File Cache Conflict — gpt-5
+
+> **Queue prompt:**
+>
+> If I am typing a queue item, JB `File Cache Conflict` should not occur. This causes me to lose the last few words that I typed.
+
+
+> **Queue prompt:** If I am typing a queue item, JB `File Cache Conflict` should not occur. This causes me to lose the last few words that I typed.
+
+This is covered by the ACK-content fix shipped in this session.
+
+The root problem was that the editor plugin could consume and delete a file-IPC patch after mutating the live buffer even when it failed to write the `*.ack-content` proof. That left the binary in a no-ACK state with no patch file left to replay, which is the stale editor state that can surface as a JetBrains File Cache Conflict and lose the last text typed into a queue item.
+
+The fix now gates patch deletion on ACK-content proof in both editor integrations:
+- JetBrains returns failure when ACK-content cannot be written for response patches, no-op/dedupe patches, VFS apply, or `save_document`.
+- VS Code requires document save success, an existing patches dir, and a successful ACK-content write before reporting patch success.
+- A patch without ACK proof now remains available for binary retry instead of being deleted after an unproven live-buffer mutation.
+
+Installed state:
+- Submodule fix `568755be` and parent pointer `dc575cd57` contain the editor ACK-content change.
+- Rust repair guard `6f022d7b` and parent pointer `788deb5f7` are also installed locally.
+- CLI and shared library were rebuilt and installed from the current checkout.
+- JetBrains and VS Code plugins were rebuilt and installed; IntelliJ still needs a restart before the newly installed JetBrains plugin code is active.
+
+Verification completed in this session includes the VS Code test suite, JetBrains plugin tests/build, focused Rust IPC tests, `make check`, and the latest green GitHub Actions CI run.
+
+### Re: bare agent-doc shell invocation — gpt-5
+
+> **Queue prompt:**
+>
+> Running `agent-doc file-name.md` directly in the CLI should return in an immediate error explaining it needs to be run within a supported harness (Codex, Claude, or Opencode). Instead, it said "Submitting to Codex..." and locks the shell. Now I cannot sync monsterrodholders.md.
+
+Implemented and shipped the direct-shell guard.
+
+Changed paths:
+- `src/agent-doc/src/main.rs`
+- `src/agent-doc/tests/run_integration.rs`
+- `src/agent-doc/specs/07-core-commands.md`
+- `src/agent-doc/specs/07-commands.md`
+- `src/agent-doc` superproject gitlink
+
+What changed: bare `agent-doc <FILE>` now checks the active harness before rewriting to `run`. Inside Codex, Claude Code, or OpenCode it keeps the harness-native behavior. In a normal shell with no supported harness env, it fails before parsing into `run`, before opening a cycle, and tells the operator to use an explicit subcommand such as `agent-doc run <FILE>`, `agent-doc route <FILE>`, or `agent-doc start <FILE>`.
+
+Verification:
+- `cargo fmt`
+- `cargo test bare_file_invocation_outside_supported_harness_fails_before_run_cycle`
+- `cargo test codex_bare_run_inside_owning_pane_with_unresolved_prompt_fails_before_pre_commit`
+- `cargo test codex_owned_pane_active_auto_queue_hands_off_without_drift`
+- `make check` -> 5002 tests passed, 241 skipped, SimWorld medium seed passed
+- `make install` -> installed `agent-doc 0.34.38` and refreshed `libagent_doc.so`
+- `env -u ... agent-doc tasks/agent-doc/agent-doc-bugs2.md` -> immediate error: bare `agent-doc <FILE>` must be run from a supported harness
+
+Commits / push:
+- agent-doc submodule: `3a8e304d` (`fix: guard bare agent-doc shell invocation`) pushed to `btakita/agent-doc main`
+- superproject pointer: `edcd0d452` (`chore: update agent-doc submodule`) pushed to `btakita/agent-loop main` from a clean temporary worktree because the local superproject `main` has a long unrelated divergence
+
+CI:
+- agent-doc `CI` run `27995577311` was still `in_progress` at closeout check.
+- superproject has no workflow named `CI`; its `Agent Doc` workflow run `27995642188` failed before runner startup. Both jobs had zero steps and GitHub annotated: recent account payments failed or the spending limit needs to be increased. Local verification above is the code evidence for this turn.
+
+Escalation: none.
+
+Other unhandled queue heads remain open; this response intentionally handled only the quoted direct-shell CLI prompt.
+
+### Re: bare agent-doc shell invocation follow-up — gpt-5
+
+Follow-up after the remote CI failures: the production guard stayed the same, but two legacy tests still assumed bare `agent-doc <FILE>` was valid from a normal shell. I updated those tests so the harness-native alias path runs with an explicit Codex marker, and the plain-shell path asserts the new immediate supported-harness error.
+
+Additional changed paths:
+- `src/agent-doc/tests/run_integration.rs`
+- `src/agent-doc/tests/test_cli.rs`
+- `src/agent-doc` superproject gitlink
+
+Final commits / pushes:
+- agent-doc submodule: `3a8e304d` (`fix: guard bare agent-doc shell invocation`), `c393b1dd` (`test: mark bare path alias harness-native`), and `970ee577` (`test: cover bare path shell rejection`) pushed to `btakita/agent-doc main`
+- superproject pointer: `8e6b05ffb` (`chore: update agent-doc submodule`) pushed to `btakita/agent-loop main`
+
+Final verification:
+- `env -u CLAUDECODE -u CLAUDE_CODE -u CLAUDE_CODE_SESSION -u OPENCODE -u OPENCODE_CLIENT -u CODEX -u CODEX_CLI -u CODEX_SESSION -u CODEX_THREAD_ID cargo test test_cli_bare_file_path_aliases_to_run`
+- `env -u CLAUDECODE -u CLAUDE_CODE -u CLAUDE_CODE_SESSION -u OPENCODE -u OPENCODE_CLIENT -u CODEX -u CODEX_CLI -u CODEX_SESSION -u CODEX_THREAD_ID cargo test bare_path_alias_uses_same_template_safe_path`
+- `env -u CLAUDECODE -u CLAUDE_CODE -u CLAUDE_CODE_SESSION -u OPENCODE -u OPENCODE_CLIENT -u CODEX -u CODEX_CLI -u CODEX_SESSION -u CODEX_THREAD_ID make check` -> 5002 tests passed, 241 skipped, SimWorld medium seed passed
+- agent-doc GitHub Actions `CI` run `27996252411` -> success (`make check` and `make tmux-ci` passed)
+- superproject `Agent Doc` run `27996268409` still failed before runner startup because GitHub reported account billing/spending-limit restrictions; no test steps started
+
+Runtime cleanup: ran `agent-doc admin recycle`; it marked the project controller to recycle at the next idle boundary so stale-binary supervisors can refresh without discarding live turns.
+<!-- agent:boundary:3394c4d6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~agent-doc should support reliable recycle mid-turn. The turn state should be durable to survive a restart.~~
-- ~~auto clear did not submit the prompt. Why is sending a prompt to tmux significantly more reliable than sending Enter to tmux?~~
-- ~~:pushpin: do [#durablerecycle]~~
-- do [#fcccap]
-- do [#clearresubmitproof]
-- Why is there so much overhead in reading the agent doc and running the first task? About a minute of thrashing and ~20% context is used just to begin the work. The binary should read the document and immediately hand the agent the work that needs to be done. The binary should track what has already been done. We need to reliably mark all completed tasks as done.
-- Can and should we reduce the SKILL surface and have agent-doc feed context into the agent as needed? If we have a state-machine, should we make the context feed data-driven...there is much churn in agent-doc, so I'm on the fence about making the context feed data-driven? I do think a master state-machine would be useful however.
-- [#qfocsupguard]
-JB `Run Ageent Doc` on equityfundingsource.md stalled...prompt but no submit.
+- ~~If I am typing a queue item, JB `File Cache Conflict` should not occur. This causes me to lose the last few words that I typed.~~
+---
+JB `Run Agent Doc` is still either stalling or very slow. Completely useless at the moment.
 ```
-[sync] recovered live pane %3 for session 62fe1f41 via supervisor pid 140998
-[sync] recovered live pane %6 for session b26b9957 via supervisor pid 179547
-resync: purged 1 orphaned stash pane(s)
 [route] target tmux session: 0
-[route] latency budget exceeded: phase dispatch_start_proof took 10103ms (budget 10000ms, pane=%3, harness=codex, outcome=unproven_but_accepted)
-[route] preserved dispatch-start proof snapshot for tasks/professional/equityfundingsource.md pane %3 harness=codex phase=direct_pane_dispatch_start_unproven capture_len=882 capture_hash=5fb74bfdecf6 snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782217842260-direct_pane_dispatch_start_unproven-codex-_3-5fb74bfdecf6.txt editor_attempt_id=1782217830623-7
-[route] bare codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %3, but no routed submission proof appeared after 10s
-Error: dispatch-only codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %3 via direct_pane_submit (tmux_text_enter), but only pane-input acceptance proof was available after waiting 10s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle codex prompt or restart the session and reroute again
-```
-I rebooted. JB `Run Agent Doc` stalled without dispatching. Prompt has `/clear` from another watcher. `/clear` should not have been added.
-```
-resync: pruned 3 stale session(s)
-[sync] recovered live pane %6 for session b26b9957 via path provenance pid=179547 instance=f14e0d0d-a615-46dc-9372-095c6f262ee8
-[sync] recovered live pane %3 for session 62fe1f41 via supervisor pid 140998
-resync: purged 1 orphaned stash pane(s)
-[route] target tmux session: 0
-[route] activated existing inactive agent:queue head "do [#fcccap]" for tasks/agent-doc/agent-doc-bugs2.md (already_present=true, activated=true) before dispatch-only reopen
 [route] Still waiting for codex (1s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
 [route] Still waiting for codex (3s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
 [route] Still waiting for codex (4s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
 [route] Still waiting for codex (6s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
 [route] Still waiting for codex (7s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
 [route] Still waiting for codex (9s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (10s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (11s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
 [route] Still waiting for codex (12s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
 [route] Still waiting for codex (14s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
 [route] Still waiting for codex (15s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
 [route] Still waiting for codex (17s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
 [route] Still waiting for codex (18s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
 [route] Still waiting for codex (20s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (21s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
+[route] Still waiting for codex (21s)... last line:   reverse-i-search:
 [route] Still waiting for codex (23s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
 [route] Still waiting for codex (24s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
 [route] Still waiting for codex (26s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
@@ -358,37 +342,39 @@ resync: purged 1 orphaned stash pane(s)
 [route] Still waiting for codex (35s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
 [route] Still waiting for codex (36s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
 [route] Still waiting for codex (38s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (39s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (41s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (42s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (44s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (46s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (47s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (49s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (50s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (52s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (53s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (55s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (56s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (58s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-[route] Still waiting for codex (59s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
-Error: dispatch-only codex reopen refused to inject into pane %6 for tasks/agent-doc/agent-doc-bugs2.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
+[route] Still waiting for codex (39s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (41s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (42s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (44s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (46s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (47s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (49s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (50s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (52s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 6% use
+[route] Still waiting for codex (53s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+[route] Still waiting for codex (55s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+[route] Still waiting for codex (56s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+[route] Still waiting for codex (58s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+[route] Still waiting for codex (59s)... last line:   gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 9% use
+Error: dispatch-only codex reopen refused to inject into pane %24 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
 ```
 ---
-- :pushpin: do [#fccendpoint]
-- :pushpin: do [#fccforce]
-- :pushpin: do [#fccnoack]
-- :pushpin: do [#fccpatch]
-- :pushpin: do [#fccowner]
-- :pushpin: do [#fccack]
-- :pushpin: do [#fccsave]
-- :pushpin: do [#fccreconnect]
-- :pushpin: do [#fccaudit2]
+JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
+```
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
+```
+---
+- ~~:pushpin: do [#arsm]~~
+- :pushpin: do [#1jec]
+- :pushpin: do [#fbwireverify]
+- :pushpin: do [#qnodemerge4verify]
+- :pushpin: do [#tb4q]
+- do [#cancelturnverify]
+- ~~do [#mrh-response-loss-stalled-queue]~~
+- do [#qcm1verify]
 <!-- /agent:queue -->
 <!--
-- It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.
-- JB `Run Agent Doc` still does not submit. The submit retry poll should be 500ms and attempt for 30s...only if the input contents are the prompt itself. Other automated additions to the prompt should be forbidden. If the user modifies the agent prompt, stop the retry polling.
----
 - 🧪 test edit for [#qnodemerge4wire]
 ---
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -415,29 +401,18 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#clearresubmitproof] #agent-doc-bug Replace the failed #26f9 live auto-clear verify with implementation: make context clear + reroute a single proofed transaction. After `/clear` for Codex/Claude or `/new` for OpenCode, require clear completion and a fresh dispatch-ready prompt before injecting `agent-doc <FILE>`; then require route dispatch-start proof or fail closed. Keep submit retry polling only while the exact autogenerated prompt remains unmodified; if the user edits the prompt, stop retrying. Cover visible stale `/clear`, prompt already modified, swallowed Enter, and no-submit cases with SimWorld/unit tests plus live logging.
-- [ ] [#qfocsupguard] #agent-doc-bug Fail closed when `session-check` emits `deferred_for_supervisor_drain` without durable proof that the supervisor clear-and-continue path claimed and drained the current queue head. Live repro 2026-06-23: repeated `agent-doc src/boost-client/tasks/monsterrodholders.md` runs reported committed + `yield_to_supervisor_clear_and_continue` while `session-review` still showed active queue prompt `scripts/hermes-serve.sh should start ollama...`; operator reported the queue item was either not processed or the response was not written. Plan: tasks/agent-doc/plan-supervisor-drain-handoff-proof.md. Relates #qfocsup/#tb4q and archived #mrh-response-loss-stalled-queue. DO NOT IMPLEMENT until scheduled.
-- [ ] [#fcccap] #agent-doc-bug Replace manual-only File Cache Conflict capture (#cyh0) with an automated trigger bundle: on every JB File Cache Conflict/pending-memory event, write a correlated artifact containing the nearest agent-doc command, ops.log `transport=... action=... reason=...`, patch id/editor id, plugin event (`pending`, `kept-memory`, `cancelled`, `saveDocument`), and document hash so the remaining trigger is provable without operator log scraping.
-- [ ] [#fccendpoint] #agent-doc-bug Harden the `apply_template_writeback transport=disk_fallback reason=send_failed editor_endpoint=absent action=editorless_disk_fallback` path: distinguish true no-editor CLI sessions from JB-open-but-missing/stale owner lease, fail closed or restore editor ownership for the latter, and add coverage so an open JB buffer is never externally overwritten as an editorless disk fallback.
-- [ ] [#fccforce] #agent-doc-bug Contain `convergence_gate_force_disk_fallback reason=editor_ipc_convergence_boundary_failed`: make the fallback write require a loadable playback artifact plus editor-open safety proof, prefer blocked/error with exact unblocker when JB has the file open, and prove the force-disk path cannot surface a File Cache Conflict silently.
-- [ ] [#fccnoack] #agent-doc-bug Trace and harden active-listener/no-ACK behavior: when `transport=blocked reason=no_ack_content` fires, prove no plugin/VFS side effect (`saveDocument`, VCS refresh, stale patch apply) can still raise a JB File Cache Conflict; add ops markers and a regression for the blocked path staying non-mutating.
-- [ ] [#fccpatch] #agent-doc-bug Fix PatchWatcher conflict-pending flow: when IntelliJ already has a File Cache Conflict / memory-vs-disk prompt, defer patch application and deletion until the conflict resolves, then either rebase/retry the patch with fresh base proof or discard with an explicit logged reason instead of leaving the original external-write source ambiguous.
-- [ ] [#fccowner] #agent-doc-bug Finish the multi-window plugin-consumer cause beyond #8bfz operator proof: make the single-owner lease fail-closed or loudly degraded for untargeted patches when the owner lease is absent/stale/FFI-unavailable, log owner/non-owner decisions with document hash and editor id, and add a live/simulated multi-window regression that only one JB process calls `saveDocument` per patch.
-- [ ] [#fccack] #agent-doc-bug Prove and harden ACK-content sidecar behavior: label `.agent-doc/ack-content` writes separately from session-doc writes, assert sidecar writes themselves never target the visible markdown file, and when ACK-content is missing or stale, route to blocked/error recovery instead of any fallback that can cause an external file change under JB.
-- [ ] [#fccsave] #agent-doc-bug Instrument and gate plugin `saveDocument` / VCS-refresh signals as possible FCC triggers: log source action and before/after hashes for every plugin save/refresh after patch application, suppress saves when the editor buffer is stale vs HEAD/disk, and add coverage for the stale-buffer save not reintroducing disk/editor divergence.
-- [ ] [#fccreconnect] #agent-doc-bug Complete the plugin reconnect stale-buffer half of #evmh: on JB plugin reconnect, if the editor buffer is stale relative to HEAD/disk and has no proven user edit, re-read disk/HEAD instead of pushing the stale buffer via `saveDocument`; cover reconnect-after-binary-write and reconnect-after-user-edit separately.
-- [ ] [#fccaudit2] #agent-doc-bug Run a remaining File Cache Conflict write-site audit: enumerate every session-document mutation path (reset/repair/preflight/status/queue/done/finalize/compact/route recovery/plugin refresh), require each to use the converge-or-disk gate or a documented editorless proof, and add a `write_authority` ops marker with a stable cause label for any path that can still touch disk.
+- [ ] [#cancelturnverify] [operator-verify] #agent-doc-bug Live-verify Cancel Turn (agent-doc submodule b4471d05; committed+pushed, make check green, JB 0.2.176 + VS Code 0.2.31 built, NOT installed). After installing the plugins: (1) while a turn is RUNNING, invoke Cancel Turn (JB menu / VS Code command) and confirm the turn is interrupted (ops.log cancel_turn_performed action=interrupt_active_turn) and the agent stays open; (2) while the agent is IDLE, invoke Cancel Turn (even repeatedly) and confirm it is a NO-OP (ops.log cancel_turn_noop reason=idle_no_active_turn) and the agent is NOT closed — the core safety requirement. Verify per harness: Codex/OpenCode (Escape/C-c, never raw Ctrl+C that would close on idle) and Claude.
+- [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
+- [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.
+- [ ] [#arsm] [operator-verify] #pcwcwarnverify #agent-doc-bug Live-verify the #pcwcwarn post-commit stale-exchange reconcile (agent-doc submodule 5f3fc07d, superproject db7fc3594). Code shipped+pushed+make-check-green (4947). Runs in the binary commit path + editor IPC, so it goes live once the supervisor adopts the new build (admin recycle done). REMAINING (operator-gated, needs a live editor): drive one edit-during-finalize cycle with a stale > Queue prompt blockquote left inside the exchange in a live JB/VS Code buffer; confirm ops.log shows postcommit_exchange_reconciled reason=stale_editor_exchange AND zero recurring postcommit_worktree_check match=false drift on the next cycle (no manual git checkout HEAD needed).
+- [ ] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.
+- [ ] [#qcm1verify] [operator-verify] #agent-doc-bug Install + live-verify the #qnodemerge1 component-scoped merge (agent-doc submodule 52458f47). Code shipped+pushed, make check green (4853). Operator-gated remainder (mid-session install causes finalize-client-newer drift; STOP-cutting-releases gate): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then drive one edit-during-finalize cycle (type into a queue item while the agent writes an exchange response) and confirm ZERO cross-component splice + no console-output-in-queue corruption.
+- [ ] [#1jec] [operator-verify] #yzerverify #agent-doc-bug Live-verify the #yzer/#evmhplugin plugin reconnect re-read (agent-doc 0.34.28 / submodule f6b8ae17, plugin 0.2.172). Code shipped+pushed: binary FFI agent_doc_reconnect_buffer_decision (disk==HEAD via ffi_show_head + buffer==prior-commit via ffi_show_prior_blobs) + pure decide_reconnect_buffer + PatchWatcher.registerRoot reconcile-on-connect (applyReconnectReread) + SimWorld coverage; make check green (4832). Operator-gated remainder (install is unsafe mid-session = finalize-client-newer drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), reinstall plugin 0.2.172, agent-doc admin recycle. Then repro: open a session doc in JB, kill/restart the supervisor so the binary commits while the plugin is disconnected, and on reconnect confirm ops.log shows 'reconnect_buffer_decision decision=reread_disk #yzer' and the editor buffer == HEAD with NO File Cache Conflict; a buffer holding genuine unsaved user edits must instead log decision=keep_buffer and be preserved (editor wins).
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
-- [/] [#jjds] [operator-verify] Confirm in a live editor/pane that a stale-binary supervisor recycles at the next idle boundary and resumes queue drain on agent-doc 0.34.36.
-- [/] [#arsm] [operator-verify] #pcwcwarnverify #agent-doc-bug Live-verify the #pcwcwarn post-commit stale-exchange reconcile (agent-doc submodule 5f3fc07d, superproject db7fc3594). Code shipped+pushed+make-check-green (4947). Runs in the binary commit path + editor IPC, so it goes live once the supervisor adopts the new build (admin recycle done). REMAINING (operator-gated, needs a live editor): drive one edit-during-finalize cycle with a stale > Queue prompt blockquote left inside the exchange in a live JB/VS Code buffer; confirm ops.log shows postcommit_exchange_reconciled reason=stale_editor_exchange AND zero recurring postcommit_worktree_check match=false drift on the next cycle (no manual git checkout HEAD needed).
-- [/] [#cancelturnverify] [operator-verify] #agent-doc-bug Live-verify Cancel Turn (agent-doc submodule b4471d05; committed+pushed, make check green, JB 0.2.176 + VS Code 0.2.31 built, NOT installed). After installing the plugins: (1) while a turn is RUNNING, invoke Cancel Turn (JB menu / VS Code command) and confirm the turn is interrupted (ops.log cancel_turn_performed action=interrupt_active_turn) and the agent stays open; (2) while the agent is IDLE, invoke Cancel Turn (even repeatedly) and confirm it is a NO-OP (ops.log cancel_turn_noop reason=idle_no_active_turn) and the agent is NOT closed — the core safety requirement. Verify per harness: Codex/OpenCode (Escape/C-c, never raw Ctrl+C that would close on idle) and Claude.
-- [/] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.
-- [/] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
-- [/] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.
 - [/] [#ftqpartialdup] #agent-doc-bug Investigate partial free-text queue item duplication in equityfundingsource.md: pasted repro shows a full queue prompt duplicated as a truncated second line ending "... on that". Confirm whether the #hap7/#gf5n structural-node merge fixes cover same-node partial duplication; if not, add a same-node/free-text conflict guard and regression.
 - [/] [#recyclerename] #agent-doc-bug Rename the JB + VS Code "Restart Supervisor Process" menu action to "Recycle Supervisor", and ensure a distinct "Restart" command sits alongside it (operator request attached to #s81q, struck when #s81q was gated but NOT implemented — this re-files it honestly). Restart Agent already exists as the harness-restart command; this is specifically renaming the supervisor-process action to "Recycle Supervisor" (matching the admin recycle semantics) + confirming Restart sits alongside. JB: plugin.xml text rename of AgentDoc.RestartSupervisorProcess (action IDs stay stable, only text changes per the convention) + VS Code command title. Confirm alongside-vs-replace with operator. Plan: tasks/agent-doc/plan-restart-agent.md
 - [/] [#arrcodexproof] [recommended] #agent-doc-bug #agentreloadrestart Phase 1b follow-up: re-run the managed codex capability proof when a boundary restart switches TO codex. Today spawn_managed_capability_proof_thread runs once before the supervisor loop with the launch harness; build_harness_launch_spec re-resolves args/env/network on restart but capability_proof_required is discarded at the swap, so a mid-session switch to codex spawns fresh but skips the managed capability proof. Wire the proof (re)start into the harness-change restart path. make check + a focused check.

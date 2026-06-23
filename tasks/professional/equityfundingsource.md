@@ -25,7 +25,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-
+complete
 <!-- /agent:status -->
 
 ## Exchange
@@ -33,81 +33,200 @@ queue: stop
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260623-131649.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260622-234611.md`*
 
 Compacted content:
-❯ - Archived 5 response topic(s): Does the TMO sandbox have any loan records?; 0099 lender role/schema; destructive migration; 2 more
-❯ - Prior summary/context: prior compacted content: Archived 15 response topic(s): production deletion logs; TMO sync delete risk + soft-disable...
-Audit completed. Email is working in the tested paths, but it is not reliable for all production use cases yet.
+❯ - Archived 4 response topic(s): Available Deals missing; audit rows + due-diligence packet; were the two Available Deals deleted?; 1 more
+❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
+
+### Re: production deletion logs — gpt-5
 
 > **Queue prompt:**
 >
-> [#vjcv]: Is this complete. I have tested the email sending and it seems to work. Could you audit all email sending to ensure it will work reliably in all use cases?
+> Look in the production logs. Are there any deletion events that occurred in the production logs?
 
+Yes, but only one clear domain-level deletion event showed up, and it is older than the two missing Available Deals: production `tmo_cache_change_logs` has one `operation='deleted'` row for `entity_type='loan'`, `source_id='TST042'`, `mode='efs'`, created at `2026-06-08 15:08:43 UTC`.
 
-Key gaps found:
-- No dedicated `CLOUDFLARE_EMAIL_API_TOKEN` secret in production; code falls back to generic `CLOUDFLARE_API_TOKEN`.
-- Broker email notifications require `BROKER_EMAIL_NOTIFICATIONS_ENABLED`, but production config does not clearly enable it.
-- Many background emails only log failures; there is no durable retry/dead-letter/status path.
-- Public `/apply` can tell borrowers to check email even if the invite email failed.
-- `MESSAGE_EMAIL_INBOUND_SECRET` is missing from the production secret list for the parsed JSON inbound route.
+For the two missing Available Deals we have been tracing (`FTM631` and `GQI751`), I did not find a production log record proving that either one was deleted. The stronger evidence is still that their EFS-local `loans` rows are gone while TMO cache still has active `Application Received` loan records for them.
 
-Verification passed with the focused email-related `bun test` suite. I did not change EFS source code; the EFS submodule remained clean. I added the follow-up items as gated review work: `#email-prod-ready`, `#email-bg-outbox`, and `#apply-invite-fail-ux`.
+What I found in production logs/audit sources:
 
-Agent-doc closeout is still blocked by the harness: the response is captured, but the editor IPC proof never ACKed, so agent-doc refused to write/commit the exchange body. `agent-doc admin recycle` has been requested, and `restart-supervisor` refused because this pane is still busy. The pending response is retained for retry once the supervisor can recycle at idle.
+- App DB fallback logs: `loan_activity_logs` has no rows matching delete text/kinds. The newer durable `audit_logs` table is not present in production yet (`no such table: audit_logs`), so it could not have preserved the missing-row deletion evidence.
+- TMO cache change log: exactly one delete event exists in the current cache log set: `TST042` at `2026-06-08 15:08:43 UTC`.
+- Cloudflare account audit logs: in the `2026-06-20T00:00:00Z` to `2026-06-22T23:30:00Z` window, `raw_method=DELETE` returned one Cloudflare control-plane event: `Delete script secret` for the Worker, not a D1/app row deletion.
+- Cloudflare D1 audit logs: cursor pagination over `resource_product=d1` scanned 350 D1 API query audit rows from `2026-06-20T02:31:27.650Z` through `2026-06-22T23:06:24.279Z`. Thirteen were write-bearing (`changed_db`/`changes`/`rows_written`), but Cloudflare audit payloads do not include the SQL body, so those cannot be classified as delete vs insert/update from audit logs alone. These are Cloudflare API/D1 query audit records, not necessarily Worker-internal D1 calls.
+- Worker logs: live `wrangler tail` works and captured a read-only `GET /admin/pipeline` request, but historical persisted Worker log queries through Workers Observability returned zero events for the checked windows. Cloudflare docs distinguish real-time logs from stored Workers Logs: real-time logs do not store history, while Query Builder searches stored Workers Logs. Sources: https://developers.cloudflare.com/workers/observability/logs/real-time-logs/ and https://developers.cloudflare.com/workers/observability/query-builder/ . Cloudflare Audit Logs are account/API/dashboard action logs, not app-domain audit logs: https://developers.cloudflare.com/fundamentals/account/account-security/audit-logs/ .
 
-### Re: [#vjcv] Email sending audit — gpt-5
+So the direct answer is: yes, production has one recorded loan deletion event, `TST042` on June 8. No, I did not find a production deletion log for the two missing Available Deals (`FTM631`, `GQI751`). The absence is not definitive because the durable app audit table is not deployed in production and the historical Worker log query path is returning no stored invocation events.
 
-I audited the email-sending paths in `src/equityfundingsource-dev`. This is not complete/reliable in all use cases yet.
+Changed paths: none outside the agent-doc session document; no EFS code or production data was changed.
 
-What looks sound:
-- Shared sender normalization and local capture are centralized in `app/equityfundingsource/lib/email/index.ts` and `local_capture.ts`.
-- Public contact/apply flows persist records before sending and record notification status.
-- Secure-message outbound and inbound email routing use the unified inbound path and Worker `email()` handler.
-- Explicit admin sends for application feedback and payment reminders surface errors on failed sends.
-- Login-link flows use single-use tokens, and admin-triggered login links expire the token if the email cannot be sent.
+Commands: `agent-doc reset --from-current ...`; `agent-doc preflight ...`; `agent-doc plan`; `tsift status`; `tsift status --fix`; `tsift --envelope session-review ...`; Cloudflare Observability API checks via `bun -e`; Cloudflare Audit Logs API checks via `bun -e`; `bun ./bin/cf-wrangler.ts tail -c ../../wrangler.toml --format json`; read-only `curl` to `/admin/pipeline`; read-only `bun ./bin/cf-wrangler.ts d1 execute ...` queries against `audit_logs`, `loan_activity_logs`, `tmo_cache_change_logs`, and `sqlite_master`; targeted `rg`/`sed` review of the delete handlers and TMO delete helper.
 
-Main reliability gaps:
-- Production secrets include `CLOUDFLARE_API_TOKEN`, but not a dedicated `CLOUDFLARE_EMAIL_API_TOKEN`; code falls back to the generic token, so Email Sending is coupled to broader Cloudflare API scope.
-- Broker email notifications are gated by `BROKER_EMAIL_NOTIFICATIONS_ENABLED`, and production `wrangler.toml` does not set it. Broker in-app notifications still work, but broker email is not clearly production-enabled.
-- Many background notification sends only log failures; there is no durable retry/dead-letter/status path for lifecycle, secure-message, broker, group invite/reminder, investor-interest, or similar notifications.
-- Public `/apply` can tell the borrower to check their inbox even when the borrower invite email failed/skipped. It records the failure for admins, but the borrower-facing UX can be wrong.
-- `MESSAGE_EMAIL_INBOUND_SECRET` is not in the production secret list. The Cloudflare Email Worker `email()` path does not need it, but the parsed JSON `/api/email/inbound` route will reject requests unless this is configured.
+Verification: read-only production D1 queries returned one `tmo_cache_change_logs.operation='deleted'` row (`TST042`, `2026-06-08 15:08:43 UTC`), zero delete-matching `loan_activity_logs` rows, no production `audit_logs` table, one Cloudflare control-plane `DELETE` event for a Worker secret, and 13 D1 write-bearing account audit events that lack SQL bodies. Live Worker tail was verified with a fresh `/admin/pipeline` request; historical persisted Worker log queries returned zero rows.
 
-Verification run passed:
-`bun test tests/email-local-capture.test.ts tests/email-login.test.ts tests/admin-provisioning-email.test.ts tests/application-leads.test.ts tests/contact-messages.test.ts tests/borrower-message-notify.test.ts tests/msgmail2-lender-reply-to.test.ts tests/msgmail3-inbound-unified.test.ts tests/msgmail4-inbound-email-handler.test.ts tests/lending-group-notify.test.ts tests/lender-group-invite-reminder.test.ts tests/admin-payment-reminder.test.ts tests/lender-account-messages.test.ts`
+Confidence: medium. The observed log evidence is concrete, but Cloudflare's historical Worker log query path did not return stored app request events, and production lacks the durable `audit_logs` table that would make this attribution high-confidence.
 
-I did not change EFS source code during this audit. I added the follow-up work as gated review items: `#email-prod-ready`, `#email-bg-outbox`, and `#apply-invite-fail-ux`.
-
-### Re: Dialog state / CTA coverage — gpt-5
-
-> **Queue prompt:**
->
-> Using our state machine, can we tag each dialog components with a state? Can we link dialogs with states and cross-reference the UX to ensure every state transition has a clear CTA in the state dialog?
-
-Yes. The right shape is to make this a small typed contract, not another pass of comments/string checks.
-
-For `/admin/lender-pipeline`, the source already has the pieces: `STAGE_LABEL`, `compliance_hold_steps_`, `next_step_hint_`, `InvestorCardModal`, and `AdvanceLenderModal` in `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`. The gap is that they are not one canonical dialog-state map. I would add a pure exported model that maps:
-
-- state id: pipeline column / requirements status / lender-account blocker
-- dialog component: card modal, advance-lender modal, profile modal, documents panel, etc.
-- visible state tag: what the admin sees in the dialog header/banner
-- primary CTA: the one action that advances the state
-- secondary CTA(s): support actions such as message lender, view documents, open profile
-- transition target: the state or blocker that should clear after the CTA succeeds
-
-Then the modal renders from that model, and tests assert coverage. That catches the exact class of bug we just saw: a state says “Link a lender account,” but the dialog’s primary action opens the generic lender page instead of the required TMO sync/assignment action.
-
-I would start with the lender pipeline because it is already close: `tests/admin-investor-pipeline.test.ts` and `tests/advance-lender-dialog.test.ts` cover the current state logic, but they mostly inspect source strings. The next step is to make the state/CTA mapping importable and test it directly: every `INVESTOR_PIPELINE_COLUMN_IDS` state, every requirements blocker, and every lender-account blocker must have a visible dialog state plus at least one clear CTA. After that, apply the same pattern to the loan/application/payment dialogs so every state transition has a dialog-owned action instead of relying on scattered buttons.
-
-I added this as backlog item `#dialog-state-cta`.
-
-Changed paths: session document only; no EFS source changes.
-Commands run: `agent-doc preflight`, `agent-doc plan`, focused `rg`/`sed` inspections, and git status checks.
-Verification: source inspection only; no tests were run because this cycle did not change code.
-Confidence: high for the implementation direction; the exact state inventory should be locked by the first `#dialog-state-cta` test pass.
 Escalation: none.
-<!-- agent:boundary:c9a9e02c -->
+
+### Re: TMO sync delete risk + soft-disable trail — gpt-5 (HEAD)
+
+> **Queue prompt:**
+>
+> Could the delete event have occured from a TMO sync bug?
+>
+> **Queue prompt:**
+>
+> No record should be deleted, only disabled. Create a migration. The durable app audit table should be deployed. Do we have sufficient logging to track deletion events? The delete borrower should not cascade. No deleted records. Only disabled records. We need a trail.
+
+A scheduled TMO sync bug is unlikely to have hard-deleted the missing EFS rows. The read-side TMO sync updates local loan/deal fields and cache records; the cache delete helper only marks `tmo_cache_entities.deleted_at` and logs `tmo_cache_change_logs.operation='deleted'`. The real hard-delete risks were explicit app paths: admin loan delete, admin TMO-loan delete/bulk-delete, borrower loan delete, and admin user delete with the old borrower loan cascade chain.
+
+I changed those paths so records are disabled, not deleted:
+
+- Added `0101_soft_delete_guards.sql`, an additive D1 migration that adds `disabled_at`, `disabled_by_user_id`, and `disabled_reason` metadata, plus `disabled_route` on loans.
+- Added D1 triggers that abort hard deletes on `users`, `loans`, and `investment_deals`, so deleting a borrower cannot cascade into loans/deals.
+- Changed admin loan, TMO-loan, borrower loan, and admin user delete handlers to write audit rows and update disable metadata/status instead of issuing hard deletes or TMO `DeleteLoan` calls.
+- Changed deal rows to disable by `disabled_at` metadata, while active deal lists filter disabled deals out without changing the existing checked deal status values.
+- Kept app audit insertions durable now that `0100_audit_logs.sql` is deployed; audit insert failures are logged instead of masking the primary disable operation.
+- Updated the admin UI copy from delete to disable and updated docs/spec tests to require row preservation and audit trails.
+
+Logging is sufficient going forward for these app paths: loan disables write `loan_disabled` / `borrower_loan_disabled`, user disables write `user_disabled`, TMO-cache orphan detection still writes app audit rows, and production now has the durable `audit_logs` table. It is not retroactive for the previously missing rows because that table was not deployed at the time.
+
+Deployed production changes:
+
+- Applied remote D1 migrations `0100_audit_logs.sql` and `0101_soft_delete_guards.sql`.
+- Deployed Worker version `3c6745a6-d281-458e-a937-d25c203c5cc9` to `https://equityfundingsource.brian-takita.workers.dev`.
+- Verified remote schema contains `audit_logs`, `prevent_users_hard_delete`, `prevent_loans_hard_delete`, and `prevent_investment_deals_hard_delete`.
+
+EFS commit: `aa4cf71 fix: disable loans and users instead of deleting`, pushed to `origin/main`.
+
+Changed paths:
+
+- `app/equityfundingsource/migrations/0101_soft_delete_guards.sql`
+- `app/equityfundingsource/lib/admin/repo.ts`
+- `app/equityfundingsource/lib/admin/loan_management/index.ts`
+- `app/equityfundingsource/lib/admin/user_management/index.ts`
+- `app/equityfundingsource/lib/borrower/loans/index.ts`
+- `lib/ui--browser--efs/portal/admin/loans.tsx`
+- `lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `docs/business-logic.md`
+- `docs/current_progress.md`
+- `tests/admin-pipeline.test.ts`
+- `tests/portal-table-dialog.test.ts`
+
+Verification:
+
+- `bun test tests/admin-pipeline.test.ts --test-name-pattern "loan disable and TMO-cache orphaning"`
+- `bun test tests/admin-pipeline.test.ts --test-name-pattern "disable actions|loan disable"`
+- `bun test tests/portal-table-dialog.test.ts --test-name-pattern "admin loan dialogs use PortalModal"`
+- `bun test tests/admin-deal-publish-gate.test.ts`
+- `bun run cf:d1:migrate:local`
+- `make check` — 1,142 tests passed, app build passed, worker build passed.
+- `make deploy` — final deploy succeeded with no pending migrations.
+- `bun run cf:d1:migrations:list:remote` — no migrations to apply.
+- `curl /` returned `200`; `curl /admin` returned `303` through Access.
+- Remote D1 schema query confirmed the audit table and delete-prevention triggers.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for this repo.
+
+Confidence: high for preventing future hard deletes through these app/DB paths. It does not prove the historical missing rows were caused by one specific actor because the durable app audit table was not present then.
+
+Escalation: none.
+
+### Re: application logging + deploy — gpt-5 (HEAD)
+
+> **Queue prompt:**
+>
+> We should log all web requests, api calls, migrations, etc. in the application logs.
+>
+> **Queue prompt:**
+>
+> deploy
+
+Implemented and deployed structured application logging for the production Worker paths we can control directly.
+
+What changed:
+
+- Every Worker web request now emits a structured `[app-log]` `web_request` line with method, path, route kind (`api`, `auth`, `portal`, `public`, etc.), status, duration, Cloudflare ray, and user agent. Errors include exception fields and use `warn`/`error` severity based on response status.
+- Unhandled Worker errors now emit a structured `[app-log]` `web_request_error` line before returning the existing error response.
+- Scheduled Worker runs now emit `[app-log]` `scheduled_event`, `scheduled_task_started`, `scheduled_task_done`, and `scheduled_task_failed` lines for TMO sync and auth-token cleanup.
+- D1 migration wrapper commands now emit `[app-log]` `migration_command` entries for `d1 migrations ...`, including whether the command is local or remote.
+- The local dev Worker log sidecar now captures `[app-log]` alongside existing `[tmo-api]` and `[dropbox-api]` API logs.
+- Added a regression test that keeps request logging, scheduled task logging, migration logging, and API log capture wired.
+
+I kept the logs metadata-oriented: no request bodies, authorization headers, tokens, or secrets are logged.
+
+Deployed production changes:
+
+- Deployed Worker version `8bc3cffa-e2d8-403c-9344-7ebd02f30c48` to `https://equityfundingsource.brian-takita.workers.dev`.
+- Remote D1 migration check reported `No migrations to apply`; the migration command itself emitted the new `[app-log]` `migration_command` entry.
+
+EFS commit: `f0ccec3 feat: add structured application logging`, pushed to `origin/main`.
+
+Changed paths:
+
+- `app/equityfundingsource/lib/app-log.ts`
+- `app/equityfundingsource/worker.ts`
+- `app/equityfundingsource/bin/cf-wrangler.ts`
+- `app/equityfundingsource/bin/dev-worker.ts`
+- `tests/app-logging.test.ts`
+- `tests/email-login.test.ts`
+
+Verification:
+
+- `bun test tests/email-login.test.ts --test-name-pattern "scheduled worker purges stale auth token rows"`
+- `bun test tests/app-logging.test.ts`
+- `make check` — 1,145 tests passed, app build passed, worker build passed.
+- `make deploy` — succeeded; deployed Worker version `8bc3cffa-e2d8-403c-9344-7ebd02f30c48`.
+- `bun run cf:d1:migrations:list:remote` — no migrations to apply, and the wrapper logged the migration command.
+- Production smoke checks: `/` returned `200`; `/admin` returned `303`; `/api/admin/pipeline` returned `401` unauthenticated.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for the EFS repo.
+
+Confidence: high for Worker request logging, scheduled task logging, migration command logging, and the existing TMO/Dropbox API log capture path. This does not retroactively create historical request logs before this deployment.
+
+Escalation: none.
+
+### Re: deploy — gpt-5 (HEAD)
+
+> **Queue prompt:**
+>
+> ~~No record should be deleted, only disabled. Create a migration. The durable app audit table should be deployed. Do we have sufficient logging to track deletion events? The delete borrower should not cascade. No deleted records. Only disabled records. We need a trail.~~ — auto-struck: answered this cycle (#ftstrike) 
+
+
+> **Queue prompt:**
+>
+> deploy
+
+The logging changes are deployed.
+
+Deployment details:
+
+- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Worker version: `8bc3cffa-e2d8-403c-9344-7ebd02f30c48`
+- EFS commit deployed: `f0ccec3 feat: add structured application logging`
+- Remote D1 migrations: no pending migrations to apply.
+
+Changed paths: none in this follow-up cycle; the deployed code paths were recorded in the prior logging response.
+
+Commands:
+
+- `make deploy`
+- `bun run cf:d1:migrations:list:remote`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/admin`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/api/admin/pipeline`
+
+Verification:
+
+- Deployment succeeded.
+- Migration list reported `No migrations to apply`.
+- Public home returned `200`.
+- `/admin` returned `303` through Access/login flow.
+- `/api/admin/pipeline` returned `401` unauthenticated.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:7267188f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -127,21 +246,21 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~Could the delete event have occured from a TMO sync bug?~~
+- ~~We should log all web requests, api calls, migrations, etc. in the application logs.~~
+- ~~No record should be deleted, only disabled. Create a migration. The durable app audit table should be deployed. Do we have sufficient logging to track deletion events? The delete borrower should not cascade. No deleted records. Only disabled records. We need a trail.~~ — auto-struck: answered this cycle (#ftstrike) 
+- ~~deploy~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#dialog-state-cta] [recommended] Dialog-state CTA coverage: add a pure dialog-state contract for the admin/lender pipeline dialogs that maps each state-machine state and blocker to dialog component, visible state tag, primary CTA, secondary CTA, and transition target; refactor `InvestorCardModal` / `AdvanceLenderModal` to consume it; add Bun tests that fail when any `INVESTOR_PIPELINE_COLUMN_IDS` state, requirements status, or lender-account blocker has no clear CTA. Start with `/admin/lender-pipeline`, then generalize the same pattern to loan/application/payment dialogs.
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#apply-invite-fail-ux] Public `/apply` invite-failure UX: when the borrower invite email fails or is skipped after lead persistence, stop telling the borrower to check their inbox; show a received/follow-up message, keep the failed invite status visible to admins, and add a regression test.
-- [/] [#email-bg-outbox] Durable email delivery observability/retry: record lifecycle, secure-message, broker, lending-group, investor-interest, login-link, invite, reminder, and feedback email results in D1 with status/error/retry/dead-letter instead of relying on console-only warnings for background notifications.
-- [/] [#email-prod-ready] Email production-readiness hardening: provision a dedicated `CLOUDFLARE_EMAIL_API_TOKEN` secret with Email Sending scope, verify `BROKER_EMAIL_NOTIFICATIONS_ENABLED` if broker email is expected, add an admin/CI diagnostic that fails when production delivery would fall back to local capture, and document that `MESSAGE_EMAIL_INBOUND_SECRET` is only needed for the HTTP parsed-inbound route.
 - [/] [#mcme] [recommended] #msg-read-status Email-open-based read receipts — DEFERRED: Cloudflare Email Sending has no open-tracking webhook, and transactional mail should stay on Cloudflare Email Sending. If email-open receipts become mandatory, design a Cloudflare-compatible tracking-pixel/event subsystem or accept portal-only read cursors. In-app portal read cursors already exist for borrower chat (`chat_sessions.*_last_read_at`) but are not email reads.
 - [/] [#msg-unify4] [gated: awaiting dual-write prod soak] Lender cutover — dual-write (best-effort mirror into messages, both lender sources) + backfill (migration 0098) SHIPPED (EFS b5a6a55). Remaining: after soak, switch the inbox to read lender data from messages (dual-read), then drop deal_interest_lender_messages + lender_account_messages. Plan: src/equityfundingsource-dev/prds/message-unification.md.
 - [/] [#msg-unify3] [gated: awaiting dual-write prod soak] Borrower cutover — dual-write (best-effort mirror into messages) + backfill (migration 0097) SHIPPED (EFS 411a4da). Remaining: after the dual-write soaks live, switch the unified inbox to read borrower data from messages (dual-read), then drop chat_messages. Plan: src/equityfundingsource-dev/prds/message-unification.md.

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -258,6 +258,10 @@ Queue drained.
 1. `StateMachine<CyclePhase, CycleEvent>` in `RunContext`, seeded from the sidecar at start.
 2. `on_transition` handler that persists to the sidecar (the cross-process authority) — the cell is in-process-authoritative only for the duration of one CLI run.
 3. A reactive consumer (`state_is(WriteApplied)` guard, a memo) replacing existing boolean plumbing — the only concrete win.
+- **PCP-side:** an optional cache/projection of phase in `ControllerMemoryState` for routing decisions, analogous to the `RunContext` read-side cache at `graph.rs:222` — a shadow, not the truth.
+2. **Lost-update** — `flock(2)` advisory lock around `load→mutate→save`, or a CAS on mtime/etag. Larger change; since phase itself is already protected by `cycle_phase_rank`, the remaining exposure is non-phase bookkeeping, so this is hardening rather than a live fire.
+1. **Atomic write** — `tempfile::NamedTempFile::new_in(parent)` → write → `persist(path)` (rename is atomic on POSIX same-FS). `tempfile` is already a dev-dep. **Eliminates torn reads entirely**; low-risk, clearly correct.
+- **In-process:** `StateMachine<CyclePhase, CycleEvent>` in `RunContext`, seeded from the sidecar at start, `on_transition` → sidecar save, with `state_is(WriteApplied)` reactive guards. Single-threaded `Context` suffices. This is the #c7j5 pilot — a small ergonomic win, not an architecture change.
 
 That's a small ergonomic improvement on one in-process slice, not a backbone. Calling it `[recommended]` overstated it; corrected the two duplicate `#lzadocsm` review items below.
 
@@ -268,6 +272,11 @@ That's a small ergonomic improvement on one in-process slice, not a backbone. Ca
 Queue drained.
 
 ### Re: CyclePhase authority — JSON sidecar vs Project Control Pane — glm-5.2
+
+> **Queue prompt:**
+>
+> Does the Sidecar <-> PCP IPC create race conditions?
+
 
 > **Queue prompt:**
 > re [#c7j5]: Why is CyclePhase authority a JSON sidecar? Can it be placed into the Project Control Pane process?
@@ -282,7 +291,7 @@ Queue drained.
 - **PCP-side:** an optional cache/projection of phase in `ControllerMemoryState` for routing decisions, analogous to the `RunContext` read-side cache at `graph.rs:222` — a shadow, not the truth.
 
 Promoting the PCP to the write authority only pays off if the PCP were ever made mandatory/always-on; today that trades a local atomic file write for a socket round-trip on every transition without removing the on-disk record, so it is not a clear win. The #c7j5 re-scope stands: sidecar stays the authority, the `StateMachine` pilot stays narrow.
-<!-- agent:boundary:9c053334 -->
+<!-- agent:boundary:a08cc37d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -291,11 +300,15 @@ Promoting the PCP to the write authority only pays off if the PCP were ever made
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~Does the Sidecar <-> PCP IPC create race conditions?~~
+- Would it benefit the agent-doc lifecycle if the CyclePhase were visible in the PCP? Would this visibility help to fix issues chronic to agent-doc? The PCP/Supervisor are running from `agent-doc start`.
+- do [#lzsidecaratomic]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzsidecaratomic] [recommended] agent-doc-repo (not lazily-rs): cycle_state::save (cycle_state.rs:1194) is a raw std::fs::write with no lock/CAS across ~42 writer call sites → latent lost-update on non-phase fields + torn read for any reader (incl. PCP projection at project_controller.rs:1489). Fix: atomic tempfile+rename (eliminates torn reads; tempfile already a dev-dep) + optional flock/CAS around load→mutate→save. cycle_phase_rank (:1273) only guards monotonic phase. Found answering the Sidecar↔PCP race question.
 <!-- /agent:backlog -->
 
 ## Review

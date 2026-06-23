@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -91,15 +91,12 @@ Other real paths:
 - ACK-content sidecar writes are probably not themselves the visible Markdown-file dialog: they write under `.agent-doc/ack-content/`. But if the plugin cannot write ACK content, the binary loses proof and can move into the blocked/fallback/error paths above.
 
 The next useful capture is exactly what `#cyh0` asks for: when the dialog appears, capture the nearest ops line naming `transport=...`, `action=...`, `reason=...`, plus whether JB logged `File Cache Conflict pending/kept memory changes`.
-<!-- agent:boundary:d496174c -->
+<!-- agent:boundary:6bb1cfa6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#ws55]~~
-- ~~:pushpin: do [#3x90]~~
-- ~~JB `File Cache Conflict` dialogs are still appearing. Why? We have spend many turns on this. What are the paths that would cause this?~~
 <!-- /agent:queue -->
 <!--
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.

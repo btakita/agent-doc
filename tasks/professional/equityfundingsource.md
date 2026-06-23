@@ -92,7 +92,58 @@ Verification:
 Confidence: high.
 
 Escalation: none. Production was not deployed in this cycle; `deploy` remains as the next queue prompt.
-<!-- agent:boundary:d1ffe7ae -->
+
+### Re: Advance Lender TMO sync action - gpt-5
+
+> **Queue prompt:**
+>
+> "Link TMO account here" should perform the automated sync with TMO. Not just expect the user to enter the id from TMO.
+
+Updated the Advance Lender flow so the primary action for pending and missing lender-account holds is now `Sync with TMO`, not a deep-link to the Lender Requests page or manual account-number entry. The modal keeps `Manually Link Account` collapsed as a fallback for any unlinked lender, and the specs/tests document that sync-first contract.
+
+Important implementation note: I did not add a new TMO lender API call. The local TMO docs still say lender creation is manual and not to call TMO lender endpoints from the investor portal, so this uses the existing admin `POST /api/admin/tmo-sync` path and leaves exact-account-number entry as fallback.
+
+EFS commit: `df98a8f fix: make advance lender tmo sync primary`, pushed to `origin/main`.
+
+Parent repo submodule pointer commit: `b2443938f chore: update equityfundingsource submodule`. I did not push the parent repo because it is already ahead of `origin/main` with unrelated agent-doc history and has unrelated dirty worktree state; pushing from here would publish unrelated work.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `src/equityfundingsource-dev/tests/advance-lender-dialog.test.ts`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev/docs/TMO/new-lender.md`
+- `src/equityfundingsource-dev/prds/investor-pipeline-admin.md`
+- `src/equityfundingsource-dev` submodule pointer in the parent repo
+
+Commands:
+- `tsift status` in parent and EFS submodule
+- `agent-doc preflight tasks/professional/equityfundingsource.md`
+- `agent-doc plan tasks/professional/equityfundingsource.md`
+- `agent-doc read tasks/professional/equityfundingsource.md`
+- targeted `rg`, `tsift --envelope source-read`, and `sed` inspections for Advance Lender/TMO sync/lender account routes
+- `bun test tests/advance-lender-dialog.test.ts tests/admin-investor-pipeline.test.ts`
+- `git diff --check`
+- `make check` in `src/equityfundingsource-dev`
+- `gh run list --workflow CI --limit 1` and `gh workflow list` in EFS
+- `git commit -m "fix: make advance lender tmo sync primary"` in EFS
+- `git push origin main` in EFS
+- `make check` in parent
+- `gh run list --workflow CI --limit 1` and `gh workflow list` in parent
+- `git commit -m "chore: update equityfundingsource submodule"` in parent
+
+Verification:
+- Focused EFS tests passed: 100 tests across `advance-lender-dialog` and `admin-investor-pipeline`.
+- Full EFS `make check` passed: 1,157 tests, app build, and Worker build.
+- EFS `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` returned no workflows.
+- Parent `make check` passed.
+- Parent `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` shows only `Agent Doc` active.
+- EFS submodule is clean on `main...origin/main` after push.
+- Parent worktree still has unrelated dirty paths, but the EFS submodule pointer change is committed.
+
+Confidence: high.
+
+Escalation: none. Production was not deployed in this cycle; `deploy` remains as the next queue prompt.
+<!-- agent:boundary:8f98899f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -112,7 +163,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline > Advance Lender > Link TMO account...there should be a Sync with TMO button with a closed Manually Link Account `<details>` that has the link form.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~"Link TMO account here" should perform the automated sync with TMO. Not just expect the user to enter the id from TMO.~~
 - deploy
 <!-- /agent:queue -->
 

@@ -751,23 +751,58 @@ fn stale_queue_prompt_exchange_artifact(line: &str) -> bool {
     trimmed.starts_with('>') || trimmed == "❯ >"
 }
 
-fn ack_mismatch_refresh_safe(target: &str, recovered: &str) -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AckMismatchRecovery {
+    RevertUntrustedAckToCurrent,
+    ReplayMissingAgentResponseToTarget,
+}
+
+fn missing_agent_response_block<'a>(target_body: &'a str, recovered_body: &str) -> Option<&'a str> {
+    if target_body.len() <= recovered_body.len() {
+        return None;
+    }
+    let missing = if let Some(missing) = target_body.strip_prefix(recovered_body) {
+        missing
+    } else if let Some(missing) = target_body.strip_suffix(recovered_body) {
+        missing
+    } else {
+        let start = target_body.find(recovered_body)?;
+        let end = start + recovered_body.len();
+        let before = &target_body[..start];
+        let after = &target_body[end..];
+        if before.trim().is_empty() {
+            after
+        } else if after.trim().is_empty() {
+            before
+        } else {
+            return None;
+        }
+    };
+    let trimmed = missing.trim_start();
+    if trimmed.starts_with("### Re:") || trimmed.contains("\n### Re:") {
+        Some(missing)
+    } else {
+        None
+    }
+}
+
+fn classify_ack_mismatch_recovery(target: &str, recovered: &str) -> Option<AckMismatchRecovery> {
     let (Some(target_without_exchange), Some(recovered_without_exchange)) = (
         blank_components_named(target, &[AGENT_RESPONSE_COMPONENT]),
         blank_components_named(recovered, &[AGENT_RESPONSE_COMPONENT]),
     ) else {
-        return false;
+        return None;
     };
     let norm = |text: &str| crate::git::normalize_transient_agent_doc_markers(text);
     if norm(&target_without_exchange) != norm(&recovered_without_exchange) {
-        return false;
+        return None;
     }
 
     let (Ok(target_comps), Ok(recovered_comps)) = (
         crate::component::parse(target),
         crate::component::parse(recovered),
     ) else {
-        return false;
+        return None;
     };
     let target_exchange = target_comps
         .iter()
@@ -777,12 +812,17 @@ fn ack_mismatch_refresh_safe(target: &str, recovered: &str) -> bool {
         .find(|c| c.name == AGENT_RESPONSE_COMPONENT);
     let (Some(target_exchange), Some(recovered_exchange)) = (target_exchange, recovered_exchange)
     else {
-        return false;
+        return None;
     };
     let target_body = norm(target_exchange.content(target));
     let recovered_body = norm(recovered_exchange.content(recovered));
     if target_body == recovered_body {
-        return false;
+        return None;
+    }
+    if recovered_body.len() < target_body.len()
+        && missing_agent_response_block(&target_body, &recovered_body).is_some()
+    {
+        return Some(AckMismatchRecovery::ReplayMissingAgentResponseToTarget);
     }
     let target_lines: HashSet<&str> = target_body
         .lines()
@@ -798,16 +838,27 @@ fn ack_mismatch_refresh_safe(target: &str, recovered: &str) -> bool {
         .iter()
         .all(|line| recovered_lines.contains(line))
     {
-        return false;
+        return None;
     }
     let recovered_only: Vec<&str> = recovered_lines.difference(&target_lines).copied().collect();
-    !recovered_only.is_empty()
+    if !recovered_only.is_empty()
         && recovered_only
             .iter()
             .all(|line| stale_queue_prompt_exchange_artifact(line))
         && recovered_only
             .iter()
             .any(|line| line.trim().starts_with("> **Queue prompt:**"))
+    {
+        return Some(AckMismatchRecovery::RevertUntrustedAckToCurrent);
+    }
+    None
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AckMismatchRefreshOutcome {
+    NoRecovery,
+    RevertedToCurrent,
+    ReplayedTarget,
 }
 
 fn refresh_editor_after_ack_mismatch(
@@ -818,10 +869,9 @@ fn refresh_editor_after_ack_mismatch(
     recovered: &str,
     current_content: &str,
     source: &str,
-) {
+) -> AckMismatchRefreshOutcome {
     let stale_hash = crate::ops_log::content_hash(recovered);
-    let target_hash = crate::ops_log::content_hash(current_content);
-    if !ack_mismatch_refresh_safe(target, recovered) {
+    let Some(recovery) = classify_ack_mismatch_recovery(target, recovered) else {
         crate::ops_log::log_op(
             file,
             &format!(
@@ -831,12 +881,39 @@ fn refresh_editor_after_ack_mismatch(
                 &stale_hash[..stale_hash.len().min(12)]
             ),
         );
-        return;
-    }
+        return AckMismatchRefreshOutcome::NoRecovery;
+    };
+    let (refresh_content, action, success_outcome) = match recovery {
+        AckMismatchRecovery::RevertUntrustedAckToCurrent => (
+            current_content,
+            "revert_untrusted_ack_content",
+            AckMismatchRefreshOutcome::RevertedToCurrent,
+        ),
+        AckMismatchRecovery::ReplayMissingAgentResponseToTarget => (
+            target,
+            "replay_missing_agent_response",
+            AckMismatchRefreshOutcome::ReplayedTarget,
+        ),
+    };
+    let target_hash = crate::ops_log::content_hash(refresh_content);
+    let failure_action = match recovery {
+        AckMismatchRecovery::RevertUntrustedAckToCurrent => {
+            "left_untrusted_ack_content_editor_owned"
+        }
+        AckMismatchRecovery::ReplayMissingAgentResponseToTarget => {
+            "left_missing_agent_response_editor_owned"
+        }
+    };
+    let failure_reason = match recovery {
+        AckMismatchRecovery::RevertUntrustedAckToCurrent => "safe_stale_prompt_refresh_failed",
+        AckMismatchRecovery::ReplayMissingAgentResponseToTarget => {
+            "safe_missing_agent_response_refresh_failed"
+        }
+    };
     match crate::ipc_socket::send_refresh_content(
         project_root,
         &canonical.to_string_lossy(),
-        current_content,
+        refresh_content,
         &stale_hash,
         recovered.len(),
     ) {
@@ -844,37 +921,45 @@ fn refresh_editor_after_ack_mismatch(
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "{source}_ack_mismatch_editor_refresh file={} transport=editor_ipc action=revert_untrusted_ack_content stale_len={} stale_hash={} target_len={} target_hash={}",
+                    "{source}_ack_mismatch_editor_refresh file={} transport=editor_ipc action={} stale_len={} stale_hash={} target_len={} target_hash={}",
                     file.display(),
+                    action,
                     recovered.len(),
                     &stale_hash[..stale_hash.len().min(12)],
-                    current_content.len(),
+                    refresh_content.len(),
                     &target_hash[..target_hash.len().min(12)]
                 ),
             );
+            success_outcome
         }
         Ok(false) => {
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "{source}_ack_mismatch_editor_refresh file={} transport=blocked reason=no_ack action=left_untrusted_ack_content_editor_owned stale_len={} stale_hash={}",
+                    "{source}_ack_mismatch_editor_refresh file={} transport=blocked reason={} no_ack=true action={} stale_len={} stale_hash={}",
                     file.display(),
+                    failure_reason,
+                    failure_action,
                     recovered.len(),
                     &stale_hash[..stale_hash.len().min(12)]
                 ),
             );
+            AckMismatchRefreshOutcome::NoRecovery
         }
         Err(err) => {
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "{source}_ack_mismatch_editor_refresh file={} transport=blocked reason=send_failed error={} action=left_untrusted_ack_content_editor_owned stale_len={} stale_hash={}",
+                    "{source}_ack_mismatch_editor_refresh file={} transport=blocked reason={} send_failed=true error={} action={} stale_len={} stale_hash={}",
                     file.display(),
+                    failure_reason,
                     err,
+                    failure_action,
                     recovered.len(),
                     &stale_hash[..stale_hash.len().min(12)]
                 ),
             );
+            AckMismatchRefreshOutcome::NoRecovery
         }
     }
 }
@@ -1045,6 +1130,33 @@ pub fn try_editor_converge(
                 }
                 Ok(true)
             } else {
+                let recovery = refresh_editor_after_ack_mismatch(
+                    file,
+                    &project_root,
+                    &canonical,
+                    target,
+                    &recovered,
+                    current_content,
+                    source,
+                );
+                if recovery == AckMismatchRefreshOutcome::ReplayedTarget {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "{source}_writeback file={} patch_id={} recovered_len={} target_len={} transport=editor_ipc recovery=ack_mismatch_replayed_target",
+                            file.display(),
+                            patch_id,
+                            recovered.len(),
+                            target.len()
+                        ),
+                    );
+                    if let Err(e) = clear_ipc_socket_ack_timeouts(&project_root, file, source) {
+                        eprintln!(
+                            "[write] WARNING: {source} converge ack-timeout clear failed (non-fatal): {e}"
+                        );
+                    }
+                    return Ok(true);
+                }
                 crate::ops_log::log_op(
                     file,
                     &format!(
@@ -1054,15 +1166,6 @@ pub fn try_editor_converge(
                         recovered.len(),
                         target.len()
                     ),
-                );
-                refresh_editor_after_ack_mismatch(
-                    file,
-                    &project_root,
-                    &canonical,
-                    target,
-                    &recovered,
-                    current_content,
-                    source,
                 );
                 anyhow::bail!(
                     "{source}: refused direct disk write for {} while editor IPC listener is active (reason=ack_mismatch)",
@@ -1848,6 +1951,65 @@ mod core_tests {
         assert!(
             !log.contains("transport=disk_fallback"),
             "ACK mismatch must not take the disk fallback:\n{log}"
+        );
+    }
+
+    #[test]
+    fn pending_write_shorter_ack_replays_missing_agent_response() {
+        // `#ack-shorter-replay`: a plugin ACK that proves every non-exchange
+        // component but is missing the newly materialized `### Re:` block is not
+        // user drift. Refresh the editor to the target response and treat the
+        // write as converged instead of leaving the cycle interrupted.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = doc_with_queue_and_exchange("- do [#head]\n", "");
+        let target = doc_with_queue_and_exchange(
+            "- do [#head]\n",
+            "### Re: do [#head]\n\nAnswered from the agent.\n",
+        );
+        let shorter_ack = source.clone();
+        assert!(
+            shorter_ack.len() < target.len(),
+            "test setup should model the shorter recovered ack"
+        );
+        fs::write(&doc, &source).unwrap();
+
+        let root = dir.path().to_path_buf();
+        let _listener = start_ack_mismatch_then_refresh_listener(&root, shorter_ack);
+        crate::test_support::wait_for_live_prompt_drift_listener(&root);
+        crate::plugin_owner::write_plugin_owner_lease_for_test(
+            doc.to_str().unwrap(),
+            std::process::id(),
+        );
+
+        converge_document_or_disk(&doc, &target, &source, "pending_write")
+            .expect("safe shorter ack should replay the target response through the editor");
+
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            target,
+            "safe shorter ack should leave the editor/disk at the target response"
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("pending_write_ack_mismatch_editor_refresh")
+                && log.contains("action=replay_missing_agent_response"),
+            "shorter ack should refresh the editor to the target response:\n{log}"
+        );
+        assert!(
+            log.contains("pending_write_writeback")
+                && log.contains("transport=editor_ipc")
+                && log.contains("recovery=ack_mismatch_replayed_target"),
+            "shorter ack recovery should be recorded as successful editor convergence:\n{log}"
+        );
+        assert!(
+            !log.contains("action=refuse_external_disk_write"),
+            "safe shorter ack must not be recorded as a refused external disk write:\n{log}"
         );
     }
 

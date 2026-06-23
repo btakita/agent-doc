@@ -1012,6 +1012,13 @@ pub fn save_overlay_crdt(doc: &Path, state: &[u8]) -> Result<()> {
     write_crdt_state(&path, state)
 }
 
+fn rebuild_overlay_crdt_locked(path: &Path, markdown: &str) -> Result<usize> {
+    let overlay_state =
+        agent_doc_markdown_ast::crdt::OverlayCrdtDoc::from_markdown(markdown).encode_state();
+    write_crdt_state(path, &overlay_state)?;
+    Ok(overlay_state.len())
+}
+
 /// Load raw per-node CRDT container bytes for a document (`#qnodemerge2`), if any.
 pub fn load_multinode_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
     let path = multinode_crdt_path_for(doc)?;
@@ -1127,6 +1134,25 @@ pub fn crdt_merge_base_state(doc: &Path, fallback_markdown: &str) -> Result<Crdt
                         fallback_markdown.len()
                     ),
                 );
+                match rebuild_overlay_crdt_locked(&path, fallback_markdown) {
+                    Ok(overlay_bytes) => crate::ops_log::log_op(
+                        doc,
+                        &format!(
+                            "crdt_merge_base_overlay_rebuilt file={} fallback_len={} overlay_bytes={}",
+                            doc.display(),
+                            fallback_markdown.len(),
+                            overlay_bytes
+                        ),
+                    ),
+                    Err(err) => crate::ops_log::log_op(
+                        doc,
+                        &format!(
+                            "crdt_merge_base_overlay_rebuild_failed file={} error={}",
+                            doc.display(),
+                            err
+                        ),
+                    ),
+                }
                 (
                     fallback_markdown.to_string(),
                     CrdtMergeBaseSource::FallbackOverlayProjectionMismatch,
@@ -1561,8 +1587,9 @@ mod tests {
     }
 
     #[test]
-    fn crdt_merge_base_state_falls_back_when_overlay_projection_is_stale() {
-        let (_dir, doc) = setup();
+    fn crdt_merge_base_state_rebuilds_stale_overlay_after_first_fallback() {
+        let (dir, doc) = setup();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let baseline = concat!(
             "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
             "## Queue\n\n<!-- agent:queue -->\n",
@@ -1591,6 +1618,29 @@ mod tests {
                 .unwrap()
                 .to_text(),
             baseline
+        );
+
+        let rebuilt = crdt_merge_base_state(&doc, baseline).unwrap();
+        assert_eq!(rebuilt.source, CrdtMergeBaseSource::Overlay);
+        assert_eq!(
+            crate::crdt::CrdtDoc::decode_state(&rebuilt.state)
+                .unwrap()
+                .to_text(),
+            baseline
+        );
+        let overlay = load_overlay_crdt(&doc).unwrap().unwrap();
+        let overlay = agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state(&overlay).unwrap();
+        assert_eq!(overlay.to_markdown().unwrap(), baseline);
+
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert_eq!(
+            log.matches("crdt_merge_base_overlay_stale").count(),
+            1,
+            "stale overlay mismatch should be logged once after rebuild:\n{log}"
+        );
+        assert!(
+            log.contains("crdt_merge_base_overlay_rebuilt"),
+            "stale overlay rebuild should be observable:\n{log}"
         );
     }
 

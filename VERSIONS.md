@@ -10,6 +10,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Cycle-state sidecar mutations now pass through a lazily transition table (`#c7j5`).** The first PCP/session-actor cutover slice adds `cycle_state_machine::CyclePhaseMachine`, backed by `lazily::ThreadSafeStateMachine`, and routes the phase-changing sidecar mutators through typed `CycleEvent` transitions before the durable `.agent-doc/state/cycles/<hash>.json` journal is written. This keeps the sidecar as crash recovery while giving the controller/session actor a shared transition authority for the next cutover slices.
 
+- **Editor-IPC shorter ACK mismatches now replay missing agent responses and stale CRDT overlays self-heal (`#ack-shorter-replay`).** When an editor ACK sidecar is shorter than the intended target only because it is missing a newly materialized `### Re:` response block, the convergence path now hash/length-proves the stale buffer and refreshes the editor to the target response instead of refusing the write and leaving the cycle interrupted. Stale overlay CRDT projections are also rebuilt from the authoritative fallback baseline on first mismatch, so repeated merge-base calls stop re-reading the same stale overlay and stop producing fallback-overlay hot loops. Coverage adds regressions for safe shorter ACK replay and stale-overlay rebuild/rate limiting.
+
 ## 0.34.41
 
 - **Windows release builds compile the supervisor hot-reload path again.** The `#ctlrecycle` Unix `execve` adoption path now keeps its stderr redirection, raw-fd adoption, and startup-miss UTC formatting behind platform guards, so non-Unix release builds fall back to the normal spawn/relaunch behavior instead of compiling POSIX-only symbols.

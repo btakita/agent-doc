@@ -116,13 +116,34 @@ Proof:
 - CI: `gh run list --workflow CI --limit 1` shows the latest submodule CI for `v0.34.42` completed successfully
 - escalation: none
 - confidence: high for the binary/session state and medium-high for the editor sync path; the terminal proves the same underlying sync path and live pane recovery, while the JetBrains notification surface itself was not human-observed in this turn
-<!-- agent:boundary:79f91ead -->
+
+### Re: #directchatpb2 fixed-scope clarification — gpt-5
+
+> **Queue prompt:**
+>
+> [#directchatpb2]: If it's fixed, why did the last turn reproduce the issue in this document?
+
+It reproduced because `#directchatpb2` is not fixed yet. The prior “fixed” statement was scoped to `#qheadresidue`, which is the completed guard for an already-answered free-text queue head that still appears active after a binary-owned `agent-doc` closeout. That guard shipped in `v0.34.40` (`50c10480`), and this machine is running `agent-doc 0.34.42`.
+
+`#directchatpb2` is a different failure class: a direct-chat / owned-pane Codex response can still escape without crossing `agent-doc finalize` or `agent-doc write --commit`. The backlog entry and `tasks/agent-doc/plan-direct-chat-owned-pane-response-loss-2026-06-23.md` both say the fix is still open and explicitly gated: add an enforced Codex final/Stop gate plus regression coverage for consecutive direct-chat prompts in one owned pane. The previous turn only recorded that recurrence; it did not implement the gate.
+
+So the correct status is:
+- `#qheadresidue`: fixed and verified in the installed build.
+- `#directchatpb2`: reproduced, recorded, and still open until scheduled. The last turn is evidence for this item, not evidence that `#qheadresidue` failed again.
+
+Proof:
+- changed_paths: this session document via `agent-doc finalize` only
+- commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent-doc --version`, `git status --short`, `git -C src/agent-doc log --oneline -5`, `rg` over the tracker/plan, `sed` on the direct-chat plan, `git -C src/agent-doc log -S free_text_queue_completed_residue_guard_fired --oneline --all`, `gh run list --workflow CI --limit 1`
+- verification: no code/spec changed, so I did not run `make check`; latest `src/agent-doc` CI run for `v0.34.42` is `completed/success`
+- escalation: none
+- confidence: high
+<!-- agent:boundary:9faa2d84 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~[#directchatpb2]. The last turn had the response partially deleted in an uncommitted state.~~
+- ~~[#directchatpb2]: If it's fixed, why did the last turn reproduce the issue in this document?~~
 ---
 :round_pushpin: JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
 ```

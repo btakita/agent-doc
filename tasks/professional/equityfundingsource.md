@@ -262,7 +262,50 @@ Verification:
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:45f556eb -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Deployed the current EFS `main` commit to production.
+
+Deployment details:
+
+- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Worker version: `d14b654c-c917-4d45-9e1a-dd9188f1b13e`
+- EFS commit deployed: `ee238a8 feat: add lender dialog CTA contract`
+- Remote D1 migrations applied during deploy: `0102_chat_messages_portal_roles.sql`, `0102_full_application_soft_delete.sql`, `0103_portal_message_reads.sql`
+- Remote D1 migration status after deploy: no pending migrations.
+
+Changed paths:
+
+- None outside the agent-doc session document. The EFS submodule was clean before and after deployment.
+
+Commands:
+
+- `git status --short --branch` in the parent repo and EFS submodule
+- `git log -1 --oneline` in the parent repo and EFS submodule
+- `make deploy`
+- `bun run cf:d1:migrations:list:remote`
+- `curl -s -o /dev/null -w '%{http_code}\\n' https://equityfundingsource.brian-takita.workers.dev/`
+- `curl -s -o /dev/null -w '%{http_code}\\n' https://equityfundingsource.brian-takita.workers.dev/admin`
+- `curl -s -o /dev/null -w '%{http_code}\\n' https://equityfundingsource.brian-takita.workers.dev/api/admin/pipeline`
+
+Verification:
+
+- `make deploy` completed successfully after building the Worker, applying remote D1 migrations, uploading updated assets, and deploying triggers.
+- Remote migration list reported `No migrations to apply!` after deploy.
+- Public home returned `200`.
+- `/admin` returned `303` through the Access/login flow.
+- `/api/admin/pipeline` returned `401` unauthenticated.
+- EFS git status remained clean on `main...origin/main`.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:217a72a0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -282,6 +325,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

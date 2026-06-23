@@ -122,7 +122,62 @@ Confidence: high.
 Reconciled the session snapshot after the no-follow-up proof wording correction.
 
 There were no actionable follow-up items to capture.
-<!-- agent:boundary:e51eca6a -->
+
+### Re: Shareable pipeline URLs, admin message bubble, deploy — gpt-5
+
+> **Queue prompt:**
+>
+> https://equityfundingsource.brian-takita.workers.dev/admin/pipeline > Qualified Lead and every other pipeline item should have a unique url so links can be shared between admins. This should use pushState so the page does not reload.
+
+> **Queue prompt:**
+>
+> The admin page should have the message bubble in the bottom right corner. The message bubble opens the "unified chat interface" implemented above. If not on a page with user(s), have a searchable selection to open the message for any user in the system.
+
+> **Queue prompt:**
+>
+> deploy
+
+Implemented, pushed, and deployed.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/messages.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/layout.tsx`
+- `src/equityfundingsource-dev/lib/ui--server--efs/portal.ts`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- parent submodule pointer `src/equityfundingsource-dev`
+
+What changed:
+- Pipeline cards now produce shareable in-place dialog URLs for loan, deal, lead, and incomplete-application cards via `history.pushState`, and restore those dialogs from the URL after refresh. Closing/replacing the dialog state still avoids a page reload.
+- The admin shell now mounts a bottom-right Messages bubble. The bubble opens the admin Messages hub with role tabs, All Messages, and Contact Messages; user/thread selection inside the bubble uses `sync_url={false}` so it does not rewrite the current admin page URL.
+- Added sizing CSS for the admin launcher panel and regression coverage for both the pipeline URL contract and the admin launcher wiring.
+
+Verification:
+- `bun test tests/admin-pipeline.test.ts tests/portal-messages-component.test.ts` — passed, 76 tests.
+- `make check` — passed, 1168 tests plus app build and worker build.
+- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists for this repo.
+- Pre-deploy `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` — `No migrations to apply!`.
+- Pre-deploy `bun run cf:d1:info` and `bun run cf:d1:time-travel:info` — D1 info read succeeded; current Time Travel bookmark recorded by Wrangler.
+- `make deploy` — passed; Worker deployed at `https://equityfundingsource.brian-takita.workers.dev`; current Worker version `5f29f309-53dc-46d2-9da9-9d2bf699d173`.
+- Post-deploy migrations list — `No migrations to apply!`.
+- Post-deploy smoke tests: `/` returned `200`; `/admin/pipeline` returned expected auth redirect `303`.
+
+Commits:
+- EFS submodule: `c476fcf4a8c8b18a1879d3b09d3516dfad1ebae0` (`feat(admin): add shareable pipeline dialog links`), pushed to `equityfundingsource-dev/main`.
+- Parent repo: `f515046d5` (`chore: update equityfundingsource submodule`), pushed to `agent-loop/main`. The push also published pre-existing parent commit `dbed747e1` (`chore: update agent-doc submodule`) that was already ahead before this work.
+
+Escalation: none.
+There were no actionable follow-up items to capture.
+Confidence: high.
+
+Suggested commit message:
+
+```txt
+feat(admin): add shareable pipeline dialog links
+
+Add pushState-backed Deal Pipeline dialog URLs for loan, deal, lead, and incomplete-application cards, plus a bottom-right admin Messages launcher that opens the existing searchable Messages hub without rewriting the current page URL. Covers the wiring with admin pipeline tests and deploys the Worker.
+```
+<!-- agent:boundary:36d79612 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -142,6 +197,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline > Qualified Lead and every other pipeline item should have a unique url so links can be shared between admins. This should use pushState so the page does not reload.
+- The admin page should have the message bubble in the bottom right corner. The message bubble opens the "unified chat interface" implemented above. 
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

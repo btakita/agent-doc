@@ -151,7 +151,55 @@ Test function names (`machine_transitions_through_all_states`, `machine_rejects_
 - superproject `cb34daaca` (`chore(lazily-rs): bump gitlink for Machine -> StateMachine rename`) → `btakita/agent-loop` main (`788335c03..cb34daaca`).
 
 The module path `state_machine::StateMachine` is mildly redundant as predicted in the prior turn's analysis, but the public surface is `lazily::StateMachine` (crate-root re-export), so the stutter is contained to one line in `lib.rs`. Queue drained.
-<!-- agent:boundary:f80ae72b -->
+
+### Re: rename done + StateMachine as agent-doc backbone? — pilot, not backbone — glm-5.2
+
+> **Queue prompts:**
+>
+> - Rename to StateMachine. *(re-anchoring — prior response was dropped in the `#postcommit-ipc-worktree-corruption` cycle; user re-invoked)*
+> - Would StateMachine be a useful architectural backbone for agent-doc realtime state management?
+
+**Rename: done.** The actual code work landed in the prior cycle and the commits are on `main` — repeating the proof since the prior response block was lost:
+
+- lazily-rs submodule `2948b78` (`refactor: rename Machine -> StateMachine`, +20/-20 across `src/state_machine.rs`, `src/lib.rs`, `tests/state_machine.rs`, `SPEC.md`) → `lazily-hub/lazily-rs` main.
+- superproject `cb34daaca` (`chore(lazily-rs): bump gitlink`) → `btakita/agent-loop` main.
+- Verification: `cargo fmt --check` clean, `cargo clippy --all-features --all-targets -- -D warnings` clean, `cargo test --all-features` all green (incl. renamed doc-test `state_machine::StateMachine (line 32)`), `cargo build --all-features` clean. `make check` green except the known environmental `benchmark-check` (`#lzbenchbudget`).
+
+---
+
+**Architectural question — short answer: useful as a *pilot primitive*, not as a *global backbone*.** agent-doc is multi-process; `StateMachine` is single-threaded in-process. Adopting it widely would either buy nothing (for state already persisted to sidecars) or require a missing `ThreadSafeStateMachine`.
+
+**What I found in the codebase:**
+
+| Surface | Today | StateMachine fit |
+|---|---|---|
+| `agent-doc-orchestration/Cargo.toml` already depends on `lazily = "0.12.0"` | Used in `graph.rs` as a **dependency-graph cache** (Context + CellHandle<PathBuf> + SlotHandle for `project_root`, `snapshot_path`, `doc_hash`, etc.) | None — graph.rs models data deps, not FSMs. No state transitions. |
+| `CyclePhase` (Idle → PreflightStarted → ResponseCaptured → WriteApplied → Committed, plus Interrupted(FaultPoint)) | `sim_world.rs:20` enumerates it as an enum + match; production `cycle_state.rs` persists phase to a JSON sidecar. **But within a single `RunContext` the phase is threaded manually.** | **High.** RunContext already owns a lazily::Context. StateMachine<CyclePhase, CycleEvent> gives free `on_transition` logging, `state_is(WriteApplied)` reactive guards, and `ctx.batch` atomicity for multi-step transitions. The in-process portion of cycle state fits cleanly. |
+| `SupervisorLifecycle` (Starting → Ready → Busy → WaitingInput → Blocked → Closed) | Enum + match in `sim_world.rs:269`; production state lives in tmux capture + supervisor IPC + JSON sidecar | **Low (production).** The authoritative state is cross-process (tmux pane + supervisor actor), not an in-process cell. Context is RefCell/single-threaded — can't back a supervisor that spans panes. Would need ThreadSafeStateMachine, which lazily does not ship (`state_machine.rs` only frees Context-bound). |
+| `QueueControlState` (Resumed / Paused / Draining) | Enum + match; persisted in document frontmatter + sidecar | **Low.** Same reason — authority is the document, not in-process. |
+| Pane route / IPC transport / drain-lease states | Ad-hoc match + ops.log markers | **Low.** These states' transitions are observed via tmux capture / IPC acks, not driven from a cell. |
+
+**What StateMachine would buy agent-doc if piloted on CyclePhase:**
+
+1. **Reactive `state_is(...)` signals** — replace the ad-hoc "did we cross WriteApplied?" boolean plumbing in `run.rs`/`write.rs` with `ctx.signal(|ctx| state_handle.get(ctx) == CyclePhase::WriteApplied)`.
+2. **`on_transition(|old, new| ...)`** — uniform phase-transition logging + ops.log markers, replacing per-call-site log statements.
+3. **PartialEq no-op suppression** — a Starting→Starting re-emission doesn't fire spurious dependents. Today this is hand-coded.
+4. **`ctx.batch` atomicity** — multi-step phase transitions (e.g. WriteApplied→Committed + boundary reposition) settle before observers fire, which is exactly the closeout ordering hazard that `#postcommit-ipc-worktree-corruption` just exhibited.
+
+**What blocks broader adoption:**
+
+- **ThreadSafeStateMachine doesn't exist.** `state_machine.rs` only binds to single-threaded Context. The watch daemon / supervisor / project-control-pane are long-lived and need Send + Sync. Until that lands, only short-lived RunContext-shaped surfaces can adopt StateMachine.
+- **Most agent-doc state authority is not in-process.** A reactive cell graph only helps when the cell is the authority. For supervisor / queue / pane state, the JSON sidecar / tmux capture / IPC acks are the authority — wrapping an in-process StateMachine around a shadow of those would create a second source of truth and regress the very clobber hazards `realtime_model.rs` exists to prevent.
+- **No reactive consumers in production today.** `graph.rs` uses lazily for caching, not for state-derived computation. Adopting StateMachine without also adding `ctx.signal`/`ctx.memo` downstream consumers is a no-op over the existing enums.
+
+**Recommendation:**
+
+1. **Pilot, don't backbone.** Use `StateMachine<CyclePhase, CycleEvent>` inside RunContext only — that's the one surface that is in-process, already has a Context, and currently threads phase manually. Logged as `#lzadocsm` in the backlog.
+2. **Don't** adopt it for supervisor / pane / queue / IPC transport — those are cross-process and would create dual-authority hazards.
+3. If the pilot proves the reactive-transition pattern, the next enabling step in lazily would be ThreadSafeStateMachine (mirror `state_machine.rs` on ThreadSafeContext) — but that's a lazily-rs feature, not an agent-doc decision, and only unlocks the watch-daemon in-process cache (still not the cross-process surfaces).
+
+Queue drained. No code changes this cycle (the rename is already shipped; the architectural answer is "pilot, deferred").
+<!-- agent:boundary:8bf8f376 -->
 <!-- /agent:exchange -->
 ###
 <!--

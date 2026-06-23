@@ -234,6 +234,27 @@ Verification:
 3. inject the exact `agent-doc <FILE>` prompt;
 2. wait for clear completion and a fresh dispatch-ready prompt;
 1. submit `/clear` or `/new` with harness-specific handling;
+- Parent remote pointer pushed from a clean worktree: `c331479d3 agent-doc: update durable checkpoint pointer` to `btakita/agent-loop:main`, avoiding the unrelated divergent local parent history.
+- Submodule commit pushed: `906890a0 agent-doc: persist durable turn checkpoints` to `btakita/agent-doc:main`.
+- Latest `agent-doc` CI for `906890a0` was `in_progress`, not red, at closeout check.
+- `make install` installed `agent-doc 0.34.38` locally and marked 2 controllers for recycle at the next idle boundary.
+- `make check` passed: clippy, nextest, doctests, and deterministic medium closeout sim.
+- `cargo fmt -- --check`
+- `git diff --check`
+- `cargo test -p agent-doc-orchestration`
+- `cargo test -p agent-doc-orchestration preflight_persists_durable_turn_checkpoint`
+- `cargo test -p agent-doc-orchestration open_cycle_recovery_command_names_durable_checkpoint`
+- `cargo test -p agent-doc-orchestration record_turn_checkpoint_persists_resume_identity_and_baseline`
+- Doctor facts now surface the checkpoint fields for debugging/recovery tooling.
+- Open-cycle recovery diagnostics now name the durable checkpoint, phase, target, pending-mutation status, capture id, and `--baseline-file` finalize command when available.
+- Preflight now records that checkpoint after baseline and prompt-target analysis, so recycle/restart during preflight, repo work, tests-before-finalize, finalize/writeback, or done-marking has enough disk state to resume or fail closed.
+- Added durable turn checkpoint fields to cycle state: preflight baseline path, prompt targets, queue head/turn identity, alongside the existing phase/completion, response hash/capture, and pending-mutation fields.
+- parent gitlink `src/agent-doc`
+- `src/agent-doc/agent-doc-orchestration/src/start.rs`
+- `src/agent-doc/agent-doc-orchestration/src/doctor.rs`
+- `src/agent-doc/agent-doc-orchestration/src/flow/closeout.rs`
+- `src/agent-doc/agent-doc-orchestration/src/preflight/run.rs`
+- `src/agent-doc/agent-doc-orchestration/src/cycle_state.rs`
 
 Confidence: high for the `#fccsup` regression class. The remaining external risk is the pending submodule CI run and the parent workflow billing block, neither of which is a code failure from this change.
 
@@ -260,7 +281,47 @@ Concrete unblocker: let this cycle close and allow the supervisor to reach the i
 `#qfocsupguard` is also not implemented in this cycle because its backlog line explicitly says `DO NOT IMPLEMENT until scheduled`; this response only records the current blocker for the active `do [#fcccap]` prompt.
 
 No new actionable follow-up backlog item was discovered in this closeout beyond the already-open `#fcccap` and scheduled `#qfocsupguard` entries.
-<!-- agent:boundary:8e729ede -->
+
+### Re: durable recycle checkpointing — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#durablerecycle]
+
+
+Queue item `#durablerecycle` is implemented and shipped.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/cycle_state.rs`
+- `src/agent-doc/agent-doc-orchestration/src/preflight/run.rs`
+- `src/agent-doc/agent-doc-orchestration/src/flow/closeout.rs`
+- `src/agent-doc/agent-doc-orchestration/src/doctor.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start.rs`
+- parent gitlink `src/agent-doc`
+
+What changed:
+- Added durable turn checkpoint fields to cycle state: preflight baseline path, prompt targets, queue head/turn identity, alongside the existing phase/completion, response hash/capture, and pending-mutation fields.
+- Preflight now records that checkpoint after baseline and prompt-target analysis, so recycle/restart during preflight, repo work, tests-before-finalize, finalize/writeback, or done-marking has enough disk state to resume or fail closed.
+- Open-cycle recovery diagnostics now name the durable checkpoint, phase, target, pending-mutation status, capture id, and `--baseline-file` finalize command when available.
+- Doctor facts now surface the checkpoint fields for debugging/recovery tooling.
+
+Verification:
+- `cargo test -p agent-doc-orchestration record_turn_checkpoint_persists_resume_identity_and_baseline`
+- `cargo test -p agent-doc-orchestration open_cycle_recovery_command_names_durable_checkpoint`
+- `cargo test -p agent-doc-orchestration preflight_persists_durable_turn_checkpoint`
+- `cargo test -p agent-doc-orchestration`
+- `git diff --check`
+- `cargo fmt -- --check`
+- `make check` passed: clippy, nextest, doctests, and deterministic medium closeout sim.
+- `make install` installed `agent-doc 0.34.38` locally and marked 2 controllers for recycle at the next idle boundary.
+- Latest `agent-doc` CI for `906890a0` was `in_progress`, not red, at closeout check.
+
+Commits and deployment:
+- Submodule commit pushed: `906890a0 agent-doc: persist durable turn checkpoints` to `btakita/agent-doc:main`.
+- Parent remote pointer pushed from a clean worktree: `c331479d3 agent-doc: update durable checkpoint pointer` to `btakita/agent-loop:main`, avoiding the unrelated divergent local parent history.
+
+The newer free-text queue prompts about startup overhead and skill-surface/data-driven context remain queued for later turns; this closeout only completes `#durablerecycle`.
+<!-- agent:boundary:96922d24 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -268,10 +329,11 @@ No new actionable follow-up backlog item was discovered in this closeout beyond 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~agent-doc should support reliable recycle mid-turn. The turn state should be durable to survive a restart.~~
 - ~~auto clear did not submit the prompt. Why is sending a prompt to tmux significantly more reliable than sending Enter to tmux?~~
-- :pushpin: do [#durablerecycle]
+- ~~:pushpin: do [#durablerecycle]~~
 - do [#fcccap]
 - do [#clearresubmitproof]
-- Why is there so much overhead in reading the agent doc and running the first task? About a minute of thrashing and ~20% context is used just to begin the work. The binary should read the document and immediately hand the agent the work that needs to be done. The binary should track what has already been done. We need to reliably mark all completed tasks
+- Why is there so much overhead in reading the agent doc and running the first task? About a minute of thrashing and ~20% context is used just to begin the work. The binary should read the document and immediately hand the agent the work that needs to be done. The binary should track what has already been done. We need to reliably mark all completed tasks as done.
+- Can and should we reduce the SKILL surface and have agent-doc feed context into the agent as needed? If we have a state-machine, should we make the context feed data-driven...there is much churn in agent-doc, so I'm on the fence about making the context feed data-driven? I do think a master state-machine would be useful however.
 - [#qfocsupguard]
 JB `Run Ageent Doc` on equityfundingsource.md stalled...prompt but no submit.
 ```
@@ -374,7 +436,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#durablerecycle] #agent-doc-bug Support reliable recycle/restart in the middle of a turn by durably checkpointing enough turn state to resume or fail closed without losing work: active session doc path, preflight baseline, prompt target or queue head identity, pending mutations, in-flight response/checkpoint body, command phase, and completion state. Cover recycle during preflight, during repo work, during finalize/writeback, after tests before finalize, and while marking queue/backlog items done so task completion remains idempotent.
 - [ ] [#clearresubmitproof] #agent-doc-bug Replace the failed #26f9 live auto-clear verify with implementation: make context clear + reroute a single proofed transaction. After `/clear` for Codex/Claude or `/new` for OpenCode, require clear completion and a fresh dispatch-ready prompt before injecting `agent-doc <FILE>`; then require route dispatch-start proof or fail closed. Keep submit retry polling only while the exact autogenerated prompt remains unmodified; if the user edits the prompt, stop retrying. Cover visible stale `/clear`, prompt already modified, swallowed Enter, and no-submit cases with SimWorld/unit tests plus live logging.
 - [ ] [#qfocsupguard] #agent-doc-bug Fail closed when `session-check` emits `deferred_for_supervisor_drain` without durable proof that the supervisor clear-and-continue path claimed and drained the current queue head. Live repro 2026-06-23: repeated `agent-doc src/boost-client/tasks/monsterrodholders.md` runs reported committed + `yield_to_supervisor_clear_and_continue` while `session-review` still showed active queue prompt `scripts/hermes-serve.sh should start ollama...`; operator reported the queue item was either not processed or the response was not written. Plan: tasks/agent-doc/plan-supervisor-drain-handoff-proof.md. Relates #qfocsup/#tb4q and archived #mrh-response-loss-stalled-queue. DO NOT IMPLEMENT until scheduled.
 - [ ] [#fcccap] #agent-doc-bug Replace manual-only File Cache Conflict capture (#cyh0) with an automated trigger bundle: on every JB File Cache Conflict/pending-memory event, write a correlated artifact containing the nearest agent-doc command, ops.log `transport=... action=... reason=...`, patch id/editor id, plugin event (`pending`, `kept-memory`, `cancelled`, `saveDocument`), and document hash so the remaining trigger is provable without operator log scraping.

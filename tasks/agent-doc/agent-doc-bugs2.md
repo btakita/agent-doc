@@ -34,87 +34,23 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260623-170826.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260623-173806.md`*
 
 Compacted content:
-- Archived 6 response topic(s): lazily-rs session sync; JB Sync Tmux Layout deferral; lazily-rs.md crash recovery -- gpt-5; 3 more
-- Prior summary/context: prior compacted content: Archived 1 response topic(s): durable recycle checkpointing
-
-### Re: actor-switch rebind already covered — gpt-5
-
-> **Queue prompt:**
->
-> :round_pushpin: JB `Run Agent Doc` on agent-loop.md after switching from claude to codex. The session switched from claude to codex, but the actor record did not switch.
-> ```
-> [route] target tmux session: 0
-> Error: authoritative actor record for tasks/software/agent-loop.md is bound to harness claude-code, not codex
-> ```
-
-This exact failure is already fixed in the installed build. It is the `#actor-switch-rebind` entry shipped in `v0.34.40`: when a document explicitly changes `agent:` from `claude` to `codex`, route now treats the old healthy `claude-code` authoritative actor as stale, logs `route_authoritative_actor_harness_mismatch_stale`, and falls back to the normal create/rebind path for the newly resolved harness instead of hard-failing with `bound to harness claude-code, not codex`.
-
-The current local binary is `agent-doc 0.34.42`, so it includes that fix. The route decision is in `route/authoritative_actor.rs`: a mismatched actor can be replaced when the document frontmatter declares the expected harness, when supervisor health is not healthy, or when the actor is closed. The exact queue shape is also covered by queue parsing/continuation regressions so prose plus fenced route diagnostics drains as real work instead of being pruned as log noise.
-
-I did not add another backlog item because this report is covered by the shipped `#actor-switch-rebind` behavior. A recurrence on `0.34.42` or newer would be a fresh live regression, and the proof to capture would be an ops line missing `route_authoritative_actor_harness_mismatch_stale` during an explicit `agent: claude` -> `agent: codex` frontmatter switch.
-
-Proof:
-- changed_paths: this session document via `agent-doc finalize` only
-- commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc session-check`, `agent-doc repair --apply-recovery`, `agent-doc patch`, `git diff -- tasks/agent-doc/agent-doc-bugs2.md`, `git show HEAD:tasks/agent-doc/agent-doc-bugs2.md`, `rg` over route/version/queue text, `sed` on `VERSIONS.md`, `route/authoritative_actor.rs`, `queue.rs`, `queue_continuation.rs`, and `write/queue_consume.rs`, `agent-doc --version`, `gh run list --workflow CI --limit 1`
-- verification: no code/spec changed, so I did not run `make check`; installed version is `agent-doc 0.34.42`, and the latest `src/agent-doc` CI run for `v0.34.42` is `completed/success`
-- escalation: none
-- confidence: high
-
-### Re: paused queue cleanup — gpt-5
-
-I picked up the queue-only edit. The struck residue that was removed from the queue stayed removed, and preflight then re-converged the managed queue from the backlog mirror.
-
-I did not start any backlog implementation from this turn. The binary reports `queue_paused=true`, `queue_continuation_required=false`, and `queue_drainable_head_count=0`; the current queue is halted by the existing phantom-pin churn guard, so this cycle is a closeout/acknowledgement rather than an auto-drain. The active backlog still contains operator-verify items, and `#directchatpb2` remains explicitly marked `DO NOT IMPLEMENT until scheduled` in the backlog text.
-
-Preflight also surfaced semantic-completion candidates worth checking before future scheduling: `#1jec` against `#yzer`, `#arsm` against `#pcwcwarn`, `#qcm1verify` against `#qnodemerge1`, review `#ftqpartialdup` against `#hap7`, and review `#j9ja` against `#optverify`.
-
-Proof:
-- changed_paths: this session document via `agent-doc finalize` only
-- commands: `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc finalize`
-- verification: no code/spec changes; no test suite was needed for this prompt-response cycle
-- escalation: none
-- confidence: high
-
-### Re: #qnodemerge4verify / #arsm / #cancelturnverify — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: do [#1jec]: Works except the prompt still does not submit.
-
-
-For `#qnodemerge4verify`: no, I would not count the `日本 😀` edit as a full verification pass yet. The good part is that ops.log shows the JetBrains reporter did record `#qnodemerge4wire` editor ops for `agent-doc-bugs2` with byte offsets and base hashes, including the current-cycle inserts at offsets `5207` and `5218` with base `363b3b483356`. That proves the non-ASCII typing path is emitting byte-indexed ops.
-
-The missing part is the acceptance proof. The same log window reports `crdt_merge_base source=fallback_overlay_projection_mismatch`, and I did not find an `editor_ops_for_base` acceptance marker for this document/cycle. Since the backlog item explicitly requires accepted base-matched ops, not just safe fallback behavior, `#qnodemerge4verify` stays open.
-
-For `#arsm`: agreed, this is not verified. The recent log only shows `go_queue_mirror_deferred id=#arsm reason=operator_verify`, and I do not see the required `postcommit_exchange_reconciled reason=stale_editor_exchange` plus a clean next-cycle `postcommit_worktree_check match=true` proof for this prompt. The visible symptom you reported, a free-text queue item left open, means the item remains failed/open rather than done.
-
-For the earlier `#cancelturnverify` prompt: I found and fixed the JetBrains menu issue. `Cancel Turn` was registered in `ToolsMenu`, `EditorPopupMenu`, and `ProjectViewPopupMenu`, but it was missing from the custom Agent Doc popup list. I added `AgentDoc.CancelTurn` to `AgentDocPopupAction.PRIMARY_ACTION_IDS`, added test coverage, bumped the JB plugin to `0.2.178`, built the signed and unsigned zips, committed, and pushed both the submodule commit and the superproject pointer. The remaining `#cancelturnverify` step is only operator install/live verification.
-
-Proof:
-- changed_paths: `src/agent-doc/editors/jetbrains/gradle.properties`, `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/AgentDocPopupAction.kt`, `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/AgentDocPopupActionTest.kt`, superproject `src/agent-doc` pointer, and this session document via `agent-doc finalize`
-- commits: `src/agent-doc` `e73ca1a8` pushed to `btakita/agent-doc`; superproject pointer commit `22766ff40` was pushed, with later agent-doc session commits now ahead in the root history
-- commands: `tsift status`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg`, `sed`, `./gradlew test --tests com.github.btakita.agentdoc.AgentDocPopupActionTest`, `make check`, `make bump-plugin`, `git add`, `git commit`, `git push origin main`, `gh run list --workflow CI --limit 1`, targeted `rg ... ops.log | tail`, `agent-doc session-check`, `agent-doc finalize`
-- verification: focused JetBrains popup test passed; `make check` passed, including 5019 nextest tests plus the medium SimWorld check; `make bump-plugin` built `agent-doc-jetbrains-0.2.178.zip` and `agent-doc-jetbrains-0.2.178-signed.zip`; latest `btakita/agent-doc` CI run `28043989387` was `in_progress` after the push; root `btakita/agent-loop` reported no workflow named `CI`
-- escalation: none
-- confidence: high
-
-### Re: closeout guard repair — gpt-5
-
-I repaired the closeout bookkeeping from the previous response: `#qnodemerge4verify` and `#arsm` are explicitly narrowed to their remaining proof, `#cancelturnverify` records the new JB plugin build, and the unhandled `#1jec` / `#fbwireverify` queue prompts are restored instead of silently struck or flattened.
-<!-- agent:boundary:88822d3c -->
+- Archived 4 response topic(s): actor-switch rebind already covered; paused queue cleanup; #qnodemerge4verify / #arsm / #cancelturnverify; 1 more
+- Prior summary/context: prior compacted content: Archived 6 response topic(s): lazily-rs session sync; JB Sync Tmux Layout deferral; lazily-r...
+<!-- agent:boundary:88d901e2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- do [#cancelturnverify]: Verified
+- do tasks/agent-doc/plan-ack-mismatch-shorter-recovered-response-loss-2026-06-23.md
 - :pushpin: do [#1jec]: Works except the prompt still does not submit. café 日本 😀日本 😀日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
 - ~~:pushpin: do [#qnodemerge4verify]~~
 - :pushpin: do [#tb4q]: please check logs
-- ~~do [#cancelturnverify]: I don't see Cancel Turn in the JB Plugin menu.~~
 - do [#qcm1verify]: Use the logs to verify.
 - ~~do [#arsm]~~
 - do [#directchatpb2]

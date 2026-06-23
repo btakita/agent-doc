@@ -226,7 +226,43 @@ Verification:
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:8b824088 -->
+
+### Re: #dialog-state-cta — gpt-5
+
+Implemented the Lender Pipeline dialog-state CTA contract and pushed it.
+
+What changed:
+
+- Added a pure `lender_dialog_state_contract_()` layer for `/admin/lender-pipeline` card dialogs. Each lane, Requirements status, and lender-account blocker now maps to a dialog component, visible state tag, primary CTA, secondary CTA, and transition target.
+- Refactored `InvestorCardModal` and `AdvanceLenderModal` to consume the contract for the visible state tag and footer CTAs. The existing hold-step banner still renders the concrete blocker list, but it now uses the composed contract state.
+- Added `INVESTOR_REQUIREMENTS_STATUS_IDS` so tests can enforce coverage when Requirements statuses change.
+- Added Bun tests that fail if any `INVESTOR_PIPELINE_COLUMN_IDS` lane, Requirements status, or lender-account blocker lacks clear CTA metadata.
+- Updated the Lender Pipeline PRD to document the dialog-state contract.
+
+Commits pushed:
+
+- EFS: `ee238a8 feat: add lender dialog CTA contract` to `origin/main`.
+- Parent repo: `788335c03 chore: update equityfundingsource submodule` to `origin/main`.
+
+Changed paths:
+
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/repo.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `src/equityfundingsource-dev/prds/investor-pipeline-admin.md`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev` submodule pointer in the parent repo
+
+Verification:
+
+- `bun test tests/admin-investor-pipeline.test.ts tests/advance-lender-dialog.test.ts` — 99 tests passed.
+- `make check` — 1,156 tests passed, app build passed, Worker build passed.
+- `gh run list --workflow CI --limit 1` — no workflow named `CI` exists in the EFS repo.
+- `gh workflow list` — no workflows listed for the EFS repo.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:7fb18274 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -252,7 +288,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#dialog-state-cta] [recommended] Dialog-state CTA coverage: add a pure dialog-state contract for the admin/lender pipeline dialogs that maps each state-machine state and blocker to dialog component, visible state tag, primary CTA, secondary CTA, and transition target; refactor `InvestorCardModal` / `AdvanceLenderModal` to consume it; add Bun tests that fail when any `INVESTOR_PIPELINE_COLUMN_IDS` state, requirements status, or lender-account blocker has no clear CTA. Start with `/admin/lender-pipeline`, then generalize the same pattern to loan/application/payment dialogs.
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 

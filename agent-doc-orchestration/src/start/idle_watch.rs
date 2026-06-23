@@ -484,6 +484,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut last_pending_enter_resubmitted: Option<String> = None;
             let mut clear_cooldown_logged = false;
             let mut route_submit_in_flight_logged = false;
+            let mut context_clear_route_wait_logged = false;
             let mut editor_typing_active_logged = false;
             let mut context_reset_policy_error_logged = false;
             let mut idle_busy_ticks: u32 = 0;
@@ -843,6 +844,38 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let context_clear_pending = context_clear_marker.as_ref().and_then(|marker| {
                 supervisor_pane_payload_already_pending(&shared, &marker.command, &harness)
             });
+            if route_submit_in_flight && context_clear_marker.is_some() {
+                if !context_clear_route_wait_logged {
+                    if let Some(marker) = context_clear_marker.as_ref() {
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "idle_queue_watch_context_clear_marker_wait harness={} reason=route_submit_in_flight target={} cmd=\"{}\" prompt_visible={} turn_active={}",
+                                harness.binary,
+                                marker.target,
+                                marker.command,
+                                prompt_visible,
+                                turn_active
+                            ),
+                        );
+                        crate::ops_log::log_op(
+                            &path,
+                            &format!(
+                                "idle_queue_watch_context_clear_marker_wait file={} harness={} reason=route_submit_in_flight target={} cmd={:?} prompt_visible={} turn_active={}",
+                                path.display(),
+                                harness.binary,
+                                marker.target,
+                                marker.command,
+                                prompt_visible,
+                                turn_active
+                            ),
+                        );
+                    }
+                    context_clear_route_wait_logged = true;
+                }
+            } else {
+                context_clear_route_wait_logged = false;
+            }
             if let Some(marker) = context_clear_marker.as_ref() {
                 context_reset_in_flight = true;
                 awaiting_clear_settle = true;
@@ -2053,7 +2086,29 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     let clear_already_pending =
                         supervisor_pane_payload_already_pending(&shared, clear_cmd, &harness);
                     let resubmit_key = format!("orphan_context_clear:{head}");
-                    if idle_queue_pending_payload_needs_enter_resubmit(
+                    if route_submit_in_flight && drain_dispatch_dedup_skip(clear_already_pending) {
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "idle_queue_watch_orphan_context_clear_wait harness={} reason=route_submit_in_flight head={:?}",
+                                harness.binary, head
+                            ),
+                        );
+                        crate::ops_log::log_op(
+                            &path,
+                            &format!(
+                                "idle_queue_watch_orphan_context_clear_wait file={} harness={} reason=route_submit_in_flight head_bytes={} head_sha256={} cmd={:?}",
+                                path.display(),
+                                harness.binary,
+                                head.len(),
+                                crate::ops_log::content_hash(head),
+                                clear_cmd
+                            ),
+                        );
+                        continue;
+                    }
+                    if !route_submit_in_flight
+                        && idle_queue_pending_payload_needs_enter_resubmit(
                         &harness.binary,
                         clear_already_pending,
                         last_pending_enter_resubmitted.as_deref() == Some(resubmit_key.as_str()),

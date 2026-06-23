@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 const ROUTE_IN_FLIGHT_DIR: &str = ".agent-doc/route-in-flight";
 const ROUTE_IN_FLIGHT_TTL_SECS: u64 = 30;
+const ROUTE_READY_PROBE_TTL_SECS: u64 = 150;
 const ROUTE_BLOCKED_DIR: &str = ".agent-doc/route-submit-blocked";
 const ROUTE_BLOCKED_TTL_SECS: u64 = 120;
 
@@ -22,11 +23,14 @@ pub struct RouteSubmitInFlight {
     pub file: String,
     pub pane: String,
     pub harness: String,
+    #[serde(default)]
+    pub reason: String,
     pub written_at: u64,
 }
 
 pub struct RouteSubmitInFlightGuard {
     path: Option<PathBuf>,
+    marker: Option<RouteSubmitInFlight>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,14 +47,63 @@ impl Drop for RouteSubmitInFlightGuard {
         let Some(path) = self.path.as_ref() else {
             return;
         };
-        if let Err(err) = std::fs::remove_file(path)
-            && err.kind() != std::io::ErrorKind::NotFound
-        {
-            eprintln!(
-                "[route] warning: failed to clear route-submit marker {}: {err}",
-                path.display()
-            );
+        match std::fs::remove_file(path) {
+            Ok(()) => {
+                if let Some(marker) = self.marker.as_ref() {
+                    crate::ops_log::log_op(
+                        Path::new(&marker.file),
+                        &format!(
+                            "route_submit_in_flight_marker_cleared file={} pane={} harness={} reason={}",
+                            marker.file,
+                            marker.pane,
+                            marker.harness,
+                            marker.reason_label()
+                        ),
+                    );
+                }
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                eprintln!(
+                    "[route] warning: failed to clear route-submit marker {}: {err}",
+                    path.display()
+                );
+                if let Some(marker) = self.marker.as_ref() {
+                    crate::ops_log::log_op(
+                        Path::new(&marker.file),
+                        &format!(
+                            "route_submit_in_flight_marker_clear_failed file={} pane={} harness={} reason={} error={:?}",
+                            marker.file,
+                            marker.pane,
+                            marker.harness,
+                            marker.reason_label(),
+                            err.to_string()
+                        ),
+                    );
+                }
+            }
         }
+    }
+}
+
+impl RouteSubmitInFlight {
+    fn reason_label(&self) -> &str {
+        if self.reason.is_empty() {
+            "legacy"
+        } else {
+            &self.reason
+        }
+    }
+
+    fn ttl_secs(&self) -> u64 {
+        route_submit_ttl_secs_for_reason(self.reason_label())
+    }
+}
+
+fn route_submit_ttl_secs_for_reason(reason: &str) -> u64 {
+    match reason {
+        "dispatch_only_ready_probe" => ROUTE_READY_PROBE_TTL_SECS,
+        _ => ROUTE_IN_FLIGHT_TTL_SECS,
     }
 }
 
@@ -82,8 +135,20 @@ pub fn begin_route_submit(
     pane: &str,
     harness: &str,
 ) -> Result<RouteSubmitInFlightGuard> {
+    begin_route_submit_with_reason(file, pane, harness, "dispatch_submit")
+}
+
+pub fn begin_route_submit_with_reason(
+    file: &Path,
+    pane: &str,
+    harness: &str,
+    reason: &str,
+) -> Result<RouteSubmitInFlightGuard> {
     let Some(path) = marker_path(file)? else {
-        return Ok(RouteSubmitInFlightGuard { path: None });
+        return Ok(RouteSubmitInFlightGuard {
+            path: None,
+            marker: None,
+        });
     };
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
@@ -92,11 +157,26 @@ pub fn begin_route_submit(
         file: file.to_string_lossy().into_owned(),
         pane: pane.to_string(),
         harness: harness.to_string(),
+        reason: reason.to_string(),
         written_at: now_secs(),
     };
     let json = serde_json::to_string_pretty(&marker).context("serialize route-submit marker")?;
     std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
-    Ok(RouteSubmitInFlightGuard { path: Some(path) })
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_submit_in_flight_marker_set file={} pane={} harness={} reason={} ttl_secs={}",
+            file.display(),
+            pane,
+            harness,
+            marker.reason_label(),
+            marker.ttl_secs()
+        ),
+    );
+    Ok(RouteSubmitInFlightGuard {
+        path: Some(path),
+        marker: Some(marker),
+    })
 }
 
 pub fn route_submit_in_flight(file: &Path) -> Result<bool> {
@@ -118,15 +198,28 @@ fn active_in_flight_marker_at(path: &Path) -> Result<bool> {
     let marker: RouteSubmitInFlight = match serde_json::from_str(&content) {
         Ok(marker) => marker,
         Err(_) => {
-            let _ = std::fs::remove_file(path);
+            remove_marker_file(path, "malformed_route_submit_marker");
             return Ok(false);
         }
     };
-    if now_secs().saturating_sub(marker.written_at) <= ROUTE_IN_FLIGHT_TTL_SECS {
+    if now_secs().saturating_sub(marker.written_at) <= marker.ttl_secs() {
         return Ok(true);
     }
-    let _ = std::fs::remove_file(path);
+    remove_marker_file(path, "stale_route_submit_marker");
     Ok(false)
+}
+
+fn remove_marker_file(path: &Path, reason: &str) {
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => {
+            eprintln!(
+                "[route] warning: failed to remove {reason} {}: {err}",
+                path.display()
+            );
+        }
+    }
 }
 
 pub fn mark_route_submit_blocked(
@@ -201,8 +294,64 @@ mod tests {
 
         let guard = begin_route_submit(&doc, "%1", "codex").unwrap();
         assert!(route_submit_in_flight(&doc).unwrap());
+        let marker = serde_json::from_str::<RouteSubmitInFlight>(
+            &std::fs::read_to_string(marker_path(&doc).unwrap().unwrap()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(marker.reason, "dispatch_submit");
         drop(guard);
         assert!(!route_submit_in_flight(&doc).unwrap());
+    }
+
+    #[test]
+    fn route_submit_marker_records_ready_probe_reason_until_guard_drops() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "body").unwrap();
+
+        let guard =
+            begin_route_submit_with_reason(&doc, "%42", "codex", "dispatch_only_ready_probe")
+                .unwrap();
+        assert!(route_submit_in_flight(&doc).unwrap());
+        let path = marker_path(&doc).unwrap().unwrap();
+        let marker: RouteSubmitInFlight =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(marker.pane, "%42");
+        assert_eq!(marker.harness, "codex");
+        assert_eq!(marker.reason, "dispatch_only_ready_probe");
+
+        drop(guard);
+        assert!(!path.exists());
+        assert!(!route_submit_in_flight(&doc).unwrap());
+    }
+
+    #[test]
+    fn ready_probe_route_submit_marker_survives_editor_wait_budget() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "body").unwrap();
+        let path = marker_path(&doc).unwrap().unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let marker = RouteSubmitInFlight {
+            file: doc.display().to_string(),
+            pane: "%1".to_string(),
+            harness: "codex".to_string(),
+            reason: "dispatch_only_ready_probe".to_string(),
+            written_at: now_secs().saturating_sub(ROUTE_IN_FLIGHT_TTL_SECS + 1),
+        };
+        std::fs::write(&path, serde_json::to_string(&marker).unwrap()).unwrap();
+
+        assert!(route_submit_in_flight(&doc).unwrap());
+
+        let stale = RouteSubmitInFlight {
+            written_at: now_secs().saturating_sub(ROUTE_READY_PROBE_TTL_SECS + 1),
+            ..marker
+        };
+        std::fs::write(&path, serde_json::to_string(&stale).unwrap()).unwrap();
+        assert!(!route_submit_in_flight(&doc).unwrap());
+        assert!(!path.exists());
     }
 
     #[test]
@@ -217,6 +366,7 @@ mod tests {
             file: doc.display().to_string(),
             pane: "%1".to_string(),
             harness: "codex".to_string(),
+            reason: "dispatch_submit".to_string(),
             written_at: now_secs().saturating_sub(ROUTE_IN_FLIGHT_TTL_SECS + 1),
         };
         std::fs::write(&path, serde_json::to_string(&marker).unwrap()).unwrap();

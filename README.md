@@ -49,7 +49,7 @@ agent-doc route --dispatch-only --plain-trigger --wait-for-ready 60 session.md
 agent-doc run session.md
 ```
 
-The typical edit cycle: write in your editor, trigger `agent-doc route --dispatch-only --plain-trigger --wait-for-ready 60 <file>` via a hotkey, and agent-doc dispatches the plain `agent-doc <file>` reopen into the right pane. Route waits for the file mtime and shared editor typing indicator to settle before it mutates the document or submits the reopen, and editor-triggered routing gives slow-starting supervisors a longer readiness window before surfacing a startup error. That editor path always stays a bounded reopen send; it does not restart Codex just because the previous prompt was `/clear`.
+The typical edit cycle: write in your editor, trigger `agent-doc route --dispatch-only --plain-trigger --wait-for-ready 60 <file>` via a hotkey, and agent-doc dispatches the plain `agent-doc <file>` reopen into the right pane. Route waits for the file mtime and shared editor typing indicator to settle before it mutates the document or submits the reopen, and editor-triggered routing gives slow-starting supervisors a longer readiness window before surfacing a startup error. During that readiness window, route owns the pane input window, so supervisor queue drains and context-reset `/clear` / `/new` recovery wait instead of interleaving into the composer. That editor path always stays a bounded reopen send; it does not restart Codex just because the previous prompt was `/clear`.
 
 ## Feature Taxonomy
 

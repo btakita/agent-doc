@@ -216,6 +216,17 @@ pub(crate) fn dispatch_only_send_reopen(
     let mut recovery_attempts = 0usize;
     let requires_ready_probe =
         dispatch_only_requires_ready_probe(log_status.as_ref(), &dispatch_pane, harness);
+    let mut pre_dispatch_route_guard =
+        Some(crate::route_in_flight::begin_route_submit_with_reason(
+            file,
+            &dispatch_pane,
+            &harness.binary,
+            if requires_ready_probe {
+                "dispatch_only_ready_probe"
+            } else {
+                "dispatch_only_pre_dispatch"
+            },
+        )?);
     if requires_ready_probe {
         loop {
             if dispatch_only_starting_pane_ready_via_authoritative_actor(
@@ -383,6 +394,7 @@ pub(crate) fn dispatch_only_send_reopen(
         );
     }
 
+    drop(pre_dispatch_route_guard.take());
     register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
     let dispatch_start = match delivery {
         DispatchOnlyReopenDelivery::SupervisorIpcOnce => dispatch_via_supervisor_ipc_with_mode(

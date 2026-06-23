@@ -53,8 +53,9 @@
 //!
 //!   Phases 1 and 2 are skipped when the layout is already correct (target exists,
 //!   single stash). Phases 3 and 4 always run.
-//! - `repair_file_state_with_tmux` is the tmux-layout portion of the doctor repair
-//!   path used by both `agent-doc session doctor <FILE> --repair` and full sync.
+//! - `repair_file_state_with_tmux` is the tmux-layout and commit-boundary portion of
+//!   the doctor repair path used by both `agent-doc session doctor <FILE> --repair`
+//!   and full sync.
 //! - The `resolve_file` closure reads each file's frontmatter session UUID and
 //!   produces a `FileResolution::Registered` (or `Unmanaged` when no UUID is present).
 //!   Files with session UUIDs are always treated as registered, even if the registry
@@ -313,6 +314,30 @@ pub fn repair_file_state(file: &Path) -> Result<Vec<String>> {
     repair_file_state_with_tmux(&tmux, file)
 }
 
+fn recover_jb_cache_conflict_cancel_commit_boundary(file: &Path) -> Result<Option<String>> {
+    if !crate::session_check::detect_jb_cache_conflict_cancel_recoverable(file)? {
+        return Ok(None);
+    }
+
+    crate::git::commit(file).with_context(|| {
+        format!(
+            "failed to close recoverable jb_cache_conflict_cancel commit boundary for {}",
+            file.display()
+        )
+    })?;
+    if crate::session_check::detect_jb_cache_conflict_cancel_recoverable(file)? {
+        anyhow::bail!(
+            "recoverable jb_cache_conflict_cancel commit boundary remained after commit for {}",
+            file.display()
+        );
+    }
+
+    Ok(Some(format!(
+        "Closed recoverable `jb_cache_conflict_cancel` commit boundary for `{}`.",
+        file.display()
+    )))
+}
+
 pub fn repair_file_state_with_tmux(tmux: &Tmux, file: &Path) -> Result<Vec<String>> {
     let canonical = file
         .canonicalize()
@@ -325,6 +350,9 @@ pub fn repair_file_state_with_tmux(tmux: &Tmux, file: &Path) -> Result<Vec<Strin
         actions.push(format!(
             "Repaired `agent-doc`/`stash` layout in tmux session `{session_name}`."
         ));
+    }
+    if let Some(note) = recover_jb_cache_conflict_cancel_commit_boundary(&canonical)? {
+        actions.push(note);
     }
 
     let content = std::fs::read_to_string(&canonical)
@@ -5078,6 +5106,74 @@ mod tests {
             other => panic!("expected ambiguous resolution, got {other:?}"),
         }
     }
+
+    #[test]
+    fn sync_repair_closes_jb_cache_conflict_cancel_commit_boundary() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd_guard = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+
+        let doc = root.join("tasks/sync-repair-closeout.md");
+        let original = concat!(
+            "---\n",
+            "agent_doc_session: sync-repair-closeout\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Pending crash recovery.\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, original).unwrap();
+        crate::snapshot::save(&doc, original).unwrap();
+        init_git_repo(root, &doc);
+
+        let materialized = original.replace(
+            "<!-- agent:boundary:test -->",
+            "### Re: crash recovery -- gpt-5\n\nRecovered by sync.\n<!-- agent:boundary:test -->",
+        );
+        std::fs::write(&doc, &materialized).unwrap();
+        crate::snapshot::save(&doc, &materialized).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&materialized),
+            Some(&materialized),
+        )
+        .unwrap();
+
+        assert!(
+            crate::session_check::detect_jb_cache_conflict_cancel_recoverable(&doc).unwrap(),
+            "precondition: visible response/snapshot should be ahead of HEAD"
+        );
+
+        let note = recover_jb_cache_conflict_cancel_commit_boundary(&doc)
+            .unwrap()
+            .expect("sync repair should close the commit boundary");
+        assert!(note.contains("jb_cache_conflict_cancel"));
+        assert!(matches!(
+            crate::git::verify_snapshot_committed(&doc).unwrap(),
+            crate::git::SnapshotCommitStatus::Committed
+        ));
+        assert!(
+            !crate::session_check::detect_jb_cache_conflict_cancel_recoverable(&doc).unwrap(),
+            "repair should remove the recoverable crash shape"
+        );
+
+        let show = ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:tasks/sync-repair-closeout.md"])
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&show.stdout).contains("Recovered by sync."),
+            "HEAD should include the recovered visible response"
+        );
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn find_live_owner_pane_reuses_latest_open_session_log_owner() {

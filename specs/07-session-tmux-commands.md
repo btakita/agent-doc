@@ -202,9 +202,12 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - If a registered pane is stashed, sync must rescue it back into the visible `agent-doc` window rather than treating the stash copy as disposable.
 - Protected outgoing on a 1-in/1-out reconcile preserves layout (`#jb-nav-3pane-promote-swap`): when the reconciler's SWAP fast path detects exactly one pane to attach and one to detach, and the outgoing pane is protected (busy / `protect_pane`), it must NOT fall through to ATTACH (join the incoming) while DETACH skips the protected outgoing pane — that grows the window to N+1 panes. Instead it preserves the current layout, leaves the incoming pane in its stash, and defers; the caller's deferred-retry resurfaces it once the busy pane frees. Keep this aligned in the `tmux-router` reconciler (`sync.rs`) and this spec.
 - Manual/full sync is also the operator repair surface behind editor
-  `Sync Tmux Layout`: before reconciliation it runs `repair_layout` for the
-  inferred target session, so the visible layout is repaired to `0:agent-doc`,
-  `1:stash`, and adjacent overflow stash windows before panes are reconciled.
+  `Sync Tmux Layout`: before reconciliation it runs file-scoped doctor repair for
+  the focused/session document. That closes recoverable `jb_cache_conflict_cancel`
+  commit-boundary drift before pane liveness can short-circuit, then runs
+  `repair_layout` for the inferred target session so the visible layout is repaired
+  to `0:agent-doc`, `1:stash`, and adjacent overflow stash windows before panes are
+  reconciled.
 - Passive `sync --no-autostart` keeps layout repair explicit and does not run
   `repair_layout`; automatic editor sync should not rename/move stash windows
   while it is only trying to follow a selection event.

@@ -315,7 +315,11 @@ Verification:
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:5a97f45f -->
+
+### Re: Queue repair — gpt-5
+
+Struck the answered preset-backed queue head left active after the response commit so the same TMO lender API investigation does not re-run.
+<!-- agent:boundary:c0544bed -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -335,7 +339,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Please investigate if TMO api has the create/search/link behavior.
+- ~~Please investigate if TMO api has the create/search/link behavior.~~ — answered in `### Re: TMO lender API behavior` (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

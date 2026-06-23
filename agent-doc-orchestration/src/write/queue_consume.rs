@@ -1960,6 +1960,47 @@ pub(crate) fn normalize_prompt_line(line: &str) -> String {
     line.trim().trim_start_matches('❯').trim().to_string()
 }
 
+fn strip_echo_presence_list_marker(line: &str) -> &str {
+    let trimmed = line.trim_start();
+    if let Some(rest) = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .or_else(|| trimmed.strip_prefix("+ "))
+    {
+        return rest.trim_start();
+    }
+    trimmed
+}
+
+fn strip_echo_presence_checkbox_marker(line: &str) -> &str {
+    let Some(rest) = line.strip_prefix('[') else {
+        return line;
+    };
+    let Some(rest) = rest.strip_prefix(|ch: char| ch == ' ' || ch == 'x' || ch == 'X') else {
+        return line;
+    };
+    rest.strip_prefix("] ").unwrap_or(line).trim_start()
+}
+
+fn normalize_prompt_echo_presence_line(line: &str) -> String {
+    let mut text = line.trim();
+    while let Some(rest) = text.strip_prefix('>') {
+        text = rest.trim_start();
+    }
+    if let Some(rest) = text
+        .strip_prefix("**Queue prompt:**")
+        .or_else(|| text.strip_prefix("**Queue prompts:**"))
+    {
+        text = rest.trim_start();
+    }
+    text = text.trim_start_matches('❯').trim_start();
+    text = strip_echo_presence_list_marker(text);
+    text = strip_echo_presence_checkbox_marker(text);
+    crate::queue::strip_priority_markers(text)
+        .trim()
+        .to_string()
+}
+
 /// Locate, within `region` (the exchange content), the byte offset of the line
 /// where this cycle's response heading begins. Prefers the captured response's
 /// first line; falls back to the last non-code `### Re:` heading. `region_base`
@@ -2032,8 +2073,12 @@ pub(crate) fn embed_consumed_prompt_in_response(
         .iter()
         .filter_map(|t| first_nonempty_line(t))
         .any(|first| {
-            let needle = normalize_prompt_line(first);
-            !needle.is_empty() && region.lines().any(|l| normalize_prompt_line(l) == needle)
+            let needle = normalize_prompt_echo_presence_line(first);
+            !needle.is_empty()
+                && region.lines().any(|line| {
+                    normalize_prompt_line(line) == needle
+                        || normalize_prompt_echo_presence_line(line) == needle
+                })
         });
     if already_present {
         return content.to_string();
@@ -2683,6 +2728,94 @@ mod core_tests {
             !queue_head_has_explicit_completion_signal(&inactive, &["foo".to_string()], &[], &[],)
                 .unwrap()
         );
+    }
+    #[test]
+    fn consumed_prompt_echo_skips_stale_blockquoted_echo_variant() {
+        let prompt = ":pushpin: Fix the root cause of this issue that occurred in this document.";
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: root fix\n\n",
+                "> **Queue prompt:**\n>\n",
+                "> Fix the root cause of this issue that occurred in this document.\n\n",
+                "Handled once.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue priority go -->\n",
+                "- {prompt}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            prompt = prompt
+        );
+
+        let updated = embed_consumed_prompt_in_response(
+            &content,
+            &[prompt.to_string()],
+            Some("### Re: root fix"),
+        );
+
+        assert_eq!(
+            updated, content,
+            "a stale blockquoted queue-prompt echo with the priority marker stripped must not be reinserted"
+        );
+        assert_eq!(updated.matches("> **Queue prompt:**").count(), 1);
+
+        let one_line_echo = content.replace(
+            "> **Queue prompt:**\n>\n> Fix the root cause of this issue that occurred in this document.",
+            "> **Queue prompt:** Fix the root cause of this issue that occurred in this document.",
+        );
+        let updated = embed_consumed_prompt_in_response(
+            &one_line_echo,
+            &[prompt.to_string()],
+            Some("### Re: root fix"),
+        );
+        assert_eq!(
+            updated, one_line_echo,
+            "legacy one-line queue-prompt echoes must also count as already present"
+        );
+        assert_eq!(updated.matches("> **Queue prompt:**").count(), 1);
+    }
+    #[test]
+    fn free_text_consume_preserves_following_id_backed_head() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let prompt = ":pushpin: Fix the root cause of this issue that occurred in this document.";
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: root fix\n\n",
+                "Handled.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue priority go -->\n",
+                "- {prompt}\n",
+                "- [#fccd]\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#fccd] Restore the accidentally consumed Clear Session Cache queue head.\n",
+                "<!-- /agent:backlog -->\n",
+            ),
+            prompt = prompt
+        );
+        fs::write(&doc, &content).unwrap();
+        snapshot::save(&doc, &content).unwrap();
+
+        let plan = plan_queue_prompt_consumption(&doc, &content, &[])
+            .unwrap()
+            .expect("free-text head should be consumable");
+
+        assert_eq!(plan.consumed_texts, vec![prompt.to_string()]);
+        assert_eq!(plan.remaining, 1);
+        assert!(
+            plan.new_document.contains("- [#fccd]\n"),
+            "open id-backed heads behind the consumed free-text prompt must remain queued:\n{}",
+            plan.new_document
+        );
+        assert!(
+            !plan.new_document.contains("~~[#fccd]"),
+            "the open id-backed head must not be struck by a free-text consume"
+        );
+        assert_eq!(plan.new_document.matches("> **Queue prompt:**").count(), 1);
     }
     #[test]
     fn done_head_consumes_despite_bundled_pending_add() {

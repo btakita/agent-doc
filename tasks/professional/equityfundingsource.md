@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,132 +33,23 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260622-230128.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260622-234611.md`*
 
 Compacted content:
-❯ - Archived 5 response topic(s): auth token retention cleanup + deploy; deploy; same-user email login links; 2 more
-❯ - Prior summary/context: prior compacted content: Archived 6 response topic(s): lender role/schema rename + deploy; expired sign-in link prefi...
-
-### Re: Available Deals missing — gpt-5
-
-> **Queue prompt:**
->
-> The Available Deals in https://equityfundingsource.brian-takita.workers.dev/admin/pipeline are now missing from the pipeline. What happened to them?
-
-They are missing because production D1 currently has no local `loans` rows and no `investment_deals` rows. The admin pipeline does not build the Deal Pipeline from raw TMO cache; `admin_pipeline_columns_` reads `loans`, maps each loan through `loan_pipeline_card_`, then groups by `tmo_loan_status`. The `Available Deals` lane is just the display label for loans whose `tmo_loan_status` is `Application Received`, so with `loans` empty that lane has zero cards and collapses.
-
-Evidence checked:
-
-- `SELECT COUNT(*) AS loans_count FROM loans` on remote D1 returned `0`.
-- `SELECT COUNT(*) AS deals_count FROM investment_deals` returned `0`.
-- `SELECT status, COUNT(*) FROM full_applications GROUP BY status` returned `15 draft` applications; none are accepted/submitted into loans.
-- `application_leads` still has open funnel entries (`19 new`, `2 contacted`, `2 archived`), so the early application funnel is still present.
-- `tmo_cache_entities` still has `12` cached TMO loan entities, `11` not marked deleted. Three cache rows carry old EFS ids; examples include `FTM631 -> bbd437b0-913f-4a6f-960b-901c72a410c9` and `GQI751 -> 45ddae53-3e7f-43b1-a627-17b79b06fa3f`. Those ids are now orphaned because the local `loans` table is empty.
-- The TMO sync loop starts from `SELECT id, tmo_loan_number FROM loans`; it enriches existing EFS loan rows and writes cache, but it does not recreate missing `loans` rows from cache.
-
-I did not find evidence of a frontend filter regression. The current diagnosis is: the local EFS loan/deal rows backing the `Available Deals` lane are absent, while TMO cache still retains several loan records. D1 does not currently have loan activity or application change-log rows that identify who/what removed those local rows. The repair path is to restore/reconcile `loans` and any corresponding `investment_deals` from D1 time travel or from the TMO cache/TMO source of truth; I only inspected time-travel info and did not run any restore.
-
-Changed paths: none outside agent-doc session bookkeeping.
-
-Commands: `agent-doc reset --from-current ...`, `agent-doc preflight ...`, `agent-doc plan ...`, `tsift status`, targeted `tsift source-read`/`symbol-read`, remote D1 `SELECT` queries through `bun run cf:d1:query:remote`, and `bun ./bin/cf-wrangler.ts d1 time-travel info equityfundingsource -c ../../wrangler.toml`.
-
-Verification: production D1 query results above; code path verified in `app/equityfundingsource/lib/admin/loan_management/index.ts`, `app/equityfundingsource/lib/admin/repo.ts`, `lib/ui--browser--efs/portal/admin/pipeline.tsx`, and `app/equityfundingsource/lib/tmo-sync.ts`.
-
-Confidence: high that the missing cards are caused by empty local `loans`/`investment_deals`; medium on the exact cause of the row loss because production D1 has no audit rows for that deletion/orphaning.
-
-Escalation: none.
-
-### Re: audit rows + due-diligence packet — gpt-5
-
-> **Queue prompt:**
->
-> Add audit rows for deletion/orphaning. Did adding the send due diligence packet break the available deals?
-
-Implemented durable audit coverage for loan deletion and TMO-cache orphan detection, and added a regression guard around the due-diligence package sender.
-
-The due-diligence package send did not appear to break available deals. I traced the feature commit `ff0d565` and it touched the lender-message/email path, not `loans` or `investment_deals` deletion. I also added a test asserting `selected_lender_due_diligence_package_send_` stays messaging-only and does not call loan/deal delete paths.
-
-Changed paths: `app/equityfundingsource/migrations/0100_audit_logs.sql`; `app/equityfundingsource/lib/admin/repo.ts`; `app/equityfundingsource/lib/admin/loan_management/index.ts`; `app/equityfundingsource/lib/borrower/loans/index.ts`; `tests/admin-pipeline.test.ts`; `tests/admin-investor-pipeline.test.ts`; `prds/equity-funding-source-lending-portal-prd.md`; parent submodule pointer `src/equityfundingsource-dev`.
-
-Commands: `tsift status`; `tsift diff-digest --revision ff0d565`; `bun test tests/admin-pipeline.test.ts tests/admin-investor-pipeline.test.ts`; `bun run build`; `git diff --check`; `bun test tests/prd.test.ts`; `make check`; `gh run list --workflow CI --limit 1`; `git diff --cached --check`; `git commit`; `git push origin main`.
-
-Verification: focused Bun tests passed (`149 pass, 0 fail`); PRD tests passed (`8 pass`); `bun run build` passed; `make check` passed (`1142 pass, 0 fail`); staged whitespace check passed. GitHub Actions check could not run because this repo has no workflow named `CI`.
-
-Commit/push: EFS submodule commit `36b621a` was pushed to `origin/main`. Parent submodule pointer is included in the agent-doc closeout commit.
-
-Confidence: high. The new `audit_logs` table is intentionally not FK-cascaded from `loans`, deletion paths write audit rows before deleting, observed TMO-cache/local loan orphaning is deduped, and the due-diligence sender is pinned by test as non-destructive.
-
-Escalation: none.
-
-### Re: were the two Available Deals deleted? — gpt-5
-
-> **Queue prompt:**
->
-> So what happened to the 2 Available Deals there were on the site yesterday? Were they deleted?
-
-Yes, in the EFS-local sense: the two rows that backed those Available Deal cards are gone from production D1's `loans` table, and there are no `investment_deals` rows either. They do not appear to be deleted from TMO itself: the TMO cache still has two active, non-deleted loan records with former EFS loan ids, and both are still `Application Received`, which is the status the admin pipeline displays as Available Deals.
-
-The two orphaned cache records are:
-
-- `FTM631` -> former EFS loan id `bbd437b0-913f-4a6f-960b-901c72a410c9`, `LoanStatus=Application Received`, `LoanAmount=100000.00`, last synced June 22, 2026 4:00:23 PM EDT.
-- `GQI751` -> former EFS loan id `45ddae53-3e7f-43b1-a627-17b79b06fa3f`, `LoanStatus=Application Received`, `LoanAmount=600000.00`, last synced June 22, 2026 4:00:15 PM EDT.
-
-So the best current answer is: the site lost the local EFS `loans` rows for those two deals, which made the Available Deals lane empty. The TMO/cache side still knows about them, so this looks like local D1 deletion/orphaning, not TMO deleting the loans.
-
-I could not prove who or what deleted them from the current database because production did not yet have the new durable `audit_logs` table, and `loan_activity_logs` is empty. Existing `loan_activity_logs` also FK-cascades from `loans`, so it would not survive loan deletion anyway. D1 time-travel bookmarks are available for June 21 and June 22, but I did not run a destructive restore.
-
-Changed paths: none outside the agent-doc session document.
-
-Commands: `agent-doc preflight`; `agent-doc plan`; `tsift status`; remote D1 queries for `loans`, `investment_deals`, `loan_activity_logs`, table presence, migrations, TMO cache summaries, orphaned EFS cache loans, and the two cached TMO loan payloads; `wrangler d1 time-travel info` for current and timestamp bookmarks; code sweep with `rg` for destructive loan/deal paths.
-
-Verification: current remote D1 returned `loans=0`, `investment_deals=0`, `loan_activity_logs=0`, no deployed `audit_logs` table, and exactly two active orphaned cache rows with EFS ids: `FTM631` and `GQI751`. Code sweep found destructive routes only in expected admin/borrower/TMO-delete paths and old `investment_deals` rebuild migrations, not in due-diligence send or pipeline read code.
-
-Confidence: high that the two visible cards disappeared because their local EFS loan rows are gone; medium on the exact actor/mechanism because the pre-audit production schema does not preserve deletion evidence after loan rows are removed.
-
-Escalation: none.
-
-### Re: migration/delete logic audit — gpt-5
-
-> **Queue prompt:**
->
-> Did a migration from a previous commit cause the deletions? What logic in the codebase would delete the rows?
-
-I do not see evidence that a previous migration deleted the two `loans` rows.
-
-Migration evidence:
-
-- Remote D1 has not applied `0100_audit_logs.sql` from the last EFS commit (`has_0100=0`), so that commit's migration could not have caused the already-missing rows.
-- No migration contains `DELETE FROM loans` or `DROP TABLE loans`.
-- `0042_investor_deal_signatures_and_funded_status.sql` rebuilds `investment_deals` with a `JOIN loans`, so it can drop orphaned deal rows if the matching loan is already missing. It was applied June 8, 2026, before `GQI751` and `FTM631` appeared in the TMO cache, so it does not explain these two rows.
-- `0085_investment_deals_reserved_status.sql` also rebuilds `investment_deals`, but it copies all existing deal rows from `investment_deals` without joining `loans`. It was applied June 19, 2026 03:26:33 UTC, before `FTM631` appeared in cache and without loan deletion logic.
-- The later migrations after the two affected cache rows existed are additive/message/lender schema migrations. `0099_lender_role_and_schema.sql` drops/recreates `users`, but it wraps that with `PRAGMA foreign_keys = OFF` and does not touch `loans` or `investment_deals`.
-
-The code paths that can delete these rows are:
-
-- `DELETE /api/admin/loans/:id` -> `admin_loans_by_id_DELETE_` -> `admin_loan_delete_` -> `DELETE FROM loans WHERE id = ?`; `investment_deals` then cascades from `investment_deals.loan_id REFERENCES loans(id) ON DELETE CASCADE`.
-- `POST /api/admin/loans/bulk-delete` -> `admin_loans_bulk_delete_POST_` -> `admin_loans_bulk_delete_` -> `DELETE FROM loans WHERE id IN (...)`; deals cascade.
-- `DELETE /api/admin/tmo-loans/:loan_number` -> deletes from TMO, then runs `DELETE FROM loans WHERE tmo_loan_number = ?`; deals cascade.
-- `POST /api/admin/tmo-loans/bulk-delete` -> deletes matching TMO loans, then runs `DELETE FROM loans WHERE tmo_loan_number IN (...)`; deals cascade.
-- `DELETE /api/borrower/loans/:id` -> `borrower_loans_by_id_DELETE_` -> `DELETE FROM loans WHERE id = ?`; deals cascade.
-- `DELETE /api/admin/users/:id` -> `admin_user_delete_` -> `DELETE FROM users WHERE id = ?`; `loans.user_id REFERENCES users(id) ON DELETE CASCADE`, then `investment_deals` cascades from `loans`. I checked the two borrower emails from the TMO cache and both user rows still exist now, so current evidence does not point strongly at user deletion for these two, but the cascade path exists.
-
-So the most likely row-loss mechanisms in this codebase are explicit loan delete routes or a borrower/user cascade, not a migration. The current production database still cannot prove which one happened because the rows were lost before durable `audit_logs` existed and `loan_activity_logs` is empty.
-
-Changed paths: none outside the agent-doc session document.
-
-Commands: `agent-doc preflight`; `agent-doc plan`; `agent-doc read exchange`; `tsift status`; `rg` migration/app destructive SQL sweeps; `sed` reads of relevant migrations and delete handlers; remote D1 queries for migration history, `0100` application status, row counts, foreign keys, and affected borrower users.
-
-Verification: EFS submodule remained clean; remote D1 still reports `loans=0`, `investment_deals=0`, `loan_activity_logs=0`; `0100_audit_logs.sql` is not applied remotely; affected borrower users `btak.dev+admin2@gmail.com` and `brian.takita+borrower6@gmail.com` exist; destructive SQL search found no loan-deleting migration and found the app delete paths listed above.
-
-Confidence: high that a previous migration did not directly delete the two `loans` rows; medium on the exact runtime route/actor because production had no durable deletion audit at the time.
-
-Commit: no EFS source commit; investigation-only agent-doc closeout.
-
-Escalation: none.
-<!-- agent:boundary:3072ff1b -->
+❯ - Archived 4 response topic(s): Available Deals missing; audit rows + due-diligence packet; were the two Available Deals deleted?; 1 more
+❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
+<!-- agent:boundary:246bca0c -->
 <!-- /agent:exchange -->
 ###
 <!--
+- Admin loan delete: /api/admin/loans/:id
+- Admin bulk loan delete: /api/admin/loans/bulk-delete
+- Admin TMO loan delete: /api/admin/tmo-loans/:loan_number
+- Admin TMO bulk delete: /api/admin/tmo-loans/bulk-delete
+- Borrower self-delete: /api/borrower/loans/:id
+- Admin user delete: /api/admin/users/:id, because loans.user_id cascades from users, then investment_deals.loan_id
+  cascades from loans
+---
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 ---
 After 20:30
@@ -167,6 +58,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Look in the production logs. Are there any deletion events that occurred in the production logs?
 <!-- /agent:queue -->
 
 ## Backlog

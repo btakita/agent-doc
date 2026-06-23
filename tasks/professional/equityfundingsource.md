@@ -498,7 +498,36 @@ Deployment: not performed.
 Escalation: none.
 
 Confidence: high. The new path is covered at the TMO wrapper layer, simulator layer, admin route/static checks, and admin dialog behavior, with full project checks passing after the changes.
-<!-- agent:boundary:14b7ae64 -->
+
+### Re: LOS/LSS lender visibility — gpt-5
+
+> **Queue prompt:** LSS.svc and LOS.svc are two separate systems. Will the LSS lender be visible with the LOS lender?
+
+Short answer: the public TMO API docs do not prove that visibility guarantee.
+
+What the docs do show is that `LOS.svc` has loan-funding endpoints (`GetLoanFundings`, `AddLoanFunding`, `UpdateLoanFunding`) and the funding payload uses an `Account` field for the lender/funder row. Separately, `LSS.svc` owns the lender/vendor master endpoints (`NewLender`, `GetLender/:Account`, `GetLenders`, `UpdateLender`) and those records also use `Account` as the lender/vendor account number.
+
+What the docs do not show is a `LOS.svc/GetLenders`, `LOS.svc/NewLender`, or any explicit statement that a lender created through `LSS.svc/NewLender` immediately appears in LOS lender pickers/lookups. So if by “visible” we mean “will the LOS UI/dropdown or LOS-side lender lookup list it,” I would treat that as unknown until tested in the actual TMO tenant.
+
+If by “usable” we mean “is this the only documented account identifier we can try when later calling `LOS.svc/AddLoanFunding` or `UpdateLoanFunding`,” then yes: `Account` is the only documented bridge in the public collection. But that is an API inference, not a vendor guarantee.
+
+Practical implication for the shipped admin flow: it is safe as an admin-only find/create/link workflow for storing the TMO lender `Account` in EFS, because it verifies the record through `LSS.svc/GetLender` and keeps duplicate review/manual override in the admin path. I would not yet rely on it as proof that LOS funding writeback will succeed. Before automated LOS funding writes depend on this, we should run a real TMO validation: create or link a lender through LSS, confirm it with `GetLender`, then try `LOS.svc/AddLoanFunding`/`UpdateLoanFunding` on a test loan or get explicit TMO support confirmation that LOS funding resolves the LSS lender/vendor master `Account`.
+
+Changed paths: none.
+
+Commands run:
+- `agent-doc --version`
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc commit /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` for queue metadata drift recovery
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- Official TMO Postman collection inspection with `curl`/`jq` for lender/funding endpoints and request bodies
+
+Verification: documentation/API-shape inspection only; no code changed, so no tests/build were run this cycle.
+
+Escalation: none.
+
+Confidence: medium. The endpoint split and shared `Account` field are clear in the public docs; the cross-service visibility/lookup behavior is not documented and needs tenant validation.
+<!-- agent:boundary:1f228bf5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -523,6 +552,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#04v8] [recommended] Validate TMO cross-service lender visibility in a real TMO sandbox/tenant before relying on automated LOS funding writes: create or link a lender through `LSS.svc`, confirm `GetLender`, then attempt `LOS.svc` `AddLoanFunding`/`UpdateLoanFunding` on a test loan or get written TMO support confirmation that LOS funding resolves the LSS lender/vendor master `Account`.
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 

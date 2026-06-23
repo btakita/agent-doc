@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -60,7 +60,7 @@ Verification: focused EFS tests passed for `tmo-api`, `tmo-sim`, `advance-lender
 Escalation: none.
 
 Confidence: high.
-<!-- agent:boundary:39645944 -->
+<!-- agent:boundary:b09cabd7 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -291,7 +291,31 @@ Queue drained.
 - **PCP-side:** an optional cache/projection of phase in `ControllerMemoryState` for routing decisions, analogous to the `RunContext` read-side cache at `graph.rs:222` — a shadow, not the truth.
 
 Promoting the PCP to the write authority only pays off if the PCP were ever made mandatory/always-on; today that trades a local atomic file write for a socket round-trip on every transition without removing the on-disk record, so it is not a clear win. The #c7j5 re-scope stands: sidecar stays the authority, the `StateMachine` pilot stays narrow.
-<!-- agent:boundary:a08cc37d -->
+
+### Re: CyclePhase visibility in the PCP — already visible at closeout; a live projection aids recovery, not prevention — glm-5.2
+
+> **Queue prompt:** Would it benefit the agent-doc lifecycle if the CyclePhase were visible in the PCP? Would this visibility help to fix issues chronic to agent-doc? The PCP/Supervisor are running from `agent-doc start`.
+
+**Already visible — at closeout.** The PCP reads `CyclePhase` today: `persist_session_actor_closeout` calls `cycle_state::load(file)` (`project_controller.rs:1489`) and projects phase + queue head + pending ids into its SQLite state store (`:1511`). So the real question is whether a *live, always-on* projection (vs a closeout-only read) would help the chronic issues.
+
+**It helps recovery/observability, not prevention.** The chronic issues — as this session itself exhibited (a captured response lost to a wedged-write repair, `live_prompt_drift_after_preflight`, repeated no-op closeouts) — are not caused by the supervisor *not seeing* the phase. They're caused by:
+
+1. **Non-atomic sidecar writes** → torn reads by any reader incl. the PCP. **Shipped this cycle** (`#lzsidecaratomic`: `cycle_state::save` now temp-file + atomic `persist`; agent-doc `647af082`; +regression test).
+2. **Capture-retirement policy** — a write that fails IPC proof is classified "wedged" and the captured body is retired for forensics, so the response vanishes from the doc. This is what ate the prior Sidecar-race answer — its conclusions survive only because they're restated below.
+3. **IPC proof brittleness** (`live_prompt_drift_after_preflight`) — the editor buffer's prompt position doesn't match the disk baseline, so delivery can't be proven even when the socket ACKs.
+
+A live phase projection in the PCP lets the supervisor *notice* a cycle stuck at `response_captured` and trigger recovery sooner — a real latency win. It does nothing for (1)–(3); those need the write/capture/IPC paths hardened. Worth adding as a *shadow* (seed `ControllerMemoryState` from the sidecar, the authority) — **not** worth promoting to the write authority (the prior turn's verdict stands: the PCP is deliberately cycle-independent so closeout survives a controller crash).
+
+**`do [#lzsidecaratomic]`: done (atomic-write half).** `cycle_state::save` → `write_atomic()` (stage `NamedTempFile` in the parent dir → write → `persist`, i.e. atomic `rename` on POSIX same-FS). Every writer (`mark_*`, `record_*`, `start_preflight`, ~42 call sites) becomes atomic for free, eliminating torn reads. 39/39 `cycle_state` tests green incl. new `save_is_atomic_leaves_no_temp_residue`; `cycle_state.rs` clippy-clean (the 40 pre-existing errors are in `sync.rs`/`write/ipc.rs` on Rust 1.96, untouched). Shipped: agent-doc `647af082` → `btakita/agent-doc` main; superproject gitlink `af2db96e5`.
+
+**Deferred (optional half → `#lzsidecarlock`):** the *lost-update* window among concurrent writers (load→mutate→save with no lock/CAS) — `cycle_phase_rank` still guards only monotonic *phase*, not the ~30 non-phase fields. Needs a flock/CAS refactor across the call sites (deadlock-prone, design-heavy).
+
+**Deploy note:** `make install-full` + `agent-doc admin recycle` run *after* this closeout so the binary recycle can't destabilize the session closeout itself (6 no-op closeouts this session — not risking another).
+
+*Restated (the prior Sidecar↔PCP answer was lost to the wedged-capture closeout):* no Sidecar↔PCP IPC exists — they share only the filesystem one-way; the PCP reads the sidecar at `:1489` and never writes it (writes go to its own SQLite store). The real race is among the ~42 sidecar writers via non-atomic save — now fixed for the torn-read class; the lost-update class remains (`#lzsidecarlock`).
+
+Queue drained.
+<!-- agent:boundary:90e1aa9a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -301,14 +325,15 @@ Promoting the PCP to the write authority only pays off if the PCP were ever made
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~Does the Sidecar <-> PCP IPC create race conditions?~~
-- Would it benefit the agent-doc lifecycle if the CyclePhase were visible in the PCP? Would this visibility help to fix issues chronic to agent-doc? The PCP/Supervisor are running from `agent-doc start`.
-- do [#lzsidecaratomic]
+- ~~Would it benefit the agent-doc lifecycle if the CyclePhase were visible in the PCP? Would this visibility help to fix issues chronic to agent-doc? The PCP/Supervisor are running from `agent-doc start`.~~
+- ~~do [#lzsidecaratomic]~~
+- do [#lzsidecarlock]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzsidecaratomic] [recommended] agent-doc-repo (not lazily-rs): cycle_state::save (cycle_state.rs:1194) is a raw std::fs::write with no lock/CAS across ~42 writer call sites → latent lost-update on non-phase fields + torn read for any reader (incl. PCP projection at project_controller.rs:1489). Fix: atomic tempfile+rename (eliminates torn reads; tempfile already a dev-dep) + optional flock/CAS around load→mutate→save. cycle_phase_rank (:1273) only guards monotonic phase. Found answering the Sidecar↔PCP race question.
+- [ ] [#lzsidecarlock] [recommended] agent-doc-repo: close the lost-update window among concurrent cycle_state writers (load->mutate->save across ~42 call sites has no lock/CAS). cycle_phase_rank (:1273) guards only monotonic phase, not the ~30 non-phase fields (pending_done_ids, active_queue_heads, capture_id, file_hash...). Approach: advisory flock (fs2 is already a prod dep) or CAS on mtime/etag around the load->mutate->save window — deadlock-prone across many call sites, so centralize the pattern. Split from #lzsidecaratomic (atomic-write/torn-read half is DONE in agent-doc 647af082).
 <!-- /agent:backlog -->
 
 ## Review

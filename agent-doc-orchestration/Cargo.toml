@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-orchestration"
-version = "0.34.41"
+version = "0.34.42"
 edition = "2024"
 description = "Orchestration layer for agent-doc (routing, git, sessions, IPC, supervision, sync) — sits between the CLI and agent-doc-core"
 license = "MIT"
@@ -16,9 +16,9 @@ name = "agent_doc_orchestration"
 test-support = []
 
 [dependencies]
-agent-doc-core = { path = "../agent-doc-core", version = "0.34.41" }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.41" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.41" }
+agent-doc-core = { path = "../agent-doc-core", version = "0.34.42" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.42" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.42" }
 lazily = "0.12.0"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }

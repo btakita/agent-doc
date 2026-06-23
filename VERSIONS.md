@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.42
+
+- **Windows release builds compile the library GC liveness probe.** `agent-doc gc-libs` now keeps Unix `kill(pid, 0)` probing behind Unix guards and uses the native Windows process handle API for PID liveness on Windows, so release packaging no longer trips over the missing `libc::kill` symbol while still cleaning stale versioned library locks.
+
 ## 0.34.41
 
 - **Windows release builds compile the supervisor hot-reload path again.** The `#ctlrecycle` Unix `execve` adoption path now keeps its stderr redirection, raw-fd adoption, and startup-miss UTC formatting behind platform guards, so non-Unix release builds fall back to the normal spawn/relaunch behavior instead of compiling POSIX-only symbols.

@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc"
-version = "0.34.41"
+version = "0.34.42"
 dependencies = [
  "agent-doc-core",
  "agent-doc-markdown-ast",
@@ -55,12 +55,13 @@ dependencies = [
  "tracing-subscriber",
  "ureq",
  "uuid",
+ "windows-sys 0.61.2",
  "zip",
 ]
 
 [[package]]
 name = "agent-doc-core"
-version = "0.34.41"
+version = "0.34.42"
 dependencies = [
  "anyhow",
  "clap",
@@ -79,7 +80,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-markdown-ast"
-version = "0.34.41"
+version = "0.34.42"
 dependencies = [
  "tree-sitter",
  "tree-sitter-md",
@@ -88,7 +89,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-orchestration"
-version = "0.34.41"
+version = "0.34.42"
 dependencies = [
  "agent-doc-core",
  "agent-doc-markdown-ast",
@@ -134,7 +135,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-sqlite"
-version = "0.34.41"
+version = "0.34.42"
 dependencies = [
  "agent-doc-core",
  "anyhow",

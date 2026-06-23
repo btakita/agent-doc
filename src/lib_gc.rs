@@ -45,9 +45,57 @@ fn is_pid_alive(pid: u32) -> bool {
     {
         Path::new(&format!("/proc/{}", pid)).exists()
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(all(unix, not(target_os = "linux")))]
     {
-        unsafe { libc::kill(pid as i32, 0) == 0 }
+        let ret = unsafe { libc::kill(pid as libc::pid_t, 0) };
+        ret == 0
+            || std::io::Error::last_os_error()
+                .raw_os_error()
+                .is_some_and(|code| code == libc::EPERM)
+    }
+    #[cfg(windows)]
+    {
+        windows_pid_alive(pid)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        true
+    }
+}
+
+#[cfg(windows)]
+fn windows_pid_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+
+        let mut exit_code = 0;
+        let ok = GetExitCodeProcess(handle, &mut exit_code) != 0;
+        CloseHandle(handle);
+        ok && exit_code == STILL_ACTIVE as u32
+    }
+}
+
+#[cfg(test)]
+#[cfg(windows)]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn windows_pid_alive_detects_current_process() {
+        assert!(windows_pid_alive(std::process::id()));
+    }
+
+    #[test]
+    fn windows_pid_alive_rejects_missing_process() {
+        assert!(!windows_pid_alive(u32::MAX));
     }
 }
 

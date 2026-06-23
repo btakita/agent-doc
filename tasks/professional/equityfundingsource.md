@@ -68,7 +68,70 @@ Verification: read-only production D1 queries returned one `tmo_cache_change_log
 Confidence: medium. The observed log evidence is concrete, but Cloudflare's historical Worker log query path did not return stored app request events, and production lacks the durable `audit_logs` table that would make this attribution high-confidence.
 
 Escalation: none.
-<!-- agent:boundary:ad8893b6 -->
+
+### Re: TMO sync delete risk + soft-disable trail — gpt-5
+
+> **Queue prompt:**
+>
+> Could the delete event have occured from a TMO sync bug?
+>
+> **Queue prompt:**
+>
+> No record should be deleted, only disabled. Create a migration. The durable app audit table should be deployed. Do we have sufficient logging to track deletion events? The delete borrower should not cascade. No deleted records. Only disabled records. We need a trail.
+
+A scheduled TMO sync bug is unlikely to have hard-deleted the missing EFS rows. The read-side TMO sync updates local loan/deal fields and cache records; the cache delete helper only marks `tmo_cache_entities.deleted_at` and logs `tmo_cache_change_logs.operation='deleted'`. The real hard-delete risks were explicit app paths: admin loan delete, admin TMO-loan delete/bulk-delete, borrower loan delete, and admin user delete with the old borrower loan cascade chain.
+
+I changed those paths so records are disabled, not deleted:
+
+- Added `0101_soft_delete_guards.sql`, an additive D1 migration that adds `disabled_at`, `disabled_by_user_id`, and `disabled_reason` metadata, plus `disabled_route` on loans.
+- Added D1 triggers that abort hard deletes on `users`, `loans`, and `investment_deals`, so deleting a borrower cannot cascade into loans/deals.
+- Changed admin loan, TMO-loan, borrower loan, and admin user delete handlers to write audit rows and update disable metadata/status instead of issuing hard deletes or TMO `DeleteLoan` calls.
+- Changed deal rows to disable by `disabled_at` metadata, while active deal lists filter disabled deals out without changing the existing checked deal status values.
+- Kept app audit insertions durable now that `0100_audit_logs.sql` is deployed; audit insert failures are logged instead of masking the primary disable operation.
+- Updated the admin UI copy from delete to disable and updated docs/spec tests to require row preservation and audit trails.
+
+Logging is sufficient going forward for these app paths: loan disables write `loan_disabled` / `borrower_loan_disabled`, user disables write `user_disabled`, TMO-cache orphan detection still writes app audit rows, and production now has the durable `audit_logs` table. It is not retroactive for the previously missing rows because that table was not deployed at the time.
+
+Deployed production changes:
+
+- Applied remote D1 migrations `0100_audit_logs.sql` and `0101_soft_delete_guards.sql`.
+- Deployed Worker version `3c6745a6-d281-458e-a937-d25c203c5cc9` to `https://equityfundingsource.brian-takita.workers.dev`.
+- Verified remote schema contains `audit_logs`, `prevent_users_hard_delete`, `prevent_loans_hard_delete`, and `prevent_investment_deals_hard_delete`.
+
+EFS commit: `aa4cf71 fix: disable loans and users instead of deleting`, pushed to `origin/main`.
+
+Changed paths:
+
+- `app/equityfundingsource/migrations/0101_soft_delete_guards.sql`
+- `app/equityfundingsource/lib/admin/repo.ts`
+- `app/equityfundingsource/lib/admin/loan_management/index.ts`
+- `app/equityfundingsource/lib/admin/user_management/index.ts`
+- `app/equityfundingsource/lib/borrower/loans/index.ts`
+- `lib/ui--browser--efs/portal/admin/loans.tsx`
+- `lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `docs/business-logic.md`
+- `docs/current_progress.md`
+- `tests/admin-pipeline.test.ts`
+- `tests/portal-table-dialog.test.ts`
+
+Verification:
+
+- `bun test tests/admin-pipeline.test.ts --test-name-pattern "loan disable and TMO-cache orphaning"`
+- `bun test tests/admin-pipeline.test.ts --test-name-pattern "disable actions|loan disable"`
+- `bun test tests/portal-table-dialog.test.ts --test-name-pattern "admin loan dialogs use PortalModal"`
+- `bun test tests/admin-deal-publish-gate.test.ts`
+- `bun run cf:d1:migrate:local`
+- `make check` — 1,142 tests passed, app build passed, worker build passed.
+- `make deploy` — final deploy succeeded with no pending migrations.
+- `bun run cf:d1:migrations:list:remote` — no migrations to apply.
+- `curl /` returned `200`; `curl /admin` returned `303` through Access.
+- Remote D1 schema query confirmed the audit table and delete-prevention triggers.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for this repo.
+
+Confidence: high for preventing future hard deletes through these app/DB paths. It does not prove the historical missing rows were caused by one specific actor because the durable app audit table was not present then.
+
+Escalation: none.
+<!-- agent:boundary:44b5ab1f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,6 +151,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~Could the delete event have occured from a TMO sync bug?~~
+- We should log all web requests, api calls, migrations, etc. in the application logs.
+- ~~No record should be deleted, only disabled. Create a migration. The durable app audit table should be deployed. Do we have sufficient logging to track deletion events? The delete borrower should not cascade. No deleted records. Only disabled records. We need a trail.~~ — auto-struck: answered this cycle (#ftstrike) 
 <!-- /agent:queue -->
 
 ## Backlog

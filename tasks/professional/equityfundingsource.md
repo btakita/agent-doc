@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,37 @@ complete
 Compacted content:
 ❯ - Archived 4 response topic(s): Available Deals missing; audit rows + due-diligence packet; were the two Available Deals deleted?; 1 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:246bca0c -->
+
+### Re: production deletion logs — gpt-5
+
+> **Queue prompt:**
+>
+> Look in the production logs. Are there any deletion events that occurred in the production logs?
+
+Yes, but only one clear domain-level deletion event showed up, and it is older than the two missing Available Deals: production `tmo_cache_change_logs` has one `operation='deleted'` row for `entity_type='loan'`, `source_id='TST042'`, `mode='efs'`, created at `2026-06-08 15:08:43 UTC`.
+
+For the two missing Available Deals we have been tracing (`FTM631` and `GQI751`), I did not find a production log record proving that either one was deleted. The stronger evidence is still that their EFS-local `loans` rows are gone while TMO cache still has active `Application Received` loan records for them.
+
+What I found in production logs/audit sources:
+
+- App DB fallback logs: `loan_activity_logs` has no rows matching delete text/kinds. The newer durable `audit_logs` table is not present in production yet (`no such table: audit_logs`), so it could not have preserved the missing-row deletion evidence.
+- TMO cache change log: exactly one delete event exists in the current cache log set: `TST042` at `2026-06-08 15:08:43 UTC`.
+- Cloudflare account audit logs: in the `2026-06-20T00:00:00Z` to `2026-06-22T23:30:00Z` window, `raw_method=DELETE` returned one Cloudflare control-plane event: `Delete script secret` for the Worker, not a D1/app row deletion.
+- Cloudflare D1 audit logs: cursor pagination over `resource_product=d1` scanned 350 D1 API query audit rows from `2026-06-20T02:31:27.650Z` through `2026-06-22T23:06:24.279Z`. Thirteen were write-bearing (`changed_db`/`changes`/`rows_written`), but Cloudflare audit payloads do not include the SQL body, so those cannot be classified as delete vs insert/update from audit logs alone. These are Cloudflare API/D1 query audit records, not necessarily Worker-internal D1 calls.
+- Worker logs: live `wrangler tail` works and captured a read-only `GET /admin/pipeline` request, but historical persisted Worker log queries through Workers Observability returned zero events for the checked windows. Cloudflare docs distinguish real-time logs from stored Workers Logs: real-time logs do not store history, while Query Builder searches stored Workers Logs. Sources: https://developers.cloudflare.com/workers/observability/logs/real-time-logs/ and https://developers.cloudflare.com/workers/observability/query-builder/ . Cloudflare Audit Logs are account/API/dashboard action logs, not app-domain audit logs: https://developers.cloudflare.com/fundamentals/account/account-security/audit-logs/ .
+
+So the direct answer is: yes, production has one recorded loan deletion event, `TST042` on June 8. No, I did not find a production deletion log for the two missing Available Deals (`FTM631`, `GQI751`). The absence is not definitive because the durable app audit table is not deployed in production and the historical Worker log query path is returning no stored invocation events.
+
+Changed paths: none outside the agent-doc session document; no EFS code or production data was changed.
+
+Commands: `agent-doc reset --from-current ...`; `agent-doc preflight ...`; `agent-doc plan`; `tsift status`; `tsift status --fix`; `tsift --envelope session-review ...`; Cloudflare Observability API checks via `bun -e`; Cloudflare Audit Logs API checks via `bun -e`; `bun ./bin/cf-wrangler.ts tail -c ../../wrangler.toml --format json`; read-only `curl` to `/admin/pipeline`; read-only `bun ./bin/cf-wrangler.ts d1 execute ...` queries against `audit_logs`, `loan_activity_logs`, `tmo_cache_change_logs`, and `sqlite_master`; targeted `rg`/`sed` review of the delete handlers and TMO delete helper.
+
+Verification: read-only production D1 queries returned one `tmo_cache_change_logs.operation='deleted'` row (`TST042`, `2026-06-08 15:08:43 UTC`), zero delete-matching `loan_activity_logs` rows, no production `audit_logs` table, one Cloudflare control-plane `DELETE` event for a Worker secret, and 13 D1 write-bearing account audit events that lack SQL bodies. Live Worker tail was verified with a fresh `/admin/pipeline` request; historical persisted Worker log queries returned zero rows.
+
+Confidence: medium. The observed log evidence is concrete, but Cloudflare's historical Worker log query path did not return stored app request events, and production lacks the durable `audit_logs` table that would make this attribution high-confidence.
+
+Escalation: none.
+<!-- agent:boundary:ad8893b6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,7 +88,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Look in the production logs. Are there any deletion events that occurred in the production logs?
 <!-- /agent:queue -->
 
 ## Backlog

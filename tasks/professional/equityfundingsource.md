@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -33,47 +33,35 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260623-213216.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260623-215335.md`*
 
 Compacted content:
+❯ - Archived 1 response topic(s): Email reply visibility and realtime message updates
+❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
-### Re: Email reply visibility and realtime message updates — gpt-5
-
-> **Queue prompt:**
->
-> ~~The email replies to a message did not show up in the messages.~~ — answered this cycle (#ftstrike)
+### Re: Queue drain after email reply visibility closeout — gpt-5
 
 > **Queue prompt:**
 >
-> ~~Ensure message updates are realtime.~~ — answered this cycle (#ftstrike)
+> Ensure message updates are realtime.
 
-Fixed inbound email replies for lender account/deal threads so they append through the same visible message repositories the current panels read, while preserving the existing `messages` dual-write mirror for the unification cutover. Successful inbound appends still notify the counterparty and now have regression coverage proving the portal realtime Durable Object gets a message tick.
 
-Changed paths:
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/messages/inbound.ts`
-- `src/equityfundingsource-dev/tests/msgmail3-inbound-unified.test.ts`
-- `src/equityfundingsource-dev/prds/message-email-roundtrip.md`
+> **Queue prompt:**
+>
+> ~~The email replies to a message did not show up in the messages.~~ — already answered by the committed EFS fix and closeout above (#ftstrike)
 
-Verification:
-- `bun test tests/msgmail3-inbound-unified.test.ts tests/portal-messages-realtime.test.ts tests/lender-account-messages.test.ts tests/msg-unify4-lender-cutover.test.ts` — 26 pass / 0 fail.
-- EFS `git diff --check` — clean.
-- EFS `make check` — passed: 1,164 tests pass / 0 fail, plus app and Worker builds.
-- Parent `make check` — passed.
-- EFS `gh run list --workflow CI --limit 1` — no workflow named `CI` found.
-- Parent `gh run list --workflow CI --limit 1` — no workflow named `CI` found.
+> **Queue prompt:**
+>
+> ~~Ensure message updates are realtime.~~ — already answered by the committed EFS fix and closeout above (#ftstrike)
 
-Commits pushed:
-- EFS `08810e9 fix(messages): show inbound lender replies in message threads`
-- Parent `63806f887 chore: update equityfundingsource submodule`
+No additional code changes were made in this drain cycle. The implementation remains EFS `08810e9`, with parent submodule pointer `63806f887`; the session closeout was committed as `612871564` after repairing stale agent-doc sidecar state.
 
-Not deployed; the active preset was `#spec-test-commit-push`, not deploy.
+Verification remains unchanged: focused Bun tests passed, EFS `make check` passed, parent `make check` passed, and both EFS/parent `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
 
 Escalation: none.
 
 Confidence: high.
-- Archived 7 response topic(s): TMO sandbox check and LSS wrapper revert; TMO lender-account LOS link and sync; Deploy; 4 more
-- Prior summary/context: prior compacted content: Archived 17 response topic(s): Advance Lender TMO sync action; Advance Lender TMO sync actio...
-<!-- agent:boundary:6e1b281d -->
+<!-- agent:boundary:74e738ee -->
 <!-- /agent:exchange -->
 ###
 <!--

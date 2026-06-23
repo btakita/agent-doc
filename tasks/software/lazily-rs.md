@@ -124,7 +124,34 @@ impl<S: PartialEq + Clone + 'static, E: 'static> Machine<S, E> {
 **Where `StateTransitions` would win:** nowhere I can find. It names the transition table, not the entity; `let m = StateTransitions::new(...)` does not read as constructing a stateful object. I'd rule this one out regardless.
 
 **My call:** keep `Machine`. If you'd prefer `StateMachine` for discoverability/parity with other Rust FSM crates, that's a defensible override — say the word and I'll run the rename through spec + tests + build + install + commit + push under the `#spec-test-build-install-commit-push` preset (touches `src/state_machine.rs`, `src/lib.rs`, `tests/state_machine.rs`, doc-test). Default action this cycle: **none**.
-<!-- agent:boundary:c05bd03e -->
+
+### Re: rename to `StateMachine` — done — glm-5.2
+
+> **Queue prompt:** Rename to StateMachine.
+
+Executed the full `#spec-test-build-install-commit-push` cycle.
+
+**Touch sites (4 files, +20/-20):**
+- `src/state_machine.rs` — `pub struct StateMachine<S, E>`, `impl`, doc comments, doc-test example.
+- `src/lib.rs` — `pub use state_machine::StateMachine;` (crate-root export is `lazily::StateMachine`).
+- `tests/state_machine.rs` — imports + 11 use sites across all FSM tests.
+- `SPEC.md` — `### State Machine` section: type sig, code block, API table row, threading note.
+
+Test function names (`machine_transitions_through_all_states`, `machine_rejects_invalid_transition`, …) kept as-is — they use `machine` as a common-noun subject, not a type reference.
+
+**Verification:**
+- `cargo fmt --check` — clean.
+- `cargo clippy --all-features --all-targets -- -D warnings` — clean.
+- `cargo test --all-features` — all suites green, including the renamed doc-test `state_machine::StateMachine (line 32)` and all 11 FSM integration tests.
+- `cargo build --all-features` — clean. (`cargo install` skipped: lazily is a library crate, no binaries; `cargo build --all-features` is the install-equivalent.)
+- `make check` — green except the known environmental `benchmark-check` (`#lzbenchbudget`: `target/criterion` has no Criterion estimates for thread-safe suites; this rename touches zero benchmarked code, same exoneration as the prior `Machine` introduction cycle).
+
+**Commits + push (executed):**
+- lazily-rs submodule `2948b78` (`refactor: rename Machine -> StateMachine`) → `lazily-hub/lazily-rs` main (`54439b5..2948b78`).
+- superproject `cb34daaca` (`chore(lazily-rs): bump gitlink for Machine -> StateMachine rename`) → `btakita/agent-loop` main (`788335c03..cb34daaca`).
+
+The module path `state_machine::StateMachine` is mildly redundant as predicted in the prior turn's analysis, but the public surface is `lazily::StateMachine` (crate-root re-export), so the stutter is contained to one line in `lib.rs`. Queue drained.
+<!-- agent:boundary:77dcce82 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -133,6 +160,7 @@ impl<S: PartialEq + Clone + 'static, E: 'static> Machine<S, E> {
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Rename to StateMachine.
 <!-- /agent:queue -->
 
 ## Backlog

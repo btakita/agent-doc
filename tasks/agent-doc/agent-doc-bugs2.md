@@ -78,11 +78,80 @@ Verification:
 - `make tmux-ci`: passed; 7 ignored/live tests passed.
 - Local install: `make install` rebuilt `/home/brian/.cargo/bin/agent-doc` and `libagent_doc.so`; it also marked 1 controller for auto-recycle at the next idle boundary.
 - GitHub Actions CI run `28002487677` for `3a61ce19` was still `in_progress` at the last check, not red.
+- GitHub Actions `CI` for `0d5c5bbd` passed: `make check` and `make tmux-ci` both green.
+- `make install` installed `agent-doc 0.34.38` locally and marked controllers for recycle at idle boundary.
+- `make check` passed locally: 5007 tests passed, 241 skipped; deterministic closeout sim passed.
+- `cargo test -p agent-doc-orchestration idle_queue_context_reset_waits_for_route_submit_to_finish`
+- `cargo test -p agent-doc-orchestration context_clear`
+- `cargo test -p agent-doc-orchestration dispatch_only`
+- `cargo test -p agent-doc-orchestration ready_probe_route_submit_marker`
+- `cargo test -p agent-doc-orchestration route_submit_marker`
+- `cargo fmt`
+- Local parent `main` was already historically divergent from `origin/main`; I avoided force-push and avoided publishing the unrelated local backlog by using a clean temporary worktree for the single fast-forward gitlink update.
+- Parent remote pointer pushed: `d304bc3b5 agent-doc: update dispatch clear fence` to `btakita/agent-loop:main`; `origin/main:src/agent-doc` now points at `0d5c5bbd`.
+- Submodule commit pushed: `0d5c5bbd fix dispatch ready clear interference` to `btakita/agent-doc:main`.
+- Ops proof now distinguishes marker set/clear, ready-probe reason, context-clear marker wait, orphan visible clear wait, and the existing prompt-ready ordering.
+- Idle queue context clear recovery now logs and waits when `/clear` or `/new` is visible or persisted while a route submit marker is active, instead of pressing Enter into the route-owned composer.
+- Ready-probe markers carry reason `dispatch_only_ready_probe` and use a longer TTL than ordinary dispatch-submit markers; ordinary dispatch markers keep the shorter default TTL.
+- `route --dispatch-only` now creates a route-submit-in-flight marker before the startup ready probe, so supervisor/PCP context-reset handling treats the pane as route-owned while prompt readiness is still being established.
+- `src/agent-doc/{README.md,SPEC.md,VERSIONS.md,specs/07-session-tmux-commands.md}`
+- `src/agent-doc/agent-doc-orchestration/src/start/idle_watch.rs`
+- `src/agent-doc/agent-doc-orchestration/src/route/dispatch_only.rs`
+- `src/agent-doc/agent-doc-orchestration/src/route_in_flight.rs`
 
 Confidence: high for the reported failure class. The fix directly addresses the operator correction: an already-idle, controller-proven-ready Codex actor is no longer blocked by a stale startup-log probe.
 
 Escalation: none needed. Remaining live note: the currently serving route-owned supervisor still reported stale until it reaches the idle boundary and processes the auto-recycle marker from `make install`.
-<!-- agent:boundary:acc9dddf -->
+
+### Re: #jbrunclear — gpt-5
+
+> **Queue prompt:**
+>
+> JB `Run Ageent Doc` on equityfundingsource.md stalled...prompt but no submit.
+> ```
+> [sync] recovered live pane %3 for session 62fe1f41 via supervisor pid 140998
+> [sync] recovered live pane %6 for session b26b9957 via supervisor pid 179547
+> resync: purged 1 orphaned stash pane(s)
+> [route] target tmux session: 0
+> [route] latency budget exceeded: phase dispatch_start_proof took 10103ms (budget 10000ms, pane=%3, harness=codex, outcome=unproven_but_accepted)
+> [route] preserved dispatch-start proof snapshot for tasks/professional/equityfundingsource.md pane %3 harness=codex phase=direct_pane_dispatch_start_unproven capture_len=882 capture_hash=5fb74bfdecf6 snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782217842260-direct_pane_dispatch_start_unproven-codex-_3-5fb74bfdecf6.txt editor_attempt_id=1782217830623-7
+> [route] bare codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %3, but no routed submission proof appeared after 10s
+> Error: dispatch-only codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %3 via direct_pane_submit (tmux_text_enter), but only pane-input acceptance proof was available after waiting 10s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle codex prompt or restart the session and reroute again
+> ```
+
+
+Implemented and verified.
+
+Changed paths:
+- `src/agent-doc/agent-doc-orchestration/src/route_in_flight.rs`
+- `src/agent-doc/agent-doc-orchestration/src/route/dispatch_only.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start/idle_watch.rs`
+- `src/agent-doc/{README.md,SPEC.md,VERSIONS.md,specs/07-session-tmux-commands.md}`
+
+Behavior changed:
+- `route --dispatch-only` now creates a route-submit-in-flight marker before the startup ready probe, so supervisor/PCP context-reset handling treats the pane as route-owned while prompt readiness is still being established.
+- Ready-probe markers carry reason `dispatch_only_ready_probe` and use a longer TTL than ordinary dispatch-submit markers; ordinary dispatch markers keep the shorter default TTL.
+- Idle queue context clear recovery now logs and waits when `/clear` or `/new` is visible or persisted while a route submit marker is active, instead of pressing Enter into the route-owned composer.
+- Ops proof now distinguishes marker set/clear, ready-probe reason, context-clear marker wait, orphan visible clear wait, and the existing prompt-ready ordering.
+
+Commits and deployment:
+- Submodule commit pushed: `0d5c5bbd fix dispatch ready clear interference` to `btakita/agent-doc:main`.
+- Parent remote pointer pushed: `d304bc3b5 agent-doc: update dispatch clear fence` to `btakita/agent-loop:main`; `origin/main:src/agent-doc` now points at `0d5c5bbd`.
+- Local parent `main` was already historically divergent from `origin/main`; I avoided force-push and avoided publishing the unrelated local backlog by using a clean temporary worktree for the single fast-forward gitlink update.
+
+Verification:
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration route_submit_marker`
+- `cargo test -p agent-doc-orchestration ready_probe_route_submit_marker`
+- `cargo test -p agent-doc-orchestration dispatch_only`
+- `cargo test -p agent-doc-orchestration context_clear`
+- `cargo test -p agent-doc-orchestration idle_queue_context_reset_waits_for_route_submit_to_finish`
+- `make check` passed locally: 5007 tests passed, 241 skipped; deterministic closeout sim passed.
+- `make install` installed `agent-doc 0.34.38` locally and marked controllers for recycle at idle boundary.
+- GitHub Actions `CI` for `0d5c5bbd` passed: `make check` and `make tmux-ci` both green.
+
+Confidence: high. The remaining risk is live-editor timing variance, but the route ownership window is now represented by a durable marker with reason-specific TTL and covered by unit/integration and CI tmux proof.
+<!-- agent:boundary:d0c2d072 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -138,8 +207,20 @@ resync: purged 1 orphaned stash pane(s)
 Error: dispatch-only codex reopen refused to inject into pane %6 for tasks/agent-doc/agent-doc-bugs2.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
 ```
 ---
-- ~~Extending the timeout is not the solution. The panes were up is less than 2s. Codex was running and idle. I am able to use Codex manually. This is an agent-doc dispatch bug.~~
-- do [#fcccap]
+JB `Run Ageent Doc` on equityfundingsource.md stalled...prompt but no submit.
+```
+[sync] recovered live pane %3 for session 62fe1f41 via supervisor pid 140998
+[sync] recovered live pane %6 for session b26b9957 via supervisor pid 179547
+resync: purged 1 orphaned stash pane(s)
+[route] target tmux session: 0
+[route] latency budget exceeded: phase dispatch_start_proof took 10103ms (budget 10000ms, pane=%3, harness=codex, outcome=unproven_but_accepted)
+[route] preserved dispatch-start proof snapshot for tasks/professional/equityfundingsource.md pane %3 harness=codex phase=direct_pane_dispatch_start_unproven capture_len=882 capture_hash=5fb74bfdecf6 snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782217842260-direct_pane_dispatch_start_unproven-codex-_3-5fb74bfdecf6.txt editor_attempt_id=1782217830623-7
+[route] bare codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %3, but no routed submission proof appeared after 10s
+Error: dispatch-only codex reopen for tasks/professional/equityfundingsource.md was accepted in pane %3 via direct_pane_submit (tmux_text_enter), but only pane-input acceptance proof was available after waiting 10s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle codex prompt or restart the session and reroute again
+```
+---
+- ~~Extending the timeout is not the solution. The panes were up is less than 2s. Codex was running and idle. I am able to use Codex manually. This is an agent-doc dispatch bug.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do [#fcccap]~~
 - do [#fccsup]
 - do [#fccendpoint]
 - do [#fccforce]
@@ -150,6 +231,7 @@ Error: dispatch-only codex reopen refused to inject into pane %6 for tasks/agent
 - do [#fccsave]
 - do [#fccreconnect]
 - do [#fccaudit2]
+- do [#jbrunclear]
 <!-- /agent:queue -->
 <!--
 - It does not seems like the JB `Run Agent Doc` submit retries are being applied correctly. Still does not submit.
@@ -181,7 +263,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#jbrunclear] #agent-doc-bug Fix the remaining JetBrains Run Agent Doc `/clear` interference: when an editor-initiated route is pending or a recovered pane is still booting, supervisor/PCP context-reset handoff must not leave `/clear` or `/new` in the composer; add ops proof that distinguishes route-submit-in-flight, context-clear marker, prompt-ready ordering, and the 2026-06-23 reboot shape.
 - [ ] [#fcccap] #agent-doc-bug Replace manual-only File Cache Conflict capture (#cyh0) with an automated trigger bundle: on every JB File Cache Conflict/pending-memory event, write a correlated artifact containing the nearest agent-doc command, ops.log `transport=... action=... reason=...`, patch id/editor id, plugin event (`pending`, `kept-memory`, `cancelled`, `saveDocument`), and document hash so the remaining trigger is provable without operator log scraping.
 - [ ] [#fccsup] #agent-doc-bug Close the stale-binary supervisor FCC path: make stale route-owned supervisors recycle at the next safe boundary without requiring a manual `admin recycle`, and add a regression/ops assertion that `content_ours_adoption_refused_stale_supervisor reason=supervisor_binary_stale` cannot recur after install+boundary recycle.
 - [ ] [#fccendpoint] #agent-doc-bug Harden the `apply_template_writeback transport=disk_fallback reason=send_failed editor_endpoint=absent action=editorless_disk_fallback` path: distinguish true no-editor CLI sessions from JB-open-but-missing/stale owner lease, fail closed or restore editor ownership for the latter, and add coverage so an open JB buffer is never externally overwritten as an editorless disk fallback.

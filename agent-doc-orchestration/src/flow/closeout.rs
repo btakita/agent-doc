@@ -578,9 +578,7 @@ impl CloseoutRecoveryState {
         let f = file.display();
         Some(match self {
             Self::Clean => return None,
-            Self::OpenCycle => format!(
-                "finish the response, then `agent-doc finalize {f}` (or `agent-doc write --commit {f}` to absorb an already-visible response)"
-            ),
+            Self::OpenCycle => open_cycle_recovery_command(file),
             Self::MissingResponseBody => format!(
                 "pipe the final response (with `<!-- patch:exchange -->` blocks) through `agent-doc write --commit {f}`, then re-run `agent-doc session-check {f}`"
             ),
@@ -610,6 +608,46 @@ impl CloseoutRecoveryState {
             ),
         })
     }
+}
+
+fn open_cycle_recovery_command(file: &Path) -> String {
+    let f = file.display();
+    let Ok(Some(state)) = crate::cycle_state::load(file) else {
+        return format!(
+            "finish the response, then `agent-doc finalize {f}` (or `agent-doc write --commit {f}` to absorb an already-visible response)"
+        );
+    };
+    let phase = cycle_phase_name(state.phase);
+    let baseline_arg = state
+        .baseline_file
+        .as_deref()
+        .map(|path| format!(" --baseline-file {path}"))
+        .unwrap_or_default();
+    let target = state
+        .queue_task_id
+        .as_deref()
+        .or_else(|| state.prompt_targets.first().map(String::as_str))
+        .map(|target| format!(" target={target:?}"))
+        .unwrap_or_default();
+    let pending = if state.had_pending_mutations
+        || !state.pending_done_ids.is_empty()
+        || !state.pending_gated_ids.is_empty()
+        || !state.pending_kept_open_ids.is_empty()
+        || !state.reaped_pending_ids.is_empty()
+    {
+        " pending_mutations=true"
+    } else {
+        ""
+    };
+    let capture = state
+        .capture_id
+        .as_deref()
+        .map(|capture_id| format!(" capture_id={capture_id}"))
+        .unwrap_or_default();
+    format!(
+        "resume durable checkpoint cycle={} phase={phase}{target}{pending}{capture}; finish the response, then `agent-doc finalize {f}{baseline_arg}` (or `agent-doc write --commit {f}` to absorb an already-visible response)",
+        state.cycle_id
+    )
 }
 
 /// Input facts that are already known at a closeout recovery call site.
@@ -1939,6 +1977,47 @@ mod tests {
                 "command should name the file: {cmd:?}"
             );
         }
+    }
+
+    #[test]
+    fn open_cycle_recovery_command_names_durable_checkpoint() {
+        let base = "---\nsession: test\n---\n\nHi\n";
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        let started = crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        crate::cycle_state::record_turn_checkpoint(
+            &doc,
+            Some("/tmp/baseline.md"),
+            &[":pushpin: do [#durablerecycle]".to_string()],
+            Some("#durablerecycle"),
+            Some("#durablerecycle"),
+        )
+        .unwrap();
+        crate::cycle_state::record_pending_done_ids(&doc, &["#durablerecycle".to_string()])
+            .unwrap();
+        crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+        crate::cycle_state::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(base),
+            Some(base),
+            "response-sha",
+            Some(&started.cycle_id),
+        )
+        .unwrap();
+
+        let cmd = CloseoutRecoveryState::OpenCycle
+            .recovery_command(&doc)
+            .unwrap();
+
+        assert!(cmd.contains("resume durable checkpoint"), "{cmd}");
+        assert!(cmd.contains("phase=response_captured"), "{cmd}");
+        assert!(cmd.contains("target=\"#durablerecycle\""), "{cmd}");
+        assert!(cmd.contains("pending_mutations=true"), "{cmd}");
+        assert!(
+            cmd.contains(&format!("capture_id={}", started.cycle_id)),
+            "{cmd}"
+        );
+        assert!(cmd.contains("--baseline-file /tmp/baseline.md"), "{cmd}");
     }
 
     #[test]

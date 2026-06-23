@@ -10,6 +10,9 @@
 //! - Stores cycle-scoped snapshot/file content hashes so callers can reason
 //!   about exact cycle state instead of inferring from file-size drift or only
 //!   the last `ops.log` line.
+//! - Stores the preflight baseline path, prompt targets, queue head identity,
+//!   pending-operation facts, and response capture hash as one durable turn
+//!   checkpoint so restart/recycle paths can resume or fail closed from disk.
 //! - `start_preflight()` opens a new cycle for a document and overwrites any
 //!   prior committed state for that document.
 //! - `mark_response_captured()` advances the open cycle to `response_captured`
@@ -119,6 +122,10 @@ pub struct CycleState {
     pub required_explicit_backlog_item_count: usize,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub required_plan_reference_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_file: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prompt_targets: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_task_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -380,6 +387,8 @@ pub fn start_preflight_with_task(
         required_backlog_targets: Vec::new(),
         required_explicit_backlog_item_count: 0,
         required_plan_reference_count: 0,
+        baseline_file: None,
+        prompt_targets: Vec::new(),
         queue_task_id: queue_task_id.map(|s| s.to_string()),
         turn_id: turn_id.map(|s| s.to_string()),
         pending_done_ids: Vec::new(),
@@ -457,6 +466,61 @@ pub fn observe_live_queue_heads(file: &Path, doc: &str) -> Result<Option<CycleSt
             changed = true;
         }
     }
+    if changed {
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// `#durablerecycle`: persist the prompt-facing turn checkpoint once preflight
+/// has computed the stable merge baseline and prompt target identity. The
+/// initial `start_preflight` record opens early; this fills the restart-critical
+/// fields that are only known after queue and diff analysis.
+pub fn record_turn_checkpoint(
+    file: &Path,
+    baseline_file: Option<&str>,
+    prompt_targets: &[String],
+    queue_task_id: Option<&str>,
+    turn_id: Option<&str>,
+) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if !state.is_open() {
+        return Ok(Some(state));
+    }
+
+    let normalized_baseline = baseline_file
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(ToOwned::to_owned);
+    let normalized_prompt_targets = normalize_text_list(prompt_targets);
+    let normalized_queue_task_id = queue_task_id
+        .map(normalize_checkpoint_task_id)
+        .filter(|id| !id.is_empty());
+    let normalized_turn_id = turn_id
+        .map(normalize_checkpoint_task_id)
+        .filter(|id| !id.is_empty());
+
+    let mut changed = false;
+    if state.baseline_file != normalized_baseline {
+        state.baseline_file = normalized_baseline;
+        changed = true;
+    }
+    if state.prompt_targets != normalized_prompt_targets {
+        state.prompt_targets = normalized_prompt_targets;
+        changed = true;
+    }
+    if state.queue_task_id != normalized_queue_task_id {
+        state.queue_task_id = normalized_queue_task_id;
+        changed = true;
+    }
+    if state.turn_id != normalized_turn_id {
+        state.turn_id = normalized_turn_id;
+        changed = true;
+    }
+
     if changed {
         state.updated_at = now_secs();
         save(file, &state)?;
@@ -1176,6 +1240,8 @@ fn synthetic_state_with_id(
         required_backlog_targets: Vec::new(),
         required_explicit_backlog_item_count: 0,
         required_plan_reference_count: 0,
+        baseline_file: None,
+        prompt_targets: Vec::new(),
         queue_task_id: None,
         turn_id: None,
         pending_done_ids: Vec::new(),
@@ -1243,6 +1309,28 @@ fn normalized_content_hash(content: &str) -> String {
 
 fn normalize_pending_id(id: &str) -> String {
     id.trim().trim_start_matches('#').to_ascii_lowercase()
+}
+
+fn normalize_checkpoint_task_id(id: &str) -> String {
+    let normalized = normalize_pending_id(id);
+    if normalized.is_empty() {
+        String::new()
+    } else {
+        format!("#{normalized}")
+    }
+}
+
+fn normalize_text_list(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .fold(Vec::new(), |mut acc, value| {
+            if !acc.iter().any(|existing| existing == &value) {
+                acc.push(value);
+            }
+            acc
+        })
 }
 
 fn now_secs() -> u64 {
@@ -1844,6 +1932,46 @@ mod tests {
         assert_eq!(state.turn_id.as_deref(), Some("#reentrant-phase2"));
 
         let loaded = load(&doc).unwrap().expect("state should persist");
+        assert_eq!(loaded.queue_task_id, state.queue_task_id);
+        assert_eq!(loaded.turn_id, state.turn_id);
+    }
+
+    #[test]
+    fn record_turn_checkpoint_persists_resume_identity_and_baseline() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        let prompts = vec![
+            "  do [#DurableRecycle]  ".to_string(),
+            "do [#DurableRecycle]".to_string(),
+            "free text prompt".to_string(),
+        ];
+        let state = record_turn_checkpoint(
+            &doc,
+            Some("/tmp/baseline.md"),
+            &prompts,
+            Some("#DurableRecycle"),
+            Some("#DurableRecycle"),
+        )
+        .unwrap()
+        .expect("state should exist");
+
+        assert_eq!(state.baseline_file.as_deref(), Some("/tmp/baseline.md"));
+        assert_eq!(
+            state.prompt_targets,
+            vec![
+                "do [#DurableRecycle]".to_string(),
+                "free text prompt".to_string()
+            ]
+        );
+        assert_eq!(state.queue_task_id.as_deref(), Some("#durablerecycle"));
+        assert_eq!(state.turn_id.as_deref(), Some("#durablerecycle"));
+
+        let loaded = load(&doc).unwrap().unwrap();
+        assert_eq!(loaded.baseline_file, state.baseline_file);
+        assert_eq!(loaded.prompt_targets, state.prompt_targets);
         assert_eq!(loaded.queue_task_id, state.queue_task_id);
         assert_eq!(loaded.turn_id, state.turn_id);
     }

@@ -755,6 +755,15 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     }
     let prompt_targets =
         crate::flow::session_cycle::prompt_targets_from_changes(&prompt_bearing_changes);
+    let directive_target_ids = crate::session_check::do_directive_target_ids(&prompt_targets);
+    let checkpoint_queue_task_id = directive_target_ids.first().map(String::as_str);
+    crate::cycle_state::record_turn_checkpoint(
+        file,
+        baseline_file.as_deref(),
+        &prompt_targets,
+        checkpoint_queue_task_id,
+        checkpoint_queue_task_id,
+    )?;
     let mut added_diff_lines = prompt_diff_result
         .as_ref()
         .map(|d| crate::prompt_contract::collect_added_diff_lines(d))
@@ -1050,8 +1059,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // lifecycle outcome before closeout. Record them so `session-check` can fail
     // closed when a directive clears the queue but leaves its target `[ ]`.
     let expect_done_or_gate_ids = {
-        let directive_ids = crate::session_check::do_directive_target_ids(&prompt_targets);
-        if directive_ids.is_empty() {
+        if directive_target_ids.is_empty() {
             Vec::new()
         } else {
             // Read the live document once for the open-backlog set.
@@ -1082,7 +1090,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 .iter()
                 .cloned()
                 .collect::<std::collections::HashSet<String>>();
-            filter_expect_done_or_gate_ids(&directive_ids, &open_backlog, &synced_queue_ids)
+            filter_expect_done_or_gate_ids(&directive_target_ids, &open_backlog, &synced_queue_ids)
         }
     };
     if !no_changes {
@@ -1411,6 +1419,72 @@ mod tests {
         // If run() returns Ok(()), the JSON was printed to stdout without error.
         // The test verifies no panic and no error return.
     }
+
+    #[test]
+    fn preflight_persists_durable_turn_checkpoint() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let base = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:abc -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#durablerecycle] Durable recycle\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, base).unwrap();
+        snapshot::save(&doc, base).unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let live = base.replace(
+            "<!-- agent:boundary:abc -->\n",
+            "do [#durablerecycle]\n<!-- agent:boundary:abc -->\n",
+        );
+        std::fs::write(&doc, live).unwrap();
+
+        run(&doc).unwrap();
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        );
+        assert_eq!(state.queue_task_id.as_deref(), Some("#durablerecycle"));
+        assert_eq!(state.turn_id.as_deref(), Some("#durablerecycle"));
+        assert!(
+            state
+                .prompt_targets
+                .iter()
+                .any(|target| target.contains("do [#durablerecycle]")),
+            "prompt targets should persist the active prompt: {:?}",
+            state.prompt_targets
+        );
+        let baseline_file = state
+            .baseline_file
+            .as_deref()
+            .expect("preflight should persist baseline_file in cycle state");
+        assert!(
+            Path::new(baseline_file).exists(),
+            "baseline path should be durable: {baseline_file}"
+        );
+    }
+
     #[test]
     fn preflight_fails_closed_when_required_ssh_doc_mapping_resolves_no_targets() {
         let dir = setup_project();

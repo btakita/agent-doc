@@ -99,7 +99,13 @@ pub struct CycleStateDoctorFacts {
     pub open: Option<bool>,
     pub capture_id: Option<String>,
     pub response_sha256: Option<String>,
+    pub baseline_file: Option<String>,
+    pub prompt_targets: Vec<String>,
     pub queue_task_id: Option<String>,
+    pub turn_id: Option<String>,
+    pub had_pending_mutations: bool,
+    pub pending_done_ids: Vec<String>,
+    pub pending_gated_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -390,7 +396,13 @@ fn read_cycle_state(file: &Path, warnings: &mut Vec<String>) -> CycleStateDoctor
                 last_event: Some(state.last_event),
                 capture_id: state.capture_id,
                 response_sha256: state.response_sha256,
+                baseline_file: state.baseline_file,
+                prompt_targets: state.prompt_targets,
                 queue_task_id: state.queue_task_id,
+                turn_id: state.turn_id,
+                had_pending_mutations: state.had_pending_mutations,
+                pending_done_ids: state.pending_done_ids,
+                pending_gated_ids: state.pending_gated_ids,
             }
         }
         Ok(None) => CycleStateDoctorFacts::default(),

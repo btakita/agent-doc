@@ -2633,6 +2633,8 @@ mod th {
             required_backlog_targets: Vec::new(),
             required_explicit_backlog_item_count: 0,
             required_plan_reference_count: 0,
+            baseline_file: None,
+            prompt_targets: Vec::new(),
             queue_task_id: None,
             turn_id: None,
             pending_done_ids: Vec::new(),

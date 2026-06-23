@@ -77,17 +77,40 @@ Proof:
 - verification: no code/spec changes; no test suite was needed for this prompt-response cycle
 - escalation: none
 - confidence: high
-<!-- agent:boundary:85fe7f87 -->
+
+### Re: #qnodemerge4verify / #arsm / #cancelturnverify — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#1jec]: Works except the prompt still does not submit.
+
+
+For `#qnodemerge4verify`: no, I would not count the `日本 😀` edit as a full verification pass yet. The good part is that ops.log shows the JetBrains reporter did record `#qnodemerge4wire` editor ops for `agent-doc-bugs2` with byte offsets and base hashes, including the current-cycle inserts at offsets `5207` and `5218` with base `363b3b483356`. That proves the non-ASCII typing path is emitting byte-indexed ops.
+
+The missing part is the acceptance proof. The same log window reports `crdt_merge_base source=fallback_overlay_projection_mismatch`, and I did not find an `editor_ops_for_base` acceptance marker for this document/cycle. Since the backlog item explicitly requires accepted base-matched ops, not just safe fallback behavior, `#qnodemerge4verify` stays open.
+
+For `#arsm`: agreed, this is not verified. The recent log only shows `go_queue_mirror_deferred id=#arsm reason=operator_verify`, and I do not see the required `postcommit_exchange_reconciled reason=stale_editor_exchange` plus a clean next-cycle `postcommit_worktree_check match=true` proof for this prompt. The visible symptom you reported, a free-text queue item left open, means the item remains failed/open rather than done.
+
+For the earlier `#cancelturnverify` prompt: I found and fixed the JetBrains menu issue. `Cancel Turn` was registered in `ToolsMenu`, `EditorPopupMenu`, and `ProjectViewPopupMenu`, but it was missing from the custom Agent Doc popup list. I added `AgentDoc.CancelTurn` to `AgentDocPopupAction.PRIMARY_ACTION_IDS`, added test coverage, bumped the JB plugin to `0.2.178`, built the signed and unsigned zips, committed, and pushed both the submodule commit and the superproject pointer. The remaining `#cancelturnverify` step is only operator install/live verification.
+
+Proof:
+- changed_paths: `src/agent-doc/editors/jetbrains/gradle.properties`, `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/AgentDocPopupAction.kt`, `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/AgentDocPopupActionTest.kt`, superproject `src/agent-doc` pointer, and this session document via `agent-doc finalize`
+- commits: `src/agent-doc` `e73ca1a8` pushed to `btakita/agent-doc`; superproject pointer commit `22766ff40` was pushed, with later agent-doc session commits now ahead in the root history
+- commands: `tsift status`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg`, `sed`, `./gradlew test --tests com.github.btakita.agentdoc.AgentDocPopupActionTest`, `make check`, `make bump-plugin`, `git add`, `git commit`, `git push origin main`, `gh run list --workflow CI --limit 1`, targeted `rg ... ops.log | tail`, `agent-doc session-check`, `agent-doc finalize`
+- verification: focused JetBrains popup test passed; `make check` passed, including 5019 nextest tests plus the medium SimWorld check; `make bump-plugin` built `agent-doc-jetbrains-0.2.178.zip` and `agent-doc-jetbrains-0.2.178-signed.zip`; latest `btakita/agent-doc` CI run `28043989387` was `in_progress` after the push; root `btakita/agent-loop` reported no workflow named `CI`
+- escalation: none
+- confidence: high
+<!-- agent:boundary:3270b984 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: do [#1jec]: Works except the prompt still does not submit.
+- ~~:pushpin: do [#1jec]: Works except the prompt still does not submit.~~
 - :pushpin: do [#fbwireverify]
 - :pushpin: do [#qnodemerge4verify]
 - :pushpin: do [#tb4q]
-- do [#cancelturnverify]: I don't see Cancel Turn in the JB Plugin menu.
+- ~~do [#cancelturnverify]: I don't see Cancel Turn in the JB Plugin menu.~~
 - do [#qcm1verify]: Use the logs to verify.
 - do [#arsm]
 - do [#directchatpb2]

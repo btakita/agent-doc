@@ -93,8 +93,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~The email replies to a message did not show up in the messages.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Ensure message updates are realtime.~~ — auto-struck: answered this cycle (#ftstrike) 
 <!-- /agent:queue -->
 
 ## Backlog

@@ -77,18 +77,18 @@ Proof:
 - verification: no code/spec changes; no test suite was needed for this prompt-response cycle
 - escalation: none
 - confidence: high
-<!-- agent:boundary:59c3697d -->
+<!-- agent:boundary:85fe7f87 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: do [#1jec]
+- :pushpin: do [#1jec]: Works except the prompt still does not submit.
 - :pushpin: do [#fbwireverify]
 - :pushpin: do [#qnodemerge4verify]
 - :pushpin: do [#tb4q]
-- do [#cancelturnverify]
-- do [#qcm1verify]
+- do [#cancelturnverify]: I don't see Cancel Turn in the JB Plugin menu.
+- do [#qcm1verify]: Use the logs to verify.
 - do [#arsm]
 - do [#directchatpb2]
 <!-- /agent:queue -->

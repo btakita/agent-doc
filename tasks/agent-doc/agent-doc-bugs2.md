@@ -139,6 +139,7 @@ No new backlog item is needed from this response.
 - ~~I want to have a backbone for all state. We should keep the Cycle State Machine. But for the rest of the state would any be a good match?~~
 - ~~:round_pushpin: do [#statebb1]~~
 - Fix Insufficient IPC Proof issues.
+- Implement state backbone /home/brian/work/btakita/agent-loop/src/agent-doc/specs/13-state-backbone.md. Add additional state machines for other state domains.
 - do [#advr03]
 - do [#advr04]
 - do [#advr05]

@@ -81,7 +81,36 @@ Delivered plan Phase 3 (`tasks/software/plan-lazily-shmblob-parity.md`): a share
 **Queue bookkeeping:** `#bagt` (`#lzshmblobconf`) → DONE. Plan `plan-lazily-shmblob-parity.md` fully delivered (all 3 phases). No new backlog item — the parity work is complete. Queue drained.
 
 Note: none of lazily-spec/py/rs/zig has a `CI` workflow — local evidence stands. Carried-over `semantic_completion_match` on `#h6qb` unchanged (operator-only e2e; agent slice `#lzwebrtcwire` DONE — left gated).
-<!-- agent:boundary:f516da46 -->
+
+
+
+```text
+ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=2ff1a924-5e0a-43f5-9ad3-847a30791527 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=9539 candidate_hash=2a8c0dab4676a4f190ffe10c0a704ecb0184ecbad0a9eaf680e3e73755a896c5 content_ours_len=10589 content_ours_hash=e34f1bb73eae2d8afa8d9daf56400fc0063450452b7b3c8795c87074b11fb721 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782322288024
+```
+
+### Re: blog post — the other agent-doc State Machines — DONE — glm-5.2
+
+> **Queue prompt:**
+>
+> Please update the …/2026-06-23-lazily-state-machine-cycle-state.md post to include the other State Machines setup in agent-doc using lazily-rs.
+
+Added a new section, **"It didn't stop at one machine: the state backbone,"** to the lazily state-machine post. The original covered only `CyclePhaseMachine`; the new section documents the other five `ThreadSafeStateMachine` subdomains in agent-doc's `state_backbone.rs` and how they compose.
+
+**What** (sourced from `src/agent-doc/agent-doc-orchestration/src/state_backbone.rs`):
+- Framed the `state_backbone` architecture: an append-only `EventLedger` of typed `StateFact`s folded by a deterministic `project()` reducer into one `StateBackboneProjection` — crash the controller, replay the facts, rebuild the same state.
+- A table of the five other machines + their phase sets + what each guards: `QueueHeadMachine` (Pending→Selected→Deferred→Completed), `TransportPatchMachine` (the editor-IPC ack/proof/retry/force-disk-fallback ladder), `ActorLifecycleMachine` (Starting→…→Closed), `RouteReadinessMachine` (Unknown→…→DispatchProven; accepted ≠ proven), `ProofGateMachine` (Observed/Disproved mutually sticky).
+- The payoff: six closed subdomains share one consistency model — pure tables, `PartialEq` idempotent terminals, reactive observation, deterministic replay.
+- Placed between "Why not just an enum and a match?" and "Takeaway".
+
+**Verification:** markdown well-formed — 10 balanced code fences, headings ordered, frontmatter intact. No full site build (pure prose + one pipe-table, no new SVGs/code — matches how content commits land here).
+
+**Committed + pushed (full chain — divergence cleared):**
+- `app/briantakita.me` `c508ad1` → pushed `btakita/briantakita.me`.
+- `briantakita.me-dev` `79a714f` → pushed `btakita/briantakita.me-dev`.
+- agent-loop superproject `3d369bbba` → **pushed** `btakita/agent-loop` (`370f156b3..3d369bbba`). The multi-pane divergence that blocked prior cycles cleared, so earlier local-only gitlink commits (lazily-py `5f8c3a6fb`, the conformance bumps `011c2ee8d`) landed on `origin/main` too.
+
+**Queue bookkeeping:** queue head consumed; queue drained. No actionable follow-up — the post update is complete and the gitlink backlog cleared. Carried-over `semantic_completion_match` on `#h6qb` unchanged (operator-only e2e; agent slice `#lzwebrtcwire` DONE — left gated).
+<!-- agent:boundary:ff9b843a -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,55 +33,51 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-040735.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-044836.md`*
 
 Compacted content:
-❯ - Archived 2 response topic(s): Message auto-create + deploy; Lead application note + documents + deploy
+❯ - Archived 5 response topic(s): Lender signup + upload unification; btak.dev+lender3@gmail.com was not sent a verification email. A verification email should be required to login.; agent-doc IPC recovery diagnostic; 2 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
-### Re: Lender signup + upload unification — gpt-5
+### Re: Lender signup first-password flow + deploy — gpt-5
 
 > **Queue prompt:**
 >
-> I signed up as a lender with btak.dev+lender3@gmail.com, but the lender did not show up in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline.
+> In the lender signup form, do not include the password. On submit, send a verification email and notify the lender to check the email. Clicking the verification email will login the lender. Since the lender does not have a password, present a dialog to set the password + confirmation. The dialog cannot be cancelled. The lender must have a password.
 
 > **Queue prompt:**
 >
-> The file upload components in https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=lead&dialog_lead_id=e2a41d4b-250c-4197-a370-4f5b786a5bcf should match the file upload components in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline. Unify the admin file upload components to a single reusable component modeled after https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline.
+> deploy
 
-Implemented, committed, and pushed the admin upload unification. I did not deploy because this queue cycle used `#spec-test-commit-push`, not a deploy preset.
-
-For the lender signup report, the live D1 database has no row for `btak.dev+lender3@gmail.com`. It does have a fresh active lender row for `btak.div+lender3@gmail.com` (`05c518e4-d881-4b8e-8317-e0382a2b2e31`), with `accreditation_status='pending'`, `accredited_confirmed_at=1782274175`, and no linked TMO lender account yet. The lender-pipeline endpoint already selects every `users.role='lender'` row and only left-joins lender requests, so plain public lender signups should appear on the board even before a lender request exists. I added a regression assertion for that join contract and left production data unchanged rather than silently rewriting the email.
+Implemented, committed, pushed, and deployed.
 
 Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/admin_document_upload.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/application_lead_detail.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/lender_documents.tsx`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/routes.ts`
+- `src/equityfundingsource-dev/lib/ui--server--efs/auth/signup.ts`
+- `src/equityfundingsource-dev/lib/ui--server--efs/auth/account_complete.ts`
+- `src/equityfundingsource-dev/tests/auth.test.ts`
+- `src/equityfundingsource-dev/tests/invite-autologin-wiring.test.ts`
 - `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
-- `src/equityfundingsource-dev/prds/investor-pipeline-admin.md`
-- `src/equityfundingsource-dev/tests/admin-application-lead-detail.test.ts`
-- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
-- `src/equityfundingsource-dev/tests/advance-lender-documents.test.ts`
-- `src/equityfundingsource-dev/tests/multi-upload.test.ts`
+- `src/equityfundingsource-dev/docs/deploy.md`
 
 What changed:
-- Added reusable `AdminDocumentUploadField`, modeled on the Lender Pipeline per-requirement uploader: compact `FileDropZone`, stretched icon upload button, busy state, and multi-file ready label.
-- Switched both Lender Pipeline per-requirement uploads and Lead Documents per-type uploads to that shared component.
-- Updated PRDs and source-level tests so lead typed uploads stay aligned with the lender-pipeline upload UI.
-- Added lender-pipeline regression coverage that the endpoint remains user-row based and does not require an inner `lender_requests` join, which would hide ordinary public lender signups.
+- Lender signup no longer renders or accepts a password; it creates the lender with an empty `password_hash`, sends the one-time verification/sign-in email, and redirects to `/login/email` with the existing check-your-email notice.
+- The email verification link signs the lender in, marks the account verified, then routes first-time no-password users to `/account/complete`.
+- `/account/complete` is now presented as a required dialog-style page with password + confirmation fields and no cancel path; the existing portal guard still prevents no-password, non-SSO users from bypassing it.
+- PRD and deploy smoke docs now describe the no-password lender signup and first-password completion flow.
 
 Verification:
-- Remote D1 read-only checks for `btak.dev+lender3@gmail.com`, `btak.div+lender3@gmail.com`, recent lenders, and the lender request rows completed successfully.
-- `bun test tests/advance-lender-documents.test.ts tests/admin-application-lead-detail.test.ts tests/admin-investor-pipeline.test.ts tests/multi-upload.test.ts tests/admin-pipeline.test.ts` — passed, 185 tests / 0 failures. The digest flagged `error: d1 down`, the expected non-fatal outbox fixture in `admin-pipeline.test.ts`.
 - `git diff --check` — passed.
-- `make check` — passed, 1175 tests / 0 failures plus app and Worker builds. The digest again flagged only the expected `error: d1 down` fixture.
+- `bun test tests/auth.test.ts tests/invite-autologin-wiring.test.ts tests/email-login.test.ts` — passed, 55 tests / 0 failures.
+- `make check` — passed, 1179 tests / 0 failures, app build, and Worker build. The known non-fatal `error: d1 down` fixture in `admin-pipeline.test.ts` still logs during the suite.
 - `gh run list --workflow CI --limit 1` in both EFS and parent repos — no workflow named `CI` exists.
+- Deploy precheck: remote D1 had pending `0108_user_email_verification.sql`; D1 info succeeded and Time Travel bookmark was current (`000004fc-00000000-00005094-126f333ecd092309d180791d62a89754`).
+- `make deploy` — passed; applied migration `0108_user_email_verification.sql` and deployed Worker version `77deacf5-86ec-4093-8910-055d8ea7e0ac` to `https://equityfundingsource.brian-takita.workers.dev`.
+- Post-deploy: remote migrations report `No migrations to apply`; homepage returns HTTP 200; live `/signup?role=lender` returns HTTP 200, includes `Send Verification Email`, and does not include `signup-password`.
 
 Commits:
-- EFS submodule: `2a4d4baca827a7e5384a0feb475b69fe52a04114` (`feat(admin): share typed document upload field`), pushed to `equityfundingsource-dev/main`.
-- Parent submodule pointer: `395e93199` (`chore: update equityfundingsource submodule`), pushed to `agent-loop/main` from a clean temporary `origin/main` worktree so unrelated local parent commits were not published.
-
-I left unrelated dirty parent-worktree files and unrelated local parent commits untouched. The EFS submodule worktree is clean.
+- EFS submodule: `f5ffc86` (`fix(auth): require lender password after email verification`), pushed to `equityfundingsource-dev/main`.
+- Parent gitlink: `a9d9cd1af` (`chore: update equityfundingsource submodule`), pushed to `agent-loop/main` from a temporary `origin/main` worktree so unrelated local parent commits/files were not published.
 
 Escalation: none.
 Confidence: high.
@@ -89,78 +85,11 @@ Confidence: high.
 Suggested commit message:
 
 ```txt
-feat(admin): share typed document upload field
+fix(auth): require lender password after email verification
 
-Unify the Lead Documents and Lender Pipeline per-type document upload rows behind a shared admin upload field, keeping the compact drop-zone plus icon-button behavior consistent across admin workflows. Updates PRDs and source-level regression tests for lead uploads, lender-pipeline signup visibility, and multi-file upload coverage.
+Remove password collection from public lender signup, send the existing email verification/sign-in link, and force verified no-password lenders through account completion before the portal. Updates auth regression coverage, PRD requirements, and deploy smoke docs.
 ```
-❯ **IPC proof issue dogfood log**
-
-❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
-
-❯ Issue class: `ipc_proof_insufficient`
-❯ Affected component: editor IPC / writeback
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=3ad9fa06-a357-41a7-b899-a964154331c5 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782274306691
-```
-
-### Re: btak.dev+lender3@gmail.com was not sent a verification email. A verification email should be required to login.
-
-> **Queue prompt:**
->
-> btak.dev+lender3@gmail.com was not sent a verification email. A verification email should be required to login.
-
-
-Implemented email verification gating for public portal auth.
-
-- Public borrower/broker/lender signup now creates the account without a session, sends a one-time verification/sign-in link, and redirects to the email-link page.
-- Password login now verifies the password first, then blocks unverified public accounts with a 403 and sends/resends a verification link instead of creating a session.
-- Consuming email-login, invite-login, password-reset, or Access/Google flows stamps `users.email_verified_at`; existing users are backfilled verified by migration `0108_user_email_verification.sql`.
-- Updated auth/email-link tests, fixtures, and the lending portal PRD.
-
-Verification:
-- Focused auth/provisioning tests passed.
-- `git diff --check` passed.
-- `make check` passed: 1179 tests, app build, and Worker build.
-- `gh run list --workflow CI --limit 1` in both EFS and parent reported no workflow named `CI`.
-
-Pushed:
-- EFS: `95a8b0a` (`feat(auth): require email verification before login`)
-- Parent gitlink: `7d4a14593` (`chore: update equityfundingsource submodule`)
-
-
-
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=30bbc545-e4a1-4991-89ea-0cb196af9028 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782275050553
-```
-
-### Re: agent-doc IPC recovery diagnostic
-
-> **Queue prompt:**
->
-> ~~The file upload components in https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=lead&dialog_lead_id=e2a41d4b-250c-4197-a370-4f5b786a5bcf should match the file upload components in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline. Unify the admin file upload components to a single reusable component modeled after https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline.~~ — auto-struck: answered this cycle (#ftstrike) 
-
-
-No product task was requested in this follow-up cycle. The preflight target is the IPC proof diagnostic left by the previous closeout recovery; the verification-email prompt was already answered and committed in `4cf086d4e`, and the visible queue is fully struck.
-
-No additional backlog item applies.
-
-### Re: agent-doc recovery closeout
-
-No remaining queue prompt is active. This cycle only reflected the IPC recovery marker after the previous retained-response repair; the queue is drained and the verification-email work is complete.
-
-
-
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=ee45284c-7fdc-46d3-9dcf-3814907966e7 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782275972625
-```
-### Re: agent-doc recovery drift closeout
-
-The remaining session-document drift is only agent-doc recovery bookkeeping from the IPC proof loop. The verification-email task is complete, the queue is drained, and no product follow-up remains active.
-
-<!-- agent:boundary:2f6144fa -->
+<!-- agent:boundary:777d8f5f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -180,6 +109,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~In the lender signup form, do not include the password. On submit, send a verification email and notify the lender to check the email. Clicking the verification email will login the lender. Since the lender does not have a password, present a dialog to set the password + confirmation. The dialog cannot be cancelled. The lender must have a password.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

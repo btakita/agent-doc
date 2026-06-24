@@ -342,7 +342,7 @@ feat(admin): add message dialog keyboard navigation
 
 Add keyboard navigation to the admin Messages dialog so Up/Down from search moves between conversations, Enter focuses the composer, and Escape returns from the composer to search. Covers the contract in the admin pipeline regression test and deploys the Worker.
 ```
-<!-- agent:boundary:55086c0d -->
+<!-- agent:boundary:4138c41d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -362,8 +362,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- In Admin message dialog: While the search input is focused, support Up/Down arrow keys to select previous/next message. Enter will focus on the conversation input. While in the conversation input, Esc will focus on the search input.
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

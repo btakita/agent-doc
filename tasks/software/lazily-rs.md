@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -60,7 +60,7 @@ Compacted content:
 **Closeout note:** editor-IPC for this file is wedged (`live_prompt_drift_after_preflight`, recurring across cycles); closed out via `--force-disk`. The struck queue head is answered; backlog/review unchanged (4 operator-drive review items, 2 icebox spikes — all genuinely operator/external-gated, none agent-drainable).
 
 Queue drained.
-<!-- agent:boundary:133ff806 -->
+<!-- agent:boundary:2e3e0e54 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,6 +69,7 @@ Queue drained.
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- The diagrams are not visible in dark mode.
 <!-- /agent:queue -->
 
 ## Backlog

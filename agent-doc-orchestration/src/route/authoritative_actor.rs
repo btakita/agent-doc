@@ -67,10 +67,11 @@ pub(crate) fn load_authoritative_actor_binding(
             return Ok(None);
         }
         if frontmatter_harness_changed {
+            let queue_paused = crate::queue_continuation::document_queue_controller_paused(file);
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "route_authoritative_actor_harness_mismatch_deferred file={} pane={} stored_harness={} expected_harness={} generation={} supervisor_health={} actor_state={} frontmatter_harness_changed=true action=defer_to_boundary_restart",
+                    "route_authoritative_actor_harness_mismatch_deferred file={} pane={} stored_harness={} expected_harness={} generation={} supervisor_health={} actor_state={} queue_paused={} frontmatter_harness_changed=true action=defer_to_boundary_restart",
                     file.display(),
                     record.pane_id,
                     record.harness,
@@ -78,13 +79,16 @@ pub(crate) fn load_authoritative_actor_binding(
                     record.generation,
                     supervisor_health_label(runtime.health),
                     effective_state.as_str(),
+                    queue_paused,
                 ),
             );
+            let recovery_hint = defer_recovery_hint(&runtime, effective_state, queue_paused, file);
             anyhow::bail!(
-                "authoritative actor record for {} is running harness {}, but frontmatter now resolves to {}; deferring to boundary agent restart instead of replacing live pane",
+                "authoritative actor record for {} is running harness {}, but frontmatter now resolves to {}; deferring to boundary agent restart instead of replacing live pane{}",
                 file.display(),
                 record.harness,
-                expected_harness
+                expected_harness,
+                recovery_hint,
             );
         }
         anyhow::bail!(
@@ -151,6 +155,47 @@ pub(crate) fn mismatched_authoritative_actor_can_be_replaced(
 ) -> bool {
     runtime.health != SupervisorHealth::Healthy
         || actor_state == crate::session_actor::ActorState::Closed
+}
+
+/// Build the operator-actionable recovery suffix for the `defer_to_boundary_restart`
+/// bail (`#actorswitchdefer` Part A). Examines supervisor health, queue pause state,
+/// and actor state to produce the correct recovery path instead of a dead-end bail.
+fn defer_recovery_hint(
+    runtime: &SupervisorRuntime,
+    actor_state: crate::session_actor::ActorState,
+    queue_paused: bool,
+    file: &Path,
+) -> String {
+    let recovery_cmd = format!(
+        "agent-doc session restart-supervisor {}",
+        file.display()
+    );
+    if queue_paused || runtime.health == SupervisorHealth::Unreachable
+        || runtime.health == SupervisorHealth::NoSocket
+    {
+        let blocker = if queue_paused {
+            "queue is paused"
+        } else {
+            "supervisor is unreachable"
+        };
+        format!(
+            ". {} — the boundary restart will not fire until it is healthy and resumed. Run: {}",
+            blocker, recovery_cmd
+        )
+    } else if actor_state == crate::session_actor::ActorState::Busy
+        || actor_state == crate::session_actor::ActorState::Starting
+    {
+        format!(
+            ". pane is {} (not dispatch-ready) — run: {} --force",
+            actor_state.as_str(),
+            recovery_cmd
+        )
+    } else {
+        format!(
+            ". The supervisor idle-watch will restart the harness at the next idle boundary. To force it now: {}",
+            recovery_cmd
+        )
+    }
 }
 
 fn document_declares_expected_harness(file: &Path, expected_harness: &str) -> bool {

@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -52,6 +52,11 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/
 
 ### Re: IPC proof issue dogfood log — gpt-5
 
+> **Queue prompt:**
+>
+> do [#docdriftfinalize]
+
+
 The IPC proof note is acknowledged. This cycle hit the stale snapshot/CRDT sidecar guard after compaction: finalize refused to write because the snapshot was still much larger than the visible compacted file, so I ran `agent-doc reset --from-current /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` and reran preflight. The recovery rebuilt sidecars from the visible document, reaped the stale resolved `#4v2w` queue head, cleared the queue, and set `queue: stop`.
 
 I added follow-up backlog item `#docdriftfinalize` to extend the existing `#docdriftgrace` plan to this finalize/write refusal path. The current top backlog id is `#docdriftfinalize`.
@@ -62,13 +67,32 @@ Proof:
 - Verification: recovery preflight completed, queue continuation is no longer required, and finalize owns the post-commit `session-check` boundary.
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:8b50696f -->
+- Root `agent-loop` has no workflow named `CI`; its `Agent Doc` run `28083396280` failed before any runner steps started. Both jobs have the GitHub annotation: recent account payments failed or the spending limit needs to be increased, so there are no failed test logs to fix.
+- `agent-doc` CI run `28083363360` for `d5ea2949` was still `in_progress` when I closed this item.
+- Root commit `219ea93b6` (`agent-doc: accept compact summary snapshot rebase`) pushed to `btakita/agent-loop main`.
+- `src/agent-doc` commit `d5ea2949` (`fix: accept compact summary snapshot rebase`) pushed to `btakita/agent-doc main`.
+- `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` marked the controller for recycle at the next idle boundary.
+- Root `make check` passed after the superproject pointer update.
+- `make precommit` passed in `src/agent-doc`.
+- `make install` installed the updated local binary/library and marked controllers for recycle.
+- `make check` passed in `src/agent-doc`.
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture` passed.
+- `cargo test -p agent-doc-orchestration stale_snapshot_reset_drift_ -- --nocapture` passed.
+- Added stream-write positive/negative regressions and updated the FlowCore token budget, `SPEC.md`, and `VERSIONS.md`.
+- Arbitrary `### Session Summary` rewrites without compact markers still fail closed.
+- `guard_no_stale_snapshot_reset_drift` now treats compact-generated `### Session Summary` exchange replacements with compact archive markers as safe historical exchange reductions, so `finalize --stream` can refresh stale pre-compact snapshot/CRDT sidecars instead of refusing and forcing `agent-doc reset --from-current`.
+<!-- agent:boundary:9982411a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- do [#docdriftfinalize]
+---
+JB `Run Agent Doc` blocked
+```
+[route] target tmux session: 0
+Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %2 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input); clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782287179464-direct_pane_protected_prompt_input-codex-_2-af2e4b2fc107.txt
+```
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -97,7 +121,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#docdriftfinalize] [recommended] Extend #docdriftgrace to the finalize/write stream stale-snapshot guard: when a compacted visible file is much smaller than the snapshot but the diff is historical exchange compaction plus resolved queue metadata, auto-rebase sidecars or restart preflight instead of refusing finalize and forcing `agent-doc reset --from-current`. Repro: agent-doc-bugs2.md 2026-06-24 `ipc_proof_insufficient` patch_id=e91d9537, finalize refused snapshot 25160 vs visible 6706 after compact; recovery required manual reset then preflight. Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md.
 <!-- /agent:backlog -->
 
 ## Review

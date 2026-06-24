@@ -129,14 +129,26 @@ Closeout note: this cycle's write hit the `#ipc-crdt-response-drift` bug (CRDT m
 **Root cause:** convergence is free-text-blind when re-annotating/re-inserting manual queue additions — `#qdedupsync` / `#7r2s` (`annotate_manual_queue_additions`) / `#queue-operator-pin-position-lock`. The `do [#id]` heads already get identity dedup; free-text heads do not, so a CRDT/backlog-sync re-emit leaves a visible duplicate.
 
 **Status:** lazily-rs.md's queue is currently clean (duplicates struck/compacted out), so this was a transient symptom — but the convergence gap remains. The fix folds into `#0bmv` (`#qeditrace` — consolidate queue-edit-during-active-turn race plans) plus a free-text dedup guard in convergence. Closing `#jbdupqueue` as verified; no separate implementation item — track the remediation under `#0bmv`.
-<!-- agent:boundary:54b91c55 -->
+
+### Re: #jbrestartbusy triaged — two-part fix (JB `--force` + binary auto-idle) — glm-5.2
+
+> **Queue prompt:**
+> 🚧 JB `Recycle Supervisor` receives a message that the agent is busy even though the opencode terminal is idle. The state needs to be updated to idle once the turn completes...even if the turn did not finalize...
+
+**#jbrestartbusy — triaged, root cause confirmed.** The refusal fires from `session_actor_cmd.rs:2510`. Key finding: the binary **already** supports the escape hatch — that message ends `...or pass --force to interrupt the running turn and restart anyway.` The gap is two parts:
+
+1. **JB-side (quick, operator-installed):** the JetBrains "Restart Supervisor Process" action calls `agent-doc session_restart <FILE>` with **no `--force`**. Since Restart Supervisor is the explicit operator "kick this loose" gesture, the JB action should pass `--force` (the binary honors it). This alone removes the 2-step Interrupt & Restart + confirmation dance. → JB plugin change; **operator will need to install a JB plugin update** (per your earlier note).
+
+2. **Binary-side (deeper, the real ask):** when an OpenCode turn ends *without* finalize (IPC churn / supervisor version mismatch), the supervisor's turn-state stays `alive-busy` even though the live pane is idle. `#opencode-post-turn-false-active` (shipped) already added a bottom-cue idle check for the dispatch path; the symmetric fix is to apply that same idle bottom-cue re-classification in the `session_restart` busy gate so an idle pane is treated as idle regardless of stale supervisor turn-state. Filed as the concrete next implementation step under `#jbrestartbusy`.
+
+Plan `plan-jb-restart-supervisor-busy-refusal.md` already covers hypothesis (1); I'm appending the (2) auto-idle requirement there. Not marking `--done` — this needs the focused implementation cycle + SimWorld proof, and the JB-side half needs your plugin install.
+<!-- agent:boundary:fc2cbf97 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Queue items are duplicated in lazily-rs.md by agent-doc.~~
-- JB `Recycle Supervisor` receives a message that the agent is busy even though the opencode terminal is idle. The state needs to be updated to idle once the turn completes...even if the turn did not finalize. If the agent stops the turn due IPC churn or a Supervisor version mismatch, the state should indicate the agents idle. No need for the extra 2 steps of to press "Interrupt & Restart" + the confirmation.
+- 🚧 JB `Recycle Supervisor` receives a message that the agent is busy even though the opencode terminal is idle. The state needs to be updated to idle once the turn completes...even if the turn did not finalize. If the agent stops the turn due IPC churn or a Supervisor version mismatch, the state should indicate the agents idle. No need for the extra 2 steps of to press "Interrupt & Restart" + the confirmation.
 ---
 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
@@ -222,18 +234,6 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 ```
 ---
 ---
-lazily-rs.md IPC error
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8c56928442bd4b165543ab0aad264d681b41b8898551d10f196018cd15a37304 content_len=11944 content_hash=46b47fdfe5505fb37c9e63df4167cb923df6b4ffc997ecca9009a15979c29a5e doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782339826601
-```
----
----
 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
 resync: pruned 2 stale session(s)
@@ -265,18 +265,27 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
+---
+lazily-rs.md IPC error
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8c56928442bd4b165543ab0aad264d681b41b8898551d10f196018cd15a37304 content_len=11944 content_hash=46b47fdfe5505fb37c9e63df4167cb923df6b4ffc997ecca9009a15979c29a5e doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782339826601
+```
+---
 - do [#npe1]
 - do [#p2j4]
-- ~~Queue items are duplicated in lazily-rs.md by agent-doc.~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#4pdp]
-- ~~do [#mrhqrestore]~~
 - do [#0bmv]
 - do [#actorswitchdefer]
 - do [#ocdrainstall]
 - do [#capproofbg]
 - do [#jbrestartbusy]
 - do [#jbrunhang]
-- ~~do [#jbdupqueue]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

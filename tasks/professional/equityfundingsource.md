@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -135,7 +135,72 @@ Verification:
 Confidence: high.
 Escalation: none.
 
-<!-- agent:boundary:cd0da0fb -->
+
+
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=73e36cb3-2116-441c-94b2-910ed200eaf6 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782323066591
+```
+### Re: Full Application Dialog Focus And Deploy — gpt-5
+
+> **Queue prompt:** From https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, remove the "Open Page" button. Focus on the 1st actionable item that is not the close button...Activity History > View All in this dialog.
+
+Implemented the dialog polish that was accidentally consumed by the prior IPC closeout:
+- Removed the stacked full-application dialog header `Open Page` action.
+- Kept the footer `Open Full Application Page` link available.
+- Added initial focus for the embedded Activity History `View all` button once activity entries render, scoped to the dialog action-nav root and using `preventScroll` before scrolling the section into view.
+- Added source-shape coverage for the removed header action and Activity History initial-focus behavior.
+
+> **Queue prompt:** deploy
+
+Deployed the latest build with `make deploy`. Cloudflare activated Worker version `bc490339-0041-48a5-bf48-1823c1711a39` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Changed paths for the dialog-focus work:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/full_applications.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+
+The deployed build also includes the earlier admin Complete-without-e-signature changes and the pre-existing modified EFS paths already noted in the prior response.
+
+Commands:
+- `bun test tests/admin-pipeline.test.ts tests/admin-full-application-approve-ui.test.ts tests/apply4-full-application-p6.test.ts`
+- `git diff --check`
+- `tsift diff-digest`
+- `make check`
+- `gh run list --workflow CI --limit 1`
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`
+- `bun run cf:d1:info`
+- `bun run cf:d1:time-travel:info`
+- `make deploy`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
+- `curl -s -o /dev/null -w '%{http_code}\n' 'https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6'`
+
+Verification:
+- Focused tests passed: 94 tests, 819 expects.
+- `git diff --check` passed.
+- `make check` passed: 1186 tests, app build, and worker build.
+- Pre-deploy remote D1 migrations: none pending.
+- D1 info succeeded; Time Travel bookmark: `00000509-00000000-00005094-f7cc40fb5e53febfca67cef7da291ced`.
+- `make deploy` applied zero D1 migrations and deployed Worker version `bc490339-0041-48a5-bf48-1823c1711a39`.
+- Post-deploy remote D1 migrations: none pending.
+- Public smoke test returned HTTP `200`.
+- Protected admin pipeline deep link returned HTTP `303` to unauthenticated curl, consistent with admin auth redirect.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in this repository.
+
+Confidence: high.
+Escalation: none.
+
+No git commit was made in `src/equityfundingsource-dev`; the repo-local instructions say not to run `git commit` unless explicitly asked.
+
+Suggested git commit message:
+
+```txt
+fix(admin): focus full application dialog activity action
+
+Remove the stacked full-application dialog's redundant Open Page header action and hand initial dialog focus to Activity History > View all once the embedded detail loads, while keeping the footer full-page link. Includes source-shape coverage and deployed Worker version bc490339-0041-48a5-bf48-1823c1711a39.
+```
+
+<!-- agent:boundary:2a04af02 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -155,9 +220,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, the admin should be able to advance the application by adding the necessary data. The e-signature is optional to advance the application to the Complete step.~~
-- ~~From https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, remove the "Open Page" button. Focus on the 1st actionable item that is not the close button...Activity History > View All in this dialog.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

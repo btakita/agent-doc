@@ -95,27 +95,48 @@ Next concrete follow-up is now `#promptprefixorch1`: fix prompt-prefixed recover
 The prompt-prefixed command and commit lines are recovery evidence from the already-completed route/closeout work, not a new task list. I preserved them in `agent:exchange`, answered them as prior execution evidence, and did not rerun the dry-run orchestration tasks.
 
 This closeout is specifically for `#exchange-prompt-dropped-on-merge`: commit the visible exchange evidence through the binary-owned path so session-check no longer sees those lines as dropped user prompts.
-<!-- agent:boundary:85fa07af -->
+
+### Re: JB Run Agent Doc blocked by protected prompt — gpt-5
+
+> **Queue prompt:** JB `Run Agent Doc` on this document stalled. I recycled + restarted. Now JB `Run Agent Doc` is blocked due to another dispatch.
+>
+> ```text
+> resync: pruned 2 stale session(s)
+> [route] target tmux session: 0
+> Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %1 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input); clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782325177477-direct_pane_protected_prompt_input-codex-_1-1d5c5a3ff075.txt
+> ```
+
+Diagnosed the route snapshot. The pane really contained a drafted Codex composer prompt: `› Implement {feature}`. Refusing dispatch was therefore correct; submitting would have typed over user/draft prompt input.
+
+This item is already covered by the recent `src/agent-doc` fixes:
+- `7585b872` `fix: harden route and closeout diagnostics`
+- `612b1552` `test: cover protected prompt route refusal`
+
+Verification passed now:
+- `cargo test -p agent-doc --bin agent-doc route_sim_protected_prompt_refusal_has_no_dispatch_churn`
+- `cargo test --test finalize_integration finalize_stale_snapshot_blocks_pending_flags_before_mutating_backlog`
+- `cargo test -p agent-doc-orchestration protected_prompt_draft_preview_redacts_and_bounds_latest_draft`
+- `./gradlew test --tests 'com.github.btakita.agentdoc.TerminalUtilTest.protected prompt input route refusal is actionable not persistent failure'`
+
+No code files changed in this cycle; `src/agent-doc` stayed clean. The remaining actionable route proof failures are `#xgdn` and `#sz4a`, with the newer `monsterrodholders.md` Run Agent Doc issue next in queue.
+<!-- agent:boundary:829e5262 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~After the auto-recycle, agent-doc turn did not restart. JB `Run Agent Doc` stalled with no feedback. No prompt. Only an auto-prompt + an auto-clear both without a submit.~~
----
+~~~done
 JB `Run Agent Doc` on this document stalled. I recycled + restarted. Now JB `Run Agent Doc` is blocked due to another dispatch.
 ```
 resync: pruned 2 stale session(s)
 [route] target tmux session: 0
 Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %1 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input); clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782325177477-direct_pane_protected_prompt_input-codex-_1-1d5c5a3ff075.txt
 ```
----
-- What are #next-steps to fix agent-doc bugs?
-- ~~do [#ipcproofcloseout]~~
-- ~~do [#crdtreset1]~~
-- ~~do [#routeblockux1]~~
+~~~
 - [#xgdn]
 - [#sz4a]
+- JB `Run Agent Doc` on monsterrodholders.md did not submit. Please diagnose and fix.
+- What are #next-steps to fix agent-doc bugs?
 - Ensure the VS Code plugin has parity with the JB plugin.
 - For tasks added from dogfooding issues, please add a configuration to select the agent document to write the backlog items to. The default is the current document. For agent-loop configure the document to this document.
 - Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.

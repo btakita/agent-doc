@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -194,7 +194,20 @@ Verification: focused `bun test tests/form-error-standard.test.ts` passed (`9 pa
 Deploy: pre-deploy remote D1 migrations reported no migrations to apply. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `5e30710d-c674-4f4d-9088-fbe170a002f3`. Post-deploy checks: public root returned `HTTP 200`; borrower application URL returned the expected unauthenticated `HTTP 303` login redirect.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:1ec43a2a -->
+
+### Re: Queue Residue Cleanup — glm-5.2
+
+> **Queue prompt:**
+>
+> ~~In the entire form https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 and the lender forms, if there is a validator error on a field, the field should be highlighted.~~ — auto-struck: answered this cycle (#ftstrike)
+
+
+The struck queue head is already answered: the field-validation-highlight feature was implemented, tested, pushed (EFS `cb40d40`), and deployed (Worker version `5e30710d-c674-4f4d-9088-fbe170a002f3`) in the prior cycle. No additional work is needed.
+
+Changed paths this cleanup cycle: none in app code. Verification/deploy evidence remains the prior cycle: focused tests passed (`9 pass / 0 fail`), full suite passed (`1195 pass / 0 fail`), `git diff --check` passed, app + Worker builds passed, post-deploy root returned `HTTP 200`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:4a232f2a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -214,9 +227,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~In the entire form https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 and the lender forms, if there is a validator error on a field, the field should be highlighted.~~
-- ~~deploy~~
-- ~~In the entire form https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 and the lender forms, if there is a validator error on a field, the field should be highlighted.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

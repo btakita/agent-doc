@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -121,7 +121,30 @@ Verification already recorded for the deployed build:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:b5f2f99c -->
+❯ **IPC proof issue dogfood log**
+
+❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+❯ Issue class: `ipc_proof_insufficient`
+❯ Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=2bc9172b-ba36-4731-876a-472e1c00b2bb invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782268950340
+```
+
+### Re: Deploy residue closeout — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Cleared the final deploy residue queue head. No additional deploy was run because this exact deployment already completed in the previous closeout: Worker version `23a232b2-68bd-4ab9-bc68-f12db711b49c` is live, remote D1 reports `No migrations to apply!`, `/` returns `200`, and the admin pipeline/lender-pipeline routes return expected admin-auth redirects `303`.
+
+There were no actionable follow-up items to capture.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:0610c713 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -141,9 +164,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~When I select an application from a borrower such as https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=lead&dialog_lead_id=e2a41d4b-250c-4197-a370-4f5b786a5bcf, and I then open the Message dialog, the borrower conversation should be selected.~~
-- ~~commit + push all uncommitted files.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

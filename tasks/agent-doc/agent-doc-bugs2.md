@@ -86,7 +86,49 @@ Commits:
 - parent repo gitlink: `2f517d881 chore: update agent-doc submodule`
 
 I did not push: the parent repo is already ahead of `origin/main` by 12 commits, so pushing it would publish unrelated existing commits beyond this pointer update.
-<!-- agent:boundary:e5ccbdda -->
+
+### Re: state backbone — gpt-5
+
+> **Queue prompt:**
+>
+> I want to have a backbone for all state. We should keep the Cycle State Machine. But for the rest of the state would any be a good match?
+
+Yes: keep the Cycle State Machine as the one global lifecycle authority, but do not make every other concern part of that FSM. The better backbone for the rest is an append-only typed event log plus deterministic projections, with actor ownership for concurrent runtime state.
+
+In concrete terms:
+
+- Cycle FSM: owns the turn lifecycle only: preflight, plan, execute, finalize, commit, session-check, loop handoff, interrupted/recovered.
+- Event log: records every meaningful state transition as typed facts: `PreflightStarted`, `BaselineSaved`, `QueueHeadSelected`, `EditorAckObserved`, `CommitObserved`, `AgentRestartPerformed`, `CapabilityProofObserved`, `IpcProofInsufficient`, and so on.
+- Projections/reducers: derive the current state from those events: document projection, queue projection, transport projection, supervisor projection, actor readiness projection, proof projection.
+- Actor ownership: one owner mutates each live surface at a time: document writer, supervisor, route/dispatch actor, editor IPC bridge, harness pane actor. Cross-owner coordination happens through messages/events, leases, epochs, and proofs.
+
+That gives us a single durable truth without forcing unrelated axes into one giant state chart.
+
+How I would map the alternatives:
+
+| Alternative | Fit for agent-doc state backbone? | Where it belongs |
+| :--- | :--- | :--- |
+| FSM | Good locally, not globally beyond the cycle | Use for small closed states: transport connection, pane readiness, proof gate status, recycle lifecycle. Avoid one mega-FSM for document + queue + editor + supervisor + git. |
+| Behavior Trees | Weak as durable state, possible as policy | Useful only for recovery/dispatch decision policy if we want inspectable priority/fallback logic. It should read projections and emit commands, not own state. |
+| GOAP | Poor fit | Too much planning machinery for correctness-critical writeback. Agent-doc needs deterministic replay and proof, not emergent plans. |
+| Coroutines | Good for protocols, not durable state | Use for linear handshakes like finalize/writeback, startup proof waiting, or clean-exit restart sequences. Persist progress as events/checkpoints, not hidden coroutine locals. |
+| Event-driven | Strong fit if disciplined | The right foundation is not a loose event bus; it is typed events, append-only storage, idempotent reducers, causation IDs, owner epochs, and replay tests. |
+| MPC | Not a fit | Agent-doc is discrete workflow/state convergence. Continuous optimization would add complexity without helping correctness. |
+
+The short version: **Cycle FSM + event-sourced actor projections** is the state model I would choose. FSMs remain useful as local components, coroutines help express protocol steps, and behavior-tree-like logic may help recovery policy later, but none of those should be the durable backbone for all state.
+
+I also incorporated the corrected prior-cycle closeout shape: the `#advr02` source work stayed at `src/agent-doc` commit `d71bd627`, the parent gitlink was `2f517d881`, and the “changed paths” correction is treated as previous response normalization. In this cycle, the only intended mutation is the session document/backlog response; no source patch is needed.
+
+Follow-up captured: `#statebb1` to define this state backbone explicitly.
+
+Proof:
+- Changed paths: session document/backlog only for this response; `src/agent-doc` stayed untouched.
+- Commands: `sed -n '1,240p' .claude/skills/agent-doc/SKILL.md`; `tsift status`; `agent-doc preflight`; `agent-doc plan`; `git status --short`; `agent-doc orchestrate --help`.
+- Verification: response-only architecture decision; no code tests run.
+- Confidence: high on the state-model recommendation; medium on exact implementation sequencing until we inspect current state modules in `src/agent-doc` for the follow-up.
+- Escalation: none.
+- Push: not pushed; no source changes were made.
+<!-- agent:boundary:7b09dba2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -157,6 +199,7 @@ What are #next-steps to fix bugs?
 - [ ] [#advr17] Advance original #fbwireverify: complete #fbwire/#fullboundary acceptance with slow-ACK no inflight pileup and wedged no-ACK bounded timeout + ERROR marker + playback artifact; add deterministic tmux-ci/sim coverage where possible.
 - [ ] [#advr18] Advance original #qnodemerge4verify: after JB/VS Code plugin install, live-test non-ASCII edit-during-merge around `café 日本 😀`; prove accepted byte-offset editor ops and no mojibake/interleaving, plus automated log checker for `editor_op_recorded` + `editor_ops_for_base`.
 - [ ] [#advr19] Advance original #cyh0: identify and instrument remaining File Cache Conflict trigger by capturing exact action, agent-doc command, and ops marker such as `write_authority action=... transport=disk`; distinguish ack-content, VCS-refresh/save, and editor-IPC convergence surfaces.
+- [ ] [#statebb1] [recommended] Define the agent-doc state backbone: keep the Cycle State Machine as the global lifecycle FSM, add an append-only typed event ledger with deterministic projections for document/queue/transport/proof/supervisor state, and document where local FSMs/coroutines are allowed versus behavior-tree/GOAP/MPC-style policy helpers.
 <!-- /agent:backlog -->
 
 ## Review

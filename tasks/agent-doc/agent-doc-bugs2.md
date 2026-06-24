@@ -278,7 +278,7 @@ For this agent-loop workspace, `.agent-doc/config.toml` now contains `agent_doc_
 The fenced `ipc_proof_insufficient ... live_prompt_drift_after_preflight` block appended by preflight is diagnostic evidence from the stale IPC recovery path, not a new user directive. I handled it by reinstalling the freshly built binary/cdylib and requesting `agent-doc admin recycle` so the route-owned controller can pick up the new build at an idle boundary.
 
 Verification: targeted config/plan/route tests passed; `make check` passed with clippy, 5085 nextest tests, doctests, and the medium closeout sim; latest GitHub Actions CI run `28121997991` was green. I also ran `make install`, which replaced the local binary/cdylib.
-<!-- agent:boundary:ad3fcdd8 -->
+<!-- agent:boundary:bb10df9d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -321,7 +321,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#promptprefixorch1] Fix prompt-prefixed recovery/evidence lines in agent:exchange being classified as user prompt targets and orchestration tasks after interrupted closeout recovery; preserve them as agent evidence or strip prompt markers during recovery.
-- [x] [#xgdn] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%3 actor_generation=596 editor_attempt_id=1782325712508-18 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_only_dispatch_start_proof content_hash=sha256:3251e072b5c1857ba06e9ba613e1004b5eefef103db7003d7dcf7efe0d698ea8]
 <!-- /agent:backlog -->
 
 ## Review

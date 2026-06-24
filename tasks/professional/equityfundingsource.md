@@ -154,7 +154,25 @@ Deploy: `make deploy` succeeded. Remote D1 migrations reported `No migrations to
 No actionable follow-up items are needed from this cycle.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:ba96bae8 -->
+Implemented and deployed the Full Application top advance CTA.
+
+EFS submodule:
+- Commit `888d71c fix(admin): surface full application advance action`
+- Pushed to `origin/main`
+- Deployed to `https://equityfundingsource.brian-takita.workers.dev`
+- Worker Version ID `eb0a41c2-9818-4ab5-b355-410787bebd7f`
+
+What changed: the top Full Application alert now includes the relevant advance action, using the same existing `Mark Complete` or `Accept and Send to TMO` handler/gates as the bottom decision card. It also shows a ready state when blockers are cleared.
+
+Verification passed:
+- Focused tests: `76 pass / 0 fail`
+- Full `make check`: `1191 pass / 0 fail`, app build, Worker build
+- Remote D1: no migrations to apply
+- Smoke: public root `200`, admin deep link `303` behind Access
+- `agent-doc session-check`: clean, queue drained
+
+Parent gitlink commit `8dbf7c171` is local only. I did not push parent `main` because it is already ahead with unrelated local commits/changes; pushing it would publish unrelated work.
+<!-- agent:boundary:2475fc4a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -174,6 +192,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application was "Mark Complete" but is still block on the e-sign ![img_36.png](img_36.png). Make the e-sign optional.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -284,7 +284,21 @@ Verification: targeted config/plan/route tests passed; `make check` passed with 
 This is a binary-owned recovery closeout for the already-applied `#xgdn` queue strike. `#xgdn` was reaped and the queue head is already struck in the working tree; this response exists only to carry that queue-only drift through the normal closeout boundary.
 
 No repo code changed in this recovery response.
-<!-- agent:boundary:dbd306d9 -->
+
+### Re: annotate current in-progress work — gpt-5
+
+Implemented the live `🚧` in-progress annotation.
+
+The queue maintenance pass now marks the first active non-slash queue prompt as `- 🚧 ...`, marks the matching backlog/pending/icebox item after its checkbox, and clears stale markers everywhere else. Slash-command heads such as `/clear` stay literal supervisor handoffs.
+
+The marker is treated as cosmetic in queue identity, priority routing, plan output, Codex stop-hook handling, and closeout consumption, so completed queue entries do not retain `🚧`. Baseline realignment also carries marker-only backlog/pending/icebox convergence to avoid false live-drift blocks.
+
+Verified with targeted regressions plus `make check` (5091 tests passed, 241 skipped) and latest `gh run list --workflow CI --limit 1` showed `completed success` for CI on `main` at `2026-06-24T18:50:53Z`.
+
+Committed submodule `941c3b50 fix: mark active agent-doc work` and parent pointer `91601b2a6 agent-doc: mark active work items`.
+
+No new actionable follow-up items were needed.
+<!-- agent:boundary:8911ef84 -->
 <!-- /agent:exchange -->
 
 ## Queue

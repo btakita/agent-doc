@@ -95,7 +95,32 @@ Same question as the two heads already struck — answered in `### Re: lazily-kt
 > **Queue prompt:**
 >
 > ~~See /home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-orchestration/src/state_backbone.rs. Should we have a lazily-kt and lazily-js package to support the JB and VSCode plugins? Would the JB and VSCode plugins benefit from the lazily state machine? Would it make sense to use lazily FFI for bi-directional communication between editor plugins and the FFI plugin?~~ — auto-struck: answered this cycle (#ftstrike)
-<!-- agent:boundary:10869360 -->
+
+### Re: bidirectional lazily↔lazily FFI channel — yes for values, no for references/authority — glm-5.2
+
+> **Queue prompt:** Can we make lazily support a bidirectional lazily<->lazily FFI communication channel? And in doing so, revisit the thin reporter spec. Whether the JB Plugin & VS Code plugin may trigger state transitions or be read-only state projections. It seems plausible that a lazily FFI channel would be beneficial to keep state aligned. If we do have a FFI channel, the plugin-side Cell can mirror the FFI plugin side Cell...for both values and references.
+
+**Strong instinct — and lazily already half-builds it — but draw the line at values, not references or transition authority.** Splitting the question:
+
+**1. The channel itself — yes, and it already exists.** `lazily-rs/src/ipc.rs` defines `IpcMessage::{Snapshot, Delta}` and `lazily-rs/src/ffi.rs` exposes the `LazilyFfiChannel` (JSON or postcard frames). Snapshot/Delta IS the lazily↔lazily mirroring protocol: a Snapshot seeds the remote graph image; a Delta carries an incremental update a receiver applies to a local mirror without re-fetching. So "a lazily FFI channel to keep state aligned" = make agent-doc's binary a lazily-ipc **producer** (emit a Delta each time a `state_backbone` machine transitions) and each plugin a **consumer** (apply Deltas to a local mirror). This is Phase 2 of `plan-lazily-ffi-state-projection.md`; your question is the case for elevating it.
+
+**2. "plugin-side Cell mirrors binary-side Cell" — yes for VALUES, no for REFERENCES.** This is the line.
+- **Values (yes):** projection data — `DocumentStateProjection` slices (queue head, closeout phase, route readiness, proof gate). Stream as Deltas; the plugin holds them in a **platform-native reactive holder** (Kotlin `StateFlow` / Compose `State`; VSCode TS signal / `EventEmitter`). Reactive mirroring (UI re-renders on delta) with zero lazily code on the plugin side.
+- **References (no):** the reactive dependency *graph* — which Cell feeds which computed/signal/effect — must live in exactly one place. Mirroring references means reconstructing lazily's `Context` dependency graph on the plugin side, which IS the `lazily-kt`/`lazily-js` port (the `Rc<dyn Fn>` / `Arc<dyn Fn + Send + Sync>` transition + RefCell/`parking_lot::Mutex` propagation graph flagged last cycle). Two synchronized graphs = the split-brain/drift class the FFI-first law exists to prevent, and only Rust carries the formal model (`lazily-spec` Lean). Keep references binary-side; the plugin treats its mirror as a flat cached snapshot.
+
+**3. Read-only projections vs triggering transitions — plugins trigger via EVENTS, never via local transitions.**
+- A plugin **may trigger a transition** by reporting a `StateFact` through `agent_doc_record_state_event(doc_hash, fact_json)` (`#lzffistate`). The binary's `ThreadSafeStateMachine` runs the transition + guard and emits the new projection (Delta). Plugin = *event source*, binary = *transition authority*. Co-design, not co-ownership.
+- A plugin must **not** run a durable FSM locally and push the resulting state — two authorities drift (the `live_prompt_drift_after_preflight` class this session is dogfooding, but for cycle state instead of buffer text).
+- Local plugin FSMs stay legitimate only for **ephemeral UI state** (`EditorCommandStateMachine.kt` keystroke/focus coalescing). Durable cross-editor FSMs (`RouteReadiness`, `TransportPatch`, `ActorLifecycle`, `ProofGate`, `CyclePhase`) are binary-only.
+
+**4. Thin-reporter spec, refined (not abandoned).**
+- **Still thin** on the *authority* axis: plugins never own durable state or run durable transitions; they report editor facts (typing, focus, layout, intent) and render binary projections.
+- **Rich** on the *rendering* axis: plugins become reactive projection-renderers (platform-native `StateFlow`/signal holding Delta-applied mirror values), not dumb pollers.
+
+So: **thin event-reporter + rich projection-renderer**, binary stays the single state authority. The FFI channel carries values + events both ways; references and transition logic stay one-sided.
+
+**Net:** build the lazily-ipc Snapshot/Delta channel (Phase 2), mirror projection VALUES into platform-native reactive holders, let plugins trigger transitions by reporting events — and stop short of mirroring reactive references or running durable FSMs in-process. I'll fold this values-vs-references contract into the plan's Phase 2 design.
+<!-- agent:boundary:854d5eb5 -->
 <!-- /agent:exchange -->
 ###
 <!--

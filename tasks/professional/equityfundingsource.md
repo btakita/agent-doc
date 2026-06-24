@@ -66,7 +66,45 @@ Remove the duplicate header Open Page action from the Deal Pipeline lead dialog 
 ```
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:80451786 -->
+
+### Re: Lead Dialog Next Step And Deploy — gpt-5
+
+> **Queue prompt:**
+>
+> 🚧 https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1. Remove the Open Lead button.
+
+
+> **Queue prompt:**
+> https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1. Remove the Open Lead button.
+>
+> **Queue prompt:**
+> In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1, show an alert with a CTA to advance the lead to the next stage. Does it mean the lead should sign up for an account? I believe btak.dev+borrower3@gmail.com already signed in.
+>
+> **Queue prompt:**
+> deploy
+
+Implemented, pushed, and deployed.
+
+Answer: the next stage is not necessarily creating a new account. The admin CTA now sends or resends the borrower invite for the full-application path. If the borrower already has an account, the same invite path lets them sign in and continue rather than creating a second account.
+
+Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/admin/application_lead_detail.tsx`, `lib/ui--browser--efs/portal/admin/pipeline.tsx`, `lib/ui--browser--efs/portal/shared/lead_pipeline_controls.tsx`, `tests/admin-application-lead-detail.test.ts`, `tests/admin-pipeline.test.ts`, and `prds/investor-pipeline-admin.md`. The Deal Pipeline lead dialog no longer shows standalone `Open Page` / `Open Lead` actions. The embedded lead detail now shows a top next-step alert with a `Send borrower invite` / `Resend borrower invite` CTA using the existing invite endpoint.
+
+Commits: EFS submodule commit `8abe2db fix(admin): surface lead invite next step` was pushed to `origin/main`. Parent repo gitlink commit `370807f6d chore(efs): bump lead next step submodule` was committed locally only; I did not push parent `main` because it is already ahead and dirty with unrelated work.
+
+Verification: focused `bun test tests/admin-pipeline.test.ts tests/admin-application-lead-detail.test.ts` passed (`72 pass / 0 fail`; it logs the known `d1 down` fixture in the non-fatal outbox test). `git diff --check` passed. Full `make check` passed (`1192 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run in either the EFS submodule or parent repo because neither has a workflow named `CI`.
+
+Deploy: pre-deploy remote D1 migrations reported no pending migrations, D1 info was reachable, and Time Travel bookmark was `0000050b-00000030-00005094-f2fece13b078fb4ae70ceae427111275`. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `6131143f-9cec-4323-884e-b1a3305404dd`. Post-deploy checks: remote D1 migrations still reported no migrations to apply; public root returned `200`; the protected admin lead dialog URL returned `303` behind Cloudflare Access.
+
+Suggested commit message:
+
+```txt
+fix(admin): surface lead invite next step (#pipeline-leads)
+
+Replace standalone lead-page actions in the Deal Pipeline lead dialog with a top next-step alert that sends or resends the borrower invite for the full-application path. Existing borrower accounts can use the same invite to sign in and continue; no schema or endpoint changes.
+```
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:2bd1b4ce -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -87,8 +125,8 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1, remove Open Page button.~~
-- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1. Remove the Open Lead button.
-- In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1, show an alert with a CTA to advance the lead to the next stage. Does it mean the lead should sign up for an account? I believe btak.dev+borrower3@gmail.com already signed in.
+- ~~🚧 https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1. Remove the Open Lead button.~~
+- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1, show an alert with a CTA to advance the lead to the next stage. Does it mean the lead should sign up for an account? I believe btak.dev+borrower3@gmail.com already signed in.~~ — auto-struck: answered this cycle (#ftstrike)
 - deploy
 <!-- /agent:queue -->
 

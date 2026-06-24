@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -209,7 +209,39 @@ Implemented the **lazily-zig half** of `#lzshmblobparity`: lazily-zig can now HO
 - superproject gitlink `730e13fef` → committed **locally**; push to `btakita/agent-loop` rejected again by multi-pane divergence (dirty shared tree with other panes' submodule drift blocks `pull --rebase`). Same environmental contention as `#krcm` — deliberately not churning the shared tree; the **port is on the submodule remote**, gitlink lands on next clean sync.
 
 **Queue bookkeeping:** the umbrella `#lzshmblobparity` is reaped (zig half complete; done record notes the split); lazily-py port is now tracked as distinct `#lzshmblobpy` (next queue head).
-<!-- agent:boundary:3f547624 -->
+
+### Re: #lzshmblobpy lazily-py ShmBlobArena host — DONE (parity with lazily-rs/zig) — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#lzshmblobpy]: lazily-py
+
+Implemented the **lazily-py half** of `#lzshmblobparity`: lazily-py can now HOST shared-memory blob payloads, not just consume `ShmBlobRef` descriptors over the wire. With this, all three siblings (rs / py / zig) host arenas — closing the second-class-blob-consumer gap.
+
+**What** (`src/lazily-py/src/lazily/ipc.py`, mirroring lazily-rs `ShmBlobArena<B>` `ipc.rs:150` + lazily-zig `ShmBlobArena` `ipc.zig` c994783):
+- `ShmBlobArena` — `bytearray`-backed arena. `with_capacity(n)` allocates; `from_buffer(buf)` wraps externally-owned storage (caller keeps ownership — aliasing verified to write through). `write_blob(epoch, payload) -> ShmBlobRef` prepends a 40-byte `LZSH` header; `read_blob(ref) -> memoryview` returns a zero-copy **read-only** view. `capacity` / `max_blob_len` / `write_offset` properties + a `buffer()` read-only accessor.
+- 40-byte header (little-endian via `struct`): `LZSH` magic, version, header_len, generation, epoch, len, FNV-1a-64 checksum. Append-only with wraparound; `next_generation` rejects stale descriptors after a wrap.
+- `ShmBlobArenaError` base + six variant subclasses (`ShmBlobCapacityTooSmall`, `ShmBlobTooLarge`, `ShmBlobDescriptorOutOfBounds`, `ShmBlobDescriptorMismatch`, `ShmBlobChecksumMismatch`, `ShmBlobGenerationOverflow`) matching the Rust enum + Zig error set.
+- Exported `ShmBlobArena`, `ShmBlobArenaError`, `SHM_BLOB_HEADER_LEN` from `ipc` + package `__init__`. SPEC.md + CHANGELOG.md updated.
+
+**Parity verification (byte-identical to lazily-rs / lazily-zig):**
+- FNV-1a-64 checked against canonical vectors (`""→0xcbf29ce484222325`, `"a"→0xaf63dc4c8601ec8c`, `"foobar"→0x85944171f73967e8`) — exact match, so a descriptor written by the py arena validates in the rs/zig arenas and vice versa.
+- Header layout confirmed via raw `struct.unpack` (magic `0x4C5A5348`, v1, LE) → `IHHQQQQ` = 40 bytes.
+
+**Verification (full suite + build/install):**
+- `uv run pytest tests/` → **71/71 pass**, incl. 6 new arena tests mirroring the zig suite (round-trip, oversize/tiny-cap, `from_buffer` aliasing, wraparound-stale, checksum-corruption, `IpcValue_SharedBlob` wire flow).
+- `ruff check` on changed files → clean. `ty check` → my code is clean (2 pre-existing `state_machine.py` diagnostics untouched, out of scope).
+- `python -m build` → sdist + wheel built; `twine check` → PASSED; fresh-venv `pip install` + import round-trip → OK.
+- (Reverted 2 unrelated ruff auto-fixes in `state_machine.py`/`test_state_machine.py` to keep the commit scoped to the port.)
+
+**Committed + pushed** (preset `#spec-test-build-install-commit-push`):
+- lazily-py submodule `4a57eb2` → **pushed** to `lazily-hub/lazily-py`.
+- superproject gitlink `5f8c3a6fb` → committed **locally**; push to `btakita/agent-loop` rejected (non-fast-forward — `origin/main` diverged 1/24 with multi-pane submodule drift in the shared tree). Same environmental contention as `#krcm` / `#lzshmblobparity` — deliberately did NOT churn the shared tree; the **port is on the submodule remote**, gitlink lands on the next clean sync.
+
+**Queue bookkeeping:** `#lzshmblobpy` → DONE. Added `#lzshmblobconf` (plan Phase 3 — cross-sibling arena conformance fixture in `lazily-spec/conformance/`) as the remaining actionable follow-up. Queue drained (this was the sole head).
+
+Note: lazily-py (like lazily-js/zig) has no `CI` workflow — local evidence stands. The carried-over `semantic_completion_match` on `#h6qb` is unchanged: agent-doable slice `#lzwebrtcwire` is DONE, `#h6qb` is the operator-only live two-host/NAT run — left gated.
+<!-- agent:boundary:604621da -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -218,13 +250,13 @@ Implemented the **lazily-zig half** of `#lzshmblobparity`: lazily-zig can now HO
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#lzshmblobpy]
+- do [#bagt]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzshmblobpy] #lzshmblobpy=[recommended] ShmBlobArena host port for lazily-py: port lazily-rs ShmBlobArena<B> (ipc.rs:150) to src/lazily-py/src/lazily/ipc.py — bytearray + memoryview backing (no native ext, preserves pure-Python install). Mirrors lazily-zig c994783: 40-byte header, FNV-1a-64 checksum, wraparound, full read validation. Tests: round-trip, oversize/tiny-cap, fromBuffer, wraparound-stale, checksum-corruption, IpcValue wire flow. Plan: tasks/software/plan-lazily-shmblob-parity.md Phase 1 (py).
+- [ ] [#bagt] #lzshmblobconf=[recommended] Cross-sibling ShmBlobArena conformance (plan Phase 3): add a shared arena-API conformance fixture (write/read round-trip, descriptor stability, wraparound-stale rejection, checksum-corruption) under lazily-spec/conformance/, exercised by lazily-py tests/test_conformance.py, lazily-rs tests, and lazily-zig (reads ../lazily-spec/conformance). All three host ports (rs/py/zig) now exist; this locks them in lockstep. Plan: tasks/software/plan-lazily-shmblob-parity.md Phase 3.
 <!-- /agent:backlog -->
 
 ## Review

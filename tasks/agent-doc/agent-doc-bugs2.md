@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -111,12 +111,31 @@ Proof:
 - Verification: this is a document planning/capture mutation; no source tests were needed.
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:e8615903 -->
+<!-- agent:boundary:a67f8975 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- do [#advr01]
+- do [#advr02]
+- do [#advr03]
+- do [#advr04]
+- do [#advr05]
+- do [#advr06]
+- do [#advr07]
+- do [#advr08]
+- do [#advr09]
+- do [#advr10]
+- do [#advr11]
+- do [#advr12]
+- do [#advr13]
+- do [#advr14]
+- do [#advr15]
+- do [#advr16]
+- do [#advr17]
+- do [#advr18]
+- do [#advr19]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

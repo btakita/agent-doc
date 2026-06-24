@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -89,7 +89,38 @@ fix(auth): require lender password after email verification
 
 Remove password collection from public lender signup, send the existing email verification/sign-in link, and force verified no-password lenders through account completion before the portal. Updates auth regression coverage, PRD requirements, and deploy smoke docs.
 ```
-<!-- agent:boundary:777d8f5f -->
+❯ **IPC proof issue dogfood log**
+
+❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+❯ Issue class: `ipc_proof_insufficient`
+❯ Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=f7aaf2e4-e5ca-43f6-b50d-c4d5393e5547 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782276656103
+```
+
+### Re: Deploy queue closeout — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Deployment is complete; this queue head was satisfied by the deploy performed with the lender signup first-password change.
+
+Changed paths: none in this follow-up closeout. The deployed code/doc changes are in EFS commit `f5ffc86` and parent gitlink commit `a9d9cd1af`.
+
+Commands / verification:
+- `make deploy` — passed; applied remote D1 migration `0108_user_email_verification.sql` and deployed Worker version `77deacf5-86ec-4093-8910-055d8ea7e0ac`.
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` — passed after deploy; no migrations remain.
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/` — returned `200`.
+- Live `/signup?role=lender` smoke — returned `200`, includes `Send Verification Email`, and does not include `signup-password`.
+
+No actionable follow-up items were created by this closeout.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:6b1f5ffe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,8 +140,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~In the lender signup form, do not include the password. On submit, send a verification email and notify the lender to check the email. Clicking the verification email will login the lender. Since the lender does not have a password, present a dialog to set the password + confirmation. The dialog cannot be cancelled. The lender must have a password.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

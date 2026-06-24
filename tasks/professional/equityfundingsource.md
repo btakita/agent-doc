@@ -96,7 +96,32 @@ Affected component: editor IPC / writeback
 ```text
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=4c9627c4-2911-4f53-a5bd-2e0f8e5c2b88 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782268211341
 ```
-<!-- agent:boundary:f789429a -->
+
+### Re: Preset residue closeout — gpt-5
+
+> **Queue prompt:**
+>
+> commit + push all uncommitted files.
+
+> **Queue prompt:**
+>
+> deploy
+
+Closed the remaining preset-generated queue residue after the borrower message selection deployment.
+
+No additional app code, tests, build, or deploy work was needed in this residue closeout. The intended EFS changes were already committed and pushed as `36c8a516629c396d72d65ea3d2398b2b85ee956c`, the parent submodule pointer was already committed and pushed as `544d110ba`, and the Worker remains deployed as version `23a232b2-68bd-4ab9-bc68-f12db711b49c`.
+
+I did not commit unrelated dirty parent-worktree files outside this task/session.
+
+Verification already recorded for the deployed build:
+- `make check` passed, 1173 tests plus app build and Worker build.
+- `make deploy` passed.
+- Post-deploy remote D1 migration list: `No migrations to apply!`.
+- Smoke tests: `/` returned `200`; the reported `/admin/pipeline?...dialog=lead...` URL and `/admin/lender-pipeline` returned expected admin-auth redirects `303`.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:b5f2f99c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -117,7 +142,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~When I select an application from a borrower such as https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=lead&dialog_lead_id=e2a41d4b-250c-4197-a370-4f5b786a5bcf, and I then open the Message dialog, the borrower conversation should be selected.~~
-- commit + push all uncommitted files.
+- ~~commit + push all uncommitted files.~~
 - deploy
 <!-- /agent:queue -->
 

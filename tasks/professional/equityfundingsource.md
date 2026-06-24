@@ -68,7 +68,19 @@ fix(admin): include details in dialog arrow navigation (#advance-lender)
 
 Update the shared dialog action-navigation helper so disclosure summaries are reachable via ArrowUp/ArrowDown while closed details children are skipped until opened. Covers Deal/Lender pipeline keyboarding PRDs and regression assertions.
 ```
-<!-- agent:boundary:798726af -->
+
+### Re: Deploy — gpt-5
+
+> **Queue prompt:** deploy
+
+Already completed. `make deploy` shipped the EFS Worker after `main` was clean and synced, remote D1 migrations showed `No migrations to apply`, D1 info was readable, and D1 Time Travel had bookmark `00000502-00000036-00005094-bc36dbfd8e1586a5978bcb35dcef60cf`.
+
+Deployment result: Worker Version ID `44e71a7d-6573-421e-b8d5-86e9aaafe8d6`, URL `https://equityfundingsource.brian-takita.workers.dev`.
+
+Post-deploy verification: remote migrations still show `No migrations to apply`, `/` returns HTTP `200`, and the requested admin lender-pipeline URL returns HTTP `303` at the Cloudflare Access/admin-auth boundary. No additional code paths changed in this deploy-only closeout.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:23c0cad9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,8 +100,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Down arrow is blocked on https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c&dialog=advance-lender > Open TMO LOS. The down arrow should also focus on `<details>` tags in the shared up/down logic. When the `<details>` is opened, the child field is also selectable. When `<details>` is closed, the child field is not selectable.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

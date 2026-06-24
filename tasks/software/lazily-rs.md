@@ -53,7 +53,18 @@ The highest-leverage cluster is **AsyncContext backend-parity** — it is the ne
 Full list written to `agent:backlog` this cycle. **Top of backlog: `#lzasyncdispose2`** — the in-flight re-run aliasing guard that completes the dispose-correctness story I just started.
 
 Pre-existing `make check` caveat: `benchmark-check` is red (`#lzbenchbudget`, unrelated to this change — budgets not refreshed since the SlotId-cast + eager-Signal landings); `fmt`/`clippy`/`build`/`test`/`test-async`/`test-async-resolve` all pass.
-<!-- agent:boundary:bd30fde9 -->
+> **Queue prompt:** What are #next-steps to fix lazily bugs?
+
+### Re: #lzasyncdispose2 — abort in-flight effect re-run on dispose — glm-5.2
+
+Drained the top `do` queue item. `AsyncContext::dispose_async_effect` recycled the SlotId (`free_ids` LIFO) while a spawned effect re-run task (`flush_async_effects`) could still be parked in-flight across its compute `.await`; on resume it re-locked and, if a freshly allocated effect had reused the recycled id, wrote the stale run's cleanup + dependency edges into the wrong node (aliasing). The existing `Effect`-type guards (`update_effect_dependencies` `:1203`, cleanup-write `:1189`) only protect recycle-to-non-Effect, not recycle-to-a-new-Effect.
+
+**Fix (lazily-rs `738ff00`, pushed):** store the spawn `JoinHandle` on `AsyncEffectNode.in_flight` and abort it under the graph lock in `dispose_async_effect` (abort released outside the lock) so the in-flight task cannot resume and commit into a recycled-id node. Regression test `async_context_dispose_aborts_in_flight_effect_rerun` parks an effect re-run on a `Notify`, disposes it mid-flight, allocates a new effect at the recycled id, then releases the park — asserting the aborted task does not corrupt the new node (fails without the abort: A overwrites B's cleanup). Verified: clippy `--all-targets --all-features -D warnings` clean; rustfmt clean; `--features async` integration 29 + state-machine 10 + stress 3 green; default tests + release build OK.
+
+The **IPC proof issue dogfood log** that plan flagged as the prompt target is a self-appended agent-doc artifact from the prior interrupted-cycle recovery (`ipc_proof_insufficient`, `live_prompt_drift_after_preflight`) — editor-IPC writeback noise, not actionable lazily-rs work; the write still reached `committed` last cycle. No code action.
+
+Continuing the queue drain (`#lzasynceffdup` next).
+<!-- agent:boundary:b93a9eba -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -62,8 +73,8 @@ Pre-existing `make check` caveat: `benchmark-check` is red (`#lzbenchbudget`, un
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- What are #next-steps to fix lazily bugs?
-- do [#lzasyncdispose2]
+- ~~What are #next-steps to fix lazily bugs?~~
+- ~~do [#lzasyncdispose2]~~
 - do [#lzasynceffdup]
 - do [#lzstr0mnetinbox]
 - do [#lzstr0mnetacceptanswer]
@@ -75,7 +86,6 @@ Pre-existing `make check` caveat: `benchmark-check` is red (`#lzbenchbudget`, un
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzasyncdispose2] [recommended] Completeness follow-on to #lzasyncdispose (caa6035): AsyncContext::dispose_async_effect still recycles the SlotId (free_ids LIFO) while a spawned effect re-run task (flush_async_effects spawn, async_context.rs:1157) may be in-flight across its .await; when it re-locks it writes cleanup + edges into whatever node now holds the recycled id (aliasing). Guard: abort/track the in-flight JoinHandle on dispose, or generation-check before storing cleanup/edges. Add an async stress test (dispose during pending re-run).
 - [ ] [#lzasynceffdup] [recommended] Backend parity: AsyncContext pending_async_effects (async_context.rs:234) is a Vec with no scheduled_async_effects HashSet, unlike Context (context.rs:123) and ThreadSafeContext (thread_safe.rs:1219) — duplicate ids accumulate O(invalidations) before drain, skipped only by a force_run flag check. Add a HashSet for dedupe + parity.
 - [ ] [#lzstr0mnetinbox] [recommended] str0m_net.rs receive-side Shared::inbox (:133) is an unbounded Mutex<VecDeque>; send side has MAX_PENDING_FRAMES=1024 backpressure but ChannelData pushes (:548) are unbounded — a slow consumer grows memory without limit. Cap inbox + apply backpressure in handle_input.
 - [ ] [#lzstr0mnetacceptanswer] str0m_net.rs driver discards rtc.accept_answer result (:391 let _ =); an ICE/DTLS fingerprint/mid mismatch is invisible and wait_open times out with no diagnostic. Propagate apply-time failure to Shared::last_error so the open-failure surfaces a cause.

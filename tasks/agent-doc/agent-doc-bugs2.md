@@ -345,7 +345,24 @@ Those lines prove the idle watcher can clear/drain this document, but they do no
 Current `session-check` still reports `ui_outcome=operator_proof_required`, not `deferred_for_supervisor_drain`.
 
 I am not marking `#tb4q` done. I am moving it to gated review so the queue prompt is not repeated while the live proof remains open.
-<!-- agent:boundary:f5f255d8 -->
+
+### Re: #qcm1verify
+
+> **Queue prompt:** :pushpin: do [#qcm1verify]: Use the logs to verify.
+
+I checked the logs for the `#qnodemerge1` component-scoped merge live proof.
+
+Result: verified for `#qcm1verify`.
+
+Evidence:
+- The installed/supervisor side crossed a recycle boundary: `ops.log` shows `supervisor_auto_install_succeeded` and repeated `supervisor_binary_stale_self_recycled ... boundary=next_queue_item`, including the `agent-doc-bugs2` session before the later live writes.
+- The live edit-during-finalize shape occurred in this document: `editor_op_recorded ... #qnodemerge4wire doc=agent-doc-bugs2` appears repeatedly during the later closeout window, including `2026-06-24T00:04:30Z` through `00:04:55Z` and again around `00:25:23Z` through `00:31:29Z`.
+- The merge path did not log a `merge_by_component` structural-divergence or segmentation fallback. In this build, `merge_contents_crdt` routes through `crdt::merge_by_component`; fallback would have logged explicitly.
+- The document converged cleanly after those writes. Relevant examples include `postcommit_worktree_check ... match=true` for `agent-doc-bugs2` at `2026-06-24T00:04:53Z`, `00:31:29Z`, `00:34:50Z`, `00:36:26Z`, and `00:38:58Z`.
+- I also checked the current `agent:queue` component: it contains only queue heads. There is no `### Re:` response body, no supervisor console block, and no visible exchange text spliced into the queue.
+
+So I am counting the component-level anti-splice verification as passed and closing `#qcm1verify`. This does not close the separate `#qnodemerge4verify` UTF-8/op-acceptance proof; that item still needs its own accepted-op marker.
+<!-- agent:boundary:daa108d1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -355,7 +372,7 @@ I am not marking `#tb4q` done. I am moving it to gated review so the queue promp
 - ~~:pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.~~
 - ~~:pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀~~
 - ~~:pushpin: do [#tb4q]: please check logs~~
-- :pushpin: do [#qcm1verify]: Use the logs to verify.
+- ~~:pushpin: do [#qcm1verify]: Use the logs to verify.~~
 - ~~:pushpin: do [#qstrikework]~~
 - :pushpin: do [#1jec]
 <!-- /agent:queue -->
@@ -386,7 +403,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#qcm1verify] [operator-verify] #agent-doc-bug Install + live-verify the #qnodemerge1 component-scoped merge (agent-doc submodule 52458f47). Code shipped+pushed, make check green (4853). Operator-gated remainder (mid-session install causes finalize-client-newer drift; STOP-cutting-releases gate): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), agent-doc admin recycle, then drive one edit-during-finalize cycle (type into a queue item while the agent writes an exchange response) and confirm ZERO cross-component splice + no console-output-in-queue corruption.
 - [ ] [#1jec] [operator-verify] #yzerverify #agent-doc-bug Live-verify the #yzer/#evmhplugin plugin reconnect re-read (agent-doc 0.34.28 / submodule f6b8ae17, plugin 0.2.172). Code shipped+pushed: binary FFI agent_doc_reconnect_buffer_decision (disk==HEAD via ffi_show_head + buffer==prior-commit via ffi_show_prior_blobs) + pure decide_reconnect_buffer + PatchWatcher.registerRoot reconcile-on-connect (applyReconnectReread) + SimWorld coverage; make check green (4832). Operator-gated remainder (install is unsafe mid-session = finalize-client-newer drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), reinstall plugin 0.2.172, agent-doc admin recycle. Then repro: open a session doc in JB, kill/restart the supervisor so the binary commits while the plugin is disconnected, and on reconnect confirm ops.log shows 'reconnect_buffer_decision decision=reread_disk #yzer' and the editor buffer == HEAD with NO File Cache Conflict; a buffer holding genuine unsaved user edits must instead log decision=keep_buffer and be preserved (editor wins).
 <!-- /agent:backlog -->
 

@@ -97,7 +97,37 @@ Verification:
 Commits:
 - `src/agent-doc`: `1223ebb8 test(merge): cover partial free-text queue extension`
 - Parent repo: `d7fc19723 chore: advance agent-doc submodule`
-<!-- agent:boundary:8d2b59dd -->
+- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success` (`28074608395`).
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.PatchGenerationFenceTest` passed.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.NormalizeExchangePrefixesTest` passed.
+- `cargo test -p agent-doc-orchestration plugin_owner -- --test-threads=2` passed: 8 tests, including single-owner election, stale/dead owner handoff, and release ownership.
+- `make install` rebuilt the binary/cdylib after the stale-install warning.
+- `NativeLib.kt` exposes the FFI methods to Kotlin.
+- `PatchWatcher.ownsDocument()` calls that FFI lease primitive; untargeted/broadcast patch files defer when this window is not the owner, while editor-targeted patches bypass the gate; `dispose()` releases owned documents so another live window can take over.
+- `src/ffi.rs` exports `agent_doc_plugin_owner_try_acquire` and `agent_doc_plugin_owner_release` for the JetBrains plugin.
+- `agent-doc-orchestration/src/plugin_owner.rs` provides the per-document `.agent-doc/plugin-owner/<hash>.json` lease, 30s TTL, live-pid self-heal, owner refresh, and owner-only release.
+- The original plan `tasks/agent-doc/plan-supervisor-direct-queue-edit-race.md` records Phase 1 `#8bfz` as shipped in `237f5fb2`.
+
+### Re: #advr13 — gpt-5
+
+Confirmed `#8bfz` is already implemented in the current tree; no new source change was needed.
+
+Proof points:
+- The original plan `tasks/agent-doc/plan-supervisor-direct-queue-edit-race.md` records Phase 1 `#8bfz` as shipped in `237f5fb2`.
+- `agent-doc-orchestration/src/plugin_owner.rs` provides the per-document `.agent-doc/plugin-owner/<hash>.json` lease, 30s TTL, live-pid self-heal, owner refresh, and owner-only release.
+- `src/ffi.rs` exports `agent_doc_plugin_owner_try_acquire` and `agent_doc_plugin_owner_release` for the JetBrains plugin.
+- `PatchWatcher.ownsDocument()` calls that FFI lease primitive; untargeted/broadcast patch files defer when this window is not the owner, while editor-targeted patches bypass the gate; `dispose()` releases owned documents so another live window can take over.
+- `NativeLib.kt` exposes the FFI methods to Kotlin.
+
+Verification:
+- `make install` rebuilt the binary/cdylib after the stale-install warning.
+- `cargo test -p agent-doc-orchestration plugin_owner -- --test-threads=2` passed: 8 tests, including single-owner election, stale/dead owner handoff, and release ownership.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.NormalizeExchangePrefixesTest` passed.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.PatchGenerationFenceTest` passed.
+- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success` (`28074608395`).
+
+Commits: none in this cycle; implementation was already present, and `src/agent-doc` is clean.
+<!-- agent:boundary:9f915644 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -141,7 +171,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr13] Advance original #8bfz: implement single live JB plugin consumer per document using a per-doc owner lease; non-owner windows defer patch apply + saveDocument, with plugin PatchWatcher + binary lease primitive and multi-window proof.
+- [x] [#advr13] Advance original #8bfz: implement single live JB plugin consumer per document using a per-doc owner lease; non-owner windows defer patch apply + saveDocument, with plugin PatchWatcher + binary lease primitive and multi-window proof.
 - [ ] [#advr14] Advance original #qpauseux: finish paused-queue plugin UX with info/action notifications, Resume or restart-supervisor/resume actions, no raw error toast, plugin artifacts, and render/ops proof.
 - [ ] [#advr15] Advance original #jbdisprecycle: convert recycle-boundary Run Agent Doc verification into deterministic proof for exactly one `dispatch_start_proof` with submit and no stranded start_session failure; ops marker `route_dispatch_submit_recycle_settle`.
 - [ ] [#advr16] Advance original #tb4q: complete #qfocsup focused-cycle supervisor clear-and-continue proof with install/recycle if needed, `session-check ui_outcome=deferred_for_supervisor_drain`, `context_reset`, `go_drain_dispatch`, and fresh-agent drain evidence.

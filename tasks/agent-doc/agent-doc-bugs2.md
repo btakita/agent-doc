@@ -219,13 +219,25 @@ Verification run for this closeout:
 No new source commit was needed. `src/agent-doc` had unrelated dirty JetBrains style-setting files appear during verification (`VisualHighlighterManager.kt`, `MarkdownStyleConfigurable.kt`, `MarkdownStyleSettings.kt`); I left them untouched and did not stage them for this closeout.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:04908b66 -->
+
+### Re: plugin version note — gpt-5
+
+> **Queue prompt:**
+>
+> Another session bumped JB plugin to 0.1.181. So you may need to bump to 0.1.182.
+
+Confirmed the current JetBrains plugin version in `src/agent-doc/editors/jetbrains/gradle.properties` is `0.2.181`, from clean submodule commit `28ba4850 feat(jetbrains): per-structure Markdown style overrides (#lzmdstyle, #9xtw)`.
+
+So the actionable version guidance for the next JetBrains plugin-bearing change is: bump `pluginVersion` from `0.2.181` to `0.2.182`. I treated the `0.1.x` version in the queue note as stale/typoed shorthand and made no source edits in this cycle.
+
+Escalation: none. Verification: inspected `gradle.properties`, `src/agent-doc` status, and the submodule commit. Confidence: high.
+<!-- agent:boundary:6ac220f3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#advr04]~~
+- ~~Another session bumped JB plugin to 0.1.181. So you may need to bump to 0.1.182.~~
 - :pushpin: do [#advr05]
 - :pushpin: do [#advr06]
 - :pushpin: do [#advr07]

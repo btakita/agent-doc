@@ -2045,9 +2045,25 @@ fn route_sim_dispatch_defers_during_recycle_then_injects_once_after_settle() {
         ops_log.contains("dispatch_inject pane=") && ops_log.contains("attempt=1"),
         "ops log must record the single dispatch_inject attempt=1 after settle:\n{ops_log}"
     );
+    assert_eq!(
+        ops_log
+            .matches("route_dispatch_submit_recycle_settle")
+            .count(),
+        1,
+        "ops log must record exactly one recycle-settle submit marker:\n{ops_log}"
+    );
+    assert_eq!(
+        ops_log.matches("dispatch_start_proof").count(),
+        1,
+        "ops log must record exactly one dispatch-start proof after settle:\n{ops_log}"
+    );
     assert!(
         !ops_log.contains("attempt=2"),
         "a correct recycle-settle dispatch must never log a second dispatch_inject attempt:\n{ops_log}"
+    );
+    assert!(
+        !ops_log.contains("start_session failed"),
+        "recycle-boundary proof must not strand a terminal start_session failure:\n{ops_log}"
     );
 }
 

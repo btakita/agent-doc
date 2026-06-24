@@ -1763,6 +1763,10 @@ impl SimWorld {
         }
         // Recycle settled — rejoin the normal route dispatch path (same
         // readiness/coalesce/acceptance invariants), so the dispatch injects once.
+        self.record_ops_proof(format!(
+            "route_dispatch_submit_recycle_settle pane={} generation={} settled=true action=submit_once_after_settle",
+            pane_id, self.route.durable.generation
+        ));
         self.dispatch_route_prompt_with(true)
     }
 
@@ -1839,8 +1843,14 @@ impl SimWorld {
                 self.trace
             );
         }
+        let proof_pane = receipt.pane_id.clone();
+        let proof_generation = receipt.generation;
         receipt.proved = true;
         self.coverage.route_dispatch_proofs += 1;
+        self.record_ops_proof(format!(
+            "dispatch_start_proof pane={} generation={} proof=submitted",
+            proof_pane, proof_generation
+        ));
         Ok(())
     }
 

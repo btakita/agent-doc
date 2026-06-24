@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -168,7 +168,32 @@ Focus the embedded Deal Pipeline lead next-step invite button after async lead d
 ```
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:0f80fd04 -->
+❯ **IPC proof issue dogfood log**
+
+❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+❯ Issue class: `ipc_proof_insufficient`
+❯ Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=8b947586-54b3-4eae-903e-6975bee0a257 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782333341357
+```
+
+### Re: Deploy Queue Residue And IPC Dogfood Note — gpt-5
+
+> **Queue prompt:**
+> deploy
+
+The deploy queue residue is already satisfied by the preceding deployed change. No additional app work was needed after Worker version `b344beea-543d-43e9-a5ab-e1040222d2bd` went live and post-deploy checks passed.
+
+Acknowledged the automatic IPC proof dogfood note. It recorded the transient `ipc_proof_insufficient` writeback failure from the first finalize attempt; the recovery path applied and committed the response. I also requested `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so the stale route-owned supervisor can recycle at the next idle boundary.
+
+Changed paths this cleanup cycle: none in app code. Commands this cleanup cycle: `agent-doc plan`, `agent-doc read --component queue`, and `agent-doc admin recycle ...`. Verification/deploy evidence remains the prior cycle: focused tests, `git diff --check`, full `make check`, pushed EFS commit `692acf4`, and production deploy version `b344beea-543d-43e9-a5ab-e1040222d2bd`.
+
+No actionable follow-up items are needed for the IPC note.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:8a116d65 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -188,8 +213,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 should focus on the alert CTA when opened and with the direct url. In this case "Resend borrower invite".~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -92,14 +92,40 @@ Verification:
 - `cargo test -p agent-doc-orchestration dispatch_only_submit_proof_gate_accepts_enter_delivery_without_codex_hooks -- --nocapture`
 - `make check` via `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`
 - `gh run list --workflow CI --limit 1` showed latest `CI` run on `main` completed successfully.
-<!-- agent:boundary:f3a1c882 -->
+
+### Re: JB `Clear Session Context` on opencode does not get past the dropdown selection submission. — gpt-5
+
+> **Queue prompt:** JB `Clear Session Context` on opencode does not get past the dropdown selection submission.
+
+Fixed in `src/agent-doc` commit `07a2d446`; the parent repo now points at that submodule commit. The OpenCode clear path sends `/new`, but OpenCode can stop at the slash-command dropdown selection by replacing the draft text with `New session` or `session_new`; the old verifier treated that as no visible pending command and falsely accepted before sending the follow-up Enter.
+
+Changed paths:
+- `src/agent-doc/src/session_actor_cmd.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start/detection.rs`
+
+The CLI-side clear verifier and the supervisor pending-payload detector now treat `New session` and `session_new` as still-pending `/new` submissions. That keeps the existing OpenCode split-submit retry path active, so it sends the second Enter instead of declaring success while the dropdown selection is still sitting in the composer. Added coverage for both selected forms.
+
+Verification:
+- `cargo test -p agent-doc session_actor_cmd::tests::clear_command_visible_detects_opencode_selected_new_session_command -- --nocapture`
+- `cargo test -p agent-doc-orchestration start::detection::tests::supervisor_pending_payload_detects_opencode_selected_new_session_command -- --nocapture`
+- `cargo test -p agent-doc clear_submit -- --nocapture`
+- `cargo test -p agent-doc clear_command_visible -- --nocapture`
+- `cargo test -p agent-doc-orchestration supervisor_pending_payload -- --nocapture`
+- `make check` via `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`
+- `make install`
+- `gh run list --workflow CI --limit 1` showed latest `CI` on `main` completed successfully.
+
+Supervisor refresh: `make install` updated the local binary and library. An immediate `agent-doc session restart-supervisor` refused because this pane is the active running turn, so I ran `agent-doc admin recycle`; the controller is marked to recycle at the next idle boundary without interrupting the live turn.
+
+Confidence: high for the reported dropdown-selection stall, because both direct clear verification paths now fail closed while OpenCode shows the selected `/new` command state and the full local check suite passed. No force restart or destructive recovery was used.
+<!-- agent:boundary:2acfea68 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~JB `Run Agent Doc` still does not submit for Codex.~~
-- JB `Clear Session Context` on opencode does not get past the dropdown selection submission.
+- ~~JB `Clear Session Context` on opencode does not get past the dropdown selection submission.~~
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -62,7 +62,29 @@ Verification: focused `bun test tests/app-docs-icon-delete-activity.test.ts` pas
 Deploy: remote D1 migration `0109_document_types_optional.sql` applied successfully (✅). `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `7491e179-b8b8-44a4-9bdb-82d90040d4b7`. Post-deploy check: public root returned `HTTP 200`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:1c1ee0f8 -->
+
+### Re: E-Sign Redirect To Dashboard And Deploy — glm-5.2
+
+> **Queue prompt:**
+> After successfully submitting the e-sign at https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1&step=6, redirect the borrower to the dashboard. Show the toast and show the flash message in the dashboard.
+>
+> **Queue prompt:**
+> deploy
+
+Implemented, pushed, and deployed. After a successful e-sign + submit, the borrower is now redirected to the dashboard with a success toast and a dismissible flash banner.
+
+What changed: `sign_()` in `full_application.tsx` previously left the borrower on the Review & sign step with only a small "Application submitted" note. It now redirects to `/borrowers/dashboard?signed=1` right after the submit succeeds. The borrower `Dashboard` reads `?signed=1` once on mount: it fires a success toast through the shared `add_toast` (rendered globally by `ToastContainer`), renders a dismissible "Application submitted" flash banner styled to match the toast, and strips the `signed` param via `replaceState` so a refresh does not re-fire it.
+
+Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/borrower/full_application.tsx` (redirect after submit), `lib/ui--browser--efs/portal/borrower/dashboard.tsx` (`add_toast` import, `signed_flash` state + mount effect + flash banner), `prds/efs-full-application-intake-spec.md` (documented `#esign-redirect`), and `tests/borrower-dashboard.test.ts` (3 source-level guard tests).
+
+Commits: EFS submodule commit `a9c60de feat(borrower): redirect to dashboard with flash after e-sign (#esign-redirect)` was pushed to `origin/main`. Parent repo gitlink commit `7eb58ec18 chore(efs): bump e-sign dashboard redirect submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with unrelated work.
+
+Verification: focused `bun test tests/borrower-dashboard.test.ts tests/full-application-resume-step.test.ts` passed (`16 pass / 0 fail`). `git diff --check` passed. Full `bun test` passed (`1203 pass / 0 fail`); app build and Worker build passed. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+
+Deploy: remote D1 reported "No migrations to apply!" (0109 already applied last cycle). `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `613304c0-6c5b-4f9c-b941-0b9eecbda4a6`. Post-deploy checks: public root returned `HTTP 200`; the dashboard URL with `?signed=1` returned the expected unauthenticated `HTTP 303` redirect to `/login?role=borrower&next=…signed%3D1`, preserving the flash param through login.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:d7dcc9c6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -82,6 +104,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~After successfully submitting the e-sign at https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1&step=6, redirect the borrower to the dashboard. Show the toast and show the flash message in the dashboard.~~
+- ~~deploy~~
+- ~~After successfully submitting the e-sign at https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1&step=6, redirect the borrower to the dashboard. Show the toast and show the flash message in the dashboard.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

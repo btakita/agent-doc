@@ -95,7 +95,10 @@ Follow-up added to backlog: investigate the JetBrains `Run Agent Doc` delay/subm
 Changed paths: session document only. Commands: `tsift status`, `tsift status --fix`, `agent-doc --version`, agent-doc preflight/plan/read/finalize. Verification: preflight and plan completed; no code or tests changed for this prompt-response cycle. Confidence: medium, based on the queue report rather than route logs. Escalation: none.
 
 Session note: the exchange is at warn-level accretion, but the queue is active, so this cycle continues the drain path rather than pausing for compaction.
-<!-- agent:boundary:eeb1b656 -->
+Agent-doc cycle completed and committed for [agent-loop.md](/home/brian/work/btakita/agent-loop/tasks/software/agent-loop.md).
+
+I treated the JetBrains `Run Agent Doc` restart delay as a bug report, added a concrete backlog item for investigating pane-input acceptance vs dispatch/start proof, and verified closeout with `agent-doc session-check`. The queue now reports no remaining continuation prompt.
+<!-- agent:boundary:5153173d -->
 <!-- /agent:exchange -->
 ###
 <!--

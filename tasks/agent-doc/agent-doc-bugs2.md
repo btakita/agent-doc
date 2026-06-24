@@ -32,13 +32,13 @@ done
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-❯ - `cargo test --test finalize_integration finalize_stale_snapshot_blocks_pending_flags_before_mutating_backlog`
-❯ - `cargo test -p agent-doc-orchestration protected_prompt_draft_preview_redacts_and_bounds_latest_draft`
+- `cargo test --test finalize_integration finalize_stale_snapshot_blocks_pending_flags_before_mutating_backlog`
+- `cargo test -p agent-doc-orchestration protected_prompt_draft_preview_redacts_and_bounds_latest_draft`
 ❯ - JetBrains `TerminalUtilTest.protected prompt input route refusal is actionable not persistent failure`
-❯ - `cargo test -p agent-doc --bin agent-doc route_sim_protected_prompt_refusal_has_no_dispatch_churn`
+- `cargo test -p agent-doc --bin agent-doc route_sim_protected_prompt_refusal_has_no_dispatch_churn`
 ❯ - `make bump-plugin`
-❯ - `make check`
-❯ - `make install-full`
+- `make check`
+- `make install-full`
 ❯ - `src/agent-doc` `7585b872` (`fix: harden route and closeout diagnostics`)
 ❯ - `src/agent-doc` `612b1552` (`test: cover protected prompt route refusal`)
 ❯ - parent repo `c77917dc0` (`agent-doc: harden route closeout diagnostics`)
@@ -77,6 +77,12 @@ Verification passed:
 - new SimWorld protected-prompt no-dispatch-churn test
 - `make check`
 - `make install-full`
+- `./gradlew test --tests 'com.github.btakita.agentdoc.TerminalUtilTest.protected prompt input route refusal is actionable not persistent failure'`
+- `cargo test -p agent-doc-orchestration protected_prompt_draft_preview_redacts_and_bounds_latest_draft`
+- `cargo test --test finalize_integration finalize_stale_snapshot_blocks_pending_flags_before_mutating_backlog`
+- `cargo test -p agent-doc --bin agent-doc route_sim_protected_prompt_refusal_has_no_dispatch_churn`
+- `612b1552` `test: cover protected prompt route refusal`
+- `7585b872` `fix: harden route and closeout diagnostics`
 
 Agent-doc closeout had remained uncommitted because the editor IPC path was blocked by the route-owned supervisor. This headed recovery response preserves the completed implementation evidence and crosses the binary-owned closeout path.
 
@@ -92,33 +98,19 @@ Next concrete follow-up is now `#promptprefixorch1`: fix prompt-prefixed recover
 
 ### Re: dropped recovery evidence prompts — gpt-5
 
-The prompt-prefixed command and commit lines are recovery evidence from the already-completed route/closeout work, not a new task list. I preserved them in `agent:exchange`, answered them as prior execution evidence, and did not rerun the dry-run orchestration tasks.
-
-This closeout is specifically for `#exchange-prompt-dropped-on-merge`: commit the visible exchange evidence through the binary-owned path so session-check no longer sees those lines as dropped user prompts.
-
-### Re: JB Run Agent Doc blocked by protected prompt — gpt-5
-
-> **Queue prompt:** JB `Run Agent Doc` on this document stalled. I recycled + restarted. Now JB `Run Agent Doc` is blocked due to another dispatch.
+> **Queue prompt:**
 >
-> ```text
+> JB `Run Agent Doc` on this document stalled. I recycled + restarted. Now JB `Run Agent Doc` is blocked due to another dispatch.
+> ```
 > resync: pruned 2 stale session(s)
 > [route] target tmux session: 0
 > Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %1 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input); clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782325177477-direct_pane_protected_prompt_input-codex-_1-1d5c5a3ff075.txt
 > ```
 
-Diagnosed the route snapshot. The pane really contained a drafted Codex composer prompt: `› Implement {feature}`. Refusing dispatch was therefore correct; submitting would have typed over user/draft prompt input.
 
-This item is already covered by the recent `src/agent-doc` fixes:
-- `7585b872` `fix: harden route and closeout diagnostics`
-- `612b1552` `test: cover protected prompt route refusal`
+The prompt-prefixed command and commit lines are recovery evidence from the already-completed route/closeout work, not a new task list. I preserved them in `agent:exchange`, answered them as prior execution evidence, and did not rerun the dry-run orchestration tasks.
 
-Verification passed now:
-- `cargo test -p agent-doc --bin agent-doc route_sim_protected_prompt_refusal_has_no_dispatch_churn`
-- `cargo test --test finalize_integration finalize_stale_snapshot_blocks_pending_flags_before_mutating_backlog`
-- `cargo test -p agent-doc-orchestration protected_prompt_draft_preview_redacts_and_bounds_latest_draft`
-- `./gradlew test --tests 'com.github.btakita.agentdoc.TerminalUtilTest.protected prompt input route refusal is actionable not persistent failure'`
-
-No code files changed in this cycle; `src/agent-doc` stayed clean. The remaining actionable route proof failures are `#xgdn` and `#sz4a`, with the newer `monsterrodholders.md` Run Agent Doc issue next in queue.
+This closeout is specifically for `#exchange-prompt-dropped-on-merge`: commit the visible exchange evidence through the binary-owned path so session-check no longer sees those lines as dropped user prompts.
 
 ### Re: exchange-prompt-dropped-on-merge closeout — gpt-5
 
@@ -126,7 +118,12 @@ Confirmed this was recovery residue, not a new implementation task. The visible 
 
 No code files changed in this follow-up. The protected-prompt `Run Agent Doc` queue item is fenced done, and the next actionable queue head is `#sz4a`. There are no new actionable follow-up items beyond the existing `#promptprefixorch1` backlog item.
 
-<!-- agent:boundary:90d475b7 -->
+Closed the cycle for `tasks/agent-doc/agent-doc-bugs2.md`.
+
+Verified the protected-prompt route refusal was already fixed by `src/agent-doc` commits `7585b872` and `612b1552`; no code changes were needed. Targeted checks passed, including the Rust route/IPC regressions and the JetBrains `TerminalUtilTest` case.
+
+`agent-doc session-check` is now OK for cycle `cycle-1782328264470`, and queue continuation is currently `false`, so I did not drain the next pinned queue item. The latest session-doc commit is `da21bf244`. Note: the session document still shows local editor/queue drift in the worktree; I left it uncommitted because the authoritative `session-check` closeout is green.
+<!-- agent:boundary:255f5046 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -140,14 +137,14 @@ resync: pruned 2 stale session(s)
 Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %1 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input); clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782325177477-direct_pane_protected_prompt_input-codex-_1-1d5c5a3ff075.txt
 ```
 ~~~
-- [#xgdn]
-- [#sz4a]
-- JB `Run Agent Doc` on monsterrodholders.md did not submit. Please diagnose and fix.
-- What are #next-steps to fix agent-doc bugs?
-- Ensure the VS Code plugin has parity with the JB plugin.
-- For tasks added from dogfooding issues, please add a configuration to select the agent document to write the backlog items to. The default is the current document. For agent-loop configure the document to this document.
-- Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.
-- do [#promptprefixorch1]
+- ~~[#xgdn]~~
+- :pushpin: [#sz4a]
+- :pushpin: JB `Run Agent Doc` on monsterrodholders.md did not submit. Please diagnose and fix.
+- :pushpin: What are #next-steps to fix agent-doc bugs?
+- :pushpin: Ensure the VS Code plugin has parity with the JB plugin.
+- :pushpin: For tasks added from dogfooding issues, please add a configuration to select the agent document to write the backlog items to. The default is the current document. For agent-loop configure the document to this document.
+- :pushpin: Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.
+- :pushpin: do [#promptprefixorch1]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

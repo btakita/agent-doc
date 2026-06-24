@@ -180,7 +180,15 @@ Verification passed:
 - `cargo test -p agent-doc route_sim_restart_drain_waits_for_dispatch_ready_prompt_before_send`
 
 No code files changed for this queue item. The actionable fix is already in the installed route/dispatch code, and future recurrence should file a stage-specific `#jbrunautobug` item with a diagnostic path instead of leaving the report as an unstructured free-text queue head.
-<!-- agent:boundary:b9959a3d -->
+
+### Re: exchange merge drift recovery — gpt-5
+
+> No code files changed in this follow-up; I marked `#sz4a` done and left the separate `#xgdn` dispatch-only proof item open.
+
+That line is assistant closeout evidence from the completed `#sz4a` response, not a new user prompt. The same applies to the nearby reordered verification bullets and Monster Rod Holders diagnosis fragments: they came from the already-committed assistant responses for `#sz4a` and the Monster Rod Holders queue head, then the live editor merge moved them around in `agent:exchange`.
+
+Recovery action for this cycle: classify those fragments as prior assistant evidence, not new work. I did not run additional tests or change code in this recovery-only closeout.
+<!-- agent:boundary:66f141b4 -->
 <!-- /agent:exchange -->
 
 ## Queue

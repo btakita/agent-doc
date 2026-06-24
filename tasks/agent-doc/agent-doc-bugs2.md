@@ -325,21 +325,39 @@ Fixed recovered prompt-prefixed evidence classification in `src/agent-doc`. Reco
 Commits: `74882f62` in `src/agent-doc` (`fix: ignore recovered prompt-prefixed evidence`) and parent pointer commit `9839c5584` (`agent-doc: ignore recovered prompt evidence`). I installed the updated binary with `make install`.
 
 Verification: full `make check` passed locally with `5093 passed, 241 skipped`; focused diff classifier/orchestration regression tests passed; `git diff --check` passed. The latest GitHub `Agent Doc` workflow did not start because GitHub reported an account billing/spending-limit annotation, not a test failure.
-<!-- agent:boundary:ec9cc4ff -->
+
+### Re: When the queue item, review item, icebox item is complete and struck out or `[x]`, remove the 🚧. — gpt-5
+Implemented completed-marker cleanup. Queue maintenance already stripped `🚧` from struck queue entries; tracked item marker maintenance now refuses to mark `[x]` items and clears stale markers from backlog, pending, review, and icebox components, with snapshot marker sync covering review too.
+
+Commits: `d8698eeb` in `src/agent-doc` (`fix: clear completed in-progress markers`) and parent pointer commit `d548161bd` (`agent-doc: clear completed in-progress markers`). I installed the updated binary with `make install`.
+
+Verification: full `make check` passed locally with `5095 passed, 241 skipped`; focused pending and preflight maintenance tests passed; `git diff --check` passed. The latest GitHub `Agent Doc` workflow still did not start because GitHub reports an account billing/spending-limit annotation.
+<!-- agent:boundary:f7f16a72 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.~~
-- ~~🚧 :pushpin: do [#promptprefixorch1]~~
-- When the queue item, review item, icebox item is complete and struck out or `[x]`, remove the 🚧. 
+- ~~:pushpin: do [#promptprefixorch1]~~
+- 🚧 When the queue item, review item, icebox item is complete and struck out or `[x]`, remove the 🚧.
 ---
 JB `Run Agent Doc` on monsterrodholders.md
 ```
 [route] target tmux session: 0
 Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %2 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Implement {feature}"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782330092988-direct_pane_protected_prompt_input-codex-_2-8a7508d5a787.txt
 ```
+---
+```
+~/work/btakita/agent-loop main ⇡68 *10 !8 ?6                                                                                                                                                                        ✘ INT  agent-loop 16:32:16
+❯ agent-doc session restart-supervisor /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md
+Error: failed to contact supervisor for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md
+
+Caused by:
+    0: failed to connect to supervisor socket
+    1: Connection refused (os error 111)
+```
+---
 - ~~:pushpin: do [#promptprefixorch1]~~
 <!-- /agent:queue -->
 <!--

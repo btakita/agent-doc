@@ -38,7 +38,37 @@ complete
 Compacted content:
 ❯ - Archived 8 response topic(s): Lender pipeline message dialogs; Deploy; IPC proof dogfood note; 5 more
 ❯ - Prior summary/context: prior compacted content: Archived 2 response topic(s): IPC recovery note; Deactivated lenders deployed
-<!-- agent:boundary:3f59114b -->
+
+### Re: Advance Lender Details Navigation And Deploy — gpt-5
+
+> **Queue prompt:** Down arrow is blocked on https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c&dialog=advance-lender > Open TMO LOS. The down arrow should also focus on `<details>` tags in the shared up/down logic. When the `<details>` is opened, the child field is also selectable. When `<details>` is closed, the child field is not selectable.
+
+Implemented in EFS. The shared dialog action-navigation helper now includes `details > summary` in the ArrowUp/ArrowDown order and filters descendants of `details:not([open])`, so the closed disclosure summary is reachable while hidden child controls are skipped; opening the disclosure brings its input/button children back into the selectable order.
+
+Changed paths: `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/ui.tsx`, `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`, `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`, `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`, `src/equityfundingsource-dev/prds/investor-pipeline-admin.md`, plus the parent repo submodule pointer.
+
+Verification: `bun test tests/admin-pipeline.test.ts tests/admin-investor-pipeline.test.ts` passed, `make check` passed (1184 tests plus app build and worker build), `git diff --check` passed. GitHub Actions check: `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` and `gh run list --limit 1` returned no workflows/runs for this repo.
+
+Committed and pushed EFS commit `43867a3` (`fix(admin): include details in dialog arrow navigation (#advance-lender)`) to `btakita/equityfundingsource-dev:main`. Committed and pushed parent pointer commit `b88123b02` (`chore(efs): advance deployed submodule pointer (#advance-lender)`) to `btakita/agent-loop:main`.
+
+> **Queue prompt:** deploy
+
+Deployed through the runbook path with `make deploy`. Pre-deploy checks showed a clean synced `main`, no pending remote D1 migrations, readable D1 info, and current D1 Time Travel bookmark `00000502-00000036-00005094-bc36dbfd8e1586a5978bcb35dcef60cf`. Deployment completed with Worker Version ID `44e71a7d-6573-421e-b8d5-86e9aaafe8d6` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Post-deploy checks: remote D1 migrations still report `No migrations to apply`, `/` returns HTTP `200`, and the requested admin lender-pipeline URL returns HTTP `303` as expected for the Cloudflare Access/admin-auth boundary. I did not perform authenticated live browser verification inside the admin page.
+
+Closeout recovery: normal `finalize`/stream retries failed three times with `ipc_proof_insufficient ... invariant=no_ack recovery=retry_without_disk_write`; `agent-doc admin inspect` showed a fresh Codex route-owned supervisor and no live editor endpoint evidence, matching the documented editor-less CLI wedge. I reset sidecars from the visible file and used the explicit `write --commit --force-disk` repair path.
+
+Escalation: none. Confidence: high.
+
+Suggested commit message:
+
+```txt
+fix(admin): include details in dialog arrow navigation (#advance-lender)
+
+Update the shared dialog action-navigation helper so disclosure summaries are reachable via ArrowUp/ArrowDown while closed details children are skipped until opened. Covers Deal/Lender pipeline keyboarding PRDs and regression assertions.
+```
+<!-- agent:boundary:798726af -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,7 +88,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Down arrow is blocked on https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c&dialog=advance-lender > Open TMO LOS. The down arrow should also focus on `<details>` tags in the shared up/down logic. When the `<details>` is opened, the child field is also selectable. When `<details>` is closed, the child field is not selectable.
+- ~~Down arrow is blocked on https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c&dialog=advance-lender > Open TMO LOS. The down arrow should also focus on `<details>` tags in the shared up/down logic. When the `<details>` is opened, the child field is also selectable. When `<details>` is closed, the child field is not selectable.~~
 - deploy
 <!-- /agent:queue -->
 

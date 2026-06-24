@@ -128,7 +128,24 @@ Verified: zero snake_case op refs remain; the 5 JSON blocks I touched all parse 
 `#lzspecdrift` → done. Remaining implementation queue: `#lzktconf`, `#lzpyregress`, `#lzzigtodos` (+ `#lzjshygiene` conformance slice).
 
 > **Queue prompt:** do [#lzspecdrift]
-<!-- agent:boundary:1ef6d455 -->
+
+### Re: do [#lzktconf] — conformance assertions validator + gradle wrapper shipped — glm-5.2
+
+**Spec:** no spec-doc change (protocol.md was already reconciled under #lzspecdrift). The work is the lazily-kt test + build surface.
+
+**Tests — generic assertions validator added** (`src/lazily-kt/.../IpcConformanceTest.kt`, +115). New `assertAssertions(message, fixture)` validates every present `assertions` field against the parsed message, so fixture drift now fails instead of passing silently. It is **not a no-op**: I confirmed all 6 fixtures carry real `assertions` blocks and every field name matches the validator — `epoch/node_count/edge_count/root_count/first_node_type_tag/first_node_state_kind/has_opaque_node/opaque_node_id/blob_offset/blob_len/blob_epoch` (snapshots) and `base_epoch/epoch/op_count/is_sequential/has_all_op_variants/first_op_kind/first_op_payload_kind/resync_after_epoch_*` (deltas). Missing keys skip gracefully (`?.let`); present keys assert. A drift like bumping a fixture `node_count` without editing the wire would now fail `assertEquals`.
+
+**Gradle wrapper added** (`gradlew`, `gradlew.bat`, `gradle/wrapper/*`, gradle 8.5). `Makefile` switched `gradle test` → `./gradlew test`, so `make check` is now self-contained — CI no longer depends on a system gradle. Wrapper files confirmed not gitignored (`.gitignore` covers only `.gradle/`/`build/`).
+
+**Build + install (local test):** `make check` → BUILD SUCCESSFUL; `:jar` produced the artifact (plain Kotlin/JVM lib, no publish plugin, so jar = local install). All **23 tests green, 0 skipped**: IpcConformanceTest 8 (was 7 — the new assertions test ran and passed), IpcTest 8, StateProjectionClientTest 7.
+
+**Commands:** `make check` (lazily-kt) · `git push origin main` (lazily-kt `f8d6a78..1500bea`) · superproject gitlink bump.
+**Changed paths:** `src/lazily-kt` → `1500bea` (commit `1500bea test: generic conformance assertions validator + gradle wrapper (#lzktconf)`, + unrelated earlier `213c691` state-projection-bridge also flushed); superproject gitlink `db4747eb1`.
+**Confidence:** high — tested at HEAD; wrapper downloaded + ran clean; fixture/validator field audit exact.
+**Escalation:** none. Note: an earlier `ipc_proof_insufficient` diagnostic (recovery=retry_without_disk_write) from the prior interrupted cycle is resolved by this proven closeout.
+
+`#lzktconf` → done. Remaining implementation queue: `#lzpyregress`, `#lzzigtodos` (+ `#lzjshygiene` conformance slice).
+<!-- agent:boundary:a34411f5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -152,7 +169,6 @@ Verified: zero snake_case op refs remain; the 5 JSON blocks I touched all parse 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzktconf] lazily-kt (queue head): IpcConformanceTest only round-trips the fixture `wire` block; the `assertions` metadata (node_count, edge_count, root_count, op_count, has_all_op_variants, blob_offset/len/epoch, is_sequential) is never validated generically, so fixture drift passes silently. Add a generic assertions validator. Also: no gradlew wrapper checked in (Makefile runs bare `gradle` → CI reproducibility gap); add gradle wrapper. gradle test currently green.
 - [ ] [#lzpyregress] lazily-py: add a deep/cyclic dependency regression test guarding the Signal→Slot RecursionError fix (commit 30907ea — Slot.__call__ no longer touches during computation; reset clears subscribers before notify). Currently 72 tests pass but the recursion path is unguarded against re-introduction. (v0.11.0 publish tracked separately in review #kb9b.)
 - [ ] [#lzzigtodos] lazily-zig: resolve open context.zig TODOs (rename .direct→.literal at context.zig:226 + CannotGetPtrOfDirectMode→LiteralHasNoPtr :273; before_change_subscribers at cell.zig:35; allocator options context.zig:617/621) and add a soak/cyclic test for Slot destroy↔unsubscribeChangeUnlocked ordering after the two recent memory-safety fixes (UAF 1dd8998 capture-ctx-before-destroy; iteration-during-mutation snapshot in emitChangeUnlocked). zig build test currently green.
 - [ ] [#lzjshygiene] lazily-js: node_modules NOT tracked (verified: git ls-files node_modules -> 0; .gitignore covers it; no commits touch it) — purge UNNEEDED, no history rewrite required. Remaining: validate conformance fixture assertions generically (parity with #lzktconf). npm test green (27 pass).

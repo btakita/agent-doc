@@ -245,20 +245,22 @@ No repo files changed in this recovery-only closeout, and there are no new backl
 The `#next-steps` queue prompt was already answered and struck in the previous committed response. This closeout exists only to clear the stale prompt-target detector after exchange drift moved the quoted prompt around.
 
 No repo files changed, and there are no new backlog items from this recovery note.
-<!-- agent:boundary:2c3b938a -->
+<!-- agent:boundary:496220d1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: [#sz4a]~~
-- ~~:pushpin: JB `Run Agent Doc` on monsterrodholders.md did not submit. Please diagnose and fix.~~
-- ~~:pushpin: What are #next-steps to fix agent-doc bugs?~~
-- ~~:pushpin: Ensure the VS Code plugin has parity with the JB plugin.~~ — auto-struck: answered this cycle (#ftstrike)
+- :pushpin: do [#xgdn]
 - :pushpin: For tasks added from dogfooding issues, please add a configuration to select the agent document to write the backlog items to. The default is the current document. For agent-loop configure the document to this document.
 - :pushpin: Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.
 - :pushpin: do [#promptprefixorch1]
-- do [#xgdn]
+---
+JB `Run Agent Doc` on monsterrodholders.md
+```
+[route] target tmux session: 0
+Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %2 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Implement {feature}"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782330092988-direct_pane_protected_prompt_input-codex-_2-8a7508d5a787.txt
+```
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

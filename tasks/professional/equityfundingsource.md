@@ -111,7 +111,22 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/profession
 
 The IPC proof dogfood note is recorded in the session document. No additional EFS repo work is needed for that note; the lender-pipeline fix and deploy are already committed, deployed, and the queue is drained.
 
-<!-- agent:boundary:f0317630 -->
+### Re: IPC diagnostic closeout — gpt-5
+
+The remaining exchange drift is the automatically appended IPC diagnostic from writeback recovery. No EFS code or deploy work remains; this response only closes that diagnostic cycle after repeated editor IPC no-ack failures.
+
+
+
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=2c92b633-cc43-4f0d-9bf8-ea88099db908 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782284911349
+```
+
+### Re: IPC diagnostic closeout — gpt-5
+
+The remaining uncommitted exchange drift is the automatically appended IPC diagnostic from the writeback recovery path. No EFS code or deploy work remains; this response only closes that diagnostic cycle.
+
+<!-- agent:boundary:b6dab03e -->
 <!-- /agent:exchange -->
 ###
 <!--

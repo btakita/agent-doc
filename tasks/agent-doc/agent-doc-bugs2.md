@@ -118,14 +118,38 @@ Verification:
 Supervisor refresh: `make install` updated the local binary and library. An immediate `agent-doc session restart-supervisor` refused because this pane is the active running turn, so I ran `agent-doc admin recycle`; the controller is marked to recycle at the next idle boundary without interrupting the live turn.
 
 Confidence: high for the reported dropdown-selection stall, because both direct clear verification paths now fail closed while OpenCode shows the selected `/new` command state and the full local check suite passed. No force restart or destructive recovery was used.
-<!-- agent:boundary:2acfea68 -->
+
+### Re: FFI IPC and lazily state consistency — gpt-5
+
+> **Queue prompt:** Look at the FFI IPC and lazily-kt/lazily-js. Will this help keep state consistent between the editor plugin, FFI plugin, and the CPC?
+
+Yes, with one constraint: it helps only if Rust/CPC stays authoritative and the editor plugins remain thin event reporters plus projection renderers. It should not become a second Kotlin/TypeScript state machine.
+
+The pieces already point that way:
+
+- `src/lazily-rs/src/ipc.rs` defines a transport-neutral snapshot/delta protocol and explicitly keeps live Rust contexts, references, closures, and typed handles out of FFI payloads.
+- `src/lazily-rs/src/ffi.rs` exposes opaque channel handles and canonical JSON/binary `IpcMessage` bytes; it is an ABI/transport adapter, not a second graph model.
+- `src/agent-doc/src/ffi.rs` already has `agent_doc_state_projection` and `agent_doc_record_state_event` backed by a Rust-owned `EventLedger`.
+- `src/agent-doc/agent-doc-orchestration/src/state_backbone.rs` already projects document, queue, closeout, transport, supervisor, route, and proof state, with owner-generation checks that reject stale editor/route events.
+- `src/lazily-kt` and `src/lazily-js` already expose matching `StateProjectionClient` wrappers for projection reads and event reports.
+- The JetBrains and VSCode native bridges already expose controller-backed repair/admin wrappers, so drift repair can go through the CPC boundary instead of local editor guesses.
+
+Practical answer: yes, this is the right direction for keeping the editor plugin, FFI layer, and CPC consistent. The first useful increment is Phase 1 projection wiring: editor plugins read the binary-owned `DocumentStateProjection`, report observed facts as `StateEvent`s, and render UI/status from that projection. Use lazily IPC snapshot/delta transport later only if measured full-projection polling is too expensive.
+
+I added a recommended backlog item for that wiring. No source code changed in this turn.
+
+Changed paths: session document only.  
+Verification: inspected the lazily IPC/FFI surfaces, agent-doc state backbone/FFI/controller repair paths, and Kotlin/JS projection clients; no tests run because this was an architecture answer with no code edits.  
+Confidence: high for the architecture direction; medium for implementation effort because the editor plugins still need actual projection-read wiring.  
+Escalation: none.
+<!-- agent:boundary:695d2728 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~JB `Run Agent Doc` still does not submit for Codex.~~
-- ~~JB `Clear Session Context` on opencode does not get past the dropdown selection submission.~~
+- Look at the FFI IPC and lazily-kt/lazily-js. Will this help keep state consistent between the editor plugin, FFI plugin, and the CPC?
+- do [#lzstatewire1]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -154,6 +178,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzstatewire1] [recommended] Wire agent-doc editor integrations to consume binary-owned state projections: expose/read `agent_doc_state_projection` in JetBrains and VSCode native bindings, emit `StateEvent`s for editor IPC/CPC observations, and render route/transport/proof state from `DocumentStateProjection` instead of local heuristics.
 - [/] [#ipcproofcloseout] [recommended] Investigate IPC proof closeout drift that appended patch_id=69d50165 as bare fenced text under an existing `(HEAD)` response instead of opening a clean exchange heading after interrupted finalize recovery.
 <!-- /agent:backlog -->
 

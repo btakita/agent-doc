@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,92 +33,17 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-050641.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-062213.md`*
 
 Compacted content:
-❯ - Archived 4 response topic(s): Lender signup first-password flow + deploy; Deploy queue closeout; IPC recovery closeout; 1 more
-❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-**IPC proof issue dogfood log**
-
-Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
-
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=7a2a4a5d-921b-4613-80c4-40f1650ee082 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782277467207
-```
-Implemented and pushed the lender-pipeline dialog URL work, but I could not complete the required `agent-doc` document closeout.
-
-> **Queue prompt:**
->
-> In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, all dialogs should have a unique url using pushState. So the links can be shared.
-
-
-Product commits:
-- EFS: `2415765` `feat(admin): share lender pipeline dialog URLs`
-- Parent gitlink: `9a5cfc236` `chore: update equityfundingsource submodule`
-
-Verification passed:
-- `git diff --check`
-- focused dialog tests
-- `make check` with 1180 tests, app build, Worker build
-- `gh run list --workflow CI --limit 1` found no `CI` workflow in either repo
-
-Blocker: `agent-doc finalize` and `agent-doc write --commit` repeatedly failed with `editor IPC did not prove the write`; the pending response is retained for retry, but the session document was not updated. `agent-doc admin inspect` reports `supervisor:stale`, and `kill-supervisor --dry-run` refused because that supervisor is this session’s own ancestor. The queue head is still active in the session doc.
-
-### Re: Shareable lender-pipeline dialog URLs — gpt-5
+❯ - Archived 10 response topic(s): Shareable lender-pipeline dialog URLs; IPC recovery closeout; Why `btak.div+lender3@gmail.com` is showing Requirements Current; 7 more
+❯ - Prior summary/context: prior compacted content: EFS: `2415765` `feat(admin): share lender pipeline dialog URLs`; Parent gitlink: `9a5cfc236`...
+### Re: IPC recovery closeout — gpt-5
 
 > **Queue prompt:**
 >
 > I just signed up as btak.div+lender3@gmail.com. This user has Requirements Current in the Lender Pipeline. Why are the requirements current? The lender has not completed the signup...adding documents.
 
-
-> **Queue prompt:**
->
-> In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, all dialogs should have a unique url using pushState. So the links can be shared.
-
-Implemented, committed, and pushed.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/funding_commits.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/lender_management.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/lender_documents.tsx`
-- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
-- `src/equityfundingsource-dev/tests/table-row-opens-dialog.test.ts`
-- `src/equityfundingsource-dev/tests/admin-dashboard.test.ts`
-- `src/equityfundingsource-dev/prds/investor-pipeline-admin.md`
-
-What changed:
-- The Lender Pipeline tab itself now follows `popstate`, so browser back/forward restores the tab from the URL.
-- The existing Pipeline card / Lender Profile / Advance Lender dialog URLs remain intact.
-- Added shareable URL state for the embedded Funding Commits allocation editor, Lenders request dialog, and lender document preview dialogs.
-- Dialog links now clear stale sibling dialog query params when switching dialog families, so shared URLs carry one coherent dialog target.
-- Document previews in both the Documents tab and Advance Lender required-documents checklist use `pushState` and restore from URL after the document list loads.
-
-Verification:
-- `git diff --check` — passed.
-- `bun test tests/admin-investor-pipeline.test.ts tests/table-row-opens-dialog.test.ts` — passed, 97 tests / 0 failures.
-- `bun test tests/admin-dashboard.test.ts -t "dashboard attention links deep-link into pipeline dialogs"` — passed.
-- `make check` — passed, 1180 tests / 0 failures, app build, and Worker build. The known non-fatal `error: d1 down` fixture in `admin-pipeline.test.ts` still logs during the suite.
-- `gh run list --workflow CI --limit 1` in both EFS and parent repos — no workflow named `CI` exists.
-
-Commits:
-- EFS submodule: `2415765` (`feat(admin): share lender pipeline dialog URLs`), pushed to `equityfundingsource-dev/main`.
-- Parent gitlink: `9a5cfc236` (`chore: update equityfundingsource submodule`), pushed to `agent-loop/main` from a temporary `origin/main` worktree so unrelated local parent commits/files were not published.
-
-Deployment: not run for this queue head; a separate `deploy` queue item remains.
-
-Escalation: none.
-Confidence: high.
-
-
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=bde39450-2463-48cb-8bcd-39c72c8d1a49 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782279548507
-```
-### Re: IPC recovery closeout — gpt-5
 
 Recovered the orphaned closeout and corrected the queue state. The prior recovery pass struck the next Requirements Current prompt even though this cycle only completed the shareable lender-pipeline dialog URL work, so I restored that prompt as the live queue head.
 
@@ -128,212 +53,17 @@ Verification:
 
 Escalation: none.
 Confidence: high.
+**IPC proof issue dogfood log**
 
+Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
 
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
 
 ```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=ea287f42-466c-4275-a70a-c50f3e5aa01f invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782279950206
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=37a37991-3c3a-40fa-928c-115be03c9973 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782281871260
 ```
-
-### Re: Why `btak.div+lender3@gmail.com` is showing Requirements Current
-
-Root cause: the production Worker is still running the old lender-pipeline requirements predicate. That old predicate treated signup self-attestation (`users.accredited_confirmed_at`) as enough to make annual Requirements `current`, so a lender who checked the accredited/self-attestation box during signup could land in `requirements_current` before completing the document/evidence flow.
-
-For `btak.div+lender3@gmail.com`, the live D1 row is:
-- `users.accreditation_status = 'pending'`
-- `users.accredited_confirmed_at = 1782274175` (`2026-06-24T04:09:35Z`)
-- no latest `lender_accreditation_verifications` row
-- no `evidence_document_id`
-- no `lender_account`
-
-A direct SQL projection shows the difference:
-- old deployed logic: `requirements_current`
-- current checked-in logic: `signed_up`
-
-The checked-in fix is already on `main` as `dd1969c fix(admin): require verified lender requirements`, committed `2026-06-24T05:55:28Z`. It changes `investor_requirements_status_()` so Requirements become `current` only when `accreditation_status === 'verified'`; `accredited_confirmed_at` remains an accreditation/self-attestation flag but no longer clears annual Requirements. The latest Cloudflare deployment I found is version `77deacf5-86ec-4093-8910-055d8ea7e0ac`, created `2026-06-24T04:59:43Z`, which predates that fix.
-
-So the answer is: Requirements are current because production has not yet deployed the fix that separates signup self-attestation from admin-verified Requirements evidence. Deploying current `main` should move this user to Signed Up / Requirements Not started until they submit evidence and an admin verifies it.
-
-Changed paths: no product code changes in this cycle. Existing product fix is already in `src/equityfundingsource-dev` at `dd1969c`.
-
-Verification:
-- `tsift status --json .` in `src/equityfundingsource-dev` reported a fresh index.
-- Queried remote D1 for `btak.div+lender3@gmail.com` and confirmed pending user status, self-attestation timestamp, no verification row, no evidence document, and no lender account.
-- Queried remote D1 with old-vs-current stage projection: old deployed logic returns `requirements_current`; checked-in logic returns `signed_up`.
-- `bun test tests/admin-investor-pipeline.test.ts` passed: 93 tests, 0 failures.
-- `wrangler deployments list` via the repo wrapper showed latest deployment at `2026-06-24T04:59:43Z`, before `dd1969c`.
-- `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in this repo.
-
-Escalation: deploy current `main` when ready; no data correction is required for this specific row.
-Confidence: high.
-
-### Re: Requirements Current for incomplete signup - gpt-5
-
-> **Queue prompt:**
->
-> I just signed up as btak.div+lender3@gmail.com. This user has Requirements Current in the Lender Pipeline. Why are the requirements current? The lender has not completed the signup...adding documents.
-
-Root cause: `investor_requirements_status_()` treated `users.accredited_confirmed_at` as enough to make annual Requirements `current`. That field is only the lender signup self-attestation, so a new lender who checked the accredited box during signup could incorrectly land in Requirements Current before uploading evidence.
-
-Implemented fix:
-- `app/equityfundingsource/lib/admin/repo.ts` now marks Requirements current only when `accreditation_status === 'verified'`; signup self-attestation alone stays `not_started`.
-- `app/equityfundingsource/lib/admin/investor_management/index.ts` now feeds the pipeline from the latest `lender_accreditation_verifications.status`, with `users.accreditation_status` only as a legacy fallback.
-- `tests/admin-investor-pipeline.test.ts` covers the reported pending/self-attested signup state and the verified-but-missing-account state separately.
-- `prds/investor-pipeline-admin.md` and `docs/master-state-machine.md` document that admin-verified evidence, not self-attestation, drives Requirements Current.
-
-Verification:
-- `git diff --check`
-- `bun test tests/admin-investor-pipeline.test.ts`
-- `make check` (1180 tests, app build, worker build)
-- `gh run list --workflow CI --limit 1` in both the EFS submodule and parent reported: `could not find any workflows named CI`.
-
-Commits:
-- EFS submodule: `dd1969c fix(admin): require verified lender requirements`
-- Parent gitlink: `ff6f88f87 chore: update equityfundingsource submodule`
-
-Deployment: not run for this queue head; the separate `deploy` queue item remains.
-
-Escalation: none.
-Confidence: high.
-
-### Re: Remove inline Message Lender section - gpt-5
-
-> **Queue prompt:**
->
-> In the Lender Pipeline > Requirements Dialog, remove the Message Lender section. The contextual messaging (chat bubble) should open to the message the lender for the card.
-
-Implemented, committed, and pushed.
-
-Changed behavior:
-- Removed the inline account-message section from the Lender Pipeline card / Requirements dialog.
-- Mounted the same lender account-message context as a floating chat launcher while that card dialog is active, so the chat bubble opens directly to that lender's onboarding/accreditation thread.
-- Kept the inline message composer in the Advance Lender dialog, where it remains part of that focused follow-up workspace.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
-- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
-- `src/equityfundingsource-dev/tests/lender-account-messages.test.ts`
-- `src/equityfundingsource-dev/prds/investor-pipeline-admin.md`
-
-Verification:
-- `git diff --check`
-- `bun test tests/admin-investor-pipeline.test.ts tests/lender-account-messages.test.ts tests/advance-lender-dialog.test.ts` — 113 tests, 0 failures.
-- `make check` after rebasing on the latest remote main — 1181 tests, app build, and worker build passed.
-- `gh run list --workflow CI --limit 1` in both EFS and parent repos reported: `could not find any workflows named CI`.
-
-Commits:
-- EFS submodule: `405e13f fix(admin): use card chat launcher for lender messages`
-- Parent gitlink: `19ef0a3fa chore: update equityfundingsource submodule`
-
-Deployment: not run for this queue head; the separate `deploy` queue item remains.
-
-Escalation: none.
-Confidence: high.
-
-### Re: Requirements dialog arrow navigation - gpt-5
-
-> **Queue prompt:**
->
-> In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field...which would be Close...then Advance Lender. The up arrow key navigates to the previous actionable item.
-
-Implemented, committed, and pushed.
-
-Changed behavior:
-- Card/Requirements dialog now marks alert and footer actions for modal-local keyboard navigation.
-- Alert-level Advance lender button gets initial focus when present and supports Enter natively.
-- ArrowDown/ArrowUp cycles through marked actions in order, including alert Advance Lender, footer Close, and footer CTAs, without changing board-level lane navigation.
-- Stacked Profile/Advance Lender dialogs opt out of the card-dialog focus loop.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
-- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
-- `src/equityfundingsource-dev/prds/investor-pipeline-admin.md`
-
-Verification:
-- `git diff --check`
-- `bun test tests/admin-investor-pipeline.test.ts tests/advance-lender-dialog.test.ts` — 105 tests, 0 failures.
-- `make check` — 1182 tests, app build, worker build passed.
-- `gh run list --workflow CI --limit 1` in both EFS and parent reported `could not find any workflows named CI`.
-
-Commits:
-- EFS submodule: `7e89423 fix(admin): add requirements dialog arrow navigation`
-- Parent gitlink: `2c2ec9452 chore: update equityfundingsource submodule`
-
-Deployment: not run for this queue head; the separate `deploy` queue item remains.
-
-Escalation: none.
-Confidence: high.
-
-### Re: Requirements dialog arrow navigation duplicate - gpt-5
-
-> **Queue prompt:**
->
-> In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field.
-
-Already resolved by the immediately preceding queue item. No additional code changes were needed.
-
-Coverage already shipped:
-- Alert-level Advance Lender receives initial focus and supports Enter natively.
-- ArrowDown/ArrowUp cycles through dialog actions in order, including alert actions, footer Close, and footer CTAs.
-
-Verification already completed for the shared implementation:
-- `git diff --check`
-- `bun test tests/admin-investor-pipeline.test.ts tests/advance-lender-dialog.test.ts` — 105 tests, 0 failures.
-- `make check` — 1182 tests, app build, worker build passed.
-
-Commits already pushed:
-- EFS submodule: `7e89423 fix(admin): add requirements dialog arrow navigation`
-- Parent gitlink: `2c2ec9452 chore: update equityfundingsource submodule`
-
-Escalation: none.
-Confidence: high.
-
-### Re: answered duplicate queue head — gpt-5
-
-The already-answered duplicate Requirements dialog arrow-navigation queue head was still at the front after the no-code-change closeout, so I consumed that free-text queue head explicitly with `agent-doc queue consume --count 1`.
-
-No product code changed in this cycle. The shared implementation remains:
-- EFS submodule: `7e89423 fix(admin): add requirements dialog arrow navigation`
-- Parent gitlink: `2c2ec9452 chore: update equityfundingsource submodule`
-
-Next queue head is `deploy`.
-
-Escalation: none.
-Confidence: high.
-
-### Re: queue repair - gpt-5
-
-Removed the answered duplicate Requirements dialog arrow-navigation queue row that remained after the duplicate closeout. Restored `deploy` as the only remaining live queue head.
-
-No product code changed in this repair cycle.
-
-### Re: deploy — gpt-5
-
-> **Queue prompt:**
->
-> deploy
-
-Deployed the current EFS worker from submodule commit `7e89423`.
-
-Deploy command:
-- `make deploy`
-
-Deploy result:
-- Remote D1 migration check ran and reported no migrations to apply.
-- Worker deploy succeeded for `equityfundingsource`.
-- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
-- Current Version ID: `18ef74cd-a39b-493b-9bf6-cd4c4d4ec17d`
-
-Live smoke checks:
-- `curl -I -L --max-time 20 https://equityfundingsource.brian-takita.workers.dev/` returned HTTP 200.
-- `curl -I -L --max-time 20 https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline` returned HTTP 303 to `/login?role=admin&next=%2Fadmin%2Flender-pipeline`, then HTTP 200 for the login page.
-
-Worktree check:
-- EFS submodule stayed clean after deploy.
-
-Escalation: none.
-Confidence: high.
-<!-- agent:boundary:062c2128 -->
+<!-- agent:boundary:afbc9221 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -353,6 +83,12 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, all dialogs should have a unique url using pushState. So the links can be shared.~~
+- ~~I just signed up as btak.div+lender3@gmail.com. This user has Requirements Current in the Lender Pipeline. Why are the requirements current? The lender has not completed the signup...adding documents.~~
+- In the Lender Pipeline > Requirements Dialog, remove the Message Lender section. The contextual messaging (chat bubble) should open to the message the lender for the card.
+- In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field...which would be Close...then Advance Lender. The up arrow key navigates to the previous actionable item.
+- In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

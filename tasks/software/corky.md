@@ -93,7 +93,33 @@ queue: stop
 
 Compacted content:
 - Archived 5 response topic(s): GPU-required local corky builds; Closeout repair; Sheets create/share; 2 more
-<!-- agent:boundary:7c149ae5 -->
+
+### Re: Next steps to fix corky bugs — glm-5.2
+
+**Bug triage results.** Reviewed the corky v0.29.0 codebase against the documented open items:
+
+**Already fixed (no action needed):**
+- ~~Gmail API threading Bug 1~~ — `in_reply_to` (RFC 2822 Message-ID) and `thread_id` (Gmail internal ID) are now separate fields in draft YAML. Both `In-Reply-To` header and `threadId` API body are set correctly. (`crates/corky-mail/src/draft/mod.rs:39-40,148-149,254-258`)
+- ~~Gmail API threading Bug 2~~ — `send_via_gmail_api` and `push_to_drafts_via_gmail_api` now include `threadId` in the Gmail API request body. (`draft/mod.rs:415-417,452-454`)
+- ~~Diarization span fix~~ — `max_speaker_span_ratio()` + `CHUNK_CASCADE` (600s→120s→30s) implemented in `corky-transcribe`. Needs release verification.
+
+**Critical — test suite does not compile (top priority):**
+- `first_comment` field added to `SocialDraftMeta` in commit `29309ff` but **7 test initializers** weren't updated. `cargo test --workspace --no-run` fails with `E0063` across `tests/test_social_publish.rs:16` and `tests/test_social_draft.rs` (6 sites). This blocks `make check` entirely.
+
+**Still open:**
+- `#pypi-trusted-publisher` — PyPI run 26195923707 fails `invalid-publisher`; needs trusted publisher configured on PyPI for `repo:btakita/corky:environment:pypi`.
+
+**Re: "Why is 1 test ignored?"** — No `#[ignore]` attributes found anywhere in the corky codebase or test files. This question appears stale; the "1 ignored test" may have been from a prior version.
+
+**Re: Performance report** — Corky v0.29.0 is a 5-crate workspace (`corky-core`, `corky-mail`, `corky-google`, `corky-social`, `corky-transcribe`). The test suite cannot be benchmarked due to the compilation failure above. Once `#fix-social-tests` lands, `make check` will give real numbers. The LinkedIn module (`corky-social`) has the most recent churn (5 commits) and is where the regression was introduced.
+
+**Backlog (priority order):**
+1. `#fix-social-tests` — Fix 7 `SocialDraftMeta` initializers missing `first_comment`
+2. `#pypi-trusted-publisher` — PyPI trusted publisher setup (existing, blocked externally)
+3. `#diarize-span-release` — Verify diarization cascade fix is committed and released
+
+**Top of backlog: `#fix-social-tests`**
+<!-- agent:boundary:d0c4c53a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -104,13 +130,15 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Waht are #next-steps to fix corky bugs?
+- 🚧 What are #next-steps to fix corky bugs?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#wwsp] #fix-social-tests — Fix test compilation: 7 errors across tests/test_social_publish.rs (1) and tests/test_social_draft.rs (6). SocialDraftMeta initializers missing first_comment field added in commit 29309ff (linkedin auto-post first comment). Blocks make check entirely. Files: tests/test_social_publish.rs:16, tests/test_social_draft.rs:142,240,271,317,393,423.
 - [/] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi. Repo workflow is configured and pushed in Corky commit feb074e; PyPI run 26195923707 now builds all artifacts but is blocked by PyPI invalid-publisher until the project has a trusted publisher matching repo:btakita/corky:environment:pypi.
+- [ ] [#84xz] #diarize-span-release — Verify diarization span cascade fix (max_speaker_span_ratio + CHUNK_CASCADE 600s→120s→30s in engine.rs) is committed and released. Code is implemented in corky-transcribe but document open-items still mark it as uncommitted working tree changes.
 <!-- /agent:backlog -->
 
 ## Completed / Reaped

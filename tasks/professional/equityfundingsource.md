@@ -60,7 +60,7 @@ Verification: focused `bun test tests/admin-application-lead-detail.test.ts test
 Deploy: pre-deploy remote D1 migrations reported no pending migrations, D1 info was reachable for DB `280e1539-b940-4c59-8988-fbed63c12ac0`, and the Time Travel bookmark was `0000050c-00000024-00005094-d5664908049b0e8b3332a57f85746df1`. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `41b78a68-0aeb-4177-9b1e-9bb84c7dad0c`. Post-deploy checks: remote D1 migrations still reported no migrations to apply; public root returned `HTTP 200`; the protected admin lead dialog URL returned `HTTP 303` to the admin login redirect, which is expected without an admin session.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:d2d08266 -->
+<!-- agent:boundary:1ceb7144 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -81,7 +81,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 > Open Message Conversation should open the modal...not the page.~~
-- deploy
+- 🚧 deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -32,101 +32,13 @@ done
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-- focused JetBrains Gradle test for `NormalizeExchangePrefixesTest`
-- `make bump-plugin`
-- full JetBrains `./gradlew test buildPlugin`
-- `make check`
-- `make precommit`
-- pushed submodule commit `a788e71e3` and GitHub Actions CI run `28080790474` passed
-- submodule: `a788e71e3` (`fix: keep component body text on theme foreground`), pushed to `agent-doc/main`
-- root pointer: `84116d682` (`agent-doc: update component body foreground fix`), local root commit only
-❯ - submodule: `a788e71e3` (`fix: keep component body text on theme foreground`), pushed to `agent-doc/main`
-❯ - pushed submodule commit `a788e71e3` and GitHub Actions CI run `28080790474` passed
-❯ - `make precommit`
-❯ - `make check`
-❯ - full JetBrains `./gradlew test buildPlugin`
-❯ - `make bump-plugin`
-❯ - focused JetBrains Gradle test for `NormalizeExchangePrefixesTest`
-❯ - JetBrains bold/italic visual tokens now inherit the editor's normal foreground instead of `DefaultLanguageHighlighterColors.IDENTIFIER`, so emphasized markdown no longer turns yellow under themes where identifiers are yellow.
-❯ - The shared visual token parser now rejects underscore emphasis markers inside identifier words. `_foo_` and `__foo__` still render italic/bold; `foo_bar_baz` and `foo__bar__baz` stay regular text.
-❯ - Added the Rust regression test, updated the editor integration guide and `VERSIONS.md`, and bumped the JetBrains plugin patch version to `0.2.184`.
-❯ - `cargo test -p agent-doc-core syntax::tests::underscore_emphasis_does_not_match_inside_identifiers` passed.
-❯ - `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` passed.
-❯ - `make check` passed.
-❯ - `make bump-plugin` built `agent-doc-jetbrains-0.2.184.zip` and `agent-doc-jetbrains-0.2.184-signed.zip`.
-❯ - `make install` installed the updated `agent-doc` binary and `libagent_doc.so`.
-❯ - `agent-doc plugin install --local jetbrains` installed the signed plugin into both active `IntelliJIdea2026.1` profile locations. Restart IntelliJ to load it.
-❯ - `make precommit` passed after refreshing the generated agent-doc instruction surfaces with `agent-doc skill install --all`.
-❯ - `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` marked the stale controller to recycle at the next idle boundary.
-❯ - `src/agent-doc` commit `dcc190ed` (`fix: keep editor emphasis on theme foreground`) was pushed to `btakita/agent-doc main`.
-❯ - Superproject commit `1759b6634` (`agent-doc: update editor emphasis fix`) is local only. I did not push the root repo because local `main` is 95 commits ahead and 7 behind `origin/main`, with unrelated dirty task/submodule edits; rebasing/pushing that safely needs a separate root-branch reconciliation. I added `#rootpushdiv` to the backlog for that follow-up.
-❯ - The latest `agent-doc` CI run for `dcc190ed` was still `in_progress` when I closed this cycle.
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-060507.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-073352.md`*
 
 Compacted content:
-❯ - Archived 1 response topic(s): JB `Run Agent Doc` still does not quickly submit the prompt
-❯ - Prior summary/context: ❯ - Recent `tasks/agent-doc/agent-doc-bugs2.md` JetBrains route attempts in `.agent-doc/state/editor-route-attempts/t...
-
-### Re: JetBrains markdown emphasis colors — gpt-5
-
-> **Queue prompt:** The JB Plugin renders the content of elements as an unpleasant yellow. Please have the JB Plugin use the current theme for regular text. Variable names with multiple `_` are being misinterpreted as em or bold; only `_foo_` should be italic and `__foo__` should be bold, while `foo_bar_baz` and `foo__bar__baz` stay regular text.
-
-Implemented.
-
-What changed:
-❯ - JetBrains bold/italic visual tokens now inherit the editor's normal foreground instead of `DefaultLanguageHighlighterColors.IDENTIFIER`, so emphasized markdown no longer turns yellow under themes where identifiers are yellow.
-❯ - The shared visual token parser now rejects underscore emphasis markers inside identifier words. `_foo_` and `__foo__` still render italic/bold; `foo_bar_baz` and `foo__bar__baz` stay regular text.
-❯ - Added the Rust regression test, updated the editor integration guide and `VERSIONS.md`, and bumped the JetBrains plugin patch version to `0.2.184`.
-
-Build/install proof:
-❯ - `cargo test -p agent-doc-core syntax::tests::underscore_emphasis_does_not_match_inside_identifiers` passed.
-❯ - `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` passed.
-❯ - `make check` passed.
-❯ - `make bump-plugin` built `agent-doc-jetbrains-0.2.184.zip` and `agent-doc-jetbrains-0.2.184-signed.zip`.
-❯ - `make install` installed the updated `agent-doc` binary and `libagent_doc.so`.
-❯ - `agent-doc plugin install --local jetbrains` installed the signed plugin into both active `IntelliJIdea2026.1` profile locations. Restart IntelliJ to load it.
-❯ - `make precommit` passed after refreshing the generated agent-doc instruction surfaces with `agent-doc skill install --all`.
-❯ - `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` marked the stale controller to recycle at the next idle boundary.
-
-Commit/push status:
-❯ - `src/agent-doc` commit `dcc190ed` (`fix: keep editor emphasis on theme foreground`) was pushed to `btakita/agent-doc main`.
-❯ - Superproject commit `1759b6634` (`agent-doc: update editor emphasis fix`) is local only. I did not push the root repo because local `main` is 95 commits ahead and 7 behind `origin/main`, with unrelated dirty task/submodule edits; rebasing/pushing that safely needs a separate root-branch reconciliation. I added `#rootpushdiv` to the backlog for that follow-up.
-❯ - The latest `agent-doc` CI run for `dcc190ed` was still `in_progress` when I closed this cycle.
-
-### Re: JetBrains markdown emphasis colors — gpt-5
-
-> **Queue prompt:**
->
-> The JB Plugin renders the content of elements as an unpleasant yellow. Please have the JB Plugin use the current theme for regular text (white in my current theme ![img_54.png](img_54.png)). Variable names with multiple `_` are being misinterpreted as em or bold. Can we disable the italics/bold font for variable names...multiple `_` starting internally? So only  `_foo_` would be italic and `__foo__` would be bold per markdown. But `foo_bar_baz` would not make `_bar_` italic and `foo__bar__baz` would not make `__bar__` bold...both those cases should be regular text with the regular text color.
-
-
-> **Queue prompt:** The JB Plugin renders the content of elements as an unpleasant yellow. Please have the JB Plugin use the current theme for regular text. Variable names with multiple `_` are being misinterpreted as em or bold; only `_foo_` should be italic and `__foo__` should be bold, while `foo_bar_baz` and `foo__bar__baz` stay regular text.
-
-Implemented and verified. JetBrains bold/italic visual tokens now inherit the editor's normal foreground instead of the identifier color, and the shared visual-token parser now rejects underscore emphasis delimiters inside identifier words. `_foo_` and `__foo__` still render italic/bold; `foo_bar_baz` and `foo__bar__baz` stay regular text. The Rust regression test, editor integration guide, `VERSIONS.md`, and JetBrains plugin version bump to `0.2.184` are included in pushed `src/agent-doc` commit `dcc190ed`.
-
-Verification passed with `cargo test -p agent-doc-core syntax::tests::underscore_emphasis_does_not_match_inside_identifiers`, `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`, `make check`, `make bump-plugin`, `make install`, and `make precommit`. The signed `0.2.184` JetBrains plugin was installed into both active `IntelliJIdea2026.1` profile locations, and `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` marked the stale controller to recycle at the next idle boundary.
-
-Commit status: `src/agent-doc` commit `dcc190ed` was pushed to `btakita/agent-doc main`. Superproject commit `1759b6634` remains local because root `main` is 95 commits ahead and 7 behind `origin/main` with unrelated dirty task/submodule edits; I added `#rootpushdiv` to track that separate root-branch reconciliation before pushing root commits. The latest `agent-doc` CI run for `dcc190ed` was still in progress when this response was written.
-
-### Re: JetBrains cold-open markdown highlighting - gpt-5
-
-> **Queue prompt:** When the JB Plugin loads a document without it being in the buffer, the colors fallback to the theme markdown. Please ensure the JB Plugin styling is applied in this case.
-
-Implemented. `VisualHighlighterManager` now subscribes to `FileEditorManagerListener.FILE_EDITOR_MANAGER` and reschedules visual-token refresh from `fileOpened` and `selectionChanged` via `ApplicationManager.invokeLater`, so markdown opened or selected cold from disk gets agent-doc styling after the editor/document is ready. I added a static JetBrains test and updated the guide/version docs. The JetBrains plugin version is now `0.2.185`.
-
-Verified with the focused Gradle test, `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`, `make bump-plugin`, `make check`, `make precommit`, and pushed submodule CI run `28080189925`, which completed successfully. I installed the rebuilt plugin zip into both `IntelliJIdea2026.1` plugin directories. Submodule commit: `196d1bd6`; root pointer commit: `6a970d863` remains local because the superproject is still ahead/behind `origin/main`.
-
-### Re: Recursive agent-doc invocation handling - gpt-5
-
-> **Queue prompt:** :round_pushpin: agent-doc monsterrodholders.md using Codex has an error. Can we manage the CLI ordering using our state machines? Is there a way to support recursive calls by dispatching or somehow redirecting the call?
-
-A true same-pane recursive `agent-doc <FILE>` call should stay fail-closed. Dispatching it would mean the CLI running inside a Codex owner pane tries to inject another prompt into that same pane while the current turn/tool call is active. That creates the deadlock/replay loop the guard is preventing.
-
-The safe state-machine path is already the redirect: `preflight` exposes `owned_pane_self_invocation` with `kind` set to `unresolved_prompt` or `active_queue_head`, and Codex should continue the same owner turn, answer that work in-pane, then persist through `agent-doc finalize` or `agent-doc write --commit`. The Codex Stop hook uses the same model for queue continuations (`#codex-self-reinvoke-prevent`), so queue drain redirects to in-pane closeout instead of re-running `agent-doc <FILE>`.
-
-For the `monsterrodholders.md` case, the recovery is not another nested CLI invocation. Continue via preflight/plan/finalize in the owning pane, or start/route the document from outside that owner pane. Routing to the same pane mid-turn is unsafe; routing from a different pane or from supervisor-owned idle state is safe because the state machine can wait for actor readiness and dispatch once.
+❯ - Archived 11 response topic(s): JetBrains markdown emphasis colors; JetBrains markdown emphasis colors; JetBrains cold-open markdown highlighting - gpt-5; 8 more
+❯ - Prior summary/context: ❯ - submodule: `a788e71e3` (`fix: keep component body text on theme foreground`), pushed to `agent-doc/main` ❯ - push...
 ❯ **IPC proof issue dogfood log**
 
 ❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
@@ -135,121 +47,22 @@ For the `monsterrodholders.md` case, the recovery is not another nested CLI invo
 ❯ Affected component: editor IPC / writeback
 
 ```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=a092679d-2ea7-4cba-9729-3bf739bbb04c invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=17415 candidate_hash=58edc8232c06d4b74fcf44ab0b4eb277dda30e69d80df3060f72ea7978d50ce7 content_ours_len=19776 content_ours_hash=946bcea9ed5bac87da403d162c2230b5c7552f69275ca0dff452bd3238364b7e doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782284326020
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=e91d9537-8972-4d66-b358-497bd4a0c3b5 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=25209 candidate_hash=517cc9774065e4e6053723e7d7022c55759e0a2afcc5b69c364f4e014ca3c9b1 content_ours_len=25557 content_ours_hash=4f3e645e0e8cd2b2e00ab5623371e8a2d59090e100b3e728534d11f35da8cc3e doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782286092889
 ```
 
-### Re: IPC proof issue dogfood log - gpt-5
+### Re: IPC proof issue dogfood log — gpt-5
 
-The IPC proof note was generated while recovering the failed closeout attempt for this session. The first retry was rejected before a valid response was committed, then the visible file and session sidecar snapshot diverged.
+The IPC proof note is acknowledged. This cycle hit the stale snapshot/CRDT sidecar guard after compaction: finalize refused to write because the snapshot was still much larger than the visible compacted file, so I ran `agent-doc reset --from-current /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` and reran preflight. The recovery rebuilt sidecars from the visible document, reaped the stale resolved `#4v2w` queue head, cleared the queue, and set `queue: stop`.
 
-Recovery completed in-session: I ran `agent-doc reset --from-current /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`, retried preflight after the editor debounce settled, and preflight retired the wedged write-applied capture, rebuilt snapshot/CRDT state from the current document, and committed the recovery as `59c2f011c`.
+I added follow-up backlog item `#docdriftfinalize` to extend the existing `#docdriftgrace` plan to this finalize/write refusal path. The current top backlog id is `#docdriftfinalize`.
 
-No product code change or backlog item is needed for this dogfood note. I am continuing with the active queue item after this closeout.
-
-
-### Re: IPC proof issue dogfood log prefix repair - gpt-5
-
-This is the same IPC proof note after preflight repaired transcript prompt prefixes around it. The underlying recovery is already complete: sidecars were reset from the visible document, preflight rebuilt snapshot/CRDT state, and the previous closeout response was committed.
-
-No product code change or backlog item is needed for this repaired dogfood note. I am continuing with the queued JetBrains yellow-text item after this closeout.
-
-
-### Re: IPC proof issue dogfood log re-added prompt - gpt-5
-
-The re-added IPC proof prompt lines are acknowledged. They record the same closeout recovery incident: a failed strict-template closeout followed by stale snapshot/CRDT state and an IPC `content_ours` merge that needed sidecar reset and preflight repair.
-
-The recovery has already been applied: the visible prompt lines are back in `agent:exchange`, the earlier recovery responses are present, and no product code or backlog follow-up is required for this note. Continuing with the queued JetBrains yellow-text item.
-
-### Re: IPC proof issue dogfood log committed repair - gpt-5
-
-This closes the repeated IPC dogfood repair loop by preserving the visible exchange as the source of truth. The dogfood prompt lines are present in the live document, the recovery responses answer them, and the repeated IPC `content_ours` merge was dropping those prompt lines from HEAD.
-
-No product code change or backlog item is needed for this recovery note. I am continuing with the queued JetBrains yellow-text item after this closeout.
-
-### Re: JetBrains component body text color - gpt-5
-
-> **Queue prompt:** The JB Plugin yellow text is still yellow. ![img_55.png](img_55.png). It should match the theme ![img_54.png](img_54.png).
-
-Fixed. The screenshot showed the remaining yellow text was the agent-doc component/queue body text, not the markdown bold/italic path from the prior fix.
-
-I changed the JetBrains `component_body` highlighter to inherit the editor's normal foreground via `baseAttrs(null)` while keeping the muted component background and font-style override. That removes the metadata/yellow foreground fallback without losing the visual component body banding.
-
-I also added a static regression test, updated the editor integration docs and `VERSIONS.md`, bumped the plugin to `0.2.186`, rebuilt it, and installed it into both IntelliJIdea2026.1 plugin directories. Restart the IDE to load the newly installed plugin.
-
-Verification passed:
-- focused JetBrains Gradle test for `NormalizeExchangePrefixesTest`
-- `make bump-plugin`
-- full JetBrains `./gradlew test buildPlugin`
-- `make check`
-- `make precommit`
-- pushed submodule commit `a788e71e3` and GitHub Actions CI run `28080790474` passed
-
-Committed updates:
-- submodule: `a788e71e3` (`fix: keep component body text on theme foreground`), pushed to `agent-doc/main`
-- root pointer: `84116d682` (`agent-doc: update component body foreground fix`), local root commit only
-
-### Re: If the operator cancels a turn in the console, then runs JB `Run Agent Doc`...the dispatch hangs. This happened in equityfundingsource.md.
-
-> **Queue prompt:**
->
-> If the operator cancels a turn in the console, then runs JB `Run Agent Doc`...the dispatch hangs. This happened in equityfundingsource.md.
-
-
-Fixed in `src/agent-doc`.
-
-The stale-draft detector now treats any later harness prompt as proof that an older `agent-doc ...` trigger is scrollback, not the current composer draft. That covers the equityfundingsource-style cancelled prompt followed by `Conversation interrupted` and a newer live Codex draft like `Use /skills to list available skills`.
-
-I also made the direct-pane route path fail closed when the target composer contains protected unsent prompt input. Instead of appending the route trigger or pressing Enter into that draft, it preserves a route-submit snapshot, returns an actionable refusal with `snapshot_path=...`, and leaves the user draft alone.
-
-JetBrains now classifies that refusal as protected prompt input and shows an actionable warning rather than a persistent generic route failure. I bumped the plugin to `0.2.187`, built and signed it, and installed it locally into both IDEA 2026.1 plugin roots.
-
-Commits:
-
-- agent-doc submodule: `04cd0bd1 fix: block run-agent-doc on protected drafts` pushed to `btakita/agent-doc main`
-- root pointer: `fc233ee59 agent-doc: block run-agent-doc on protected drafts`
-
-Verification:
-
-- `cargo test -p agent-doc-orchestration direct_pane_existing_draft_detection -- --nocapture`
-- `cargo test -p agent-doc-orchestration is_prompt_line -- --nocapture`
-- `cargo test -p agent-doc-orchestration protected_prompt_input_reason -- --nocapture`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin`
-- `make check`
-- `make precommit`
-- GitHub Actions CI run `28082046269` passed, including `make check` and `make tmux-ci`.
-
-Local installs completed:
-
-- `make install`
-- `agent-doc plugin install --local jetbrains` for `/home/brian/.config/JetBrains/IntelliJIdea2026.1` and `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`
-
-### Re: do [#rootpushdiv]
-
-> **Queue prompt:**
->
-> do [#rootpushdiv]
-
-
-Resolved the root push divergence item.
-
-After `git fetch origin`, the root repository was no longer behind `origin/main`; it was only ahead by local commits. I pushed `main` successfully:
-
-- before push: `main...origin/main [ahead 31]`
-- push result: `59396ae32..1925fb921 main -> main`
-- after push: local `HEAD`, `origin/main`, and `origin/HEAD` all match at `1925fb921`
-
-I left the unrelated dirty working-tree files and submodules untouched.
-
-Backlog item `#rootpushdiv` is marked done.
-
-CI check:
-
-- The root repo has workflow `Agent Doc`, not `CI`.
-- Latest run: `28082469612` for `1925fb921`.
-- It failed before running any steps because GitHub Actions did not start jobs due account billing/spending-limit gating: “The job was not started because recent account payments have failed or your spending limit needs to be increased.”
-- There are no failed test logs to fix from that run.
-<!-- agent:boundary:a493402e -->
+Proof:
+- Commands: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc session-check`, `agent-doc reset --from-current`, `rg` searches for the related drift/backlog history, and `git status --short`.
+- Changed paths: this session document and its done archive through agent-doc recovery/finalize metadata; no product code changed in this cycle.
+- Verification: recovery preflight completed, queue continuation is no longer required, and finalize owns the post-commit `session-check` boundary.
+- Confidence: high.
+- Escalation: none.
+<!-- agent:boundary:01297463 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -283,6 +96,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#docdriftfinalize] [recommended] Extend #docdriftgrace to the finalize/write stream stale-snapshot guard: when a compacted visible file is much smaller than the snapshot but the diff is historical exchange compaction plus resolved queue metadata, auto-rebase sidecars or restart preflight instead of refusing finalize and forcing `agent-doc reset --from-current`. Repro: agent-doc-bugs2.md 2026-06-24 `ipc_proof_insufficient` patch_id=e91d9537, finalize refused snapshot 25160 vs visible 6706 after compact; recovery required manual reset then preflight. Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md.
 <!-- /agent:backlog -->
 
 ## Review

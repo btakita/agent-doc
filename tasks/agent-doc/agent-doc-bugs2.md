@@ -137,18 +137,58 @@ Good links:
 - Projection dependencies, for example route dispatch reads supervisor readiness and transport proof projections.
 - Policy layer / behavior-tree-like decision code that reads projections and emits events or commands.
 - Explicit owner generation checks at projection boundaries.
+- Parent repo: `33a085c3a chore: update agent-doc submodule` (created locally; parent push happens after this session closeout commit lands).
+- `src/agent-doc`: `742ec733 feat: log restart agent menu marker` (pushed to `origin/main`).
+- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success`, run `28072965944`, from `2026-06-24T03:25:07Z`.
+- Installed jar metadata was verified: `META-INF/plugin.xml` reports version `0.2.180` and registers `AgentDoc.RestartAgent`.
+- `agent-doc plugin install --local jetbrains` installed signed `agent-doc-jetbrains 0.2.180` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`; restart IntelliJ to activate it.
+- `make install-full` installed `agent-doc 0.34.43` and `libagent_doc-0.34.43.so`; lib install marked two controllers to recycle at the next idle boundary.
+- `make check` twice, including the post-doc-edit rerun: clippy, 5056 nextest tests, doctests, and medium SimWorld all passed.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
+- `cargo test -p agent-doc-core gate_verify -- --test-threads=2`
+- `cargo test -p agent-doc-orchestration gate_verify -- --test-threads=2`
+- `git diff --check`
+- `cargo fmt --check`
 
 Avoid links where one FSM reaches into another FSM's mutable state or encodes another domain's transitions. That recreates a global FSM by accident and brings back state explosion. The right shape is discrete FSMs plus typed events, deterministic projections, and policy orchestration above them.
-<!-- agent:boundary:902e0aa7 -->
+
+### Re: #advr03 — gpt-5
+
+> **Queue prompt:**
+>
+> do [#advr03]
+
+Completed `#advr03`.
+
+Implemented the missing `#restartagentmenu` proof marker so the JetBrains Restart Agent menu path now leaves structured evidence for `#optverify` instead of only an IDE logger line. `RestartAgentAction` records the marker before invoking the restart command; `TerminalUtil` writes a best-effort `restart_agent_menu_invoked file=<relative-path> source=jetbrains action=restart_agent` line to `.agent-doc/logs/ops.log`; tests pin both the action ordering and marker format. `specs/supervisor.md` and `VERSIONS.md` now document the marker contract, and the JetBrains plugin version is bumped to `0.2.180`.
+
+Verification:
+
+- `cargo fmt --check`
+- `git diff --check`
+- `cargo test -p agent-doc-orchestration gate_verify -- --test-threads=2`
+- `cargo test -p agent-doc-core gate_verify -- --test-threads=2`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin`
+- `make check` twice, including the post-doc-edit rerun: clippy, 5056 nextest tests, doctests, and medium SimWorld all passed.
+- `make install-full` installed `agent-doc 0.34.43` and `libagent_doc-0.34.43.so`; lib install marked two controllers to recycle at the next idle boundary.
+- `agent-doc plugin install --local jetbrains` installed signed `agent-doc-jetbrains 0.2.180` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`; restart IntelliJ to activate it.
+- Installed jar metadata was verified: `META-INF/plugin.xml` reports version `0.2.180` and registers `AgentDoc.RestartAgent`.
+- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success`, run `28072965944`, from `2026-06-24T03:25:07Z`.
+
+Commits:
+
+- `src/agent-doc`: `742ec733 feat: log restart agent menu marker` (pushed to `origin/main`).
+- Parent repo: `33a085c3a chore: update agent-doc submodule` (created locally; parent push happens after this session closeout commit lands).
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:227a4d1e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Fix Insufficient IPC Proof issues.~~
-- ~~Implement state backbone /home/brian/work/btakita/agent-loop/src/agent-doc/specs/13-state-backbone.md. Add additional state machines for other state domains.~~
-- ~~Are you using lazily-rs for all state machines?~~
-- ~~Can we link the different State Machines together? Is that advisable or should we keep them discrete?~~
 - do [#advr03]
 - do [#advr04]
 - do [#advr05]
@@ -195,7 +235,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr03] Advance original #j9ja: finish #optverify marker coverage by adding `agent_restart_performed` in #agentreloadrestart execution and a restart-agent menu-invoke marker in #restartagentmenu; then auto-resolve the stale review gate from ops-log proof/disproof markers.
 - [ ] [#advr04] Advance original #restartagentmenu: implement JB `RestartAgentAction.kt`, plugin.xml registration, TerminalUtil restart wiring, pluginVersion bump, signed+unsigned builds, action invocation log, and resolved harness log. Plan: tasks/agent-doc/plan-restart-agent.md.
 - [ ] [#advr05] [recommended] Advance original #s81q: add Stop Agent and mirror Stop+Restart into VS Code extension menus; implement JB `StopAgentAction.kt`, plugin.xml registration, VS Code command contributions, and signed/unsigned plugin artifacts.
 - [ ] [#advr06] Advance original #recyclerename: rename JB + VS Code "Restart Supervisor Process" UI text to "Recycle Supervisor" while keeping stable action IDs, and ensure Restart Agent and Recycle Supervisor commands sit alongside each other. Plan: tasks/agent-doc/plan-restart-agent.md.

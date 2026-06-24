@@ -98,14 +98,38 @@ Local commits prepared:
 - parent repo: `4105af85a chore: update agent-doc submodule`
 
 Per the session-doc closeout ordering, I will push after this `agent-doc finalize` commit lands.
-<!-- agent:boundary:ab4f7c11 -->
+
+### Re: lazily-rs state machines — gpt-5
+
+> **Queue prompt:**
+>
+> Implement state backbone /home/brian/work/btakita/agent-loop/src/agent-doc/specs/13-state-backbone.md. Add additional state machines for other state domains.
+
+> **Queue prompt:**
+>
+> Are you using lazily-rs for all state machines?
+
+The state-backbone implementation is complete and pushed.
+
+Yes for the closed FSM domains introduced in this change: the existing `CyclePhaseMachine` and the new `QueueHeadMachine`, `TransportPatchMachine`, `ActorLifecycleMachine`, `RouteReadinessMachine`, and `ProofGateMachine` are all backed by `lazily::ThreadSafeStateMachine`.
+
+Not every state surface is a lazily FSM. The backbone itself is event-driven: `EventLedger` records typed facts, and `StateBackboneProjection` reduces those facts into current document, queue, closeout, transport, supervisor, route, and proof projections. Those reducers are deterministic replay logic, not finite state machines. Existing broader projections such as SimWorld and some runtime enums can remain plain reducers/enums until a closed subdomain needs an explicit transition table.
+
+Push / CI state after the implementation:
+
+- `src/agent-doc` pushed `a565bb49 feat: add state backbone projections` to `origin/main`.
+- Parent repo pushed through merge commit `903f4904a` to `origin/main`, including `4105af85a chore: update agent-doc submodule` and the session closeout commit.
+- Latest `agent-doc` CI after the push is running: `28072965944`, started `2026-06-24T03:25:07Z`.
+<!-- agent:boundary:b4c9ca61 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~Fix Insufficient IPC Proof issues.~~
-- Implement state backbone /home/brian/work/btakita/agent-loop/src/agent-doc/specs/13-state-backbone.md. Add additional state machines for other state domains.
+- ~~Implement state backbone /home/brian/work/btakita/agent-loop/src/agent-doc/specs/13-state-backbone.md. Add additional state machines for other state domains.~~
+- ~~Are you using lazily-rs for all state machines?~~
+- Can we link the different State Machines together? Is that advisable or should we keep them discrete?
 - do [#advr03]
 - do [#advr04]
 - do [#advr05]

@@ -111,7 +111,7 @@ e.g. `val card = JBColor(Color(230,230,230), Color(92,110,158))` mirrors `--colo
 **#mpt7 DONE** — raised dark `--color-card` `52,63,96` → `92,110,158` in `config/blog_site.ts`. Verified ~3:1 vs bg `33,39,55` (was ~1.3:1) while keeping white-text-on-card ~4.3:1 (the two constraints nearly conflict — can't get 3:1 card-vs-bg AND 4.5:1 text from one value, so I picked the balance + rely on borders for delineation). `bun run build` green. Pushed: `briantakita.me` `46da770` → `briantakita.me-dev` `81807da` → `agent-loop` `b73df3598`.
 
 **Operator follow-up (non-blocking):** eyeball-verify the live site in dark mode (post cards, code blocks, nav) — I can't render-check it. If `92,110,158` reads too light/dark anywhere, tweak in `config/blog_site.ts` dark block. The diagram-scoped override (`#lzdarkchart`, `108,128,180`) stays — it gives the diagrams extra pop and is harmless now that the base is lifted.
-<!-- agent:boundary:8921732a -->
+<!-- agent:boundary:4202d0ce -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -120,8 +120,7 @@ e.g. `val card = JBColor(Color(230,230,230), Color(92,110,158))` mirrors `--colo
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~How can I support dark mode in JB while using the sitewide CSS in briantakita.me?~~
-- ~~do [#mpt7]~~
+- Can we make the JB plugin have a configuration for the light and dark mode colors?
 <!-- /agent:queue -->
 
 ## Backlog

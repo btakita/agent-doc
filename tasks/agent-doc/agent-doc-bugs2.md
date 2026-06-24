@@ -116,25 +116,41 @@ Repaired: `agent-doc queue prune-noise` struck **4 predicate-proven noise/orphan
 Root-cause status: the duplication is the `#jbdupqueue` / `#qeditrace` class — CRDT/backlog-sync re-emitting heads without free-text dedup (`#qdedupsync` free-text-blind) + operator-pasted duplicates. `#jbdupqueue` is in backlog to verify the `#prompt-preempts-auto-queue` fix vs a fresh cross-doc regression; `#qeditrace` (`#0bmv`) owns the queue-edit-during-turn race. `prune-noise` is the correct deterministic repair tool for the symptom and is now the documented stopgap.
 
 Closeout note: this cycle's write hit the `#ipc-crdt-response-drift` bug (CRDT merge dropped 4 prior committed response headings) and the `#ipcqproof` IPC-proof-insufficient loop; recovered via snapshot restore + `--force-disk`. Those are the live CRDT/IPC bugs the backlog already tracks.
-<!-- agent:boundary:1bb56602 -->
+
+### Re: #jbdupqueue verified — not fixed by prompt-preempts; root cause is convergence free-text dedup — glm-5.2
+
+> **Queue prompt:**
+> 🚧 Queue items are duplicated in lazily-rs.md by agent-doc.
+
+**#jbdupqueue — VERIFIED.** Confirmed the duplication was real. In lazily-rs.md at commit `9ffb73bd5` (18:20) the free-text `What are #next-steps to fix lazily-{js,zig,py,rs} bugs?` heads appeared **twice** — once bare and once re-annotated with a `🚧` prefix — i.e. queue convergence re-emitted the operator's free-text heads without deduping against the existing entries.
+
+**Not fixed by `#prompt-preempts-auto-queue`:** that plan (not yet shipped) is about an unanswered exchange prompt preempting an active auto-queue — a different code path (snapshot/prompt preemption, not free-text duplication). The preflight `semantic_completion` match (0.828) was a false positive on shared "next-steps queue" wording.
+
+**Root cause:** convergence is free-text-blind when re-annotating/re-inserting manual queue additions — `#qdedupsync` / `#7r2s` (`annotate_manual_queue_additions`) / `#queue-operator-pin-position-lock`. The `do [#id]` heads already get identity dedup; free-text heads do not, so a CRDT/backlog-sync re-emit leaves a visible duplicate.
+
+**Status:** lazily-rs.md's queue is currently clean (duplicates struck/compacted out), so this was a transient symptom — but the convergence gap remains. The fix folds into `#0bmv` (`#qeditrace` — consolidate queue-edit-during-active-turn race plans) plus a free-text dedup guard in convergence. Closing `#jbdupqueue` as verified; no separate implementation item — track the remediation under `#0bmv`.
+<!-- agent:boundary:54b91c55 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Queue items are duplicated in this document. Please ensure the last fix addressed the root cause(s) of the duplicate queue items. Repair this queue.~~
-- 🚧 Queue items are duplicated in lazily-rs.md by agent-doc.
+- ~~Queue items are duplicated in lazily-rs.md by agent-doc.~~
 - JB `Recycle Supervisor` receives a message that the agent is busy even though the opencode terminal is idle. The state needs to be updated to idle once the turn completes...even if the turn did not finalize. If the agent stops the turn due IPC churn or a Supervisor version mismatch, the state should indicate the agents idle. No need for the extra 2 steps of to press "Interrupt & Restart" + the confirmation.
 ---
-lazily-rs.md IPC error
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8c56928442bd4b165543ab0aad264d681b41b8898551d10f196018cd15a37304 content_len=11944 content_hash=46b47fdfe5505fb37c9e63df4167cb923df6b4ffc997ecca9009a15979c29a5e doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782339826601
+:round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
+```
+resync: pruned 2 stale session(s)
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 
+Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
 ---
@@ -174,6 +190,50 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - Still getting JB `File Cache Conflict` dialogs.
 - Opencode responses are reverse ordering numeric lists.
 ---
+:round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
+```
+resync: pruned 2 stale session(s)
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 
+Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+---
+---
+:round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
+```
+resync: pruned 2 stale session(s)
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 
+Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+---
+---
+lazily-rs.md IPC error
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8c56928442bd4b165543ab0aad264d681b41b8898551d10f196018cd15a37304 content_len=11944 content_hash=46b47fdfe5505fb37c9e63df4167cb923df6b4ffc997ecca9009a15979c29a5e doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782339826601
+```
+---
+---
 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
 resync: pruned 2 stale session(s)
@@ -205,64 +265,18 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
-- ~~do [#mrhqrestore]~~
-- ~~do [#mrhqrestore]~~
 - do [#npe1]
 - do [#p2j4]
+- ~~Queue items are duplicated in lazily-rs.md by agent-doc.~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#4pdp]
+- ~~do [#mrhqrestore]~~
 - do [#0bmv]
-- ~~do [#mrhqrestore]~~
 - do [#actorswitchdefer]
-- Queue items are duplicated in lazily-rs.md by agent-doc.
----
-🚧 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
-```
-resync: pruned 2 stale session(s)
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 
-Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
----
-- ~~do [#mrhqrestore]~~
----
-JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
-```
-resync: pruned 2 stale session(s)
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 
-Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
----
----
-JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
-```
-resync: pruned 2 stale session(s)
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 
-Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
----
+- do [#ocdrainstall]
+- do [#capproofbg]
+- do [#jbrestartbusy]
+- do [#jbrunhang]
+- ~~do [#jbdupqueue]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -293,7 +307,6 @@ What are #next-steps to fix bugs?
 - [ ] [#capproofbg] Make the JB Run Agent Doc capacity proof non-blocking: dispatch immediately and run the capacity proof in the background, surfacing failure asynchronously instead of stalling every dispatch.
 - [ ] [#jbrestartbusy] Supervisor reports agent busy when the OpenCode pane is idle: turn state must flip to idle on a non-finalize turn exit (IPC churn / supervisor version mismatch), and Recycle Supervisor must skip the Interrupt & Restart + confirmation 2-step. See plan-jb-restart-supervisor-busy-refusal.md, plan-opencode-post-turn-false-active.md.
 - [ ] [#jbrunhang] JB Run Agent Doc on a session that is not open hangs the next invocation: the first run against a closed session must fail immediately instead of wedging the subsequent dispatch. See plan-controller-stalled-client-start-hang.md.
-- [ ] [#jbdupqueue] agent-doc duplicated queue items into lazily-rs.md: verify whether already fixed by #prompt-preempts-auto-queue (semantic match 0.828) or a fresh cross-document queue-duplication regression.
 - [ ] [#npe1] #codefencestrip=Template patch parser strips trailing code fences at the exchange boundary
 - [ ] [#p2j4] #jbcfdiag=JB File Cache Conflict: investigate remaining write-path triggering the JB VFS dialog beyond IPC-first writes
 - [ ] [#4pdp] #ocreverselist=OpenCode reverse-ordered numeric list rendering investigation

@@ -39,7 +39,7 @@ done
 Compacted content:
 ❯ - Archived 3 response topic(s): editor state projection wiring; JetBrains Codex Enter submit path; equityfundingsource route difference
 ❯ - Prior summary/context: prior compacted content: Archived 8 response topic(s): bug handling policy; bug policy config; JB `Run Agent Doc` sti...
-<!-- agent:boundary:fcc646b9 -->
+<!-- agent:boundary:6708482a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -79,6 +79,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#xgdn] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%3 actor_generation=596 editor_attempt_id=1782325712508-18 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_only_dispatch_start_proof content_hash=sha256:3251e072b5c1857ba06e9ba613e1004b5eefef103db7003d7dcf7efe0d698ea8]
+- [ ] [#sz4a] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/professional/equityfundingsource.md stage=dispatch_start_proof pane=%3 actor_generation=596 editor_attempt_id=1782325712508-18 dispatch_proof_state=none elapsed_ms=10109 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782325723814-direct_pane_dispatch_start_unproven-codex-_3-c75435aee855.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_start_proof content_hash=sha256:1ec714087cfb4c5fc783eb9ad2f02a563124b3df04828fbe1140370937f40135]
 - [ ] [#ipcproofcloseout] [recommended] Investigate IPC proof closeout drift that appended patch_id=69d50165 as bare fenced text under an existing `(HEAD)` response instead of opening a clean exchange heading after interrupted finalize recovery.
 - [ ] [#crdtreset1] Fix stale snapshot/CRDT sidecar recovery after compact/manual cleanup: make preflight/finalize converge or emit one safe reset path, with tests for visible-file-shorter-than-snapshot/manual-cleanup cases.
 - [ ] [#routeblockux1] Improve JB/Codex protected-prompt route recovery: surface the blocking pane, draft preview, and snapshot path in the session response/state, and add SimWorld coverage proving refusal does not create queue/dispatch churn.

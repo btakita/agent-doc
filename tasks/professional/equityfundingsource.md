@@ -48,7 +48,25 @@ Affected component: editor IPC / writeback
 ```text
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=7a2a4a5d-921b-4613-80c4-40f1650ee082 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782277467207
 ```
-<!-- agent:boundary:ab6708f9 -->
+Implemented and pushed the lender-pipeline dialog URL work, but I could not complete the required `agent-doc` document closeout.
+
+> **Queue prompt:**
+>
+> In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, all dialogs should have a unique url using pushState. So the links can be shared.
+
+
+Product commits:
+- EFS: `2415765` `feat(admin): share lender pipeline dialog URLs`
+- Parent gitlink: `9a5cfc236` `chore: update equityfundingsource submodule`
+
+Verification passed:
+- `git diff --check`
+- focused dialog tests
+- `make check` with 1180 tests, app build, Worker build
+- `gh run list --workflow CI --limit 1` found no `CI` workflow in either repo
+
+Blocker: `agent-doc finalize` and `agent-doc write --commit` repeatedly failed with `editor IPC did not prove the write`; the pending response is retained for retry, but the session document was not updated. `agent-doc admin inspect` reports `supervisor:stale`, and `kill-supervisor --dry-run` refused because that supervisor is this session’s own ancestor. The queue head is still active in the session doc.
+<!-- agent:boundary:fa8c6a8a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -68,7 +86,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, all dialogs should have a unique url using pushState. So the links can be shared.
+- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, all dialogs should have a unique url using pushState. So the links can be shared.~~
 - I just signed up as btak.div+lender3@gmail.com. This user has Requirements Current in the Lender Pipeline. Why are the requirements current? The lender has not completed the signup...adding documents.
 - In the Lender Pipeline > Requirements Dialog, remove the Message Lender section. The contextual messaging (chat bubble) should open to the message the lender for the card.
 - In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field...which would be Close...then Advance Lender. The up arrow key navigates to the previous actionable item.

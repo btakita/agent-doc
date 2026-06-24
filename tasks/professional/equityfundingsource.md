@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,225 +33,40 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-184624.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-200744.md`*
 
 Compacted content:
-❯ - Archived 6 response topic(s): Application Next-Step Alert And Deploy; Deploy; Accept Application Guidance And Deploy; 3 more
+❯ - Archived 9 response topic(s): Full Application Property Type Dropdown; Pipeline Edit Field Audit And Deploy; Step 6 Review & Sign Optional And Deploy; 6 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
-### Re: Full Application Property Type Dropdown — gpt-5
+### Re: Remove Lead Dialog Open Page And Deploy — gpt-5
 
 > **Queue prompt:**
-> Should https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application > Property Type be a dropdown? It is a free text field in edit.
-
-Yes. Property Type is already a controlled intake value in the borrower full-application form, so the admin Full Application edit surface should use the same controlled dropdown instead of free text.
-
-Implemented in `src/equityfundingsource-dev` commit `90059dc fix(admin): use property type dropdown in full application edit`, pushed to `origin/main`. The parent submodule pointer commit is `53191e4da chore(efs): bump property type dropdown submodule`, also pushed to `origin/main`.
-
-Changed paths: `lib/ui--browser--efs/portal/shared/full_application_detail.tsx`, `tests/admin-full-application-approve-ui.test.ts`, and `prds/67v2-admin-loan-pipeline-kanban.md`. The shared Full Application subject-property editor now renders `Property type` as a select using the borrower intake values: `Single Family Residence`, `Single Family (zoned residential lot/parcel)`, `Commercial & Income Producing`, `Land (zoned commercial/residential)`, and `Other`. If an older stored value does not match those options, the select includes that value as a visible `(current)` option so saving the form does not silently clear it.
-
-Verification: focused test passed (`bun test tests/admin-full-application-approve-ui.test.ts`: `11 pass / 0 fail`). Full EFS check passed (`make check`: raw summary `1189 pass / 0 fail`, app build, and Worker build). The tsift digest wrapper flagged the known logged `error: d1 down` fixture string, but the command exited 0 and the raw Bun summary has zero failures. `git diff --check` was clean. `gh run list --workflow CI --limit 1` found no workflow named `CI` in the EFS submodule.
-
-Deploy was not requested for this queue item. Escalation: none. Confidence: high for the code path, tests, spec note, commit, and push.
-
-### Re: Pipeline Edit Field Audit And Deploy — gpt-5
-
-> **Queue prompt:** Review all form edit fields in the Deal Pipeline + Lender Pipeline. Make sure the correct input is used (dropdown instead of free text where appropriate).
->
-> **Queue prompt:** deploy
-
-Completed and deployed.
-
-Changed paths in the EFS submodule: `lib/ui--browser--efs/portal/shared/full_application_detail.tsx`, `prds/67v2-admin-loan-pipeline-kanban.md`, `prds/investor-pipeline-admin.md`, `tests/admin-full-application-approve-ui.test.ts`, `tests/admin-investor-pipeline.test.ts`. Parent pointer update: `src/equityfundingsource-dev` committed locally as `e06b789ab`.
-
-Implementation: Deal Pipeline's shared Full Application edit surface now uses dropdowns for `New lien position`, `Asset type`, and `Expense type`; `Property type` was already on the controlled dropdown path from the previous cut. The generic `(current)` select fallback still preserves legacy stored values. The REO mortgage nested record remains a JSON editor, but its placeholder now shows representative `payoff_at_close` and `loan_type` fields. Lender Pipeline edit surfaces were audited: request status, document category/visibility, lender picker, and user role/status are already bounded selects; TMO lender account numbers, document display names, profile/contact fields, search, workflow notes, and messages remain free text by design.
-
-Commit/deploy: EFS commit `bf7b27d` (`fix(admin): align pipeline edit controls`) was pushed to `origin/main`. Deployed with `make deploy`; Worker URL `https://equityfundingsource.brian-takita.workers.dev`; Version ID `ff1482da-fc53-46fe-adcb-aa891ac220d2`. I did not push the parent `agent-loop` branch because it already had three unrelated local commits ahead of `origin/main`; pushing the parent would have published unrelated work. The EFS code repo itself is pushed and deployed.
-
-Verification: `bun test tests/admin-full-application-approve-ui.test.ts tests/admin-investor-pipeline.test.ts` passed (`108 pass / 0 fail`). `git diff --check` was clean. `make check` passed (`1191 pass / 0 fail`, app build, Worker build). Pre-deploy D1 checks showed no pending remote migrations, D1 info available, and a current Time Travel bookmark. Post-deploy `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` again showed no pending migrations, and `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/` returned `200`. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-
-Escalation: none. Confidence: high.
-
-### Re: Step 6 Review & Sign Optional And Deploy — gpt-5
-
-> **Queue prompt:**
-> https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Step 6 - Review & Sign should be optional. This should not block advancing the application. "Before advancing this application" "Address the highlighted fields and sections below before marking complete or accepting the application." "Step 6 - Review & Sign" "Submitted, EFS status, E-sign consent". None of "Submitted, EFS status, E-sign consent" should be blocker to "Mark Complete".
->
-> **Queue prompt:**
-> deploy
-
-Implemented and deployed.
-
-Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/admin/full_applications.tsx`, `lib/ui--browser--efs/portal/admin/pipeline.tsx`, `prds/67v2-admin-loan-pipeline-kanban.md`, `tests/admin-full-application-approve-ui.test.ts`, and `tests/admin-pipeline.test.ts`.
-
-Behavior: the stacked/standalone Full Application detail now uses completion requirements while the Mark Complete action is present, so Step 6 - Review & Sign does not appear in the top "Before advancing this application" blocker list for Mark Complete. The pipeline application card checklist also splits by action: incomplete cards show "Before Mark Complete" with completion blockers only; review/accept cards still use the stricter Accept Application gate. The server-side Mark Complete gate was already e-signature optional, and tests now guard that completion requirements omit `Submitted`, `EFS status`, and `E-sign consent`.
-
-Commits: EFS submodule commit `65509f4 fix(admin): make review signature optional for completion` was pushed to `origin/main`. Parent gitlink commit `0a6a098cc chore(efs): bump review completion gate submodule` was committed locally only; I did not push parent `main` because it already had two unrelated unpushed `lazily-rs` commits, and pushing would have published unrelated work.
-
-Verification: focused tests passed (`bun test tests/admin-full-application-approve-ui.test.ts tests/admin-pipeline.test.ts tests/apply4-full-application-p6.test.ts`: `98 pass / 0 fail`). `git diff --check` was clean. Full check passed (`make check`: `1191 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` found no workflow named `CI` in the EFS submodule.
-
-Deploy: pre-deploy D1 checks showed no pending remote migrations, D1 info reachable, and Time Travel bookmark `00000509-0000002a-00005094-801e11d7a8151dcf75679ae0c68505e4`. `make deploy` completed; Worker URL `https://equityfundingsource.brian-takita.workers.dev`; Version ID `9c8ebd7c-692e-48d3-bd3e-b7749d86ecc4`. Post-deploy migration list still had no pending migrations; public root returned `200`; the admin pipeline URL returned `303` behind Cloudflare Access.
-
-Escalation: none. Confidence: high.
-
-### Re: Queue Closeout Repair — gpt-5
-
-Struck the two answered free-text queue rows after the deploy response was committed, so the queue will not re-run the completed Step 6 / deploy work.
-
-Escalation: none. Confidence: high.
-Implemented, pushed, and deployed the EFS change.
-
-EFS commit `65509f4` is on `origin/main`. Deploy succeeded at `https://equityfundingsource.brian-takita.workers.dev` with Worker Version ID `9c8ebd7c-692e-48d3-bd3e-b7749d86ecc4`.
-
-What changed: Mark Complete now uses completion blockers only, so Step 6 fields (`Submitted`, `EFS status`, `E-sign consent`) no longer block or appear in the advancement alert while completing an application. Accept Application still keeps the stricter approval gate.
-
-Verification passed: focused tests `98 pass / 0 fail`, full `make check` `1191 pass / 0 fail`, no pending D1 migrations, root smoke `200`, admin URL `303` behind Access. `agent-doc session-check` is clean.
-
-Parent gitlink commit `0a6a098cc` is local only; I did not push parent `main` because it already had unrelated unpushed commits.
-
-Suggested commit message:
-```txt
-fix(admin): make review signature optional for completion (#pipeline-full-app-dialog)
-
-Split full-application advancement blockers so Mark Complete uses completion requirements while Accept Application keeps the stricter approval gate. Updates Deal Pipeline guidance, PRD notes, and regression coverage.
-```
-
-### Re: Queue Residue Cleanup — gpt-5
-
-Cleared the already-struck queue residue so the completed Step 6 / deploy work has no remaining queue head.
-
-Escalation: none. Confidence: high.
-
-### Re: Closeout Drift Repair — gpt-5
-
-Closed the remaining document-only drift after the queue cleanup: the queue is empty/stopped, and there is no app work left to run.
-
-Changed paths: `tasks/professional/equityfundingsource.md` only.
-Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc write --template --stream --commit`, `agent-doc session-check`.
-Verification: session-check is expected to confirm the cycle is committed with no drainable queue work.
-Escalation: none. Confidence: high.
-
-### Re: Full Application Top Advance CTA And Deploy — gpt-5
-
-> **Queue prompt:**
-> https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application should have an alert with the next steps and a CTA to advance the application at the top. "Mark Complete" requires substantial scrolling to get to it.
+> In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1, remove Open Page button.
 >
 > **Queue prompt:**
 > deploy
 
 Implemented, pushed, and deployed.
 
-Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/shared/full_application_detail.tsx`, `lib/ui--browser--efs/portal/admin/full_applications.tsx`, `lib/ui--server--efs/portal.ts`, `tests/admin-full-application-approve-ui.test.ts`, and `prds/67v2-admin-loan-pipeline-kanban.md`.
+Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/admin/pipeline.tsx`, `tests/admin-pipeline.test.ts`, and `prds/investor-pipeline-admin.md`. The Deal Pipeline lead dialog no longer renders the header `Open Page` button; the footer `Open Lead` deep-link remains available for admins who need the standalone lead page.
 
-Behavior: the Full Application top advancement alert now has a focused action slot. In the completion stage it shows the existing **Mark Complete** action at the top of the detail view; in the acceptance stage it shows the existing **Accept and Send to TMO** action. The alert also renders a ready state when no blockers remain, so admins do not have to scroll to the bottom decision card to advance a long application. The top CTA reuses the same handlers, disabled states, titles, and validation gates as the bottom decision card.
+Commits: EFS submodule commit `2e6a267 fix(admin): remove lead dialog open page button` was pushed to `origin/main`. Parent repo gitlink commit `89851f8c2 chore(efs): bump lead dialog submodule` was committed locally only; I did not push parent `main` because it is already ahead and dirty with unrelated work.
 
-Commits: EFS commit `888d71c fix(admin): surface full application advance action` is pushed to `origin/main`. Parent gitlink commit `8dbf7c171 chore(efs): bump full application advance action submodule` is committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with many unrelated local commits/changes, and pushing would publish unrelated work.
+Verification: focused `bun test tests/admin-pipeline.test.ts` passed (`64 pass / 0 fail`; it logs the known `d1 down` fixture in the non-fatal outbox test). `git diff --check` passed. Full `make check` passed (`1192 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run in either the EFS submodule or parent repo because neither has a workflow named `CI`.
 
-Verification: focused tests passed (`bun test tests/admin-full-application-approve-ui.test.ts tests/admin-pipeline.test.ts`: `76 pass / 0 fail`; tsift separately flagged the known logged `error: d1 down` fixture string, but the command exited 0). `git diff --check` passed. Full `make check` passed (`1191 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` found no workflow named `CI` in both the EFS submodule and parent repo.
+Deploy: pre-deploy remote D1 migrations reported no pending migrations, D1 info was reachable, and Time Travel bookmark was `0000050b-00000028-00005094-d711a439306e78783077d8c94632d00b`. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `23025fdb-6771-4184-9015-a4425b223197`. Post-deploy checks: remote D1 migrations still reported no migrations to apply; public root returned `200`; the protected admin lead dialog URL returned `303` behind Cloudflare Access.
 
-Deploy: `make deploy` succeeded. Remote D1 migrations reported `No migrations to apply`. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `eb0a41c2-9818-4ab5-b355-410787bebd7f`. Post-deploy smoke checks: public root returned `200`; the deep-linked admin pipeline URL returned `303` behind Cloudflare Access; remote migration list still reported no migrations to apply.
+Suggested commit message:
 
-No actionable follow-up items are needed from this cycle.
+```txt
+fix(admin): remove lead dialog open page button (#pipeline-leads)
+
+Remove the duplicate header Open Page action from the Deal Pipeline lead dialog while keeping the footer Open Lead deep-link. Updates the pipeline regression test and PRD note, with no schema or endpoint changes.
+```
 
 Escalation: none. Confidence: high.
-Implemented and deployed the Full Application top advance CTA.
-
-EFS submodule:
-- Commit `888d71c fix(admin): surface full application advance action`
-- Pushed to `origin/main`
-- Deployed to `https://equityfundingsource.brian-takita.workers.dev`
-- Worker Version ID `eb0a41c2-9818-4ab5-b355-410787bebd7f`
-
-What changed: the top Full Application alert now includes the relevant advance action, using the same existing `Mark Complete` or `Accept and Send to TMO` handler/gates as the bottom decision card. It also shows a ready state when blockers are cleared.
-
-Verification passed:
-- Focused tests: `76 pass / 0 fail`
-- Full `make check`: `1191 pass / 0 fail`, app build, Worker build
-- Remote D1: no migrations to apply
-- Smoke: public root `200`, admin deep link `303` behind Access
-- `agent-doc session-check`: clean, queue drained
-
-Parent gitlink commit `8dbf7c171` is local only. I did not push parent `main` because it is already ahead with unrelated local commits/changes; pushing it would publish unrelated work.
-
-### Re: E-sign Optional For Acceptance And Deploy — gpt-5
-
-> **Queue prompt:** https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application was "Mark Complete" but is still block on the e-sign ![img_36.png](img_36.png). Make the e-sign optional.
->
-> **Queue prompt:** deploy
-
-Implemented and deployed the follow-up. E-sign consent is now optional for Full Application acceptance, not just Mark Complete.
-
-Changed behavior:
-- Server approval validation no longer adds `e-signature` to missing requirements when `sections.signature.esign_consent` is false or absent.
-- The admin Full Application dialog no longer lists `E-sign consent` as a blocking prerequisite before `Accept and Send to TMO`.
-- The screenshot case should now advance once the other required application sections are satisfied.
-
-Changed paths:
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/applications/index.ts`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/full_application_detail.tsx`
-- `src/equityfundingsource-dev/tests/admin-full-application-approve-ui.test.ts`
-- `src/equityfundingsource-dev/tests/apply4-full-application-p6.test.ts`
-- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
-- `src/equityfundingsource-dev` parent gitlink
-
-Commits:
-- EFS submodule: `eba3d43 fix(admin): make e-sign optional for application acceptance` pushed to `origin/main`.
-- Parent repo: `dc92000d3 chore(efs): bump e-sign optional acceptance submodule` committed locally. I did not push parent `main` because it still has unrelated ahead/dirty state outside this task.
-
-Verification:
-- `git diff --check` passed in `src/equityfundingsource-dev`.
-- `bun test tests/admin-full-application-approve-ui.test.ts tests/apply4-full-application-p6.test.ts tests/admin-pipeline.test.ts` passed: 98 pass, 0 fail.
-- `make check` passed: 1191 pass, 0 fail, app build and Worker build completed.
-- `gh run list --workflow CI --limit 1` could not run for both repos because no workflow named `CI` exists.
-
-Deploy:
-- `make deploy` completed successfully.
-- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
-- Current Version ID: `81c55f56-740c-4d43-8811-8b631a2938e5`
-- Remote D1 check: `bun run cf:d1:migrations:list:remote` reports no migrations to apply.
-- HTTP checks: public root `200`; protected admin dialog URL `303` behind Access.
-
-### Re: Full Application Alert CTA Focus And Deploy — gpt-5
-
-> **Queue prompt:** https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 should have the alert CTA as the focused item when opened. In this case the "Accept and Send to TMO" button in the alert.
->
-> **Queue prompt:** deploy
-
-Implemented and deployed the focus follow-up for the stacked Full Application dialog.
-
-Changed behavior:
-- The embedded Full Application detail now marks the top alert advance CTA as the dialog initial-focus target.
-- After the async detail payload renders, the embedded view focuses and scrolls the enabled top advance action into view. In the ready-to-accept case, that is `Accept and Send to TMO`.
-- The Activity History `View all` delayed-focus helper now defers when the enabled top advance CTA is present, so it no longer steals initial focus.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/full_applications.tsx`
-- `src/equityfundingsource-dev/tests/admin-full-application-approve-ui.test.ts`
-- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
-- `src/equityfundingsource-dev` parent gitlink
-
-Commits:
-- EFS submodule: `9848833 fix(admin): focus full application advance CTA` pushed to `origin/main`.
-- Parent repo: `0fe32b06b chore(efs): bump full application focus submodule` committed locally. I did not push parent `main` because it still has unrelated ahead/dirty state outside this task.
-
-Verification:
-- `git diff --check` passed in `src/equityfundingsource-dev`.
-- `bun test tests/admin-full-application-approve-ui.test.ts tests/admin-pipeline.test.ts` passed: 77 pass, 0 fail.
-- `make check` passed: 1192 pass, 0 fail, app build and Worker build completed.
-- `gh run list --workflow CI --limit 1` could not run for both repos because no workflow named `CI` exists.
-
-Deploy:
-- `make deploy` completed successfully.
-- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
-- Current Version ID: `e38e9999-3cbe-455a-8a66-1c89ec29f707`
-- Remote D1 check: `bun run cf:d1:migrations:list:remote` reports no migrations to apply.
-- HTTP checks: public root `200`; protected admin dialog URL `303` behind Access.
-
-Preflight notes:
-- Left the existing legacy gated backlog/review semantic warnings untouched; they were not part of this queue item.
-- Confidence: high from static focus wiring tests, full suite, build, and deployed asset hash `index.browser-2NZ6LM72.js`.
-- Escalation: none.
-<!-- agent:boundary:57e1afce -->
+<!-- agent:boundary:80451786 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -271,6 +86,10 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1, remove Open Page button.~~
+- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1. Remove the Open Lead button.
+- In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1, show an alert with a CTA to advance the lead to the next stage. Does it mean the lead should sign up for an account? I believe btak.dev+borrower3@gmail.com already signed in.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

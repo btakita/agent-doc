@@ -38,7 +38,40 @@ complete
 Compacted content:
 - Archived 2 response topic(s): IPC recovery note; Deactivated lenders deployed
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:447753c5 -->
+
+### Re: Lender pipeline message dialogs — gpt-5
+
+> **Queue prompt:** All lender pipeline dialogs for a lender should contextualize the Message dialog to the lender. Remove and delete any embedded lender message components in the lender pipeline dialogs.
+
+Implemented and committed.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/advance-lender-dialog.test.ts`
+- `src/equityfundingsource-dev/tests/borrower-messages.test.ts`
+- `src/equityfundingsource-dev/tests/message-avatar-shortcut.test.ts`
+- `src/equityfundingsource-dev/tests/msg-send-shortcut.test.ts`
+
+What changed:
+- Removed the embedded deal-interest lender message panel from the lender pipeline workflow list.
+- Removed the embedded lender-account message panel from `AdvanceLenderModal` and mounted the lender-scoped `PortalMessages` launcher there instead.
+- Deleted stale embedded lender-message helper/import code from `investor_pipeline.tsx`.
+- Updated source-contract tests so Deal Detail keeps deal-scoped lender threads, while Lender Pipeline uses `admin_lender_messages_context_(card.user_id)` and keeps only borrower workflow messaging inline.
+
+Verification:
+- `bun test tests/advance-lender-dialog.test.ts tests/admin-investor-pipeline.test.ts tests/msg-send-shortcut.test.ts tests/message-avatar-shortcut.test.ts tests/borrower-messages.test.ts` passed: 146 pass, 0 fail.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'bun run check'` exited 0.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` exited 0. The digest flagged the expected `d1 down` log emitted by a passing non-fatal outbox test, not a command failure.
+- `gh run list --workflow CI --limit 1` in both the EFS submodule and the superproject returned `could not find any workflows named CI`, so there was no latest CI run to inspect.
+
+Commits:
+- EFS submodule: `77d8376 fix: use lender message launcher in pipeline dialogs`
+- Superproject pointer: `5dfca3df0 chore: advance equityfundingsource submodule`
+
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:899d0ac4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,7 +91,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- All lender pipeline dialogs for a lender should contextualize the Message dialog to the lender. Remove and delete any embedded lender message components in the lender pipeline dialogs.
+- ~~All lender pipeline dialogs for a lender should contextualize the Message dialog to the lender. Remove and delete any embedded lender message components in the lender pipeline dialogs.~~
 - deploy
 <!-- /agent:queue -->
 

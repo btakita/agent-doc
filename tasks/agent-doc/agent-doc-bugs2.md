@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -223,14 +223,38 @@ Local installs completed:
 
 - `make install`
 - `agent-doc plugin install --local jetbrains` for `/home/brian/.config/JetBrains/IntelliJIdea2026.1` and `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`
-<!-- agent:boundary:9e0b5208 -->
+
+### Re: do [#rootpushdiv]
+
+> **Queue prompt:**
+>
+> do [#rootpushdiv]
+
+
+Resolved the root push divergence item.
+
+After `git fetch origin`, the root repository was no longer behind `origin/main`; it was only ahead by local commits. I pushed `main` successfully:
+
+- before push: `main...origin/main [ahead 31]`
+- push result: `59396ae32..1925fb921 main -> main`
+- after push: local `HEAD`, `origin/main`, and `origin/HEAD` all match at `1925fb921`
+
+I left the unrelated dirty working-tree files and submodules untouched.
+
+Backlog item `#rootpushdiv` is marked done.
+
+CI check:
+
+- The root repo has workflow `Agent Doc`, not `CI`.
+- Latest run: `28082469612` for `1925fb921`.
+- It failed before running any steps because GitHub Actions did not start jobs due account billing/spending-limit gating: “The job was not started because recent account payments have failed or your spending limit needs to be increased.”
+- There are no failed test logs to fix from that run.
+<!-- agent:boundary:a493402e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~If the operator cancels a turn in the console, then runs JB `Run Agent Doc`...the dispatch hangs. This happened in equityfundingsource.md.~~
-- do [#rootpushdiv]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -259,7 +283,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#rootpushdiv] Resolve superproject `main` divergence before pushing local root commits: root is 95 commits ahead and 7 behind `origin/main` with unrelated dirty task/submodule edits; local root commit `1759b6634` and this closeout commit need a safe rebase/merge before `git push origin main`.
 <!-- /agent:backlog -->
 
 ## Review

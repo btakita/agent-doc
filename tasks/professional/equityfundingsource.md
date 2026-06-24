@@ -419,7 +419,13 @@ Add arrow-key navigation to the Deal and Lender pipeline boards, including focus
 Cleared the two already-answered free-text queue heads for pipeline keyboard navigation and deploy after the Stop hook reported them as still active.
 
 No additional code or deployment work was performed in this repair step.
-<!-- agent:boundary:99e9eaba -->
+
+### Re: Queue component closeout — gpt-5
+
+Cleared the answered pipeline keyboard-navigation and deploy prompts from `agent:queue` after the Stop hook found the component still populated.
+
+No additional code, test, deploy, or repo changes were made in this repair step.
+<!-- agent:boundary:74276154 -->
 <!-- /agent:exchange -->
 ###
 <!--

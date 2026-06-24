@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -153,7 +153,23 @@ Next queue head: `#lzwsunbounded` (ws_backend unbounded outbound mpsc + drive ab
 **Fix (lazily-rs `a41aaec`, pushed):** switch to a bounded `mpsc::channel(WS_OUTBOUND_CAPACITY = 1024)` and make the sync `send_frame` use `try_send`, mapping `Full` → `WsError::Backpressure` (new variant) and `Closed` → `WsError::Closed` — so a producer faster than the socket drains is surfaced flow control instead of unbounded growth, and the frames abandoned on a write-error break are now bounded. Test `ws_send_frame_surfaces_backpressure_when_buffer_fills` exploits the single-threaded `#[tokio::test]` runtime (a tight sync loop never yields to the driver) to fill the bounded channel deterministically and asserts `Backpressure`. Verified: clippy `--all-targets --all-features -D warnings` clean, rustfmt clean, `--features websocket` suite green, release build OK.
 
 Remaining queue: `#lzerrfrom` (error From impls), `#lzsid32` (SlotId 32-bit casts).
-<!-- agent:boundary:d57a83ac -->
+
+### Re: #lzerrfrom + #lzsid32 — already satisfied (stale) — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#lzerrfrom]
+> do [#lzsid32]
+
+Both final queue items are **already implemented** — they were stale backlog entries from 2026-06-17, resolved by intervening work. Verified against HEAD, no code change needed:
+
+- **#lzerrfrom (done):** all four `From` impls are present in `src/ipc.rs` — `From<serde_json::Error>` for `EncodeError` (`:691`) and `DecodeError` (`:738`), and `From<postcard::Error>` for `EncodeError` (`:698`) and `DecodeError` (`:745`), each correctly feature-gated (`ffi` / `ipc-binary`) to mirror its variant and mapping to `Self::Json` / `Self::Binary`.
+- **#lzsid32 (done):** every `SlotId -> usize` conversion in the crate already routes through a `node_index` helper using `usize::try_from(id.0)` — `context.rs:186`, `thread_safe.rs:1230`, `async_context.rs:251`. A repo-wide grep for bare `.0 as usize` SlotId casts returns **none** (the only `as usize` in `thread_safe.rs:1542` is an `Arc::as_ptr` HashMap key, unrelated). 32-bit parity across all three backends is already achieved.
+
+**Queue is now empty — drain complete.** The session fixed six real bugs this run: `#lzasyncdispose` (caa6035), `#lzasyncdispose2` (738ff00), `#lzasynceffdup` (090e104), `#lzstr0mnetinbox` (e165720), `#lzstr0mnetacceptanswer` (7a28283), `#lzwsunbounded` (a41aaec) — all pushed to `lazily-hub/lazily-rs`, each with clippy `--all-features -D warnings` + rustfmt clean + feature-suite green + release build OK.
+
+Note: the editor-IPC CRDT for this doc stayed diverged through the run (`ack_mismatch` at queue consume on every cycle, recovered via `write --commit` + `content_ours`); the responses all committed, but a proven clean closeout needs the editor buffer reloaded to disk. Worth filing the `#exchange-prompt-dropped-on-merge` agent-doc behavior (its own auto-appended dogfood logs classified as fail-closed user prompts) against `tasks/agent-doc/agent-doc-bugs2.md`.
+<!-- agent:boundary:7a97d88d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -162,21 +178,11 @@ Remaining queue: `#lzerrfrom` (error From impls), `#lzsid32` (SlotId 32-bit cast
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~What are #next-steps to fix lazily bugs?~~
-- ~~do [#lzasyncdispose2]~~
-- ~~do [#lzasynceffdup]~~
-- ~~:pushpin: do [#lzstr0mnetinbox]~~
-- ~~:pushpin: do [#lzstr0mnetacceptanswer]~~
-- ~~:pushpin: do [#lzwsunbounded]~~
-- 🚧 :pushpin: do [#lzerrfrom]
-- :pushpin: do [#lzsid32]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzerrfrom] [recommended] Add From<serde_json::Error>/From<postcard::Error> impls for EncodeError/DecodeError ergonomics (open since 2026-06-17). src/ipc.rs.
-- [ ] [#lzsid32] Harden SlotId.0 as-usize casts in thread_safe.rs to usize::try_from for 32-bit safety parity with single-threaded Context (open since 2026-06-17).
 <!-- /agent:backlog -->
 
 ## Review

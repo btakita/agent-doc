@@ -115,14 +115,44 @@ Commits:
 - `99bc090fb chore: advance agent-doc submodule` in the parent repo
 
 For the operator-side IDE replay, the installed checker is now the proof command after the live edit/merge: `agent-doc verify-op-capture <FILE> --expect-cafe-demo`.
-<!-- agent:boundary:344da539 -->
+
+### Re: #advr19 — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#advr19]
+
+
+Instrumented the remaining File Cache Conflict surfaces so the next JetBrains run can distinguish the trigger path instead of only seeing the dialog after the fact.
+
+Changed:
+- `agent-doc-orchestration/src/write.rs` now logs visible-document routing as `write_authority action=routed transport=write_queue ...`.
+- `PatchWatcher.kt` now writes durable `.agent-doc/logs/ops.log` markers for `file_cache_conflict_detected source=jetbrains outcome=pending|cancel surface=editor_ipc_convergence action=apply_patch agent_command=write_finalize_ipc ... #cyh0`.
+- `PatchWatcher.kt` also records `editor_surface_event ... surface=ack_content|vcs_refresh|vcs_refresh_save ... #cyh0`, covering ack-content, VCS refresh, and save-document convergence surfaces.
+- JetBrains tests assert the marker builders and static conflict path wiring.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test -p agent-doc-orchestration write_authority_visible_write_routes_through_queue_without_deadlock -- --test-threads=2`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.NormalizeExchangePrefixesTest`
+- `npm test` in `editors/vscode`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`
+- `make check` passed: 5069 tests, doctests, and medium SimWorld corpus.
+- `git diff --check`
+- `gh run list --workflow CI --limit 1` reported success for run `28074608395`.
+
+Install/commit status:
+- Installed updated CLI/lib with `make install`; then ran `agent-doc admin recycle` after preflight flagged the old route-owned supervisor binary.
+- Built the JetBrains plugin zip, but `agent-doc plugin install --local jetbrains` stopped because multiple JetBrains plugin directories require an interactive choice. Install `/home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.183-signed.zip` into the IDE profile you are testing before the JB live gate.
+- Commits: `src/agent-doc` `4a38bf98` (`cyh0: instrument file cache conflict surfaces`), parent `fa2882cec` (`chore: advance agent-doc submodule`).
+<!-- agent:boundary:9589233f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: do [#advr18]~~
-- :pushpin: do [#advr19]
+- ~~:pushpin: do [#advr19]~~
 - :pushpin: JB `Run Agent Doc` still does not quickly submit the prompt.
 <!-- /agent:queue -->
 <!--
@@ -152,7 +182,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr19] Advance original #cyh0: identify and instrument remaining File Cache Conflict trigger by capturing exact action, agent-doc command, and ops marker such as `write_authority action=... transport=disk`; distinguish ack-content, VCS-refresh/save, and editor-IPC convergence surfaces.
 <!-- /agent:backlog -->
 
 ## Review

@@ -798,7 +798,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `reason=stale_editor_queue_resurrection transport=…` on both the
         // editor-IPC and disk transports so committed completed queue rows win
         // over stale live-buffer unstrikes before the generic editor flush.
-        ("agent-doc-orchestration/src/git.rs", "reason=") => 17,
+        // +3 (`#editorbufwin` P2): one production
+        // `reason=preserved_queue_addition_replay_neutralized` marker plus two
+        // regression assertions prove replay-neutralized queue additions are
+        // committed only after closeout recovery evidence, not during ordinary
+        // independent queue edits.
+        ("agent-doc-orchestration/src/git.rs", "reason=") => 20,
         ("src/orchestrate.rs", "guard_") => 0,
         ("src/orchestrate/dag.rs", "guard_") => 2,
         // +1 (`reason=probe_inspection_only`): `preflight --probe` logs why it

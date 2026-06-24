@@ -785,6 +785,9 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     let ipc_snapshot_adoption_blocked = cycle_state_for_commit
         .as_ref()
         .is_some_and(|state| state.ipc_snapshot_adoption_blocked);
+    let has_dropped_queue_prompt_evidence = cycle_state_for_commit
+        .as_ref()
+        .is_some_and(|state| !state.dropped_queue_prompts.is_empty());
     let reintroduced_reaped_ids = cycle_state_for_commit
         .map(|state| state.reaped_pending_ids.into_iter().collect::<HashSet<_>>())
         .map(|ids| detect_reintroduced_reaped_pending_ids(&file_content, &ids))
@@ -889,6 +892,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         .as_deref()
         .zip(head_doc.as_deref())
         .is_some_and(|(snapshot, head)| strip_head_markers(snapshot) == head);
+    let mut stale_response_collapse_repaired = false;
     if snapshot_matches_head
         && let Some(head) = head_doc.as_deref()
         && let Some(cleaned) =
@@ -915,6 +919,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             repair_stale_agent_response_collapse_worktree(file, head, &file_content)?
     {
         file_content = repaired;
+        stale_response_collapse_repaired = true;
     }
     let post_commit_local_drift = if snapshot_matches_head {
         head_doc
@@ -923,6 +928,33 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     } else {
         None
     };
+    if snapshot_matches_head
+        && (ipc_snapshot_adoption_blocked
+            || has_dropped_queue_prompt_evidence
+            || stale_response_collapse_repaired)
+        && let Some(head) = head_doc.as_deref()
+        && let Some(added_prompts) =
+            preserved_queue_additions_neutralized_by_replay(head, &file_content)
+    {
+        eprintln!(
+            "[commit] committing preserved queue addition drift for {} ({} prompt(s)); replay normalization neutralized the queue component",
+            file.display(),
+            added_prompts
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "snapshot_absorb file={} reason=preserved_queue_addition_replay_neutralized prompts={} old_snap_len={} new_snap_len={}",
+                file.display(),
+                added_prompts,
+                snap_len,
+                file_content.len()
+            ),
+        );
+        crate::snapshot::save(file, &file_content)?;
+        snapshot_content = Some(file_content.clone());
+        snapshot_matches_head = false;
+    }
 
     // Warn on significant file/snapshot drift — may indicate an out-of-band write
     // that bypassed the agent-doc write pipeline (snapshot not updated).
@@ -2216,6 +2248,95 @@ fn classify_post_commit_local_drift(
         return Some(kind);
     }
     Some(PostCommitLocalDriftKind::WorkingTreeEdits)
+}
+
+fn queue_entry_commit_signature(entry: &crate::queue::QueueEntry) -> String {
+    match entry {
+        crate::queue::QueueEntry::Prompt(prompt) => {
+            format!("prompt:{}:{}", prompt.multiline, prompt.text.trim())
+        }
+        crate::queue::QueueEntry::Completed(prompt) => {
+            format!("completed:{}:{}", prompt.multiline, prompt.text.trim())
+        }
+        crate::queue::QueueEntry::Preset(preset) => format!("preset:{}", preset.trim()),
+        crate::queue::QueueEntry::Dispatch(dispatch) => format!("dispatch:{}", dispatch.trim()),
+        crate::queue::QueueEntry::StartFence(Some(at)) => format!("start:{}", at.trim()),
+        crate::queue::QueueEntry::StartFence(None) => "start:".to_string(),
+        crate::queue::QueueEntry::StopFence => "stop:".to_string(),
+        crate::queue::QueueEntry::Freeform(line) => format!("freeform:{}", line.trim()),
+    }
+}
+
+fn queue_entry_count_map(entries: &[crate::queue::QueueEntry]) -> HashMap<String, (usize, bool)> {
+    let mut counts = HashMap::new();
+    for entry in entries {
+        let key = queue_entry_commit_signature(entry);
+        let is_prompt = matches!(entry, crate::queue::QueueEntry::Prompt(_));
+        let slot = counts.entry(key).or_insert((0usize, is_prompt));
+        slot.0 += 1;
+        slot.1 |= is_prompt;
+    }
+    counts
+}
+
+/// `#editorbufwin` P2 — when the visible document differs from clean HEAD only
+/// inside `agent:queue`, replay normalization reports `match=true` because queue
+/// churn is deliberately neutralized. In that narrow shape, commit a preserved
+/// editor-buffer queue addition into the snapshot/HEAD so the operator's queue
+/// edit is durable and session-check does not need a manual reset-from-current.
+///
+/// Conservative rules:
+/// - HEAD's queue entries must still be present with at least the same counts
+///   (no queue deletions or unstrikes are accepted here).
+/// - Every extra working entry must be an active prompt.
+/// - Non-queue document content must compare equal under replay normalization.
+fn preserved_queue_additions_neutralized_by_replay(
+    head_doc: &str,
+    current_doc: &str,
+) -> Option<usize> {
+    if head_doc == current_doc {
+        return None;
+    }
+    if normalize_for_replay_hash(head_doc) != normalize_for_replay_hash(current_doc) {
+        return None;
+    }
+
+    let head_components = crate::component::parse(head_doc).ok()?;
+    let current_components = crate::component::parse(current_doc).ok()?;
+    let head_queue = head_components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    let current_queue = current_components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    let head_entries = crate::queue::parse(head_queue.content(head_doc)).ok()?;
+    let current_entries = crate::queue::parse(current_queue.content(current_doc)).ok()?;
+    let head_counts = queue_entry_count_map(&head_entries);
+    let current_counts = queue_entry_count_map(&current_entries);
+
+    for (key, (head_count, _)) in &head_counts {
+        let current_count = current_counts
+            .get(key)
+            .map(|(count, _)| *count)
+            .unwrap_or(0);
+        if current_count < *head_count {
+            return None;
+        }
+    }
+
+    let mut added_prompts = 0usize;
+    for (key, (current_count, is_prompt)) in &current_counts {
+        let head_count = head_counts.get(key).map(|(count, _)| *count).unwrap_or(0);
+        if *current_count <= head_count {
+            continue;
+        }
+        if !*is_prompt {
+            return None;
+        }
+        added_prompts += current_count - head_count;
+    }
+
+    (added_prompts > 0).then_some(added_prompts)
 }
 
 fn exchange_component(doc: &str) -> Option<crate::component::Component> {
@@ -6507,6 +6628,73 @@ Duplicate replay should stay live.
     }
 
     #[test]
+    fn commit_already_current_commits_preserved_queue_additions_neutralized_by_replay() {
+        // #editorbufwin P2: queue-only drift is neutralized by replay hashing, so
+        // an already-current snapshot used to close as a no-op and leave the
+        // operator's queue addition local. The preserved queue prompt must become
+        // durable in a follow-up commit while staying live for the next drain.
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+
+        let head_doc = "---\nagent_doc_session: test\nqueue_active: true\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: prior\n\
+            response body\n\
+            <!-- agent:boundary:abc123 -->\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:queue priority go -->\n\
+            - do [#existing]\n\
+            <!-- /agent:queue -->\n";
+        commit_file(root, "session.md", head_doc, "agent-doc: prior response");
+        let doc = root.join("session.md");
+        crate::snapshot::save(&doc, head_doc).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(head_doc), Some(head_doc)).unwrap();
+        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc)
+            .unwrap()
+            .expect("cycle state should be present");
+
+        let visible_with_queue_add = head_doc.replace(
+            "- do [#existing]\n",
+            "- do [#existing]\n- :pushpin: do [#advance-review]\n",
+        );
+        fs::write(&doc, &visible_with_queue_add).unwrap();
+
+        let did_commit = commit(&doc).expect("queue-only drift should commit");
+        assert!(
+            did_commit,
+            "queue-only preserved editor drift must create a follow-up commit"
+        );
+
+        let head_after = show_head(&doc).unwrap().unwrap();
+        assert!(
+            head_after.contains("- :pushpin: do [#advance-review]\n"),
+            "HEAD must include the preserved queue addition:\n{head_after}"
+        );
+        let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snapshot_after.contains("- :pushpin: do [#advance-review]\n"),
+            "snapshot must make the queue addition durable for session-check:\n{snapshot_after}"
+        );
+        let working_after = fs::read_to_string(&doc).unwrap();
+        assert!(
+            working_after.contains("- :pushpin: do [#advance-review]\n"),
+            "visible document must keep the queue addition live:\n{working_after}"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("reason=preserved_queue_addition_replay_neutralized"),
+            "commit should log the replay-neutralized queue recovery:\n{log}"
+        );
+        assert!(
+            !log.contains("commit_already_current file="),
+            "the queue addition must not be closed as an already-current no-op:\n{log}"
+        );
+    }
+
+    #[test]
     fn postcommit_worktree_reconciles_stale_queue_unstrikes_before_flush() {
         // #pzjy: a stale editor buffer can turn committed completed queue rows
         // back into live prompts. That must not be accepted by the generic
@@ -7024,7 +7212,7 @@ Duplicate replay should stay live.
         );
     }
     #[test]
-    fn commit_already_current_repairs_stale_agent_response_collapse_preserving_queue_follow_up() {
+    fn commit_already_current_repairs_stale_agent_response_collapse_and_commits_queue_follow_up() {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
@@ -7145,33 +7333,54 @@ Duplicate replay should stay live.
 
         let did_commit = commit(&doc).expect("stale response collapse should self-heal");
         assert!(
-            !did_commit,
-            "repair should close as already committed and leave queue follow-up local"
+            did_commit,
+            "repair should commit the preserved queue follow-up after cleaning the exchange"
         );
 
-        let expected_working = committed.replace(
-            "<!-- agent:queue -->\n<!-- /agent:queue -->",
-            "<!-- agent:queue -->\n- do [#submitdiag] Add diagnostics for JB Run Agent Doc submit misses?\n<!-- /agent:queue -->",
+        let head_after = show_head(&doc).unwrap().unwrap();
+        assert!(
+            head_after.contains("### Re: #vbc1 next backlog"),
+            "committed exchange response must be restored:\n{head_after}"
+        );
+        assert!(
+            head_after.contains("### Re: #queueeditloss"),
+            "second committed exchange response must be restored:\n{head_after}"
+        );
+        assert!(
+            !head_after.contains("<!-- agent:boundary:live-boundary -->"),
+            "stale live boundary must not survive in HEAD:\n{head_after}"
+        );
+        assert!(
+            head_after.contains(
+                "- do [#submitdiag] Add diagnostics for JB Run Agent Doc submit misses?\n"
+            ),
+            "preserved queue follow-up must be durable in HEAD:\n{head_after}"
         );
         let working = fs::read_to_string(&doc).unwrap();
-        assert_eq!(
-            working, expected_working,
-            "only the stale exchange collapse should be restored; queue follow-up drift must remain visible"
+        assert!(
+            working.contains(
+                "- do [#submitdiag] Add diagnostics for JB Run Agent Doc submit misses?\n"
+            ),
+            "queue follow-up must remain visible:\n{working}"
         );
 
         let snap = crate::snapshot::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            snap, committed,
-            "snapshot must stay on clean HEAD so the queue follow-up is not committed"
+        assert!(
+            snap.contains(
+                "- do [#submitdiag] Add diagnostics for JB Run Agent Doc submit misses?\n"
+            ),
+            "snapshot must include the committed queue follow-up:\n{snap}"
         );
 
         let crdt = crate::snapshot::load_crdt(&doc)
             .unwrap()
             .expect("CRDT state should be refreshed for the repaired visible document");
         let crdt_text = crate::crdt::CrdtDoc::decode_state(&crdt).unwrap().to_text();
-        assert_eq!(
-            crdt_text, expected_working,
-            "CRDT state should match the repaired visible worktree, including preserved queue drift"
+        assert!(
+            crdt_text.contains(
+                "- do [#submitdiag] Add diagnostics for JB Run Agent Doc submit misses?\n"
+            ),
+            "CRDT state should include the preserved queue follow-up:\n{crdt_text}"
         );
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
@@ -7179,6 +7388,10 @@ Duplicate replay should stay live.
             log.contains("stale_agent_response_collapse_cleanup file=")
                 && log.contains("preserved_local_drift=true"),
             "repair should leave durable evidence that only the exchange collapse was cleaned:\n{log}"
+        );
+        assert!(
+            log.contains("reason=preserved_queue_addition_replay_neutralized"),
+            "queue follow-up commit should log the replay-neutralized recovery:\n{log}"
         );
     }
     #[test]

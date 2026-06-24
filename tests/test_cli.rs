@@ -1136,9 +1136,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/write/ipc/transport.rs", "reason=") => 10,
         // +2 (#docdriftgrace): the stale-snapshot reset regression tests call the
         // existing `guard_no_stale_snapshot_reset_drift` boundary for the safe
-        // visible rebase and fail-closed active-driver cases. The production guard
-        // boundary is unchanged; the new matches are test coverage.
-        ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 7,
+        // visible rebase and fail-closed active-driver cases. +2 (#docdriftfinalize):
+        // compact-summary stream-write rebase and fake-summary rejection tests call
+        // the same existing boundary. The production guard boundary is unchanged;
+        // the new matches are test coverage.
+        ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 9,
         // +9 (#fcc0-no-external-write): active editor listeners no longer allow
         // disk fallback when component convergence cannot prove editor apply.
         // The added `reason=` tokens are the blocked production reasons

@@ -125,7 +125,7 @@ fn classify_stale_snapshot_visible_rebase(
         }
 
         if snap_comp.name == "exchange" {
-            if exchange_change_is_complete_response_block_trim(
+            if exchange_change_is_safe_historical_reduction(
                 snap_comp.content(snapshot_body),
                 current_comp.content(current_body),
             ) {
@@ -249,6 +249,48 @@ fn exchange_change_is_complete_response_block_trim(snapshot: &str, current: &str
     }
 
     removed > 0 && current[current_pos..] == snapshot[snapshot_pos..]
+}
+
+fn exchange_change_is_safe_historical_reduction(snapshot: &str, current: &str) -> bool {
+    exchange_change_is_complete_response_block_trim(snapshot, current)
+        || exchange_change_is_compact_summary_replacement(snapshot, current)
+}
+
+fn exchange_change_is_compact_summary_replacement(snapshot: &str, current: &str) -> bool {
+    if snapshot == current {
+        return false;
+    }
+    let current_trimmed = current.trim_start();
+    if !current_trimmed.starts_with("### Session Summary") {
+        return false;
+    }
+    if !current.contains("*Compacted. Content archived to `")
+        && !current.contains("Compacted content:")
+    {
+        return false;
+    }
+
+    let snapshot_headings = exchange_response_heading_lines(snapshot);
+    if snapshot_headings.is_empty() {
+        return false;
+    }
+    let current_headings = exchange_response_heading_lines(current);
+    if current_headings
+        .iter()
+        .any(|heading| !snapshot_headings.contains(heading))
+    {
+        return false;
+    }
+
+    current_headings.len() < snapshot_headings.len()
+}
+
+fn exchange_response_heading_lines(exchange: &str) -> Vec<String> {
+    exchange
+        .lines()
+        .filter(|line| is_exchange_response_heading(line))
+        .map(|line| line.trim().to_string())
+        .collect()
 }
 
 fn exchange_response_block_ranges(exchange: &str) -> Vec<std::ops::Range<usize>> {
@@ -3082,6 +3124,89 @@ mod core_tests {
                 && ops_log.contains("historical_exchange_trim_unrelated_drift"),
             "rebase marker should explain the scoped drift:\n{ops_log}"
         );
+    }
+
+    #[test]
+    fn stale_snapshot_reset_drift_rebases_compact_summary_replacement_on_stream_write() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "seed").unwrap();
+        let old_blocks = (0..12)
+            .map(|idx| {
+                format!(
+                    "### Re: archived {idx} - gpt-5\n\n{}\n",
+                    "Archived response body.\n".repeat(12)
+                )
+            })
+            .collect::<String>();
+        let snapshot = format!(
+            "---\nagent_doc_session: test\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n{old_blocks}<!-- agent:boundary:old -->\n<!-- /agent:exchange -->\n\n\
+## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n"
+        );
+        let current = "---\nagent_doc_session: test\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\nCompacted content:\n- Archived 12 response topic(s): archived 0; archived 1; archived 2; 9 more\n- Prior summary/context: compacted prior responses\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n\n\
+## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
+        fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, &snapshot).unwrap();
+        let scope =
+            agent_doc_core::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
+        crate::turn_scope_store::save(&doc, &scope).unwrap();
+
+        let rebased =
+            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "stream write")
+                .expect("compact summary replacement should rebase stale pre-compact snapshot");
+
+        assert!(rebased, "guard should report a snapshot refresh");
+        assert_eq!(
+            crate::snapshot::load(&doc).unwrap(),
+            Some(current.to_string())
+        );
+        let ops_log =
+            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains("stale_snapshot_visible_rebased")
+                && ops_log.contains("phase=stream write")
+                && ops_log.contains("historical_exchange_trim"),
+            "stream-write rebase marker should explain compact-summary drift:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn stale_snapshot_reset_drift_blocks_fake_session_summary_without_compact_marker() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "seed").unwrap();
+        let old_blocks = (0..12)
+            .map(|idx| {
+                format!(
+                    "### Re: archived {idx} - gpt-5\n\n{}\n",
+                    "Archived response body.\n".repeat(12)
+                )
+            })
+            .collect::<String>();
+        let snapshot = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n{old_blocks}<!-- /agent:exchange -->\n"
+        );
+        let current = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\nOperator-authored replacement without compact archive proof.\n<!-- /agent:exchange -->\n";
+        crate::snapshot::save(&doc, &snapshot).unwrap();
+        let scope =
+            agent_doc_core::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
+        crate::turn_scope_store::save(&doc, &scope).unwrap();
+
+        let err =
+            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "stream write")
+                .expect_err("non-compact exchange rewrite must still fail closed");
+
+        assert!(
+            err.to_string().contains("agent-doc reset --from-current"),
+            "unsafe exchange rewrite should keep deterministic reset guidance: {err}"
+        );
+        assert_eq!(crate::snapshot::load(&doc).unwrap(), Some(snapshot));
     }
 
     #[test]

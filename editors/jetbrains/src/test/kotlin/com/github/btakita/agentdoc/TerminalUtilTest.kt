@@ -340,6 +340,24 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `protected prompt input route refusal is actionable not persistent failure`() {
+        val relativePath = "tasks/professional/equityfundingsource.md"
+        val snapshot = "/tmp/agent-doc-route-snapshot.txt"
+        val output = """
+            Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/$relativePath into pane %3 for /home/brian/work/btakita/agent-loop/$relativePath because the composer contains protected prompt input (drafted prompt input); clear or submit that draft, then rerun agent-doc route snapshot_path=$snapshot
+        """.trimIndent()
+        val message = TerminalUtil.buildRunAgentDocProtectedPromptInputMessage(relativePath, output)
+
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.PROTECTED_PROMPT_INPUT, TerminalUtil.classifyRunAgentDocRouteFailure(output))
+        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
+        assertTrue(message.contains("did not start"))
+        assertTrue(message.contains("unsent prompt text"))
+        assertTrue(message.contains(snapshot))
+        assertFalse(message.contains("route failed"))
+        assertFalse(message.contains("Saved exact route output"))
+    }
+
+    @Test
     fun `paused queue route is reported as actionable info not persistent route failure`() {
         val relativePath = "tasks/agent-doc/agent-doc-bugs2.md"
         val output = """

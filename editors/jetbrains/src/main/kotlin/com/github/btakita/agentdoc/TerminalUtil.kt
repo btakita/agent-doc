@@ -223,6 +223,7 @@ object TerminalUtil {
         QUEUED_PENDING,
         QUEUE_PAUSED,
         DISPATCH_START_UNPROVEN,
+        PROTECTED_PROMPT_INPUT,
     }
 
     internal val inFlightRouteRegistry = InFlightRouteRegistry()
@@ -511,6 +512,13 @@ object TerminalUtil {
                             clearPersistedRouteFailureOutput(cwd, relativePath)
                             notifyRunAgentDocDispatchUnproven(project, relativePath, output)
                             finalStage = "route_dispatch_start_unproven"
+                            finalError = routeAttemptError(exitCode, failureKind, output)
+                            break
+                        } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.PROTECTED_PROMPT_INPUT) {
+                            LOG.warn("[route] protected prompt input for $relativePath: $output")
+                            clearPersistedRouteFailureOutput(cwd, relativePath)
+                            notifyRunAgentDocProtectedPromptInput(project, relativePath, output)
+                            finalStage = "route_protected_prompt_input"
                             finalError = routeAttemptError(exitCode, failureKind, output)
                             break
                         } else if (exitCode != 0) {
@@ -1617,10 +1625,17 @@ object TerminalUtil {
             isDispatchOnlyBusyActorWaitTimeout(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
             isLatestRunStillBootingBusy(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
             isDispatchStartUnproven(output) -> RunAgentDocRouteFailureKind.DISPATCH_START_UNPROVEN
+            isProtectedPromptInputRouteFailure(output) -> RunAgentDocRouteFailureKind.PROTECTED_PROMPT_INPUT
             isStartingActorRouteFailure(output) ->
                 RunAgentDocRouteFailureKind.RETRYABLE_STARTING
             else -> RunAgentDocRouteFailureKind.PERSISTENT
         }
+    }
+
+    private fun isProtectedPromptInputRouteFailure(output: String): Boolean {
+        val lower = output.lowercase()
+        return lower.contains("route refusing to dispatch") &&
+            lower.contains("composer contains protected prompt input")
     }
 
     private fun isDispatchStartUnproven(output: String): Boolean {
@@ -2007,6 +2022,19 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         }
     }
 
+    internal fun buildRunAgentDocProtectedPromptInputMessage(relativePath: String, routeOutput: String): String {
+        val snapshotPath = latestRegexValue(routeOutput.lines(), ROUTE_SNAPSHOT_PATH_REGEX)
+        return buildString {
+            append("Agent Doc did not start for ")
+            append(relativePath)
+            append(".\nThe target pane has unsent prompt text. Clear or submit that draft, then run Agent Doc again.")
+            if (snapshotPath.isNotBlank()) {
+                append("\nRoute snapshot: ")
+                append(snapshotPath)
+            }
+        }
+    }
+
     private fun notifyRunAgentDocStillRunning(project: Project, relativePath: String, routeOutput: String) {
         val summary = buildRunAgentDocStillRunningMessage(relativePath)
         try {
@@ -2035,6 +2063,30 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
             notification.addAction(NotificationAction.createSimple("Copy details") {
                 CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
                 showHint(project, "Copied unproven route details for $relativePath")
+            })
+            if (snapshotPath.isNotBlank()) {
+                notification.addAction(NotificationAction.createSimple("Copy snapshot path") {
+                    CopyPasteManager.getInstance().setContents(StringSelection(snapshotPath))
+                    showHint(project, "Copied route snapshot path for $relativePath")
+                })
+            }
+            notification.notify(project)
+        } catch (_: Exception) {
+            System.err.println("[agent-doc] $summary")
+        }
+    }
+
+    private fun notifyRunAgentDocProtectedPromptInput(project: Project, relativePath: String, routeOutput: String) {
+        val summary = buildRunAgentDocProtectedPromptInputMessage(relativePath, routeOutput)
+        val snapshotPath = latestRegexValue(routeOutput.lines(), ROUTE_SNAPSHOT_PATH_REGEX)
+        try {
+            val notification = NotificationGroupManager.getInstance()
+                .getNotificationGroup("Agent Doc")
+                .createNotification(summary, NotificationType.WARNING)
+            notification.isImportant = true
+            notification.addAction(NotificationAction.createSimple("Copy details") {
+                CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
+                showHint(project, "Copied protected-input route details for $relativePath")
             })
             if (snapshotPath.isNotBlank()) {
                 notification.addAction(NotificationAction.createSimple("Copy snapshot path") {

@@ -296,11 +296,11 @@ pub(crate) fn direct_pane_existing_draft_visible(
         {
             continue;
         }
-        let later_has_idle_prompt = lines
+        let later_has_prompt = lines
             .iter()
             .skip(start + 1)
-            .any(|line| harness.is_dispatch_ready_prompt_line(line));
-        return !later_has_idle_prompt;
+            .any(|line| harness.is_prompt_line(line));
+        return !later_has_prompt;
     }
     false
 }
@@ -766,6 +766,7 @@ pub(crate) fn send_command_unchecked(
     let payload = routed_trigger_payload(&trigger);
     validate_routed_trigger_payload(harness, &trigger, &payload)?;
     let mut existing_draft_diagnostic_path = None;
+    let mut protected_prompt_input = None;
     let existing_draft_visible = match sessions::capture_pane(tmux, pane) {
         Ok(content) => {
             let visible = direct_pane_existing_draft_visible(&content, &trigger, harness);
@@ -778,6 +779,16 @@ pub(crate) fn send_command_unchecked(
                     &content,
                 )
                 .path;
+            } else if let Some(reason) = harness.protected_prompt_input_reason(&content) {
+                let diagnostic_path = preserve_route_pane_snapshot(
+                    file,
+                    pane,
+                    harness,
+                    "direct_pane_protected_prompt_input",
+                    &content,
+                )
+                .path;
+                protected_prompt_input = Some((reason, diagnostic_path));
             }
             visible
         }
@@ -789,6 +800,30 @@ pub(crate) fn send_command_unchecked(
             false
         }
     };
+    if let Some((reason, diagnostic_path)) = protected_prompt_input {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_direct_pane_blocked file={} pane={} harness={} protected_input={}",
+                file.display(),
+                pane,
+                harness.binary,
+                reason,
+            ),
+        );
+        let diagnostic = diagnostic_path
+            .as_ref()
+            .map(|path| format!(" snapshot_path={}", path.display()))
+            .unwrap_or_default();
+        anyhow::bail!(
+            "route refusing to dispatch {} into pane {} for {} because the composer contains protected prompt input ({}); clear or submit that draft, then rerun agent-doc route{}",
+            harness.trigger_command(file_path),
+            pane,
+            file.display(),
+            reason,
+            diagnostic,
+        );
+    }
     if direct_pane_can_enter_existing_draft(&harness.binary, existing_draft_visible) {
         let first = send_direct_pane_enter_resubmit_until_stable(
             tmux,
@@ -2169,6 +2204,28 @@ preflight complete
         assert!(
             !direct_pane_existing_draft_visible(stale_scrollback, trigger, &harness),
             "an idle prompt below the trigger means it is scrollback, not the active draft"
+        );
+
+        let interrupted_with_new_draft = "\
+╭─────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.142.0)                  │
+╰─────────────────────────────────────────────╯
+
+› agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
+
+■ Conversation interrupted - tell the model what to do differently.
+
+› Use /skills to list available skills
+
+gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
+";
+        assert!(
+            !direct_pane_existing_draft_visible(
+                interrupted_with_new_draft,
+                "agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md",
+                &harness
+            ),
+            "a cancelled route trigger in scrollback must not receive Enter when a newer composer draft exists"
         );
 
         assert!(direct_pane_can_enter_existing_draft("codex", true));

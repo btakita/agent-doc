@@ -196,7 +196,6 @@ impl HarnessConfig {
 
     /// Check if a line (potentially with ANSI codes) matches a prompt pattern.
     /// Used by route.rs for pane prompt detection.
-    #[cfg(test)]
     pub fn is_prompt_line(&self, line: &str) -> bool {
         let stripped = crate::prompt::strip_ansi(line);
         let trimmed = stripped.trim();

@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.44
 
+- **Run Agent Doc no longer re-submits cancelled scrollback prompts over a newer Codex draft.** Direct-pane dispatch now treats any later harness prompt, including a non-empty draft such as `Use /skills...`, as proof that an older `agent-doc <FILE>` line is scrollback rather than the current composer draft. If protected live input is present, route now fails closed with a snapshot diagnostic instead of sending Enter or appending a fresh trigger into the user's text, and the JetBrains plugin reports that state as an actionable warning instead of a generic route failure. The JetBrains plugin patch version is bumped to 0.2.187.
+
 - **Editor markdown emphasis now respects theme foreground and identifier underscores.** JetBrains bold/italic visual tokens now inherit the editor's normal foreground instead of the identifier color, so regular markdown text no longer turns yellow in dark themes. The shared visual-token parser also rejects underscore emphasis delimiters inside identifier words, so `foo_bar_baz` and `foo__bar__baz` stay regular text while `_foo_` and `__foo__` still render italic/bold. Coverage pins the underscore delimiter regression, and the JetBrains plugin patch version is bumped to 0.2.184.
 - **JetBrains component bodies inherit theme foreground.** Agent-doc component body text in the JetBrains plugin now keeps the editor's normal foreground color while retaining the subtle component background, so queue/backlog/body content no longer renders as yellow metadata text in dark themes. Test `component body inherits editor foreground`, and the JetBrains plugin patch version is bumped to 0.2.186.
 

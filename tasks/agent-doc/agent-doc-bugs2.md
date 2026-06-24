@@ -190,6 +190,11 @@ Committed updates:
 
 ### Re: If the operator cancels a turn in the console, then runs JB `Run Agent Doc`...the dispatch hangs. This happened in equityfundingsource.md.
 
+> **Queue prompt:**
+>
+> If the operator cancels a turn in the console, then runs JB `Run Agent Doc`...the dispatch hangs. This happened in equityfundingsource.md.
+
+
 Fixed in `src/agent-doc`.
 
 The stale-draft detector now treats any later harness prompt as proof that an older `agent-doc ...` trigger is scrollback, not the current composer draft. That covers the equityfundingsource-style cancelled prompt followed by `Conversation interrupted` and a newer live Codex draft like `Use /skills to list available skills`.
@@ -218,14 +223,13 @@ Local installs completed:
 
 - `make install`
 - `agent-doc plugin install --local jetbrains` for `/home/brian/.config/JetBrains/IntelliJIdea2026.1` and `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`
-<!-- agent:boundary:c627668b -->
+<!-- agent:boundary:9e0b5208 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~The JB Plugin yellow text is still yellow. ![img_55.png](img_55.png). It should match the theme ![img_54.png](img_54.png).~~
-- If the operator cancels a turn in the console, then runs JB `Run Agent Doc`...the dispatch hangs. This happened in equityfundingsource.md.
+- ~~If the operator cancels a turn in the console, then runs JB `Run Agent Doc`...the dispatch hangs. This happened in equityfundingsource.md.~~
 - do [#rootpushdiv]
 <!-- /agent:queue -->
 <!--

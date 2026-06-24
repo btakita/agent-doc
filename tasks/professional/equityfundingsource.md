@@ -103,7 +103,79 @@ fix(admin): auto-create selected message threads
 
 Remove the manual Create session button in admin Messages, create missing selected-user threads through the existing admin endpoint, and focus the reply textarea after contextual application-dialog launches load or create the borrower conversation. Updates PRD and regression assertions for the new auto-create behavior.
 ```
-<!-- agent:boundary:48ba3e98 -->
+
+### Re: Lead application note + documents + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=lead&dialog_lead_id=e2a41d4b-250c-4197-a370-4f5b786a5bcf, I see "Message" section with an entry "Test"...but "Test" is not in the conversation. Is this a different "Message" than our conversation messages...did it come from the application itself? Should we rename his "Message" to something more appropriate?
+
+> **Queue prompt:**
+>
+> In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=lead&dialog_lead_id=e2a41d4b-250c-4197-a370-4f5b786a5bcf, add the uploaded files by type. Allow the admin to upload files by type...similar to how the admin can upload Lender files for the accredation process.
+
+> **Queue prompt:**
+>
+> deploy
+
+Implemented, committed, pushed, and deployed the lead-dialog update.
+
+The `Test` entry was the public prequalification lead's `message` field, not the secure portal conversation. I renamed that section to **Application note** so it is distinct from admin/borrower conversation messages.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/migrations/0107_application_lead_documents.sql`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/application-lead-documents.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/application_leads/index.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/routes.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/application_lead_detail.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/investor/lender_account.tsx`
+- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
+- `src/equityfundingsource-dev/prds/investor-pipeline-admin.md`
+- `src/equityfundingsource-dev/tests/admin-application-lead-detail.test.ts`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/application-leads.test.ts`
+
+What changed:
+- Added `application_lead_documents`, a lead-scoped link table over the shared `documents` + R2 store.
+- Added admin lead document list/upload/delete/download endpoints under `/api/admin/application-leads/:id/documents`.
+- Added a **Lead Documents** panel to the existing `ApplicationLeadDetail` component, so both the standalone lead page and the Deal Pipeline lead dialog support typed uploads.
+- Supported lead document types: purchase contract, property photos, entity documents, bank statements/proof of funds, payoff statement, scope/budget, and other intake document.
+- Kept uploads behind the existing Tier 0 upload guard, upload rate limiter, admin auth, R2 storage, and guarded download path.
+- Fixed an existing investor lender-signup modal contract issue by marking its scroll region with `class="modal-body"`, which was required for the full UI test suite.
+
+Verification:
+- `bun test tests/application-leads.test.ts tests/admin-application-lead-detail.test.ts tests/admin-pipeline.test.ts` — passed, 76 tests / 0 failures. The `d1 down` line is the expected non-fatal outbox failure fixture in `admin-pipeline.test.ts`.
+- `bun test tests/portal-table-dialog.test.ts --test-name-pattern "every PortalModal file"` — passed.
+- `git diff --check` — passed.
+- `make check` — passed, 1174 tests / 0 failures plus app and Worker builds.
+- `gh run list --workflow CI --limit 1` in both EFS and parent repos — no workflow named `CI` exists.
+
+Deployment:
+- Pre-deploy remote D1 migration list showed only additive `0107_application_lead_documents.sql` pending.
+- D1 info was reachable for DB `280e1539-b940-4c59-8988-fbed63c12ac0`.
+- D1 Time Travel bookmark before deploy: `000004f6-00000096-00005094-266da1f4b67ede9ad49fb7fc65153a61`.
+- `make deploy` applied migration `0107_application_lead_documents.sql` and activated Worker version `f6915adf-4989-4775-807a-8f420e5214a3` at `https://equityfundingsource.brian-takita.workers.dev`.
+- Post-deploy remote D1 migration list: `No migrations to apply!`.
+- Smoke tests: `/` returned `200`; the admin lead-dialog URL returned the expected admin-auth redirect `303`; unauthenticated lead-documents API returned `401`.
+
+Commits:
+- EFS submodule: `85d56ebc933702e40b15c7b85ceeebfdc87775cf` (`feat(admin): add typed lead document uploads`), pushed to `equityfundingsource-dev/main`.
+- Parent submodule pointer: `3e080a0ad5feffee20a39eedc69363b2d517d33e` (`chore: update equityfundingsource submodule`), pushed to `agent-loop/main` from a clean temporary `origin/main` worktree so unrelated local parent commits and dirty files were not published.
+
+I left unrelated dirty parent-worktree files and unrelated local parent commits untouched. The EFS submodule worktree is clean.
+
+Escalation: none.
+Confidence: high.
+
+Suggested commit message:
+
+```txt
+feat(admin): add typed lead document uploads
+
+Rename the prequalification lead free-text display to Application note, add lead-scoped typed document uploads backed by application_lead_documents plus shared R2 documents, and cover the new admin routes/UI with PRD and regression tests. Also fixes the existing lender signup modal-body contract required by the full UI suite.
+```
+<!-- agent:boundary:d41c52f9 -->
 <!-- /agent:exchange -->
 ###
 <!--

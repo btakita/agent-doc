@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -60,7 +60,31 @@ Compacted content:
 **Closeout note:** editor-IPC for this file is wedged (`live_prompt_drift_after_preflight`, recurring across cycles); closed out via `--force-disk`. The struck queue head is answered; backlog/review unchanged (4 operator-drive review items, 2 icebox spikes — all genuinely operator/external-gated, none agent-drainable).
 
 Queue drained.
-<!-- agent:boundary:2e3e0e54 -->
+**IPC proof issue dogfood log**
+
+Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=1774b52f-180f-4339-9d78-e2a5debcccea invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=6728 candidate_hash=dc94b2e9e095064dbfa935c6c206b3f0d93cce7ea5a6f51519c7a64aaad9b64e content_ours_len=11339 content_ours_hash=6096dfa17c56d3a59537904ed65aba22d5ca13e8a5d46f295aeb05058cb43690 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782258293379
+```
+
+### Re: dark-mode diagram visibility — root-caused + fixed — glm-5.2
+
+> **Queue prompt:** The diagrams are not visible in dark mode.
+
+**Root cause (verified against rendered HTML):** not stripped styles and not missing vars. I started the dev server, fetched `/posts/lazily-state-machine-cycle-state`, and confirmed the page carries both the light `:root{--color-card:230,230,230;…}` and the dark `@media(prefers-color-scheme:dark){:root{--color-card:52,63,96;…}}` blocks, and the SVG `<style>`/`var(--color-card)` survive marked. The actual failure was **contrast**: dark-mode box fill `rgb(52,63,96)` vs page bg `rgb(33,39,55)` is ~1.3:1, so the filled boxes vanish (borders/text stay visible, which is why it looked "not visible" rather than absent).
+
+**Fix:** scoped `<style>` override on the diagrams — `@media(prefers-color-scheme:dark){.lz-sm-svg{--color-card:108,128,180}}` (plus a `[data-color-scheme="dark"]` belt-and-suspenders rule), with `class="lz-sm-svg"` on all 4 `<svg>`. Lifts the dark box fill to ~3.4:1 vs bg. Verified the override + class reach the rendered HTML (dev-server fetch).
+
+**Verified:** `bun run build` green.
+
+**Pushed:** `btakita/briantakita.me` `464ac2a` → `briantakita.me-dev` `8b5354d` → `agent-loop` `68508b770` (all main).
+
+Note: this is a content-local lift, not a theme change — the shared dark `--color-card` in `config/blog_site.ts` is the underlying low-contrast value, but changing it would affect the whole site, so the override is scoped to these diagrams. A site-wide card/fill contrast pass is a separate task if you want it.
+<!-- agent:boundary:d1f2e5aa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,12 +93,13 @@ Queue drained.
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- The diagrams are not visible in dark mode.
+- do [#mpt7]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#mpt7] #lzdarktheme [recommended] Site-wide dark-mode --color-card (52,63,96) vs --color-fill bg (33,39,55) is ~1.3:1 — low contrast for filled surfaces (cards, diagram boxes). Raise dark --color-card in src/briantakita.me-dev/app/briantakita.me/config/blog_site.ts to a ~3:1+ value vs bg and eyeball-verify the whole site (post cards, code blocks, nav). Scoped SVG override (#lzdarkchart) is DONE (commit 464ac2a); this is the broader theme fix.
 <!-- /agent:backlog -->
 
 ## Review

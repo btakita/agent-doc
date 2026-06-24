@@ -286,7 +286,7 @@ Escalation: none.
 Preflight warnings were existing backlog/review cleanup candidates and were left untouched.
 There were no actionable follow-up items to capture.
 Confidence: high.
-<!-- agent:boundary:be53c268 -->
+<!-- agent:boundary:99b068fe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -306,10 +306,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Add Ctrl+M/Cmd+M to toggle the message dialog open/close on all portals.
-- In the Admin Message dialog, add Alt+B to open Borrowers tab, Alt+L to open Lenders tab, Alt+r to open Brokers tab. Underline the B, L, and r.
-- In the Admin Message dialog, when a tab is opened, select the search input so the admin can begin typing in the search term.
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

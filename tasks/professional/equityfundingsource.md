@@ -253,7 +253,26 @@ Commits: EFS submodule commit `7669e49 fix(admin): simplify lead follow-up card`
 Verification: focused `bun test tests/admin-application-lead-detail.test.ts tests/admin-pipeline.test.ts tests/portal-table-dialog.test.ts tests/application-leads.test.ts` passed (`93 pass / 0 fail`). `git diff --check` passed. Full `make check` passed (`1193 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:e0f35970 -->
+
+### Re: Deploy Lead Follow-up Change — gpt-5
+
+> **Queue prompt:**
+> deploy
+
+Pushed and deployed.
+
+The EFS submodule commit `7669e49 fix(admin): simplify lead follow-up card` is now pushed to `origin/main`. The production Worker deploy completed successfully at `https://equityfundingsource.brian-takita.workers.dev` with Current Version ID `9eff0e78-a089-4554-97b6-fac79f5e784d`.
+
+Deploy evidence: pre-deploy remote D1 migrations reported `No migrations to apply`; D1 info was reachable for DB `280e1539-b940-4c59-8988-fbed63c12ac0`; Time Travel bookmark before deploy was `0000050c-00000020-00005094-f3536d826ff65b1bc511b111f7e755d8`. `make deploy` built the Worker, applied remote migrations (again no pending migrations), uploaded one changed browser asset, and deployed the Worker.
+
+Post-deploy checks: remote D1 migrations still report `No migrations to apply`; public root returned `HTTP 200`; the protected admin pipeline lead-dialog URL returned `HTTP 303` to `/login?role=admin&next=...`, which is expected without an admin session.
+
+Changed paths this deploy cycle: none. The code change was already committed in the prior cycle; this cycle pushed EFS `main` and deployed it. The EFS submodule is clean and matches `origin/main`. The parent repo still has unrelated dirty work plus local agent-doc commits; I did not push parent `main`.
+
+Verification carried forward from the code cycle: focused Bun tests passed (`93 pass / 0 fail`), `git diff --check` passed, and full `make check` passed (`1193 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:42e386b1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -274,13 +293,14 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#q1w3]~~
+- 🚧 deploy
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
-- [ ] 🚧 [#q1w3] Remove "Deal Pipeline" card dropdown. The CRM status can be inferred by the conversation and pipeline status. The conversation is self-evident. Just have the button and a link to open the message conversation.
+- [ ] [#q1w3] Remove "Deal Pipeline" card dropdown. The CRM status can be inferred by the conversation and pipeline status. The conversation is self-evident. Just have the button and a link to open the message conversation.
 <!-- /agent:backlog -->
 
 ## Review

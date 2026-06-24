@@ -477,13 +477,15 @@ pub fn run_stream(
 
     let mut current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let snapshot_doc = snapshot::load(file).ok().flatten();
-    guard_no_stale_snapshot_reset_drift(
+    let mut snapshot_doc = snapshot::load(file).ok().flatten();
+    if guard_no_stale_snapshot_reset_drift(
         file,
         snapshot_doc.as_deref(),
         &current_content,
         "stream write",
-    )?;
+    )? {
+        snapshot_doc = snapshot::load(file).ok().flatten();
+    }
     sanitize_template_patchback_response_for_write(&mut response)?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);

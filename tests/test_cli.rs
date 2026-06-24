@@ -1134,7 +1134,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // a new flow guard boundary.
         ("agent-doc-orchestration/src/write/ipc/transport.rs", "guard_") => 9,
         ("agent-doc-orchestration/src/write/ipc/transport.rs", "reason=") => 10,
-        ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 5,
+        // +2 (#docdriftgrace): the stale-snapshot reset regression tests call the
+        // existing `guard_no_stale_snapshot_reset_drift` boundary for the safe
+        // visible rebase and fail-closed active-driver cases. The production guard
+        // boundary is unchanged; the new matches are test coverage.
+        ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 7,
         // +9 (#fcc0-no-external-write): active editor listeners no longer allow
         // disk fallback when component convergence cannot prove editor apply.
         // The added `reason=` tokens are the blocked production reasons
@@ -1167,7 +1171,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // did not rewrite the editor buffer (`untrusted_ack_content_contains_user_drift`,
         // `no_ack`, `send_failed`) while the existing `ack_mismatch` writeback
         // reason remains the fail-closed flow boundary.
-        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 20,
+        // +1 (#docdriftgrace): `stale_snapshot_visible_rebased ... reason={}` logs
+        // the audited safe-rebase reason after the reset guard refreshes snapshot
+        // and CRDT sidecars for unrelated visible drift.
+        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 21,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

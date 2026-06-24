@@ -31,20 +31,37 @@ pub fn guard_no_stale_snapshot_reset_drift(
     snapshot_doc: Option<&str>,
     current_doc: &str,
     phase: &str,
-) -> Result<()> {
+) -> Result<bool> {
     let Some(snapshot_doc) = snapshot_doc else {
-        return Ok(());
+        return Ok(false);
     };
     if let Ok(Some(cleaned)) =
         crate::template::deleted_conversation_tail_cleanup(snapshot_doc, current_doc)
         && cleaned == current_doc
     {
-        return Ok(());
+        return Ok(false);
     }
     let Some((snapshot_len, current_len)) = stale_snapshot_reset_drift(snapshot_doc, current_doc)
     else {
-        return Ok(());
+        return Ok(false);
     };
+    if let Some(reason) = classify_stale_snapshot_visible_rebase(file, snapshot_doc, current_doc) {
+        crate::snapshot::save(file, current_doc)?;
+        let crdt = crate::crdt::CrdtDoc::from_text(current_doc).encode_state();
+        crate::snapshot::save_document_crdt(file, &crdt, current_doc)?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "stale_snapshot_visible_rebased file={} phase={} reason={} old_snap_len={} new_snap_len={}",
+                file.display(),
+                phase,
+                reason,
+                snapshot_len,
+                current_len
+            ),
+        );
+        return Ok(true);
+    }
 
     crate::ops_log::log_op(
         file,
@@ -63,6 +80,229 @@ pub fn guard_no_stale_snapshot_reset_drift(
         current_len,
         file.display()
     );
+}
+
+fn classify_stale_snapshot_visible_rebase(
+    file: &Path,
+    snapshot_doc: &str,
+    current_doc: &str,
+) -> Option<&'static str> {
+    let scope = crate::turn_scope_store::load(file)?;
+    if active_capture_response_removed(file, snapshot_doc, current_doc) {
+        return None;
+    }
+
+    let (snapshot_frontmatter, snapshot_body) = crate::frontmatter::parse(snapshot_doc).ok()?;
+    let (current_frontmatter, current_body) = crate::frontmatter::parse(current_doc).ok()?;
+    if !frontmatter_agent_only_equivalent(&snapshot_frontmatter, &current_frontmatter) {
+        return None;
+    }
+
+    let snap_components = crate::component::parse(snapshot_body).ok()?;
+    let current_components = crate::component::parse(current_body).ok()?;
+    if snap_components.is_empty() || snap_components.len() != current_components.len() {
+        return None;
+    }
+
+    let mut saw_exchange_trim = false;
+    let mut saw_independent_component = false;
+    for (snap_comp, current_comp) in snap_components.iter().zip(current_components.iter()) {
+        if snap_comp.name != current_comp.name {
+            return None;
+        }
+        if !is_backlog_component(&snap_comp.name)
+            && snap_comp.patch_mode() != current_comp.patch_mode()
+        {
+            return None;
+        }
+
+        let snap_content =
+            crate::git::normalize_component_content_for_absorb(snap_comp.content(snapshot_body));
+        let current_content =
+            crate::git::normalize_component_content_for_absorb(current_comp.content(current_body));
+        if snap_content == current_content {
+            continue;
+        }
+
+        if snap_comp.name == "exchange" {
+            if exchange_change_is_complete_response_block_trim(
+                snap_comp.content(snapshot_body),
+                current_comp.content(current_body),
+            ) {
+                saw_exchange_trim = true;
+                continue;
+            }
+            return None;
+        }
+
+        if component_change_is_turn_independent(
+            snapshot_body,
+            current_body,
+            &snap_comp.name,
+            &scope,
+        ) {
+            saw_independent_component = true;
+            continue;
+        }
+        return None;
+    }
+
+    match (saw_exchange_trim, saw_independent_component) {
+        (true, true) => Some("historical_exchange_trim_unrelated_drift"),
+        (true, false) => Some("historical_exchange_trim"),
+        (false, true) => Some("unrelated_component_drift"),
+        (false, false) => None,
+    }
+}
+
+fn active_capture_response_removed(file: &Path, snapshot_doc: &str, current_doc: &str) -> bool {
+    let Ok(Some(state)) = crate::cycle_state::load(file) else {
+        return false;
+    };
+    if !state.is_open() {
+        return false;
+    }
+    let Ok(Some(capture)) = crate::capture::load_active(file) else {
+        return false;
+    };
+    !capture.response_body.trim().is_empty()
+        && crate::repair::response_already_applied(snapshot_doc, &capture.response_body)
+        && !crate::repair::response_already_applied(current_doc, &capture.response_body)
+}
+
+fn frontmatter_agent_only_equivalent(
+    snapshot: &crate::frontmatter::Frontmatter,
+    current: &crate::frontmatter::Frontmatter,
+) -> bool {
+    normalized_frontmatter_without_agent(snapshot)
+        .zip(normalized_frontmatter_without_agent(current))
+        .is_some_and(|(snapshot, current)| snapshot == current)
+}
+
+fn normalized_frontmatter_without_agent(
+    frontmatter: &crate::frontmatter::Frontmatter,
+) -> Option<serde_yaml::Value> {
+    let mut value = serde_yaml::to_value(frontmatter).ok()?;
+    if let serde_yaml::Value::Mapping(map) = &mut value {
+        map.remove(serde_yaml::Value::String("agent".to_string()));
+    }
+    Some(value)
+}
+
+fn component_change_is_turn_independent(
+    snap_body: &str,
+    current_body: &str,
+    component_name: &str,
+    scope: &agent_doc_core::turn_scope::TurnScope,
+) -> bool {
+    use agent_doc_core::op_log::OpActor;
+    use agent_doc_core::turn_scope::{Address, classify_op};
+
+    let events: Vec<_> = agent_doc_markdown_ast::events::diff_node_events(snap_body, current_body)
+        .into_iter()
+        .filter(|event| event.component == component_name)
+        .collect();
+    if events.is_empty() {
+        return false;
+    }
+
+    events.iter().all(|event| {
+        let address = Address::from_component_node_key(&event.component, &event.node_key);
+        let node_index = event.after_index.or(event.before_index);
+        !classify_op(
+            OpActor::User,
+            event.kind.as_str(),
+            &address,
+            node_index,
+            scope,
+        )
+        .affects_turn()
+    })
+}
+
+fn exchange_change_is_complete_response_block_trim(snapshot: &str, current: &str) -> bool {
+    if snapshot == current {
+        return false;
+    }
+    let blocks = exchange_response_block_ranges(snapshot);
+    if blocks.is_empty() {
+        return false;
+    }
+
+    let mut snapshot_pos = 0usize;
+    let mut current_pos = 0usize;
+    let mut removed = 0usize;
+    for block in blocks {
+        let prefix = &snapshot[snapshot_pos..block.start];
+        if !current[current_pos..].starts_with(prefix) {
+            return false;
+        }
+        current_pos += prefix.len();
+
+        let block_text = &snapshot[block.clone()];
+        if current[current_pos..].starts_with(block_text) {
+            current_pos += block_text.len();
+        } else {
+            removed += 1;
+        }
+        snapshot_pos = block.end;
+    }
+
+    removed > 0 && current[current_pos..] == snapshot[snapshot_pos..]
+}
+
+fn exchange_response_block_ranges(exchange: &str) -> Vec<std::ops::Range<usize>> {
+    #[derive(Clone, Copy)]
+    struct Line<'a> {
+        start: usize,
+        end: usize,
+        text: &'a str,
+    }
+
+    let mut lines = Vec::new();
+    let mut offset = 0usize;
+    for line in exchange.split_inclusive('\n') {
+        let end = offset + line.len();
+        lines.push(Line {
+            start: offset,
+            end,
+            text: line,
+        });
+        offset = end;
+    }
+    if offset < exchange.len() {
+        lines.push(Line {
+            start: offset,
+            end: exchange.len(),
+            text: &exchange[offset..],
+        });
+    }
+
+    let heading_indices: Vec<_> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, line)| is_exchange_response_heading(line.text).then_some(idx))
+        .collect();
+    let mut ranges = Vec::new();
+    for (pos, &heading_idx) in heading_indices.iter().enumerate() {
+        let mut end_idx = heading_indices.get(pos + 1).copied().unwrap_or(lines.len());
+        for (idx, line) in lines.iter().enumerate().take(end_idx).skip(heading_idx + 1) {
+            if is_exchange_boundary(line.text) {
+                end_idx = idx;
+                break;
+            }
+        }
+        ranges.push(lines[heading_idx].start..lines[end_idx - 1].end);
+    }
+    ranges
+}
+
+fn is_exchange_response_heading(line: &str) -> bool {
+    line.trim_start().starts_with("### Re:")
+}
+
+fn is_exchange_boundary(line: &str) -> bool {
+    line.trim_start().starts_with("<!-- agent:boundary:")
 }
 
 /// `#exch-intermix`: discriminator for the benign `live_prompt_drift_after_preflight`
@@ -1539,6 +1779,14 @@ mod core_tests {
         )
     }
 
+    fn queue_node_key_for_id(doc: &str, id: &str) -> String {
+        agent_doc_markdown_ast::mutations::all_item_nodes(doc)
+            .into_iter()
+            .find(|node| node.component == "queue" && node.item.id == id)
+            .map(|node| node.node_key)
+            .unwrap_or_else(|| panic!("missing queue node id {id}"))
+    }
+
     fn start_ack_mismatch_then_refresh_listener(
         project_root: &Path,
         ack_content: String,
@@ -2782,6 +3030,119 @@ mod core_tests {
             "recovery guidance should name deterministic sidecar reset: {message}"
         );
     }
+
+    #[test]
+    fn stale_snapshot_reset_drift_rebases_historical_exchange_trim_and_sibling_queue_add() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "seed").unwrap();
+        let old_blocks = (0..12)
+            .map(|idx| {
+                format!(
+                    "### Re: archived {idx} - gpt-5\n\n{}\n",
+                    "Archived response body.\n".repeat(12)
+                )
+            })
+            .collect::<String>();
+        let kept_block = "### Re: kept - gpt-5\n\nKept response.\n";
+        let snapshot = format!(
+            "---\nagent_doc_session: test\nagent: opencode\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n{old_blocks}{kept_block}<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n\n\
+## Queue\n\n<!-- agent:queue auto -->\n- do [#active]\n<!-- /agent:queue -->\n"
+        );
+        let current = format!(
+            "---\nagent_doc_session: test\nagent: claude\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n{kept_block}<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n\n\
+## Queue\n\n<!-- agent:queue auto -->\n- do [#active]\n- do [#sibling]\n<!-- /agent:queue -->\n"
+        );
+        fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, &snapshot).unwrap();
+        let active_node_key = queue_node_key_for_id(&snapshot, "active");
+        let scope = agent_doc_core::turn_scope::TurnScope::for_driver_with_exchange_tail(
+            Some(agent_doc_core::turn_scope::Address::node(
+                "queue",
+                0,
+                &active_node_key,
+            )),
+            Some(0),
+        );
+        crate::turn_scope_store::save(&doc, &scope).unwrap();
+
+        let rebased =
+            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), &current, "preflight")
+                .expect("historical trim plus sibling queue add should rebase");
+
+        assert!(rebased, "guard should report a snapshot refresh");
+        assert_eq!(crate::snapshot::load(&doc).unwrap(), Some(current));
+        let ops_log =
+            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains("stale_snapshot_visible_rebased")
+                && ops_log.contains("historical_exchange_trim_unrelated_drift"),
+            "rebase marker should explain the scoped drift:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn stale_snapshot_reset_drift_blocks_when_active_queue_driver_changes() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "seed").unwrap();
+        let old_blocks = (0..12)
+            .map(|idx| {
+                format!(
+                    "### Re: archived {idx} - gpt-5\n\n{}\n",
+                    "Archived response body.\n".repeat(12)
+                )
+            })
+            .collect::<String>();
+        let kept_block = "### Re: kept - gpt-5\n\nKept response.\n";
+        let snapshot = format!(
+            "---\nagent_doc_session: test\nagent: opencode\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n{old_blocks}{kept_block}<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n\n\
+## Queue\n\n<!-- agent:queue auto -->\n- do [#active]\n<!-- /agent:queue -->\n"
+        );
+        let current = format!(
+            "---\nagent_doc_session: test\nagent: claude\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n{kept_block}<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n\n\
+## Queue\n\n<!-- agent:queue auto -->\n- do [#sibling]\n<!-- /agent:queue -->\n"
+        );
+        fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, &snapshot).unwrap();
+        let active_node_key = queue_node_key_for_id(&snapshot, "active");
+        let scope = agent_doc_core::turn_scope::TurnScope::for_driver_with_exchange_tail(
+            Some(agent_doc_core::turn_scope::Address::node(
+                "queue",
+                0,
+                &active_node_key,
+            )),
+            Some(0),
+        );
+        crate::turn_scope_store::save(&doc, &scope).unwrap();
+        let (_, snapshot_body) = crate::frontmatter::parse(&snapshot).unwrap();
+        let (_, current_body) = crate::frontmatter::parse(&current).unwrap();
+        let queue_events: Vec<_> =
+            agent_doc_markdown_ast::events::diff_node_events(snapshot_body, current_body)
+                .into_iter()
+                .filter(|event| event.component == "queue")
+                .collect();
+        assert!(
+            !component_change_is_turn_independent(snapshot_body, current_body, "queue", &scope),
+            "fixture should affect the active queue driver; events={queue_events:?}"
+        );
+
+        let err = guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), &current, "preflight")
+            .expect_err("active queue driver edit must stay structural");
+
+        assert!(
+            err.to_string().contains("agent-doc reset --from-current"),
+            "unsafe drift should keep deterministic reset guidance: {err}"
+        );
+        assert_eq!(crate::snapshot::load(&doc).unwrap(), Some(snapshot));
+    }
+
     #[test]
     fn stale_snapshot_reset_drift_allows_small_size_delta() {
         let dir = TempDir::new().unwrap();

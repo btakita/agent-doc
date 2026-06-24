@@ -761,12 +761,14 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     {
         file_content = recovered;
     }
-    crate::write::guard_no_stale_snapshot_reset_drift(
+    if crate::write::guard_no_stale_snapshot_reset_drift(
         file,
         snapshot_content.as_deref(),
         &file_content,
         "commit",
-    )?;
+    )? {
+        snapshot_content = crate::snapshot::load(file)?;
+    }
 
     let repaired_committed_historical =
         if let Some(reason) = repair_committed_historical_snapshot_drift(file)? {

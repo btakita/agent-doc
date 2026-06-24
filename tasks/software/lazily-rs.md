@@ -261,7 +261,7 @@ Published via `corky linkedin publish` (status flipped `draft → ready`, then p
 **Committed + pushed:** `mail` `2f2a0c0..4317c6b` → `btakita/mail`; superproject gitlink `1ca6a5e92` → `btakita/agent-loop`.
 
 **Queue bookkeeping:** queue head consumed (publish done); queue drained. Review `#lilazilysmpost` updated — post is live, only image + first comment remain.
-<!-- agent:boundary:eb30143c -->
+<!-- agent:boundary:7254132c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -270,6 +270,7 @@ Published via `corky linkedin publish` (status flipped `draft → ready`, then p
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- The image is not on the post.
 <!-- /agent:queue -->
 
 ## Backlog

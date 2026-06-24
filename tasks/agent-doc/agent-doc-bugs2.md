@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -92,7 +92,7 @@ Verification:
 - `cargo test -p agent-doc-orchestration dispatch_only_submit_proof_gate_accepts_enter_delivery_without_codex_hooks -- --nocapture`
 - `make check` via `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`
 - `gh run list --workflow CI --limit 1` showed latest `CI` run on `main` completed successfully.
-<!-- agent:boundary:0c96d3d6 -->
+<!-- agent:boundary:f3a1c882 -->
 <!-- /agent:exchange -->
 
 ## Queue

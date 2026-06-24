@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -129,7 +129,7 @@ e.g. `val card = JBColor(Color(230,230,230), Color(92,110,158))` mirrors `--colo
 **Install:** `build/distributions/agent-doc-jetbrains-0.2.179.zip` (unsigned — run `./gradlew signPlugin` for a signed zip before publishing). Changes take effect on the next prompt-panel show.
 
 **Git note:** the local agent-doc checkout had 2 stale pre-rebase commits (`a92a781a`, `660e4a58`) the operator had already superseded on remote (`5b7a32ac`, `b0a6f1eb`). Reset to `origin/main` and cherry-picked only the JB commit (unrelated files, clean) rather than resolving conflicts in the queue-consume CLI code — stale commits stay reflog-recoverable.
-<!-- agent:boundary:a429e83b -->
+<!-- agent:boundary:0ddfab10 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -138,7 +138,6 @@ e.g. `val card = JBColor(Color(230,230,230), Color(92,110,158))` mirrors `--colo
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Can we make the JB plugin have a configuration for the light and dark mode colors?
 <!-- /agent:queue -->
 
 ## Backlog

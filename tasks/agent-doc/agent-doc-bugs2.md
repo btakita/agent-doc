@@ -89,7 +89,7 @@ Actionable follow-up stays in the queue/backlog: `#ipcqproof` covers the ACK dri
 Normalized the exchange component to remove stale prompt-prefix artifacts that were already answered but were still being classified as unresolved prompt-bearing user changes. This did not change the queue or backlog source of truth.
 
 Verification: `agent-doc patch` was used for the exchange component only; queue remains active with `#lzpkgwire` as the next head.
-<!-- agent:boundary:c8acf7bd -->
+<!-- agent:boundary:8df1a0a5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -104,30 +104,18 @@ Verification: `agent-doc patch` was used for the exchange component only; queue 
 agent-doc equityfundingsource.md had IPC churn
 ```
 ### Re: Deploy Queue Residue And IPC Dogfood Note — gpt-5
-
 > **Queue prompt:**
 > deploy
-
 The deploy queue residue is already satisfied by the preceding deployed change. No additional app work was needed after Worker version `b344beea-543d-43e9-a5ab-e1040222d2bd` went live and post-deploy checks passed.
-
 Acknowledged the automatic IPC proof dogfood note. It recorded the transient `ipc_proof_insufficient` writeback failure from the first finalize attempt; the recovery path applied and committed the response. I also requested `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so the stale route-owned supervisor can recycle at the next idle boundary.
-
 Changed paths this cleanup cycle: none in app code. Commands this cleanup cycle: `agent-doc plan`, `agent-doc read --component queue`, and `agent-doc admin recycle ...`. Verification/deploy evidence remains the prior cycle: focused tests, `git diff --check`, full `make check`, pushed EFS commit `692acf4`, and production deploy version `b344beea-543d-43e9-a5ab-e1040222d2bd`.
-
 No actionable follow-up items are needed for the IPC note.
-
 Escalation: none. Confidence: high.
-
 ### Re: IPC Dogfood Note Closeout — gpt-5
-
 Acknowledged the second automatic IPC proof dogfood note from cleanup recovery. The deploy queue is drained, the app change remains deployed at Worker version `b344beea-543d-43e9-a5ab-e1040222d2bd`, and there is no remaining EFS app work from this note.
-
 The route-owned supervisor was already marked for recycle at the next idle boundary with `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`. An immediate `agent-doc session restart-supervisor ...` correctly refused because this Codex turn is still the active busy owner; the recycle request is the non-disruptive path.
-
 Changed paths this closeout cycle: none. Commands this closeout cycle: `agent-doc preflight` recovery, `agent-doc session restart-supervisor ...` probe, and `agent-doc read --component queue`.
-
 No actionable follow-up items are needed for this IPC note.
-
 Escalation: none. Confidence: high.
 ```
 <!-- /agent:queue -->

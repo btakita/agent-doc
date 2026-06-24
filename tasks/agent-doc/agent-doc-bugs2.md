@@ -188,7 +188,32 @@ No code files changed for this queue item. The actionable fix is already in the 
 That line is assistant closeout evidence from the completed `#sz4a` response, not a new user prompt. The same applies to the nearby reordered verification bullets and Monster Rod Holders diagnosis fragments: they came from the already-committed assistant responses for `#sz4a` and the Monster Rod Holders queue head, then the live editor merge moved them around in `agent:exchange`.
 
 Recovery action for this cycle: classify those fragments as prior assistant evidence, not new work. I did not run additional tests or change code in this recovery-only closeout.
-<!-- agent:boundary:66f141b4 -->
+
+### Re: Ensure the VS Code plugin has parity with the JB plugin. — gpt-5
+
+> **Queue prompt:**
+> :pushpin: Ensure the VS Code plugin has parity with the JB plugin.
+
+Implemented and committed the VS Code parity work.
+
+What changed:
+- VS Code `Run Agent Doc` now uses the JetBrains route contract: `agent-doc route --dispatch-only --plain-trigger --debounce 0 --wait-for-ready 120 <relative-path>`, plus visible `--col` layout and `--focus` args from the nearest agent-doc project root.
+- Added VS Code command/popup support for Fix Document, Load Tmux Window, and direct Interrupt and Clear Session Context.
+- Added the existing lower-frequency operator actions to popup overflow: Stop Agent, Cancel Turn, Kill Supervisor, Resync / Fix Sessions, and GC Stale Sessions.
+- Bumped the VS Code extension to `0.2.32` and updated the VS Code spec, release notes, popup tests, and Rust static guards.
+
+Commits:
+- `src/agent-doc`: `0defec47 fix(vscode): align editor parity with JetBrains`
+- parent repo gitlink: `27c4a5010 agent-doc: update vscode parity`
+
+Verification passed:
+- `npm test` in `editors/vscode`
+- `cargo test --test full_content_static_guard vscode_`
+- `make check`
+- latest GitHub Actions CI check was green: run `28121997991`, `completed success`, workflow `CI`, commit title `test: cover protected prompt route refusal`.
+
+Install note: the VS Code plugin needs the `0.2.32` update installed before these UI command changes appear in the editor.
+<!-- agent:boundary:229c7191 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -197,7 +222,7 @@ Recovery action for this cycle: classify those fragments as prior assistant evid
 - ~~:pushpin: [#sz4a]~~
 - ~~:pushpin: JB `Run Agent Doc` on monsterrodholders.md did not submit. Please diagnose and fix.~~
 - :pushpin: What are #next-steps to fix agent-doc bugs?
-- :pushpin: Ensure the VS Code plugin has parity with the JB plugin.
+- ~~:pushpin: Ensure the VS Code plugin has parity with the JB plugin.~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: For tasks added from dogfooding issues, please add a configuration to select the agent document to write the backlog items to. The default is the current document. For agent-loop configure the document to this document.
 - :pushpin: Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.
 - :pushpin: do [#promptprefixorch1]

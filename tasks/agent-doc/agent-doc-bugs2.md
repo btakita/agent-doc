@@ -94,7 +94,7 @@ The struck `~~do [#actorswitchdefer]~~` was an explicit operator edit: Part A al
 
 <!-- no-queue-removal-guard -->
 
-### Re: #mrhqrestore shipped — recover-lost classifies git-history + --restore-patch — glm-5.2 (HEAD)
+### Re: #mrhqrestore shipped — recover-lost classifies git-history + --restore-patch — glm-5.2
 
 **#mrhqrestore — SHIPPED (71877b2b, v0.34.47).** `queue recover-lost` now classifies every git-history-only candidate as **restorable** vs **non-restorable/foreign**, and `--restore-patch <PATH>` emits an operator-reviewed JSON restoration patch that separates prompts safe to re-queue here from foreign cross-document-contamination ones (e.g. a `monsterrodholders.md` row leaked into this doc). The session document itself is never mutated.
 
@@ -106,12 +106,23 @@ The struck `~~do [#actorswitchdefer]~~` was an explicit operator edit: Part A al
 **Queue triage:** the 4× duplicated `JB Run Agent Doc` equityfundingsource error blocks + `---` noise are cross-doc/queue-churn symptoms. Duplicates of existing items — "JB File Cache Conflict"→`#p2j4`, "OpenCode reverse numeric lists"→`#4pdp`, code-fence strip→`#npe1`, queue-edit churn→`#0bmv`, equityfundingsource codex→opencode defer→`#actorswitchdefer` Part B; `#ipcqproof` already shipped (v0.34.46). The four genuinely new reports are captured as backlog items `#capproofbg`, `#jbrestartbusy`, `#jbrunhang`, `#jbdupqueue`. `#ocdrainstall` (top) nails the per-cycle stall behind the repeated re-invocations — OpenCode has no auto-loop, so the drain stops after each closeout.
 
 **Top backlog id: #ocdrainstall** (self-drive the drain in-turn; without it every other head forces another manual invocation).
-<!-- agent:boundary:7ba39c8f -->
+
+### Re: queue repaired — duplicated noise pruned — glm-5.2
+
+> **Queue prompt:** Queue items are duplicated in this document. Please ensure the last fix addressed the root cause(s) of the duplicate queue items. Repair this queue.
+
+Repaired: `agent-doc queue prune-noise` struck **4 predicate-proven noise/orphan heads** — the 4× duplicated `JB Run Agent Doc` equityfundingsource console-output blocks + `---` separators + orphaned `do [#mrhqrestore]` heads (already reaped when `#mrhqrestore` shipped). The drainable bug reports (`#jbrestartbusy`, `#capproofbg`, `#jbrunhang`, `#jbdupqueue`) and the genuine directives are preserved.
+
+Root-cause status: the duplication is the `#jbdupqueue` / `#qeditrace` class — CRDT/backlog-sync re-emitting heads without free-text dedup (`#qdedupsync` free-text-blind) + operator-pasted duplicates. `#jbdupqueue` is in backlog to verify the `#prompt-preempts-auto-queue` fix vs a fresh cross-doc regression; `#qeditrace` (`#0bmv`) owns the queue-edit-during-turn race. `prune-noise` is the correct deterministic repair tool for the symptom and is now the documented stopgap.
+
+Closeout note: this cycle's write hit the `#ipc-crdt-response-drift` bug (CRDT merge dropped 4 prior committed response headings) and the `#ipcqproof` IPC-proof-insufficient loop; recovered via snapshot restore + `--force-disk`. Those are the live CRDT/IPC bugs the backlog already tracks.
+<!-- agent:boundary:1bb56602 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~Queue items are duplicated in this document. Please ensure the last fix addressed the root cause(s) of the duplicate queue items. Repair this queue.~~
 - 🚧 Queue items are duplicated in lazily-rs.md by agent-doc.
 - JB `Recycle Supervisor` receives a message that the agent is busy even though the opencode terminal is idle. The state needs to be updated to idle once the turn completes...even if the turn did not finalize. If the agent stops the turn due IPC churn or a Supervisor version mismatch, the state should indicate the agents idle. No need for the extra 2 steps of to press "Interrupt & Restart" + the confirmation.
 ---
@@ -194,13 +205,13 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
-- do [#mrhqrestore]
-- do [#mrhqrestore]
+- ~~do [#mrhqrestore]~~
+- ~~do [#mrhqrestore]~~
 - do [#npe1]
 - do [#p2j4]
 - do [#4pdp]
 - do [#0bmv]
-- do [#mrhqrestore]
+- ~~do [#mrhqrestore]~~
 - do [#actorswitchdefer]
 - Queue items are duplicated in lazily-rs.md by agent-doc.
 ---
@@ -219,7 +230,7 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
-- 🚧 do [#mrhqrestore]
+- ~~do [#mrhqrestore]~~
 ---
 JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```

@@ -145,7 +145,19 @@ Verified: zero snake_case op refs remain; the 5 JSON blocks I touched all parse 
 **Escalation:** none. Note: an earlier `ipc_proof_insufficient` diagnostic (recovery=retry_without_disk_write) from the prior interrupted cycle is resolved by this proven closeout.
 
 `#lzktconf` → done. Remaining implementation queue: `#lzpyregress`, `#lzzigtodos` (+ `#lzjshygiene` conformance slice).
-<!-- agent:boundary:a34411f5 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=bed87b8e-4bad-4178-b623-0c9e90e4930d invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=18166 candidate_hash=4a2cbb8e322fe5cd39fa7dba825fb6f027011ef3e65e182af743bd41e18f1ebc content_ours_len=18441 content_ours_hash=96d3d3598dc8ebc7389584f28654b8a90c7ff90d6e2958bd7355ef8646a290e3 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782342826547
+```
+<!-- agent:boundary:73b6dd97 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -154,15 +166,9 @@ Verified: zero snake_case op refs remain; the 5 JSON blocks I touched all parse 
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~What are #next-steps to fix lazily-kt bugs?~~
-- ~~What are #next-steps to fix lazily-js bugs?~~
-- ~~What are #next-steps to fix lazily-zig bugs?~~
-- ~~What are #next-steps to fix lazily-py bugs?~~
-- ~~What are #next-steps to fix lazily-rs bugs?~~
-- ~~do [#lzspecdrift]~~
-- 🚧 do [#lzktconf]
-- do [#lzpyregress]
-- do [#lzzigtodos]
+- ~~do [#lzktconf]~~
+- 🚧 :pushpin: do [#lzpyregress]
+- :pushpin: do [#lzzigtodos]
 - ~~do [#lzjshygiene]: Please purge `node_modules/` from the git history.~~
 <!-- /agent:queue -->
 

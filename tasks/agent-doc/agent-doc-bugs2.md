@@ -147,7 +147,7 @@ Escalation: none.
 
 Repair closeout: the FFI IPC prompt was already answered in the prior committed section. I consumed that free-text queue head, preserved the remaining `do [#lzstatewire1]` queue item, and left the newly added equityfundingsource route-stall note in the queue for a later cycle.
 
-### Re: reopened closeout state — gpt-5 (HEAD)
+### Re: reopened closeout state — gpt-5
 
 Closed the reopened turn state: the already-answered FFI IPC prompt is struck, `do [#lzstatewire1]` remains the next pinned actionable queue item, and the equityfundingsource route-stall note is preserved behind it for a later cycle. I did not mark `#lzstatewire1` done because no implementation work for that item ran in this repair cycle.
 
@@ -156,7 +156,7 @@ Verification: checked the queue component and working-tree diff.
 Confidence: medium; this was a closeout repair after editor IPC drift, not feature implementation.  
 Escalation: none.
 
-### Re: repair cycle closeout — gpt-5 (HEAD)
+### Re: repair cycle closeout — gpt-5
 
 Closed the repair cycle after queue convergence. The prior FFI IPC question remains answered and struck. I did not execute `#lzstatewire1` in this repair cycle, so it remains open as the pinned next queue item. The equityfundingsource route-stall note remains preserved behind it for a later cycle.
 
@@ -164,7 +164,7 @@ Changed paths: session document only.
 Verification: preflight and queue/session state were rechecked after the repair commits.  
 Confidence: medium; this closeout repaired session-document state after editor IPC drift, but did not implement `#lzstatewire1`.  
 Escalation: used a narrow force-disk write after editor IPC proof failed, preserving the visible queue content.
-<!-- agent:boundary:3b88878a -->
+<!-- agent:boundary:4ffdcb6b -->
 <!-- /agent:exchange -->
 
 ## Queue

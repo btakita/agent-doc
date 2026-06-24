@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -261,7 +261,7 @@ Published via `corky linkedin publish` (status flipped `draft → ready`, then p
 **Committed + pushed:** `mail` `2f2a0c0..4317c6b` → `btakita/mail`; superproject gitlink `1ca6a5e92` → `btakita/agent-loop`.
 
 **Queue bookkeeping:** queue head consumed (publish done); queue drained. Review `#lilazilysmpost` updated — post is live, only image + first comment remain.
-<!-- agent:boundary:7254132c -->
+<!-- agent:boundary:4d830c3a -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -1468,12 +1468,23 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
         }
     };
 
+    let op_log_summary = match &op {
+        agent_doc_orchestration::crdt::EditorOp::Insert { text, .. } => format!(
+            "insert_bytes={} insert_non_ascii={}",
+            text.len(),
+            !text.is_ascii()
+        ),
+        agent_doc_orchestration::crdt::EditorOp::Delete { len, .. } => {
+            format!("delete_len={len}")
+        }
+    };
+
     match agent_doc_orchestration::op_capture::record_editor_op(&file_path_buf, base, op) {
         Ok(()) => {
             agent_doc_orchestration::ops_log::log_op(
                 &file_path_buf,
                 &format!(
-                    "editor_op_recorded kind={kind} offset={offset} base={} #qnodemerge4wire",
+                    "editor_op_recorded kind={kind} offset={offset} {op_log_summary} base={} #qnodemerge4wire",
                     base.get(..12).unwrap_or(base),
                 ),
             );
@@ -2182,6 +2193,79 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(ops.len(), 2, "failed ops must not be recorded");
+    }
+
+    #[test]
+    fn record_editor_op_ffi_preserves_non_ascii_byte_offsets() {
+        use agent_doc_orchestration::op_capture;
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "# plan\n").unwrap();
+
+        let base_text = "café 日本 😀\n";
+        let base_hash = op_capture::content_hash(base_text);
+        let offset = "café ".len() as i64;
+        let delete_len = "日本".len() as i64;
+
+        let file_c = CString::new(doc.to_str().unwrap()).unwrap();
+        let base_c = CString::new(base_hash.as_str()).unwrap();
+        let insert_kind = CString::new("insert").unwrap();
+        let delete_kind = CString::new("delete").unwrap();
+        let insert_text = CString::new("世界").unwrap();
+
+        let rc = unsafe {
+            agent_doc_record_editor_op(
+                file_c.as_ptr(),
+                base_c.as_ptr(),
+                delete_kind.as_ptr(),
+                offset,
+                std::ptr::null(),
+                delete_len,
+            )
+        };
+        assert_eq!(rc, 1, "valid non-ASCII delete op must record");
+        let rc = unsafe {
+            agent_doc_record_editor_op(
+                file_c.as_ptr(),
+                base_c.as_ptr(),
+                insert_kind.as_ptr(),
+                offset,
+                insert_text.as_ptr(),
+                0,
+            )
+        };
+        assert_eq!(rc, 1, "valid non-ASCII insert op must record");
+
+        let ops = op_capture::editor_ops_for_base(&doc, base_text)
+            .unwrap()
+            .expect("non-ASCII ops captured against the base must be trusted");
+        assert_eq!(
+            ops,
+            vec![
+                agent_doc_orchestration::crdt::EditorOp::Delete { offset: 6, len: 6 },
+                agent_doc_orchestration::crdt::EditorOp::Insert {
+                    offset: 6,
+                    text: "世界".into()
+                },
+            ]
+        );
+
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("editor_op_recorded kind=delete offset=6 delete_len=6"),
+            "delete byte evidence missing:\n{ops_log}"
+        );
+        assert!(
+            ops_log.contains(
+                "editor_op_recorded kind=insert offset=6 insert_bytes=6 insert_non_ascii=true"
+            ),
+            "insert byte evidence missing:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains('�'),
+            "ops log should not contain mojibake:\n{ops_log}"
+        );
     }
 
     #[test]

@@ -142,6 +142,17 @@ pub fn merge_contents_crdt_with_ops(
                 ops.len(),
                 doc.display()
             );
+            crate::ops_log::log_op(
+                doc,
+                &format!(
+                    "editor_ops_for_base accepted=true ops={} base={} {} #qnodemerge4wire",
+                    ops.len(),
+                    crate::op_capture::content_hash(&base_text)
+                        .get(..12)
+                        .unwrap_or_default(),
+                    summarize_editor_ops_for_log(ops)
+                ),
+            );
             crate::crdt::merge_with_editor_ops(base_state, ours, theirs, Some(ops))
                 .context("CRDT merge (with editor ops) failed")?
         }
@@ -166,6 +177,33 @@ pub fn merge_contents_crdt_with_ops(
     let state = crdt_doc.encode_state();
     eprintln!("[write] CRDT merge successful — no conflicts possible.");
     Ok((merged, state))
+}
+
+fn summarize_editor_ops_for_log(ops: &[crate::crdt::EditorOp]) -> String {
+    let mut offsets = Vec::new();
+    let mut delete_bytes = 0usize;
+    let mut insert_bytes = 0usize;
+    let mut insert_non_ascii = false;
+    for op in ops {
+        match op {
+            crate::crdt::EditorOp::Insert { offset, text } => {
+                offsets.push(offset.to_string());
+                insert_bytes = insert_bytes.saturating_add(text.len());
+                insert_non_ascii |= !text.is_ascii();
+            }
+            crate::crdt::EditorOp::Delete { offset, len } => {
+                offsets.push(offset.to_string());
+                delete_bytes = delete_bytes.saturating_add(*len);
+            }
+        }
+    }
+    format!(
+        "offsets={} delete_bytes={} insert_bytes={} insert_non_ascii={}",
+        offsets.join(","),
+        delete_bytes,
+        insert_bytes,
+        insert_non_ascii
+    )
 }
 
 /// 3-way merge using `git merge-file --diff3`.
@@ -657,6 +695,61 @@ User line 2.
         assert!(
             crate::op_capture::load_op_capture(&doc).unwrap().is_none(),
             "sidecar must be cleared after the merge consumes its epoch"
+        );
+    }
+
+    #[test]
+    fn merge_with_ops_logs_accepted_non_ascii_byte_offsets() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "# plan\n").unwrap();
+
+        let base = "café 日本 😀\n";
+        let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+        let base_hash = crate::op_capture::content_hash(base);
+        crate::op_capture::record_editor_op(
+            &doc,
+            &base_hash,
+            crate::crdt::EditorOp::Delete { offset: 6, len: 6 },
+        )
+        .unwrap();
+        crate::op_capture::record_editor_op(
+            &doc,
+            &base_hash,
+            crate::crdt::EditorOp::Insert {
+                offset: 6,
+                text: "世界".to_string(),
+            },
+        )
+        .unwrap();
+
+        let ours = "café 日本 😀\n\nAgent response.\n";
+        let theirs = "café 世界 😀\n";
+        let (merged, _state) =
+            merge_contents_crdt_with_ops(&doc, Some(&base_state), ours, theirs).unwrap();
+        assert!(
+            merged.contains("Agent response."),
+            "agent side lost:\n{merged}"
+        );
+        assert!(
+            merged.contains("世界"),
+            "non-ASCII editor op lost:\n{merged}"
+        );
+        assert!(
+            !merged.contains('�'),
+            "merge introduced mojibake:\n{merged}"
+        );
+        assert!(!merged.contains("<<<<<<<"));
+
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("editor_ops_for_base accepted=true ops=2")
+                && ops_log.contains("offsets=6,6")
+                && ops_log.contains("delete_bytes=6")
+                && ops_log.contains("insert_bytes=6")
+                && ops_log.contains("insert_non_ascii=true"),
+            "merge acceptance evidence missing:\n{ops_log}"
         );
     }
 

@@ -61,6 +61,7 @@ mod mcp;
 mod migrate;
 mod mode;
 mod notify;
+mod op_capture_verify;
 mod ops_report;
 mod orchestrate;
 mod outline;
@@ -385,6 +386,14 @@ enum Commands {
     Ops {
         #[command(subcommand)]
         action: OpsAction,
+    },
+    /// Verify editor op-capture producer and merge-consumer evidence in ops.log
+    VerifyOpCapture {
+        /// Path to the session document
+        file: PathBuf,
+        /// Require the canonical café 日本 😀 byte-offset evidence
+        #[arg(long)]
+        expect_cafe_demo: bool,
     },
     /// Show document content at a specific point in git history
     Show {
@@ -2228,6 +2237,10 @@ fn main() -> anyhow::Result<()> {
                 json,
             ),
         },
+        Commands::VerifyOpCapture {
+            file,
+            expect_cafe_demo,
+        } => op_capture_verify::run(&file, expect_cafe_demo),
         Commands::Show {
             file,
             back,

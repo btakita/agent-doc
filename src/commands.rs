@@ -205,6 +205,11 @@ fn all_commands() -> Vec<CommandInfo> {
         "Gather cycle/patch diagnostics from logs, captures, hooks, and actor state",
     ));
     cmds.push(cmd(
+        "/agent-doc verify-op-capture",
+        "<FILE> [--expect-cafe-demo]",
+        "Verify editor op-capture producer and merge-consumer evidence in ops.log",
+    ));
+    cmds.push(cmd(
         "/agent-doc memory index",
         "<FILE> [--db PATH] [--json]",
         "Index session tracked work and exchange history into .tsift/memory.db",

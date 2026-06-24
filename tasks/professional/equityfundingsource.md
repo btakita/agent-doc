@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -235,7 +235,29 @@ Verification: focused `bun test tests/form-error-standard.test.ts` passed (`9 pa
 Deploy: pre-deploy remote D1 migrations reported no migrations to apply. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `9ad2c0a3-9e46-4673-9034-7b96dc2251e8`. Post-deploy checks: public root returned `HTTP 200`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:31e71482 -->
+
+### Re: Property Type Client-Side Validation And Deploy — glm-5.2
+
+> **Queue prompt:**
+> I filled out a borrower form missing Property Type and Family or business relationship with the seller? "Missing required values: B. Family or business relationship with the seller? (purchase)."...but only 1 error occurred. Both errors should show up.
+>
+> **Queue prompt:**
+> deploy
+
+Implemented, pushed, and deployed. When Property Type and a declaration are both left blank, both errors now surface together.
+
+Root cause: the client-side `validate_step_(4)` in `full_application.tsx` validated loan amount, purpose, street, city, state, ZIP, property value, occupancy, and Declarations A–M — but **not `property_type`** — while the server-side `subject_property_validation_error_` (routes.ts:368) did. The `<select id="property_type">` defaults to a blank `Select…` option, so a borrower who left it blank AND left declaration B unanswered saw only the declaration B error; the missing property type was invisible until the server rejected the save. Added the client-side `property_type` guard mirroring the server check so all missing fields in the subject-property step appear in one "Missing required values" message.
+
+Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/borrower/full_application.tsx` (added `property_type` check to `validate_step_`), `prds/efs-full-application-intake-spec.md` (documented client/server lock-step validation requirement), and `tests/apply4-full-application-p6.test.ts` (source-level guard asserting the client-side `property_type` check).
+
+Commits: EFS submodule commit `d41f7ae fix(borrower): validate property type client-side so all missing fields show` was pushed to `origin/main`. Parent repo gitlink commit `a3079a93e chore(efs): bump property-type client validation submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with unrelated work.
+
+Verification: focused `bun test tests/apply4-full-application-p6.test.ts` passed (`22 pass / 0 fail`). `git diff --check` passed. Full `make check` passed (`1195 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+
+Deploy: `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `c1dcd513-b55b-4827-98da-490742f1312b`. Post-deploy checks: public root returned `HTTP 200`; borrower application URL returned the expected unauthenticated `HTTP 303` redirect to `/login?role=borrower&next=%2Fborrowers%2Fnew-application`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:7cbd1e11 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -255,6 +277,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~I filled out a borrower form missing Property Type and Family or business relationship with the seller? "Missing required values: B. Family or business relationship with the seller? (purchase)."...but only 1 error occurred. Both errors should show up.~~
+- ~~deploy~~
+- ~~I filled out a borrower form missing Property Type and Family or business relationship with the seller? "Missing required values: B. Family or business relationship with the seller? (purchase)."...but only 1 error occurred. Both errors should show up.~~ — auto-struck: answered this cycle (#ftstrike) 
 <!-- /agent:queue -->
 
 ## Backlog

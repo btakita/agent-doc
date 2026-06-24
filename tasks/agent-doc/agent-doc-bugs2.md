@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -362,19 +362,28 @@ Evidence:
 - I also checked the current `agent:queue` component: it contains only queue heads. There is no `### Re:` response body, no supervisor console block, and no visible exchange text spliced into the queue.
 
 So I am counting the component-level anti-splice verification as passed and closing `#qcm1verify`. This does not close the separate `#qnodemerge4verify` UTF-8/op-acceptance proof; that item still needs its own accepted-op marker.
-<!-- agent:boundary:daa108d1 -->
+
+### Re: #1jec
+
+> **Queue prompt:** :pushpin: do [#1jec]
+
+I checked the reconnect re-read proof for `#yzer/#evmhplugin`.
+
+Result: verified at the ops-log contract level, so I am closing `#1jec`.
+
+Evidence:
+- Stale-buffer re-read branch is present: `2026-06-23T14:10:36Z reconnect_buffer_decision decision=reread_disk buffer_matches_disk=false disk_is_head=true buffer_is_prior_commit=true #yzer doc=lazily-rs ...`. That is the exact predicate for re-reading disk/HEAD into a stale prior-commit buffer.
+- The editor-wins branch is present: `2026-06-23T14:10:36Z reconnect_buffer_decision decision=keep_buffer buffer_matches_disk=false disk_is_head=true buffer_is_prior_commit=false #yzer doc=agent-doc-bugs2 ...`, with additional `keep_buffer` decisions for other open docs in the same reconnect sweep. That proves non-prior / unsaved buffers are preserved instead of clobbered.
+- The clean/no-op branch also appears repeatedly for `agent-doc-bugs2`: `decision=in_sync ... #yzer`, so the reconnect hook is active and correctly leaves already-converged buffers alone.
+- Around the stale-buffer event, `lazily-rs` had clean post-commit state before and after the reconnect window (`postcommit_worktree_check ... match=true` at `2026-06-23T14:03:29Z` and later `2026-06-23T14:24:19Z`). I did not find a File Cache Conflict marker tied to that `#yzer` reconnect window.
+
+Caveat: `ops.log` proves the binary FFI decision path. The plugin-side `applyReconnectReread` log line is emitted through the IDE plugin logger, not the agent-doc ops log. For this item's stated acceptance marker, the required `reconnect_buffer_decision decision=reread_disk #yzer` and `decision=keep_buffer #yzer` evidence is present.
+<!-- agent:boundary:e5ab22da -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#3ygp]~~
-- ~~:pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.~~
-- ~~:pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀~~
-- ~~:pushpin: do [#tb4q]: please check logs~~
-- ~~:pushpin: do [#qcm1verify]: Use the logs to verify.~~
-- ~~:pushpin: do [#qstrikework]~~
-- :pushpin: do [#1jec]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -403,7 +412,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#1jec] [operator-verify] #yzerverify #agent-doc-bug Live-verify the #yzer/#evmhplugin plugin reconnect re-read (agent-doc 0.34.28 / submodule f6b8ae17, plugin 0.2.172). Code shipped+pushed: binary FFI agent_doc_reconnect_buffer_decision (disk==HEAD via ffi_show_head + buffer==prior-commit via ffi_show_prior_blobs) + pure decide_reconnect_buffer + PatchWatcher.registerRoot reconcile-on-connect (applyReconnectReread) + SimWorld coverage; make check green (4832). Operator-gated remainder (install is unsafe mid-session = finalize-client-newer drift): at a supervisor-recycle boundary run make install (cargo install --path . + cargo build --release + agent-doc lib-install), reinstall plugin 0.2.172, agent-doc admin recycle. Then repro: open a session doc in JB, kill/restart the supervisor so the binary commits while the plugin is disconnected, and on reconnect confirm ops.log shows 'reconnect_buffer_decision decision=reread_disk #yzer' and the editor buffer == HEAD with NO File Cache Conflict; a buffer holding genuine unsaved user edits must instead log decision=keep_buffer and be preserved (editor wins).
 <!-- /agent:backlog -->
 
 ## Review

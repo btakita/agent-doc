@@ -227,7 +227,16 @@ Changed paths: none.
 Commands: inspected `pipeline.tsx`, `application_lead_detail.tsx`, `lead_pipeline_controls.tsx`, and `repo.ts`; checked the live URL/API, which redirects to admin login or returns `unauthenticated` without an admin session.
 Verification: no tests run because this was an explanation-only cycle.
 Escalation: none. Confidence: high.
-<!-- agent:boundary:72376da6 -->
+
+### Re: Queue Residue Cleanup — gpt-5
+
+Cleared the answered free-text queue head after the Deal Pipeline card explanation committed. No additional EFS app work was needed.
+
+Changed paths: none in app code.
+Commands: `agent-doc preflight`, `agent-doc session-check`, `agent-doc admin inspect`, and queue component read/cleanup through `agent-doc finalize`.
+Verification: explanation-only cleanup; no tests run.
+Escalation: none. Confidence: high.
+<!-- agent:boundary:5e102d8a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -247,7 +256,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1, what is the Deal Pipeline card? I don't recognize these steps. They look like a sales pipeline.
 <!-- /agent:queue -->
 
 ## Backlog

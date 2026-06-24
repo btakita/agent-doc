@@ -33,121 +33,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-175342.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-184624.md`*
 
 Compacted content:
-❯ - Archived 3 response topic(s): Admin Application Completion And Deploy; IPC Proof Issue Dogfood Log; Full Application Dialog Focus And Deploy
+❯ - Archived 6 response topic(s): Application Next-Step Alert And Deploy; Deploy; Accept Application Guidance And Deploy; 3 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: Application Next-Step Alert And Deploy — gpt-5
-
-> **Queue prompt:**
-> In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, add an alert with explaining the next actionable step to advance the application with a CTA button.
-> deploy
-
-Done. The admin Pipeline application dialog now shows a status-aware next-step alert before the detail rows. The CTA opens the existing stacked Full Application dialog, with copy that either tells the admin to complete required core data and mark the application Complete, or to review/decide on a submitted/in-review application.
-
-Changed paths: `src/equityfundingsource-dev` at `ba39c67`; parent submodule pointer at `ee4a32358`. Key files were `lib/ui--browser--efs/portal/admin/pipeline.tsx`, `lib/ui--browser--efs/portal/admin/full_applications.tsx`, `lib/ui--browser--efs/portal/shared/full_application_detail.tsx`, `app/equityfundingsource/lib/admin/applications/index.ts`, and related Bun tests.
-
-Commits/push/deploy: EFS commit `ba39c67 feat(admin): surface application advancement CTA (#pipeline-full-app-dialog)` was pushed to `origin/main`; parent pointer commit `ee4a32358 chore(efs): bump application advancement submodule` was pushed to `origin/main`; deployed Worker version `891e4b29-bb5c-49c3-ba8e-5a0b28ed6c04`.
-
-Verification: focused Bun tests passed with `94 pass / 0 fail`; `make check` passed with `1186 pass / 0 fail`, app build, and worker build. The digest wrapper flagged the intentional logged `d1 down` fixture from the non-fatal outbox test, but the raw Bun logs report zero failures. D1 preflight/post-deploy checks showed no migrations to apply, D1 info returned, and Time Travel bookmark `00000509-00000000-00005094-f7cc40fb5e53febfca67cef7da291ced` was available. Smoke checks: public `/` returned `200`; the admin deep link returned `303`, consistent with Cloudflare Access redirect.
-
-CI/workflows: `gh run list --workflow CI --limit 1` found no `CI` workflow in either EFS or the parent repo. `gh workflow list` returned no EFS workflows and only `Agent Doc` in the parent repo.
-
-Escalation: none. Confidence: high for the shipped code/deploy path; the final live visual check of the admin-only dialog still requires an authenticated browser session.
-
-### Re: Deploy — gpt-5
-
-> **Queue prompt:**
-> deploy
-
-Done. I redeployed the current EFS Worker through the project deployment path (`make deploy`), which rebuilt the Worker, checked/applied remote D1 migrations, and activated Cloudflare Worker version `35ce9176-4565-4aaa-b064-03bd63065324` at `https://equityfundingsource.brian-takita.workers.dev`.
-
-Changed paths: none in `src/equityfundingsource-dev`; the submodule is clean on `main` at `ba39c67` / `origin/main`. The parent repo still has unrelated dirty files, but I did not touch them.
-
-Verification: `make check` passed with `1186 pass / 0 fail`, app build, and Worker build. Pre-deploy and post-deploy D1 checks both reported no migrations to apply. D1 info returned successfully for database `280e1539-b940-4c59-8988-fbed63c12ac0`, and Time Travel reported current bookmark `00000509-00000010-00005094-54e662098a450514cb2e36b3dd1b69a7`. Post-deploy smoke checks returned `200` for `/` and `303` for the admin pipeline deep link, consistent with Cloudflare Access redirect on admin routes.
-
-CI/workflows: `gh run list --workflow CI --limit 1` found no workflow named `CI` in either the EFS submodule or the parent repo.
-
-Escalation: none. Confidence: high for deploy/build/D1/smoke coverage; authenticated visual verification of the admin-only dialog still requires an authenticated browser session.
-
-### Re: Accept Application Guidance And Deploy — gpt-5
-
-> **Queue prompt:**
-> In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, add guidance on what needs to be completed before being able to Accept Application.
-> deploy
-
-Done. The Deal Pipeline application dialog now fetches the selected full-application detail, runs the same shared approval blocker gate used by the Accept action, and shows a `Before Accept Application` checklist in the existing next-step alert. The checklist shows exact missing items, a loading/error state, or a ready message when submission, core data, declarations, and e-signature are complete.
-
-Changed paths: `src/equityfundingsource-dev` at `295ca29`; parent submodule pointer at `a5bdda62b`. Key files were `lib/ui--browser--efs/portal/admin/pipeline.tsx`, `tests/admin-pipeline.test.ts`, and `prds/67v2-admin-loan-pipeline-kanban.md`. Unrelated dirty files in the parent repo were left untouched.
-
-Commits/push/deploy: EFS commit `295ca29 feat(admin): show application accept blockers (#pipeline-full-app-dialog)` was pushed to `origin/main`; parent pointer commit `a5bdda62b chore(efs): bump application guidance submodule` was pushed to `origin/main`; deployed Worker version `16958120-9119-48d8-8352-7354c99a9358` at `https://equityfundingsource.brian-takita.workers.dev`.
-
-Verification: focused tests passed (`bun test tests/admin-pipeline.test.ts tests/admin-full-application-approve-ui.test.ts`: `72 pass / 0 fail`). Full local verification passed (`make check`: `1186 pass / 0 fail`, app build, and Worker build). Pre-deploy D1 checks reported no pending migrations, D1 info returned for database `280e1539-b940-4c59-8988-fbed63c12ac0`, and Time Travel bookmark `00000509-00000010-00005094-54e662098a450514cb2e36b3dd1b69a7` was available. Deploy ran through `make deploy`; post-deploy migrations still report none pending. Smoke checks returned `200` for `/` and `303` for the admin pipeline deep link, consistent with Cloudflare Access on admin routes.
-
-CI/workflows: `gh run list --workflow CI --limit 1` found no workflow named `CI` in either the EFS submodule or the parent repo.
-
-Escalation: none. Confidence: high for code, tests, push, D1/deploy, and unauthenticated smoke coverage; final visual verification of the admin-only dialog still requires an authenticated browser session.
-❯ **IPC proof issue dogfood log**
-
-❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
-
-❯ Issue class: `ipc_proof_insufficient`
-❯ Affected component: editor IPC / writeback
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=32e0a4ef-0749-4838-961c-454946a78238 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782324870083
-```
-
-### Re: Deploy Queue Closeout And IPC Proof Note — gpt-5
-
-> **Queue prompt:**
-> deploy
-
-Done. No second deploy was needed: the deploy requested by this queue head was already completed in the preceding implementation cycle through `make deploy`, which rebuilt the Worker, confirmed no pending remote D1 migrations, and activated Worker version `16958120-9119-48d8-8352-7354c99a9358` at `https://equityfundingsource.brian-takita.workers.dev`.
-
-The IPC proof dogfood note was recorded during closeout recovery after the first finalize attempt did not get an editor-write proof. I kept recovery on the agent-doc path; preflight repaired and committed the captured response, and this response closes the remaining `deploy` queue head. There is no EFS backlog item to add from that diagnostic note; it belongs to agent-doc internals and this cycle recovered successfully.
-
-Changed paths: no new EFS code changes for this follow-up; the deployed code remains `src/equityfundingsource-dev` commit `295ca29`, with parent pointer commit `a5bdda62b` already pushed. The only expected new change here is the agent-doc session closeout.
-
-Verification: deploy evidence remains the completed `make deploy`; post-deploy checks reported no pending D1 migrations, public `/` returned `200`, and the admin pipeline deep link returned `303` behind Cloudflare Access. `gh run list --workflow CI --limit 1` found no workflow named `CI` in either the EFS submodule or the parent repo.
-
-Escalation: none. Confidence: high for deploy completion and queue closeout; authenticated visual verification of the admin-only dialog still requires an authenticated browser session.
-
-### Re: IPC Recovery Closeout — gpt-5
-
-The IPC recovery note is acknowledged. It is diagnostic metadata from the agent-doc writeback path, not a new EFS product request. I did not add an EFS backlog item for it.
-
-Changed paths: no new code changes; this is an agent-doc session closeout only.
-
-Verification: the queue has been drained and the requested deploy evidence is already recorded above. No additional tests or deploys were needed for this metadata-only closeout.
-
-Escalation: none. Confidence: high that the requested EFS work and deploy are complete; the remaining matter is only agent-doc IPC bookkeeping.
-
-### Re: Full Application Blocker Highlighting And Deploy — gpt-5
-
-> **Queue prompt:**
->
-> The https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application should have the alert at the top and highlighted fields + sections that need to be addressed to advance the application.
-
-
-> **Queue prompt:**
-> The https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application should have the alert at the top and highlighted fields + sections that need to to be addressed to advance the application.
-> deploy
-
-Done. The admin Full Application detail now receives the same approval-gate requirements used by the Accept action, renders a top `Before advancing this application` alert, and highlights the matching section cards and visible field rows. The guidance is opt-in from the admin page, so the borrower Application Status view continues to use the shared detail component without admin advancement language.
-
-Changed paths: `src/equityfundingsource-dev` at `e02fef7`; parent submodule pointer at `1133cf4f2`. Key files were `lib/ui--browser--efs/portal/shared/full_application_detail.tsx`, `lib/ui--browser--efs/portal/admin/full_applications.tsx`, `lib/ui--server--efs/portal.ts`, `tests/admin-full-application-approve-ui.test.ts`, and `prds/67v2-admin-loan-pipeline-kanban.md`.
-
-Commits/push/deploy: EFS commit `e02fef7 feat(admin): highlight application advancement blockers (#pipeline-full-app-dialog)` was pushed to `origin/main`; parent pointer commit `1133cf4f2 chore(efs): bump application blocker highlighting submodule` was pushed to `origin/main`; deployed Worker version `f1736ccf-1044-46ad-a7ed-d001eab69bdd` at `https://equityfundingsource.brian-takita.workers.dev`.
-
-Verification: focused Bun tests passed (`tests/admin-full-application-approve-ui.test.ts tests/admin-pipeline.test.ts`: `74 pass / 0 fail`). Full local verification passed twice after edits (`make check`: latest run `1188 pass / 0 fail`, app build, and Worker build). The tsift digest wrapper flagged the intentional logged `d1 down` non-fatal outbox fixture, but the raw Bun summaries report zero failures. Pre-deploy D1 checks reported no pending migrations, D1 info returned for database `280e1539-b940-4c59-8988-fbed63c12ac0`, and Time Travel bookmark `00000509-00000010-00005094-54e662098a450514cb2e36b3dd1b69a7` was available. Deploy ran through `make deploy`; post-deploy migrations still report none pending. Smoke checks returned `200` for `/` and `303` for the admin pipeline deep link, consistent with Cloudflare Access on admin routes.
-
-CI/workflows: `gh run list --workflow CI --limit 1` found no workflow named `CI` in either the EFS submodule or the parent repo.
-
-Escalation: none. Confidence: high for code, tests, push, D1/deploy, and unauthenticated smoke coverage; authenticated visual verification of the admin-only Full Application dialog still requires an authenticated browser session.
-<!-- agent:boundary:2fa16f1c -->
+<!-- agent:boundary:12f390b3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -167,6 +58,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Should https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application > Property Type be a dropdown? It is a free text field in edit.
 <!-- /agent:queue -->
 
 ## Backlog

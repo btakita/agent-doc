@@ -89,6 +89,21 @@ The "node_modules committed → bloat" premise in my earlier cross-port response
 
 ### Re: lazily-js next-steps — glm-5.2
 
+> **Queue prompt:**
+>
+> What are #next-steps to fix lazily-rs bugs?
+
+
+> **Queue prompt:**
+>
+> What are #next-steps to fix lazily-py bugs?
+
+
+> **Queue prompt:**
+>
+> What are #next-steps to fix lazily-zig bugs?
+
+
 Deeper check confirms lazily-js is **clean** — `npm test` 27 pass, no TODO/FIXME, and thorough input validation (`src/index.js:22` enforces non-negative **safe-integer** NodeIds per protocol.md's 2^53 rule; byte-range 0..255 checks; externally-tagged variant validation). The IPC model mirrors lazily-kt and round-trips all 6 conformance fixtures.
 
 The only actionable next-step is already captured as **#lzjshygiene** (validate the conformance fixture `assertions` generically — currently only the `wire` block is round-tripped, so fixture metadata drift passes silently). node_modules confirmed not tracked last cycle. Nothing new to add to the backlog.
@@ -96,7 +111,7 @@ The only actionable next-step is already captured as **#lzjshygiene** (validate 
 > **Queue prompt:** What are #next-steps to fix lazily-js bugs?
 
 Note: the remaining planning heads (zig/py/rs `#next-steps`) are likewise already covered by backlog items `#lzzigtodos`, `#lzpyregress`, and `#lzspecdrift`; the substantive work is the `do [#id]` implementation queue.
-<!-- agent:boundary:f92060a1 -->
+<!-- agent:boundary:82f3f570 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -107,9 +122,9 @@ Note: the remaining planning heads (zig/py/rs `#next-steps`) are likewise alread
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~What are #next-steps to fix lazily-kt bugs?~~
 - ~~What are #next-steps to fix lazily-js bugs?~~
-- What are #next-steps to fix lazily-zig bugs?
-- What are #next-steps to fix lazily-py bugs?
-- What are #next-steps to fix lazily-rs bugs?
+- ~~What are #next-steps to fix lazily-zig bugs?~~
+- ~~What are #next-steps to fix lazily-py bugs?~~
+- ~~What are #next-steps to fix lazily-rs bugs?~~
 - do [#lzspecdrift]
 - do [#lzktconf]
 - do [#lzpyregress]

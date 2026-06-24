@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -67,7 +67,7 @@ Verification: focused `bun test tests/apply4-full-application-p1.test.ts` passed
 Deploy: remote D1 reported "No migrations to apply!" (no schema change — reuses existing application tables). `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `a6df6f88-f836-4b60-afd1-6df7e5bbad05`. Post-deploy check: public root returned `HTTP 200`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:3bc975e5 -->
+<!-- agent:boundary:42834aac -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -87,8 +87,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~New Loan Applications in https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097&step=0 should prefill all available data that we have about the borrower. If we are not saving the borrower info, save it so future Loan Applicaitons can be prefilled. Do not commingle applicaiton-specific and property-specific data...those fields should not be prefilled.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

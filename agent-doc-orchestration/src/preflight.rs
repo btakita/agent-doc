@@ -1801,12 +1801,25 @@ fn append_ipc_dogfood_note_to_content(content: &str, diagnostic: &str) -> Result
 
 fn format_ipc_dogfood_note(diagnostic: &str) -> String {
     let diagnostic = diagnostic.replace("```", "'''");
+    // The note opens with a `### Re:` response heading and folds the body into
+    // a fenced block so the prompt-bearing diff classifier sees ONE
+    // `[user+]` block whose first line is a recovery artifact heading → it is
+    // classified as a binary-authored `RecoveryArtifact`, never a user
+    // `PromptTarget`. Without this, the bare-text note closes the exchange
+    // tail, is classified as a fresh prompt, gets `❯`-normalized, and becomes
+    // an unresolved prompt-only tail that forces an extra acknowledgment
+    // cycle (`#ipcqproof`). A fence-opening line after a blank joins the
+    // heading's block, and blank lines inside a fence never split it.
     format!(
-        "**IPC proof issue dogfood log**\n\n\
-Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.\n\n\
+        "### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc\n\n\
+```text\n\
+**IPC proof issue dogfood log**\n\
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.\n\
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.\n\
 Issue class: `ipc_proof_insufficient`\n\
 Affected component: editor IPC / writeback\n\n\
-```text\n{}\n```",
+{}\n\
+```",
         diagnostic
     )
 }
@@ -3800,6 +3813,86 @@ mod tests {
 
         assert!(!super::append_latest_ipc_dogfood_note(&doc).unwrap());
     }
+
+    /// `#ipcqproof`: an IPC proof diagnostic appended during interrupted-cycle
+    /// recovery must NOT become an unresolved prompt-bearing exchange item. The
+    /// queue-consume `socket_ack_content` ACK mismatch (`live_prompt_drift_after_preflight`)
+    /// and the `missing_response_probe` variant both record a fail-closed
+    /// diagnostic; the appended dogfood note must classify as a binary-authored
+    /// `RecoveryArtifact`, never a user `PromptTarget`, so it does not get
+    /// `❯`-normalized into a prompt-only tail that forces a follow-up cycle.
+    #[test]
+    fn ipc_dogfood_note_is_recovery_artifact_not_prompt_bearing() {
+        let before = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#next]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let cases = [
+            // socket ACK content mismatch on a queue-consume write.
+            "ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle",
+            // queue-consume patch consumed without the response body present.
+            "ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write",
+        ];
+
+        for diagnostic in cases {
+            let updated = super::append_ipc_dogfood_note_to_content(before, diagnostic)
+                .unwrap()
+                .expect("expected IPC note to append");
+
+            // The note opens with a `### Re:` heading → RecoveryArtifact.
+            assert!(
+                updated.contains("### Re: IPC proof diagnostic"),
+                "dogfood note must open with a ### Re: heading for {diagnostic}"
+            );
+            // Fail-closed recovery stays on the binary-owned path (no direct disk write).
+            assert!(
+                !diagnostic.contains("direct_write_fallback"),
+                "IPC proof diagnostic must remain fail-closed for {diagnostic}"
+            );
+
+            // Mirrors `first_unstarted_prompt_bearing_change`: classify the diff
+            // the prompt-bearing guard would see.
+            let diff_text = crate::diff::unified_diff_from_contents(before, &updated)
+                .expect("expected a non-empty diff after appending the note");
+            let changes = crate::diff::classify_prompt_bearing_changes(&diff_text);
+            assert!(
+                !changes.iter().any(|c| matches!(
+                    c.kind,
+                    crate::diff::PromptBearingChangeKind::PromptTarget
+                )),
+                "dogfood note must not classify as a PromptTarget for {diagnostic}: {changes:?}"
+            );
+            assert!(
+                changes.iter().any(|c| matches!(
+                    c.kind,
+                    crate::diff::PromptBearingChangeKind::RecoveryArtifact
+                )),
+                "dogfood note must classify as a RecoveryArtifact for {diagnostic}: {changes:?}"
+            );
+            // No `❯` prompt-prefix normalization may be derived from the note.
+            assert!(
+                crate::diff::prompt_prefix_normalization_targets(&diff_text).is_empty(),
+                "dogfood note must not trigger prompt-prefix normalization for {diagnostic}"
+            );
+            // The exchange tail is not left as a prompt-only tail.
+            assert!(
+                crate::session_check::prompt_only_exchange_tail(&updated).is_none(),
+                "dogfood note must not leave a prompt-only exchange tail for {diagnostic}"
+            );
+        }
+    }
+
     /// #drained-done-queue-clear: a standalone no-diff preflight that drains a
     /// fully-resolved auto-queue writes the drained shape to disk + snapshot
     /// but leaves HEAD on the active-queue commit. The next preflight commit

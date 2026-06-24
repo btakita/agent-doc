@@ -181,6 +181,183 @@ Commits:
 
 - `src/agent-doc`: `742ec733 feat: log restart agent menu marker` (pushed to `origin/main`).
 - Parent repo: `33a085c3a chore: update agent-doc submodule` (created locally; parent push happens after this session closeout commit lands).
+- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success`, run `28073513496`, for `feat: log restart agent menu marker`.
+- `git diff --check` passed.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin` passed.
+- `cargo test -p agent-doc-orchestration session_log_event_after_latest_start_resets_on_agent_restart_performed -- --test-threads=2` passed.
+- `cargo test -p agent-doc-orchestration mismatched_authoritative_actor_can_be_replaced_only_when_not_live_authority -- --test-threads=2` passed.
+- `cargo test -p agent-doc-orchestration agent_change_restart -- --test-threads=2` passed.
+- Supervisor-side harness-change proof is present: `harness_change_detected`, `agent_restart_boundary_gate`, `agent_restart_performed`, plus the route kill-guard test for avoiding cold replacement of a healthy live authoritative actor.
+- Signed and unsigned plugin artifacts exist: `agent-doc-jetbrains-0.2.180.zip` and `agent-doc-jetbrains-0.2.180-signed.zip`.
+- `editors/jetbrains/gradle.properties` is at `pluginVersion = 0.2.180`.
+- `TerminalUtil` writes the optverify-scannable ops-log marker `restart_agent_menu_invoked file=<relative-path> source=jetbrains action=restart_agent`.
+- `plugin.xml` registers `AgentDoc.RestartAgent` with text `Restart Agent`, alongside `Restart Supervisor Process` and `Stop Agent`.
+- JetBrains `RestartAgentAction.kt` exists and records `restart_agent_menu_invoked` before calling `TerminalUtil.restartSession`.
+
+Escalation: none. Confidence: high.
+
+### Re: #advr03 queue closeout repair — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#advr04]
+
+
+The `#advr03` implementation response and backlog reap are already committed. This repair closeout persists the queue strike that preflight converged after the IPC retry, so the visible queue now advances to `#advr04` without reopening any code work.
+
+No additional repo code changed after the verification recorded in the `#advr03` response. Backlog now starts at `#advr04`; the done archive has a local `#advr03` append alongside older uncommitted archive drift, so I did not stage that archive wholesale.
+
+> **[TRANSFER from /tmp/agent-doc-bugs2-head.md]** (2026-06-24T03:54:32Z)
+>
+### Session Summary
+
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-030802.md`*
+
+Compacted content:
+- Archived 4 response topic(s): response overwrite sidecar recovery - gpt-5; #advr02 - gpt-5; state backbone - gpt-5; 1 more
+- Prior summary/context: prior compacted content: Archived prior response topics and recovery notes from this long-running agent-doc session.;...
+
+### Re: state backbone queue closeout - gpt-5
+
+> **Queue prompt:**
+>
+> Fix Insufficient IPC Proof issues.
+
+
+> **Queue prompt:**
+>
+> I want to have a backbone for all state. We should keep the Cycle State Machine. But for the rest of the state would any be a good match?
+
+Closed this through the supported queue-response path after repairing the corrupted exchange component.
+
+The answer and implementation are now both present in the session document and repo history: keep the Cycle State Machine for the global turn lifecycle, and use typed append-only events plus deterministic projections and actor ownership for the rest of agent-doc state. FSMs remain useful for small closed subdomains; behavior-tree-like logic is only a policy layer; GOAP and MPC are not a good durable-state backbone for this workflow.
+
+Committed docs/spec work:
+
+- `src/agent-doc`: `b3239b70 docs: define state backbone`
+- Parent repo: `35659b5a0 chore: update agent-doc submodule`
+- Session exchange repair: `7dbe13d66 agent-doc(agent-doc-bugs2): 2026-06-23 22:57:52`
+
+Verification already completed:
+
+- `make check` in `src/agent-doc` passed with Clippy, 5053 nextest tests, doctests, and the wider closeout sim.
+- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success`, run `28070395022`, on `2026-06-24T02:11:52Z`.
+
+No new backlog item is needed from this response.
+
+### Re: state backbone implementation — gpt-5
+
+> **Queue prompt:**
+>
+> Implement state backbone /home/brian/work/btakita/agent-loop/src/agent-doc/specs/13-state-backbone.md. Add additional state machines for other state domains.
+
+Implemented the state backbone as a concrete orchestration module instead of leaving the spec as prose.
+
+Changes:
+
+- Added `agent-doc-orchestration/src/state_backbone.rs` with a typed append-only `EventLedger`, `StateEvent`, `StateFact`, and deterministic `StateBackboneProjection` reducers for document, queue, closeout, transport, supervisor, route, and proof state.
+- Kept the existing `CyclePhaseMachine` as the closeout lifecycle authority and added local FSMs for other closed domains: `QueueHeadMachine`, `TransportPatchMachine`, `ActorLifecycleMachine`, `RouteReadinessMachine`, and `ProofGateMachine`.
+- Added generation-aware owner checks so stale editor IPC / route / supervisor reports are recorded as rejected instead of mutating current projections.
+- Updated `specs/13-state-backbone.md` to point at the implementation and list the state machines now backing the spec.
+
+Verification completed before closeout:
+
+- `cargo fmt --check`
+- `cargo test -p agent-doc-orchestration state_backbone -- --test-threads=2`
+- `cargo clippy -p agent-doc-orchestration -- -D warnings`
+- `make check` (clippy, 5056 nextest tests, doctests, medium SimWorld)
+- `make install-full` (installed `agent-doc 0.34.43`; lib install marked one controller for recycle at next idle boundary)
+- `gh run list --workflow CI --limit 1` showed latest `CI` run `28070395022` completed successfully.
+
+Local commits prepared:
+
+- `src/agent-doc`: `a565bb49 feat: add state backbone projections`
+- parent repo: `4105af85a chore: update agent-doc submodule`
+
+Per the session-doc closeout ordering, I will push after this `agent-doc finalize` commit lands.
+
+### Re: lazily-rs state machines — gpt-5
+
+> **Queue prompt:**
+>
+> Implement state backbone /home/brian/work/btakita/agent-loop/src/agent-doc/specs/13-state-backbone.md. Add additional state machines for other state domains.
+
+> **Queue prompt:**
+>
+> Are you using lazily-rs for all state machines?
+
+The state-backbone implementation is complete and pushed.
+
+Yes for the closed FSM domains introduced in this change: the existing `CyclePhaseMachine` and the new `QueueHeadMachine`, `TransportPatchMachine`, `ActorLifecycleMachine`, `RouteReadinessMachine`, and `ProofGateMachine` are all backed by `lazily::ThreadSafeStateMachine`.
+
+Not every state surface is a lazily FSM. The backbone itself is event-driven: `EventLedger` records typed facts, and `StateBackboneProjection` reduces those facts into current document, queue, closeout, transport, supervisor, route, and proof projections. Those reducers are deterministic replay logic, not finite state machines. Existing broader projections such as SimWorld and some runtime enums can remain plain reducers/enums until a closed subdomain needs an explicit transition table.
+
+Push / CI state after the implementation:
+
+- `src/agent-doc` pushed `a565bb49 feat: add state backbone projections` to `origin/main`.
+- Parent repo pushed through merge commit `903f4904a` to `origin/main`, including `4105af85a chore: update agent-doc submodule` and the session closeout commit.
+- Latest `agent-doc` CI after the push is running: `28072965944`, started `2026-06-24T03:25:07Z`.
+
+### Re: linking state machines — gpt-5
+
+> **Queue prompt:**
+>
+> Can we link the different State Machines together? Is that advisable or should we keep them discrete?
+
+Keep the state machines discrete as transition authorities, but link them through events and projections.
+
+That means one FSM should not directly drive another FSM's internal transition table. Instead, it emits a typed event such as `EditorAckObserved`, `ActorGenerationChanged`, or `DispatchProofObserved`; projections reduce those events; policy code reads the projections and decides whether to emit the next command/event. This keeps each FSM small and replayable while still allowing the whole workflow to coordinate.
+
+Good links:
+
+- Shared event ledger with stable ids and causation ids.
+- Projection dependencies, for example route dispatch reads supervisor readiness and transport proof projections.
+- Policy layer / behavior-tree-like decision code that reads projections and emits events or commands.
+- Explicit owner generation checks at projection boundaries.
+- Parent repo: `33a085c3a chore: update agent-doc submodule` (created locally; parent push happens after this session closeout commit lands).
+- `src/agent-doc`: `742ec733 feat: log restart agent menu marker` (pushed to `origin/main`).
+- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success`, run `28072965944`, from `2026-06-24T03:25:07Z`.
+- Installed jar metadata was verified: `META-INF/plugin.xml` reports version `0.2.180` and registers `AgentDoc.RestartAgent`.
+- `agent-doc plugin install --local jetbrains` installed signed `agent-doc-jetbrains 0.2.180` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`; restart IntelliJ to activate it.
+- `make install-full` installed `agent-doc 0.34.43` and `libagent_doc-0.34.43.so`; lib install marked two controllers to recycle at the next idle boundary.
+- `make check` twice, including the post-doc-edit rerun: clippy, 5056 nextest tests, doctests, and medium SimWorld all passed.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
+- `cargo test -p agent-doc-core gate_verify -- --test-threads=2`
+- `cargo test -p agent-doc-orchestration gate_verify -- --test-threads=2`
+- `git diff --check`
+- `cargo fmt --check`
+
+Avoid links where one FSM reaches into another FSM's mutable state or encodes another domain's transitions. That recreates a global FSM by accident and brings back state explosion. The right shape is discrete FSMs plus typed events, deterministic projections, and policy orchestration above them.
+
+### Re: #advr03 — gpt-5
+
+> **Queue prompt:**
+>
+> do [#advr03]
+
+Completed `#advr03`.
+
+Implemented the missing `#restartagentmenu` proof marker so the JetBrains Restart Agent menu path now leaves structured evidence for `#optverify` instead of only an IDE logger line. `RestartAgentAction` records the marker before invoking the restart command; `TerminalUtil` writes a best-effort `restart_agent_menu_invoked file=<relative-path> source=jetbrains action=restart_agent` line to `.agent-doc/logs/ops.log`; tests pin both the action ordering and marker format. `specs/supervisor.md` and `VERSIONS.md` now document the marker contract, and the JetBrains plugin version is bumped to `0.2.180`.
+
+Verification:
+
+- `cargo fmt --check`
+- `git diff --check`
+- `cargo test -p agent-doc-orchestration gate_verify -- --test-threads=2`
+- `cargo test -p agent-doc-core gate_verify -- --test-threads=2`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin`
+- `make check` twice, including the post-doc-edit rerun: clippy, 5056 nextest tests, doctests, and medium SimWorld all passed.
+- `make install-full` installed `agent-doc 0.34.43` and `libagent_doc-0.34.43.so`; lib install marked two controllers to recycle at the next idle boundary.
+- `agent-doc plugin install --local jetbrains` installed signed `agent-doc-jetbrains 0.2.180` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`; restart IntelliJ to activate it.
+- Installed jar metadata was verified: `META-INF/plugin.xml` reports version `0.2.180` and registers `AgentDoc.RestartAgent`.
+- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success`, run `28072965944`, from `2026-06-24T03:25:07Z`.
+
+Commits:
+
+- `src/agent-doc`: `742ec733 feat: log restart agent menu marker` (pushed to `origin/main`).
+- Parent repo: `33a085c3a chore: update agent-doc submodule` (created locally; parent push happens after this session closeout commit lands).
 
 Escalation: none. Confidence: high.
 
@@ -219,7 +396,7 @@ Verification run for this closeout:
 No new source commit was needed. `src/agent-doc` had unrelated dirty JetBrains style-setting files appear during verification (`VisualHighlighterManager.kt`, `MarkdownStyleConfigurable.kt`, `MarkdownStyleSettings.kt`); I left them untouched and did not stage them for this closeout.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:cd087e42 -->
+<!-- agent:boundary:8e49edc8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -285,6 +462,21 @@ What are #next-steps to fix bugs?
 - [ ] [#advr17] Advance original #fbwireverify: complete #fbwire/#fullboundary acceptance with slow-ACK no inflight pileup and wedged no-ACK bounded timeout + ERROR marker + playback artifact; add deterministic tmux-ci/sim coverage where possible.
 - [ ] [#advr18] Advance original #qnodemerge4verify: after JB/VS Code plugin install, live-test non-ASCII edit-during-merge around `café 日本 😀`; prove accepted byte-offset editor ops and no mojibake/interleaving, plus automated log checker for `editor_op_recorded` + `editor_ops_for_base`.
 - [ ] [#advr19] Advance original #cyh0: identify and instrument remaining File Cache Conflict trigger by capturing exact action, agent-doc command, and ops marker such as `write_authority action=... transport=disk`; distinguish ack-content, VCS-refresh/save, and editor-IPC convergence surfaces.
+- [ ] [#advr05] [recommended] Advance original #s81q: add Stop Agent and mirror Stop+Restart into VS Code extension menus; implement JB `StopAgentAction.kt`, plugin.xml registration, VS Code command contributions, and signed/unsigned plugin artifacts.
+- [ ] [#advr06] Advance original #recyclerename: rename JB + VS Code "Restart Supervisor Process" UI text to "Recycle Supervisor" while keeping stable action IDs, and ensure Restart Agent and Recycle Supervisor commands sit alongside each other. Plan: tasks/agent-doc/plan-restart-agent.md.
+- [ ] [#advr07] [recommended] Advance original #supinstallvis: make supervisor auto-install/rebuild status visible in pane body or plugin notification surface, choose a non-input-consuming mechanism, add ops/log proof, and avoid disturbing keepalive Enter-to-restart reader.
+- [ ] [#advr08] Advance original #runexitrestart: implement/verify recovery for cleanly exited harness panes by detecting `Press Enter to restart`, restarting the harness, waiting for dispatch-ready proof, and submitting prompt-bearing work so Run Agent Doc cannot drop on clean exit.
+- [ ] [#advr09] Advance original #jbrundispatch: replace operator-capture gate with deterministic Run Agent Doc dispatch diagnostics using admin detect, route trace, pane state, dispatch/start proof, and auto-filed route bugs; add regression coverage where possible.
+- [ ] [#advr10] Advance original #editorbufwin: finish editor-buffer-wins P2 by auto-recovering and committing preserved queue additions when replay normalization neutralizes the queue component. Plan: tasks/agent-doc/plan-editor-buffer-wins-queue-merge.md.
+- [ ] [#advr11] Advance original #docdriftgrace: implement component-scoped graceful drift resolution that auto-rebases unrelated changes and surfaces only structural conflicts on in-flight prompt/response. Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md.
+- [ ] [#advr12] Advance original #ftqpartialdup: confirm whether #hap7/#gf5n fixes same-node partial free-text queue duplication; if not, add same-node/free-text conflict guard and regression for truncated duplicate queue prompts.
+- [ ] [#advr13] Advance original #8bfz: implement single live JB plugin consumer per document using a per-doc owner lease; non-owner windows defer patch apply + saveDocument, with plugin PatchWatcher + binary lease primitive and multi-window proof.
+- [ ] [#advr14] Advance original #qpauseux: finish paused-queue plugin UX with info/action notifications, Resume or restart-supervisor/resume actions, no raw error toast, plugin artifacts, and render/ops proof.
+- [ ] [#advr15] Advance original #jbdisprecycle: convert recycle-boundary Run Agent Doc verification into deterministic proof for exactly one `dispatch_start_proof` with submit and no stranded start_session failure; ops marker `route_dispatch_submit_recycle_settle`.
+- [ ] [#advr16] Advance original #tb4q: complete #qfocsup focused-cycle supervisor clear-and-continue proof with install/recycle if needed, `session-check ui_outcome=deferred_for_supervisor_drain`, `context_reset`, `go_drain_dispatch`, and fresh-agent drain evidence.
+- [ ] [#advr17] Advance original #fbwireverify: complete #fbwire/#fullboundary acceptance with slow-ACK no inflight pileup and wedged no-ACK bounded timeout + ERROR marker + playback artifact; add deterministic tmux-ci/sim coverage where possible.
+- [ ] [#advr18] Advance original #qnodemerge4verify: after JB/VS Code plugin install, live-test non-ASCII edit-during-merge around `café 日本 😀`; prove accepted byte-offset editor ops and no mojibake/interleaving, plus automated log checker for `editor_op_recorded` + `editor_ops_for_base`.
+- [ ] [#advr19] Advance original #cyh0: identify and instrument remaining File Cache Conflict trigger by capturing exact action, agent-doc command, and ops marker such as `write_authority action=... transport=disk`; distinguish ack-content, VCS-refresh/save, and editor-IPC convergence surfaces.
 <!-- /agent:backlog -->
 
 ## Review
@@ -293,6 +485,17 @@ What are #next-steps to fix bugs?
 <!-- /agent:review -->
 
 <!-- agent:icebox -->
+- [ ] [#qloop1] #agent-doc-feature Define durable queue loop annotation syntax and parser/rendering behavior: mark loop-only queue/backlog entries, keep annotation/state out of prompt completion proof, and expose a stable current-item marker for editor/supervisor surfaces.
+- [ ] [#qloop2] #agent-doc-feature Implement idle-loop scheduling for annotated loop items: when normal drainable queue work is empty, dispatch loop items in deterministic sequence, persist the loop cursor/last-run state, and prove regular queue items always preempt loop work.
+- [ ] [#qloop3] #agent-doc-feature Add loop poll controls: global default poll period plus per-loop override, next-run time gates, bounded backoff/jitter, and tests proving no tight spin when there are no relevant events.
+- [ ] [#qloop4] #agent-doc-feature Add event-aware loop scheduling: record deterministic event counters/timestamps and let loop items schedule earlier/later based on event frequency before any model-assisted scheduling hook.
+- [ ] [#qobs1] #agent-doc-feature Add a bounded observer telemetry snapshot surface: supervisor/session actors expose compact per-document state (cycle phase, queue head, actor readiness, IPC inflight, recent typed ops-log markers, and artifact handles) without dumping raw transcripts by default.
+- [ ] [#qobs2] #agent-doc-feature Implement deterministic observer rules that scan session-check/preflight/ops-log snapshots for annotated issues and recurring failure patterns, then file deduped session-doc backlog bugs with evidence paths and stable issue fingerprints.
+- [ ] [#qobs3] #agent-doc-feature Add a sidecar observer agent-doc loop that can monitor all running project sessions from snapshot artifacts, rate-limit bug filing, avoid pane interference, and route created bug items to the correct session document or a configured observer inbox.
+- [ ] [#qobs4] #agent-doc-feature Add model-assisted observer triage as advisory-only: feed compact snapshot/context-pack handles to a subscription or local model, require deterministic evidence before auto-filing bugs, and record model provenance/confidence on suggestions.
+- [ ] [#qlm1] #agent-doc-feature Define queue item backend-selection syntax for local-model execution, separate from queued `/model <tier>` switches: support explicit per-item backend/model annotations on normal and loop queue items without changing prompt text or completion proof.
+- [ ] [#qlm2] #agent-doc-feature Implement a local-model queue dispatcher backend that can run eligible queue/loop items through a configured local model, capture stdout/structured results, and write responses through the normal agent-doc closeout boundary.
+- [ ] [#qlm3] #agent-doc-feature Add local-model dispatch safety gates and telemetry: capability checks, GPU/resource lease integration, fallback policy, provenance logs, and tests proving local-model queue items cannot be silently marked complete without a committed response/proof.
 - [ ] [#qloop1] #agent-doc-feature Define durable queue loop annotation syntax and parser/rendering behavior: mark loop-only queue/backlog entries, keep annotation/state out of prompt completion proof, and expose a stable current-item marker for editor/supervisor surfaces.
 - [ ] [#qloop2] #agent-doc-feature Implement idle-loop scheduling for annotated loop items: when normal drainable queue work is empty, dispatch loop items in deterministic sequence, persist the loop cursor/last-run state, and prove regular queue items always preempt loop work.
 - [ ] [#qloop3] #agent-doc-feature Add loop poll controls: global default poll period plus per-loop override, next-run time gates, bounded backoff/jitter, and tests proving no tight spin when there are no relevant events.

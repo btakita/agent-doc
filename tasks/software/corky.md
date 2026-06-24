@@ -119,7 +119,7 @@ Compacted content:
 3. `#diarize-span-release` — Verify diarization cascade fix is committed and released
 
 **Top of backlog: `#fix-social-tests`**
-<!-- agent:boundary:0102c1b7 -->
+<!-- agent:boundary:05518a65 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -132,6 +132,7 @@ Please give me a report the performance
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - 🚧 What are #next-steps to fix corky bugs?
 - [#wwsp]
+- [#84xz]
 <!-- /agent:queue -->
 
 ## Backlog

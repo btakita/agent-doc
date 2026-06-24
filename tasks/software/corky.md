@@ -128,6 +128,7 @@ Compacted content:
 - `cargo fmt --check` — clean
 - `cargo clippy --workspace` — clean (only pre-existing imap-proto warning)
 - `cargo test --workspace` — all pass (0 failed, 0 ignored)
+1. `#pypi-trusted-publisher` — top remaining item; blocked outside the repo until PyPI trusted publishing is configured for `repo:btakita/corky:environment:pypi`.
 
 **Top of backlog: `#fix-social-tests`**
 **IPC proof issue dogfood log**
@@ -146,17 +147,7 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/c
 I ran the required orchestration handoff, but it failed closed because the repaired exchange now contains duplicate task-like lines for `#pypi-trusted-publisher`, so the DAG builder reported `duplicate dag task id #pypi-trusted-publisher`.
 
 Manual closeout for this cycle: no Corky repo files were changed, no new bug backlog items were added, and the current top remaining item is `#pypi-trusted-publisher`. `#fix-social-tests` and `#diarize-span-release` should be treated as completed based on the prior recorded closeout; the stale `Top of backlog: #fix-social-tests` line above is historical drift from the interrupted recovery, not the current queue state.
-
-### Re: Next steps prompt — gpt-5
-
-> **Queue prompt:** What are #next-steps to fix corky bugs?
-
-No new Corky bug follow-up items should be added from this cycle. The current backlog priority is only:
-1. `#pypi-trusted-publisher` — top remaining item; blocked outside the repo until PyPI trusted publishing is configured for `repo:btakita/corky:environment:pypi`.
-
-The earlier `#fix-social-tests` and `#diarize-span-release` entries are completed historical items, not current backlog heads.
-
-<!-- agent:boundary:3cc50db2 -->
+<!-- agent:boundary:0df561c3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -173,7 +164,6 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog -->
-- [/] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi. Repo workflow is configured and pushed in Corky commit feb074e; PyPI run 26195923707 now builds all artifacts but is blocked by PyPI invalid-publisher until the project has a trusted publisher matching repo:btakita/corky:environment:pypi.
 <!-- /agent:backlog -->
 
 ## Completed / Reaped

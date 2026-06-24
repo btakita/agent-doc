@@ -263,7 +263,31 @@ Deployment: not run for this queue head; the separate `deploy` queue item remain
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:1ce65b89 -->
+
+### Re: Requirements dialog arrow navigation duplicate - gpt-5
+
+> **Queue prompt:**
+>
+> In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field.
+
+Already resolved by the immediately preceding queue item. No additional code changes were needed.
+
+Coverage already shipped:
+- Alert-level Advance Lender receives initial focus and supports Enter natively.
+- ArrowDown/ArrowUp cycles through dialog actions in order, including alert actions, footer Close, and footer CTAs.
+
+Verification already completed for the shared implementation:
+- `git diff --check`
+- `bun test tests/admin-investor-pipeline.test.ts tests/advance-lender-dialog.test.ts` — 105 tests, 0 failures.
+- `make check` — 1182 tests, app build, worker build passed.
+
+Commits already pushed:
+- EFS submodule: `7e89423 fix(admin): add requirements dialog arrow navigation`
+- Parent gitlink: `2c2ec9452 chore: update equityfundingsource submodule`
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:cd2da929 -->
 <!-- /agent:exchange -->
 ###
 <!--

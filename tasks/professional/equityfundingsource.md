@@ -120,7 +120,24 @@ No actionable follow-up items were created by this closeout.
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:6b1f5ffe -->
+
+
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=5112cab5-334c-466a-8e15-22bb93aef96f invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782277353707
+```
+
+### Re: IPC recovery closeout — gpt-5
+
+No product task remains in the queue. The lender signup change was implemented, committed, pushed, deployed, and live-smoke verified; the follow-up deploy queue head was also closed.
+
+This cycle only closes the agent-doc IPC recovery diagnostic. I marked the stale route-owned supervisor for recycle with `agent-doc admin recycle`.
+
+No changed paths, repo commands, or deployment actions were needed in this closeout. No actionable follow-up items were created.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:6ac13890 -->
 <!-- /agent:exchange -->
 ###
 <!--

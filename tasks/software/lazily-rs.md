@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -59,7 +59,7 @@ Compaction archived 4 topics cleanly. Exchange tail is clear. Sidecar snapshot w
 **Semantic-completion warnings (3):** all false positives, none auto-closed — `#h6qb` is genuinely operator-gated (live two-host/NAT); `#bcnf`/`#mes4` are JS/Kotlin consumer packages, distinct from the Rust FFI exports in `#lzffistate1`.
 
 **Next head:** `do [#9226]` — lazily-zig Signal engine (deferred-recompute queue in `context.zig`, plan `c74e75909`). Flip `queue: go` or `queue: auto` in frontmatter to resume the drain, or point me at a specific item.
-<!-- agent:boundary:7a98c0ec -->
+<!-- agent:boundary:92266cd0 -->
 <!-- /agent:exchange -->
 ###
 <!--

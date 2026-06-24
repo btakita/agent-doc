@@ -99,7 +99,35 @@ Next queue head is `:pushpin: do [#pwvm]`.
 - Closed the six duplicate clarification items: `#pwvm`, `#9e64`, `#t1xt`, `#dcgp`, `#7gpg`, `#kjfe` → all resolved by this finding.
 
 > Note: preflight flagged `queue_stall_detected` — expected, since OpenCode has no in-session auto-loop; this is the manual continuation of the drain. `#h6qb`/`#krcm` `semantic_completion_match` warnings carry over unchanged (separate items, not touched).
-<!-- agent:boundary:6dba1fba -->
+
+### Re: #tnbd migrate lazily-js FFI off ffi-napi → koffi — DONE — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#tnbd]
+
+
+Migrated the `loadAgentDocFFI` native loader from the unmaintained `ffi-napi`/`ref-napi` pair to **koffi** (chosen over `node-ffi-rs` — more mature, single dependency, no separate ref lib, active maintenance). Closed `#tnbd`.
+
+**Why:** `ffi-napi` fails to build on Node >= 23 (`napi_add_finalizer` ABI break, confirmed live on this machine's **Node v26.1.0**), so VSCode consumers on modern Node couldn't `npm install` it to reach `stateProjection`/`recordStateEvent`. koffi ships **prebuilt binaries** (no native compile step) — verified `npm install koffi@3.0.2` succeeds cleanly on Node 26 where `ffi-napi` cannot.
+
+**How** (`src/lazily-js/src/state-projection.js`):
+- `loadAgentDocFFI` now `createRequire("koffi")` + `koffi.load()` + `lib.func()` with C prototypes. The projection fn is declared `void *agent_doc_state_projection(...)` (raw pointer, **not** `char *`) so koffi hands back the pointer instead of auto-stringifying — needed to `koffi.decode.string(ptr)` then free via `agent_doc_free_string(ptr)`. NULL-check via `koffi.address(ptr) === 0n`.
+- The `LazilyFFI` interface (`stateProjection`/`recordStateEvent`) is **unchanged** → `StateProjectionClient` and all mock tests work as-is. Lazy-load boundary preserved (koffi resolved inside the fn, so `make check` stays pure-JS).
+- `package.json`: `ffi-napi`/`ref-napi`/`@types/ffi-napi` → `koffi ^3.0.2`. Comments in `.d.ts`/test updated.
+
+**Verification (full suite + live native path):**
+- `make check` → **23/23 tests pass** (build + node:test).
+- Live integration: built a real `.so` with the actual `agent_doc_*` ABI, exercised the migrated loader end-to-end → value / `"null"` string / NULL pointer / record-ok / record-bad all correct.
+- koffi API pattern confirmed via a compiled C probe before writing (the `void *`-return + `decode.string` + free dance is non-obvious).
+
+**Committed + pushed** (preset `#spec-test-build-install-commit-push`):
+- lazily-js submodule `7017b9d` → pushed to `lazily-hub/lazily-js`.
+- superproject gitlink `b4500b171` → pushed to `btakita/agent-loop` (origin/main).
+- Note: `package-lock.json` left untracked (no prior lockfile; matching the library convention). `lazily-js` has no `CI` workflow yet — local evidence stands.
+
+Next queue head: `#krcm` (pre-existing Zig 0.17 `Slot.touch` crash — the `semantic_completion_match` flagged it vs #t0qn but it's a real, separate, still-open issue).
+<!-- agent:boundary:caca2505 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -115,15 +143,15 @@ Next queue head is `:pushpin: do [#pwvm]`.
 - ~~do [#dcgp]~~
 - ~~do [#7gpg]~~
 - ~~do [#kjfe]~~
-- do [#tnbd]
+- ~~do [#tnbd]~~
 - do [#krcm]
+- do [#lzshmblobparity]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [ ] [#krcm] #lzsigzig3=[recommended] lazily-zig: pre-existing slot.zig:320 Slot.touch test crash on Zig 0.17.0-dev (installed 0.17.0-dev.892; repo targets 0.16 per commit 9b492d8). 3 of 4 test binaries crash in slot.touch, masking the full suite (signal.zig + state_machine tests pass). Investigate the Slot.touch path under the newer std.Io/async semantics, or pin the CI/dev Zig to 0.16.x until 0.17 is stable. Unrelated to #t0qn (Signal primitive is complete).
-- [ ] [#tnbd] #lzjsffi=[recommended] Migrate lazily-js FFI loader off ffi-napi (unmaintained; native addon fails to build on Node >=23 — napi_add_finalizer ABI break, confirmed at Node 26.1.0). The loadAgentDocFFI() path in src/lazily-js/src/state-projection.js is mock-tested + pure-JS at import time, but VSCode consumers on modern Node cannot install ffi-napi to reach the live stateProjection/recordStateEvent calls. Evaluate koffi or node-ffi-rs as the maintained replacement.
 - [ ] [#lzshmblobparity] #lzshmblobparity=[recommended] ShmBlobArena host parity for lazily-py + lazily-zig: only lazily-rs implements the owning arena (ipc.rs:150 ShmBlobArena<B>: with_capacity/from_buffer/write_blob:220/read_blob:269); py/zig have only ShmBlobRef + SharedBlob wire tagging (ref-only consumers, cannot host). Port arena 1:1 (py: bytearray+memoryview; zig: allocator-backed slice) + lazily-spec conformance test. Plan: tasks/software/plan-lazily-shmblob-parity.md. Resolves #pwvm/#9e64/#t1xt/#dcgp/#7gpg/#kjfe (IPC.lean protocol already DONE+proven; Lean extraction not indicated).
 <!-- /agent:backlog -->
 

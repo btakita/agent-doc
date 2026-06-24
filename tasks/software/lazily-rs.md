@@ -141,7 +141,7 @@ The str0m driver discarded the result of `rtc.sdp_api().accept_answer(pending, a
 **Fix (lazily-rs `7a28283`, pushed):** capture apply-time failures in a new `Shared::last_error` field (let-chained `Err` guard, edition-2024 style) exposed via `Str0mNet::last_error()`, so a `wait_open` timeout has a diagnosable cause. Inline unit test `last_error_round_trips_apply_failure` exercises the plumbing; the real two-socket integration test asserts `last_error` stays clear on a successful handshake. Verified: clippy `--all-targets --all-features -D warnings` clean (after collapsing the nested `if let` into a let-chain per `collapsible_if`), rustfmt clean, `--features webrtc-str0m` suite green (incl. `tests/str0m_net.rs` two-socket round trip), release build OK.
 
 Next queue head: `#lzwsunbounded` (ws_backend unbounded outbound mpsc + drive abandons frames on send error).
-<!-- agent:boundary:4ac6ee13 -->
+<!-- agent:boundary:23ec6ca9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -154,8 +154,8 @@ Next queue head: `#lzwsunbounded` (ws_backend unbounded outbound mpsc + drive ab
 - ~~do [#lzasyncdispose2]~~
 - ~~do [#lzasynceffdup]~~
 - ~~:pushpin: do [#lzstr0mnetinbox]~~
-- 🚧 :pushpin: do [#lzstr0mnetacceptanswer]
-- :pushpin: do [#lzwsunbounded]
+- ~~:pushpin: do [#lzstr0mnetacceptanswer]~~
+- 🚧 :pushpin: do [#lzwsunbounded]
 - :pushpin: do [#lzerrfrom]
 - :pushpin: do [#lzsid32]
 <!-- /agent:queue -->
@@ -163,7 +163,7 @@ Next queue head: `#lzwsunbounded` (ws_backend unbounded outbound mpsc + drive ab
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzwsunbounded] ws_backend.rs outbound is an unbounded mpsc (:88) and drive abandons queued frames on send error (:117-119 break); producers can keep enqueuing after close. Switch to a bounded channel, surface send failures via WsError, stop producers on close.
+- [ ] 🚧 [#lzwsunbounded] ws_backend.rs outbound is an unbounded mpsc (:88) and drive abandons queued frames on send error (:117-119 break); producers can keep enqueuing after close. Switch to a bounded channel, surface send failures via WsError, stop producers on close.
 - [ ] [#lzerrfrom] [recommended] Add From<serde_json::Error>/From<postcard::Error> impls for EncodeError/DecodeError ergonomics (open since 2026-06-17). src/ipc.rs.
 - [ ] [#lzsid32] Harden SlotId.0 as-usize casts in thread_safe.rs to usize::try_from for 32-bit safety parity with single-threaded Context (open since 2026-06-17).
 <!-- /agent:backlog -->

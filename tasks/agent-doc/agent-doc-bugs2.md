@@ -71,7 +71,18 @@ Commits: submodule `896563a9 test(sim): prove recycle-boundary dispatch submit`;
 Completed #advr16. The focused-cycle supervisor path now has deterministic proof for the full handoff: `session-check` logs `session_check_supervisor_drain_handoff` with `ui_outcome=deferred_for_supervisor_drain` / `next_action=yield_to_supervisor_clear_and_continue`, idle-watch logs a focused-cycle-specific `#qfocsup` context reset instead of the clean-session reason, the following `idle_queue_watch_drain` carries `proof=go_drain_dispatch`, and SimWorld proves the stale-supervisor recycle, clear settle, go-drain dispatch, and fresh-agent response-materialization sequence.
 
 Changed submodule commit: `ad8709344 test(queue): prove focused-cycle supervisor drain`; parent gitlink commit: `920e94087 chore: advance agent-doc submodule`. Verification passed: targeted focused-cycle/session-check/idle-watch tests, `make check`, `git -C src/agent-doc diff --check`, latest GitHub Actions CI run `28074608395` success. I also ran `make install`; `lib-install` marked one controller for recycle at the next idle boundary.
-<!-- agent:boundary:8856fbe2 -->
+
+### Re: #advr17 — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#advr17]
+
+
+Closed #advr17 as already satisfied by the shipped `#fbwire` / `#fullboundary` implementation. The acceptance pieces are present in `85b173fb` and `2367d883`: the supervisor idle-watch runs `convergence_gate_decision` before inter-item dispatch, slow ACK keeps deferring while `inflight > 0` so the next head cannot pile up, wedged no-ACK crosses the bounded timeout into `ForceDiskFallback`, and the fallback emits `convergence_gate_force_disk_fallback severity=error` with a persisted loadable playback artifact.
+
+Fresh verification passed: `cargo test -p agent-doc-orchestration convergence_gate_slow_ack_drain_never_dispatches_while_inflight_positive -- --test-threads=2`, `cargo test -p agent-doc-orchestration convergence_gate_wedged_editor_trips_force_disk_after_timeout -- --test-threads=2`, `cargo test -p agent-doc-orchestration record_convergence_force_disk_fallback_emits_loud_error_and_loadable_playback -- --test-threads=2`, `make tmux-ci`, and the previously-run `make check`. Latest GitHub Actions CI run `28074608395` is successful. No additional code changes were needed for this item.
+<!-- agent:boundary:e1888df3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -83,7 +94,7 @@ Changed submodule commit: `ad8709344 test(queue): prove focused-cycle supervisor
 - ~~:pushpin: do [#advr14]~~
 - ~~:pushpin: do [#advr15]~~
 - ~~:pushpin: do [#advr16]~~
-- :pushpin: do [#advr17]
+- ~~:pushpin: do [#advr17]~~
 - :pushpin: do [#advr18]
 - :pushpin: do [#advr19]
 - :pushpin: JB `Run Agent Doc` still does not quickly submit the prompt.
@@ -115,7 +126,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr17] Advance original #fbwireverify: complete #fbwire/#fullboundary acceptance with slow-ACK no inflight pileup and wedged no-ACK bounded timeout + ERROR marker + playback artifact; add deterministic tmux-ci/sim coverage where possible.
 - [ ] [#advr18] Advance original #qnodemerge4verify: after JB/VS Code plugin install, live-test non-ASCII edit-during-merge around `café 日本 😀`; prove accepted byte-offset editor ops and no mojibake/interleaving, plus automated log checker for `editor_op_recorded` + `editor_ops_for_base`.
 - [ ] [#advr19] Advance original #cyh0: identify and instrument remaining File Cache Conflict trigger by capturing exact action, agent-doc command, and ops marker such as `write_authority action=... transport=disk`; distinguish ack-content, VCS-refresh/save, and editor-IPC convergence surfaces.
 <!-- /agent:backlog -->

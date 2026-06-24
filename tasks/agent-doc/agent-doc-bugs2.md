@@ -60,7 +60,18 @@ Verification passed:
 - `gh run list --workflow CI --limit 1` (latest CI success: `28074608395`)
 
 Commits: submodule `896563a9 test(sim): prove recycle-boundary dispatch submit`; parent `ec9d1f2d3 chore: advance agent-doc submodule`.
-<!-- agent:boundary:6b0db543 -->
+
+### Re: #advr16 — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#advr16]
+
+
+Completed #advr16. The focused-cycle supervisor path now has deterministic proof for the full handoff: `session-check` logs `session_check_supervisor_drain_handoff` with `ui_outcome=deferred_for_supervisor_drain` / `next_action=yield_to_supervisor_clear_and_continue`, idle-watch logs a focused-cycle-specific `#qfocsup` context reset instead of the clean-session reason, the following `idle_queue_watch_drain` carries `proof=go_drain_dispatch`, and SimWorld proves the stale-supervisor recycle, clear settle, go-drain dispatch, and fresh-agent response-materialization sequence.
+
+Changed submodule commit: `ad8709344 test(queue): prove focused-cycle supervisor drain`; parent gitlink commit: `920e94087 chore: advance agent-doc submodule`. Verification passed: targeted focused-cycle/session-check/idle-watch tests, `make check`, `git -C src/agent-doc diff --check`, latest GitHub Actions CI run `28074608395` success. I also ran `make install`; `lib-install` marked one controller for recycle at the next idle boundary.
+<!-- agent:boundary:8856fbe2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -70,8 +81,8 @@ Commits: submodule `896563a9 test(sim): prove recycle-boundary dispatch submit`;
 - ~~:pushpin: do [#advr12]~~
 - ~~:pushpin: do [#advr13]~~
 - ~~:pushpin: do [#advr14]~~
-- :pushpin: do [#advr15]
-- :pushpin: do [#advr16]
+- ~~:pushpin: do [#advr15]~~
+- ~~:pushpin: do [#advr16]~~
 - :pushpin: do [#advr17]
 - :pushpin: do [#advr18]
 - :pushpin: do [#advr19]
@@ -104,7 +115,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr16] Advance original #tb4q: complete #qfocsup focused-cycle supervisor clear-and-continue proof with install/recycle if needed, `session-check ui_outcome=deferred_for_supervisor_drain`, `context_reset`, `go_drain_dispatch`, and fresh-agent drain evidence.
 - [ ] [#advr17] Advance original #fbwireverify: complete #fbwire/#fullboundary acceptance with slow-ACK no inflight pileup and wedged no-ACK bounded timeout + ERROR marker + playback artifact; add deterministic tmux-ci/sim coverage where possible.
 - [ ] [#advr18] Advance original #qnodemerge4verify: after JB/VS Code plugin install, live-test non-ASCII edit-during-merge around `café 日本 😀`; prove accepted byte-offset editor ops and no mojibake/interleaving, plus automated log checker for `editor_op_recorded` + `editor_ops_for_base`.
 - [ ] [#advr19] Advance original #cyh0: identify and instrument remaining File Cache Conflict trigger by capturing exact action, agent-doc command, and ops marker such as `write_authority action=... transport=disk`; distinguish ack-content, VCS-refresh/save, and editor-IPC convergence surfaces.

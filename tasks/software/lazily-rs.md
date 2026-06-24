@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -34,97 +34,32 @@ queue: start
 <!-- agent:exchange -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260624-052505.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260624-060903.md`*
 
 Compacted content:
-❯ - Archived 10 response topic(s): lazily-kt / lazily-js for the editor plugins; queue strike; strike q3; 7 more
+❯ - Archived 4 response topic(s): #t0mf / #lzsigzig; queue dedup; IPC dogfood log acknowledged; 1 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-**IPC proof issue dogfood log**
 
-Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+### Re: compaction landed; queue stopped, DAG order intact — glm-5.2
 
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
+Compaction archived 4 topics cleanly. Exchange tail is clear. Sidecar snapshot was stale (18.8 KB vs 10.4 KB doc from the compacted-away content) — reset via `agent-doc reset --from-current` so the snapshot/CRDT now matches the live file.
 
-```text
-ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=c8c9a5a8-5fa9-4e71-b0ae-f4d610353d76 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=37120 candidate_hash=74a6ad67229d6756c49a25909e1c27dd5cc12774d6d691c7ca80994f9dd1ec08 content_ours_len=37051 content_ours_hash=7cb272128716351199f9745ea37292dcd1c327014f6080e873a388d9203b47b5 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782278536903
-```
+**Queue state:** `queue: stop` in frontmatter — halted, not draining. DAG reorder from the prior cycle is intact across both queue and backlog:
 
-### Re: #t0mf / #lzsigzig — engine blocker found; plan written, split into 2 phases — glm-5.2
+| Tier | Items | Status |
+|------|-------|--------|
+| 0 — no deps, unblocks | `#9226` → `#nnyn` → `#hj5x` | ready |
+| 1 — dep on #9226 | `#f71y` | blocked |
+| 2 — unblocked FFI consumers | `#mes4` → `#bcnf` | ready (`#lzffistate1` DONE) |
+| 3 — superseded context | `#t0qn` → `#t0mf` | narrowed by #9226/#f71y split |
+| 4 — operator clarification | `#pwvm`/`#9e64` · `#t1xt`/`#dcgp` · `#7gpg`/`#kjfe` | blocked |
 
-`#t0mf` investigated and **narrowed, not done** — an eager `Signal` in lazily-zig is NOT the direct port the backlog assumed. Two engine-level blockers (both absent in lazily-rs/py):
+**`:pushpin:` prefixes:** supervisor re-injected on 7 queue heads (`#qauthorder` known bug). Inert while queue is stopped; will strip on next resume.
 
-1. **Deadlock on eager recompute.** lazily-zig invalidation runs under `ctx.mutex` (`Slot.emitChangeUnlocked`); an inline recompute re-runs the user `valueFn`, which re-locks that same mutex via `slot()`/`slotKeyed()` (`slot.zig:59`) → deadlock. `Thread.Mutex` isn't reentrant. lazily-rs `RefCell` re-borrows; lazily-py is a lock-free dict.
-2. **Destroy-on-invalidate.** lazily-zig frees the `Slot` on invalidation (`destroySelf`, `context.zig:354`) — no stable identity across invalidations, no `reset()` hook like lazily-py's `_SignalSlot`. Also found a latent bug: `emitChangeUnlocked` mutates `change_subscribers` during its own iteration via nested `unsubscribeChangeUnlocked`.
+**Semantic-completion warnings (3):** all false positives, none auto-closed — `#h6qb` is genuinely operator-gated (live two-host/NAT); `#bcnf`/`#mes4` are JS/Kotlin consumer packages, distinct from the Rust FFI exports in `#lzffistate1`.
 
-**Plan committed:** `tasks/software/plan-lazily-zig-signal.md` (`c74e75909`). Fix = a **deferred-recompute queue** on `Context` drained outside the lock: `on_invalidate`/`recompute` fn pointers on `Slot`, snapshot-then-clear `emitChangeUnlocked`, `Context.drainPendingRecompute()` from `emitChange()`/`Cell.set()` after unlock.
-
-Split into two actionable backlog items (engine first): `#lzsigzig1` (`#9226`) — engine hooks + queue + drain + snapshot; `#lzsigzig2` (`#f71y`) — `signal.zig` + tests, blocked on #lzsigzig1. `#t0mf` narrowed with the blocker + plan ref. Continuing the drain.
-
-### Re: queue dedup — removed 8 :pushpin: duplicate heads — glm-5.2
-
-Removed the 8 `:pushpin:`-prefixed queue lines (compaction had duplicated every `do [#id]` head — `#t0mf`/`#t0qn`/`#9e64`/`#dcgp`/`#kjfe`/`#pwvm`/`#t1xt`/`#7gpg`). The `:pushpin:` prefix was tripping the free-text-queue-head guard. Queue is now clean `do [#id]` entries only; `#lzffistate1` is the next head (the Signal engine work `#lzsigzig1`/`#9226` is in the backlog, plan committed `c74e75909`).
-
-### Re: #lzffistate1 DONE — FFI state-projection phase 1 — glm-5.2
-
-> **Queue prompt:**
->
-> do [#lzffistate1]
-
-
-**Implemented and committed.** `src/agent-doc/src/ffi.rs` (submodule commit `f3af02fc`, superproject gitlink `baa6c8e57`):
-- `agent_doc_state_projection(document_hash) -> *mut c_char` — returns the per-document `DocumentStateProjection` JSON (document/queue/closeout/transport/supervisor/route/proof slices), or `"null"` when no events recorded. Recomputed from the in-process ledger on each call.
-- `agent_doc_record_state_event(document_hash, fact_json) -> i32` — parses a `StateEvent` (serde `Deserialize`; `StateFact` is internally-tagged `{ "type": ... }`) and appends it. Returns `1`/`0`; all error paths log to stderr (no swallowed errors, per AGENTS.md).
-- Backed by a process-global `static STATE_LEDGER: OnceLock<Mutex<EventLedger>>` (the FFI layer had no backbone handle before). `EventLedger::append` + `project().document(hash)` from `state_backbone.rs:267/275/296`. Replay dedupe via the projection's `seen_event_ids`.
-
-**Verification:** `cargo test -p agent-doc --lib ffi::` → 33 passed (incl. new `state_projection_ffi_round_trip`: record `BaselineSaved` → read projection → assert doc_hash present, replay returns 1, unknown hash → `"null"`). `cargo clippy -p agent-doc --lib -- -D warnings` clean. (Pre-existing orchestration-test lints under `--tests -D warnings` are unrelated working-tree drift in `PatchWatcher.kt`, not my code.)
-
-**Scope note:** shipped ungated (purely additive — new exports + new global, no change to existing behavior). The "compile flag" from the plan is a follow-up if/when a gate is wanted. Phase 2 (lazily-ipc Delta transport) + Phase 3 (plugin UI wiring in JB `NativeLib.kt` / VSCode addon) remain in the plan.
-
-Also stripped the supervisor-re-injected `:pushpin:` prefixes (`#qauthorder` known bug) so the free-text-queue-head guard passes. Next head: `do [#t0qn]` / `do [#nnyn]`.
-
-### Re: backlog DAG reorder + IPC dogfood logs — glm-5.2
-
-**IPC dogfood logs (prompt targets):** the `ipc_proof_insufficient` ```text blocks (editor writeback `live_prompt_drift_after_preflight` → `content_ours_snapshot_next_cycle`) are the recurring editor-IPC instability symptom this drain has been logging — binary recovery absorbs them, not new work.
-
-**Backlog reordered by dependency DAG** (`#lzffistate1` DONE unblocks the FFI-consumer items):
-
-1. `#9226` (#lzsigzig1) — engine: `on_invalidate` + `pending_recompute` queue + drain + snapshot `emitChangeUnlocked` in `context.zig`. **No deps.** Unblocks #lzsigzig2; also fixes a latent iteration-mutation bug.
-2. `#nnyn` (#lzsmzig) — StateMachine in lazily-zig. **No deps** (Zig has Cell).
-3. `#f71y` (#lzsigzig2) — `signal.zig`. **Blocked on #9226.**
-4. `#hj5x` (#lzsmlean2) — Lean SM↔IPC cross-module proof. **No deps** (StateMachine.lean + IPC.lean both done).
-5. `#mes4` (#lzkt) — [recommended] lazily-kt FFI-consumer. **Unblocked** (#lzffistate1 DONE).
-6. `#bcnf` (#lzjs) — [recommended] lazily-js FFI-consumer. **Unblocked**.
-7. `#t0mf`/`#t0qn` — superseded by the #9226/#f71y split; kept as narrowed context.
-8. `#pwvm`/`#9e64`, `#t1xt`/`#dcgp`, `#7gpg`/`#kjfe` — [recommended] IPC.lean clarification (need operator intent: ShmBlobArena parity vs proof extraction). **Blocked on clarification.**
-
-Next drain head: `#9226` (Signal engine) or `#nnyn` (StateMachine zig) — both independent. Stripped re-injected `:pushpin:` prefixes again (`#qauthorder` bug).
-
-### Re: IPC dogfood log acknowledged — glm-5.2
-
-The `ipc_proof_insufficient` ```text block(s) in the exchange tail are the editor-IPC instability diagnostics this drain has been auto-appending (binary recovery = `content_ours_snapshot_next_cycle`). Acknowledged as the known dogfood class — not new work. Substantive work this drain is committed: `#lzffistate1` DONE (ffi.rs `f3af02fc` + gitlink `baa6c8e57`), `#lzsigzig` plan (`c74e75909`), backlog DAG-reordered. Queue head `order the backlog…` is answered above (DAG order applied via `--pending-reorder`).
-
-### Re: backlog + queue DAG reorder complete — glm-5.2
-
-Backlog + queue reordered by dependency DAG (topological sort via `agent-doc auto-dag`). Both the `--pending-reorder` (backlog) and `patch:queue` (queue) landed in the prior cycle before the IPC proof failure; this cycle is the recovery closeout.
-
-**DAG order applied (visible in queue + backlog above):**
-
-| Tier | Items | Rationale |
-|------|-------|-----------|
-| 0 — no deps, unblocks | `#9226` → `#nnyn` → `#hj5x` | Engine first (deferred-recompute queue in `context.zig`, unblocks `#f71y`); then independent StateMachine-zig + Lean SM↔IPC proof |
-| 1 — dep on tier 0 | `#f71y` | `signal.zig` — blocked on `#9226` |
-| 2 — unblocked FFI consumers | `#mes4` → `#bcnf` | `#lzffistate1` DONE |
-| 3 — superseded context | `#t0qn` → `#t0mf` | Narrowed by `#9226`/`#f71y` split |
-| 4 — blocked on operator clarification | `#pwvm`,`#9e64` (rs) · `#t1xt`,`#dcgp` (py) · `#7gpg`,`#kjfe` (zig) | IPC.lean already implemented; need operator intent |
-
-**Semantic-completion warnings — all false positives, none auto-closed:** `#h6qb` genuinely operator-gated (live two-host/NAT); `#bcnf`/`#mes4` are JS/Kotlin consumer packages (different from Rust FFI exports `#lzffistate1`).
-
-**IPC dogfood log:** the `ipc_proof_insufficient` block above is the known editor-IPC instability class (recovery = `content_ours_snapshot_next_cycle`). Not new work.
-
-Next drain head: `do [#9226]` (Signal engine — no deps, highest unblock impact).
-
-<!-- agent:boundary:e257ea53 -->
+**Next head:** `do [#9226]` — lazily-zig Signal engine (deferred-recompute queue in `context.zig`, plan `c74e75909`). Flip `queue: go` or `queue: auto` in frontmatter to resume the drain, or point me at a specific item.
+<!-- agent:boundary:7a98c0ec -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -133,22 +68,20 @@ Next drain head: `do [#9226]` (Signal engine — no deps, highest unblock impact
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#lzffistate1]~~
-- ord
+- :pushpin: do [#9226]
+- :pushpin: do [#nnyn]
+- :pushpin: do [#hj5x]
+- :pushpin: do [#f71y]
+- :pushpin: do [#mes4]
+- :pushpin: do [#bcnf]
 - do [#t0qn]
 - do [#t0mf]
-- do [#9226]
-- do [#f71y]
-- do [#nnyn]
-- do [#kjfe]
+- :pushpin: do [#pwvm]
 - do [#9e64]
-- do [#dcgp]
-- do [#pwvm]
 - do [#t1xt]
+- do [#dcgp]
 - do [#7gpg]
-- do [#hj5x]
-- do [#mes4]
-- do [#bcnf]
+- do [#kjfe]
 <!-- /agent:queue -->
 
 ## Backlog

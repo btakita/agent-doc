@@ -177,7 +177,7 @@ self.touchUnlocked();   // (or destroyUnlocked(recurse))
 - superproject gitlink `fca2cd100` → committed **locally**. Push to `btakita/agent-loop` is blocked: `origin/main` diverged (other panes pushed) and the shared working tree carries other panes' submodule-pointer drift, so `pull --rebase` can't run cleanly without disrupting them. Deliberately did NOT churn the shared tree. The gitlink bump lands on the next clean sync; the **fix itself is already on the submodule remote**, so direct lazily-zig consumers get it immediately.
 
 Note: lazily-zig (like lazily-js) has no `CI` workflow — local evidence stands. Next queue head: `#lzshmblobparity` (the ShmBlobArena-parity plan I scoped last cycle — `[recommended]`, awaits operator direction on parity vs. drop).
-<!-- agent:boundary:7119fd02 -->
+<!-- agent:boundary:7bb86969 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -186,16 +186,7 @@ Note: lazily-zig (like lazily-js) has no `CI` workflow — local evidence stands
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#t0mf]~~
-- ~~:pushpin: do [#pwvm]~~
-- ~~do [#9e64]~~
-- ~~do [#t1xt]~~
-- ~~do [#dcgp]~~
-- ~~do [#7gpg]~~
-- ~~do [#kjfe]~~
-- ~~do [#tnbd]~~
-- ~~do [#krcm]~~
-- do [#lzshmblobparity]
+- do [#lzshmblobparity]: lazily-zig
 <!-- /agent:queue -->
 
 ## Backlog

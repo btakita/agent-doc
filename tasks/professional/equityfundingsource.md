@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,170 +33,82 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-164815.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-173322.md`*
 
 Compacted content:
-❯ - Archived 3 response topic(s): Advance Lender Details Navigation And Deploy; Deploy; Direct Dialog Initial Focus And Deploy
+❯ - Archived 4 response topic(s): Dialog Select Keyboard Navigation; Deploy; Application Review Auto-Move And Deploy; 1 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-No new user-visible changes were detected in `/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`, so I stopped before opening a response cycle.
 
-Preflight did repair and commit transcript prompt prefixes, creating commit `5eea37c09`. It also reported a stale `agent-doc` install and one legacy gated backlog item; no drainable queue head is available right now.
+### Re: Admin Application Completion And Deploy — gpt-5
 
-### Re: Dialog Select Keyboard Navigation — gpt-5
+> **Queue prompt:** In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, the admin should be able to advance the application by adding the necessary data. The e-signature is optional to advance the application to the Complete step.
 
-> **Queue prompt:** The up/down dialog navigation should not open a select element. Pressing down while on a select should move to the next item. Pressing Enter on a select should open the select element with up/down navigating between the items. Pressing enter selects the select item and closes the select. Pressing Esc closes the select without a new selection.
-
-Implemented the shared dialog/select keyboard behavior in `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/ui.tsx`.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/ui.tsx`
-- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
-- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+Implemented an admin-only path to advance draft full applications to the Complete/submitted step once required data is present, without requiring e-signature for that completion transition.
 
 What changed:
-- Dialog navigation roots now mark themselves for child controls.
-- Closed `PortalSelect` ArrowUp/ArrowDown events inside dialog navigation roots now bubble to the shared dialog action navigator, so focus moves to the previous/next dialog control instead of opening the select.
-- Open `PortalSelect` menus still own ArrowUp/ArrowDown for option movement.
-- Enter/Space open the closed select or select the active open option.
-- Escape closes an open select menu and stops the modal Escape handler from closing the dialog.
-
-Verification:
-- `bun test tests/admin-pipeline.test.ts tests/admin-investor-pipeline.test.ts`
-- `make check`
-- `git diff --check`
-- `gh run list --workflow CI --limit 1` could not inspect CI because this repo has no workflow named `CI`; `gh workflow list` returned no workflows.
-
-Confidence: high.
-Escalation: none.
-
-Suggested git commit message:
-
-```txt
-fix(admin): keep dialog arrow navigation from opening selects
-
-Mark shared dialog navigation roots and let closed PortalSelect ArrowUp/ArrowDown events bubble to the dialog action navigator inside those roots, while keeping Enter/Escape and open-list option navigation owned by the select. Updates the Deal Pipeline and Lender Pipeline regression coverage; make check passes.
-```
-
-### Re: Deploy — gpt-5
+- The admin full-application status endpoint now accepts `submitted` in addition to `in_review` and `declined`.
+- The `submitted` transition is gated on core application data: borrower name/email, current residence address, loan amount, subject property address, property value, property type, and declarations.
+- Borrower and broker submit endpoints remain e-signature gated.
+- The admin embedded full-application decision card now includes `Mark Complete`, disabled with a missing-data message until the completion gate passes.
+- Application cards can now move to the Complete column through the same admin status endpoint.
+- Pipeline auto-review still runs for applications that were already Complete when opened, but no longer immediately sweeps an application opened as Draft into Review after the admin marks it Complete during the same dialog session.
 
 > **Queue prompt:** deploy
 
-Deployed the current EFS Worker through the project runbook path, `make deploy`. Cloudflare returned Worker version `1b6da8b5-bab6-4fc2-8140-526ff3425953` for `https://equityfundingsource.brian-takita.workers.dev`.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/ui.tsx`
-- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
-- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
-
-Commands:
-- `tsift diff-digest`
-- `git diff --check`
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`
-- `bun run cf:d1:info`
-- `bun run cf:d1:time-travel:info`
-- `make check`
-- `make deploy`
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
-- `gh run list --workflow CI --limit 1`
-
-Verification:
-- Remote D1 migrations before deploy: none pending.
-- D1 recovery posture checked; current Time Travel bookmark: `00000506-00000052-00005094-c35c411cebeed0ff492dca4b7bd57c23`.
-- `make check` passed: 1184 tests, app build, worker build.
-- Deploy applied zero D1 migrations and uploaded/activated the Worker.
-- Remote D1 migrations after deploy: none pending.
-- Public smoke test returned HTTP `200`.
-- CI lookup could not find a workflow named `CI` in this repository.
-
-Confidence: high.
-Escalation: none.
-
-No git commit was made; the three EFS files above remain modified in `src/equityfundingsource-dev` because this queue head requested deploy only and the repo-local instruction says not to run `git commit` unless explicitly asked.
-
-Suggested git commit message:
-
-```txt
-fix(admin): keep dialog arrow navigation from opening selects
-
-Mark shared dialog navigation roots and let closed PortalSelect ArrowUp/ArrowDown events bubble to the dialog action navigator inside those roots, while keeping Enter/Escape and open-list option navigation owned by the select. Updates the Deal Pipeline and Lender Pipeline regression coverage; make check passes and Worker version 1b6da8b5-bab6-4fc2-8140-526ff3425953 is deployed.
-```
-
-### Re: Application Review Auto-Move And Deploy — gpt-5
-
-> **Queue prompt:** In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > should be automatically moved to the Review stage when it is opened. Remove the "Marked for Review" button.
-
-Implemented the pipeline application dialog behavior and removed the manual review action.
-
-What changed:
-- Submitted/Complete application cards now auto-request `in_review` through the existing `/api/admin/full-applications/:id/status` path when their pipeline dialog opens, including deep links like the provided URL.
-- The old full-application `Mark in Review` decision button is removed; Decline, Accept and Send to TMO, and Remove remain.
-- Tests now lock the auto-review effect, the removed manual review button, and the updated approval-card button-row anchor.
-
-> **Queue prompt:** deploy
-
-Deployed through the project runbook path, `make deploy`. Cloudflare activated Worker version `03fc99ce-4dbd-453a-8c21-b08c7d989c31` at `https://equityfundingsource.brian-takita.workers.dev`.
+Deployed through the project runbook path, `make deploy`. Cloudflare activated Worker version `f9b7b678-f7f2-4f40-9216-ef12a8e3ca89` at `https://equityfundingsource.brian-takita.workers.dev`.
 
 Changed paths in this cycle:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/applications/index.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/borrower/applications/repo.ts`
 - `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/full_applications.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/full_application_detail.tsx`
+- `src/equityfundingsource-dev/tests/admin-full-application-approve-ui.test.ts`
 - `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
 - `src/equityfundingsource-dev/tests/apply4-full-application-p6.test.ts`
-- `src/equityfundingsource-dev/tests/admin-full-application-approve-ui.test.ts`
 
 Pre-existing modified paths still remain in the EFS submodule and were included in the deployed build:
 - `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/ui.tsx`
 - `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
 
 Commands:
-- `bun test tests/admin-pipeline.test.ts tests/apply4-full-application-p6.test.ts`
-- `bun test tests/admin-full-application-approve-ui.test.ts tests/admin-pipeline.test.ts tests/apply4-full-application-p6.test.ts`
+- `bun test tests/admin-full-application-approve-ui.test.ts tests/apply4-full-application-p6.test.ts tests/admin-pipeline.test.ts`
 - `git diff --check`
+- `tsift diff-digest`
+- `make check`
+- `gh run list --workflow CI --limit 1`
 - `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`
 - `bun run cf:d1:info`
 - `bun run cf:d1:time-travel:info`
-- `make check`
 - `make deploy`
 - `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
 - `curl -s -o /dev/null -w '%{http_code}\n' 'https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6'`
-- `gh run list --workflow CI --limit 1`
 
 Verification:
-- Focused tests passed: 92 tests across the affected admin pipeline/full-application files.
+- Focused tests passed: 94 tests across the admin full-application, TMO writeback, and pipeline files.
 - `git diff --check` passed.
+- `make check` passed: 1186 tests, app build, and worker build.
 - Pre-deploy remote D1 migrations: none pending.
-- D1 recovery posture checked; Time Travel bookmark: `00000507-00000000-00005094-19ad6bd87b633c2d6d76e83187ab0a3b`.
-- `make check` passed after fixing one stale source-shape test anchor: 1184 tests, app build, and worker build.
-- `make deploy` applied zero D1 migrations and deployed Worker version `03fc99ce-4dbd-453a-8c21-b08c7d989c31`.
+- D1 recovery posture checked; Time Travel bookmark: `00000509-00000000-00005094-f7cc40fb5e53febfca67cef7da291ced`.
+- `make deploy` applied zero D1 migrations and deployed Worker version `f9b7b678-f7f2-4f40-9216-ef12a8e3ca89`.
 - Post-deploy remote D1 migrations: none pending.
 - Public smoke test returned HTTP `200`.
-- The admin pipeline URL returned HTTP `303` to unauthenticated curl, consistent with protected admin access; I could not verify the authenticated page render from this shell.
+- The protected admin pipeline deep link returned HTTP `303` to unauthenticated curl, consistent with admin auth redirect; I could not verify the authenticated page render from this shell.
 - `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in this repository.
 
 Confidence: high.
 Escalation: none.
 
-No git commit was made in `src/equityfundingsource-dev`; the repo-local instructions say not to commit unless explicitly asked.
+No git commit was made in `src/equityfundingsource-dev`; the repo-local instructions say not to run `git commit` unless explicitly asked.
 
 Suggested git commit message:
 
 ```txt
-fix(admin): auto-review opened pipeline applications
+fix(admin): let admins mark applications complete without e-signature
 
-Move submitted pipeline application cards into the Under Review stage when their pipeline dialog opens, remove the manual Mark in Review decision button, and update the admin pipeline/full-application tests. The Worker is deployed as version 03fc99ce-4dbd-453a-8c21-b08c7d989c31 with no pending D1 migrations.
+Add an admin-only submitted/Complete transition for full applications once required borrower, property, and declaration data is present, while keeping borrower submit e-signature gated and approval/TMO writeback gated separately. Updates the embedded full-application decision UI, pipeline Complete-column handling, and focused admin application tests; Worker version f9b7b678-f7f2-4f40-9216-ef12a8e3ca89 is deployed.
 ```
-
-### Re: Deploy Queue Closeout — gpt-5
-
-> **Queue prompt:** deploy
-
-Already completed in the preceding closeout: `make deploy` activated Worker version `03fc99ce-4dbd-453a-8c21-b08c7d989c31`, post-deploy D1 migrations had none pending, and the public smoke test returned HTTP `200`.
-
-Changed paths: no additional file changes for this closeout.
-Commands: no additional deploy command was run for this residue-only closeout.
-Verification: this response only clears the remaining free-text queue row that was left active after agent-doc repaired the main response.
-Confidence: high.
-Escalation: none.
-<!-- agent:boundary:4aefd795 -->
+<!-- agent:boundary:c23a2087 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -216,6 +128,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, the admin should be able to advance the application by adding the necessary data. The e-signature is optional to advance the application to the Complete step.~~
+- From https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, remove the "Open Page" button. Focus on the 1st actionable item that is not the close button...Activity History > View All in this dialog.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

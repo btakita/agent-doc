@@ -154,7 +154,7 @@ Deploy: `make deploy` succeeded. Remote D1 migrations reported `No migrations to
 No actionable follow-up items are needed from this cycle.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:60a28e6c -->
+<!-- agent:boundary:ba96bae8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -174,8 +174,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application should have an alert with the next steps and a CTA to advance the application at the top. "Mark Complete" requires substantial scrolling to get to it.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -67,7 +67,31 @@ Verification: focused `bun test tests/apply4-full-application-p1.test.ts` passed
 Deploy: remote D1 reported "No migrations to apply!" (no schema change — reuses existing application tables). `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `a6df6f88-f836-4b60-afd1-6df7e5bbad05`. Post-deploy check: public root returned `HTTP 200`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:42834aac -->
+
+### Re: Message Dialog Open Flash Jank And Deploy — glm-5.2
+
+> **Queue prompt:**
+> Opening the Message dialog in the borrower, lender, broker causes a flash jank where the dialog appears then disappears then appears again.
+>
+> **Queue prompt:**
+> deploy
+
+Implemented, pushed, and deployed. Opening the message launcher panel no longer flashes (appear → disappear → appear).
+
+Root cause: the launcher render gate `if (loading) return null` unmounted the entire `PortalMessages` component — including the trigger and the open panel — whenever a reload flipped `loading` to `true`. The load effect set `loading = true` on every open (to refetch the thread), so each open unmounted the panel (disappear) until the fetch resolved and `loading` went false (reappear).
+
+What changed: a `loaded_once_ref` now gates `set_loading(true)` to the very first load only. On subsequent opens/reloads the ref is already true, so `loading` stays false and the panel stays mounted throughout — the thread refreshes silently in place. The initial-load skeleton behavior is unchanged (first load still shows the loading gate).
+
+Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/shared/portal_messages.tsx` (`loaded_once_ref` + gated `set_loading(true)` + ref set after first load in both branches), `prds/portal-messages-component.md` (documented `#msg-flash-jank`), and `tests/msg-send-shortcut.test.ts` (1 source-level guard test).
+
+Commits: EFS submodule commit `bcf4771 fix(portal): stop message dialog open flash jank (#msg-flash-jank)` was pushed to `origin/main`. Parent repo gitlink commit `cae4a26d6 chore(efs): bump message dialog flash jank submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with unrelated work.
+
+Verification: focused `bun test tests/msg-send-shortcut.test.ts` passed (`15 pass / 0 fail`). `git diff --check` passed. Full `bun test` passed (`1206 pass / 0 fail`); app build and Worker build passed. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+
+Deploy: remote D1 reported "No migrations to apply!" `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `1248dcf6-ee93-4cd3-bc56-0a23d049a242`. Post-deploy check: public root returned `HTTP 200`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:f1b5090b -->
 <!-- /agent:exchange -->
 ###
 <!--

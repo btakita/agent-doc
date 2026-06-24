@@ -132,7 +132,25 @@ Deployment is automatic: `briantakita.me-dev/.github/workflows/deploy.yml` runs 
 **Verification:** `gh run list --workflow deploy.yml --repo btakita/briantakita.me-dev` → the run for commit *"briantakita.me: bump gitlink — lazily-sm state backbone post"* is **`completed success`** (56s). Its built-in smoke test passed (`/`, `/about`, `/posts`, `/robots.txt` all 200, plus `assets.briantakita.me/.../briantakita-og.jpg`). The **"It didn't stop at one machine: the state backbone"** section is live on briantakita.me.
 
 No agent-doable deploy action beyond verification — the deploy is CI-owned and push-triggered (no manual `make deploy`, no local credentials). The `drainable=0` classification fit: the work was the push (already done last cycle) plus this CI confirmation.
-<!-- agent:boundary:7813a01e -->
+
+### Re: LinkedIn teaser draft for the state-machine post — DONE — glm-5.2
+
+> **Queue prompt:**
+>
+> Draft a LinkedIn teaser post with the 1st comment being the link. Include the image of the Cycle State machine.
+
+Drafted `mail/drafts/linkedin/2026-06-24-lazily-state-machine.md` (matching the existing LinkedIn draft conventions: plain-text post body → `---` → `FIRST COMMENT` with the link).
+
+**Body:** punchy hook ("a FSM shouldn't be a scattered pile of `if state.phase != Committed` checks"), the lost-update bug, the one-pure-table fix (`Some(next)`/`None`, idempotent terminals, reactive observation), and a nod to the new backbone — six subdomain machines, one event-sourced model. Ends with an engagement question, in the style of the lazily-architecture teaser.
+
+**First comment** (the link, per the request): `https://briantakita.me/posts/lazily-state-machine-cycle-state` (live, deploy confirmed green last cycle) + the GitHub source.
+
+**Image:** the draft carries an attach-at-posting note pointing at **Figure 3** of the post — the `CyclePhase` transition graph (PreflightStarted → ResponseCaptured → WriteApplied → Committed, `Abandoned` terminal). The post's diagrams are theme-dependent inline SVG (`rgb(var(--color-accent))` etc.), so a raw SVG render would be unstyled; the operator attaches a themed screenshot/render at posting time.
+
+**Committed + pushed:** `mail` submodule `8c1f562..cbb78ac` → `btakita/mail`; superproject gitlink `cf15c5bbe` → `btakita/agent-loop` (pushed).
+
+**Follow-up:** posting itself is operator-gated (needs `corky linkedin` + the themed image render) → filed as gated review `#lilazilysmpost`, mirroring the `#kabc` architecture-post flow.
+<!-- agent:boundary:a58f1836 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -141,8 +159,6 @@ No agent-doable deploy action beyond verification — the deploy is CI-owned and
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~deploy briantakita.me~~
-- Draft a LinkedIn teaser post with the 1st comment being the link. Include the image of the Cycle State machine.
 <!-- /agent:queue -->
 
 ## Backlog
@@ -153,6 +169,7 @@ No agent-doable deploy action beyond verification — the deploy is CI-owned and
 ## Review
 
 <!-- agent:review -->
+- [/] [#lilazilysmpost] [operator-drive] Post the lazily state-machine LinkedIn teaser. Draft: mail/drafts/linkedin/2026-06-24-lazily-state-machine.md (mail@cbb78ac). 1st comment = https://briantakita.me/posts/lazily-state-machine-cycle-state. Attach a themed render of Figure 3 (CyclePhase transition graph — SVG is theme-dependent, so a screenshot/render is needed). Publish via corky linkedin and record in mail/social/20260624-lazily-state-machine-linkedin.md, mirroring the #kabc architecture-post flow. Gated on operator posting + image render.
 - [/] [#kb9b] #lzpypub011=[operator-drive] Publish lazily-py v0.11.0: SHIP-STOPPER #lzpysigfix is FIXED (commit 30907ea). Build artifacts rebuilt in src/lazily-py/dist/ (lazily-0.11.0-{whl,tar.gz}, twine check PASSED, fresh-venv install round-trip verified). From src/lazily-py: tag v0.11.0 + push, gh release create v0.11.0 --generate-notes, then python -m twine upload dist/* (needs PyPI token + browser/passkey 2FA). Gated on the pre-publish live-test confirm per the testing-gate rule. Commit 30907ea + superproject gitlink eb93a75ac already pushed.
 - [/] [#kabc] #lipostlazilyarch=[operator-drive] Main LinkedIn post is published and repaired: Corky edit updated mail/social/20260616-lazily-architecture-linkedin.md / https://www.linkedin.com/feed/update/urn:li:share:7472666756810190848 with the full body after the public post truncated at "The core is small: three primitives". Local metadata is committed in mail commit 07a9ea1 and superproject gitlink e7e0b08c1. Remaining operator follow-up: post the first comment from mail/drafts/linkedin/2026-06-16-lazily-architecture.md via `corky linkedin comment <published-file> <comment-body>` if still desired.
 - [/] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet backend through the LIVE #yxjw signaling Worker (two real hosts / NAT). Agent-doable slice (#lzwebrtcwire) is DONE: src/webrtc_signaling.rs wires SignalingClient↔Str0mNet and tests/webrtc_signaling.rs covers the localhost handshake. Remaining: live two-host/NAT run via deployed Worker — operator-only.

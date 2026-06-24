@@ -300,7 +300,13 @@ Next queue head is `deploy`.
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:37bfe9e1 -->
+
+### Re: queue repair - gpt-5
+
+Removed the answered duplicate Requirements dialog arrow-navigation queue row that remained after the duplicate closeout. Restored `deploy` as the only remaining live queue head.
+
+No product code changed in this repair cycle.
+<!-- agent:boundary:91271ce6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -324,7 +330,6 @@ After 20:30
 - ~~I just signed up as btak.div+lender3@gmail.com. This user has Requirements Current in the Lender Pipeline. Why are the requirements current? The lender has not completed the signup...adding documents.~~
 - ~~In the Lender Pipeline > Requirements Dialog, remove the Message Lender section. The contextual messaging (chat bubble) should open to the message the lender for the card.~~
 - ~~In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field...which would be Close...then Advance Lender. The up arrow key navigates to the previous actionable item.~~
-- ~~In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field.~~ — auto-struck: answered this cycle (#ftstrike)
 - deploy
 <!-- /agent:queue -->
 

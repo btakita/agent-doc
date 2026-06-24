@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -128,7 +128,25 @@ Pushed:
 - EFS: `95a8b0a` (`feat(auth): require email verification before login`)
 - Parent gitlink: `7d4a14593` (`chore: update equityfundingsource submodule`)
 
-<!-- agent:boundary:014a1bdd -->
+
+
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=30bbc545-e4a1-4991-89ea-0cb196af9028 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782275050553
+```
+
+### Re: agent-doc IPC recovery diagnostic
+
+> **Queue prompt:**
+>
+> ~~The file upload components in https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=lead&dialog_lead_id=e2a41d4b-250c-4197-a370-4f5b786a5bcf should match the file upload components in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline. Unify the admin file upload components to a single reusable component modeled after https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline.~~ — auto-struck: answered this cycle (#ftstrike) 
+
+
+No product task was requested in this follow-up cycle. The preflight target is the IPC proof diagnostic left by the previous closeout recovery; the verification-email prompt was already answered and committed in `4cf086d4e`, and the visible queue is fully struck.
+
+No additional backlog item applies.
+
+<!-- agent:boundary:64c9fce1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -148,9 +166,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~I signed up as a lender with btak.dev+lender3@gmail.com, but the lender did not show up in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline.~~
-- ~~btak.dev+lender3@gmail.com was not sent a verification email. A verification email should be required to login.~~
-- ~~The file upload components in https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=lead&dialog_lead_id=e2a41d4b-250c-4197-a370-4f5b786a5bcf should match the file upload components in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline. Unify the admin file upload components to a single reusable component modeled after https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline.~~ — auto-struck: answered this cycle (#ftstrike) 
 <!-- /agent:queue -->
 
 ## Backlog

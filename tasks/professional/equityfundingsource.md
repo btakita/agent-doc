@@ -99,7 +99,23 @@ Escalation: none. Confidence: high.
 Struck the two answered free-text queue rows after the deploy response was committed, so the queue will not re-run the completed Step 6 / deploy work.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:44f59a27 -->
+Implemented, pushed, and deployed the EFS change.
+
+EFS commit `65509f4` is on `origin/main`. Deploy succeeded at `https://equityfundingsource.brian-takita.workers.dev` with Worker Version ID `9c8ebd7c-692e-48d3-bd3e-b7749d86ecc4`.
+
+What changed: Mark Complete now uses completion blockers only, so Step 6 fields (`Submitted`, `EFS status`, `E-sign consent`) no longer block or appear in the advancement alert while completing an application. Accept Application still keeps the stricter approval gate.
+
+Verification passed: focused tests `98 pass / 0 fail`, full `make check` `1191 pass / 0 fail`, no pending D1 migrations, root smoke `200`, admin URL `303` behind Access. `agent-doc session-check` is clean.
+
+Parent gitlink commit `0a6a098cc` is local only; I did not push parent `main` because it already had unrelated unpushed commits.
+
+Suggested commit message:
+```txt
+fix(admin): make review signature optional for completion (#pipeline-full-app-dialog)
+
+Split full-application advancement blockers so Mark Complete uses completion requirements while Accept Application keeps the stricter approval gate. Updates Deal Pipeline guidance, PRD notes, and regression coverage.
+```
+<!-- agent:boundary:b627aace -->
 <!-- /agent:exchange -->
 ###
 <!--

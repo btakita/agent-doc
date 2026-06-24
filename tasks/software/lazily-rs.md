@@ -39,7 +39,31 @@ queue: start
 Compacted content:
 ❯ - Archived 7 response topic(s): lazily-kt GitHub project and submodule; queue guard repair; lazily-js GitHub project and submodule; 4 more
 ❯ - Prior summary/context: prior compacted content: Archived 6 response topic(s): compaction landed; queue stopped, DAG order intact; #9226 DONE...
-<!-- agent:boundary:95db4da9 -->
+
+### Re: #t0mf eager Signal in lazily-zig — already complete (stale duplicate) — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#t0mf]
+
+
+`#t0mf` (Implement eager Signal in lazily-zig) is **already done** — it was split into the two phases the item itself describes, and both landed + shipped. Closing as `--done`.
+
+**Completed work (committed in `src/lazily-zig`):**
+- **Phase 1 — engine** (`#9226` / `#lzsigzig1`, DONE): `0c2c81a feat: Signal engine Phase 1 — deferred-recompute queue + snapshot emitChangeUnlocked`. `context.zig` has `Slot.on_invalidate`/`recompute` fn ptrs (default null), `Context.pending_recompute` + `draining_recompute` re-entrancy guard, `drainPendingRecompute()` drained outside the mutex (LIFO), snapshot-then-clear `emitChangeUnlocked` (also fixes the latent iteration-during-mutation bug), and the drain point in `Slot.emitChange()` (`context.zig:324`).
+- **Phase 2 — signal.zig** (`#f71y` / `#lzsigzig2`, DONE): `ac8c06f feat: add eager Signal(T) — Phase 2`. `signal.zig` mirrors lazily-rs `SignalHandle<T>`: memoized backing slot + comptime `on_invalidate_hook`/`makeRecomputeFn` puller + `std.meta.eql` memo guard. `get()`/`dispose()`/`is_active()`, exported from `root.zig:37-38`. Tests: eager recompute, memo-guard suppresses equal cascade, dispose→lazy.
+
+**Verification this cycle:**
+- `zig build test -Dfilters="lazily/signal"` → **EXIT=0**, all signal tests green.
+- SPEC.md (`:127`) + README.md (`:17`) document eager Signal as the backing-slot node (no separate wire type) — committed in `ba7e965`/`083f69b`.
+- `src/lazily-zig` working tree clean; superproject gitlink already pinned to `ac8c06f` (no diff) — nothing to commit or push.
+
+**Preflight warnings (observed, not acted on — separate items):**
+- `semantic_completion_match`: review `#h6qb` vs DONE `#lzwebrtcwire` — the agent-doable slice is done; `#h6qb` is the operator-only live two-host/NAT run. Left gated.
+- `semantic_completion_match`: backlog `#krcm` vs DONE `#t0qn` — **false positive.** `#krcm` is the pre-existing `slot.zig:320 Slot.touch` crash on Zig 0.17.0-dev (installed 0.17.0-dev.892; repo targets 0.16). Unrelated to the Signal primitive and still open. The full `zig build test` hits this on 3/4 binaries on 0.17; signal + state_machine tests pass. Not touched here.
+
+Next queue head is `:pushpin: do [#pwvm]`.
+<!-- agent:boundary:4a0b47f0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,7 +72,7 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#t0mf]
+- ~~do [#t0mf]~~
 - :pushpin: do [#pwvm]
 - do [#9e64]
 - do [#t1xt]
@@ -64,7 +88,6 @@ Compacted content:
 <!-- agent:backlog priority queue -->
 - [ ] [#krcm] #lzsigzig3=[recommended] lazily-zig: pre-existing slot.zig:320 Slot.touch test crash on Zig 0.17.0-dev (installed 0.17.0-dev.892; repo targets 0.16 per commit 9b492d8). 3 of 4 test binaries crash in slot.touch, masking the full suite (signal.zig + state_machine tests pass). Investigate the Slot.touch path under the newer std.Io/async semantics, or pin the CI/dev Zig to 0.16.x until 0.17 is stable. Unrelated to #t0qn (Signal primitive is complete).
 - [ ] [#tnbd] #lzjsffi=[recommended] Migrate lazily-js FFI loader off ffi-napi (unmaintained; native addon fails to build on Node >=23 — napi_add_finalizer ABI break, confirmed at Node 26.1.0). The loadAgentDocFFI() path in src/lazily-js/src/state-projection.js is mock-tested + pure-JS at import time, but VSCode consumers on modern Node cannot install ffi-napi to reach the live stateProjection/recordStateEvent calls. Evaluate koffi or node-ffi-rs as the maintained replacement.
-- [ ] [#t0mf] #lzsigzig=Implement eager Signal in lazily-zig (src/lazily-zig/src/lazily/signal.zig). NOT a direct mirror: lazily-zig destroy-on-invalidate (destroySelf frees the Slot, context.zig:354) + non-reentrant Thread.Mutex means an inline eager recompute DEADLOCKS (user valueFn re-locks ctx.mutex via slot()/slotKeyed). lazily-rs RefCell + lazily-py dict have no such re-entrancy issue. Plan + deferred-recompute-queue design committed: tasks/software/plan-lazily-zig-signal.md (c74e75909). Phase 1 = engine changes in context.zig (on_invalidate hook + pending_recompute queue + drain points outside the lock + snapshot emitChangeUnlocked to also fix latent iteration-mutation). Phase 2 = signal.zig. Splitting #t0mf into #lzsigzig1 (engine) + #lzsigzig2 (signal.zig) below.
 - [ ] [#pwvm] #lzffileanrs=[recommended] Clarify: IPC.lean protocol already implemented in lazily-rs ipc.rs (Snapshot/Delta/ShmBlobArena). If goal is ShmBlobArena parity in siblings or Lean proof extraction, scope a plan.
 - [ ] [#9e64] #lzffileanrs=[recommended] Clarify: IPC.lean formal theorems already implemented in lazily-rs ipc.rs (Snapshot/Delta/DeltaOp/epoch sequencing). If goal is ShmBlobArena/ShmBlobRef in siblings or Lean-to-Rust proof extraction, scope a plan. Currently ambiguous.
 - [ ] [#t1xt] #lzffileanpy=[recommended] Clarify: lazily-py ipc.py already implements IPC.lean (IpcValue/SharedBlob/Snapshot/Delta). If goal is ShmBlobArena parity or proof extraction, scope a plan.

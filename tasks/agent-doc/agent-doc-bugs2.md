@@ -311,20 +311,36 @@ Implemented and verified. The exact queue-topic closeout is using the full promp
 Code changes are in submodule `941c3b50 fix: mark active agent-doc work`; the parent pointer is `91601b2a6 agent-doc: mark active work items`; the session response commit is `7f1ad1b01`.
 
 No new actionable follow-up items were needed.
-<!-- agent:boundary:85944014 -->
+
+### Re: do [#promptprefixorch1] — gpt-5
+
+> **Queue prompt:**
+>
+> 🚧 :pushpin: do [#promptprefixorch1]
+>
+> :pushpin: do [#promptprefixorch1]
+
+Fixed recovered prompt-prefixed evidence classification in `src/agent-doc`. Recovery `### Re:` response bodies now keep `❯ - ...` command/test/commit evidence grouped as recovery evidence, and orchestration detection skips recovered response tails until a real new prompt starts.
+
+Commits: `74882f62` in `src/agent-doc` (`fix: ignore recovered prompt-prefixed evidence`) and parent pointer commit `9839c5584` (`agent-doc: ignore recovered prompt evidence`). I installed the updated binary with `make install`.
+
+Verification: full `make check` passed locally with `5093 passed, 241 skipped`; focused diff classifier/orchestration regression tests passed; `git diff --check` passed. The latest GitHub `Agent Doc` workflow did not start because GitHub reported an account billing/spending-limit annotation, not a test failure.
+<!-- agent:boundary:ec9cc4ff -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.~~
-- 🚧 :pushpin: do [#promptprefixorch1]
+- ~~🚧 :pushpin: do [#promptprefixorch1]~~
+- When the queue item, review item, icebox item is complete and struck out or `[x]`, remove the 🚧. 
 ---
 JB `Run Agent Doc` on monsterrodholders.md
 ```
 [route] target tmux session: 0
 Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %2 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Implement {feature}"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782330092988-direct_pane_protected_prompt_input-codex-_2-8a7508d5a787.txt
 ```
+- ~~:pushpin: do [#promptprefixorch1]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -351,7 +367,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#promptprefixorch1] Fix prompt-prefixed recovery/evidence lines in agent:exchange being classified as user prompt targets and orchestration tasks after interrupted closeout recovery; preserve them as agent evidence or strip prompt markers during recovery.
 <!-- /agent:backlog -->
 
 ## Review

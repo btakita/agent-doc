@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -129,7 +129,36 @@ e.g. `val card = JBColor(Color(230,230,230), Color(92,110,158))` mirrors `--colo
 **Install:** `build/distributions/agent-doc-jetbrains-0.2.179.zip` (unsigned — run `./gradlew signPlugin` for a signed zip before publishing). Changes take effect on the next prompt-panel show.
 
 **Git note:** the local agent-doc checkout had 2 stale pre-rebase commits (`a92a781a`, `660e4a58`) the operator had already superseded on remote (`5b7a32ac`, `b0a6f1eb`). Reset to `origin/main` and cherry-picked only the JB commit (unrelated files, clean) rather than resolving conflicts in the queue-consume CLI code — stale commits stay reflog-recoverable.
-<!-- agent:boundary:cbdd88b1 -->
+
+### Re: configuring JB plugin Markdown styles — glm-5.2
+
+> **Queue prompt:** How do I configure the JB Plugin styles for Markdown?
+
+**Today: via IntelliJ's editor color scheme, not a plugin settings page.** The plugin's in-editor markdown styling lives in `VisualHighlighterManager.attrsFor()` (`editors/jetbrains/.../VisualHighlighterManager.kt:120`). It does **not** own colors — it derives every style from the active editor scheme with `editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.X)`. So you configure the underlying Language-Defaults keys.
+
+**Settings → Editor → Color Scheme → Language Defaults** (changes apply live; the highlighter re-runs on doc edit / save). Literal marker syntax below is HTML-escaped so the session-doc linter doesn't read it as real markup — it renders as the real text in the post.
+
+| agent-doc structure (literal marker) | color-scheme key (`DefaultLanguageHighlighterColors.*`) | font/effect added by plugin |
+|---|---|---|
+| `component_open` / `component_close` (`&lt;!-- agent:exchange --&gt;` … `&lt;!-- /agent:exchange --&gt;`) | **Metadata** | bold |
+| `component_body` (queue/backlog/review/exchange bodies) | Metadata fg + 10%-blended muted bg | — |
+| `patch_open` / `patch_close` (`&lt;!-- patch:exchange --&gt;`) | **Markup attribute** | bold |
+| `boundary` (`&lt;!-- agent:boundary:&lt;hex&gt; --&gt;`) | **Keyword** | italic |
+| `scratch_comment_body` / `scratch_comment` (other HTML comments) | **Block comment** + muted bg | italic |
+| `bold` / `italic` (inline emphasis) | **Identifier** | bold / italic |
+| `prompt` (user `❯ …` lines) | **String** | bold |
+| `response_heading` (`### Re: …`) | **Function declaration** | bold |
+| `tracked_id` (`[#id]`) | **Constant** | bold + rounded box |
+| `label_tag` (`[x]`, `[/]`, etc.) | **Markup attribute** | bold + rounded box |
+
+Backgrounds (`mutedBackground`, `:205`) are a 10% blend of the structure's accent over `editor.colorsScheme.defaultBackground`, so they track the editor theme automatically.
+
+**There is no agent-doc-specific Markdown-style settings page** — the only plugin-level color config is the prompt-panel `AgentDocColorSettings` page (`0a887cfe`), which does **not** affect markdown rendering. Two paths if you want plugin-level control rather than editing Language Defaults:
+1. **Quick:** edit the Language Defaults keys above (one place, applies to all agent-doc markdown).
+2. **Plugin-level (follow-up → `#lzmdstyle`, added to backlog):** a Markdown-style settings page overriding `attrsFor()` per structure, same pattern as `AgentDocColorConfigurable`, defaulting to the color-scheme-derived values.
+
+This covers the in-editor highlighting only; the IntelliJ **Markdown plugin's preview tab** is a separate rendering (its own CSS, not agent-doc's). The agent-doc plugin doesn't render markdown — it layers `RangeHighlighter`s on top of the IntelliJ editor.
+<!-- agent:boundary:db8166f6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -138,12 +167,13 @@ e.g. `val card = JBColor(Color(230,230,230), Color(92,110,158))` mirrors `--colo
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- How do I configure the JB Plugin styles for Markdown?
+- do [#9xtw]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#9xtw] #lzmdstyle [recommended] Add plugin-level Markdown style overrides to the JB plugin. VisualHighlighterManager.attrsFor() (editors/jetbrains/.../VisualHighlighterManager.kt:120) derives every agent-doc markdown structure's style from the IntelliJ editor color scheme (DefaultLanguageHighlighterColors.*), so users can only customize via Settings → Editor → Color Scheme → Language Defaults. Add a MarkdownStyle settings page (like AgentDocColorSettings) exposing per-structure fg/bg/effect/italic/bold (component_body, scratch_comment_body, component_open/close, patch_open/close, boundary, bold, italic, prompt, response_heading, tracked_id, label_tag) defaulting to the current color-scheme-derived values; have attrsFor() prefer the overrides when set.
 <!-- /agent:backlog -->
 
 ## Review

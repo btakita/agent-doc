@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Session History
@@ -119,7 +119,7 @@ Compacted content:
 3. `#diarize-span-release` — Verify diarization cascade fix is committed and released
 
 **Top of backlog: `#fix-social-tests`**
-<!-- agent:boundary:980a359c -->
+<!-- agent:boundary:0102c1b7 -->
 <!-- /agent:exchange -->
 ###
 <!--

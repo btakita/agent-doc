@@ -31,10 +31,35 @@ to explicitly state the **self-drive** contract:
 
 Also add an explicit “do NOT interpret ‘no auto-loop’ as ‘stop after each closeout’” callout.
 
-### Part B — Optional mechanism (investigate, then decide)
+### Part B — OpenCode auto-loop plugin (CONFIRMED FEASIBLE — ship this)
 
-1. Determine whether opencode 1.17+ exposes a lifecycle hook (PostToolUse / Stop / on-turn-end) that `agent-doc skill install --harness opencode` could register. If yes: ship an `agent-doc hook opencode-stop` (analogous to `codex-stop`) that reads `.agent-doc/queue-continuations/<doc-hash>.json` and re-dispatches the next head, so the drain survives even an agent that misreads the SKILL.
-2. If opencode has no lifecycle hook: Part A alone closes the behavioral gap; record the finding and revisit when opencode adds hook support.
+**Correction of the original premise:** OpenCode is *not* missing lifecycle hooks. Per https://opencode.ai/docs/plugins, OpenCode's plugin system exposes lifecycle events — most importantly **`session.idle`** (fires when a session finishes a turn) plus `tool.execute.before`/`tool.execute.after`, `message.updated`, and `tui.prompt.append`. The Codex auto-loop uses a `Stop` hook; the OpenCode equivalent is a **plugin subscribing to `session.idle`**. agent-doc simply never wrote that plugin — it only shipped (a) Codex's `.codex/hooks.json` `Stop` hook (`agent-doc hook codex-stop` + the durable `.agent-doc/queue-continuations/<doc-hash>.json` marker) and (b) Claude Code's `/loop` skill. "OpenCode currently has no auto-loop" is therefore an **agent-doc provisioning gap**, NOT an OpenCode limitation.
+
+Ship a project/global plugin, e.g. `.opencode/plugins/agent-doc-queue.ts`:
+
+```ts
+import type { Plugin } from "@opencode-ai/plugin"
+export const AgentDocQueueLoop: Plugin = async ({ client, $ }) => {
+  return {
+    event: async ({ event }) => {
+      if (event.type !== "session.idle") return
+      // agent-doc already writes a durable continuation marker on every clean closeout
+      const res = await $`agent-doc session-check <FILE> --opencode-continue-gate`.quiet()
+      // exit nonzero ⇒ a clean doc still owes an `agent:queue auto` continuation
+      if (res.exitCode !== 0) {
+        await client.session.prompt(...)   // re-dispatch `agent-doc <FILE>` for the next head
+      }
+    },
+  }
+}
+```
+
+Key design points (mirrors the proven Codex path):
+- Reuse the existing `.agent-doc/queue-continuations/<doc-hash>.json` marker (already written by the binary on every clean closeout) as the drain signal — the plugin does not re-derive drainability.
+- Add `agent-doc session-check <FILE> --opencode-continue-gate` (analogous to the existing `--codex-final-gate`) that exits nonzero whenever a clean document still owes an `agent:queue auto` continuation.
+- Fail closed: if the marker says "continue" but the head did not advance on the prior dispatch, stop instead of looping (mirrors `#codex-self-reinvoke-prevent` / the non-advancing-repeat rule).
+- Install via `agent-doc skill install --harness opencode` (write the plugin + register it in `opencode.json` `"plugin"` list, the same way it today writes `.codex/hooks.json`).
+- The plugin path is **durable**: unlike agent self-drive (Part A), it survives an agent that misreads the SKILL, because the harness — not the LLM — re-dispatches.
 
 ### Part C — SimWorld / regression coverage
 

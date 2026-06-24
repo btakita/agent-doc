@@ -174,7 +174,18 @@ This directly fixes the re-invocation churn you were hitting — every cycle I s
 **Parts B/C remain (optional, not gating):** B — an `agent-doc hook opencode-stop` if/when OpenCode 1.17 exposes a lifecycle hook (a stop-hook would let the binary self-continue without relying on the agent's in-turn discipline); C — a SimWorld multi-head in-turn drain regression. Neither blocks the behavior fix.
 
 **Top backlog id: #capproofbg** (capacity proof blocking dispatch). Continuing the drain.
-<!-- agent:boundary:fe55f49d -->
+
+### Re: #capproofbg narrowed — route capability-probe serializes dispatch — glm-5.2
+
+> **Queue prompt:**
+> 🚧 The Capacity Proof should not block the JB `Run Agent Doc` dispatch. Dispatch should occur immediately while the Capacity Proof runs in the background.
+
+**#capproofbg — root cause narrowed.** "Capacity Proof" is not a literal code term; it maps to the route **capability / N-probe** in `agent-doc-orchestration/src/route/authoritative_actor.rs` (`wait_for_n`, with `n_probe_timeout_secs` config). The route serializes dispatch behind this probe — JB `Run Agent Doc` waits for the probe to complete before the dispatch byte reaches the pane, so a slow/stalled probe stalls dispatch.
+
+**Design direction (for the impl cycle):** optimistic dispatch — send the dispatch byte immediately while the capability probe runs concurrently; if the probe later fails, surface the failure asynchronously (interrupt + diagnostic) rather than blocking dispatch up front. This is a real behavioral change with safety implications (dispatch can reach a harness that later proves incapable), so it needs: (1) a clear async-failure surfacing path, (2) a bounded probe deadline, (3) SimWorld regressions for the optimistic-send + late-fail case. Not a safe quick patch.
+
+`wait_for_n` is the concrete site to refactor; `n_probe_timeout_secs` (config.rs) is the existing bound. Needs the focused impl cycle + live JB timing repro to confirm the probe is the actual bottleneck (vs. pane creation / supervisor RPC).
+<!-- agent:boundary:0156f42c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -232,7 +243,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 ```
 ---
 - ~~If I run JB `Run Agent Doc` on a session not open, the next JB `Run Agent Doc` hangs. The first JB `Run Agent Doc` should immediately fail.~~ — auto-struck: answered this cycle (#ftstrike)
-- The Capacity Proof should not block the JB `Run Agent Doc` dispatch. Dispatch should occur immediately while the Capacity Proof runs in the background.
+- ~~The Capacity Proof should not block the JB `Run Agent Doc` dispatch. Dispatch should occur immediately while the Capacity Proof runs in the background.~~ — auto-struck: answered this cycle (#ftstrike)
 - Still getting JB `File Cache Conflict` dialogs.
 - Opencode responses are reverse ordering numeric lists.
 ---

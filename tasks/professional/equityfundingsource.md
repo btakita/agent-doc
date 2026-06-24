@@ -172,7 +172,46 @@ Verification passed:
 - `agent-doc session-check`: clean, queue drained
 
 Parent gitlink commit `8dbf7c171` is local only. I did not push parent `main` because it is already ahead with unrelated local commits/changes; pushing it would publish unrelated work.
-<!-- agent:boundary:2475fc4a -->
+
+### Re: E-sign Optional For Acceptance And Deploy — gpt-5
+
+> **Queue prompt:** https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application was "Mark Complete" but is still block on the e-sign ![img_36.png](img_36.png). Make the e-sign optional.
+>
+> **Queue prompt:** deploy
+
+Implemented and deployed the follow-up. E-sign consent is now optional for Full Application acceptance, not just Mark Complete.
+
+Changed behavior:
+- Server approval validation no longer adds `e-signature` to missing requirements when `sections.signature.esign_consent` is false or absent.
+- The admin Full Application dialog no longer lists `E-sign consent` as a blocking prerequisite before `Accept and Send to TMO`.
+- The screenshot case should now advance once the other required application sections are satisfied.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/applications/index.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/full_application_detail.tsx`
+- `src/equityfundingsource-dev/tests/admin-full-application-approve-ui.test.ts`
+- `src/equityfundingsource-dev/tests/apply4-full-application-p6.test.ts`
+- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+- `src/equityfundingsource-dev` parent gitlink
+
+Commits:
+- EFS submodule: `eba3d43 fix(admin): make e-sign optional for application acceptance` pushed to `origin/main`.
+- Parent repo: `dc92000d3 chore(efs): bump e-sign optional acceptance submodule` committed locally. I did not push parent `main` because it still has unrelated ahead/dirty state outside this task.
+
+Verification:
+- `git diff --check` passed in `src/equityfundingsource-dev`.
+- `bun test tests/admin-full-application-approve-ui.test.ts tests/apply4-full-application-p6.test.ts tests/admin-pipeline.test.ts` passed: 98 pass, 0 fail.
+- `make check` passed: 1191 pass, 0 fail, app build and Worker build completed.
+- `gh run list --workflow CI --limit 1` could not run for both repos because no workflow named `CI` exists.
+
+Deploy:
+- `make deploy` completed successfully.
+- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Current Version ID: `81c55f56-740c-4d43-8811-8b631a2938e5`
+- Remote D1 check: `bun run cf:d1:migrations:list:remote` reports no migrations to apply.
+- HTTP checks: public root `200`; protected admin dialog URL `303` behind Access.
+
+<!-- agent:boundary:97b57372 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -192,7 +231,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application was "Mark Complete" but is still block on the e-sign ![img_36.png](img_36.png). Make the e-sign optional.
+- ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application was "Mark Complete" but is still block on the e-sign ![img_36.png](img_36.png). Make the e-sign optional.~~
 - deploy
 <!-- /agent:queue -->
 

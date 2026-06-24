@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,118 +33,22 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-044836.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-050641.md`*
 
 Compacted content:
-❯ - Archived 5 response topic(s): Lender signup + upload unification; btak.dev+lender3@gmail.com was not sent a verification email. A verification email should be required to login.; agent-doc IPC recovery diagnostic; 2 more
+❯ - Archived 4 response topic(s): Lender signup first-password flow + deploy; Deploy queue closeout; IPC recovery closeout; 1 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
+**IPC proof issue dogfood log**
 
-### Re: Lender signup first-password flow + deploy — gpt-5
+Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
 
-> **Queue prompt:**
->
-> In the lender signup form, do not include the password. On submit, send a verification email and notify the lender to check the email. Clicking the verification email will login the lender. Since the lender does not have a password, present a dialog to set the password + confirmation. The dialog cannot be cancelled. The lender must have a password.
-
-> **Queue prompt:**
->
-> deploy
-
-Implemented, committed, pushed, and deployed.
-
-Changed paths:
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/routes.ts`
-- `src/equityfundingsource-dev/lib/ui--server--efs/auth/signup.ts`
-- `src/equityfundingsource-dev/lib/ui--server--efs/auth/account_complete.ts`
-- `src/equityfundingsource-dev/tests/auth.test.ts`
-- `src/equityfundingsource-dev/tests/invite-autologin-wiring.test.ts`
-- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
-- `src/equityfundingsource-dev/docs/deploy.md`
-
-What changed:
-- Lender signup no longer renders or accepts a password; it creates the lender with an empty `password_hash`, sends the one-time verification/sign-in email, and redirects to `/login/email` with the existing check-your-email notice.
-- The email verification link signs the lender in, marks the account verified, then routes first-time no-password users to `/account/complete`.
-- `/account/complete` is now presented as a required dialog-style page with password + confirmation fields and no cancel path; the existing portal guard still prevents no-password, non-SSO users from bypassing it.
-- PRD and deploy smoke docs now describe the no-password lender signup and first-password completion flow.
-
-Verification:
-- `git diff --check` — passed.
-- `bun test tests/auth.test.ts tests/invite-autologin-wiring.test.ts tests/email-login.test.ts` — passed, 55 tests / 0 failures.
-- `make check` — passed, 1179 tests / 0 failures, app build, and Worker build. The known non-fatal `error: d1 down` fixture in `admin-pipeline.test.ts` still logs during the suite.
-- `gh run list --workflow CI --limit 1` in both EFS and parent repos — no workflow named `CI` exists.
-- Deploy precheck: remote D1 had pending `0108_user_email_verification.sql`; D1 info succeeded and Time Travel bookmark was current (`000004fc-00000000-00005094-126f333ecd092309d180791d62a89754`).
-- `make deploy` — passed; applied migration `0108_user_email_verification.sql` and deployed Worker version `77deacf5-86ec-4093-8910-055d8ea7e0ac` to `https://equityfundingsource.brian-takita.workers.dev`.
-- Post-deploy: remote migrations report `No migrations to apply`; homepage returns HTTP 200; live `/signup?role=lender` returns HTTP 200, includes `Send Verification Email`, and does not include `signup-password`.
-
-Commits:
-- EFS submodule: `f5ffc86` (`fix(auth): require lender password after email verification`), pushed to `equityfundingsource-dev/main`.
-- Parent gitlink: `a9d9cd1af` (`chore: update equityfundingsource submodule`), pushed to `agent-loop/main` from a temporary `origin/main` worktree so unrelated local parent commits/files were not published.
-
-Escalation: none.
-Confidence: high.
-
-Suggested commit message:
-
-```txt
-fix(auth): require lender password after email verification
-
-Remove password collection from public lender signup, send the existing email verification/sign-in link, and force verified no-password lenders through account completion before the portal. Updates auth regression coverage, PRD requirements, and deploy smoke docs.
-```
-❯ **IPC proof issue dogfood log**
-
-❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
-
-❯ Issue class: `ipc_proof_insufficient`
-❯ Affected component: editor IPC / writeback
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
 
 ```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=f7aaf2e4-e5ca-43f6-b50d-c4d5393e5547 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782276656103
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=7a2a4a5d-921b-4613-80c4-40f1650ee082 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782277467207
 ```
-
-### Re: Deploy queue closeout — gpt-5
-
-> **Queue prompt:**
->
-> deploy
-
-Deployment is complete; this queue head was satisfied by the deploy performed with the lender signup first-password change.
-
-Changed paths: none in this follow-up closeout. The deployed code/doc changes are in EFS commit `f5ffc86` and parent gitlink commit `a9d9cd1af`.
-
-Commands / verification:
-- `make deploy` — passed; applied remote D1 migration `0108_user_email_verification.sql` and deployed Worker version `77deacf5-86ec-4093-8910-055d8ea7e0ac`.
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` — passed after deploy; no migrations remain.
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/` — returned `200`.
-- Live `/signup?role=lender` smoke — returned `200`, includes `Send Verification Email`, and does not include `signup-password`.
-
-No actionable follow-up items were created by this closeout.
-
-Escalation: none.
-Confidence: high.
-
-
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=5112cab5-334c-466a-8e15-22bb93aef96f invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782277353707
-```
-
-### Re: IPC recovery closeout — gpt-5
-
-No product task remains in the queue. The lender signup change was implemented, committed, pushed, deployed, and live-smoke verified; the follow-up deploy queue head was also closed.
-
-This cycle only closes the agent-doc IPC recovery diagnostic. I marked the stale route-owned supervisor for recycle with `agent-doc admin recycle`.
-
-No changed paths, repo commands, or deployment actions were needed in this closeout. No actionable follow-up items were created.
-
-Escalation: none.
-Confidence: high.
-
-### Re: IPC diagnostic closeout — gpt-5
-
-No product or deploy work remains. This response only closes the IPC diagnostic text appended during recovery; the queue is drained and no actionable follow-up item is needed.
-
-Escalation: none.
-Confidence: high.
-<!-- agent:boundary:b7537b01 -->
+<!-- agent:boundary:ab6708f9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -164,6 +68,12 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, all dialogs should have a unique url using pushState. So the links can be shared.
+- I just signed up as btak.div+lender3@gmail.com. This user has Requirements Current in the Lender Pipeline. Why are the requirements current? The lender has not completed the signup...adding documents.
+- In the Lender Pipeline > Requirements Dialog, remove the Message Lender section. The contextual messaging (chat bubble) should open to the message the lender for the card.
+- In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field...which would be Close...then Advance Lender. The up arrow key navigates to the previous actionable item.
+- In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

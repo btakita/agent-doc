@@ -158,7 +158,20 @@ Implemented and committed `#lzliveproof` in `src/agent-doc`:
 The session document writeback is stuck because editor IPC cannot prove the response while the route-owned supervisor is still mapping the stale binary. I requested `agent-doc admin recycle ...`; non-force restart correctly refused because this Codex turn is the active busy owner. I did not force a direct disk write or interrupt the live turn.
 
 Next recovery should happen after this turn goes idle: rerun `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` so the recycled supervisor can absorb/commit the retained response.
-<!-- agent:boundary:12d3039f -->
+
+### Re: IPC dogfood note and pinned churn closeout — gpt-5
+
+> **Queue prompt:**
+> :round_pushpin: agent-doc equityfundingsource.md had IPC churn
+
+The IPC dogfood note is acknowledged and already has an actionable follow-up: `#ipcqproof` remains queued for the socket ACK-content / `live_prompt_drift_after_preflight` regression and for preventing diagnostics from becoming prompt-bearing exchange tails.
+
+The pinned EFS churn note is already satisfied by the prior EFS closeout and supervisor recycle request. No EFS app code changed in this recovery cycle.
+
+`#lzliveproof` remains completed: `src/agent-doc` commit `2133e363` adds the Rust cross-editor state-projection proof, the parent pointer landed in `db7fd2d2c`, and the root `make check` gate passed.
+
+Verification for this recovery closeout: `agent-doc preflight` converged the document and `agent-doc session-check` identified only this missing assistant-response tail. Escalation: none.
+<!-- agent:boundary:bbfbb98b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -183,7 +196,7 @@ Escalation: none. Confidence: high.
 ```
 ---
 - ~~do [#lzliveproof]~~
-- do [#mrhqrestore]
+- ~~do [#mrhqrestore]~~
 - do [#ipcqproof]
 - Still getting JB `File Cache Conflict` dialogs.
 - Opencode responses are reverse ordering numeric lists.

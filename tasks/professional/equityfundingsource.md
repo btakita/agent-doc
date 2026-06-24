@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -270,7 +270,7 @@ The struck queue head is already answered: the client-side `property_type` valid
 Changed paths this cleanup cycle: none in app code. Verification/deploy evidence remains the prior cycle: focused tests passed (`22 pass / 0 fail`), full `make check` passed (`1195 pass / 0 fail`), app + Worker builds passed, post-deploy root returned `HTTP 200` and the borrower app returned the expected unauthenticated `HTTP 303` login redirect.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:79602573 -->
+<!-- agent:boundary:b9defb0f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -290,10 +290,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~I filled out a borrower form missing Property Type and Family or business relationship with the seller? "Missing required values: B. Family or business relationship with the seller? (purchase)."...but only 1 error occurred. Both errors should show up.~~
-- ~~deploy~~
-- ~~~~I filled out a borrower form missing Property Type and Family or business relationship with the seller? "Missing required values: B. Family or business relationship with the seller? (purchase)."...but only 1 error occurred. Both errors should show up.~~ — auto-struck: answered this cycle (#ftstrike)~~
-- ~~I filled out a borrower form missing Property Type and Family or business relationship with the seller? "Missing required values: B. Family or business relationship with the seller? (purchase)."...but only 1 error occurred. Both errors should show up.~~ — auto-struck: answered this cycle (#ftstrike) 
 <!-- /agent:queue -->
 
 ## Backlog

@@ -158,7 +158,23 @@ The remaining hang is in the **route/start pane-creation wait**: when JB `Run Ag
 3. SimWorld regression: a `starting` actor that never reaches a dispatch-ready prompt must produce a bounded `startup_miss`, not an infinite wait.
 
 Advances `plan-controller-stalled-client-start-hang.md` (mark its accept-loop hypothesis resolved; scope shifts to bounded session-startup). Needs the focused impl cycle + live JB repro.
-<!-- agent:boundary:6e334f64 -->
+
+### Re: #ocdrainstall Part A shipped — OpenCode self-drives the drain in-turn — glm-5.2
+
+> **Queue prompt:**
+> do [#ocdrainstall]
+
+**#ocdrainstall Part A — SHIPPED (`9444a398`, v0.34.48).** Rewrote the OpenCode auto-loop guidance in the shared skill section (`src/skill.rs`). The installed OpenCode skill now **mandates in-turn drain self-drive**: after a proven `write --commit` closeout with `queue_continuation_required=true` and `queue_drainable_head_count>0`, the agent keeps running preflight → respond → `write --commit` in the **same turn** instead of stopping and forcing per-head operator re-invocation. "Low context budget" / "this head deserves a focused cycle" are explicitly documented as **stalls** (`#drain-no-defer`), not stop reasons.
+
+This directly fixes the re-invocation churn you were hitting — every cycle I stopped and waited for you to re-invoke `/agent-doc`, which was the stall you correctly called out. From the next fresh OpenCode session on 0.34.48, the agent drains consecutive heads in one turn.
+
+- 72 skill/render tests green; no new clippy warnings.
+- Released `#deploy-just-do-it`: 0.34.47→0.34.48, `make install-full` done, lib installed, controllers marked to recycle, pushed to origin/main.
+
+**Parts B/C remain (optional, not gating):** B — an `agent-doc hook opencode-stop` if/when OpenCode 1.17 exposes a lifecycle hook (a stop-hook would let the binary self-continue without relying on the agent's in-turn discipline); C — a SimWorld multi-head in-turn drain regression. Neither blocks the behavior fix.
+
+**Top backlog id: #capproofbg** (capacity proof blocking dispatch). Continuing the drain.
+<!-- agent:boundary:fe55f49d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -300,7 +316,7 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 - do [#4pdp]
 - do [#0bmv]
 - do [#actorswitchdefer]
-- do [#ocdrainstall]
+- ~~do [#ocdrainstall]~~
 - do [#capproofbg]
 <!-- /agent:queue -->
 <!--
@@ -328,7 +344,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ocdrainstall] OpenCode agent-doc active-queue drain stalls after each committed closeout. SKILL says "OpenCode currently has no auto-loop" which agents read as "stop after each cycle," but it means "no AUTOMATED mechanism — the agent must self-drive the drain in-turn." Result: the agent stops and forces operator re-invocation per head; compounded by deferring drainable heads as "redundant" (#drain-no-defer violation). Claude Code uses /loop; Codex uses agent-doc hook codex-stop + .agent-doc/queue-continuations marker; OpenCode has neither. Fix: Part A (ship first) rewrite OpenCode SKILL auto-loop guidance to mandate in-turn self-drive — after a proven closeout with queue_continuation_required=true, keep running preflight->respond->finalize/write --commit in the SAME turn until drained or a real stop condition; Part B optional agent-doc hook opencode-stop if opencode 1.17 exposes a lifecycle hook; Part C SimWorld multi-head in-turn drain test. Plan: tasks/agent-doc/plan-opencode-queue-drain-self-drive.md
 - [ ] [#capproofbg] Make the JB Run Agent Doc capacity proof non-blocking: dispatch immediately and run the capacity proof in the background, surfacing failure asynchronously instead of stalling every dispatch.
 - [ ] [#jbrestartbusy] Supervisor reports agent busy when the OpenCode pane is idle: turn state must flip to idle on a non-finalize turn exit (IPC churn / supervisor version mismatch), and Recycle Supervisor must skip the Interrupt & Restart + confirmation 2-step. See plan-jb-restart-supervisor-busy-refusal.md, plan-opencode-post-turn-false-active.md.
 - [ ] [#jbrunhang] JB Run Agent Doc on a session that is not open hangs the next invocation: the first run against a closed session must fail immediately instead of wedging the subsequent dispatch. See plan-controller-stalled-client-start-hang.md.

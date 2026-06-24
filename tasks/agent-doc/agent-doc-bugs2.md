@@ -158,7 +158,7 @@ Implemented and committed `#lzliveproof` in `src/agent-doc`:
 The session document writeback is stuck because editor IPC cannot prove the response while the route-owned supervisor is still mapping the stale binary. I requested `agent-doc admin recycle ...`; non-force restart correctly refused because this Codex turn is the active busy owner. I did not force a direct disk write or interrupt the live turn.
 
 Next recovery should happen after this turn goes idle: rerun `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` so the recycled supervisor can absorb/commit the retained response.
-<!-- agent:boundary:c83e0870 -->
+<!-- agent:boundary:12d3039f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -213,7 +213,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [x] [#lzliveproof] Add cross-editor live/state-projection proof for agent-doc IPC: drive JB socket/file IPC and VS Code file IPC through queued/ack/retry plus route started/proven/blocked events, then assert the Rust DocumentStateProjection and compact summaries match.
 - [ ] [#mrhqrestore] Improve agent-doc queue recover-lost for git-history-only queue deletions: produce an operator-reviewed restoration patch or explicit non-restorable recommendation for foreign-owned prompts such as the monsterrodholders test-email CSV row.
 - [ ] [#ipcqproof] Fix IPC proof dogfood closeout recovery: add a regression for queue-consume socket_ack_content / live_prompt_drift_after_preflight ACK mismatch, ensure diagnostics do not become unresolved prompt-bearing exchange items, and keep fail-closed recovery on the binary-owned path.
 <!-- /agent:backlog -->

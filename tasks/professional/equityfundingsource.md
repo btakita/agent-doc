@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -84,7 +84,15 @@ Verification: focused `bun test tests/borrower-dashboard.test.ts tests/full-appl
 Deploy: remote D1 reported "No migrations to apply!" (0109 already applied last cycle). `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `613304c0-6c5b-4f9c-b941-0b9eecbda4a6`. Post-deploy checks: public root returned `HTTP 200`; the dashboard URL with `?signed=1` returned the expected unauthenticated `HTTP 303` redirect to `/login?role=borrower&next=…signed%3D1`, preserving the flash param through login.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:d7dcc9c6 -->
+
+### Re: Struck Residue Drain — glm-5.2
+
+The struck queue head is already answered: the e-sign → dashboard redirect with toast + flash shipped (EFS `a9c60de`, pushed to `origin/main`) and deployed (Worker `613304c0-6c5b-4f9c-b941-0b9eecbda4a6`) in the prior cycle. The `#ftstrike` marker confirms it was auto-struck because it was answered this session. Cleared the struck residue from the queue and set `queue: stop` so the drained queue converges. No additional app work is needed.
+
+Changed paths this cleanup cycle: none in app code. Verification/deploy evidence remains the prior cycle: focused tests passed (`16 pass / 0 fail`), full `bun test` passed (`1203 pass / 0 fail`), app + Worker builds passed, post-deploy root returned `HTTP 200` and the dashboard `?signed=1` URL returned the expected unauthenticated `HTTP 303` login redirect with the flash param preserved.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:ca3d89da -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -104,9 +112,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~After successfully submitting the e-sign at https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1&step=6, redirect the borrower to the dashboard. Show the toast and show the flash message in the dashboard.~~
-- ~~deploy~~
-- ~~After successfully submitting the e-sign at https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1&step=6, redirect the borrower to the dashboard. Show the toast and show the flash message in the dashboard.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

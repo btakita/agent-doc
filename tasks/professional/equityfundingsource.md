@@ -272,7 +272,7 @@ Changed paths this deploy cycle: none. The code change was already committed in 
 Verification carried forward from the code cycle: focused Bun tests passed (`93 pass / 0 fail`), `git diff --check` passed, and full `make check` passed (`1193 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:9287d082 -->
+<!-- agent:boundary:ef1aaf6d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -292,8 +292,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#q1w3]~~
-- 🚧 deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -306,7 +306,34 @@ Confidence: high.
 Removed the answered duplicate Requirements dialog arrow-navigation queue row that remained after the duplicate closeout. Restored `deploy` as the only remaining live queue head.
 
 No product code changed in this repair cycle.
-<!-- agent:boundary:91271ce6 -->
+
+### Re: deploy — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Deployed the current EFS worker from submodule commit `7e89423`.
+
+Deploy command:
+- `make deploy`
+
+Deploy result:
+- Remote D1 migration check ran and reported no migrations to apply.
+- Worker deploy succeeded for `equityfundingsource`.
+- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Current Version ID: `18ef74cd-a39b-493b-9bf6-cd4c4d4ec17d`
+
+Live smoke checks:
+- `curl -I -L --max-time 20 https://equityfundingsource.brian-takita.workers.dev/` returned HTTP 200.
+- `curl -I -L --max-time 20 https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline` returned HTTP 303 to `/login?role=admin&next=%2Fadmin%2Flender-pipeline`, then HTTP 200 for the login page.
+
+Worktree check:
+- EFS submodule stayed clean after deploy.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:062c2128 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -326,11 +353,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, all dialogs should have a unique url using pushState. So the links can be shared.~~
-- ~~I just signed up as btak.div+lender3@gmail.com. This user has Requirements Current in the Lender Pipeline. Why are the requirements current? The lender has not completed the signup...adding documents.~~
-- ~~In the Lender Pipeline > Requirements Dialog, remove the Message Lender section. The contextual messaging (chat bubble) should open to the message the lender for the card.~~
-- ~~In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field...which would be Close...then Advance Lender. The up arrow key navigates to the previous actionable item.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

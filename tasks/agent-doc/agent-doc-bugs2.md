@@ -238,7 +238,14 @@ No repo files changed for this planning-only queue item.
 That quoted line is the already-answered free-text queue prompt from the committed `### Re: What are #next-steps to fix agent-doc bugs? — gpt-5` response. The queue row is already struck in `agent:queue`, and the previous response contains the ordered next steps.
 
 No repo files changed in this recovery-only closeout, and there are no new backlog items to capture from this recovery note.
-<!-- agent:boundary:42f53ce6 -->
+
+### Re: What are #next-steps to fix agent-doc bugs? — gpt-5
+
+
+The `#next-steps` queue prompt was already answered and struck in the previous committed response. This closeout exists only to clear the stale prompt-target detector after exchange drift moved the quoted prompt around.
+
+No repo files changed, and there are no new backlog items from this recovery note.
+<!-- agent:boundary:2c3b938a -->
 <!-- /agent:exchange -->
 
 ## Queue

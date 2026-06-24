@@ -66,6 +66,27 @@ pub(crate) fn load_authoritative_actor_binding(
             );
             return Ok(None);
         }
+        if frontmatter_harness_changed {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_authoritative_actor_harness_mismatch_deferred file={} pane={} stored_harness={} expected_harness={} generation={} supervisor_health={} actor_state={} frontmatter_harness_changed=true action=defer_to_boundary_restart",
+                    file.display(),
+                    record.pane_id,
+                    record.harness,
+                    expected_harness,
+                    record.generation,
+                    supervisor_health_label(runtime.health),
+                    effective_state.as_str(),
+                ),
+            );
+            anyhow::bail!(
+                "authoritative actor record for {} is running harness {}, but frontmatter now resolves to {}; deferring to boundary agent restart instead of replacing live pane",
+                file.display(),
+                record.harness,
+                expected_harness
+            );
+        }
         anyhow::bail!(
             "authoritative actor record for {} is bound to harness {}, not {}",
             file.display(),
@@ -126,10 +147,9 @@ pub(crate) fn load_authoritative_actor_binding(
 pub(crate) fn mismatched_authoritative_actor_can_be_replaced(
     runtime: &SupervisorRuntime,
     actor_state: crate::session_actor::ActorState,
-    frontmatter_harness_changed: bool,
+    _frontmatter_harness_changed: bool,
 ) -> bool {
-    frontmatter_harness_changed
-        || runtime.health != SupervisorHealth::Healthy
+    runtime.health != SupervisorHealth::Healthy
         || actor_state == crate::session_actor::ActorState::Closed
 }
 
@@ -844,12 +864,12 @@ mod tests {
             "a healthy ready actor from another harness is still authoritative and must block"
         );
         assert!(
-            mismatched_authoritative_actor_can_be_replaced(
+            !mismatched_authoritative_actor_can_be_replaced(
                 &healthy_ready,
                 crate::session_actor::ActorState::Ready,
                 true,
             ),
-            "an explicit frontmatter harness switch should replace even a healthy old-harness actor"
+            "an explicit frontmatter harness switch must defer to the boundary restart guard while the old-harness actor is healthy"
         );
 
         let healthy_closed = SupervisorRuntime {

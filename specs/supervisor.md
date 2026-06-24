@@ -2,7 +2,7 @@
 name: supervisor
 status: living
 date: 2026-04-13
-updated: 2026-05-08
+updated: 2026-06-24
 ---
 
 # agent-doc Supervisor Spec
@@ -77,6 +77,17 @@ The supervisor is a single process that:
 4. Wait-loop on the child; on exit, applies restart policy.
 5. Reports actor lifecycle facts to the project controller so the session actor
    owns authoritative state transitions.
+6. Re-resolves the document frontmatter at quiet dispatch-ready prompt
+   boundaries. When `agent:` now maps to a different harness and
+   `agent_doc_agent_change_restart` is enabled, the supervisor logs
+   `harness_change_detected`, gates with `agent_restart_boundary_gate`, requests
+   a fresh restart, and records `agent_restart_performed` before spawning the
+   new harness.
+
+Route/startup code must not cold-replace a healthy live authoritative actor
+solely because the document's `agent:` frontmatter changed. A live wrong-harness
+actor is deferred to the boundary restart path; only an unhealthy supervisor or
+a closed actor record is replaceable through the stale-authority path.
 
 ## Core Invariants
 

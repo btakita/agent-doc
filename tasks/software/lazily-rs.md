@@ -128,7 +128,7 @@ Verified: zero snake_case op refs remain; the 5 JSON blocks I touched all parse 
 `#lzspecdrift` → done. Remaining implementation queue: `#lzktconf`, `#lzpyregress`, `#lzzigtodos` (+ `#lzjshygiene` conformance slice).
 
 > **Queue prompt:** do [#lzspecdrift]
-<!-- agent:boundary:f653b53d -->
+<!-- agent:boundary:9a806ae7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -143,7 +143,7 @@ Verified: zero snake_case op refs remain; the 5 JSON blocks I touched all parse 
 - ~~What are #next-steps to fix lazily-py bugs?~~
 - ~~What are #next-steps to fix lazily-rs bugs?~~
 - ~~do [#lzspecdrift]~~
-- do [#lzktconf]
+- 🚧 do [#lzktconf]
 - do [#lzpyregress]
 - do [#lzzigtodos]
 - ~~do [#lzjshygiene]: Please purge `node_modules/` from the git history.~~

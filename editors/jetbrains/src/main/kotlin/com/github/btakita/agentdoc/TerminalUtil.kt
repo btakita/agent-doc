@@ -1153,7 +1153,7 @@ object TerminalUtil {
         output: String,
         telemetry: RestartSupervisorTelemetry?,
     ): String {
-        val base = output.ifBlank { "Restart requested for supervisor handling $relativePath" }
+        val base = output.ifBlank { "Recycle requested for supervisor handling $relativePath" }
         return if (telemetry == null) {
             base
         } else {

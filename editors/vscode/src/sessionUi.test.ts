@@ -199,7 +199,7 @@ describe('sessionUi', () => {
     it('falls back to the supervisor restart success hint when the CLI returns no text', () => {
         assert.strictEqual(
             buildSessionSuccessHint('restart-supervisor', 'tasks/agent-doc/agent-doc-bugs2.md', ''),
-            'Restart requested for supervisor handling tasks/agent-doc/agent-doc-bugs2.md',
+            'Recycle requested for supervisor handling tasks/agent-doc/agent-doc-bugs2.md',
         );
     });
 

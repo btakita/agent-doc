@@ -13,7 +13,7 @@ import com.intellij.openapi.diagnostic.Logger
  * `restart-supervisor` re-resolves the harness from current frontmatter, so a
  * manual "Restart Agent" brings up a changed `agent:` harness.
  *
- * This is intentionally distinct from "Restart Supervisor Process": they share
+ * This is intentionally distinct from "Recycle Supervisor": they share
  * the same CLI today, but the operator-facing intent differs (restart the agent
  * harness child vs. restart the bound supervisor process).
  */

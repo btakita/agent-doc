@@ -52,7 +52,7 @@
       },
       {
         "command": "agentDoc.restartSession",
-        "title": "Agent Doc: Restart Supervisor Process"
+        "title": "Agent Doc: Recycle Supervisor"
       },
       {
         "command": "agentDoc.restartAgent",
@@ -116,6 +116,10 @@
     "menus": {
       "commandPalette": [
         {
+          "command": "agentDoc.restartSession",
+          "when": "editorLangId == markdown"
+        },
+        {
           "command": "agentDoc.restartAgent",
           "when": "editorLangId == markdown"
         },
@@ -133,6 +137,11 @@
         }
       ],
       "editor/context": [
+        {
+          "command": "agentDoc.restartSession",
+          "when": "editorLangId == markdown",
+          "group": "agentDoc@0"
+        },
         {
           "command": "agentDoc.restartAgent",
           "when": "editorLangId == markdown",

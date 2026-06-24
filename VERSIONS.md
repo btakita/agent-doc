@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.44
 
+- **Editor menus now label the supervisor restart action as Recycle Supervisor (`#recyclerename`).** JetBrains keeps the stable `AgentDoc.RestartSupervisorProcess` action ID, VS Code keeps the stable `agentDoc.restartSession` command ID, and both continue to call `agent-doc session restart-supervisor` while presenting Recycle Supervisor alongside Restart Agent and Stop Agent in operator menus. Fallback success hints now say the recycle was requested.
+
 - **Restart Agent menu invocations now leave an optverify proof marker (`#j9ja` / `#restartagentmenu`).** The JetBrains `RestartAgentAction` records a best-effort `restart_agent_menu_invoked file=<relative-path> source=jetbrains action=restart_agent` line in `.agent-doc/logs/ops.log` before calling the existing restart-supervisor path, so stale gated review items can be proved from structured ops-log evidence instead of an IDE-only logger line. The supervisor-side `agent_restart_performed` marker remains the proof that the boundary restart actually spawned the fresh harness. Coverage pins the action wiring and marker format.
 
 - **State ownership is now documented as Cycle FSM plus typed projections (`#statebb1`).** The new state-backbone spec keeps the Cycle State Machine scoped to response-turn closeout, while queue, document, transport, supervisor, route, and proof state are modeled as append-only typed events reduced into deterministic projections with actor ownership/epoch guards. The docs also record where local FSMs, coroutines, and behavior-tree-like policy helpers fit, and why GOAP/MPC-style planning is not the durable correctness model for agent-doc closeout.

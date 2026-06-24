@@ -78,7 +78,7 @@ export function buildSessionSuccessHint(
     if (trimmed) return trimmed;
     switch (command) {
         case 'restart-supervisor':
-            return `Restart requested for supervisor handling ${relativePath}`;
+            return `Recycle requested for supervisor handling ${relativePath}`;
         case 'stop-agent':
             return `Stopped agent for ${relativePath} (supervisor still running)`;
         case 'cancel-turn':

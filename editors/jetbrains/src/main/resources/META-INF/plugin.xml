@@ -120,8 +120,8 @@
         </action>
         <action id="AgentDoc.RestartSupervisorProcess"
                 class="com.github.btakita.agentdoc.RestartSupervisorProcessAction"
-                text="Restart Supervisor Process"
-                description="Restart the bound agent-doc supervisor process for this document">
+                text="Recycle Supervisor"
+                description="Recycle the bound agent-doc supervisor process for this document">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>

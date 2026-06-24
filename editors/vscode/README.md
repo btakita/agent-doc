@@ -28,8 +28,10 @@ Interactive document sessions with AI agents. Edit markdown documents in your ed
 | Agent Doc: Claim | `Ctrl+Shift+Alt+C` | Claim the current document for this tmux pane |
 | Agent Doc: Sync Layout | `Ctrl+Shift+Alt+L` | Sync tmux panes to match editor tab layout |
 | Agent Doc: Show Session Status | none | Show binary-owned session status for the current document |
+| Agent Doc: Recycle Supervisor | none | Recycle the binary supervisor for the current document |
+| Agent Doc: Restart Agent | none | Restart the agent harness for the current document |
+| Agent Doc: Stop Agent | none | Stop the agent harness while leaving the supervisor running |
 | Agent Doc: Clear Session Context | none | Clear the current document's session context through `agent-doc session clear` |
-| Agent Doc: Restart Supervisor Process | none | Restart the binary supervisor for the current document |
 | Agent Doc: Copy Session Diagnostics | none | Copy binary-owned session diagnostics |
 | Agent Doc: Menu | `Alt+Enter` | Show action menu |
 

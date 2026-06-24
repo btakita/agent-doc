@@ -861,7 +861,7 @@ async function restartSessionAction(): Promise<void> {
 }
 
 // #s81q: Restart Agent — runs the same `session restart-supervisor` path as
-// "Restart Supervisor Process" but with a distinct operator-facing intent (bring
+// "Recycle Supervisor" but with a distinct operator-facing intent (bring
 // the agent harness back up, re-resolving a changed `agent:` frontmatter).
 // Mirrors the JetBrains RestartAgentAction.
 async function restartAgentAction(): Promise<void> {
@@ -1625,6 +1625,9 @@ async function popupMenuAction(): Promise<void> {
             break;
         case 'restartSupervisor':
             await restartSessionAction();
+            break;
+        case 'restartAgent':
+            await restartAgentAction();
             break;
         case 'clear':
             await clearSessionContextAction();

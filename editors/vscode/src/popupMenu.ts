@@ -5,6 +5,7 @@ export type PopupMenuActionId =
     | 'syncLayout'
     | 'status'
     | 'restartSupervisor'
+    | 'restartAgent'
     | 'clear'
     | 'doctor'
     | 'more'
@@ -23,9 +24,10 @@ export function buildPrimaryPopupMenuItems(): PopupMenuItem[] {
         { label: '[3] $(archive) Compact Exchange', id: 'compactExchange' },
         { label: '[4] $(layout) Sync Layout', id: 'syncLayout' },
         { label: '[5] $(pulse) Show Session Status', id: 'status' },
-        { label: '[6] $(debug-restart) Restart Supervisor Process', id: 'restartSupervisor' },
-        { label: '[7] $(clear-all) Clear Session Context', id: 'clear' },
-        { label: '[8] $(copy) Copy Session Diagnostics', id: 'doctor' },
+        { label: '[6] $(debug-restart) Recycle Supervisor', id: 'restartSupervisor' },
+        { label: '[7] $(debug-restart) Restart Agent', id: 'restartAgent' },
+        { label: '[8] $(clear-all) Clear Session Context', id: 'clear' },
+        { label: '[9] $(copy) Copy Session Diagnostics', id: 'doctor' },
         { label: '$(kebab-horizontal) More Actions', id: 'more' },
     ];
 }

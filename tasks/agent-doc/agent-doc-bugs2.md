@@ -300,14 +300,42 @@ Commits/push:
 Acknowledged. The preflight recovery appended an `ipc_proof_insufficient` dogfood note for the prior interrupted-cycle recovery; this turn continued through the binary-owned finalize path instead of direct-editing the session document.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:63fff301 -->
+
+### Re: #advr07 — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#advr07]
+
+
+Verified `#supinstallvis` / `#supinstallfeedback` is already implemented in the current `src/agent-doc` submodule and closes this queue item.
+
+Evidence:
+- Implementation commit: `cf7347a93 feat(#supinstallfeedback): surface supervisor auto-install status on the owned pane`.
+- The idle supervisor uses a non-input-consuming `tmux display-message` targeted at the owned pane for auto-install phases, so it does not type into the harness composer or disturb the `Press Enter to restart` keepalive reader.
+- The started message explicitly says the supervisor is rebuilding and says `do NOT press Enter`; success and failure messages are distinct terminal phases.
+- The auto-install path records session-log and ops-log proof markers: `supervisor_auto_install_started`, `supervisor_auto_install_succeeded`, and `supervisor_auto_install_failed`.
+- The opt-out detect path still logs `supervisor_source_newer_detected` and prints manual refresh guidance instead of silently stalling.
+- `VERSIONS.md` documents the dogfood supervisor auto-install behavior and the pane/status feedback contract.
+
+Verification this cycle:
+- `cargo test -p agent-doc-orchestration supervisor_auto_install`: passed 2 tests, including the pane-message keepalive warning and auto-install default-on precedence.
+- `cargo test -p agent-doc-orchestration supervisor_install_action_policy`: passed.
+- `git diff --check` in `src/agent-doc`: passed.
+- `git status --short` in `src/agent-doc`: clean.
+- `gh run list --workflow CI --limit 1`: latest CI for `feat(editors): rename supervisor restart action` was still `in_progress`, so I recorded it as pending rather than waiting.
+
+No source changes or new repo commits were needed for this item.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:0d7b1927 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: do [#advr06]~~
-- :pushpin: do [#advr07]
+- ~~:pushpin: do [#advr07]~~
 - :pushpin: do [#advr08]
 - :pushpin: do [#advr09]
 - :pushpin: do [#advr10]
@@ -349,7 +377,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr07] [recommended] Advance original #supinstallvis: make supervisor auto-install/rebuild status visible in pane body or plugin notification surface, choose a non-input-consuming mechanism, add ops/log proof, and avoid disturbing keepalive Enter-to-restart reader.
 - [ ] [#advr08] Advance original #runexitrestart: implement/verify recovery for cleanly exited harness panes by detecting `Press Enter to restart`, restarting the harness, waiting for dispatch-ready proof, and submitting prompt-bearing work so Run Agent Doc cannot drop on clean exit.
 - [ ] [#advr09] Advance original #jbrundispatch: replace operator-capture gate with deterministic Run Agent Doc dispatch diagnostics using admin detect, route trace, pane state, dispatch/start proof, and auto-filed route bugs; add regression coverage where possible.
 - [ ] [#advr10] Advance original #editorbufwin: finish editor-buffer-wins P2 by auto-recovering and committing preserved queue additions when replay normalization neutralizes the queue component. Plan: tasks/agent-doc/plan-editor-buffer-wins-queue-merge.md.

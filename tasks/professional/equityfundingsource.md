@@ -413,7 +413,13 @@ feat(portal): add pipeline keyboard navigation
 
 Add arrow-key navigation to the Deal and Lender pipeline boards, including focus handoff to lane expand/collapse toggles, and make Broker My Pipeline rows keyboard-selectable so the detail panel follows the active deal. Covers the behavior with admin pipeline, lender pipeline, and broker portal tests; deployed Worker version e53148b0-7045-4b77-a459-95c39941477d.
 ```
-<!-- agent:boundary:701d5b43 -->
+
+### Re: Queue residue closeout — gpt-5
+
+Cleared the two already-answered free-text queue heads for pipeline keyboard navigation and deploy after the Stop hook reported them as still active.
+
+No additional code or deployment work was performed in this repair step.
+<!-- agent:boundary:99e9eaba -->
 <!-- /agent:exchange -->
 ###
 <!--

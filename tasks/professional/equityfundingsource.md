@@ -195,7 +195,41 @@ Deployment: not run for this queue head; the separate `deploy` queue item remain
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:0c84fc41 -->
+
+### Re: Remove inline Message Lender section - gpt-5
+
+> **Queue prompt:**
+>
+> In the Lender Pipeline > Requirements Dialog, remove the Message Lender section. The contextual messaging (chat bubble) should open to the message the lender for the card.
+
+Implemented, committed, and pushed.
+
+Changed behavior:
+- Removed the inline account-message section from the Lender Pipeline card / Requirements dialog.
+- Mounted the same lender account-message context as a floating chat launcher while that card dialog is active, so the chat bubble opens directly to that lender's onboarding/accreditation thread.
+- Kept the inline message composer in the Advance Lender dialog, where it remains part of that focused follow-up workspace.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/lender-account-messages.test.ts`
+- `src/equityfundingsource-dev/prds/investor-pipeline-admin.md`
+
+Verification:
+- `git diff --check`
+- `bun test tests/admin-investor-pipeline.test.ts tests/lender-account-messages.test.ts tests/advance-lender-dialog.test.ts` — 113 tests, 0 failures.
+- `make check` after rebasing on the latest remote main — 1181 tests, app build, and worker build passed.
+- `gh run list --workflow CI --limit 1` in both EFS and parent repos reported: `could not find any workflows named CI`.
+
+Commits:
+- EFS submodule: `405e13f fix(admin): use card chat launcher for lender messages`
+- Parent gitlink: `19ef0a3fa chore: update equityfundingsource submodule`
+
+Deployment: not run for this queue head; the separate `deploy` queue item remains.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:52865b26 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -217,7 +251,7 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, all dialogs should have a unique url using pushState. So the links can be shared.~~
 - ~~I just signed up as btak.div+lender3@gmail.com. This user has Requirements Current in the Lender Pipeline. Why are the requirements current? The lender has not completed the signup...adding documents.~~
-- In the Lender Pipeline > Requirements Dialog, remove the Message Lender section. The contextual messaging (chat bubble) should open to the message the lender for the card.
+- ~~In the Lender Pipeline > Requirements Dialog, remove the Message Lender section. The contextual messaging (chat bubble) should open to the message the lender for the card.~~
 - In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field...which would be Close...then Advance Lender. The up arrow key navigates to the previous actionable item.
 - In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field.
 - deploy

@@ -118,7 +118,13 @@ Escalation: none. Confidence: high.
 Struck the answered deploy queue residue after the deployed lead-dialog response committed. No additional app work remained.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:ad9955d4 -->
+
+### Re: Queue Residue Cleanup — gpt-5
+
+Cleared the already-struck queue residue after the lead dialog deploy response and deploy cleanup response were committed. No app work remained.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:64468f52 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -138,10 +144,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1, remove Open Page button.~~
-- ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1. Remove the Open Lead button.~~
-- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1, show an alert with a CTA to advance the lead to the next stage. Does it mean the lead should sign up for an account? I believe btak.dev+borrower3@gmail.com already signed in.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~deploy~~
 <!-- /agent:queue -->
 
 ## Backlog

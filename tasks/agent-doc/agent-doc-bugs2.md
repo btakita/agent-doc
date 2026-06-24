@@ -267,7 +267,29 @@ Verification:
 
 Confidence: high for backlog capture; implementation remains queued as `do [#3ygp]`.
 Escalation: none.
-<!-- agent:boundary:9fd172e1 -->
+
+### Re: #3ygp
+
+> **Queue prompt:** :pushpin: do [#3ygp]
+
+Implemented `#3ygp`.
+
+The JetBrains Run Agent Doc route/dispatch failure paths now file a deduped session-doc backlog bug when bounded submit or dispatch-start proof is exhausted. The auto-filed item includes the required evidence: failure class, document path, route stage, pane, actor generation, editor attempt id, dispatch proof state, elapsed time, preserved diagnostic path, ops log path, ops log marker, and a symptom-key marker keyed by document/stage/failure so repeated failures dedupe.
+
+Coverage was wired into the direct-pane submit timeout path, supervisor IPC accepted-without-start-proof path, routed reopen accepted-without-start-proof path, and dispatch-only required proof failure path. Pane diagnostic snapshot paths are carried through the relevant submit/acceptance result structs. Docs were updated in `VERSIONS.md`, `editors/jetbrains/SPEC.md`, and `specs/08-session-routing.md`.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
+- `cargo test -p agent-doc-orchestration route_dispatch_bug_report -- --nocapture`
+- `cargo test -p agent-doc-orchestration direct_pane_enter_resubmit -- --nocapture`
+- `cargo test -p agent-doc-orchestration route_submit -- --nocapture`
+- `cargo test -p agent-doc-orchestration dispatch_only_direct_pane_accepted_submit_skips_optional_proof_wait -- --nocapture`
+- `make check`
+- `make install-full`
+
+Committed and pushed source change `ef50ed8aa187839567552bcf627659099af383ba` (`fix: file route dispatch proof failures`) to `btakita/agent-doc` `main`. Updated and pushed the parent submodule pointer in `btakita/agent-loop` as `a51932f8d` (`chore: update agent-doc submodule`). GitHub Actions CI for the source push was queued as run `28066398449` when checked.
+<!-- agent:boundary:cf3f1477 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -308,7 +330,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#3ygp] #jbrunautobug #agent-doc-bug Automatically file a session-doc backlog item when JetBrains Run Agent Doc route/dispatch fails after retries; include the saved route diagnostic path, failure class, pane/generation, dispatch/turn-start proof, and ops.log marker; dedupe repeated failures for the same document/stage; and have the supervisor detect whether the turn actually started after submit, retry Enter/submission until a bounded start proof is observed, then file the bug with evidence if the turn never starts.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.
 - [ ] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.

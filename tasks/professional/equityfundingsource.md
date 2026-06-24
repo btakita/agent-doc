@@ -272,7 +272,7 @@ Changed paths this deploy cycle: none. The code change was already committed in 
 Verification carried forward from the code cycle: focused Bun tests passed (`93 pass / 0 fail`), `git diff --check` passed, and full `make check` passed (`1193 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:42e386b1 -->
+<!-- agent:boundary:1de8ebea -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -300,7 +300,7 @@ After 20:30
 
 <!-- agent:backlog priority queue -->
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
-- [ ] [#q1w3] Remove "Deal Pipeline" card dropdown. The CRM status can be inferred by the conversation and pipeline status. The conversation is self-evident. Just have the button and a link to open the message conversation.
+- [x] [#q1w3] Remove "Deal Pipeline" card dropdown. The CRM status can be inferred by the conversation and pipeline status. The conversation is self-evident. Just have the button and a link to open the message conversation.
 <!-- /agent:backlog -->
 
 ## Review

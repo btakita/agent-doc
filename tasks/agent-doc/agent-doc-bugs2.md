@@ -71,7 +71,32 @@ Verification: `agent-doc session-check`, recovery preflight state, and `ops.log`
 Repaired the queue residue from the interrupted closeout: the answered monsterrodholders free-text head is removed from the active queue, and the still-open lazily follow-up heads are restored as runnable queue items.
 
 Verification: `agent-doc queue consume`, `agent-doc queue sync`, and committed queue repair through `agent-doc write --commit --template --stream`.
-<!-- agent:boundary:e1d50e55 -->
+
+### Re: queue repair follow-up — gpt-5
+
+> **Queue prompt:**
+> 🚧 :pushpin: agent-doc monsterrodholders.md queue was removed without being processed
+> ```
+> • The queue helper is contradictory here: it sees the preset as id-backed, then says there is no matching id-backed
+>   head. I’m removing the answered queue row directly and keeping the queue component itself intact.
+>
+> • Edited tasks/monsterrodholders.md (+0 -1)
+>     82  &lt;!-- agent:queue preset="#spec-test-commit-push" priority go --&gt;
+>     83 -- We should have the test email addresses in a CSV file. brian.takita+mrh-user-1@gmail.com, brian.takita+mrh-us
+>         er-2@gmail.com, brian.takita+mrh-user-3@gmail.com, rberkes+mrh-user-1@gmail.com, rberkes+mrh-user-2@gmail.com,
+>         rberkes+mrh-user-3@gmail.com.
+>     83  &lt;!-- /agent:queue --&gt;
+>
+> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+> • The answered queue row is removed. I’m committing the document cleanup through agent-doc so its snapshot stays
+>   aligned, then I’ll rerun the invariant check.
+> ```
+
+The free-text monsterrodholders prompt was already answered in the audit response and should not remain an active queue head. I’m removing that stale head, restoring `#lzliveproof` as runnable because its backlog item is still open, and leaving the follow-up queue ordered as `#lzpkgwire`, `#lzliveproof`, `#mrhqrestore`, `#ipcqproof`.
+
+Verification: `agent-doc session-check`, `agent-doc plan`, and component reads of `exchange` and `queue` before repair. No repository code changed in this cycle.
+<!-- agent:boundary:0a6c58a8 -->
 <!-- /agent:exchange -->
 
 ## Queue

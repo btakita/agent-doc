@@ -213,7 +213,29 @@ Escalation: none. Confidence: high.
 All three queue heads are already struck: the field-validation-highlight feature shipped (EFS `cb40d40`, Worker `5e30710d`) and the deploy completed in the prior cycle. The `queue: start` frontmatter flip re-activated the queue, but every item in it is residue from already-answered work. No additional app work needed.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:5b5bf3a5 -->
+
+### Re: Show All Validation Errors At Once — glm-5.2
+
+> **Queue prompt:**
+> In the borrower, broker, and lender forms: If there are multiple fields not validating, show all errors and highlight all the fields at once.
+
+> **Queue prompt:**
+> deploy
+
+Implemented, pushed, and deployed. When multiple fields fail validation, every invalid field is now highlighted and shows its own error message simultaneously — instead of the native browser behavior which only shows one bubble on the first invalid field.
+
+What changed: updated `use_form_validation_highlight_()` in `shared/ui.tsx` to call `e.preventDefault()` on each native `invalid` event, suppressing the single-bubble. For every invalid field it now injects a `.form-field-error` div with the field's `validationMessage` text, so all errors appear at once under their respective fields. The hook also focuses the first invalid field after all invalid events settle (via `setTimeout(0)`) so the user lands on the right field without losing the all-at-once view. Clearing on `input` now also removes the injected error message div.
+
+Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/shared/ui.tsx` (updated hook) and `tests/form-error-standard.test.ts` (extended guard assertions).
+
+Commits: EFS submodule commit `9f3fae8 feat(portal): show all validation errors at once` was pushed to `origin/main`. Parent repo gitlink commit `eb7f4ca96 chore(efs): bump show-all-validation-errors submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with unrelated work.
+
+Verification: focused `bun test tests/form-error-standard.test.ts` passed (`9 pass / 0 fail`). `git diff --check` passed. Full `bun test` passed (`1195 pass / 0 fail`). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+
+Deploy: pre-deploy remote D1 migrations reported no migrations to apply. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `9ad2c0a3-9e46-4673-9034-7b96dc2251e8`. Post-deploy checks: public root returned `HTTP 200`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:31e71482 -->
 <!-- /agent:exchange -->
 ###
 <!--

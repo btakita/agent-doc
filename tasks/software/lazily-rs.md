@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -81,7 +81,7 @@ Delivered plan Phase 3 (`tasks/software/plan-lazily-shmblob-parity.md`): a share
 **Queue bookkeeping:** `#bagt` (`#lzshmblobconf`) → DONE. Plan `plan-lazily-shmblob-parity.md` fully delivered (all 3 phases). No new backlog item — the parity work is complete. Queue drained.
 
 Note: none of lazily-spec/py/rs/zig has a `CI` workflow — local evidence stands. Carried-over `semantic_completion_match` on `#h6qb` unchanged (operator-only e2e; agent slice `#lzwebrtcwire` DONE — left gated).
-<!-- agent:boundary:a2d92d5c -->
+<!-- agent:boundary:f516da46 -->
 <!-- /agent:exchange -->
 ###
 <!--

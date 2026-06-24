@@ -115,7 +115,13 @@ fix(admin): make review signature optional for completion (#pipeline-full-app-di
 
 Split full-application advancement blockers so Mark Complete uses completion requirements while Accept Application keeps the stricter approval gate. Updates Deal Pipeline guidance, PRD notes, and regression coverage.
 ```
-<!-- agent:boundary:b627aace -->
+
+### Re: Queue Residue Cleanup — gpt-5
+
+Cleared the already-struck queue residue so the completed Step 6 / deploy work has no remaining queue head.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:92ae52fa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,8 +141,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Step 6 - Review & Sign should be optional. This should not block advancing the application. "Before advancing this application" "Address the highlighted fields and sections below before marking complete or accepting the application." "Step 6 - Review & Sign" "Submitted, EFS status, E-sign consent". None of "Submitted, EFS status, E-sign consent" should be blocker to "Mark Complete".~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~deploy~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

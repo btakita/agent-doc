@@ -56,7 +56,37 @@ Proof:
 - Verification: all three focused regressions passed. Latest `src/agent-doc` CI was green: run `28070395022`.
 - Confidence: high that this cycle repaired the live stale-sidecar state and that current source covers the known overwrite paths; no source patch was needed.
 - Escalation: none.
-<!-- agent:boundary:a6551cc3 -->
+
+### Re: #advr02 — gpt-5
+
+> **Queue prompt:**
+>
+> :round_pushpin: do [#advr02]
+
+Implemented and committed the managed Codex proof restart fix.
+
+- `agent-doc-orchestration/src/start.rs`: added a proof epoch to `SupervisorShared`, made stale proof threads unable to update the gate after a newer epoch, and grouped proof thread inputs into `ManagedCapabilityProofTask`.
+- `agent-doc-orchestration/src/start/run.rs`: centralized proof setup from `HarnessLaunchSpec`; on harness-change restart, the old proof epoch is invalidated before `agent_restart_performed` is logged, the gate is reset for the new harness, and the managed proof thread is restarted for the new launch spec.
+- `agent-doc-orchestration/src/startup_miss.rs`: route/session-log proof scans now reset on `agent_restart_performed`, so pre-restart proof events cannot satisfy post-restart readiness.
+- `agent-doc-orchestration/src/route.rs`: added a regression proving a Codex proof before `agent_restart_performed` is treated as missing until a new post-restart proof appears.
+
+Verification:
+
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration capability_proof_epoch_ignores_stale_thread_result -- --nocapture`
+- `cargo test -p agent-doc-orchestration managed_capability_proof_status_requires_post_restart_proof -- --nocapture`
+- `cargo test -p agent-doc-orchestration session_log_event_after_latest_start_resets_on_agent_restart_performed -- --nocapture`
+- `make check` in `src/agent-doc`: passed Clippy, 5053 nextest tests, doctests, and the wider closeout sim.
+- `gh run list --workflow CI --limit 1`: latest remote CI was `completed success` for run `28070395022`.
+- `make install` rebuilt `~/.cargo/bin/agent-doc` and `libagent_doc.so`; `agent-doc admin recycle` marked the controller to recycle at the next idle boundary.
+
+Commits:
+
+- `src/agent-doc`: `d71bd627 fix: rerun codex proof after harness restart`
+- parent repo gitlink: `2f517d881 chore: update agent-doc submodule`
+
+I did not push: the parent repo is already ahead of `origin/main` by 12 commits, so pushing it would publish unrelated existing commits beyond this pointer update.
+<!-- agent:boundary:e5ccbdda -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -110,7 +140,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr02] :round_pushpin: [recommended] Advance original #arrcodexproof: re-run managed Codex capability proof when a boundary restart switches to Codex; wire proof restart into harness-change restart path and add focused regression + make check.
 - [ ] [#advr03] Advance original #j9ja: finish #optverify marker coverage by adding `agent_restart_performed` in #agentreloadrestart execution and a restart-agent menu-invoke marker in #restartagentmenu; then auto-resolve the stale review gate from ops-log proof/disproof markers.
 - [ ] [#advr04] Advance original #restartagentmenu: implement JB `RestartAgentAction.kt`, plugin.xml registration, TerminalUtil restart wiring, pluginVersion bump, signed+unsigned builds, action invocation log, and resolved harness log. Plan: tasks/agent-doc/plan-restart-agent.md.
 - [ ] [#advr05] [recommended] Advance original #s81q: add Stop Agent and mirror Stop+Restart into VS Code extension menus; implement JB `StopAgentAction.kt`, plugin.xml registration, VS Code command contributions, and signed/unsigned plugin artifacts.

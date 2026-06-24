@@ -39,6 +39,17 @@ done
 Relevant preserved context:
 - The prior compact archived 19 response topics, including `#ipcproofcloseout`, `#crdtreset1`, `#routeblockux1`, stalled Run Agent Doc recovery, dropped recovery evidence prompts, and related debugging context.
 - The active queue/backlog, not old exchange prose, is the source of truth for remaining work.
+- `gh run list --workflow CI --limit 1` still reports no workflow named `CI`; latest `Agent Doc` workflow run remains the pre-existing empty-step failure `28129203412`, so CI remains an external start/workflow issue rather than a local regression signal.
+- `make install` in `src/agent-doc`: passed and auto-marked controllers for recycle.
+- Root `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`: passed.
+- `git diff --check` in `src/agent-doc`: passed before commit.
+- `tsift --envelope digest-runner --kind test --path . --shell-command 'cargo test -p agent-doc-orchestration state_backbone'` in `src/agent-doc`: passed.
+- `cargo test -p agent-doc-orchestration state_backbone::tests::cross_editor_live_ipc_projection_summaries_match_bridge_contract`: passed.
+- Parent pointer was committed by `agent-doc` closeout in `db7fd2d2c`.
+- `src/agent-doc` `2133e363` `test: add cross-editor state projection proof`.
+- `specs/13-state-backbone.md` and `VERSIONS.md` record the proof contract.
+- The new `cross_editor_live_ipc_projection_summaries_match_bridge_contract` test drives JetBrains socket IPC, JetBrains file IPC, and VS Code file IPC through queued, retry, and ack transport transitions plus route started, proven, and blocked events, then asserts `DocumentStateProjection` fields and compact route/transport/proof summaries.
+- `agent-doc-orchestration/src/state_backbone.rs` now exposes `ProjectionSummary` plus the compact summary contract matching the editor helpers.
 ❯ - `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; the active workflow is `Agent Doc`. Latest `Agent Doc` run `28129203412` was already failed on an earlier push, with empty-step `check` and `tmux-ci` jobs, so this records as an external CI-start/workflow failure rather than a local regression signal.
 ❯ - Root `make check` through `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`: passed.
 ❯ - `./gradlew test` in `src/agent-doc/editors/jetbrains`: passed.
@@ -106,17 +117,55 @@ Actionable follow-up stays in the queue/backlog: `#ipcqproof` covers the ACK dri
 Normalized the exchange component to remove stale prompt-prefix artifacts that were already answered but were still being classified as unresolved prompt-bearing user changes. This did not change the queue or backlog source of truth.
 
 Verification: `agent-doc patch` was used for the exchange component only; queue remains active with `#lzpkgwire` as the next head.
-<!-- agent:boundary:ab9123d5 -->
+❯ **IPC proof issue dogfood log**
+
+❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+❯ Issue class: `ipc_proof_insufficient`
+❯ Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=159d0648-43b0-45f1-ac01-cda6f27fe5b3 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=16970 candidate_hash=a995a4466aeb1f22219eb5177f41431239e7cce9e177f55a37b008065fd5db10 content_ours_len=17358 content_ours_hash=4fe4ab7463ef930fbc4c7bf55e80e23afb14c21548d69befe2c537ae60e387dc doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782334343549
+```
+Blocked at the final agent-doc closeout boundary.
+
+> **Queue prompt:**
+>
+> :round_pushpin: agent-doc equityfundingsource.md had IPC churn
+> ```
+> ### Re: Deploy Queue Residue And IPC Dogfood Note — gpt-5
+> > **Queue prompt:**
+> > deploy
+> The deploy queue residue is already satisfied by the preceding deployed change. No additional app work was needed after Worker version `b344beea-543d-43e9-a5ab-e1040222d2bd` went live and post-deploy checks passed.
+> Acknowledged the automatic IPC proof dogfood note. It recorded the transient `ipc_proof_insufficient` writeback failure from the first finalize attempt; the recovery path applied and committed the response. I also requested `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so the stale route-owned supervisor can recycle at the next idle boundary.
+> Changed paths this cleanup cycle: none in app code. Commands this cleanup cycle: `agent-doc plan`, `agent-doc read --component queue`, and `agent-doc admin recycle ...`. Verification/deploy evidence remains the prior cycle: focused tests, `git diff --check`, full `make check`, pushed EFS commit `692acf4`, and production deploy version `b344beea-543d-43e9-a5ab-e1040222d2bd`.
+> No actionable follow-up items are needed for the IPC note. Escalation: none. Confidence: high.
+> ### Re: IPC Dogfood Note Closeout — gpt-5
+> Acknowledged the second automatic IPC proof dogfood note from cleanup recovery. The deploy queue is drained, the app change remains deployed at Worker version `b344beea-543d-43e9-a5ab-e1040222d2bd`, and there is no remaining EFS app work from this note.
+> The route-owned supervisor was already marked for recycle at the next idle boundary with `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`. An immediate `agent-doc session restart-supervisor ...` correctly refused because this Codex turn is still the active busy owner; the recycle request is the non-disruptive path.
+> Changed paths this closeout cycle: none. Commands this closeout cycle: `agent-doc preflight` recovery, `agent-doc session restart-supervisor ...` probe, and `agent-doc read --component queue`.
+> No actionable follow-up items are needed for this IPC note.
+> Escalation: none. Confidence: high.
+> ```
+
+
+Implemented and committed `#lzliveproof` in `src/agent-doc`:
+- `2133e363` adds the Rust cross-editor state-projection proof.
+- Parent pointer was committed in `db7fd2d2c`.
+- Full root `make check` passed.
+- `make install` passed and requested supervisor recycle.
+
+The session document writeback is stuck because editor IPC cannot prove the response while the route-owned supervisor is still mapping the stale binary. I requested `agent-doc admin recycle ...`; non-force restart correctly refused because this Codex turn is the active busy owner. I did not force a direct disk write or interrupt the live turn.
+
+Next recovery should happen after this turn goes idle: rerun `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` so the recycled supervisor can absorb/commit the retained response.
+<!-- agent:boundary:c83e0870 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#lzliveproof]
-- do [#mrhqrestore]
-- do [#ipcqproof]
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
 ---
-agent-doc equityfundingsource.md had IPC churn
+🚧 :round_pushpin: agent-doc equityfundingsource.md had IPC churn
 ```
 ### Re: Deploy Queue Residue And IPC Dogfood Note — gpt-5
 > **Queue prompt:**
@@ -124,8 +173,7 @@ agent-doc equityfundingsource.md had IPC churn
 The deploy queue residue is already satisfied by the preceding deployed change. No additional app work was needed after Worker version `b344beea-543d-43e9-a5ab-e1040222d2bd` went live and post-deploy checks passed.
 Acknowledged the automatic IPC proof dogfood note. It recorded the transient `ipc_proof_insufficient` writeback failure from the first finalize attempt; the recovery path applied and committed the response. I also requested `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so the stale route-owned supervisor can recycle at the next idle boundary.
 Changed paths this cleanup cycle: none in app code. Commands this cleanup cycle: `agent-doc plan`, `agent-doc read --component queue`, and `agent-doc admin recycle ...`. Verification/deploy evidence remains the prior cycle: focused tests, `git diff --check`, full `make check`, pushed EFS commit `692acf4`, and production deploy version `b344beea-543d-43e9-a5ab-e1040222d2bd`.
-No actionable follow-up items are needed for the IPC note.
-Escalation: none. Confidence: high.
+No actionable follow-up items are needed for the IPC note. Escalation: none. Confidence: high.
 ### Re: IPC Dogfood Note Closeout — gpt-5
 Acknowledged the second automatic IPC proof dogfood note from cleanup recovery. The deploy queue is drained, the app change remains deployed at Worker version `b344beea-543d-43e9-a5ab-e1040222d2bd`, and there is no remaining EFS app work from this note.
 The route-owned supervisor was already marked for recycle at the next idle boundary with `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`. An immediate `agent-doc session restart-supervisor ...` correctly refused because this Codex turn is still the active busy owner; the recycle request is the non-disruptive path.
@@ -134,6 +182,9 @@ No actionable follow-up items are needed for this IPC note.
 Escalation: none. Confidence: high.
 ```
 ---
+- ~~do [#lzliveproof]~~
+- do [#mrhqrestore]
+- do [#ipcqproof]
 - Still getting JB `File Cache Conflict` dialogs.
 - Opencode responses are reverse ordering numeric lists.
 <!-- /agent:queue -->
@@ -162,7 +213,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzliveproof] Add cross-editor live/state-projection proof for agent-doc IPC: drive JB socket/file IPC and VS Code file IPC through queued/ack/retry plus route started/proven/blocked events, then assert the Rust DocumentStateProjection and compact summaries match.
+- [x] [#lzliveproof] Add cross-editor live/state-projection proof for agent-doc IPC: drive JB socket/file IPC and VS Code file IPC through queued/ack/retry plus route started/proven/blocked events, then assert the Rust DocumentStateProjection and compact summaries match.
 - [ ] [#mrhqrestore] Improve agent-doc queue recover-lost for git-history-only queue deletions: produce an operator-reviewed restoration patch or explicit non-restorable recommendation for foreign-owned prompts such as the monsterrodholders test-email CSV row.
 - [ ] [#ipcqproof] Fix IPC proof dogfood closeout recovery: add a regression for queue-consume socket_ack_content / live_prompt_drift_after_preflight ACK mismatch, ensure diagnostics do not become unresolved prompt-bearing exchange items, and keep fail-closed recovery on the binary-owned path.
 <!-- /agent:backlog -->

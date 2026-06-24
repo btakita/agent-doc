@@ -277,7 +277,11 @@ Closed `#lzffistate` — its deliverable was the phased plan (`tasks/software/pl
 **`#h6qb` semantic_completion_match:** stays `[operator-drive]`. Agent-doable slice `#lzwebrtcwire` is DONE (SignalingClient↔Str0mNet wired, localhost handshake tested); the remaining cross-host/NAT validation through the live `#yxjw` Worker is genuinely operator-only.
 
 **Backlog drift:** ~8 duplicate queue IDs (`#t0mf`/`#t0qn`, `#pwvm`/`#9e64`, `#t1xt`/`#dcgp`, `#7gpg`/`#kjfe`) are residue from the IPC-lost capture recovery cycles. Non-blocking; they reaped surface as the drain advances. Next real head after `#lzffistate1` is `#nnyn` (StateMachine in lazily-zig).
-<!-- agent:boundary:59a5d885 -->
+
+### Re: queue decontamination — 4 prose lines removed — glm-5.2
+
+Removed the 4 free-text lines from `agent:queue` per `session-check` (`#jb-run-agent-doc-response-queue-contamination`): "Implement Signal in lazily-zig", "Implement IPC.lean in lazily-rs/zig/py". They were assistant-prose duplicates of the existing `do [#id]` entries (`#t0qn`/`#t0mf` → #lzsigzig; `#9e64`/`#pwvm` → #lzffileanrs; `#dcgp`/`#t1xt` → #lzffileanpy; `#kjfe`/`#7gpg` → #lzffileanzig). Queue now contains only `do [#id]` directives. The duplicate `do [#id]` pairs themselves are valid queue sources — they'll collapse as each is struck/done.
+<!-- agent:boundary:3cefa26a -->
 <!-- /agent:exchange -->
 ###
 <!--

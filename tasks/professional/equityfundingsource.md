@@ -342,7 +342,11 @@ feat(admin): add message dialog keyboard navigation
 
 Add keyboard navigation to the admin Messages dialog so Up/Down from search moves between conversations, Enter focuses the composer, and Escape returns from the composer to search. Covers the contract in the admin pipeline regression test and deploys the Worker.
 ```
-<!-- agent:boundary:4138c41d -->
+
+### Re: Queue residue repair — gpt-5
+
+Cleared the two already-answered free-text queue heads after the closeout commit so the queue will not re-run stale work.
+<!-- agent:boundary:e1b144dd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -362,6 +366,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- In the pipeline views (Deal + Broker), the arrow keys navigate between the items. Up/Down in the same column, Left/Right move between columns. Pressing up at the first item or empty column selects the +/- toggle. Enter activates the selected item.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

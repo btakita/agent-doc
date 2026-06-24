@@ -102,7 +102,17 @@ Commit status: `src/agent-doc` commit `dcc190ed` was pushed to `btakita/agent-do
 Implemented. `VisualHighlighterManager` now subscribes to `FileEditorManagerListener.FILE_EDITOR_MANAGER` and reschedules visual-token refresh from `fileOpened` and `selectionChanged` via `ApplicationManager.invokeLater`, so markdown opened or selected cold from disk gets agent-doc styling after the editor/document is ready. I added a static JetBrains test and updated the guide/version docs. The JetBrains plugin version is now `0.2.185`.
 
 Verified with the focused Gradle test, `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`, `make bump-plugin`, `make check`, `make precommit`, and pushed submodule CI run `28080189925`, which completed successfully. I installed the rebuilt plugin zip into both `IntelliJIdea2026.1` plugin directories. Submodule commit: `196d1bd6`; root pointer commit: `6a970d863` remains local because the superproject is still ahead/behind `origin/main`.
-<!-- agent:boundary:910c7bef -->
+
+### Re: Recursive agent-doc invocation handling - gpt-5
+
+> **Queue prompt:** :round_pushpin: agent-doc monsterrodholders.md using Codex has an error. Can we manage the CLI ordering using our state machines? Is there a way to support recursive calls by dispatching or somehow redirecting the call?
+
+A true same-pane recursive `agent-doc <FILE>` call should stay fail-closed. Dispatching it would mean the CLI running inside a Codex owner pane tries to inject another prompt into that same pane while the current turn/tool call is active. That creates the deadlock/replay loop the guard is preventing.
+
+The safe state-machine path is already the redirect: `preflight` exposes `owned_pane_self_invocation` with `kind` set to `unresolved_prompt` or `active_queue_head`, and Codex should continue the same owner turn, answer that work in-pane, then persist through `agent-doc finalize` or `agent-doc write --commit`. The Codex Stop hook uses the same model for queue continuations (`#codex-self-reinvoke-prevent`), so queue drain redirects to in-pane closeout instead of re-running `agent-doc <FILE>`.
+
+For the `monsterrodholders.md` case, the recovery is not another nested CLI invocation. Continue via preflight/plan/finalize in the owning pane, or start/route the document from outside that owner pane. Routing to the same pane mid-turn is unsafe; routing from a different pane or from supervisor-owned idle state is safe because the state machine can wait for actor readiness and dispatch once.
+<!-- agent:boundary:26b785af -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -110,7 +120,7 @@ Verified with the focused Gradle test, `GRADLE_USER_HOME=/tmp/agent-doc-gradle .
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~The JB Plugin renders the content of elements as an unpleasant yellow. Please have the JB Plugin use the current theme for regular text (white in my current theme ![img_54.png](img_54.png)). Variable names with multiple `_` are being misinterpreted as em or bold. Can we disable the italics/bold font for variable names...multiple `_` starting internally? So only  `_foo_` would be italic and `__foo__` would be bold per markdown. But `foo_bar_baz` would not make `_bar_` italic and `foo__bar__baz` would not make `__bar__` bold...both those cases should be regular text with the regular text color.~~
 - ~~When the JB Plugin loads a document without it being in the buffer, the colors fallback to the theme markdown. Please ensure the JB Plugin styling is applied in this case.~~
----
+~~~done
 :round_pushpin: agent-doc monsterrodholders.md using Codex has an error. Can we manage the CLI ordering using our state machines? Is there a way to support recursive calls by dispatching or somehow redirecting the call?
 ```
 • agent-doc tasks/monsterrodholders.md did not start a new cycle because this Codex pane already owns that document.
@@ -124,7 +134,8 @@ Verified with the focused Gradle test, `GRADLE_USER_HOME=/tmp/agent-doc-gradle .
   To launch a fresh managed cycle, run the command from outside this owned pane, or use agent-doc start tasks/
   monsterrodholders.md.
 ```
----
+~~~
+- The JB Plugin yellow text is still yellow. ![img_55.png](img_55.png)
 - do [#rootpushdiv]
 <!-- /agent:queue -->
 <!--

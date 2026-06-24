@@ -39,7 +39,19 @@ queue: start
 Compacted content:
 - Archived 6 response topic(s): compaction landed; queue stopped, DAG order intact; #9226 DONE; Zig 0.16 support added to lazily-zig; 3 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-<!-- agent:boundary:1755da79 -->
+
+### Re: lazily-kt GitHub project and submodule — gpt-5
+
+> **Queue prompt:** create a lazily-hub/lazily-kt github project. Make src/lazily-kt/ be a git submodule to the lazily-hub/lazily-kt project.
+
+Done. I created the public GitHub repository at https://github.com/lazily-hub/lazily-kt, initialized `src/lazily-kt` as its own `main` branch repo, committed the existing Kotlin package there as `e7dee31 Initial lazily Kotlin package`, and pushed it to `origin/main`.
+
+Changed paths in the superproject: `.gitmodules` and `src/lazily-kt` now point to `git@github.com:lazily-hub/lazily-kt.git` as a submodule gitlink at `e7dee316a083bc544cfd74fc1a1841fabfd6a7d0`. The superproject conversion is committed as `aae252cc2 Add lazily-kt submodule`.
+
+Verification: `make check` passed through `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`; `git submodule status src/lazily-kt` reports the expected commit; `git -C src/lazily-kt status --short --branch` is clean on `main...origin/main`; `gh repo view lazily-hub/lazily-kt` confirms the repo is public with default branch `main`. CI check note: `gh run list --workflow CI --limit 1` reported that this repo has no workflow named `CI`, so there was no latest CI run to inspect.
+
+Escalation: no approval prompts were needed. Confidence: high; unrelated dirty worktree changes were left untouched.
+<!-- agent:boundary:5fa5e429 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -54,7 +66,7 @@ Compacted content:
 - ~~:pushpin: do [#hj5x]~~
 - ~~:pushpin: do [#f71y]~~
 - ~~:pushpin: do [#mes4]~~
-- create a lazily-hub/lazily-kt github project. Make src/lazily-kt/ be a git submodule to the lazily-hub/lazily-kt project.
+- ~~create a lazily-hub/lazily-kt github project. Make src/lazily-kt/ be a git submodule to the lazily-hub/lazily-kt project.~~
 - create a lazily-hub/lazily-js github project. Make src/lazily-js be a git submodule to the lazily-hub/lazily-js
 - :pushpin: do [#bcnf]
 - do [#t0qn]

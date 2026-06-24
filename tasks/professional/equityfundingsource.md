@@ -153,7 +153,25 @@ Verification:
 
 Escalation: none.
 Confidence: medium; the direct disk path was used only after repeated editor IPC proof failures retained and recovered the response but kept leaving post-commit drift.
-<!-- agent:boundary:0f9113eb -->
+
+
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=23576efe-92c2-4b1d-833d-211c85da27b1 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782282608517
+```
+### Re: Final closeout repair — gpt-5
+
+Closed the remaining agent-doc follow-up classifier after IPC recovery. The substantive duplicate-card answer is already recorded above; this entry only closes the document-write invariant.
+
+Changed paths: `tasks/professional/equityfundingsource.md` only.
+
+Verification:
+- `agent-doc commit` refused the existing drift as a follow-up prompt and directed this `agent-doc write --commit` path.
+- Queue is empty; no EFS product code changed.
+
+Escalation: none.
+Confidence: medium.
+<!-- agent:boundary:e913627b -->
 <!-- /agent:exchange -->
 ###
 <!--

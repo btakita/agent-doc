@@ -58,6 +58,7 @@ object TerminalUtil {
     private val OPS_LOG_CURRENT_COMMAND_REGEX = Regex("""\bcurrent_command=(\S+)""")
     private val ROUTE_EDITOR_ATTEMPT_REGEX = Regex("""\beditor_attempt_id=(\S+)""")
     private val ROUTE_SNAPSHOT_PATH_REGEX = Regex("""\bsnapshot_path=(\S+)""")
+    private val ROUTE_DRAFT_PREVIEW_REGEX = Regex("""\bdraft_preview="([^"]*)"""")
     private val ROUTE_QUEUE_PAUSED_REASON_REGEX = Regex(
         """failed_stage=queue_paused\s+reason=(.*?)\s+receipt_id=""",
         RegexOption.DOT_MATCHES_ALL,
@@ -2049,11 +2050,17 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
     }
 
     internal fun buildRunAgentDocProtectedPromptInputMessage(relativePath: String, routeOutput: String): String {
-        val snapshotPath = latestRegexValue(routeOutput.lines(), ROUTE_SNAPSHOT_PATH_REGEX)
+        val lines = routeOutput.lines()
+        val snapshotPath = latestRegexValue(lines, ROUTE_SNAPSHOT_PATH_REGEX)
+        val draftPreview = latestRegexValue(lines, ROUTE_DRAFT_PREVIEW_REGEX)
         return buildString {
             append("Agent Doc did not start for ")
             append(relativePath)
             append(".\nThe target pane has unsent prompt text. Clear or submit that draft, then run Agent Doc again.")
+            if (draftPreview.isNotBlank()) {
+                append("\nDraft preview: ")
+                append(draftPreview)
+            }
             if (snapshotPath.isNotBlank()) {
                 append("\nRoute snapshot: ")
                 append(snapshotPath)

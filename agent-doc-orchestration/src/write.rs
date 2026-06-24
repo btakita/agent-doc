@@ -1782,6 +1782,18 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         );
     }
 
+    if has_pending_ops || options.status.is_some() {
+        let current_content = std::fs::read_to_string(file)
+            .with_context(|| format!("failed to read {}", file.display()))?;
+        let snapshot_doc = snapshot::load(file).ok().flatten();
+        guard_no_stale_snapshot_reset_drift(
+            file,
+            snapshot_doc.as_deref(),
+            &current_content,
+            "pre-pending write",
+        )?;
+    }
+
     if has_pending_ops {
         let pending_kept_open_ids = pending_kept_open_ids_from_options(&options);
         if options.pending_clear {

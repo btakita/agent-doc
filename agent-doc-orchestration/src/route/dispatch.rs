@@ -21,6 +21,24 @@ pub(crate) struct DirectPaneAcceptance {
 
 const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR: Duration = Duration::from_millis(900);
 
+fn protected_prompt_draft_preview(harness: &HarnessConfig, content: &str) -> Option<String> {
+    let candidate = harness.last_prompt_candidate(content)?;
+    let stripped = crate::prompt::strip_ansi(&candidate);
+    let redacted = crate::secret_redact::redact(stripped.trim());
+    let preview = redacted.trim();
+    if preview.is_empty() {
+        return None;
+    }
+    const MAX_CHARS: usize = 160;
+    let mut chars = preview.chars();
+    let shortened: String = chars.by_ref().take(MAX_CHARS).collect();
+    if chars.next().is_some() {
+        Some(format!("{shortened}..."))
+    } else {
+        Some(shortened)
+    }
+}
+
 /// `#rdypoll` (§D / img_52): process-global count of REAL trigger injections into
 /// a harness composer for this `agent-doc route` invocation. A single dispatch
 /// should inject the `agent-doc <FILE>` trigger exactly once; a multi-inject
@@ -788,7 +806,8 @@ pub(crate) fn send_command_unchecked(
                     &content,
                 )
                 .path;
-                protected_prompt_input = Some((reason, diagnostic_path));
+                let draft_preview = protected_prompt_draft_preview(harness, &content);
+                protected_prompt_input = Some((reason, diagnostic_path, draft_preview));
             }
             visible
         }
@@ -800,15 +819,20 @@ pub(crate) fn send_command_unchecked(
             false
         }
     };
-    if let Some((reason, diagnostic_path)) = protected_prompt_input {
+    if let Some((reason, diagnostic_path, draft_preview)) = protected_prompt_input {
+        let draft_preview_field = draft_preview
+            .as_deref()
+            .map(|preview| format!(" draft_preview={preview:?}"))
+            .unwrap_or_default();
         crate::ops_log::log_op(
             file,
             &format!(
-                "route_dispatch_direct_pane_blocked file={} pane={} harness={} protected_input={}",
+                "route_dispatch_direct_pane_blocked file={} pane={} harness={} protected_input={}{}",
                 file.display(),
                 pane,
                 harness.binary,
                 reason,
+                draft_preview_field,
             ),
         );
         let diagnostic = diagnostic_path
@@ -816,11 +840,12 @@ pub(crate) fn send_command_unchecked(
             .map(|path| format!(" snapshot_path={}", path.display()))
             .unwrap_or_default();
         anyhow::bail!(
-            "route refusing to dispatch {} into pane {} for {} because the composer contains protected prompt input ({}); clear or submit that draft, then rerun agent-doc route{}",
+            "route refusing to dispatch {} into pane {} for {} because the composer contains protected prompt input ({}){}; clear or submit that draft, then rerun agent-doc route{}",
             harness.trigger_command(file_path),
             pane,
             file.display(),
             reason,
+            draft_preview_field,
             diagnostic,
         );
     }
@@ -1994,6 +2019,41 @@ mod tests {
             Some(CommandDispatchStatus::Accepted)
         );
     }
+
+    #[test]
+    fn protected_prompt_draft_preview_redacts_and_bounds_latest_draft() {
+        let harness = HarnessConfig::codex();
+        let content = format!(
+            "\
+history
+› {}
+gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
+",
+            format!(
+                "Implement feature using OPENAI_API_KEY=sk-proj-{} and then {}",
+                "a".repeat(32),
+                "continue ".repeat(40)
+            )
+        );
+
+        let preview = protected_prompt_draft_preview(&harness, &content).unwrap();
+
+        assert!(preview.starts_with("› Implement feature"), "{preview}");
+        assert!(
+            preview.contains("OPENAI_API_KEY=[REDACTED]"),
+            "preview must redact secrets before surfacing draft text: {preview}"
+        );
+        assert!(
+            !preview.contains("sk-proj-"),
+            "raw secret must not leak into route diagnostics: {preview}"
+        );
+        assert!(preview.ends_with("..."), "{preview}");
+        assert!(
+            preview.chars().count() <= 163,
+            "preview should be bounded plus ellipsis: {preview}"
+        );
+    }
+
     #[test]
     fn direct_pane_resubmit_only_on_timeout_with_trigger_visible() {
         // `#jbcodexsubmit` / `#jbclaudesubmit`: a direct-pane submit that times out

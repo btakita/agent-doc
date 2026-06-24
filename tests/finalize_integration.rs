@@ -273,6 +273,60 @@ fn write_commit_requires_git_repo_before_mutating_session_document() {
 }
 
 #[test]
+fn finalize_stale_snapshot_blocks_pending_flags_before_mutating_backlog() {
+    // #ipcproofcloseout / #crdtreset1: stale snapshot/CRDT state must be detected
+    // before granular --pending-* mutations are applied. Otherwise a failed
+    // finalize can leave backlog changes without the exchange response that
+    // explains them.
+    let (tmp, doc) = setup_session_stream_doc();
+    init_git_repo(tmp.path(), &doc);
+    let current = fs::read_to_string(&doc).unwrap();
+    let stale_exchange = (0..40)
+        .map(|idx| {
+            format!(
+                "### Re: archived {idx} — gpt-5\n\n{}\n",
+                "body\n".repeat(20)
+            )
+        })
+        .collect::<String>();
+    let stale_snapshot = current.replace(
+        "❯ Please reply\n<!-- agent:boundary:1234abcd -->",
+        &format!("{stale_exchange}❯ Please reply\n<!-- agent:boundary:1234abcd -->"),
+    );
+    fs::write(snapshot_path(tmp.path(), &doc), stale_snapshot).unwrap();
+    let baseline = write_baseline(tmp.path(), &current);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--stream",
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+            "--pending-add-back",
+            "id=partial Pending item that must not land without the response",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: stale snapshot — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("refusing pre-pending write"))
+        .stderr(predicates::str::contains("agent-doc reset --from-current"));
+
+    let after = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !after.contains("#partial"),
+        "pending add must not land when stale snapshot blocks finalize:\n{after}"
+    );
+    assert!(
+        !after.contains("### Re: stale snapshot — gpt-5"),
+        "exchange response must also remain absent on failed finalize:\n{after}"
+    );
+}
+
+#[test]
 fn write_commit_writes_and_commits_session_response() {
     let (tmp, doc) = setup_session_template_doc();
     init_git_repo(tmp.path(), &doc);

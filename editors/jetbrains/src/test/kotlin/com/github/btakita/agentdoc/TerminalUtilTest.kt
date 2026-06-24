@@ -344,7 +344,7 @@ class TerminalUtilTest {
         val relativePath = "tasks/professional/equityfundingsource.md"
         val snapshot = "/tmp/agent-doc-route-snapshot.txt"
         val output = """
-            Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/$relativePath into pane %3 for /home/brian/work/btakita/agent-loop/$relativePath because the composer contains protected prompt input (drafted prompt input); clear or submit that draft, then rerun agent-doc route snapshot_path=$snapshot
+            Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/$relativePath into pane %3 for /home/brian/work/btakita/agent-loop/$relativePath because the composer contains protected prompt input (drafted prompt input) draft_preview="› Implement {feature}"; clear or submit that draft, then rerun agent-doc route snapshot_path=$snapshot
         """.trimIndent()
         val message = TerminalUtil.buildRunAgentDocProtectedPromptInputMessage(relativePath, output)
 
@@ -352,6 +352,7 @@ class TerminalUtilTest {
         assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
         assertTrue(message.contains("did not start"))
         assertTrue(message.contains("unsent prompt text"))
+        assertTrue(message.contains("Draft preview: › Implement {feature}"))
         assertTrue(message.contains(snapshot))
         assertFalse(message.contains("route failed"))
         assertFalse(message.contains("Saved exact route output"))

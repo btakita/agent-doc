@@ -346,7 +346,13 @@ Add keyboard navigation to the admin Messages dialog so Up/Down from search move
 ### Re: Queue residue repair — gpt-5
 
 Cleared the two already-answered free-text queue heads after the closeout commit so the queue will not re-run stale work.
-<!-- agent:boundary:e1b144dd -->
+
+### Re: Closeout repair — gpt-5
+
+Reconciled the session document through the binary finalize path after preflight recovered the orphaned response body.
+
+No repo work was started in this repair step, and no backlog items were changed.
+<!-- agent:boundary:0a3bf6b8 -->
 <!-- /agent:exchange -->
 ###
 <!--

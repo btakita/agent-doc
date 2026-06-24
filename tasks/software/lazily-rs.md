@@ -138,7 +138,77 @@ Great clarification — and it surfaces a category my last answer wrongly folded
 **So: recommended to mirror?** Yes — for the *payload*, via `SharedBlob` descriptor. No — for a raw pointer into Rust memory. The line is "descriptor + managed arena with integrity guards" vs. "dereferenceable address-space pointer." My prior "references (no)" was right only for category 3/4 (reactive-graph references and raw handles); it was wrong to imply category 2 (blob-by-reference) is off-limits — lazily already ships the mechanism.
 
 **Plan updated:** folded this three-way contract (inline value / blob-by-descriptor / structural-edge / raw-pointer-never) into Phase 2 of `tasks/software/plan-lazily-ffi-state-projection.md`, including the `ShmBlobArena` validation path so Phase 2 picks `SharedBlob` for large projection payloads instead of re-inlining them.
-<!-- agent:boundary:1e28dbf6 -->
+
+
+
+```text
+ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=c75552ac-2840-46e1-be53-ee4e15098149 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=20861 candidate_hash=c152a9f376d5cbfc226624942a6a476699257d8e877913ec5206e45ddfe3f082 content_ours_len=23146 content_ours_hash=069b1347b45d892fb29db9f0212a6a2755dd033b60f3a5a6e524eb12d97fb787 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782275568022
+```
+
+### Re: StateMachine in lazily-spec + ecosystem parity — spec done, plan + backlog captured — glm-5.2
+
+> **Queue prompt:** Should the State Machine be part of lazily-spec? To facilitate State Machine mirroring?
+> **Queue prompt:** Spec FFI channel implementation in lazily-spec.
+> **Queue prompt:** Implement State Machine in lazily-zig
+> **Queue prompt:** Implement State Machine in lazily-py
+> **Queue prompt:** Implement lazily-kt
+> **Queue prompt:** Implement lazily-js. Use *.js + *.d.ts.
+
+**Six queue heads, grouped and answered:**
+
+**1. "Should the State Machine be part of lazily-spec?" — YES, and it's done.** Created `LazilyFormal/StateMachine.lean` (commit `9fbc669` in lazily-spec, gitlink `3ead752bc`). It formalizes the exact `Fn(&S, &E) -> Option<S>` transition/guard model from `state_machine.rs:60`:
+- `Machine` structure: `current : State` + `transition : Transition` (pure `State → Event → Option State`)
+- `send` (advances on `some`, preserves on `none`) and `sends` (reports whether a transition would change state)
+- Five theorems: guard-rejection preserves state, accepted-transition advances, self-transition preserves + suppresses propagation (`sends = false`), changed-transition sends true, send preserves the transition function
+- `lake build` passes. This is the **first formal linkage between the reactive layer and the transport layer** — `IPC.lean` formalizes Snapshot/Delta; `StateMachine.lean` formalizes the transitions that produce the values those deltas carry. Cross-module proof (SM `send` → `DeltaOp.cellSet` emission) is Phase 1 TODO → `#lzsmlean2`.
+
+**2. "Spec FFI channel in lazily-spec?" — DEFERRED.** The `LazilyFfiChannel` (`ffi.rs:90`) is a FIFO byte-queue (`VecDeque<Vec<u8>>`) with encode/decode round-trip. Its semantics are trivial — the interesting ordering invariants (Delta epoch sequencing, gap-requires-resync) are already proven in `IPC.lean:70-97`. Revisit only if a non-trivial FFI-specific invariant emerges (e.g. backpressure, frame fragmentation). Not worth formalizing a pipe.
+
+**3. "Implement StateMachine in lazily-py / lazily-zig" — legitimate primitive parity (captured).** Unlike a full reactive-core port (which we rejected), `StateMachine` is one self-contained primitive: a state Cell + a pure transition function. Both siblings already have `Cell` (lazily-py has Cell+Signal; lazily-zig has Cell but not Signal), so adding StateMachine is additive — same primitive, not a re-implementation of the propagation graph. Plan phases: `#lzsmpy` (Phase 2, easiest — Python already has the full Slot/Cell/Signal stack) and `#lzsmzig` (Phase 3 — Zig has no closures, so the transition is a `*const fn(*const S, E) ?S` function pointer).
+
+**4. "Implement lazily-kt / lazily-js" — FFI-consumer packages, NOT reactive-core ports.** Consistent with the no-port decision (`plan-lazily-ffi-state-projection.md`): these are thin event-reporter + rich projection-renderer packages that wrap the existing JNA/N-API bridge. They hold `DocumentStateProjection` values in platform-native reactive holders (Kotlin `StateFlow`, JS `EventEmitter`), report editor events via `recordStateEvent`, and execute **zero** reactive logic locally. The `StateMachine` they "mirror" is consumed as a projection value from the binary — never executed in-process. `lazily-js` ships `*.js` + `*.d.ts` as requested. Both are **blocked on `#lzffistate1`** (the FFI state-projection exports must exist first). → `#lzkt` (Phase 4), `#lzjs` (Phase 5).
+
+**Parity matrix after this plan completes:**
+
+| Port | Slot | Cell | Signal | StateMachine | IPC | Lean |
+|---|---|---|---|---|---|---|
+| lazily-rs | ✅ | ✅ | ✅ | ✅ (×3) | ✅ | — |
+| lazily-py | ✅ | ✅ | ✅ | → `#lzsmpy` | ✅ | — |
+| lazily-zig | ✅ | ✅ | ❌ | → `#lzsmzig` | ✅ | — |
+| lazily-spec | — | — | — | ✅ `StateMachine.lean` | ✅ `IPC.lean` | (formal layer) |
+| lazily-kt | — | — | — | projection-only | → `#lzkt` | — |
+| lazily-js | — | — | — | projection-only | → `#lzjs` | — |
+
+**Delivered this cycle:** `StateMachine.lean` spec (builds clean), `plan-lazily-state-machine-mirroring.md` (5 phases), 5 backlog items (`#lzsmpy`/`#lzsmzig`/`#lzsmlean2`/`#lzkt`/`#lzjs`). All committed (`3ead752bc`).
+
+> **Queue prompt:**
+>
+> ~~Can we make lazily support a bidirectional lazily<->lazily FFI communication channel?…~~ — auto-struck: answered prior cycle
+
+> **Queue prompt:**
+>
+> ~~Should the State Machine be part of lazily-spec? To facilitate State Machine mirroring?~~ — auto-struck: answered this cycle — StateMachine.lean created (#ftstrike)
+
+> **Queue prompt:**
+>
+> ~~Spec FFI channel implementation in lazily-spec.~~ — auto-struck: answered this cycle — deferred (trivial FIFO) (#ftstrike)
+
+> **Queue prompt:**
+>
+> ~~Implement State Machine in lazily-zig~~ — auto-struck: captured as #lzsmzig (Phase 3) (#ftstrike)
+
+> **Queue prompt:**
+>
+> ~~Implement State Machine in lazily-py~~ — auto-struck: captured as #lzsmpy (Phase 2) (#ftstrike)
+
+> **Queue prompt:**
+>
+> ~~Implement lazily-kt~~ — auto-struck: captured as #lzkt (Phase 4, FFI-consumer, blocked on #lzffistate1) (#ftstrike)
+
+> **Queue prompt:**
+>
+> ~~Implement lazily-js. Use *.js + *.d.ts.~~ — auto-struck: captured as #lzjs (Phase 5, FFI-consumer, blocked on #lzffistate1) (#ftstrike)
+<!-- agent:boundary:b71e1c4e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -153,17 +223,27 @@ Great clarification — and it surfaces a category my last answer wrongly folded
 - Can we make lazily support a bidirectional lazily<->lazily FFI communication channel? And in doing so, revisit the thin reporter spec. Whether the JB Plugin & VS Code plugin may trigger state transitions or be read-only state projections. It seems plausible that a lazily FFI channel would be beneficial to keep state aligned. If we do have a FFI channel, the Cell
 - do [#lzffistate]
 - do [#lzffistate1]
-- Should the State Machine be part of lazily-spec? To facilitate State Machine mirroring?
-- Spec FFI channel implementation in lazily-spec.
-- Implement State Machine in lazily-zig
-- Implement State Machine in lazily-py
+- ~~Should the State Machine be part of lazily-spec? To facilitate State Machine mirroring?~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Spec FFI channel implementation in lazily-spec.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Implement State Machine in lazily-zig~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Implement State Machine in lazily-py~~ — auto-struck: answered this cycle (#ftstrike)
 - Implement lazily-kt
-- Implement lazily-js. Use *.js + *.d.ts.
+- ~~Implement lazily-js. Use *.js + *.d.ts.~~ — auto-struck: answered this cycle (#ftstrike)
+- do [#8wmj]
+- do [#nnyn]
+- do [#hj5x]
+- do [#mes4]
+- do [#bcnf]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#8wmj] #lzsmpy=Implement StateMachine in lazily-py (plan: tasks/software/plan-lazily-state-machine-mirroring.md Phase 2). Add src/lazily-py/src/lazily/state_machine.py: StateMachine(initial, transition) wrapping Cell, send(event)->bool, state property. Mirror lazily-rs API. Tests: tests/test_state_machine.py.
+- [ ] [#nnyn] #lzsmzig=Implement StateMachine in lazily-zig (plan Phase 3). Add src/lazily-zig/src/lazily/state_machine.zig: StateMachine(S,E) wrapping Cell + *const fn(*const S,E)?S transition pointer (Zig has no closures). Tests for guard rejection + acceptance.
+- [ ] [#hj5x] #lzsmlean2=Add Lean cross-module proof: SM send -> IPC DeltaOp.cellSet (plan Phase 1 TODO). Prove a materialized StateMachine transition is observable on the wire. Link StateMachine.lean with IPC.lean.
+- [ ] [#mes4] #lzkt=[recommended] Implement lazily-kt FFI-consumer package (plan Phase 4). Kotlin/Gradle under src/lazily-kt/. Wraps JNA bridge to lazily_ffi_*; StateFlow<DocumentStateProjection> projection holder + recordStateEvent reporter. NOT a reactive-core port. Blocked on #lzffistate1.
+- [ ] [#bcnf] #lzjs=[recommended] Implement lazily-js FFI-consumer package with *.js + *.d.ts (plan Phase 5). Under src/lazily-js/. Wraps VSCode N-API addon; EventEmitter projection holder + event reporter. NOT a reactive-core port. Blocked on #lzffistate1.
 - [ ] [#lzffistate1] Implement lazily FFI state-projection phase 1 (plan: tasks/software/plan-lazily-ffi-state-projection.md, #lzffistate plan-gate satisfied). Add agent_doc_state_projection(doc_hash)->JSON + agent_doc_record_state_event(doc_hash, fact_json) to src/agent-doc/src/ffi.rs behind a compile flag, mirror in editors/jetbrains NativeLib.kt + VSCode native addon, with record→read round-trip tests. Plugins become projection-renderer + event-reporter; JB EditorCommandStateMachine.kt stays local UI coalescing.
 - [ ] [#lzffistate] [recommended] Spike: FFI state-projection + event-intake exports so JB/VSCode plugins consume the binary's lazily-powered state_backbone FSMs (RouteReadiness/TransportPatch/ActorLifecycle/ProofGate) instead of re-deriving them. Add agent_doc_state_projection(doc_hash)->JSON (DocumentStateProjection slices) + agent_doc_record_state_event(doc_hash, fact_json) behind the existing JNA bridge (ffi.rs / NativeLib.kt). Plugins become thin event-reporter + projection-renderer per the FFI-first rule; EditorCommandStateMachine.kt stays local UI coalescing. Prototyped behind a compile flag. Plan first.
 <!-- /agent:backlog -->

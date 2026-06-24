@@ -92,7 +92,37 @@ Affected component: editor IPC / writeback
 ```text
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=620465db-ef3c-4340-80f1-32b0ce3e6627 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782267128699
 ```
-<!-- agent:boundary:8b7dfbf9 -->
+
+### Re: Deploy queue closeout — gpt-5
+
+> **Queue prompt:**
+>
+> do [#n4c1]
+
+> **Queue prompt:**
+>
+> deploy
+
+Closed the residual queue prompts after the pipeline toggle focus deployment.
+
+`#n4c1` was a recommended commit/push follow-up generated during closeout, but the backlog item was removed during recovery while its queue mirror remained. No commit or push was run because `src/equityfundingsource-dev/AGENTS.md` requires an explicit user request before `git commit`.
+
+Deployment proof already completed:
+- `make deploy` passed.
+- Remote D1 migrations: `No migrations to apply!` before and after deploy.
+- Worker deployed at `https://equityfundingsource.brian-takita.workers.dev`.
+- Current Worker version: `693fb7c5-c214-494d-a4ad-4df4e87fda5f`.
+- Post-deploy smoke tests: `/` returned `200`; `/admin/pipeline` and `/admin/lender-pipeline` returned expected admin-auth redirects `303`.
+
+Verification for the deployed build:
+- `bun test tests/admin-pipeline.test.ts tests/admin-investor-pipeline.test.ts` — passed, 155 tests.
+- `git diff --check` — passed.
+- `make check` — passed, 1173 tests plus app and Worker builds.
+- `gh run list --workflow CI --limit 1` in both EFS and parent repos — no workflow named `CI` exists.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:d34d61ea -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -112,20 +142,20 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~In the Deal Pipeline and Lender Pipeline boards, after pressing Enter on a +, the - should be focused. Same when pressing Enter on a -, the + should be focused. If possible, make the +/- the same element where the +/- content is toggled as is the mousedown/Enter behavior.~~
+- do [#n4c1]
 - deploy
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#n4c1] [recommended] Commit and push the deployed pipeline toggle focus-preservation changes in `src/equityfundingsource-dev` once operator approval is given. Current deployed working tree touches `lib/ui--browser--efs/portal/admin/pipeline.tsx`, `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`, `tests/admin-pipeline.test.ts`, and `tests/admin-investor-pipeline.test.ts`.
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#n4c1] [recommended] Commit and push the deployed pipeline toggle focus-preservation changes in `src/equityfundingsource-dev` once operator approval is given. Current deployed working tree touches `lib/ui--browser--efs/portal/admin/pipeline.tsx`, `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`, `tests/admin-pipeline.test.ts`, and `tests/admin-investor-pipeline.test.ts`.
 - [/] [#04v8] [recommended] Validate TMO cross-service lender visibility in a real TMO sandbox/tenant before relying on automated LOS funding writes: create or link a lender through `LSS.svc`, confirm `GetLender`, then attempt `LOS.svc` `AddLoanFunding`/`UpdateLoanFunding` on a test loan or get written TMO support confirmation that LOS funding resolves the LSS lender/vendor master `Account`.
 - [/] [#apply-invite-fail-ux] Public `/apply` invite-failure UX: when the borrower invite email fails or is skipped after lead persistence, stop telling the borrower to check their inbox; show a received/follow-up message, keep the failed invite status visible to admins, and add a regression test.
 - [/] [#email-bg-outbox] Durable email delivery observability/retry: record lifecycle, secure-message, broker, lending-group, investor-interest, login-link, invite, reminder, and feedback email results in D1 with status/error/retry/dead-letter instead of relying on console-only warnings for background notifications.

@@ -261,7 +261,29 @@ Published via `corky linkedin publish` (status flipped `draft → ready`, then p
 **Committed + pushed:** `mail` `2f2a0c0..4317c6b` → `btakita/mail`; superproject gitlink `1ca6a5e92` → `btakita/agent-loop`.
 
 **Queue bookkeeping:** queue head consumed (publish done); queue drained. Review `#lilazilysmpost` updated — post is live, only image + first comment remain.
-<!-- agent:boundary:4d830c3a -->
+
+### Re: image added to LinkedIn post (delete + republish with CyclePhase diagram) — DONE — glm-5.2
+
+> **Queue prompt:**
+>
+> The image is not on the post.
+
+The LinkedIn API does not support adding media to an already-published post (the `w_member_social` token scope allows creating posts and uploading images but not updating existing ones). So the fix was: delete the old text-only post, render the CyclePhase diagram, upload it, and create a new post with the image attached.
+
+**New post (with image):** https://www.linkedin.com/feed/update/urn:li:share:7475622100263923712
+
+**What:**
+1. **Rendered the CyclePhase diagram** from the blog post's inline SVG (`2026-06-23-lazily-state-machine-cycle-state.md` line 192). The SVG uses CSS variables (`rgb(var(--color-accent))` etc.) — resolved them to the light theme values from `blog_site.ts` (`--color-accent: 0,108,172`, `--color-card: 230,230,230`, `--color-text-base: 40,39,40`, `--color-fill: 251,254,251`). Rendered to 1520x720 PNG via `rsvg-convert`.
+2. **Uploaded via LinkedIn digitalmediaAsset API**: `POST /v2/assets?action=registerUpload` (recipe `feedshare-image`) → binary PUT (HTTP 201) → asset `urn:li:digitalmediaAsset:D5622AQFxc5CP8M14Ng`. The newer Images API (`/rest/images?action=initializeUpload`) also worked for upload but its `urn:li:image:*` URN is incompatible with the UGC posts API (which expects `urn:li:digitalmediaAsset:*`).
+3. **Deleted old post** (`DELETE /v2/ugcPosts/urn:li:share:7475617202893639680` → HTTP 204).
+4. **Created new post** with `shareMediaCategory: IMAGE` + the asset URN → `urn:li:share:7475622100263923712` (HTTP 201).
+
+**Diagram saved:** `mail/social/20260624-142530-cyclephase-diagram.png`.
+
+**Committed + pushed:** `mail` `4317c6b..bf4ab26` → `btakita/mail`; superproject gitlink `293539301` → `btakita/agent-loop`.
+
+**Queue bookkeeping:** queue head consumed (image is now on the post). Review `#lilazilysmpost` updated — post is live with image. Remaining operator follow-up: post the first comment (link + GitHub source) via `corky linkedin comment`.
+<!-- agent:boundary:c6f8d6f5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -270,7 +292,9 @@ Published via `corky linkedin publish` (status flipped `draft → ready`, then p
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- The image is not on the post.
+- ~~The image is not on the post.~~
+- Linked in posts are not markdown. so "`StateMachine`" is not rendered. Please draft an edit that I can paste into Linked In with the correct formatting.
+- Please fix corky with the feedback from this session.
 <!-- /agent:queue -->
 
 ## Backlog
@@ -281,7 +305,7 @@ Published via `corky linkedin publish` (status flipped `draft → ready`, then p
 ## Review
 
 <!-- agent:review -->
-- [/] [#lilazilysmpost] [/] [operator-drive] lazily state-machine LinkedIn post PUBLISHED: https://www.linkedin.com/feed/update/urn:li:share:7475617202893639680 (mail/social/20260624-142530-linkedin.md @ mail 4317c6b). Body verified not truncated (1785 chars < 3000 limit; dry-run + API-limit analysis). Remaining operator follow-up: (1) attach themed Figure 3 render via corky linkedin edit, (2) post first comment (link + GitHub source) via corky linkedin comment.
+- [/] [#lilazilysmpost] [/] [operator-drive] lazily state-machine LinkedIn post PUBLISHED WITH IMAGE: https://www.linkedin.com/feed/update/urn:li:share:7475622100263923712 (mail/social/20260624-142530-linkedin.md @ mail bf4ab26). CyclePhase diagram rendered from blog post SVG (light theme colors) + uploaded via LinkedIn digitalmediaAsset API. Old text-only post (urn:li:share:7475617202893639680) deleted + replaced. Remaining operator follow-up: post first comment (link + GitHub source) via corky linkedin comment.
 - [/] [#kb9b] #lzpypub011=[operator-drive] Publish lazily-py v0.11.0: SHIP-STOPPER #lzpysigfix is FIXED (commit 30907ea). Build artifacts rebuilt in src/lazily-py/dist/ (lazily-0.11.0-{whl,tar.gz}, twine check PASSED, fresh-venv install round-trip verified). From src/lazily-py: tag v0.11.0 + push, gh release create v0.11.0 --generate-notes, then python -m twine upload dist/* (needs PyPI token + browser/passkey 2FA). Gated on the pre-publish live-test confirm per the testing-gate rule. Commit 30907ea + superproject gitlink eb93a75ac already pushed.
 - [/] [#kabc] #lipostlazilyarch=[operator-drive] Main LinkedIn post is published and repaired: Corky edit updated mail/social/20260616-lazily-architecture-linkedin.md / https://www.linkedin.com/feed/update/urn:li:share:7472666756810190848 with the full body after the public post truncated at "The core is small: three primitives". Local metadata is committed in mail commit 07a9ea1 and superproject gitlink e7e0b08c1. Remaining operator follow-up: post the first comment from mail/drafts/linkedin/2026-06-16-lazily-architecture.md via `corky linkedin comment <published-file> <comment-body>` if still desired.
 - [/] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet backend through the LIVE #yxjw signaling Worker (two real hosts / NAT). Agent-doable slice (#lzwebrtcwire) is DONE: src/webrtc_signaling.rs wires SignalingClient↔Str0mNet and tests/webrtc_signaling.rs covers the localhost handshake. Remaining: live two-host/NAT run via deployed Worker — operator-only.

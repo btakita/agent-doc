@@ -127,7 +127,57 @@ Migrated the `loadAgentDocFFI` native loader from the unmaintained `ffi-napi`/`r
 - Note: `package-lock.json` left untracked (no prior lockfile; matching the library convention). `lazily-js` has no `CI` workflow yet — local evidence stands.
 
 Next queue head: `#krcm` (pre-existing Zig 0.17 `Slot.touch` crash — the `semantic_completion_match` flagged it vs #t0qn but it's a real, separate, still-open issue).
-<!-- agent:boundary:caca2505 -->
+❯ **IPC proof issue dogfood log**
+
+❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+❯ Issue class: `ipc_proof_insufficient`
+❯ Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=159c5414-0154-442d-b7ea-0426422ea346 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=14008 candidate_hash=6a994c57c63770a9da9d47df73d2f5f43c48151cb4b55417b69b4d06abba28f1 content_ours_len=15034 content_ours_hash=39b5e62723417b740fd8f04878bfefcf6f642a6b551428300fddbbd7d90f16e2 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782319052695
+```
+
+### Re: #krcm Zig 0.17 Slot.touch crash — root-caused + FIXED (use-after-free) — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#krcm]
+
+
+Root-caused the pre-existing crash and fixed it (rather than pinning to 0.16). Closing `#krcm`.
+
+*(Side note: the auto-appended IPC-proof dogfood log above is the recorded `ipc_proof_insufficient` event from the #tnbd cycle's socket-ack — `content_ours_snapshot_next_cycle` recovery still reached a proven closeout. Left in place as the record.)*
+
+**Root cause — use-after-free in `Slot.touch()` / `Slot.destroy()`** (`src/lazily-zig/src/lazily/context.zig`):
+```zig
+pub fn touch(self: *Slot) void {
+    self.ctx.mutex.lock();
+    defer self.ctx.mutex.unlock();   // <-- dereferences freed self.ctx
+    self.touchUnlocked();             // -> destroyUnlocked(true) -> destroySelf
+                                      //    -> allocator.destroy(self)  frees self
+}
+```
+The destroy path frees `self`, so the deferred `self.ctx.mutex.unlock()` reads `self.ctx` from freed memory → garbage mutex pointer. Zig 0.16's `std.atomic.Mutex.unlock()` had no state check, so the UAF was **silent** for a long time. Zig 0.17 added `assert(@atomicLoad(Mutex, m, .unordered) == .locked)`; the garbage pointer failed it → `SIGABRT` in `slot.touch`, crashing **3 of 4 test binaries** and masking the full suite.
+
+**Fix:** capture `ctx` into a local BEFORE locking, so the deferred unlock uses the live `Context` pointer (the Context is not freed by slot destruction), not freed `self.ctx`. Applied to both `touch()` and `destroy()`:
+```zig
+const ctx = self.ctx;
+ctx.mutex.lock();
+defer ctx.mutex.unlock();
+self.touchUnlocked();   // (or destroyUnlocked(recurse))
+```
+
+**Verification:**
+- `zig build test -Dfilters="lazily/slot"` → EXIT=0 (was: ABRT).
+- **Full `zig build test` → EXIT=0** on Zig `0.17.0-dev.892` — the entire suite is green now (signal + state_machine + slot + cell + ipc + examples all pass; previously 3/4 binaries aborted).
+
+**Committed + pushed** (preset `#spec-test-build-install-commit-push`):
+- lazily-zig submodule `1dd8998` → **pushed** to `lazily-hub/lazily-zig`.
+- superproject gitlink `fca2cd100` → committed **locally**. Push to `btakita/agent-loop` is blocked: `origin/main` diverged (other panes pushed) and the shared working tree carries other panes' submodule-pointer drift, so `pull --rebase` can't run cleanly without disrupting them. Deliberately did NOT churn the shared tree. The gitlink bump lands on the next clean sync; the **fix itself is already on the submodule remote**, so direct lazily-zig consumers get it immediately.
+
+Note: lazily-zig (like lazily-js) has no `CI` workflow — local evidence stands. Next queue head: `#lzshmblobparity` (the ShmBlobArena-parity plan I scoped last cycle — `[recommended]`, awaits operator direction on parity vs. drop).
+<!-- agent:boundary:7119fd02 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -144,14 +194,13 @@ Next queue head: `#krcm` (pre-existing Zig 0.17 `Slot.touch` crash — the `sema
 - ~~do [#7gpg]~~
 - ~~do [#kjfe]~~
 - ~~do [#tnbd]~~
-- do [#krcm]
+- ~~do [#krcm]~~
 - do [#lzshmblobparity]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#krcm] #lzsigzig3=[recommended] lazily-zig: pre-existing slot.zig:320 Slot.touch test crash on Zig 0.17.0-dev (installed 0.17.0-dev.892; repo targets 0.16 per commit 9b492d8). 3 of 4 test binaries crash in slot.touch, masking the full suite (signal.zig + state_machine tests pass). Investigate the Slot.touch path under the newer std.Io/async semantics, or pin the CI/dev Zig to 0.16.x until 0.17 is stable. Unrelated to #t0qn (Signal primitive is complete).
 - [ ] [#lzshmblobparity] #lzshmblobparity=[recommended] ShmBlobArena host parity for lazily-py + lazily-zig: only lazily-rs implements the owning arena (ipc.rs:150 ShmBlobArena<B>: with_capacity/from_buffer/write_blob:220/read_blob:269); py/zig have only ShmBlobRef + SharedBlob wire tagging (ref-only consumers, cannot host). Port arena 1:1 (py: bytearray+memoryview; zig: allocator-backed slice) + lazily-spec conformance test. Plan: tasks/software/plan-lazily-shmblob-parity.md. Resolves #pwvm/#9e64/#t1xt/#dcgp/#7gpg/#kjfe (IPC.lean protocol already DONE+proven; Lean extraction not indicated).
 <!-- /agent:backlog -->
 

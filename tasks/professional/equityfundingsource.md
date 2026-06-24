@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -71,7 +71,32 @@ Commits:
 
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:899d0ac4 -->
+
+### Re: Deploy — gpt-5
+
+> **Queue prompt:** deploy
+
+Deployed the committed EFS worker build.
+
+Deployment result:
+- Worker: `equityfundingsource`
+- URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Version ID: `3ea3cf58-6487-4b67-9e32-23ae02f8b38e`
+- Remote D1 migrations: no migrations to apply.
+- Assets: uploaded 1 new/modified static asset; 43 already uploaded.
+
+Commands:
+- `bun run deploy:worker`
+- `git status --short` in `src/equityfundingsource-dev` showed no generated file churn after deploy.
+
+Verification:
+- Deploy command exited 0 after build, asset packing, remote D1 migration check, asset upload, and Wrangler deploy.
+- Prior to deploy, `bun run check` and `make check` both exited 0 through tsift digest-runner.
+
+Changed paths: none in this deploy cycle.
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:62b37525 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -91,8 +116,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~All lender pipeline dialogs for a lender should contextualize the Message dialog to the lender. Remove and delete any embedded lender message components in the lender pipeline dialogs.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

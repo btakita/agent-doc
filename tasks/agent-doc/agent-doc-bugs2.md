@@ -89,7 +89,7 @@ Actionable follow-up stays in the queue/backlog: `#ipcqproof` covers the ACK dri
 Normalized the exchange component to remove stale prompt-prefix artifacts that were already answered but were still being classified as unresolved prompt-bearing user changes. This did not change the queue or backlog source of truth.
 
 Verification: `agent-doc patch` was used for the exchange component only; queue remains active with `#lzpkgwire` as the next head.
-<!-- agent:boundary:8df1a0a5 -->
+<!-- agent:boundary:c44e873f -->
 <!-- /agent:exchange -->
 
 ## Queue

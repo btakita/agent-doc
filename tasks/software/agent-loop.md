@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': ''
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 # agent-loop operations
@@ -81,7 +81,7 @@ Escalation: used a guarded `git push --force-with-lease=main:ad2433059...` becau
 Consumed by the completed rebase/force-push above. `origin/main` was rewritten with `--force-with-lease` from the accidental merge commit `ad2433059` to the rebased linear head `b34635be1`, and the latest remote check reported the expected SHA before the session response commit.
 
 Changed paths: only the session document was repaired in this closeout; no repo content changed for the rebase itself. Verification remains: local and remote were aligned at the rebased head (`git rev-list --left-right --count main...origin/main` returned `0 0` before this document repair commit), the rebased range had no merge commits, and `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
-<!-- agent:boundary:d46bc72b -->
+<!-- agent:boundary:e0e72ff2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -90,6 +90,8 @@ Changed paths: only the session document was repaired in this closeout; no repo 
 ## Queue
 
 <!-- agent:queue go -->
+- JB `Run Agent Doc` while codex session was restarting had a long delay to add the prompt and did not submit.
+- #advance-review
 <!-- /agent:queue -->
 
 ## Backlog

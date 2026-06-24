@@ -227,6 +227,11 @@ Recommended next steps, in order:
 4. Add the live `🚧` current-item annotation for queue/backlog/icebox items so active work is visible during a turn and stale active markers get cleaned up reliably at closeout.
 5. Reconcile `#xgdn` against the completed `#sz4a` route-dispatch proof work. The semantic-completion warning says it is probably already resolved, so the next action should be proof-based closeout or a narrowly scoped remaining-delta item.
 6. After the queue-drain fixes above, compact or repair the exchange drift only through the binary-owned path. The document still has historical reordered assistant fragments, and those are causing noisy preflight plans, but they should not be manually edited around the closeout machinery.
+- Documented the key in `specs/06-config.md` and `VERSIONS.md`.
+- Updated route-filed `#jbrunautobug` reports to write to the configured target and log both source and target files.
+- Updated `agent-doc plan` so `#agent-doc-bug` uses the configured target only when the prompt/preset did not explicitly name a backlog file.
+- Resolved configured targets with the same project-root / redundant-project-prefix rules as explicit backlog targets.
+- Added `agent_doc_bug_target_document` to project config, with default behavior unchanged: absent or empty means current document.
 
 No repo files changed for this planning-only queue item.
 
@@ -245,14 +250,42 @@ No repo files changed in this recovery-only closeout, and there are no new backl
 The `#next-steps` queue prompt was already answered and struck in the previous committed response. This closeout exists only to clear the stale prompt-target detector after exchange drift moved the quoted prompt around.
 
 No repo files changed, and there are no new backlog items from this recovery note.
-<!-- agent:boundary:496220d1 -->
+
+
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=1b11e1c5-c11b-4c4a-a0c4-deca07f1eb84 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=23421 candidate_hash=9f0dad3a2eb61086e297739fd8317db4a6b8de8bd54b98678ddb97feddd4b027 content_ours_len=24637 content_ours_hash=b8dbee12ed8faf4acbb136c3155b8b5668991823df4b561210f89e32ef4ffc73 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782329634879
+```
+
+### Re: #xgdn, dogfooding bug target, and IPC diagnostic — gpt-5
+
+> **Queue prompt:** :pushpin: do [#xgdn]
+
+`#xgdn` is the dispatch-only variant of the same equityfundingsource route/dispatch proof failure already closed by `#sz4a`; preflight also reported the semantic match at 0.997. I marked `#xgdn` done as duplicate-resolved rather than adding another route path.
+
+> **Queue prompt:** :pushpin: For tasks added from dogfooding issues, please add a configuration to select the agent document to write the backlog items to. The default is the current document. For agent-loop configure the document to this document.
+
+Implemented in `src/agent-doc` commit `0efc54af`:
+
+- Added `agent_doc_bug_target_document` to project config, with default behavior unchanged: absent or empty means current document.
+- Resolved configured targets with the same project-root / redundant-project-prefix rules as explicit backlog targets.
+- Updated `agent-doc plan` so `#agent-doc-bug` uses the configured target only when the prompt/preset did not explicitly name a backlog file.
+- Updated route-filed `#jbrunautobug` reports to write to the configured target and log both source and target files.
+- Documented the key in `specs/06-config.md` and `VERSIONS.md`.
+
+For this agent-loop workspace, `.agent-doc/config.toml` now contains `agent_doc_bug_target_document = "tasks/agent-doc/agent-doc-bugs2.md"`. That file is intentionally ignored by the superproject, so the local configuration is applied but not force-added.
+
+The fenced `ipc_proof_insufficient ... live_prompt_drift_after_preflight` block appended by preflight is diagnostic evidence from the stale IPC recovery path, not a new user directive. I handled it by reinstalling the freshly built binary/cdylib and requesting `agent-doc admin recycle` so the route-owned controller can pick up the new build at an idle boundary.
+
+Verification: targeted config/plan/route tests passed; `make check` passed with clippy, 5085 nextest tests, doctests, and the medium closeout sim; latest GitHub Actions CI run `28121997991` was green. I also ran `make install`, which replaced the local binary/cdylib.
+<!-- agent:boundary:ad3fcdd8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - :pushpin: do [#xgdn]
-- :pushpin: For tasks added from dogfooding issues, please add a configuration to select the agent document to write the backlog items to. The default is the current document. For agent-loop configure the document to this document.
+- ~~:pushpin: For tasks added from dogfooding issues, please add a configuration to select the agent document to write the backlog items to. The default is the current document. For agent-loop configure the document to this document.~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.
 - :pushpin: do [#promptprefixorch1]
 ---
@@ -288,7 +321,7 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#promptprefixorch1] Fix prompt-prefixed recovery/evidence lines in agent:exchange being classified as user prompt targets and orchestration tasks after interrupted closeout recovery; preserve them as agent evidence or strip prompt markers during recovery.
-- [ ] [#xgdn] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%3 actor_generation=596 editor_attempt_id=1782325712508-18 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_only_dispatch_start_proof content_hash=sha256:3251e072b5c1857ba06e9ba613e1004b5eefef103db7003d7dcf7efe0d698ea8]
+- [x] [#xgdn] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%3 actor_generation=596 editor_attempt_id=1782325712508-18 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_only_dispatch_start_proof content_hash=sha256:3251e072b5c1857ba06e9ba613e1004b5eefef103db7003d7dcf7efe0d698ea8]
 <!-- /agent:backlog -->
 
 ## Review

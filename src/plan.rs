@@ -727,15 +727,6 @@ fn pending_mutations_for_doc(
         added_diff_lines,
         &fm.prompt_presets,
     ) {
-        let target_files = agent_doc_orchestration::prompt_contract::explicit_backlog_targets(
-            file,
-            prompt_targets,
-            added_diff_lines,
-            &fm.prompt_presets,
-        )?
-        .into_iter()
-        .map(|path| path.display().to_string())
-        .collect();
         let issue_units =
             agent_doc_orchestration::prompt_contract::ordered_issue_units_for_agent_doc_bug(
                 prompt_targets,
@@ -743,6 +734,25 @@ fn pending_mutations_for_doc(
                 &fm.prompt_presets,
                 prompt_bearing_changes,
             );
+        let mut target_paths = agent_doc_orchestration::prompt_contract::explicit_backlog_targets(
+            file,
+            prompt_targets,
+            added_diff_lines,
+            &fm.prompt_presets,
+        )?;
+        if target_paths.is_empty()
+            && !issue_units.is_empty()
+            && let Some(target) =
+                agent_doc_orchestration::project_config::agent_doc_bug_target_document_for_doc(
+                    file,
+                )?
+        {
+            target_paths.push(target);
+        }
+        let target_files = target_paths
+            .into_iter()
+            .map(|path| path.display().to_string())
+            .collect();
         if issue_units.len() > 1 {
             eprintln!(
                 "[plan] #agent-doc-bug declaration_order={} final_insert_order={}",
@@ -1777,6 +1787,128 @@ prompt_presets:
                 .any(|cmd| cmd.contains("--pending-add-to") && cmd.contains("bugs.md")),
             "expected finalize hint to include --pending-add-to, got {:?}",
             plan.required_commands
+        );
+    }
+
+    #[test]
+    fn agent_doc_bug_uses_configured_target_when_preset_has_no_explicit_file() {
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            r#"agent_doc_bug_target_document = "tasks/agent-doc/agent-doc-bugs2.md"
+"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks/agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks/software")).unwrap();
+        let doc = dir.path().join("tasks/software/source.md");
+        let target = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
+        std::fs::write(
+            &target,
+            "<!-- agent:backlog -->\n- [ ] [#old1] Existing\n<!-- /agent:backlog -->\n",
+        )
+        .unwrap();
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+prompt_presets:
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog.
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+"#;
+
+        let current = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "#agent-doc-bug\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+        let expect_add = plan
+            .pending_mutations
+            .iter()
+            .find(|m| m.kind == PendingMutationKind::ExpectAdd)
+            .expect("expected ExpectAdd mutation");
+        assert_eq!(
+            expect_add.target_files,
+            vec![target.canonicalize().unwrap().display().to_string()]
+        );
+    }
+
+    #[test]
+    fn agent_doc_bug_explicit_target_overrides_configured_target() {
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            r#"agent_doc_bug_target_document = "configured-bugs.md"
+"#,
+        )
+        .unwrap();
+        let doc = dir.path().join("plan.md");
+        let configured = dir.path().join("configured-bugs.md");
+        let explicit = dir.path().join("explicit-bugs.md");
+        std::fs::write(
+            &configured,
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &explicit,
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+        )
+        .unwrap();
+
+        let baseline = format!(
+            r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+prompt_presets:
+  '#agent-doc-bug': Please create a plan. Add to the backlog of {}
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+"#,
+            explicit.display()
+        );
+
+        let current = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "#agent-doc-bug\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, &baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+        let expect_add = plan
+            .pending_mutations
+            .iter()
+            .find(|m| m.kind == PendingMutationKind::ExpectAdd)
+            .expect("expected ExpectAdd mutation");
+
+        assert_eq!(
+            expect_add.target_files,
+            vec![explicit.canonicalize().unwrap().display().to_string()]
         );
     }
 

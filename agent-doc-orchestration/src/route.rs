@@ -727,8 +727,29 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
             return;
         }
     };
+    let target_file = match crate::project_config::agent_doc_bug_target_document_for_doc(facts.file)
+    {
+        Ok(Some(target)) => target,
+        Ok(None) => facts.file.to_path_buf(),
+        Err(err) => {
+            crate::ops_log::log_op(
+                facts.file,
+                &format!(
+                    "route_dispatch_bug_target_resolve_failed file={} pane={} harness={} phase={} issue={} error={}",
+                    facts.file.display(),
+                    facts.pane,
+                    facts.harness.binary,
+                    facts.phase,
+                    facts.issue,
+                    crate::secret_redact::redact(&err.to_string())
+                        .replace(char::is_whitespace, "_")
+                ),
+            );
+            facts.file.to_path_buf()
+        }
+    };
     let items = [item];
-    match crate::pending_cmd::add_many(facts.file, &items, false) {
+    match crate::pending_cmd::add_many(&target_file, &items, false) {
         Ok(ids) => {
             let id = ids
                 .first()
@@ -737,8 +758,9 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
             crate::ops_log::log_op(
                 facts.file,
                 &format!(
-                    "route_dispatch_bug_backlog_filed file={} pane={} harness={} phase={} issue={} id={} inserted={}",
+                    "route_dispatch_bug_backlog_filed file={} target_file={} pane={} harness={} phase={} issue={} id={} inserted={}",
                     facts.file.display(),
+                    target_file.display(),
                     facts.pane,
                     facts.harness.binary,
                     facts.phase,
@@ -752,8 +774,9 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
             crate::ops_log::log_op(
                 facts.file,
                 &format!(
-                    "route_dispatch_bug_backlog_file_failed file={} pane={} harness={} phase={} issue={} error={}",
+                    "route_dispatch_bug_backlog_file_failed file={} target_file={} pane={} harness={} phase={} issue={} error={}",
                     facts.file.display(),
+                    target_file.display(),
                     facts.pane,
                     facts.harness.binary,
                     facts.phase,
@@ -7457,6 +7480,63 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             ops.contains("route_dispatch_bug_backlog_filed")
                 && ops.contains("inserted=true")
                 && ops.contains("inserted=false"),
+            "{ops}"
+        );
+    }
+
+    #[test]
+    fn route_dispatch_bug_report_uses_configured_bug_target_document() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks/agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            r#"agent_doc_bug_target_document = "tasks/agent-doc/agent-doc-bugs2.md"
+"#,
+        )
+        .unwrap();
+        let doc = dir.path().join("run-agent-doc.md");
+        let target = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &target,
+            "---\nagent_doc_session: bugs\n---\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+        )
+        .unwrap();
+        let diagnostic = dir
+            .path()
+            .join(".agent-doc/logs/route-submit/configured.txt");
+        let facts = RouteDispatchBugReportFacts {
+            file: &doc,
+            pane: "%7",
+            harness: &HarnessConfig::codex(),
+            phase: "direct_pane_submit_final",
+            issue: "prompt_not_submitted",
+            result: "submit_timed_out_without_proof",
+            elapsed: Duration::from_secs(30),
+            proof: None,
+            diagnostic_path: Some(&diagnostic),
+        };
+
+        file_route_dispatch_bug_report(facts);
+
+        let source = std::fs::read_to_string(&doc).unwrap();
+        let filed = std::fs::read_to_string(&target).unwrap();
+        assert!(
+            !source.contains("#jbrunautobug"),
+            "source document should not receive configured bug target item: {source}"
+        );
+        assert!(filed.contains("#jbrunautobug"), "{filed}");
+        assert!(filed.contains("document="), "{filed}");
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("route_dispatch_bug_backlog_filed")
+                && ops.contains("target_file=")
+                && ops.contains("agent-doc-bugs2.md"),
             "{ops}"
         );
     }

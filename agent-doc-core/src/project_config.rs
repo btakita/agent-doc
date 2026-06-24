@@ -267,6 +267,15 @@ pub struct ProjectConfig {
     /// docs cannot force it on.
     #[serde(default, alias = "supervisor_auto_install")]
     pub agent_doc_supervisor_auto_install: Option<bool>,
+    /// Optional project-default document for `#agent-doc-bug` / dogfooding bug
+    /// backlog capture. When absent or empty, bug backlog items stay in the
+    /// current session document.
+    #[serde(
+        default,
+        alias = "bug_target_document",
+        alias = "agent_doc_bug_backlog_document"
+    )]
+    pub agent_doc_bug_target_document: Option<String>,
     /// Guard behavior overrides (for example pending-capture enforcement).
     #[serde(default)]
     pub guards: GuardConfig,
@@ -415,6 +424,21 @@ mod documents_gate_tests {
             },
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn parses_agent_doc_bug_target_document() {
+        let cfg = parse_project_toml(
+            r#"
+agent_doc_bug_target_document = "tasks/agent-doc/agent-doc-bugs2.md"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            cfg.agent_doc_bug_target_document.as_deref(),
+            Some("tasks/agent-doc/agent-doc-bugs2.md")
+        );
     }
 
     #[test]

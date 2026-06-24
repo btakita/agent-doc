@@ -37,6 +37,22 @@ pub fn project_root_for_doc(file: &Path) -> Option<PathBuf> {
     crate::fs_util::find_project_root(file)
 }
 
+/// Resolve the optional project-default document used for dogfooding
+/// `#agent-doc-bug` backlog capture. Relative configured paths are interpreted
+/// with the same project-root / redundant-project-prefix rules as explicit
+/// markdown backlog targets. `None` means "use the current document".
+pub fn agent_doc_bug_target_document_for_doc(file: &Path) -> Result<Option<PathBuf>> {
+    let config = load_project_for_doc(file);
+    let Some(target) = config.agent_doc_bug_target_document.as_deref() else {
+        return Ok(None);
+    };
+    let target = target.trim();
+    if target.is_empty() {
+        return Ok(None);
+    }
+    crate::security::referenced_markdown_path_checked(file, target)
+}
+
 /// Load project config from an explicit path. On absence, I/O error, or
 /// parse error, returns `ProjectConfig::default()` and emits a warning
 /// to stderr (never panics). Performs one-time migration from legacy
@@ -177,6 +193,30 @@ mod tests {
     fn setup_project(dir: &Path) -> PathBuf {
         std::fs::create_dir_all(dir.join(".agent-doc")).unwrap();
         dir.join(".agent-doc").join("config.toml")
+    }
+
+    #[test]
+    fn agent_doc_bug_target_document_resolves_relative_to_project_root() {
+        let dir = TempDir::new().unwrap();
+        let config_path = setup_project(dir.path());
+        std::fs::create_dir_all(dir.path().join("tasks/agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks/software")).unwrap();
+        let current = dir.path().join("tasks/software/source.md");
+        let target = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
+        std::fs::write(&current, "# source\n").unwrap();
+        std::fs::write(&target, "# bugs\n").unwrap();
+        std::fs::write(
+            &config_path,
+            r#"agent_doc_bug_target_document = "tasks/agent-doc/agent-doc-bugs2.md"
+"#,
+        )
+        .unwrap();
+
+        let resolved = agent_doc_bug_target_document_for_doc(&current)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(resolved, target.canonicalize().unwrap());
     }
 
     #[test]

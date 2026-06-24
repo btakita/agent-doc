@@ -132,13 +132,32 @@ Implemented restart-agent Phase 1b kill-guard for frontmatter `agent:` harness s
   - GitHub CI run `28068962411` passed with `make check` and `make tmux-ci`.
 
 Note: the live `src/agent-doc` checkout still has unrelated pre-existing dirty files `agent-doc-orchestration/src/write.rs` and `agent-doc-orchestration/src/write/queue_consume.rs`. I left them unstaged and untouched. Because those dirty files conflict with the remote main update, the parent gitlink was staged directly to the pushed submodule commit rather than switching the live submodule checkout.
-<!-- agent:boundary:dbf96c5e -->
+
+### Re: commit uncommitted files in agent-doc — gpt-5
+
+> **Queue prompt:**
+>
+> commit uncommitted files in agent-doc
+
+Committed the uncommitted `src/agent-doc` changes and recorded the parent submodule pointer.
+
+- Changed paths: `src/agent-doc/agent-doc-orchestration/src/write.rs`, `src/agent-doc/agent-doc-orchestration/src/write/queue_consume.rs`, and parent gitlink `src/agent-doc`.
+- Commands: `cargo test -p agent-doc-orchestration consume_decision_keeps_free_text_head_without_exact_response_proof -- --nocapture`; `cargo test -p agent-doc-orchestration consume_decision_strikes_answered_free_text_head -- --nocapture`; `cargo test -p agent-doc-orchestration explicit_signal_done_flag_consumes -- --nocapture`; `cargo test -p agent-doc finalize_echoes_consumed_free_text_queue_prompt_into_response -- --nocapture`; `make check`; `gh run list --workflow CI --limit 1`.
+- Verification: focused queue tests passed; `make check` passed with 5047 nextest tests, doctests, and the medium SimWorld seed; latest CI was green (`28068962411`).
+- Commit: `src/agent-doc` submodule commit `660e4a58` (`fix: guard free-text queue consumption`); parent gitlink commit `0be2b13d7` (`chore: update agent-doc submodule`).
+- Confidence: high.
+- Escalation: none.
+
+I did not push; this queue item requested committing the local uncommitted files.
+<!-- agent:boundary:90d6daf2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#advr01]~~
+- ~~commit uncommitted files in agent-doc~~
+- Add an emoji that annotates the current queue item and backlog item. Pick the most appropriate emoji.
 - do [#advr02]
 - do [#advr03]
 - do [#advr04]

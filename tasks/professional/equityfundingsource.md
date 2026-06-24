@@ -117,7 +117,29 @@ Changed paths this closeout cycle: none in app code. Commands this closeout cycl
 No actionable EFS follow-up items are needed for this IPC diagnostic.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:c46e6751 -->
+
+### Re: Borrower Lead Prefill And Deploy — gpt-5
+
+> **Queue prompt:**
+> https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 should prefill any data that we have, such as the First Name + Last Name + email address.
+>
+> **Queue prompt:**
+> deploy
+
+Implemented, pushed, and deployed.
+
+Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/borrower/full_application.tsx`, `tests/borrower-lead-to-tmo-flow.test.ts`, `tests/apply4-full-application-p1.test.ts`, and `prds/borrower-application-lead-to-tmo-plan.md`.
+
+What changed: a direct borrower application URL with `?lead_id=...` now starts or resumes the lead-backed draft through the authenticated draft POST endpoint with `create_if_missing=true`. That endpoint already validates the lead and applies the existing deterministic `application_lead_prefill_apply_` helper, so the wizard's section fetch sees known lead fields such as first name, last name, email, phone, and property/request data without overwriting borrower-entered values.
+
+Commits: EFS submodule commit `e3d2830 fix(borrower): prefill lead application links` was pushed to `origin/main`. Parent repo gitlink commit `210f8c4ba chore(efs): bump lead prefill submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` by 39 commits with unrelated work.
+
+Verification: focused `bun test tests/borrower-lead-to-tmo-flow.test.ts tests/apply4-full-application-p1.test.ts` passed (`12 pass / 0 fail`). `git diff --check` passed. Full `make check` passed (`1193 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+
+Deploy: pre-deploy remote D1 migrations reported no pending migrations, and the Time Travel bookmark was `0000050d-00000004-00005094-df441773e9b30c807983ba477615bcd3`. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `a964ccdb-ccfa-4c2e-8168-1ec20b0295ec`. Post-deploy checks: remote D1 migrations still reported no migrations to apply; public root returned `HTTP 200`; the protected borrower URL returned the expected unauthenticated `HTTP 303` redirect to `/login?role=borrower&next=%2Fborrowers%2Fnew-application%3Flead_id%3Dc907d851-8870-49aa-a6fc-66d393868ce1`, preserving the lead id through login.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:98e4e713 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -137,6 +159,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 should prefill any data that we have, such as the First Name + Last Name + email address.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

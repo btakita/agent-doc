@@ -150,7 +150,7 @@ Drafted `mail/drafts/linkedin/2026-06-24-lazily-state-machine.md` (matching the 
 **Committed + pushed:** `mail` submodule `8c1f562..cbb78ac` → `btakita/mail`; superproject gitlink `cf15c5bbe` → `btakita/agent-loop` (pushed).
 
 **Follow-up:** posting itself is operator-gated (needs `corky linkedin` + the themed image render) → filed as gated review `#lilazilysmpost`, mirroring the `#kabc` architecture-post flow.
-<!-- agent:boundary:a58f1836 -->
+<!-- agent:boundary:ac5bc405 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -159,6 +159,7 @@ Drafted `mail/drafts/linkedin/2026-06-24-lazily-state-machine.md` (matching the 
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Edited the LinkedIn teaser draft to remove AI tells. Use my natural "voice" in this post.
 <!-- /agent:queue -->
 
 ## Backlog

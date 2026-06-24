@@ -71,7 +71,7 @@ Commit/deploy: EFS commit `bf7b27d` (`fix(admin): align pipeline edit controls`)
 Verification: `bun test tests/admin-full-application-approve-ui.test.ts tests/admin-investor-pipeline.test.ts` passed (`108 pass / 0 fail`). `git diff --check` was clean. `make check` passed (`1191 pass / 0 fail`, app build, Worker build). Pre-deploy D1 checks showed no pending remote migrations, D1 info available, and a current Time Travel bookmark. Post-deploy `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` again showed no pending migrations, and `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/` returned `200`. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:720dfdb0 -->
+<!-- agent:boundary:8fb07aef -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -91,8 +91,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Review all form edit fields in the Deal Pipeline + Lender Pipeline. Make sure the correct input is used (dropdown instead of free text where appropriate).~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

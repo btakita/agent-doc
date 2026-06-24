@@ -118,7 +118,30 @@ Session-doc recovery note:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:864bec5e -->
+❯ **IPC proof issue dogfood log**
+
+❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+❯ Issue class: `ipc_proof_insufficient`
+❯ Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=f0cd2e07-6a5e-4ca9-8ebc-11422c4ad06e invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782282557185
+```
+### Re: IPC recovery note — gpt-5
+
+Recorded the IPC proof diagnostic that was appended during recovery. The duplicate-card investigation response is present in the exchange, and the queue is drained.
+
+Changed paths: `tasks/professional/equityfundingsource.md` only.
+
+Verification:
+- `agent-doc read --component exchange` confirmed the duplicate-card answer is present.
+- `agent-doc read --component queue` confirmed the queue is empty after consuming the stale already-completed heads.
+- `git diff -- tasks/professional/equityfundingsource.md` showed only the IPC diagnostic/HEAD marker drift before this closeout response.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:280b1f8b -->
 <!-- /agent:exchange -->
 ###
 <!--

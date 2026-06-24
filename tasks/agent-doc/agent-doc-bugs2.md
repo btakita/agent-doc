@@ -34,125 +34,27 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-051651.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-055704.md`*
 
 Compacted content:
-❯ - Archived 4 response topic(s): #advr11; #advr12; #advr13; 1 more
+❯ - Archived 5 response topic(s): #advr15; #advr16; #advr17; 2 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
+**IPC proof issue dogfood log**
 
-### Re: #advr15 — gpt-5
+Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
 
-Converted the recycle-boundary `Run Agent Doc` verification into deterministic proof coverage for `#jbdisprecycle`.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
 
-The runtime R1/R2/R3 fixes were already shipped (`ad55b993`, `d21079b7`): dispatch gates before pane input while `recycle_inflight` is set, `start_session` retries while the recycle marker is fresh, and `route/dispatch.rs` logs `route_dispatch_submit_recycle_settle` before the post-settle submit retry.
-
-I added the missing deterministic proof layer in SimWorld:
-- The modeled post-recycle dispatch now records `route_dispatch_submit_recycle_settle ... action=submit_once_after_settle` before rejoining the normal dispatch path.
-- Dispatch proof now records `dispatch_start_proof ... proof=submitted` when a pending dispatch is proved.
-- `route_sim_dispatch_defers_during_recycle_then_injects_once_after_settle` now asserts: no injection while recycling, exactly one post-settle `dispatch_inject attempt=1`, exactly one recycle-settle submit marker, exactly one `dispatch_start_proof`, no `attempt=2`, and no stranded `start_session failed` text.
-
-Verification passed:
-- `cargo fmt`
-- `cargo test recycle -- --test-threads=2`
-- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --test-threads=2`
-- `make check`
-- `git -C src/agent-doc diff --check`
-- `gh run list --workflow CI --limit 1` (latest CI success: `28074608395`)
-
-Commits: submodule `896563a9 test(sim): prove recycle-boundary dispatch submit`; parent `ec9d1f2d3 chore: advance agent-doc submodule`.
-
-### Re: #advr16 — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: do [#advr16]
-
-
-Completed #advr16. The focused-cycle supervisor path now has deterministic proof for the full handoff: `session-check` logs `session_check_supervisor_drain_handoff` with `ui_outcome=deferred_for_supervisor_drain` / `next_action=yield_to_supervisor_clear_and_continue`, idle-watch logs a focused-cycle-specific `#qfocsup` context reset instead of the clean-session reason, the following `idle_queue_watch_drain` carries `proof=go_drain_dispatch`, and SimWorld proves the stale-supervisor recycle, clear settle, go-drain dispatch, and fresh-agent response-materialization sequence.
-
-Changed submodule commit: `ad8709344 test(queue): prove focused-cycle supervisor drain`; parent gitlink commit: `920e94087 chore: advance agent-doc submodule`. Verification passed: targeted focused-cycle/session-check/idle-watch tests, `make check`, `git -C src/agent-doc diff --check`, latest GitHub Actions CI run `28074608395` success. I also ran `make install`; `lib-install` marked one controller for recycle at the next idle boundary.
-
-### Re: #advr17 — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: do [#advr17]
-
-
-Closed #advr17 as already satisfied by the shipped `#fbwire` / `#fullboundary` implementation. The acceptance pieces are present in `85b173fb` and `2367d883`: the supervisor idle-watch runs `convergence_gate_decision` before inter-item dispatch, slow ACK keeps deferring while `inflight > 0` so the next head cannot pile up, wedged no-ACK crosses the bounded timeout into `ForceDiskFallback`, and the fallback emits `convergence_gate_force_disk_fallback severity=error` with a persisted loadable playback artifact.
-
-Fresh verification passed: `cargo test -p agent-doc-orchestration convergence_gate_slow_ack_drain_never_dispatches_while_inflight_positive -- --test-threads=2`, `cargo test -p agent-doc-orchestration convergence_gate_wedged_editor_trips_force_disk_after_timeout -- --test-threads=2`, `cargo test -p agent-doc-orchestration record_convergence_force_disk_fallback_emits_loud_error_and_loadable_playback -- --test-threads=2`, `make tmux-ci`, and the previously-run `make check`. Latest GitHub Actions CI run `28074608395` is successful. No additional code changes were needed for this item.
-
-### Re: #advr18 — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: do [#advr18]
-
-
-Completed the op-capture verification work for `#qnodemerge4verify` and installed the updated local binary/library.
-
-What changed:
-- `agent_doc_record_editor_op` now records byte evidence in `ops.log`: `delete_len`, `insert_bytes`, and `insert_non_ascii`, without logging inserted text.
-- `merge_contents_crdt_with_ops` now logs durable merge-consumer proof when captured ops are actually accepted: `editor_ops_for_base accepted=true ... offsets=... delete_bytes=... insert_bytes=... insert_non_ascii=... #qnodemerge4wire`.
-- Added `agent-doc verify-op-capture <FILE> [--expect-cafe-demo]`, which fails closed unless the target document has both producer-side `editor_op_recorded` and merge-side `editor_ops_for_base accepted=true` evidence. With `--expect-cafe-demo`, it verifies the canonical `café 日本 😀` byte contract: `offset=6`, `delete_len=6`, and non-ASCII insert evidence.
-- Added deterministic regressions for the FFI non-ASCII sidecar path and merge acceptance path, replacing `日本` with `世界` at UTF-8 byte offset `6` and asserting no mojibake.
-
-Verification passed:
-- `cargo fmt`
-- `cargo test record_editor_op_ffi_preserves_non_ascii_byte_offsets -- --test-threads=2`
-- `cargo test -p agent-doc-orchestration merge_with_ops_logs_accepted_non_ascii_byte_offsets -- --test-threads=2`
-- `cargo test op_capture_verify::tests -- --test-threads=2`
-- existing op-capture wiring tests
-- `npm test` in `editors/vscode` (includes existing `café 日本` and emoji UTF-16 to UTF-8 tests)
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` in `editors/jetbrains`
-- `make check` (clippy, 5068 tests, doctests, medium SimWorld corpus)
-- `git diff --check`
-- latest GitHub Actions CI run is green: `28074608395`
-
-Commits:
-- `57ecf388 qnodemerge4: add op-capture verifier` in `src/agent-doc`
-- `99bc090fb chore: advance agent-doc submodule` in the parent repo
-
-For the operator-side IDE replay, the installed checker is now the proof command after the live edit/merge: `agent-doc verify-op-capture <FILE> --expect-cafe-demo`.
-
-### Re: #advr19 — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: do [#advr19]
-
-
-Instrumented the remaining File Cache Conflict surfaces so the next JetBrains run can distinguish the trigger path instead of only seeing the dialog after the fact.
-
-Changed:
-- `agent-doc-orchestration/src/write.rs` now logs visible-document routing as `write_authority action=routed transport=write_queue ...`.
-- `PatchWatcher.kt` now writes durable `.agent-doc/logs/ops.log` markers for `file_cache_conflict_detected source=jetbrains outcome=pending|cancel surface=editor_ipc_convergence action=apply_patch agent_command=write_finalize_ipc ... #cyh0`.
-- `PatchWatcher.kt` also records `editor_surface_event ... surface=ack_content|vcs_refresh|vcs_refresh_save ... #cyh0`, covering ack-content, VCS refresh, and save-document convergence surfaces.
-- JetBrains tests assert the marker builders and static conflict path wiring.
-
-Verification:
-- `cargo fmt --check`
-- `cargo test -p agent-doc-orchestration write_authority_visible_write_routes_through_queue_without_deadlock -- --test-threads=2`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.NormalizeExchangePrefixesTest`
-- `npm test` in `editors/vscode`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`
-- `make check` passed: 5069 tests, doctests, and medium SimWorld corpus.
-- `git diff --check`
-- `gh run list --workflow CI --limit 1` reported success for run `28074608395`.
-
-Install/commit status:
-- Installed updated CLI/lib with `make install`; then ran `agent-doc admin recycle` after preflight flagged the old route-owned supervisor binary.
-- Built the JetBrains plugin zip, but `agent-doc plugin install --local jetbrains` stopped because multiple JetBrains plugin directories require an interactive choice. Install `/home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.183-signed.zip` into the IDE profile you are testing before the JB live gate.
-- Commits: `src/agent-doc` `4a38bf98` (`cyh0: instrument file cache conflict surfaces`), parent `fa2882cec` (`chore: advance agent-doc submodule`).
-<!-- agent:boundary:9589233f -->
+```text
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=c695cb4e-a178-426a-af2d-54597f475e60 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=14852 candidate_hash=2c87e52bd79c83bbcb1c24d2fb1a447ceb2c3bbef71d9b4ef5b20ead37ca2bdd content_ours_len=15094 content_ours_hash=17e2163450eca7e718edd528de557795088ee212beddd6ac5048f8918c88b344 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782280562177
+```
+<!-- agent:boundary:7e678985 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#advr18]~~
-- ~~:pushpin: do [#advr19]~~
 - :pushpin: JB `Run Agent Doc` still does not quickly submit the prompt.
 <!-- /agent:queue -->
 <!--

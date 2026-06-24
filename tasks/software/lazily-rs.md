@@ -120,7 +120,25 @@ Same question as the two heads already struck — answered in `### Re: lazily-kt
 So: **thin event-reporter + rich projection-renderer**, binary stays the single state authority. The FFI channel carries values + events both ways; references and transition logic stay one-sided.
 
 **Net:** build the lazily-ipc Snapshot/Delta channel (Phase 2), mirror projection VALUES into platform-native reactive holders, let plugins trigger transitions by reporting events — and stop short of mirroring reactive references or running durable FSMs in-process. I'll fold this values-vs-references contract into the plan's Phase 2 design.
-<!-- agent:boundary:854d5eb5 -->
+
+### Re: references = pointer to object/blob — mirror via `SharedBlob` descriptor, never raw pointer — glm-5.2
+
+> **Queue prompt:** What I mean by reference is if the Cell value is a reference pointer to an object or blob. Would that be recommended to mirror or to not mirror?
+
+Great clarification — and it surfaces a category my last answer wrongly folded into "references (no)." A Cell whose value is itself a pointer/reference to an object or blob is **neither** a pure inline value **nor** a reactive-graph reference. It is a **by-reference payload**, and lazily-ipc already has a first-class answer for it: mirror it **by descriptor**, never by raw pointer.
+
+**The protocol already defines this — `IpcValue::SharedBlob(ShmBlobRef)` (`lazily-rs/src/ipc.rs:47`, descriptor at `:32`).** `ShmBlobRef` is exactly a mirrorable "reference to an object/blob": it carries `{offset, len, generation, epoch, checksum}` into a managed `ShmBlobArena` (`ipc.rs:150`). The arena writes a 40-byte header (magic `"LZSH"`, version, generation, epoch, len, checksum) before every payload and re-validates all of it on read (`read_blob`, `ipc.rs:269`) — so stale regions are rejected after wraparound, torn writes are caught by checksum, and the plugin never dereferences Rust memory. `DeltaOp::{CellSet, SlotValue}` (`ipc.rs:458/460`) and `NodeState::SharedBlob` (`ipc.rs:328`) both carry it, and `cell_set_blob`/`slot_value_blob` (`ipc.rs:501/506`) are the constructors. So the recommended path already exists.
+
+**The full taxonomy (what crosses, and how):**
+1. **Small structured values → `IpcValue::Inline`** — serialize bytes into the delta. Mirror freely.
+2. **Large object/blob values → `IpcValue::SharedBlob(ShmBlobRef)`** — **YES, mirror**, by descriptor into the arena. This is the recommended way to avoid copying a big payload into every delta. The descriptor IS the reference; the arena is the backing store; generation/checksum guard against drift between the two sides.
+3. **Reactive dependency edges → structural data only** — `EdgeSnapshot`/`EdgeAdd`/`EdgeRemove` over `NodeId`s (`ipc.rs:375/472/477`): graph *shape* crosses, not live reactive *behavior*. The plugin renders shape; closures/propagation stay binary-side.
+4. **Raw Rust pointers / typed handles (`&T`, `Arc<T>`, `*mut T`) → NEVER.** `ffi.rs:1-6` and `ipc.rs:8-10` explicitly forbid exposing live contexts, references, closures, or typed handles. `NodeState::Opaque` (`ipc.rs:330`) is the escape hatch — advertise a node's existence without leaking the reference behind it.
+
+**So: recommended to mirror?** Yes — for the *payload*, via `SharedBlob` descriptor. No — for a raw pointer into Rust memory. The line is "descriptor + managed arena with integrity guards" vs. "dereferenceable address-space pointer." My prior "references (no)" was right only for category 3/4 (reactive-graph references and raw handles); it was wrong to imply category 2 (blob-by-reference) is off-limits — lazily already ships the mechanism.
+
+**Plan updated:** folded this three-way contract (inline value / blob-by-descriptor / structural-edge / raw-pointer-never) into Phase 2 of `tasks/software/plan-lazily-ffi-state-projection.md`, including the `ShmBlobArena` validation path so Phase 2 picks `SharedBlob` for large projection payloads instead of re-inlining them.
+<!-- agent:boundary:758f4e11 -->
 <!-- /agent:exchange -->
 ###
 <!--

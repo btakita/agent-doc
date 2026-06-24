@@ -126,7 +126,66 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/profession
 
 The remaining uncommitted exchange drift is the automatically appended IPC diagnostic from the writeback recovery path. No EFS code or deploy work remains; this response only closes that diagnostic cycle.
 
-<!-- agent:boundary:b6dab03e -->
+### Re: Pipeline dialog keyboard navigation — gpt-5
+
+> In all admin deal pipeline and lender pipeline dialogs, make the top actionable item (button or field) focused. Support the up/down arrow keys to navigate between actionable items. Ensure the focused item is visible within the viewport. We already have an implementation of this in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c&dialog=lender. Unify the implementation of this logic so all pipeline dialogs use the same logic.
+
+Implemented and pushed.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/ui.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `src/equityfundingsource-dev/prds/investor-pipeline-admin.md`
+- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/message-avatar-shortcut.test.ts`
+- `src/equityfundingsource-dev/tests/document-viewer.test.ts`
+- `src/equityfundingsource-dev/tests/download-security.test.ts`
+- `src/equityfundingsource-dev/tests/advance-lender-documents.test.ts`
+- `src/equityfundingsource-dev/tests/borrower-messages.test.ts`
+- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
+- `src/equityfundingsource-dev` submodule pointer
+
+What changed:
+- Added shared `use_dialog_action_navigation_` in shared UI code with reusable initial-focus, ArrowDown/ArrowUp navigation, disabled/hidden filtering, and `scrollIntoView({ block: 'nearest', inline: 'nearest' })` visibility behavior.
+- Wired all admin Deal Pipeline dialogs and Lender Pipeline dialogs through the shared hook instead of keeping the lender-dialog-only implementation.
+- Marked each dialog's first intended action with `data-dialog-initial-focus="true"` and generic action navigation attributes.
+- Disabled parent-dialog navigation while stacked child dialogs are open where applicable.
+- Updated PRDs and source-contract tests for the shared dialog keyboard behavior and rebased document/message component contracts.
+
+Commits:
+- EFS submodule: `34c3304 fix(admin): share pipeline dialog keyboard nav` pushed to `btakita/equityfundingsource-dev:main`.
+- Superproject: `58fb5b3d1 chore: update equityfundingsource submodule` pushed to `btakita/agent-loop:main`.
+
+Verification:
+- `bun test tests/admin-pipeline.test.ts tests/admin-investor-pipeline.test.ts tests/advance-lender-dialog.test.ts` passed before the rebase.
+- `bun test tests/message-avatar-shortcut.test.ts tests/document-viewer.test.ts tests/download-security.test.ts tests/advance-lender-documents.test.ts tests/admin-investor-pipeline.test.ts tests/borrower-messages.test.ts tests/investor-portal-e2e.test.ts` passed: 196 pass, 0 fail.
+- `make check` in `src/equityfundingsource-dev` exited 0. The digest still surfaced the known non-fatal `error: d1 down` failure-path log.
+- `make check` in the superproject exited 0.
+- `gh run list --workflow CI --limit 1` was checked in both repos; both returned `could not find any workflows named CI`.
+
+Confidence: high. The behavior is centralized in one hook and covered by source-contract tests for both pipeline surfaces.
+
+Escalation: none.
+
+### Re: Deploy — gpt-5
+
+> deploy
+
+Deployed with the documented EFS runbook flow.
+
+Deployment proof:
+- Pre-deploy `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`: no migrations to apply.
+- Pre-deploy `bun run cf:d1:info`: remote D1 reachable.
+- Pre-deploy `bun run cf:d1:time-travel:info`: current bookmark `00000502-00000036-00005094-bc36dbfd8e1586a5978bcb35dcef60cf`.
+- `make deploy` succeeded.
+- Worker Version ID: `64829c8a-213a-4f43-9234-321b1f39a46d`.
+- Post-deploy migrations check: no migrations to apply.
+- Public smoke test `https://equityfundingsource.brian-takita.workers.dev/`: `200`.
+- Protected admin lender-pipeline URL: `303`, expected Cloudflare Access redirect without an authenticated browser session.
+<!-- agent:boundary:0b101491 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -146,6 +205,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~In all admin deal pipeline and lender pipeline dialogs, make the top actionable item (button or field) focused. Support the up/down arrow keys to navigate between actionable items. Ensure the focused item is visible within the viewport. We already have an implementation of this in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c&dialog=lender. Unify the implementation of this logic so all pipeline dialogs use the same logic.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -167,7 +167,24 @@ Also closing `#hj5x` (Lean SM↔IPC proof, submodule `2506182`, gitlink `0987e59
 **Drain summary this session:** `#9226` (engine Phase 1) → Zig 0.16 compat → `#nnyn` (StateMachine) → `#hj5x` (Lean proof) → `#f71y` (Signal Phase 2). Five items done across lazily-zig + lazily-spec.
 
 **Next drain head:** `do [#mes4]` (lazily-kt FFI-consumer, [recommended]) or `do [#bcnf]` (lazily-js FFI-consumer, [recommended]).
-<!-- agent:boundary:e367f4c6 -->
+
+### Re: #mes4 DONE — lazily-kt FFI-consumer package — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#mes4]
+
+**Implemented and committed** (superproject `af59dda7a`). `src/lazily-kt/` — Kotlin/Gradle package:
+
+- **`LazilyFFI`** (JNA interface): `agent_doc_state_projection`, `agent_doc_record_state_event`, `agent_doc_free_string`
+- **`StateProjectionClient`**: `StateFlow<StateProjection>` for reactive UI binding + `recordStateEvent(factJson)` for event intake. `refresh()` pulls the latest JSON projection and updates the flow.
+- **4 tests** (mock FFI): refresh updates StateFlow, null projection handling, recordStateEvent success/failure, free lifecycle
+- `gradle build` passes (JDK 24, Kotlin 2.0.21, JNA 5.15.0)
+
+NOT a reactive-core port — thin projection-renderer + event-reporter per the FFI-first rule. Plan Phase 4.
+
+**Next drain head:** `do [#bcnf]` (lazily-js FFI-consumer, [recommended]) — 9 items remaining.
+<!-- agent:boundary:5cadd1cb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -181,7 +198,7 @@ Also closing `#hj5x` (Lean SM↔IPC proof, submodule `2506182`, gitlink `0987e59
 - ~~:pushpin: do [#nnyn]~~
 - ~~:pushpin: do [#hj5x]~~
 - ~~:pushpin: do [#f71y]~~
-- :pushpin: do [#mes4]
+- ~~:pushpin: do [#mes4]~~
 - :pushpin: do [#bcnf]
 - do [#t0qn]
 - do [#t0mf]
@@ -196,7 +213,6 @@ Also closing `#hj5x` (Lean SM↔IPC proof, submodule `2506182`, gitlink `0987e59
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#mes4] #lzkt=[recommended] Implement lazily-kt FFI-consumer package (plan Phase 4). Kotlin/Gradle under src/lazily-kt/. Wraps JNA bridge to lazily_ffi_*; StateFlow<DocumentStateProjection> projection holder + recordStateEvent reporter. NOT a reactive-core port. Blocked on #lzffistate1.
 - [ ] [#bcnf] #lzjs=[recommended] Implement lazily-js FFI-consumer package with *.js + *.d.ts (plan Phase 5). Under src/lazily-js/. Wraps VSCode N-API addon; EventEmitter projection holder + event reporter. NOT a reactive-core port. Blocked on #lzffistate1.
 - [ ] [#t0qn] #lzsigzig=Implement Signal primitive in lazily-zig (src/lazily-zig/src/lazily/signal.zig). Zig currently has Slot+Cell but no Signal. Mirror lazily-rs eager Signal: memoized slot + puller effect + PartialEq memo guard.
 - [ ] [#t0mf] #lzsigzig=Implement eager Signal in lazily-zig (src/lazily-zig/src/lazily/signal.zig). NOT a direct mirror: lazily-zig destroy-on-invalidate (destroySelf frees the Slot, context.zig:354) + non-reentrant Thread.Mutex means an inline eager recompute DEADLOCKS (user valueFn re-locks ctx.mutex via slot()/slotKeyed). lazily-rs RefCell + lazily-py dict have no such re-entrancy issue. Plan + deferred-recompute-queue design committed: tasks/software/plan-lazily-zig-signal.md (c74e75909). Phase 1 = engine changes in context.zig (on_invalidate hook + pending_recompute queue + drain points outside the lock + snapshot emitChangeUnlocked to also fix latent iteration-mutation). Phase 2 = signal.zig. Splitting #t0mf into #lzsigzig1 (engine) + #lzsigzig2 (signal.zig) below.

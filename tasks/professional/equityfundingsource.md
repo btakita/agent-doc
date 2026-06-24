@@ -257,7 +257,20 @@ Verification: focused `bun test tests/apply4-full-application-p6.test.ts` passed
 Deploy: `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `c1dcd513-b55b-4827-98da-490742f1312b`. Post-deploy checks: public root returned `HTTP 200`; borrower application URL returned the expected unauthenticated `HTTP 303` redirect to `/login?role=borrower&next=%2Fborrowers%2Fnew-application`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:7cbd1e11 -->
+
+### Re: Struck Residue Drain — glm-5.2
+
+> **Queue prompt:**
+>
+> ~~I filled out a borrower form missing Property Type and Family or business relationship with the seller? "Missing required values: B. Family or business relationship with the seller? (purchase)."...but only 1 error occurred. Both errors should show up.~~ — auto-struck: answered this cycle (#ftstrike)
+
+
+The struck queue head is already answered: the client-side `property_type` validation shipped (EFS `d41f7ae`, pushed to `origin/main`) and deployed (Worker `c1dcd513-b55b-4827-98da-490742f1312b`) in the prior cycle. The `#ftstrike` marker confirms it was auto-struck because it was answered this session. No additional app work is needed.
+
+Changed paths this cleanup cycle: none in app code. Verification/deploy evidence remains the prior cycle: focused tests passed (`22 pass / 0 fail`), full `make check` passed (`1195 pass / 0 fail`), app + Worker builds passed, post-deploy root returned `HTTP 200` and the borrower app returned the expected unauthenticated `HTTP 303` login redirect.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:79602573 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -279,6 +292,7 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~I filled out a borrower form missing Property Type and Family or business relationship with the seller? "Missing required values: B. Family or business relationship with the seller? (purchase)."...but only 1 error occurred. Both errors should show up.~~
 - ~~deploy~~
+- ~~~~I filled out a borrower form missing Property Type and Family or business relationship with the seller? "Missing required values: B. Family or business relationship with the seller? (purchase)."...but only 1 error occurred. Both errors should show up.~~ — auto-struck: answered this cycle (#ftstrike)~~
 - ~~I filled out a borrower form missing Property Type and Family or business relationship with the seller? "Missing required values: B. Family or business relationship with the seller? (purchase)."...but only 1 error occurred. Both errors should show up.~~ — auto-struck: answered this cycle (#ftstrike) 
 <!-- /agent:queue -->
 

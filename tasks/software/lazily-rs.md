@@ -106,7 +106,28 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/l
 Note: `#9226` (Signal engine Phase 1) was committed in the prior cycle (`0c2c81a` / gitlink `e69684c6e`) — the response was scrambled by IPC transit but the work landed. Both commits are on `main`.
 
 **Next drain head:** `do [#nnyn]` (StateMachine in lazily-zig) or `do [#f71y]` (signal.zig Phase 2, now unblocked).
-<!-- agent:boundary:69236c47 -->
+
+### Re: #nnyn DONE — StateMachine in lazily-zig — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#nnyn]
+
+**Implemented and committed.** `src/lazily-zig/src/lazily/state_machine.zig` (submodule `60ad8d1`, gitlink `eaf2e0401`):
+
+- `StateMachine(comptime S, comptime E)` wraps `Cell(S)` — pure transition `fn(*const S, E) ?S` (`null` = guard rejection).
+- `send(event) -> bool`, `state() -> S`, `cellHandle() -> *Cell(S)`.
+- Threadlocal initial-state pattern (Zig has no closures).
+- 4 tests: traffic-light cycle, guard rejection, eql self-transition suppression, multi-cycle (6 transitions cycle back to start).
+
+**Verification:** 32/32 pass (0.15.2), 36/37 pass (0.16.0, 1 skip). Exported from `root.zig`.
+
+Also shipped this drain (prior cycle, IPC-scrambled but committed):
+- `#9226` Signal engine Phase 1 (submodule `0c2c81a`, gitlink `e69684c6e`)
+- Zig 0.16 compat — `GraphMutex` spinlock + ArrayList `.empty` + `ThreadSafeAllocator` guard (submodule `9b492d8`, gitlink `045d90abe`)
+
+**Next drain head:** `do [#hj5x]` (Lean SM↔IPC cross-module proof) or `do [#f71y]` (signal.zig Phase 2, now unblocked by #9226).
+<!-- agent:boundary:30fede7c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -117,7 +138,7 @@ Note: `#9226` (Signal engine Phase 1) was committed in the prior cycle (`0c2c81a
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: do [#9226]~~
 - ~~update lazily-zig, add support for 0.16.0~~
-- :pushpin: do [#nnyn]
+- ~~:pushpin: do [#nnyn]~~
 - :pushpin: do [#hj5x]
 - :pushpin: do [#f71y]
 - :pushpin: do [#mes4]
@@ -135,7 +156,6 @@ Note: `#9226` (Signal engine Phase 1) was committed in the prior cycle (`0c2c81a
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#nnyn] #lzsmzig=Implement StateMachine in lazily-zig (plan Phase 3). Add src/lazily-zig/src/lazily/state_machine.zig: StateMachine(S,E) wrapping Cell + *const fn(*const S,E)?S transition pointer (Zig has no closures). Tests for guard rejection + acceptance.
 - [ ] [#hj5x] #lzsmlean2=Add Lean cross-module proof: SM send -> IPC DeltaOp.cellSet (plan Phase 1 TODO). Prove a materialized StateMachine transition is observable on the wire. Link StateMachine.lean with IPC.lean.
 - [ ] [#f71y] #lzsigzig2=Implement eager Signal in src/lazily-zig/src/lazily/signal.zig (mirrors lazily-rs SignalHandle + lazily-py Signal): memoized backing slot + comptime on_invalidate/recompute puller + std.meta.eql memo guard. get()/dispose()/is_active(). Export from root.zig. Tests: eager recompute, memo-guard suppresses equal cascade, dispose->lazy, signal-on-signal. Blocked on #lzsigzig1. Plan Phase 2.
 - [ ] [#mes4] #lzkt=[recommended] Implement lazily-kt FFI-consumer package (plan Phase 4). Kotlin/Gradle under src/lazily-kt/. Wraps JNA bridge to lazily_ffi_*; StateFlow<DocumentStateProjection> projection holder + recordStateEvent reporter. NOT a reactive-core port. Blocked on #lzffistate1.

@@ -39,13 +39,30 @@ done
 Compacted content:
 ❯ - Archived 5 response topic(s): IPC proof dogfood note; #advance-review backlog capture; #advr01; 2 more
 ❯ - Prior summary/context: prior compacted content: Archived 17 response topic(s): #mbd4 IPC issue dogfooding log; #p6a0 deferred session clear ...
-<!-- agent:boundary:96dfa27c -->
+
+### Re: response overwrite sidecar recovery — gpt-5
+
+> **Queue prompt:**
+>
+> The response is still overwriting parts of the previous response.
+
+I traced this against the current `src/agent-doc` code and the live document state. The source already contains the relevant protections for this failure class: strict template closeout rebases stale exchange baselines to `HEAD`, large snapshot-vs-visible reset drift fails closed, and compaction refreshes the CRDT/snapshot from the compacted text.
+
+The live document was in the stale-sidecar shape that can make old response content reappear: preflight reported the visible file at 11,786 bytes while the snapshot was 23,381 bytes. I rebuilt the sidecars from the visible file with `agent-doc reset --from-current`, then reran preflight; the document and snapshot both read 11,820 bytes and preflight committed the repaired baseline as `754b9f547`.
+
+Proof:
+- Changed paths: session document/sidecar recovery only; `src/agent-doc` stayed clean.
+- Commands: `agent-doc reset --from-current /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`; `agent-doc preflight`; `cargo test -p agent-doc --test finalize_integration finalize_stream_rebases_stale_exchange_baseline_to_head_after_new_preflight -- --nocapture`; `cargo test -p agent-doc-orchestration stale_snapshot_reset_drift -- --nocapture`; `cargo test -p agent-doc-orchestration compact_advances_snapshot_and_crdt_so_next_preflight_does_not_refuse -- --nocapture`; `gh run list --workflow CI --limit 1`.
+- Verification: all three focused regressions passed. Latest `src/agent-doc` CI was green: run `28070395022`.
+- Confidence: high that this cycle repaired the live stale-sidecar state and that current source covers the known overwrite paths; no source patch was needed.
+- Escalation: none.
+<!-- agent:boundary:a6551cc3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- The response is still overwriting parts of the previous response.
+- ~~The response is still overwriting parts of the previous response.~~
 - :round_pushpin: do [#advr02]
 - do [#advr03]
 - do [#advr04]

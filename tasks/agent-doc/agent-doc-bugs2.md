@@ -81,49 +81,56 @@ Proof:
 - Added stream-write positive/negative regressions and updated the FlowCore token budget, `SPEC.md`, and `VERSIONS.md`.
 - Arbitrary `### Session Summary` rewrites without compact markers still fail closed.
 - `guard_no_stale_snapshot_reset_drift` now treats compact-generated `### Session Summary` exchange replacements with compact archive markers as safe historical exchange reductions, so `finalize --stream` can refresh stale pre-compact snapshot/CRDT sidecars instead of refusing and forcing `agent-doc reset --from-current`.
-
-### Re: IPC proof issue dogfood log after closeout recovery — gpt-5
-
-The IPC proof diagnostic with `patch_id=69d50165-a7a8-406d-a902-679456301d0a` is acknowledged. It describes the closeout retry after `#docdriftfinalize`: finalize captured the response, queue consumption failed to prove the editor write, and the next preflight recovered by retiring the wedged capture, rebuilding from the visible document, committing `84f40c5dc`, and leaving the queue empty with `queue: stop`.
-
-I added gated follow-up `#ipcproofcloseout` for the residual dogfood shape: the recovery left the proof text attached under the existing `(HEAD)` exchange area rather than opening a clean new response heading. The product fix for the compact-summary stale snapshot refusal is already done in `src/agent-doc` commit `d5ea2949` and root pointer commit `219ea93b6`; `#docdriftfinalize` is archived in `tasks/agent-doc-bugs2.done.md`.
-
-Proof:
-- Changed paths: this session document and its done archive through agent-doc recovery/finalize metadata; prior product code paths are already committed.
-- Commands: `agent-doc session-check`, `agent-doc plan`, `agent-doc read` for exchange/queue/backlog, `rg` for pending-op/finalize guidance, and `ls -l` for the baseline file.
-- Verification: before this closeout, the queue and backlog were empty and `session-check` reported only the open `cycle-1782287296564` waiting for finalize. The new follow-up is gated, so it records the recommendation without creating an active queue head.
-- Confidence: high.
 - Escalation: none.
-
-### Re: IPC proof diagnostics after closeout recovery — gpt-5
-
-The fresh IPC proof diagnostic with `patch_id=1d90ccce-c703-4297-8028-ae4782a0e1fa` is acknowledged. It came from the retry that attempted to answer `patch_id=69d50165` inline: the response was captured, but write proof was still insufficient, so preflight retired the wedged capture and appended this dogfood note.
-
-The residual follow-up is already represented by gated backlog item `#ipcproofcloseout`; I am not adding another duplicate item in this retry. No product code changed in this recovery pass.
-
-### Re: After a codex session JB `Clear Session Context`, when the agent is ready, JB `Run Agent Doc` does not submit. — gpt-5
-
-This queue head reappeared during the same stale sidecar/CRDT recovery. Preflight reported it as semantically matching archived completion `#7az7`, so I am treating it as a resurrected duplicate rather than starting a new product change. If the bug reappears with fresh logs after the current binary/recycle state, it should be filed as a new item with that evidence.
-
-Proof:
-- Changed paths: this session document and its agent-doc metadata/recovery state; no new product source paths.
-- Commands: `agent-doc reset --from-current`, `agent-doc preflight`, `agent-doc plan`, `agent-doc session-check`, `agent-doc read`, and `nl -ba ... | tail`.
-- Verification: preflight opened `cycle-1782287548462`, classified the `patch_id=1d90...` fence and `queue: start`/resurrected queue prompt as the current prompt-bearing changes, and this response answers both without adding duplicate backlog.
 - Confidence: medium; the closeout path itself is the dogfood subject, so `session-check` remains the gate.
+- Verification: preflight opened `cycle-1782287548462`, classified the `patch_id=1d90...` fence and `queue: start`/resurrected queue prompt as the current prompt-bearing changes, and this response answers both without adding duplicate backlog.
+- Commands: `agent-doc reset --from-current`, `agent-doc preflight`, `agent-doc plan`, `agent-doc session-check`, `agent-doc read`, and `nl -ba ... | tail`.
+- Changed paths: this session document and its agent-doc metadata/recovery state; no new product source paths.
+- Escalation: none.
+- Confidence: high.
+- Verification: preflight opened `cycle-1782287481057` against the visible document, classified the `patch_id=69d50165` fence as the prompt target, and this response answers that exact target after the failed template closeout.
+- Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc session-check`, `agent-doc read`, and `nl -ba ... | tail` to inspect the visible prompt boundary.
+- Changed paths: this session document and its backlog metadata through agent-doc finalize/recovery; no new product source paths.
+- Confidence: high.
+- Verification: before this closeout, the queue and backlog were empty and `session-check` reported only the open `cycle-1782287296564` waiting for finalize. The new follow-up is gated, so it records the recommendation without creating an active queue head.
+- Commands: `agent-doc session-check`, `agent-doc plan`, `agent-doc read` for exchange/queue/backlog, `rg` for pending-op/finalize guidance, and `ls -l` for the baseline file.
+- Changed paths: this session document and its done archive through agent-doc recovery/finalize metadata; prior product code paths are already committed.
+
+
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=69d50165-a7a8-406d-a902-679456301d0a invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=11911 candidate_hash=cbb1eb13b7735af66e0c5b773b6642343d5589817cb6ab609026063dbaccc3e5 content_ours_len=11602 content_ours_hash=c9e52ddaf1af8aa00d86022b1d22998e4feab1d06e21a3e41144fd89425ee895 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782287257910
+```
+
+
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=1d90ccce-c703-4297-8028-ae4782a0e1fa invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=12865 candidate_hash=20d01d13da3e0a2990d2e8568d6a292ca9d9e39fa6bf7aa075f63cabf0d42ae6 content_ours_len=14373 content_ours_hash=38ad786a993df52b926191ebf6b5a6e348813cb8a42edbe338e60251fcaa20ac doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782287481057
+```
+### Re: IPC proof diagnostics and resurrected queue head — gpt-5
+
+> **Queue prompt:**
+>
+> After a codex session JB `Clear Session Context`, when the agent is ready, JB `Run Agent Doc` does not submit.
+
+
+The remaining IPC proof fences are acknowledged. The normal stream/IPC closeout path repeatedly captured responses but merged them above the diagnostic fences, leaving the fences as unresolved prompt text. I reset sidecars from the visible file and used the documented `write --commit --force-disk` repair path so this response lands after the visible prompt text instead of being reordered by the live IPC merge.
+
+The free-text queue head is treated as a resurrected duplicate because preflight matched it to archived completion `#7az7`; no new product source change is needed in this repair. I attempted an exact queue-prompt echo, but the consume path failed with `document has 0 prompt(s) but planned to consume 1`, so this repair records the duplicate without triggering another consume attempt. The residual writeback bug is already tracked by gated backlog item `#ipcproofcloseout`.
+
+Proof:
+- Changed paths: this session document through agent-doc repair write/commit; no new product source paths.
+- Commands: `agent-doc reset --from-current`, `agent-doc write --commit --force-disk`, plus prior `agent-doc preflight`, `agent-doc session-check`, `agent-doc read`, and `nl -ba ... | tail` diagnostics.
+- Verification: this response answers the visible IPC diagnostic fences after the prompt text and records the failed queue-consume proof for the resurrected duplicate head.
+- Confidence: medium; this is a repair of the writeback mechanism itself, so the next `agent-doc session-check` is the required gate.
 - Escalation: none.
 
-<!-- agent:boundary:269cc7c3 -->
+<!-- agent:boundary:961852cd -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
----
-JB `Run Agent Doc` blocked
-```
-[route] target tmux session: 0
-Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %2 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input); clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782287179464-direct_pane_protected_prompt_input-codex-_2-af2e4b2fc107.txt
-```
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

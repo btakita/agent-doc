@@ -72,7 +72,7 @@ Continuing the queue drain (`#lzasynceffdup` next).
 **Fix (lazily-rs `090e104`, pushed):** added `scheduled_async_effects: HashSet<SlotId>` to `AsyncContextInner` and extracted `schedule_async_effect(inner, id)` (mirrors `Context::schedule_effect`) — all three scheduling sites now set `force_run` and enqueue only on `scheduled_async_effects.insert(id)`. `flush_async_effects` clears the set on drain; `dispose_async_effect` removes from it (parity with `Context::dispose_effect:684`). White-box unit test `async_schedule_effect_dedupes_pending_queue` schedules the same id three times and asserts exactly one queue entry + flush-clears the set (fails without the HashSet). Verified: clippy `--all-targets --all-features -D warnings` clean, rustfmt clean, `--features async` suite green, default tests + release build OK.
 
 Next queue head: `#lzstr0mnetinbox` (str0m receive-side unbounded inbox).
-<!-- agent:boundary:98673404 -->
+<!-- agent:boundary:dd6d9dec -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -83,18 +83,18 @@ Next queue head: `#lzstr0mnetinbox` (str0m receive-side unbounded inbox).
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~What are #next-steps to fix lazily bugs?~~
 - ~~do [#lzasyncdispose2]~~
-- 🚧 do [#lzasynceffdup]
-- do [#lzstr0mnetinbox]
-- do [#lzstr0mnetacceptanswer]
-- do [#lzwsunbounded]
-- do [#lzerrfrom]
-- do [#lzsid32]
+- ~~do [#lzasynceffdup]~~
+- 🚧 :pushpin: do [#lzstr0mnetinbox]
+- :pushpin: do [#lzstr0mnetacceptanswer]
+- :pushpin: do [#lzwsunbounded]
+- :pushpin: do [#lzerrfrom]
+- :pushpin: do [#lzsid32]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzstr0mnetinbox] [recommended] str0m_net.rs receive-side Shared::inbox (:133) is an unbounded Mutex<VecDeque>; send side has MAX_PENDING_FRAMES=1024 backpressure but ChannelData pushes (:548) are unbounded — a slow consumer grows memory without limit. Cap inbox + apply backpressure in handle_input.
+- [ ] 🚧 [#lzstr0mnetinbox] [recommended] str0m_net.rs receive-side Shared::inbox (:133) is an unbounded Mutex<VecDeque>; send side has MAX_PENDING_FRAMES=1024 backpressure but ChannelData pushes (:548) are unbounded — a slow consumer grows memory without limit. Cap inbox + apply backpressure in handle_input.
 - [ ] [#lzstr0mnetacceptanswer] str0m_net.rs driver discards rtc.accept_answer result (:391 let _ =); an ICE/DTLS fingerprint/mid mismatch is invisible and wait_open times out with no diagnostic. Propagate apply-time failure to Shared::last_error so the open-failure surfaces a cause.
 - [ ] [#lzwsunbounded] ws_backend.rs outbound is an unbounded mpsc (:88) and drive abandons queued frames on send error (:117-119 break); producers can keep enqueuing after close. Switch to a bounded channel, surface send failures via WsError, stop producers on close.
 - [ ] [#lzerrfrom] [recommended] Add From<serde_json::Error>/From<postcard::Error> impls for EncodeError/DecodeError ergonomics (open since 2026-06-17). src/ipc.rs.

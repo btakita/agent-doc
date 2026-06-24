@@ -96,7 +96,15 @@ Verification: `agent-doc queue consume`, `agent-doc queue sync`, and committed q
 The free-text monsterrodholders prompt was already answered in the audit response and should not remain an active queue head. I’m removing that stale head, restoring `#lzliveproof` as runnable because its backlog item is still open, and leaving the follow-up queue ordered as `#lzpkgwire`, `#lzliveproof`, `#mrhqrestore`, `#ipcqproof`.
 
 Verification: `agent-doc session-check`, `agent-doc plan`, and component reads of `exchange` and `queue` before repair. No repository code changed in this cycle.
-<!-- agent:boundary:46beed7d -->
+
+### Re: IPC merge prompt-prefix repair — gpt-5
+
+The current prompt targets are recovery artifacts from the IPC `content_ours` merge and transcript-prefix repair, not new operator requests. The dropped-prompt condition is now represented in the document and already answered by the IPC proof response above.
+
+Actionable follow-up stays in the queue/backlog: `#ipcqproof` covers the ACK drift and prompt-bearing diagnostic regression, while `#lzpkgwire`, `#lzliveproof`, and `#mrhqrestore` remain runnable follow-ups. No code changed in this cycle.
+
+Verification: `agent-doc preflight` committed the repaired exchange/queue state and identified only prompt-prefix artifacts for this cycle.
+<!-- agent:boundary:fc6fcfc2 -->
 <!-- /agent:exchange -->
 
 ## Queue

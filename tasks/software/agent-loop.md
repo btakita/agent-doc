@@ -81,7 +81,21 @@ Escalation: used a guarded `git push --force-with-lease=main:ad2433059...` becau
 Consumed by the completed rebase/force-push above. `origin/main` was rewritten with `--force-with-lease` from the accidental merge commit `ad2433059` to the rebased linear head `b34635be1`, and the latest remote check reported the expected SHA before the session response commit.
 
 Changed paths: only the session document was repaired in this closeout; no repo content changed for the rebase itself. Verification remains: local and remote were aligned at the rebased head (`git rev-list --left-right --count main...origin/main` returned `0 0` before this document repair commit), the rebased range had no merge commits, and `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
-<!-- agent:boundary:e0e72ff2 -->
+
+### Re: JetBrains Run Agent Doc restart delay — gpt-5
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` while codex session was restarting had a long delay to add the prompt and did not submit.
+
+I’m treating this as a JetBrains/Codex restart handoff bug report, not as proof that the route consumed the prompt. The important distinction is pane-input acceptance versus actual dispatch/start proof: a delayed prompt write without submission means the diagnostics need to show whether the IDE action was waiting on Codex readiness, whether the pane accepted text but skipped Enter/submission, or whether restart-state routing dropped the submit phase.
+
+Follow-up added to backlog: investigate the JetBrains `Run Agent Doc` delay/submission miss during Codex session restart and require diagnostics that separate input acceptance from dispatch/start proof.
+
+Changed paths: session document only. Commands: `tsift status`, `tsift status --fix`, `agent-doc --version`, agent-doc preflight/plan/read/finalize. Verification: preflight and plan completed; no code or tests changed for this prompt-response cycle. Confidence: medium, based on the queue report rather than route logs. Escalation: none.
+
+Session note: the exchange is at warn-level accretion, but the queue is active, so this cycle continues the drain path rather than pausing for compaction.
+<!-- agent:boundary:eeb1b656 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -90,13 +104,14 @@ Changed paths: only the session document was repaired in this closeout; no repo 
 ## Queue
 
 <!-- agent:queue go -->
-- JB `Run Agent Doc` while codex session was restarting had a long delay to add the prompt and did not submit.
+- ~~JB `Run Agent Doc` while codex session was restarting had a long delay to add the prompt and did not submit.~~
 - #advance-review
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#t0d0] Investigate JetBrains `Run Agent Doc` delay/submission miss while a Codex session is restarting; require diagnostics that separate pane-input acceptance from dispatch/start proof.
 - [ ] [#bx57] Disable unused MCP servers — currently managed via Claude Code UI, not settings.json
 - [ ] [#wr52] Run litellm proxy pointing at vllm
 - [ ] [#04hc] Test `claude` against local model via `ANTHROPIC_BASE_URL`

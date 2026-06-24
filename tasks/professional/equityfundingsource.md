@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,121 +33,56 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-021308.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-022812.md`*
 
 Compacted content:
-❯ - Archived 14 response topic(s): Unified admin chat interface; Deploy; Snapshot reconciliation; 11 more
+❯ - Archived 4 response topic(s): Unified admin chat interface; Deploy queue closeout; Deploy residue closeout; 1 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
-### Re: Unified admin chat interface — gpt-5
+### Re: Borrower message selection + deploy — gpt-5
 
 > **Queue prompt:**
 >
-> In the Deal Pipeline and Lender Pipeline boards, after pressing Enter on a +, the - should be focused. Same when pressing Enter on a -, the + should be focused. If possible, make the +/- the same element where the +/- content is toggled as is the mousedown/Enter behavior.
-
+> When I select an application from a borrower such as https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=lead&dialog_lead_id=e2a41d4b-250c-4197-a370-4f5b786a5bcf, and I then open the Message dialog, the borrower conversation should be selected.
 
 > **Queue prompt:**
 >
-> Add the unified chat interface to the admin portal. This chat portal should detect which borrower, lender(s), or broker that is being viewed and display the appropriate conversation(s). For example, if an available deal dialog is open, show the chat with the borrower. If viewing interested lender(s), the chat should be with the lender(s) and the borrower in a separate tab. Size the admin message dialog appropriately to see the conversation and tabs if there are multiple participants. Lender groups should allow messaging with the entire group as a multiway conversation or with an individual lender via tabs.
+> deploy
 
-Implemented and pushed the unified admin chat interface.
+Implemented, committed, pushed, and deployed the admin Messages launcher borrower selection fix. I also included and closed the previously deployed pipeline +/- focus-preservation work tracked by `#n4c1`.
 
 Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/portal_messages.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/deal_detail.tsx`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/routes.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/investor_management/index.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/lending_groups/routes.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/messages_unified.ts`
-- `src/equityfundingsource-dev/tests/portal-messages-component.test.ts`
-- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/messages.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
 
 What changed:
-- Added `AdminConversationTabs` and admin-scoped message contexts for borrower, broker, deal-interest lender, and lending-group conversations.
-- Added a dedicated admin Deal Detail `Messages` tab plus contextual inline chat tabs in Loan Detail, Interested Lenders, and Multi-Lender Groups.
-- Added borrower deal-level admin message endpoints backed by persisted borrower chat sessions and borrower notifications.
-- Added lending-group deal message endpoints backed by live `messages` storage, including group broadcast fanout to active linked members and individual lender tabs.
-- Included lending-group message rows in the lender unified inbox aggregation.
+- The bottom-right admin Messages launcher now detects active `/admin/pipeline` lead/application dialogs, resolves the selected borrower through existing admin lead/application APIs, switches to the Borrowers tab, and loads the matching borrower thread by email.
+- Standalone `/admin/application-leads/:id` and `/admin/loan-applications/:id` pages get the same contextual borrower selection behavior.
+- Deal Pipeline and Lender Pipeline collapse toggles preserve keyboard focus after Enter toggles +/-.
+- Regression assertions cover the contextual message launcher and pipeline focus behavior.
 
 Verification:
-- `bun test tests/portal-messages-component.test.ts` — passed, 13 tests.
-- `bun test tests/investor-portal-e2e.test.ts tests/admin-investor-pipeline.test.ts tests/lender-deal-allocation-dialog.test.ts` — passed, 143 tests.
+- `bun test tests/admin-pipeline.test.ts` — passed, 63 tests.
+- `bun test tests/portal-messages-component.test.ts tests/borrower-messages.test.ts tests/messages-unified.test.ts` — passed, 32 tests.
+- `bun test tests/admin-investor-pipeline.test.ts` — passed, 92 tests.
 - `git diff --check` — passed.
-- `make check` — passed, 1167 tests plus app build and worker build.
-- `gh run list --workflow CI --limit 1` — could not run because this repository has no workflow named `CI`.
-
-Commits:
-- EFS submodule: `f91141d68cc3e391acec29cfdd92c41fe2acc3e8` (`feat(admin): add context-aware chat tabs`), pushed to `equityfundingsource-dev/main`.
-- Parent submodule pointer: `cc31cce25` (`chore: update equityfundingsource submodule`), pushed to `agent-loop/main`.
-
-Escalation: none.
-Confidence: high.
-**IPC proof issue dogfood log**
-
-Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
-
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=620465db-ef3c-4340-80f1-32b0ce3e6627 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782267128699
-```
-
-### Re: Deploy queue closeout — gpt-5
-
-> **Queue prompt:**
->
-> do [#n4c1]
-
-> **Queue prompt:**
->
-> deploy
-
-Closed the residual queue prompts after the pipeline toggle focus deployment.
-
-`#n4c1` was a recommended commit/push follow-up generated during closeout, but the backlog item was removed during recovery while its queue mirror remained. No commit or push was run because `src/equityfundingsource-dev/AGENTS.md` requires an explicit user request before `git commit`.
-
-Deployment proof already completed:
-- `make deploy` passed.
-- Remote D1 migrations: `No migrations to apply!` before and after deploy.
-- Worker deployed at `https://equityfundingsource.brian-takita.workers.dev`.
-- Current Worker version: `693fb7c5-c214-494d-a4ad-4df4e87fda5f`.
-- Post-deploy smoke tests: `/` returned `200`; `/admin/pipeline` and `/admin/lender-pipeline` returned expected admin-auth redirects `303`.
-
-Verification for the deployed build:
-- `bun test tests/admin-pipeline.test.ts tests/admin-investor-pipeline.test.ts` — passed, 155 tests.
-- `git diff --check` — passed.
-- `make check` — passed, 1173 tests plus app and Worker builds.
+- `make check` — passed, 1173 tests plus app build and Worker build.
 - `gh run list --workflow CI --limit 1` in both EFS and parent repos — no workflow named `CI` exists.
 
-Escalation: none.
-Confidence: high.
-
-### Re: Deploy residue closeout — gpt-5
-
-> **Queue prompt:**
->
-> deploy
-
-Cleared the remaining `deploy` queue head after the Worker deployment had already completed.
-
-No additional code, test, deploy, commit, or push work was performed in this residue closeout. The deployed Worker version remains `693fb7c5-c214-494d-a4ad-4df4e87fda5f` at `https://equityfundingsource.brian-takita.workers.dev`.
-
-Verification already recorded for the deployed build:
+Deployment:
+- Pre-deploy remote D1 migration list: `No migrations to apply!`.
+- D1 Time Travel bookmark was available: `000004f6-00000078-00005094-9d846883e65c7e7e8918d2c0a8f1ea00`.
 - `make deploy` passed.
-- Post-deploy remote migration list: `No migrations to apply!`.
-- Smoke tests: `/` returned `200`; `/admin/pipeline` and `/admin/lender-pipeline` returned expected admin-auth redirects `303`.
+- Deploy applied no migrations and activated Worker version `23a232b2-68bd-4ab9-bc68-f12db711b49c` at `https://equityfundingsource.brian-takita.workers.dev`.
+- Post-deploy remote D1 migration list: `No migrations to apply!`.
+- Smoke tests: `/` returned `200`; the reported `/admin/pipeline?...dialog=lead...` URL and `/admin/lender-pipeline` returned expected admin-auth redirects `303`.
 
-Escalation: none.
-Confidence: high.
-
-### Re: IPC proof note — gpt-5
-
-Recorded the agent-doc IPC proof issue note from the deploy-residue recovery.
-
-No code, test, deploy, commit/push, or backlog work was performed for this acknowledgement. The queue is already drained, and the deployment remains Worker version `693fb7c5-c214-494d-a4ad-4df4e87fda5f`.
-
-There were no actionable follow-up items to capture.
+Commits:
+- EFS submodule: `36c8a516629c396d72d65ea3d2398b2b85ee956c` (`fix(admin): preserve pipeline focus and contextual messages`), pushed to `equityfundingsource-dev/main`.
+- Parent submodule pointer: `544d110ba` (`chore: update equityfundingsource submodule`), pushed to `agent-loop/main`.
 
 Escalation: none.
 Confidence: high.
@@ -159,9 +94,9 @@ Issue class: `ipc_proof_insufficient`
 Affected component: editor IPC / writeback
 
 ```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=1cbbeb3d-dc59-47d8-ac7c-4bb516c743d6 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782267881983
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=4c9627c4-2911-4f53-a5bd-2e0f8e5c2b88 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782268211341
 ```
-<!-- agent:boundary:71afd827 -->
+<!-- agent:boundary:f789429a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -181,6 +116,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~When I select an application from a borrower such as https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=lead&dialog_lead_id=e2a41d4b-250c-4197-a370-4f5b786a5bcf, and I then open the Message dialog, the borrower conversation should be selected.~~
+- commit + push all uncommitted files.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog
@@ -192,7 +130,6 @@ After 20:30
 ## Review
 
 <!-- agent:review -->
-- [/] [#n4c1] [recommended] Commit and push the deployed pipeline toggle focus-preservation changes in `src/equityfundingsource-dev` once operator approval is given. Current deployed working tree touches `lib/ui--browser--efs/portal/admin/pipeline.tsx`, `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`, `tests/admin-pipeline.test.ts`, and `tests/admin-investor-pipeline.test.ts`.
 - [/] [#04v8] [recommended] Validate TMO cross-service lender visibility in a real TMO sandbox/tenant before relying on automated LOS funding writes: create or link a lender through `LSS.svc`, confirm `GetLender`, then attempt `LOS.svc` `AddLoanFunding`/`UpdateLoanFunding` on a test loan or get written TMO support confirmation that LOS funding resolves the LSS lender/vendor master `Account`.
 - [/] [#apply-invite-fail-ux] Public `/apply` invite-failure UX: when the borrower invite email fails or is skipped after lead persistence, stop telling the borrower to check their inbox; show a received/follow-up message, keep the failed invite status visible to admins, and add a regression test.
 - [/] [#email-bg-outbox] Durable email delivery observability/retry: record lifecycle, secure-message, broker, lending-group, investor-interest, login-link, invite, reminder, and feedback email results in D1 with status/error/retry/dead-letter instead of relying on console-only warnings for background notifications.

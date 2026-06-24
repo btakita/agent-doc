@@ -128,7 +128,7 @@ Verified: zero snake_case op refs remain; the 5 JSON blocks I touched all parse 
 `#lzspecdrift` → done. Remaining implementation queue: `#lzktconf`, `#lzpyregress`, `#lzzigtodos` (+ `#lzjshygiene` conformance slice).
 
 > **Queue prompt:** do [#lzspecdrift]
-<!-- agent:boundary:50be7e8f -->
+<!-- agent:boundary:1ef6d455 -->
 <!-- /agent:exchange -->
 ###
 <!--

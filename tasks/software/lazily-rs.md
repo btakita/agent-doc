@@ -85,7 +85,17 @@ Queue heads answered; plan committed.
 > **Queue prompt:** Should we create lazily-kt and lazily-js for the plugins to help with FFI communication with the FFI plugin?
 
 All three are the same architectural question (refinements of each other), answered in the `### Re: lazily-kt / lazily-js` response above: **no reactive-core port; the binary owns the lazily FSMs and the plugins consume them as serializable `DocumentStateProjection` state over FFI/IPC (`#lzffistate` → `#lzffistate1` phase-1 spike)**. Striking as resolved.
-<!-- agent:boundary:95f0c1d6 -->
+
+### Re: strike q3 — same question, answered above — glm-5.2
+
+> **Queue prompt:** Should we create lazily-kt and lazily-js for the plugins to help with FFI communication with the FFI plugin?
+
+Same question as the two heads already struck — answered in `### Re: lazily-kt / lazily-js` above (no port; consume the binary's `DocumentStateProjection` over FFI/IPC per `#lzffistate`/`#lzffistate1`). Striking.
+
+> **Queue prompt:**
+>
+> ~~See /home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-orchestration/src/state_backbone.rs. Should we have a lazily-kt and lazily-js package to support the JB and VSCode plugins? Would the JB and VSCode plugins benefit from the lazily state machine? Would it make sense to use lazily FFI for bi-directional communication between editor plugins and the FFI plugin?~~ — auto-struck: answered this cycle (#ftstrike)
+<!-- agent:boundary:10869360 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -96,8 +106,8 @@ All three are the same architectural question (refinements of each other), answe
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~See /home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-orchestration/src/state_backbone.rs. Should we have a lazily-kt and lazily-js package to support the JB and VSCode plugins? Would the JB and VSCode plugins benefit from the lazily state machine? Would it make sense for these plugins to use lazily FFI to communicate with the FFI plugin?~~
 - ~~See /home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-orchestration/src/state_backbone.rs. Should we have a lazily-kt and lazily-js package to support the JB and VSCode plugins? Would the JB and VSCode plugins benefit from the lazily state machine? Would it make sense to use lazily FFI for bi-directional communication between editor plugins and the FFI plugin?~~ — auto-struck: answered this cycle (#ftstrike)
-- Should we create lazily-kt and lazily-js for the plugins to help with FFI communication with the FFI plugin?
-- Can we make lazily support a bidirectional lazily<->lazily FFI communication channel? 
+- ~~Should we create lazily-kt and lazily-js for the plugins to help with FFI communication with the FFI plugin?~~
+- Can we make lazily support a bidirectional lazily<->lazily FFI communication channel? And in doing so, revisit the thin reporter spec. Whether the JB Plugin & VS Code plugin may trigger state transitions or be read-only state projections. It seems plausible that a lazily FFI channel would be beneficial to keep state aligned. If we do have a FFI channel, the Cell
 - do [#lzffistate]
 - do [#lzffistate1]
 <!-- /agent:queue -->

@@ -34,133 +34,12 @@ queue: start
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260624-073034.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260624-162720.md`*
 
 Compacted content:
-- Archived 6 response topic(s): compaction landed; queue stopped, DAG order intact; #9226 DONE; Zig 0.16 support added to lazily-zig; 3 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-
-### Re: lazily-kt GitHub project and submodule — gpt-5
-
-> **Queue prompt:** create a lazily-hub/lazily-kt github project. Make src/lazily-kt/ be a git submodule to the lazily-hub/lazily-kt project.
-
-Done. I created the public GitHub repository at https://github.com/lazily-hub/lazily-kt, initialized `src/lazily-kt` as its own `main` branch repo, committed the existing Kotlin package there as `e7dee31 Initial lazily Kotlin package`, and pushed it to `origin/main`.
-
-Changed paths in the superproject: `.gitmodules` and `src/lazily-kt` now point to `git@github.com:lazily-hub/lazily-kt.git` as a submodule gitlink at `e7dee316a083bc544cfd74fc1a1841fabfd6a7d0`. The superproject conversion is committed as `aae252cc2 Add lazily-kt submodule`.
-
-Verification: `make check` passed through `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`; `git submodule status src/lazily-kt` reports the expected commit; `git -C src/lazily-kt status --short --branch` is clean on `main...origin/main`; `gh repo view lazily-hub/lazily-kt` confirms the repo is public with default branch `main`. CI check note: `gh run list --workflow CI --limit 1` reported that this repo has no workflow named `CI`, so there was no latest CI run to inspect.
-
-Escalation: no approval prompts were needed. Confidence: high; unrelated dirty worktree changes were left untouched.
-
-### Re: queue guard repair — gpt-5
-
-The previous closeout intentionally consumed only the lazily-kt free-text queue head. The `:pushpin: do [#bcnf]` and `:pushpin: do [#pwvm]` rows were not consumed by this cycle; both remain queued for their own later `do #id` cycles.
-
-Changed paths: none in this repair closeout. Verification: session-check repair evidence only; the lazily-kt implementation verification remains the prior passing `make check` and GitHub/submodule checks. Escalation: none. Confidence: high.
-
-### Re: lazily-js GitHub project and submodule — gpt-5
-
-> **Queue prompt:** create a lazily-hub/lazily-js github project. Make src/lazily-js be a git submodule to the lazily-hub/lazily-js
-
-Done. I created the public GitHub repository at https://github.com/lazily-hub/lazily-js, initialized `src/lazily-js` as its own `main` branch repo, committed the existing package metadata there as `78f3adc Initial lazily JavaScript package`, and pushed it to `origin/main`.
-
-Changed paths in the superproject: `.gitmodules` and `src/lazily-js` now point to `git@github.com:lazily-hub/lazily-js.git` as a submodule gitlink at `78f3adc5285596e6b1ac2e27ce080a7339b07eeb`. The superproject conversion is committed as `d4e89629e Add lazily-js submodule` and `git push origin main` reports the remote is up to date.
-
-Verification: `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` passed with exit code 0; `git submodule status src/lazily-js` reports the expected commit; `git -C src/lazily-js status --short --branch` is clean on `main...origin/main`; `gh repo view lazily-hub/lazily-js` confirms the repo is public with default branch `main`. CI check note: `gh run list --workflow CI --limit 1` reported that this repo has no workflow named `CI`, so there was no latest CI run to inspect.
-
-Preflight warnings: semantic completion candidates were reported for review `#h6qb` and backlog `#bcnf`; I left both unchanged because this cycle only handled the free-text lazily-js GitHub/submodule queue head.
-
-Escalation: no approval prompts were needed. Confidence: high; unrelated dirty worktree changes were left untouched.
-
-### Re: lazily-kt spec conformance — gpt-5
-
-> **Queue prompt:** Ensure lazily-kt follows the lazily-spec. It seems to be missing much of the spec.
-
-Done. I implemented the missing Kotlin IPC spec surface in `src/lazily-kt`: externally tagged `IpcMessage` Snapshot/Delta frames, `NodeState`, `IpcValue`, `ShmBlobRef`, all 7 `DeltaOp` variants, epoch gap handling via `DeltaApplyStatus`, JSON encode/decode helpers, and permission-filtered Snapshot/Delta views. The Kotlin binding now round-trips the canonical lazily-spec fixture shape instead of only exposing the agent-doc state-projection FFI wrapper.
-
-Changed paths in the submodule commit `f8d6a78 Add lazily IPC conformance model`: `.gitignore`, `AGENTS.md`, `Makefile`, `build.gradle.kts`, `src/main/kotlin/io/github/lazily/Ipc.kt`, `src/test/kotlin/io/github/lazily/IpcTest.kt`, `src/test/kotlin/io/github/lazily/IpcConformanceTest.kt`, and vendored `src/test/resources/conformance/*.json` fixtures. The submodule commit was pushed to `lazily-hub/lazily-kt/main`.
-
-Changed paths in the superproject: `src/lazily-kt` gitlink now points at `f8d6a78`. The gitlink update was committed as `62a04f52e Update lazily-kt spec conformance` and pushed to `origin/main`.
-
-Verification: `make check` passed in `src/lazily-kt`; root `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` passed with exit code 0; `gh run list --workflow CI --limit 1` reported no workflow named `CI` in both the superproject and `lazily-kt`, so there was no latest CI run to inspect.
-
-Preflight warnings: the semantic-completion candidates for review `#h6qb` and backlog `#bcnf` were unrelated to this lazily-kt queue head and were left unchanged. Escalation: no approval prompts were needed. Confidence: high. Existing unrelated dirty files in the superproject were left untouched.
-
-### Re: lazily-js spec conformance — gpt-5
-
-> **Queue prompt:** Ensure lazily-js follows the lazily-spec...except for what + covered in [#bcnf].
-
-Done. I implemented the lazily-spec IPC surface in `src/lazily-js` while leaving the `#bcnf` FFI state-projection package work untouched for its own queued cycle. The JS package now has a real ESM entrypoint plus `.d.ts` declarations for externally tagged `IpcMessage` Snapshot/Delta frames, `NodeState`, `IpcValue`, `ShmBlobRef`, all 7 `DeltaOp` variants, epoch gap handling via `DeltaApplyStatus`, JSON encode/decode helpers, and permission-filtered Snapshot/Delta views.
-
-Changed paths in the submodule commit `1afbce4 Add lazily IPC JavaScript conformance model`: `.gitignore`, `AGENTS.md`, `Makefile`, `package.json`, `src/index.js`, `src/index.d.ts`, `test/ipc.test.js`, and vendored `test/conformance/*.json` fixtures. The submodule commit was pushed to `lazily-hub/lazily-js/main`.
-
-Changed paths in the superproject: `src/lazily-js` gitlink now points at `1afbce4`. The gitlink update was committed as `9a4b4e115 Update lazily-js spec conformance` and pushed to `origin/main`.
-
-Verification: `make check` passed in `src/lazily-js` (`npm run build` plus 15 Node tests); root `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` passed with exit code 0; `gh run list --workflow CI --limit 1` reported no workflow named `CI` in both the superproject and `lazily-js`, so there was no latest CI run to inspect.
-
-Preflight warnings: the semantic-completion warnings for review `#h6qb` and backlog `#bcnf` were not part of this free-text spec-conformance queue head. Escalation: no approval prompts were needed. Confidence: high. Existing unrelated dirty files in the superproject were left untouched.
-
-### Re: lazily-js FFI-consumer package (#bcnf) — glm-5.2
-
-> **Queue prompt:**
->
-> :pushpin: do [#bcnf]
-
-
-Done. I implemented the lazily-js FFI-consumer package under `src/lazily-js`, mirroring the lazily-kt `StateProjectionClient` (#mes4, the Kotlin Phase-4 reference) with JS idioms.
-
-**Semantic-completion warning resolution:** the preflight `semantic_completion_match` flagged #bcnf as possibly resolved by #lzffistate1 (score 1.836). That is a false positive — #lzffistate1 added the *Rust FFI exports* + native-addon glue (the backend), while #bcnf is the *JS consumer SDK* that wraps that channel into a usable API. Different layers; #lzffistate1 only unblocked #bcnf. I proceeded with implementation.
-
-**What landed:**
-- `src/state-projection.js` — `StateProjectionClient` (extends `EventEmitter`): projection holder that emits `"projection"` events on `refresh()`, plus `recordStateEvent(factJson)` reporter. `loadAgentDocFFI(libPath?)` wraps the agent-doc C ABI (`agent_doc_state_projection` / `agent_doc_record_state_event` / `agent_doc_free_string`) via `createRequire`-deferred `ffi-napi`+`ref-napi`, encapsulating the pointer read/free lifecycle so the consumer never handles raw C pointers. Native deps resolve only when `loadAgentDocFFI()` is called, keeping `make check` pure-JS.
-- `src/state-projection.d.ts` — full type declarations for `LazilyFFI`, `loadAgentDocFFI`, `StateProjectionClient` (with typed `"projection"` event overloads).
-- `test/state-projection.test.js` — 8 mock-FFI tests (refresh updates + emits, null/unavailable handling, repeated-refresh change propagation, recordStateEvent success/failure, documentHash binding). No native dependency.
-- `package.json` — added `./state-projection` subpath export, `ref-napi` dependency, and `state-projection.js` to the `build` check.
-
-This is the EventEmitter analogue of lazily-kt's StateFlow-based client: plugins become thin projection-renderer + event-reporter, NOT a reactive-core port (FFI-first rule).
-
-**Pre-existing dependency note (not a regression):** `npm install` fails because `ffi-napi` 4.0.3 is unmaintained and its native addon does not compile against Node v26.1.0 (`napi_add_finalizer` ABI break). This affects only the runtime native-load path, never `make check` (tests inject mocks). Recorded follow-up `#lzjsffi` to migrate to a maintained FFI library.
-
-Changed paths (submodule `lazily-hub/lazily-js`, commit `c5607e1`): `package.json`, `src/state-projection.js`, `src/state-projection.d.ts`, `test/state-projection.test.js`. Superproject gitlink update: `1c825988b`.
-
-Verification: `make check` in `src/lazily-js` passes — `npm run build` (node --check on both modules) + 23 Node tests (15 IPC + 8 state-projection), 0 fail. `git -C src/lazily-js status --short --branch` clean on `main...origin/main`. `gh run list --workflow CI --limit 1` reported no workflow named `CI` in both the superproject and `lazily-js`, so there was no latest CI run to inspect.
-
-Escalation: no approval prompts were needed. Confidence: high. The semantic-completion warnings for review `#h6qb` and backlog `#bcnf` were addressed this cycle (`#bcnf` now done; `#h6qb` is a separate live-two-host WebRTC item, left unchanged).
-❯ **IPC proof issue dogfood log**
-
-❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
-
-❯ Issue class: `ipc_proof_insufficient`
-❯ Affected component: editor IPC / writeback
-
-```text
-ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=8c197acc-41ac-4ec3-a9ad-ba170539b282 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=17392 candidate_hash=8642b619be983c755a5316742e20c56149cdefe0d885061a2e3c43d61d8f354d content_ours_len=19594 content_ours_hash=e03e461515ab4679f2aea9cd03b814e39c594350f1bc2fd3671d3935b5090a66 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782317423546
-```
-
-### Re: lazily-zig Signal primitive (#t0qn) — already satisfied — glm-5.2
-
-> **Queue prompt:**
->
-> do [#t0qn]
-
-
-**#t0qn is already done** — satisfied by #f71y (commit `ac8c06f feat: add eager Signal(T) — Phase 2`) on top of the Phase-1 engine (#9226, commit `0c2c81a`). I verified the implementation rather than duplicate it.
-
-`src/lazily-zig/src/lazily/signal.zig` contains all three primitives #t0qn asked for:
-- **Memoized slot** — `signal()` creates + caches a backing slot via `slot(T, ctx, valueFn, deinitPayload)` (signal.zig:147), keyed by `valueFnCacheKey`.
-- **Puller effect (eager recompute)** — `on_invalidate_hook` queues into `ctx.pending_recompute` (signal.zig:55) and `makeRecomputeFn` re-runs the `valueFn` with a tracking frame *outside* the graph mutex, then cascades via `drainPendingRecompute` + `emitChange` (signal.zig:62-137). This is the deferred-recompute design from the #t0mf engine split.
-- **PartialEq memo guard** — `std.meta.eql(old_value, new_value)` suppresses the downstream cascade when the recomputed value is unchanged (signal.zig:104), mirroring lazily-rs's `SignalHandle<T>`.
-
-The module ships tests for eager recompute on dependency change, memo-guard suppression, and dispose-reverts-to-lazy — and its doc comment explicitly states it mirrors lazily-rs `SignalHandle<T>` / lazily-py `Signal[T]`.
-
-**Observed pre-existing failure (not a #t0qn regression, recorded as `#lzsigzig3`):** `zig build test` on the installed Zig 0.17.0-dev crashes in `slot.zig:320 Slot.touch` (3 of 4 test binaries). The repo targets Zig 0.16 (commit 9b492d8), so this is a newer-stdlib incompatibility, not a Signal issue — the signal tests are among the 19 passing in the non-crashing binary. I made no lazily-zig edits this cycle.
-
-Changed paths: none (recognition closeout — the work was already committed in lazily-zig `ac8c06f`). No superproject gitlink change.
-
-Verification: read `src/lazily-zig/src/lazily/signal.zig` (255 lines) — confirms memoized slot + eager recompute hooks + `std.meta.eql` memo guard + 3 tests. `zig build test` ran: 30/34 tests passed, 1 skipped, 3 crashed (all crashes in `slot.zig Slot.touch`, not signal). `gh run list --workflow CI --limit 1`: no workflow named `CI` in lazily-zig.
-
-Escalation: none. Confidence: high — #t0qn's deliverable is verifiably present in the codebase.
-<!-- agent:boundary:89bf24f1 -->
+❯ - Archived 7 response topic(s): lazily-kt GitHub project and submodule; queue guard repair; lazily-js GitHub project and submodule; 4 more
+❯ - Prior summary/context: prior compacted content: Archived 6 response topic(s): compaction landed; queue stopped, DAG order intact; #9226 DONE...
+<!-- agent:boundary:95db4da9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -169,8 +48,6 @@ Escalation: none. Confidence: high — #t0qn's deliverable is verifiably present
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#bcnf]~~
-- ~~do [#t0qn]~~
 - do [#t0mf]
 - :pushpin: do [#pwvm]
 - do [#9e64]

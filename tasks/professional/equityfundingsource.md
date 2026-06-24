@@ -53,7 +53,25 @@ Changed paths: `lib/ui--browser--efs/portal/shared/full_application_detail.tsx`,
 Verification: focused test passed (`bun test tests/admin-full-application-approve-ui.test.ts`: `11 pass / 0 fail`). Full EFS check passed (`make check`: raw summary `1189 pass / 0 fail`, app build, and Worker build). The tsift digest wrapper flagged the known logged `error: d1 down` fixture string, but the command exited 0 and the raw Bun summary has zero failures. `git diff --check` was clean. `gh run list --workflow CI --limit 1` found no workflow named `CI` in the EFS submodule.
 
 Deploy was not requested for this queue item. Escalation: none. Confidence: high for the code path, tests, spec note, commit, and push.
-<!-- agent:boundary:f2dc27a9 -->
+
+### Re: Pipeline Edit Field Audit And Deploy — gpt-5
+
+> **Queue prompt:** Review all form edit fields in the Deal Pipeline + Lender Pipeline. Make sure the correct input is used (dropdown instead of free text where appropriate).
+>
+> **Queue prompt:** deploy
+
+Completed and deployed.
+
+Changed paths in the EFS submodule: `lib/ui--browser--efs/portal/shared/full_application_detail.tsx`, `prds/67v2-admin-loan-pipeline-kanban.md`, `prds/investor-pipeline-admin.md`, `tests/admin-full-application-approve-ui.test.ts`, `tests/admin-investor-pipeline.test.ts`. Parent pointer update: `src/equityfundingsource-dev` committed locally as `e06b789ab`.
+
+Implementation: Deal Pipeline's shared Full Application edit surface now uses dropdowns for `New lien position`, `Asset type`, and `Expense type`; `Property type` was already on the controlled dropdown path from the previous cut. The generic `(current)` select fallback still preserves legacy stored values. The REO mortgage nested record remains a JSON editor, but its placeholder now shows representative `payoff_at_close` and `loan_type` fields. Lender Pipeline edit surfaces were audited: request status, document category/visibility, lender picker, and user role/status are already bounded selects; TMO lender account numbers, document display names, profile/contact fields, search, workflow notes, and messages remain free text by design.
+
+Commit/deploy: EFS commit `bf7b27d` (`fix(admin): align pipeline edit controls`) was pushed to `origin/main`. Deployed with `make deploy`; Worker URL `https://equityfundingsource.brian-takita.workers.dev`; Version ID `ff1482da-fc53-46fe-adcb-aa891ac220d2`. I did not push the parent `agent-loop` branch because it already had three unrelated local commits ahead of `origin/main`; pushing the parent would have published unrelated work. The EFS code repo itself is pushed and deployed.
+
+Verification: `bun test tests/admin-full-application-approve-ui.test.ts tests/admin-investor-pipeline.test.ts` passed (`108 pass / 0 fail`). `git diff --check` was clean. `make check` passed (`1191 pass / 0 fail`, app build, Worker build). Pre-deploy D1 checks showed no pending remote migrations, D1 info available, and a current Time Travel bookmark. Post-deploy `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` again showed no pending migrations, and `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/` returned `200`. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:720dfdb0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,6 +91,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~Review all form edit fields in the Deal Pipeline + Lender Pipeline. Make sure the correct input is used (dropdown instead of free text where appropriate).~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

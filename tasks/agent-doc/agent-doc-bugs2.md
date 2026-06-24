@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
 prompt_presets:
-  '#advance-review': Go through the review items. Add actionable backlog items to complete or advance the review items.,
+  '#advance-review': Go through the review items. Add actionable backlog + queue items to complete or advance the review items.,
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/agent-doc/agent-doc-bugs2.md
   '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix.
   '#commit-push': commit + push all uncommitted files
@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -34,356 +34,63 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260623-222916.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-004520.md`*
 
 Compacted content:
-- Archived 10 response topic(s): ack-mismatch shorter recovered response loss; #directchatpb2; JB Run Agent Doc submit path; 7 more
-- Prior summary/context: prior compacted content: Archived 6 response topic(s): JB Run Agent Doc submit latency; #turnstuck-readybusy; answere...
-❯ - `src/agent-doc` commit `644d7b12 fix: guard queued clear dispatch`
-❯ - Clean sibling worktree at `644d7b12`: `make check` passed, including clippy, 5039 nextest tests, doctests, and the ignored medium sim check.
-❯ - `cargo test -p agent-doc-orchestration context_clear_marker_resubmits_visible_pending_clear_once -- --nocapture`
-❯ - `cargo test -p agent-doc-orchestration drain_settle_gate_blocks_until_pane_idles_after_clear -- --nocapture`
-❯ - `cargo test -p agent-doc-orchestration focused_cycle_head_drains_for_supervisor_not_in_session_loop -- --nocapture`
-❯ - `cargo test -p agent-doc-orchestration supervisor_drains_focused_cycle_but_loop_defers_it -- --nocapture`
-❯ - `cargo test repeated_busy_session_clear_keeps_single_deferred_clear -- --nocapture`
-❯ - `cargo test busy_clear -- --nocapture`
-❯ - `cargo test queue_dispatch -- --nocapture`
-❯ - Added a dispatcher regression proving a queued `/clear` does not reach raw supervisor injection, and retargeted the generic supervisor-inject test to `/doctor` so it still covers non-clear command dispatch.
-❯ - Non-clear queued commands still use the existing supervisor IPC path.
-❯ - That reuses the current busy-pane/active-auto-queue behavior: the first non-interrupting busy clear writes the deferred handoff/cooldown, duplicates are suppressed, and raw `/clear` is not injected into an active response.
-❯ - Queued `/clear` commands now leave `queue_dispatch` before generic supervisor IPC or tmux fallback and call the existing guarded `session_actor_cmd::clear` path.
-❯ - `src/agent-doc/src/queue_dispatch.rs`
-- Latest GitHub Actions CI for `main` was green: run `28060207399`, `fix: preserve prose queue heads`, completed 2026-06-23T22:03:57Z.
-- `make install-full` passed from that isolated worktree and installed `agent-doc 0.34.43`; install marked two controllers for recycle at next idle boundary.
-- Full `make check` passed in an isolated worktree containing only this patch: 5042 tests passed, 241 skipped, medium simulator passed.
-- Targeted regressions passed for queue preemption, session-clear messages, and SimWorld duplicate suppression.
-- `cargo fmt --check` passed in the working tree.
-
-### Re: #mbd4 IPC issue dogfooding log — gpt-5
-
-> **Queue prompt:** do [#mbd4]
-
-Implemented `#mbd4` in `src/agent-doc`.
-
-IPC proof failures now get mirrored into the session document during interrupted-cycle recovery: preflight reads the latest matching `ipc_proof_insufficient` ops-log diagnostic, appends a deduped visible IPC dogfood note inside `agent:exchange`, and commits it through the normal recovery/commit path. The note is deliberately not a markdown heading or `### Re:` block, so session-check does not treat the automatic log as a new prompt or unowned assistant response.
-
-The write-path direct-append approach was tested and rejected during this cycle because it created post-commit working-tree drift; the landed implementation keeps the note on the recovery side of the commit boundary.
-
-Changed paths: `src/agent-doc/agent-doc-orchestration/src/preflight.rs`
-Commands: `tsift status`; `cargo test -p agent-doc-orchestration ipc_dogfood_note`; `cargo test -p agent-doc-orchestration route_queue_commit_boundary`; `cargo test -p agent-doc-orchestration ipc_proof`; `cargo test -p agent-doc-orchestration ipc_`; clean-worktree `make check` at `dad06399`
-Verification: all listed commands passed except an earlier main-worktree `make check` was blocked by unrelated unstaged queue-consumption edits; the clean sibling worktree at commit `dad06399` passed `make check`.
-Commit: `src/agent-doc` `dad06399 fix: log IPC proof failures in session exchange`
-Confidence: high
-Escalation: none.
-
-### Re: #p6a0 deferred session clear dedupe — gpt-5
-
-Completed `#p6a0`.
-
-`agent-doc session clear` now treats a busy active auto-loop as a single deferred handoff: the first non-interrupting clear records one pending clear for the next proven idle boundary, and repeated clears while that marker exists report `session_clear already deferred` without refreshing cooldown or injecting another `/clear` into the active turn. The supervisor simulator now covers that duplicate suppression and the later idle-boundary delivery.
-
-Updated the shared and editor specs, README, `VERSIONS.md`, and the installed agent-doc skill text. I committed and pushed the agent-doc submodule fix as `ef365e4b` (`fix: dedupe deferred session clears`) and committed the parent submodule pointer as `8042b8955`.
-
-Verification:
-- `cargo fmt --check` passed in the working tree.
-- Targeted regressions passed for queue preemption, session-clear messages, and SimWorld duplicate suppression.
-- Full `make check` passed in an isolated worktree containing only this patch: 5042 tests passed, 241 skipped, medium simulator passed.
-- `make install-full` passed from that isolated worktree and installed `agent-doc 0.34.43`; install marked two controllers for recycle at next idle boundary.
-- Latest GitHub Actions CI for `main` was green: run `28060207399`, `fix: preserve prose queue heads`, completed 2026-06-23T22:03:57Z.
-
-The live worktree still has pre-existing unrelated dirty files in `agent-doc-orchestration/src/write.rs` and `agent-doc-orchestration/src/write/queue_consume.rs`; I did not stage or commit them. A direct `make check` in the dirty worktree is currently blocked by those queue-consumption edits, so I used the isolated-patch worktree for the full check.
-
-> **Queue prompt:** JB Run Agent Doc still not submitting. Can we track when this happens and automatically file a bug so I don't have to endlessly repeat myself when you fail to fix the issue?
-
-I did not fold that separate auto-filing behavior into `#p6a0`. I added it as a new backlog item so the route failure path can be designed with the right diagnostic capture and dedupe contract instead of being mixed into the deferred-clear fix.
-Implemented and pushed `#p6a0`.
-
-Code commits:
-- `src/agent-doc`: `ef365e4b fix: dedupe deferred session clears`
-- parent gitlink: `8042b8955 chore: update agent-doc submodule`
-- session closeout: `76ca6e39b agent-doc(agent-doc-bugs2): 2026-06-23 18:51:43`
-
-What changed:
-- Busy `agent-doc session clear` now queues one deferred clear for the next idle boundary.
-- Repeat clears while pending now report already deferred and do not inject another `/clear`.
-- Added queue-preemption, session message, and SimWorld regression coverage.
-- Updated README/spec/editor specs/`VERSIONS.md`.
-- Added backlog item `#3ygp` for automatic bug filing on repeated JetBrains Run route failures.
-
-Verification:
-- `cargo fmt --check` passed.
-- Targeted regressions passed.
-- Full `make check` passed in an isolated worktree containing only this patch: 5042 passed, 241 skipped, medium sim passed.
-- `make install-full` passed and installed `agent-doc 0.34.43`.
-- `src/agent-doc` CI was green before push.
-- Root `Agent Doc` workflow failed in 4s with empty job steps and no logs, matching an external CI-start/no-log blocker rather than a test failure.
-
-Notes:
-- I left pre-existing unrelated dirty files unstaged, including `agent-doc-orchestration/src/write.rs` and `write/queue_consume.rs`.
-- `session-check` is ok; it still warns that the route-owned supervisor is stale and should recycle at the next idle boundary.
-
-### Re: :pushpin: do [#pzjy] — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: do [#pzjy]
-
-
-Implemented `#pzjy`.
-
-- Added post-commit queue reconciliation so committed `agent:queue` completions stay completed when a stale editor buffer reappears with the same prompt active again. This covers pinned/id-backed rows and answered free-text rows, preserves unrelated new queue work, and keeps the existing editor-owned direction where a newly struck live row wins over an active HEAD row.
-- Wired the reconcile into the post-commit match decision before transient replay-hash equality can hide strike-only queue drift, with editor-IPC/disk transports and FlowCore audit coverage.
-- Added the missing `--force-disk` closeout path for pending-maintenance reap after this live closeout exposed that recovery gap; ordinary preflight/route maintenance still fails closed under active listeners.
-- Added focused low-level, post-commit, force-disk maintenance, and FlowCore regressions, plus spec and version notes.
-
-Verification:
-- `cargo fmt --check`
-- `cargo test -p agent-doc-orchestration postcommit_queue -- --nocapture`
-- `cargo test -p agent-doc-orchestration postcommit_worktree_reconciles_stale_queue_unstrikes_before_flush -- --nocapture`
-- `cargo test -p agent-doc-orchestration force_disk_closeout_pending_maintenance_bypasses_active_listener -- --nocapture`
-- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
-- Clean isolated worktree `make check`: clippy, 5047 nextest tests, doctests, and medium simulation passed.
-- Installed the verified clean build with `make install-full`.
-
-Commits:
-- `src/agent-doc` `63edca4d` (`fix: preserve completed queue heads after stale editor drift`), pushed to `origin/main`.
-- `src/agent-doc` `a58eb3e8` (`fix: force pending maintenance under force-disk closeout`), pushed to `origin/main`.
-- Parent gitlink `9d0c6b5c3` (`chore: update agent-doc submodule`).
-- Added focused low-level and post-commit regressions, plus spec and version notes.
-
-Verification:
-- `cargo fmt --check`
-- `cargo test -p agent-doc-orchestration postcommit_queue -- --nocapture`
-- `cargo test -p agent-doc-orchestration postcommit_worktree_reconciles_stale_queue_unstrikes_before_flush -- --nocapture`
-- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
-❯ - Clean isolated worktree `make check`: clippy, 5046 nextest tests, doctests, and medium simulation passed.
-- Installed the verified clean build with `make install-full`.
-
-Commits:
-- `src/agent-doc` `63edca4d` (`fix: preserve completed queue heads after stale editor drift`), pushed to `origin/main`.
-- Parent gitlink `dbed747e1` (`chore: update agent-doc submodule`).
-- `src/agent-doc` `63edca4d` (`fix: preserve completed queue heads after stale editor drift`), pushed to `origin/main`.
-- Installed the verified clean build with `make install-full`.
-❯ - Clean isolated worktree `make check`: clippy, 5046 nextest tests, doctests, and medium simulation passed.
-- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
-- `cargo test -p agent-doc-orchestration postcommit_worktree_reconciles_stale_queue_unstrikes_before_flush -- --nocapture`
-- `cargo test -p agent-doc-orchestration postcommit_queue -- --nocapture`
-- `cargo fmt --check`
-- Added focused low-level and post-commit regressions, plus spec and version notes.
-- Wired the reconcile into the post-commit match decision before transient replay-hash equality can hide strike-only queue drift, with editor-IPC/disk transports and FlowCore audit coverage.
-- Added post-commit queue reconciliation so committed `agent:queue` completions stay completed when a stale editor buffer reappears with the same prompt active again. This covers pinned/id-backed rows and answered free-text rows, preserves unrelated new queue work, and keeps the existing editor-owned direction where a newly struck live row wins over an active HEAD row.
-
-### Re: stale #pzjy replay drift — gpt-5
-
-This cycle did not require new source work. Preflight surfaced stale editor replay/prompt-prefix drift in the just-committed `#pzjy` exchange tail, not a new actionable queue item. I’m closing that drift through the binary-owned path so the queue can continue from a clean boundary.
-
-Verification:
-- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` opened cycle `cycle-1782257556456` and identified the stale `#pzjy` exchange drift.
-- No source files changed in this cleanup cycle.
-
-### Re: queue restoration repair — gpt-5
-
-Restored the next queue head that was accidentally marked complete during stale closeout cleanup. No source work was performed in this repair cycle.
-
-### Re: annotated idle loop queue items — gpt-5
-
-> **Queue prompt:** Can we have annotated queue item(s) that runs when there are no other queue items? So this would effectively be a running loop. This should also support multiple annotated loop queue items that run in a sequence loop. Also, can we have an emoji annotate which queue item is currently being run? There can be a default poll period with configurable override. Also, the loop item can intelligently schedule based on the frequency of events.
-
-Yes, but this should be implemented as a scheduler feature rather than overloading ordinary `agent:queue` drain semantics. The safe shape is: normal drainable queue work always wins; loop items run only when no regular head is ready; loop order/cursor and last-run timestamps are persisted; visual/current-item state is metadata, not prompt text; poll periods and event-frequency decisions stay deterministic until a later local-model dispatch hook is added.
-
-Captured this as four backlog items: `#qloop1` syntax/state, `#qloop2` idle-loop sequencing, `#qloop3` poll controls, and `#qloop4` event-aware scheduling. No source files changed in this cycle.
-
-Verification:
-- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
-- `agent-doc read ... --component queue`
-- `agent-doc read ... --component backlog`
-
-Confidence: medium; this is a decomposition/architecture closeout for a multi-part feature, not an implementation patch.
-Escalation: none.
-
-### Re: telemetry observer for agent-doc bugs — gpt-5
-
-> **Queue prompt:** How can we give agent-doc more telemetry access to identify bugs? Should we have an observer in the supervisor that takes periodic snapshots to process either with the subscription or a local model to identify bugs? Could we have an agent doc run a dedicated loop to schedule observation + bug fixes? So there would be a sidecar agent doc to this session that can observe all running project sessions to add bugs as they are seen. Could we also have a deterministic observer detect any annotated issues & deterministic patterns of issues?
-
-Yes. The right shape is a two-layer observer: deterministic telemetry first, model triage second. The supervisor should publish compact snapshot artifacts for each live session; a deterministic observer should scan those snapshots plus `session-check`, preflight warnings, and ops-log markers for known issue fingerprints; a sidecar agent-doc loop can then file deduped bug backlog items without touching active panes. Model processing should consume compact snapshot/context-pack handles and remain advisory unless a deterministic rule or explicit operator gate proves the bug.
-
-Captured this as four backlog items: `#qobs1` snapshot surface, `#qobs2` deterministic issue rules, `#qobs3` sidecar observer loop, and `#qobs4` model-assisted advisory triage. No source files changed in this cycle.
-
-Verification:
-- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
-- `agent-doc read ... --component queue`
-- `agent-doc read ... --component backlog`
-
-Confidence: medium; this is a design/backlog closeout for a cross-cutting observability feature, not implementation.
-Escalation: none.
-
-### Re: local-model queue item dispatch — gpt-5
-
-> **Queue prompt:** Allow dispatching of queue items, such as loop items, use local models.
-
-Agreed. The existing queue dispatch surface already supports `/model <tier>` as an inline command, but that only changes the model override for later harness work. The missing feature is per-item backend selection: a queue or loop item should be able to declare that it is eligible for a local-model executor, run through that backend, and still close through the same response/commit/session-check proof boundary as normal queue work.
-
-Captured this as three backlog items: `#qlm1` backend-selection syntax, `#qlm2` local-model dispatcher, and `#qlm3` safety/telemetry gates. No source files changed in this cycle.
-
-Verification:
-- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
-- `sed -n '1,260p' src/agent-doc/src/queue_dispatch.rs`
-- `rg -n "local model|/model|queue.*model" src/agent-doc ...`
-
-Confidence: medium; existing `/model` support is confirmed, but local-model execution requires a new backend path.
-Escalation: none.
-
-### Re: post-closeout queue sync drift — gpt-5
-
-Committed editor-applied queue-sync/boundary drift that arrived after the prior closeout. No source work was performed and no queue head is being answered by this repair cycle.
-
-### Re: JB Run Agent Doc submit/start miss tracking — gpt-5
-
-> **Queue prompt:** JB `Run Agent Doc` still not submitting. Can we track when this happens and automatically file a bug so I don't have to endlessly repeat myself when you fail to fix the issue? [dogfooding] Can we also have the supervisor detect if the turn started? And if the turn has not started, send Enter and continue retrying until the turn starts?
-
-Yes. This belongs in the existing `#3ygp` bug, not as a second duplicate backlog item. I expanded `#3ygp` so it now covers both halves: automatic bug filing for repeated JetBrains route/dispatch misses, and supervisor-side turn-start proof with bounded Enter/submission retries before filing the evidence-backed bug.
-
-No source files changed in this cycle.
-
-Verification:
-- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
-- `agent-doc read ... --component queue`
-- `agent-doc read ... --component backlog`
-- The parent repo has no workflow named `CI`.
-- Latest `agent-doc` CI for this push was still `in_progress` when checked: run `28065394925`.
-- `make install-full` installed the verified build from `/tmp/agent-doc-qstrikework`.
-- Clean worktree `make check`: clippy, 5048 nextest tests, doctests, and medium simulator passed.
-- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
-- `cargo test -p agent-doc finalize_keeps_free_text_queue_head_when_cycle_answers_foreign_exchange_prompt --test finalize_integration -- --nocapture`
-- `cargo test -p agent-doc finalize_echoes_consumed_free_text_queue_prompt_into_response --test finalize_integration -- --nocapture`
-- `cargo test -p agent-doc-orchestration consume_decision -- --nocapture`
-- `cargo fmt --check`
-- Parent repo `d0518761b` (`chore: update agent-doc submodule`), pushed to `origin/main`.
-- `src/agent-doc` `b0a6f1eb` (`fix: require exact queue head proof before strike`), pushed to `origin/main`.
-- Generic repair/no-op responses and unrelated exchange answers leave the active free-text queue head runnable.
-- Id-backed heads accept explicit same-id closeout signals, including `--done`, `--pending-gate`, `--pending-edit`, and now `--review-resolve`.
-- Free-text heads are consumed only when the current response explicitly quotes/targets that same queue prompt.
-- `queue_consumption_allowed_for_response` now requires exact proof before striking a queue head.
-
-Confidence: high for backlog capture; implementation remains queued as `do [#3ygp]`.
-Escalation: none.
-
-### Re: #3ygp
-
-> **Queue prompt:** :pushpin: do [#3ygp]
-
-Implemented `#3ygp`.
-
-The JetBrains Run Agent Doc route/dispatch failure paths now file a deduped session-doc backlog bug when bounded submit or dispatch-start proof is exhausted. The auto-filed item includes the required evidence: failure class, document path, route stage, pane, actor generation, editor attempt id, dispatch proof state, elapsed time, preserved diagnostic path, ops log path, ops log marker, and a symptom-key marker keyed by document/stage/failure so repeated failures dedupe.
-
-Coverage was wired into the direct-pane submit timeout path, supervisor IPC accepted-without-start-proof path, routed reopen accepted-without-start-proof path, and dispatch-only required proof failure path. Pane diagnostic snapshot paths are carried through the relevant submit/acceptance result structs. Docs were updated in `VERSIONS.md`, `editors/jetbrains/SPEC.md`, and `specs/08-session-routing.md`.
-
-Verification:
-- `cargo fmt --check`
-- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
-- `cargo test -p agent-doc-orchestration route_dispatch_bug_report -- --nocapture`
-- `cargo test -p agent-doc-orchestration direct_pane_enter_resubmit -- --nocapture`
-- `cargo test -p agent-doc-orchestration route_submit -- --nocapture`
-- `cargo test -p agent-doc-orchestration dispatch_only_direct_pane_accepted_submit_skips_optional_proof_wait -- --nocapture`
-- `make check`
-- `make install-full`
-
-Committed and pushed source change `ef50ed8aa187839567552bcf627659099af383ba` (`fix: file route dispatch proof failures`) to `btakita/agent-doc` `main`. Updated and pushed the parent submodule pointer in `btakita/agent-loop` as `a51932f8d` (`chore: update agent-doc submodule`). GitHub Actions CI for the source push was queued as run `28066398449` when checked.
-
-### Re: #fbwireverify
-
-> **Queue prompt:** :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
-
-`#fbwireverify` is operator-gated because the remaining work is not code implementation. It is live acceptance proof for a race/transport behavior that only appears with a real editor plugin and a real agent pane running at the same time.
-
-The test needs two independently controlled live surfaces: one editor/IDE side that can apply or withhold IPC acknowledgements, and one CLI/agent-doc pane that is being driven by the supervisor. The current driving session is itself the agent-doc turn being finalized, so using it as the test subject would collapse observer and subject into the same pane. It also cannot safely simulate a wedged editor consumer, slow editor ACKs, plugin reinstall/restart, and supervisor recycle while still preserving this session's own write/commit boundary.
-
-What the operator has to verify later is concrete:
-
-- Slow-ACK case: after install/recycle, drive a live editor + CLI pair and confirm `ops.log` shows `convergence_gate_defer` with `unmet=inflight_drained` before each dispatch, with no IPC inflight pileup above one.
-- Wedged/no-ACK case: deliberately make the editor consumer stop acknowledging patches and confirm the bounded `CONVERGENCE_GATE_TIMEOUT_MS` path emits `convergence_gate_force_disk_fallback severity=error`, writes a loadable `.agent-doc/playback/<hash>/<cycle>.json` artifact, and the drain continues instead of sticking forever.
-
-So the gate is about needing a human-controlled live topology and failure injection. Deterministic tests and `make check` already covered the shipped code path; this item stays open until that live proof is collected.
-
-### Re: #fbwireverify gate cleanup
-
-`#fbwireverify` remains open as live operator verification work. This cleanup keeps the explanation response committed while moving the underlying item into gated review, so the explanatory queue prompt is not re-served as runnable work and the live two-pane verification requirement is still preserved for the operator.
-
-### Re: #qnodemerge4verify
-
-> **Queue prompt:** :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀
-
-This verifies the live editor-op merge path, not ordinary Unicode display. The bug class appears when the editor plugin records edits in a buffer that contains non-ASCII text while agent-doc is also merging a response or queue/backlog mutation into that same document. JetBrains document offsets are UTF-16-oriented, while the Rust merge code ultimately needs byte-aligned spans; the verification is proving the plugin/binary handoff records accepted byte offsets and the merge lands at the real character boundary.
-
-Practical verification:
-
-1. Open a session document in the freshly installed JetBrains plugin.
-2. Put obvious non-ASCII text in or near a queue/backlog line, for example `café 日本 😀 sentinel`.
-3. Start an agent-doc turn that will write to the same document, then while it is running, edit around that text in the IDE: insert/delete characters before, inside, and after `日本 😀`.
-4. Let the turn finalize normally.
-5. Inspect `.agent-doc/ops.log` for the edit/merge evidence. Useful searches are `editor_op_recorded`, `editor_ops_for_base`, `byte`, `qnodemerge`, and the document path.
-6. Pass condition: the resulting markdown has no mojibake, no split emoji/surrogate artifacts, no character interleaving, and the log shows the editor ops were accepted for the expected base with byte offsets.
-
-A lighter smoke test is to make a non-ASCII edit during a normal agent response and confirm the final document still contains exactly the intended `café 日本 😀` text. The full proof is the concurrent edit-during-finalize case above, because that is when recorded offsets are actually consumed by the merge path.
-
-I am not marking `#qnodemerge4verify` done here. I am moving it to gated review so the explanation prompt is not repeated, while the live proof remains available for the operator to complete.
-
-### Re: #tb4q
-
-> **Queue prompt:** :pushpin: do [#tb4q]: please check logs
-
-I checked `.agent-doc/logs/ops.log` and `agent-doc ops summary/diagnose` for the `#qfocsupverify` proof chain.
-
-Result: not verified.
-
-I found ordinary supervisor reset/drain activity for this document, including:
-- `2026-06-23T23:54:16Z idle_queue_watch_context_reset ... target=%1 ... reason="session accretion is warn ..."`
-- `2026-06-24T00:04:58Z idle_queue_watch_drain ... target=%1 ... head_sha256=e1d673...`
-
-Those lines prove the idle watcher can clear/drain this document, but they do not prove the `#qfocsup` focused-cycle path. The reset reasons are context/accretion/compaction, not focused-cycle. I did not find `ui_outcome=deferred_for_supervisor_drain`, `yield_to_supervisor_clear_and_continue`, `qfocsup`, or a `go_drain_dispatch`/fresh-agent proof tied to `#tb4q`.
-
-Current `session-check` still reports `ui_outcome=operator_proof_required`, not `deferred_for_supervisor_drain`.
-
-I am not marking `#tb4q` done. I am moving it to gated review so the queue prompt is not repeated while the live proof remains open.
-
-### Re: #qcm1verify
-
-> **Queue prompt:** :pushpin: do [#qcm1verify]: Use the logs to verify.
-
-I checked the logs for the `#qnodemerge1` component-scoped merge live proof.
-
-Result: verified for `#qcm1verify`.
-
-Evidence:
-- The installed/supervisor side crossed a recycle boundary: `ops.log` shows `supervisor_auto_install_succeeded` and repeated `supervisor_binary_stale_self_recycled ... boundary=next_queue_item`, including the `agent-doc-bugs2` session before the later live writes.
-- The live edit-during-finalize shape occurred in this document: `editor_op_recorded ... #qnodemerge4wire doc=agent-doc-bugs2` appears repeatedly during the later closeout window, including `2026-06-24T00:04:30Z` through `00:04:55Z` and again around `00:25:23Z` through `00:31:29Z`.
-- The merge path did not log a `merge_by_component` structural-divergence or segmentation fallback. In this build, `merge_contents_crdt` routes through `crdt::merge_by_component`; fallback would have logged explicitly.
-- The document converged cleanly after those writes. Relevant examples include `postcommit_worktree_check ... match=true` for `agent-doc-bugs2` at `2026-06-24T00:04:53Z`, `00:31:29Z`, `00:34:50Z`, `00:36:26Z`, and `00:38:58Z`.
-- I also checked the current `agent:queue` component: it contains only queue heads. There is no `### Re:` response body, no supervisor console block, and no visible exchange text spliced into the queue.
-
-So I am counting the component-level anti-splice verification as passed and closing `#qcm1verify`. This does not close the separate `#qnodemerge4verify` UTF-8/op-acceptance proof; that item still needs its own accepted-op marker.
-
-### Re: #1jec
-
-> **Queue prompt:** :pushpin: do [#1jec]
-
-I checked the reconnect re-read proof for `#yzer/#evmhplugin`.
-
-Result: verified at the ops-log contract level, so I am closing `#1jec`.
-
-Evidence:
-- Stale-buffer re-read branch is present: `2026-06-23T14:10:36Z reconnect_buffer_decision decision=reread_disk buffer_matches_disk=false disk_is_head=true buffer_is_prior_commit=true #yzer doc=lazily-rs ...`. That is the exact predicate for re-reading disk/HEAD into a stale prior-commit buffer.
-- The editor-wins branch is present: `2026-06-23T14:10:36Z reconnect_buffer_decision decision=keep_buffer buffer_matches_disk=false disk_is_head=true buffer_is_prior_commit=false #yzer doc=agent-doc-bugs2 ...`, with additional `keep_buffer` decisions for other open docs in the same reconnect sweep. That proves non-prior / unsaved buffers are preserved instead of clobbered.
-- The clean/no-op branch also appears repeatedly for `agent-doc-bugs2`: `decision=in_sync ... #yzer`, so the reconnect hook is active and correctly leaves already-converged buffers alone.
-- Around the stale-buffer event, `lazily-rs` had clean post-commit state before and after the reconnect window (`postcommit_worktree_check ... match=true` at `2026-06-23T14:03:29Z` and later `2026-06-23T14:24:19Z`). I did not find a File Cache Conflict marker tied to that `#yzer` reconnect window.
-
-Caveat: `ops.log` proves the binary FFI decision path. The plugin-side `applyReconnectReread` log line is emitted through the IDE plugin logger, not the agent-doc ops log. For this item's stated acceptance marker, the required `reconnect_buffer_decision decision=reread_disk #yzer` and `decision=keep_buffer #yzer` evidence is present.
-<!-- agent:boundary:e5ab22da -->
+- Archived 17 response topic(s): #mbd4 IPC issue dogfooding log; #p6a0 deferred session clear dedupe; :pushpin: do [#pzjy]; 14 more
+- Prior summary/context: prior compacted content: Archived 10 response topic(s): ack-mismatch shorter recovered response loss; #directchatpb2;...
+- Codex dispatch-start tracking is enabled when the session document can see the workspace `.codex/hooks.json`, including nested agent-doc roots.
+- Direct-pane delivery logs pane-input acceptance separately from harness start proof: `direct_pane_submit` covers the tmux text+Enter acceptance window, while `dispatch_start_proof` covers Codex hook advance or OpenCode pane-state proof.
+- If a tracked dispatch leaves the input surface but no dispatch-start proof arrives, route logs `route_submit_observation result=accepted_without_dispatch_start_proof`, emits `route_submit_issue issue=accepted_without_dispatch_start_proof`, preserves a redacted pane snapshot, returns `RoutedDispatchStartProof::DispatchStartUnproven`, and the dispatch-only gate fails closed.
+- Untracked accepted-only delivery still logs `proof=accepted proof_scope=accepted_only`, which preserves the distinction for log review without claiming dispatch-start proof.
+- Changed paths: no source files changed in `src/agent-doc`; the pre-existing dirty files `agent-doc-orchestration/src/write.rs` and `agent-doc-orchestration/src/write/queue_consume.rs` were left untouched.
+- Commands: `tsift status`; `cargo test -p agent-doc-orchestration route_submit_observation -- --nocapture`; `cargo test -p agent-doc-orchestration dispatch_only_tracked_timeout_fails_closed_even_when_accepted_only_is_allowed -- --nocapture`; `cargo test -p agent-doc-orchestration codex_dispatch_start_tracking_enabled -- --nocapture`; `gh run list --workflow CI --limit 1`; `agent-doc reset --from-current /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`.
+- Verification: all three focused test commands passed. Latest `src/agent-doc` CI was green: run `28066398449`, `fix: file route dispatch proof failures`, completed 2026-06-24T00:24:34Z.
+- Confidence: high for the diagnostic/audit result.
+- Escalation: none.
+**IPC proof issue dogfood log**
+
+Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=64b2305b-0126-40fe-ae97-c23fd2834c06 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=39743 candidate_hash=e7a3fcd5884ac70ff46056c80578fc940bcf336609b789c279517bad549335d8 content_ours_len=40450 content_ours_hash=c946686fe9fb6aa877e1a2620bfa7daf257aab4082a54ca94574cea15b6ad889 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782259426340
+```
+**IPC proof issue dogfood log**
+
+Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+
+### Re: IPC proof dogfood note — gpt-5
+
+The current prompt-bearing change is the automatic IPC proof dogfood note for `ipc_proof_insufficient` on `agent-doc-bugs2.md`. I am treating it as telemetry for the editor IPC/writeback path, not as a new source-code request in this cycle.
+
+I already verified `#t0d0`: current route diagnostics separate pane-input acceptance from dispatch-start proof, and tracked accepted-without-proof dispatches log `route_submit_issue issue=accepted_without_dispatch_start_proof` and fail closed. No source patch was needed.
+
+Closeout notes:
+- Changed paths: session document state only; no `src/agent-doc` source files changed.
+- Commands: `agent-doc reset --from-current /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`; `agent-doc repair --apply-recovery /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`; focused route tests listed in the previous audit note.
+- Verification: prior focused route tests passed, and latest `src/agent-doc` CI was green (`28066398449`).
+- Confidence: medium for the closeout recovery because the editor IPC sidecar repeatedly reported stale snapshot drift; high for the `#t0d0` route diagnostic audit.
+- Escalation: none.
+
+No new follow-up backlog item is needed from this IPC telemetry note. `#advance-review` remains queued; this cycle did not drain it.
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=9d04336f-6af2-4a7e-89d6-62d63a895517 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=20046 candidate_hash=0814c3876aeabcad6d7be9f17261101e985e2edd144c8f0fc26b4d025e580df4 content_ours_len=50021 content_ours_hash=44851fb2ef72b930cbaa8e613adb11d3e9f642bfb568fa0cc598b477fc7d09ac doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782263068189
+```
+<!-- agent:boundary:b96f51a8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~[#t0d0]~~
+- #advance-review
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

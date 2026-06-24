@@ -226,6 +226,9 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 - `on_transition(handler)` — fires `(old, new)` on state change, returns disposer; not called on registration (matches lazily-rs effect semantics)
 - Self-transition suppression via Cell's `PartialEq` guard (returning equal state = accepted but no propagation)
 - 7 tests (traffic-light FSM, guard rejection, self-transition noop, on_transition fires/dispose/old-new-correct, reactive invalidation). All 65 lazily-py tests pass.
+- lazily-zig: `src/lazily-zig/src/lazily/ipc.zig`
+- lazily-py: `src/lazily-py/src/lazily/ipc.py` (incl. `ShmBlobRef`, `IpcValue`)
+- lazily-rs: `src/lazily-rs/src/ipc.rs` (incl. `ShmBlobArena`)
 
 Marking `#8wmj` done. Remaining StateMachine parity: `#nnyn` (lazily-zig, Phase 3), `#hj5x` (Lean cross-module proof, Phase 1 TODO).
 
@@ -236,7 +239,24 @@ Marking `#8wmj` done. Remaining StateMachine parity: `#nnyn` (lazily-zig, Phase 
 > **Queue prompt:**
 >
 > ~~Can we make lazily support a bidirectional lazily<->lazily FFI communication channel?…~~ — auto-struck: answered prior cycle (#ftstrike)
-<!-- agent:boundary:ea361f57 -->
+
+### Re: queue cleanup + new items addressed — glm-5.2
+
+Cleaned queue residue (9 struck/answered items removed). The session-check `#qheadresidue` guard was tripping on stale struck rows that auto-strike couldn't remove from the go-mode queue; manually purged them.
+
+**New queue items addressed:**
+
+**"Implement Signal in lazily-zig"** — captured as `#lzsigzig`. lazily-zig currently has Slot+Cell but no Signal (the eager derived primitive). This is a parity gap: lazily-rs and lazily-py both have Signal; lazily-zig doesn't. Added to backlog.
+
+**"Implement IPC.lean in lazily-rs / lazily-zig / lazily-py"** — these need clarification. The IPC.lean protocol (Snapshot/Delta/DeltaOp/epoch sequencing/peer permissions) is **already implemented** in all three ports:
+- lazily-rs: `src/lazily-rs/src/ipc.rs` (incl. `ShmBlobArena`)
+- lazily-py: `src/lazily-py/src/lazily/ipc.py` (incl. `ShmBlobRef`, `IpcValue`)
+- lazily-zig: `src/lazily-zig/src/lazily/ipc.zig`
+
+If the goal is (a) `ShmBlobArena` parity in Zig/Python, (b) Lean-to-Rust proof extraction / certified code, or (c) property tests derived from IPC.lean theorems, please clarify and I'll scope a plan. Captured as `#lzffileanrs`/`#lzffileanpy`/`#lzffileanzig` with `[recommended]` — they default to "needs clarification" until the intent is pinned.
+
+**Next drainable head: `do [#nnyn]` (StateMachine in lazily-zig).** Continuing in the loop.
+<!-- agent:boundary:1a6420a1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -260,6 +280,10 @@ Marking `#8wmj` done. Remaining StateMachine parity: `#nnyn` (lazily-zig, Phase 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#t0qn] #lzsigzig=Implement Signal primitive in lazily-zig (src/lazily-zig/src/lazily/signal.zig). Zig currently has Slot+Cell but no Signal. Mirror lazily-rs eager Signal: memoized slot + puller effect + PartialEq memo guard.
+- [ ] [#9e64] #lzffileanrs=[recommended] Clarify: IPC.lean formal theorems already implemented in lazily-rs ipc.rs (Snapshot/Delta/DeltaOp/epoch sequencing). If goal is ShmBlobArena/ShmBlobRef in siblings or Lean-to-Rust proof extraction, scope a plan. Currently ambiguous.
+- [ ] [#dcgp] #lzffileanpy=[recommended] Clarify: lazily-py ipc.py already implements the IPC.lean protocol (IpcValue/SharedBlob/Snapshot/Delta). If goal is ShmBlobArena parity or proof extraction, scope a plan.
+- [ ] [#kjfe] #lzffileanzig=[recommended] Clarify: lazily-zig ipc.zig already implements the IPC.lean protocol. If goal is ShmBlobArena parity or proof extraction, scope a plan.
 - [ ] [#nnyn] #lzsmzig=Implement StateMachine in lazily-zig (plan Phase 3). Add src/lazily-zig/src/lazily/state_machine.zig: StateMachine(S,E) wrapping Cell + *const fn(*const S,E)?S transition pointer (Zig has no closures). Tests for guard rejection + acceptance.
 - [ ] [#hj5x] #lzsmlean2=Add Lean cross-module proof: SM send -> IPC DeltaOp.cellSet (plan Phase 1 TODO). Prove a materialized StateMachine transition is observable on the wire. Link StateMachine.lean with IPC.lean.
 - [ ] [#mes4] #lzkt=[recommended] Implement lazily-kt FFI-consumer package (plan Phase 4). Kotlin/Gradle under src/lazily-kt/. Wraps JNA bridge to lazily_ffi_*; StateFlow<DocumentStateProjection> projection holder + recordStateEvent reporter. NOT a reactive-core port. Blocked on #lzffistate1.

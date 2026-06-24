@@ -128,7 +128,45 @@ Verification:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:8820d52a -->
+
+
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=ea287f42-466c-4275-a70a-c50f3e5aa01f invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782279950206
+```
+
+### Re: Why `btak.div+lender3@gmail.com` is showing Requirements Current
+
+Root cause: the production Worker is still running the old lender-pipeline requirements predicate. That old predicate treated signup self-attestation (`users.accredited_confirmed_at`) as enough to make annual Requirements `current`, so a lender who checked the accredited/self-attestation box during signup could land in `requirements_current` before completing the document/evidence flow.
+
+For `btak.div+lender3@gmail.com`, the live D1 row is:
+- `users.accreditation_status = 'pending'`
+- `users.accredited_confirmed_at = 1782274175` (`2026-06-24T04:09:35Z`)
+- no latest `lender_accreditation_verifications` row
+- no `evidence_document_id`
+- no `lender_account`
+
+A direct SQL projection shows the difference:
+- old deployed logic: `requirements_current`
+- current checked-in logic: `signed_up`
+
+The checked-in fix is already on `main` as `dd1969c fix(admin): require verified lender requirements`, committed `2026-06-24T05:55:28Z`. It changes `investor_requirements_status_()` so Requirements become `current` only when `accreditation_status === 'verified'`; `accredited_confirmed_at` remains an accreditation/self-attestation flag but no longer clears annual Requirements. The latest Cloudflare deployment I found is version `77deacf5-86ec-4093-8910-055d8ea7e0ac`, created `2026-06-24T04:59:43Z`, which predates that fix.
+
+So the answer is: Requirements are current because production has not yet deployed the fix that separates signup self-attestation from admin-verified Requirements evidence. Deploying current `main` should move this user to Signed Up / Requirements Not started until they submit evidence and an admin verifies it.
+
+Changed paths: no product code changes in this cycle. Existing product fix is already in `src/equityfundingsource-dev` at `dd1969c`.
+
+Verification:
+- `tsift status --json .` in `src/equityfundingsource-dev` reported a fresh index.
+- Queried remote D1 for `btak.div+lender3@gmail.com` and confirmed pending user status, self-attestation timestamp, no verification row, no evidence document, and no lender account.
+- Queried remote D1 with old-vs-current stage projection: old deployed logic returns `requirements_current`; checked-in logic returns `signed_up`.
+- `bun test tests/admin-investor-pipeline.test.ts` passed: 93 tests, 0 failures.
+- `wrangler deployments list` via the repo wrapper showed latest deployment at `2026-06-24T04:59:43Z`, before `dd1969c`.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in this repo.
+
+Escalation: deploy current `main` when ready; no data correction is required for this specific row.
+Confidence: high.
+<!-- agent:boundary:215b15e7 -->
 <!-- /agent:exchange -->
 ###
 <!--

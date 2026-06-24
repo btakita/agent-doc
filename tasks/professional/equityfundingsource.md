@@ -251,8 +251,7 @@ Preflight notes:
 - Left the existing legacy gated backlog/review semantic warnings untouched; they were not part of this queue item.
 - Confidence: high from static focus wiring tests, full suite, build, and deployed asset hash `index.browser-2NZ6LM72.js`.
 - Escalation: none.
-
-<!-- agent:boundary:823ea70e -->
+<!-- agent:boundary:57e1afce -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -272,8 +271,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 should have the alert CTA as the focused item when opened. In this case the "Accept and Send to TMO" button in the alert.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

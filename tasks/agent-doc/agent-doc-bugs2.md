@@ -83,8 +83,22 @@ GitHub Actions note: `gh run list --workflow CI --limit 1` now reports no workfl
 - `specs/13-state-backbone.md` documents the editor projection bridge contract.
 - VS Code now has the same native projection/event bridge, records route and editor patch events, and includes matching tests.
 - JetBrains now binds `agent_doc_state_projection` and `agent_doc_record_state_event`, records route/transport/proof observations, renders a compact projection summary, and includes bridge tests.
+- `agent-doc session-check` for the three documents
+- `src/boost-client/.agent-doc/sessions.json`
+- `.agent-doc/sessions.json`
+- `src/boost-client/.agent-doc/state/editor-route-attempts/tasks__monsterrodholders.md-37a03006.txt`
+- `.agent-doc/state/editor-route-attempts/tasks__agent-doc__agent-doc-bugs2.md-b9c648a4.txt`
+- `.agent-doc/state/editor-route-attempts/tasks__professional__equityfundingsource.md-102ef8c4.txt`
+- `src/boost-client/tasks/monsterrodholders.md`: pane `%2`, separate submodule project/session registry; recent route either succeeded or queued behind an active owner turn.
+- `tasks/agent-doc/agent-doc-bugs2.md`: pane `%1`, recent `route_success`.
+- `tasks/professional/equityfundingsource.md`: pane `%3`, repeated `PROTECTED_PROMPT_INPUT`, plus a currently interrupted cycle after IPC no-ack.
 
 ### Re: JetBrains Codex Enter submit path — gpt-5
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` does not submit on equityfundingsource.md but does submit on monsterrodholders.md and this document. Why?
+
 
 > **Queue prompt:**
 >
@@ -97,7 +111,7 @@ The split text-then-Enter path exists for palette-style harness behavior, not Co
 So if JB `Run Agent Doc` still leaves a typed-but-unsubmitted Codex trigger, the failure is not “JetBrains forgot to include Enter.” It means the route typed across a bad readiness boundary: stale supervisor, startup/recycle transition, active/blocked composer, or a proof path that accepted pane input without dispatch-start proof. The right fix is to keep tightening the binary route readiness/proof gates and surface the state projection, not to add a second Enter from the plugin. A second Enter is risky because it can submit the wrong future prompt after the composer catches up.
 
 Relevant local checks already pin this contract: `simworld_jb_run_and_clear_share_codex_enter_submit_contract` expects Codex `tmux_text_enter`/`Enter`, and the dispatch-only direct-pane test asserts the route submits once without extra Enter retries.
-<!-- agent:boundary:c49c71e7 -->
+<!-- agent:boundary:fe9da0fd -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -105,8 +119,6 @@ Relevant local checks already pin this contract: `simworld_jb_run_and_clear_shar
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 <!-- /agent:queue -->
 <!--
-- 🧪 test edit for [#qnodemerge4wire]
----
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
 ---
 `'/clear' is disabled while a task is in progress

@@ -33,78 +33,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-063545.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-065804.md`*
 
 Compacted content:
-❯ - Archived 5 response topic(s): IPC recovery closeout; Duplicate lender3 Signed Up cards; IPC recovery note; 2 more
-❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-### Re: IPC recovery note — gpt-5
-
-> **Queue prompt:**
->
-> I deactivated btak.div+lender3@gmail.com, but the card still remains in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=05c518e4-d881-4b8e-8317-e0382a2b2e31&dialog=lender. Deactivated lenders should be removed from the Lender Pipeline. Create a Deactivated Lenders tab in the Lender Pipeline...and place the deactivated lenders in the tab as a searchable table.
-
-
-Recorded the IPC proof diagnostic that was appended during recovery. The duplicate-card investigation response is present in the exchange, and the queue is drained.
-
-Changed paths: `tasks/professional/equityfundingsource.md` only.
-
-Verification:
-- `agent-doc read --component exchange` confirmed the duplicate-card answer is present.
-- `agent-doc read --component queue` confirmed the queue is empty after consuming the stale already-completed heads.
-- `git diff -- tasks/professional/equityfundingsource.md` showed only the IPC diagnostic/HEAD marker drift before this closeout response.
-
-Escalation: none.
-Confidence: high.
-**IPC proof issue dogfood log**
-
-Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
-
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=23576efe-92c2-4b1d-833d-211c85da27b1 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782282608517
-```
-
-### Re: Deactivated lenders deployed — gpt-5
-
-> **Queue prompt:**
->
-> deploy
-
-Implemented, pushed, and deployed the deactivated-lenders split. Suspended/deactivated lenders no longer feed the active Lender Pipeline board, and the Lender Pipeline now has a searchable `Deactivated Lenders` tab.
-
-What changed:
-- The Lender Pipeline endpoint now filters active board data with `COALESCE(u.status, 'active') = 'active'` for board rows, pending-funds context, deal-interest context, and the nav badge count.
-- The endpoint now returns `deactivated_lenders` for `COALESCE(u.status, 'active') != 'active'`.
-- The admin UI now renders a `Deactivated Lenders` tab with a searchable table and an open-profile action for inspecting or reactivating deactivated lender accounts.
-
-Changed paths:
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/investor_management/index.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/nav_counts/index.ts`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
-- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
-- parent gitlink `src/equityfundingsource-dev`
-
-Commits / deploy:
-- EFS commit: `845cbd6` (`feat(admin): split deactivated lenders from pipeline`), pushed to `btakita/equityfundingsource-dev main`.
-- Parent gitlink commit: `227c2ee9c` (`chore: update equityfundingsource submodule`), pushed to `btakita/agent-loop main`.
-- Worker deploy succeeded at `https://equityfundingsource.brian-takita.workers.dev`, version `c6f15aaf-8a2f-48ed-a1ee-fb2e39340758`.
-
-Verification:
-- `bun test tests/admin-investor-pipeline.test.ts` passed: 95 tests.
-- `bun run check` passed: 1183 tests plus app build and worker build.
-- root `make check` passed.
-- `bun run deploy:worker` completed successfully; remote D1 had no migrations to apply.
-- Production D1 confirmed `05c518e4-d881-4b8e-8317-e0382a2b2e31` / `btak.div+lender3@gmail.com` is `status='suspended'`.
-- Production D1 predicate check confirmed that user has `active_board_match=0` and `deactivated_match=1`.
-- GitHub Actions `Agent Doc` run `28080578235` failed before jobs started because GitHub reported account billing/spending-limit failure; `gh run view` showed the billing annotation and no failed job logs.
-- `make tmux-ci` is not available in this checkout (`No rule to make target 'tmux-ci'`).
-
-Escalation: none.
-Confidence: high.
-<!-- agent:boundary:4134bf5d -->
+- Archived 2 response topic(s): IPC recovery note; Deactivated lenders deployed
+- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
+<!-- agent:boundary:ebe96438 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -124,6 +58,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- All lender pipeline dialogs for a lender should contextualize the Message dialog to the lender. Remove and delete any embedded lender message components in the lender pipeline dialogs.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

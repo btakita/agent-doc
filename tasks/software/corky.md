@@ -108,7 +108,35 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/corky.md source=socket_ack_content patch_id=5d96cfbd-5ae9-4578-9df1-1191291303e8 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=12002 candidate_hash=ae4a42ed9d1f3d8dab778278c3d07cf1a273a6660bb3b66f6bc8350278a82d97 content_ours_len=12362 content_ours_hash=ee3c7966174db5823da7842a7892803b2eb991fa135203e1dcfb8a9b3fbb9475 doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782335669784
 ```
-<!-- agent:boundary:4f426661 -->
+
+### Re: corky bug next-steps — prioritized backlog from workspace review — glm-5.2
+
+Ran a deep `#code-review` across the 5-crate workspace (`corky-core/-google/-mail/-social/-transcribe` + bin, ~33k lines) with three parallel passes (concurrency/lifecycle, mail-sync/draft, google+error-unsafe sweep). 12 concrete bugs with `file:line` evidence, ranked by severity. The two most severe are active **data-loss** hazards in `sync full`.
+
+**Top of backlog: `#ckyorphan`** (P0 data-loss).
+
+**P0 — data loss / crash on realistic input**
+- **`#ckyorphan`** — `sync full` orphan cleanup reaps ALL conversations: (a) `--account X` deletes every other account's files (cleanup scans global `mail/conversations/` but the `touched` set is account-scoped), (b) a transient empty Gmail/IMAP fetch leaves `touched` empty so every file classifies as an orphan — and it's **not self-healing** (state stays unchanged → incremental runs never re-fetch). `sync/mod.rs:202-260,782-798`.
+- **`#ckypanic`** — UTF-8 byte-slice panics: `&body[..80]` (`draft/mod.rs:712`, CJK/emoji replies) and `&due[..10]` (`tasks/list.rs:40`). One-line char-boundary fixes.
+- **`#ckysheets`** — `sheets push` clears the tab then writes in two HTTP calls; a failure between them leaves the tab empty with no backup. `doc/sheets.rs:148-174`.
+
+**P1 — correctness / stuck users**
+- **`#ckywatchpanic`** — `corky watch` dies on any tick panic: `spawn_blocking(...).await?` + `panic="abort"` aborts the daemon, breaking the "never crashes the loop" contract. `watch.rs:309-312`, `Cargo.toml:89`.
+- **`#ckydedup`** — `(raw_from, raw_date)` dedup drops distinct same-second messages and leaks duplicates across providers. `imap_sync.rs:184-197`.
+- **`#ckythread`** — IMAP path hardcodes `message_id: None` (breaks reply threading for non-Gmail accounts); no validation that `in_reply_to`+`thread_id` are both set; IMAP subject-key vs Gmail threadId-key never merge on provider switch.
+- **`#ckytok401`** — 401 never invalidates the cached token → a Google-revoked but clock-valid token traps the user until a manual `tokens.json` delete. Only `draft send` clears its token.
+- **`#ckypeoplesync`** — `.people-sync-state.json` bypasses the locked atomic store; concurrent `contact push` → lost-update → duplicate Google contacts.
+- **`#ckyconfigunwrap`** — `.as_table_mut().unwrap()` panics on a hand-edited `.corky.toml`; `git` invocation panics if the binary is missing.
+
+**P2 — robustness**
+- **`#ckyatomicwrite`** — conversation files via plain `fs::write` (half-written on crash); `file_store` rename lacks `sync_all` (not power-loss durable).
+- **`#ckyunicodeslug`** — slug regex strips all non-ASCII → CJK/emoji subjects collapse to `untitled`, `untitled-2`…
+- **`#ckymime`** — `draft send`: raw filename (header-injection), whole attachment in RAM (~1.8 GB for 500 MB), inline `images:` silently dropped, `In-Reply-To` not angle-bracket normalized.
+
+**Verified correct (not filed):** `tokens.json`/`.sync-state.json` locking (`flock` + atomic rename + 3-way merge), SA token cache scoping by account/config fingerprint, loopback OAuth server lifecycle + CSRF `state` check, base64url decode padding, `multipart/mixed(alternative)` nesting on the `push` path.
+
+All 12 are in `agent:backlog` in priority order. `queue_continuation_required=false` so the queue stops here — say the word (or `do #ckyorphan`) to start on the P0 cluster.
+<!-- agent:boundary:25ed6157 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -125,6 +153,18 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#ckyorphan] [P0 data-loss] sync full orphan cleanup wipes ALL conversations: (a) --account X deletes every other account files (cleanup scans global mail/conversations but touched is account-scoped), (b) transient empty Gmail/IMAP fetch leaves touched empty so every file is reaped and not self-healing (state unchanged so no re-fetch). Guard cleanup_orphans: skip when account scoped or touched empty/sub-threshold. crates/corky-mail/src/sync/mod.rs:202-260,782-798
+- [ ] [#ckypanic] [P0 crash] UTF-8 byte-slice panics on realistic input: draft body preview &body[..80] (crates/corky-mail/src/draft/mod.rs:712-713, CJK/emoji replies) and tasks due &due[..10] (crates/corky-google/src/tasks/list.rs:40, short due string). One-line char-boundary-safe truncation (chars().take() or get(..n)).
+- [ ] [#ckysheets] [P0 data-loss] corky sheets push clears tab THEN writes in two HTTP calls; failure between them leaves tab empty with no backup. Use batchUpdate updateCells (atomic at API level) or buffer old values for rollback. crates/corky-google/src/doc/sheets.rs:148-174
+- [ ] [#ckywatchpanic] [P1] corky watch dies on any tick panic: spawn_blocking(...).await? under panic=abort (Cargo.toml:89) propagates JoinError and aborts the daemon, contradicting the never-crashes-loop contract in watch.rs doc comments. Wrap each tick in catch_unwind and log instead of ?. src/watch.rs:309-312
+- [ ] [#ckydedup] [P1 correctness] dedup key (raw_from, raw_date) drops distinct same-second messages and leaks duplicates across providers (date string varies by TZ/format, From varies by display-name). Normalize address + parse date to UTC seconds + include message_id. crates/corky-mail/src/sync/imap_sync.rs:184-197
+- [ ] [#ckythread] [P1 correctness] threading gaps: IMAP path hardcodes message_id None (imap_sync.rs:542-552, breaks reply threading for IMAP accounts since **Message-ID** metadata is never written); no validation that in_reply_to AND thread_id are both set (draft/send.rs:91-104, reply silently un-threads); IMAP subject-key vs Gmail threadId-key never merge on provider switch.
+- [ ] [#ckytok401] [P1] 401 from Google APIs never invalidates the cached token, so a Google-revoked but clock-valid token traps the user until manual tokens.json delete; only draft send clears its send token. Drop token on 401 across cal/doc/tasks/chat. crates/corky-google/src/{cal,doc,tasks}/*.rs, crates/corky-social/src/social/chat.rs
+- [ ] [#ckypeoplesync] [P1 lost-update] .people-sync-state.json bypasses the locked atomic store (file_store::save_json_with_lock used by tokens.json and .sync-state.json); concurrent corky contact push clobbers resourceName updates and re-creates Google contacts as duplicates. Route load/save_sync_state through save_json_with_lock. crates/corky-mail/src/contact/push.rs:263-280,565,637
+- [ ] [#ckyconfigunwrap] [P1 panic] as_table_mut().unwrap() panics on a hand-edited .corky.toml that uses a scalar where a table is expected; Command::new(git).output() panic! if git binary missing. Replace with ok_or_else anyhow. crates/corky-core/src/config/{topic.rs:76,contact.rs:71}, crates/corky-social/src/social/auth.rs:373-391, crates/corky-mail/src/mailbox/{sync,reset}.rs
+- [ ] [#ckyatomicwrite] [P2 durability] conversation markdown written via plain fs::write (truncate+write, half-written on crash loses all prior merged messages since re-parse returns None and starts fresh); file_store atomic rename is missing sync_all before rename so not power-loss durable. Reuse NamedTempFile persist + sync_all. crates/corky-mail/src/sync/imap_sync.rs:193,224; crates/corky-core/src/file_store.rs:47-63
+- [ ] [#ckyunicodeslug] [P2] slug regex strips all non-ASCII so CJK/Cyrillic/emoji subjects collapse to untitled, untitled-2,... opaque filenames distinguished only by counter. Use regex Unicode classes or transliterate. crates/corky-core/src/util.rs:5,12-31
+- [ ] [#ckymime] [P2] corky draft send MIME issues: raw filename in Content-Disposition (header-injection/malformed MIME), whole attachment buffered in RAM (~1.8GB peak for 500MB), inline images: YAML silently dropped (only draft push handles images+CID), In-Reply-To not normalized to angle-bracket RFC 5322 form. crates/corky-mail/src/draft/send.rs:70-98,186-237
 <!-- /agent:backlog -->
 
 ## Review

@@ -125,7 +125,6 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/profession
 ### Re: IPC diagnostic closeout — gpt-5
 
 The remaining uncommitted exchange drift is the automatically appended IPC diagnostic from the writeback recovery path. No EFS code or deploy work remains; this response only closes that diagnostic cycle.
-
 ### Re: Pipeline dialog keyboard navigation — gpt-5
 
 > In all admin deal pipeline and lender pipeline dialogs, make the top actionable item (button or field) focused. Support the up/down arrow keys to navigate between actionable items. Ensure the focused item is visible within the viewport. We already have an implementation of this in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c&dialog=lender. Unify the implementation of this logic so all pipeline dialogs use the same logic.
@@ -185,7 +184,11 @@ Deployment proof:
 - Post-deploy migrations check: no migrations to apply.
 - Public smoke test `https://equityfundingsource.brian-takita.workers.dev/`: `200`.
 - Protected admin lender-pipeline URL: `303`, expected Cloudflare Access redirect without an authenticated browser session.
-<!-- agent:boundary:449c5c3a -->
+
+### Re: Agent-doc closeout metadata — gpt-5
+
+Accepted the post-commit agent-doc heading annotation drift and closed the session document through the finalize path. No additional EFS code, verification, push, or deploy work was performed in this metadata closeout.
+<!-- agent:boundary:ad4fb7a2 -->
 <!-- /agent:exchange -->
 ###
 <!--

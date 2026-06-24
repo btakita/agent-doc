@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 3d9ff8e4-bafd-4e1f-b48d-550d3c976904
-agent: opencode
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -56,7 +56,24 @@ Fix: mirror str0m's `push_inbox_frame` — cap at `MAX_INBOX_FRAMES`, drop+count
 `Str0mLoopback` inbox (`str0m_backend.rs:204`) is also an unbounded `push_back`. Deterministic in-process test harness (not a network DoS vector), so lowest priority, but applying the same cap gives uniform backpressure semantics across every `DataChannel` backend.
 
 Backlog is prioritized top → bottom. **Top item id: `#e4tf`** (`#lzasyncrerunabort` — core async-primitive correctness, proven reproducer). Both HIGH items are clean to land; on confirmation I'll execute `#xdsx` first (lowest-risk, well-precedented) then `#e4tf` (regression test ready from the reproducer).
-<!-- agent:boundary:dd12bfc3 -->
+> **Queue prompt:** What are #next-steps to fix lazily bugs?
+
+### Re: lazily-rs bug fixes #e4tf + #xdsx shipped — glm-5.2
+
+Picked up the queue-backed backlog items and landed both HIGH-priority fixes. Build + full suite green; pushed to origin/main.
+
+**#e4tf `#lzasyncrerunabort` — FIXED (5b1ac88).** `flush_async_effects` now takes + aborts the prior `in_flight` under the lock before spawning the re-run, mirroring `dispose_async_effect`. Regression test `effect_rerun_aborts_prior_inflight` asserts exactly one completed run (was 2 pre-fix) and that the surviving cleanup fires once on dispose. Verified the test FAILS without the abort (`left: 2`) and passes with it.
+
+**#xdsx `#lzwsinboundunbounded` — FIXED (279eb74).** `WsDataChannel` inbound is now capped at `WS_INBOUND_CAPACITY` (1024), shedding oldest-first and counted via `dropped_inbound_frames()`, mirroring the str0m inbox fix (`#lzstr0mnetinbox`). Unit test `inbound_caps_at_capacity_and_counts_drops` covers cap + drop + count.
+
+**Bonus CI unblock (6a41992):** `tests/conformance.rs` carried a non-fmt-clean line that kept the CI "Check formatting" step red on main; `make fmt` normalized it.
+
+**Verification:** `cargo test --all-features` → 0 failures; clippy clean across async / websocket / webrtc-str0m / signaling-client / ffi / ipc-binary / instrumentation; `cargo fmt --check` clean; `cargo build --all-features` green. Pushed a41aaec..6a41992.
+
+**Pre-existing (not a regression):** `make benchmark-check` is red on clean HEAD too — `BENCHMARKS.md` lacks p50/p95 latency rows for the `thread_safe_*` contention benchmarks. Filed as `#lzbmcheckdrift`. Untouched by these fixes.
+
+Remaining backlog: `#hses` (low-priority loopback inbox consistency) + the new `#lzbmcheckdrift`.
+<!-- agent:boundary:1a9d2664 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -65,17 +82,17 @@ Backlog is prioritized top → bottom. **Top item id: `#e4tf`** (`#lzasyncreruna
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 What are #next-steps to fix lazily bugs?
+- ~~What are #next-steps to fix lazily bugs?~~ — auto-struck: answered this cycle (#ftstrike)
 - [#e4tf]
 - [#xdsx]
 - [#hses]
+- do [#gxzm]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#e4tf] #lzasyncrerunabort=Fix AsyncContext effect re-run leak: flush_async_effects (async_context.rs:1176-1209) overwrites e.in_flight WITHOUT aborting the prior still-.awaiting task when an effect_async dependency is re-invalidated mid-flight. Proven reproducer: compute_count=2 (double concurrent execution) + cleanup_count=0 (overwritten run's cleanup is leaked, never invoked). Mirror dispose_async_effect (:1054-1055): take+abort prior in_flight before spawning the re-run. Core async-primitive correctness bug; affects any effect doing I/O/timers.
-- [ ] [#xdsx] #lzwsinboundunbounded=Bound WsDataChannel INBOUND queue: ws_backend.rs:92,147,151 does bare inbound.lock().push_back(payload) on an unbounded VecDeque. A consumer slower than the socket reader grows receive memory without bound — same bug class as the already-fixed #lzstr0mnetinbox (str0m_net.rs:131-150,577-583) and #lzwsunbounded (outbound). Fix: mirror str0m_net — cap at MAX_INBOX_FRAMES, drop+count oldest via AtomicUsize, expose dropped_inbox_frames().
+- [ ] [#gxzm] #lzbmcheckdrift=[recommended] make benchmark-check red on main: BENCHMARKS.md is missing p50/p95 latency rows for thread_safe_contention / thread_safe_effect_contention / thread_safe_graph_propagation benchmarks. Pre-existing — fails identically on a41aaec, unrelated to the async/ws fixes. Fix: run make benchmark-update to regenerate from the thread_safe contention benches, or relax the check script's required-row set.
 - [ ] [#hses] [recommended] #lzstr0mloopbackinbox=Low-priority consistency: Str0mLoopback inbox (str0m_backend.rs:82,94,204) is also an unbounded push_back. Deterministic in-process test harness (not a network DoS vector), so lower priority than #lzwsinboundunbounded, but apply the same cap for uniform backpressure semantics across all DataChannel backends.
 <!-- /agent:backlog -->
 

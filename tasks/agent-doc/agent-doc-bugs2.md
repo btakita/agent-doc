@@ -183,30 +183,36 @@ Commits:
 - Parent repo: `33a085c3a chore: update agent-doc submodule` (created locally; parent push happens after this session closeout commit lands).
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:227a4d1e -->
+
+### Re: #advr03 queue closeout repair — gpt-5
+
+The `#advr03` implementation response and backlog reap are already committed. This repair closeout persists the queue strike that preflight converged after the IPC retry, so the visible queue now advances to `#advr04` without reopening any code work.
+
+No additional repo code changed after the verification recorded in the `#advr03` response. Backlog now starts at `#advr04`; the done archive has a local `#advr03` append alongside older uncommitted archive drift, so I did not stage that archive wholesale.
+<!-- agent:boundary:87df0907 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- do [#advr03]
-- do [#advr04]
-- do [#advr05]
-- do [#advr06]
-- do [#advr07]
-- do [#advr08]
-- do [#advr09]
-- do [#advr10]
-- do [#advr11]
-- do [#advr12]
-- do [#advr13]
-- do [#advr14]
-- do [#advr15]
-- do [#advr16]
-- do [#advr17]
-- do [#advr18]
-- JB `Run Agent Doc` still does not quickly submit the prompt.
-- do [#advr19]
+- ~~do [#advr03]~~
+- :pushpin: do [#advr04]
+- :pushpin: do [#advr05]
+- :pushpin: do [#advr06]
+- :pushpin: do [#advr07]
+- :pushpin: do [#advr08]
+- :pushpin: do [#advr09]
+- :pushpin: do [#advr10]
+- :pushpin: do [#advr11]
+- :pushpin: do [#advr12]
+- :pushpin: do [#advr13]
+- :pushpin: do [#advr14]
+- :pushpin: do [#advr15]
+- :pushpin: do [#advr16]
+- :pushpin: do [#advr17]
+- :pushpin: do [#advr18]
+- :pushpin: JB `Run Agent Doc` still does not quickly submit the prompt.
+- :pushpin: do [#advr19]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -354,7 +354,10 @@ Verification: full `make check` passed locally with `5095 passed, 241 skipped`; 
 > When the queue item, review item, icebox item is complete and struck out or `[x]`, remove the 🚧.
 
 Completed in `d8698eeb` and installed. This closeout records the exact free-text queue prompt echo required for binary-owned queue consumption.
-<!-- agent:boundary:2b3a899c -->
+
+### Re: stop-hook queue cleanup recovery — gpt-5
+Persisted the stop-hook recovery for the remaining predicate-proven queue noise. The queue is drained and the stale fenced console-output head is archived as completed queue history.
+<!-- agent:boundary:d153d69d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -362,7 +365,7 @@ Completed in `d8698eeb` and installed. This closeout records the exact free-text
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.~~
 - ~~:pushpin: do [#promptprefixorch1]~~
-- ~~🚧 When the queue item, review item, icebox item is complete and struck out or `[x]`, remove the 🚧.~~
+- ~~When the queue item, review item, icebox item is complete and struck out or `[x]`, remove the 🚧.~~
 ~~~done
 JB `Run Agent Doc` on monsterrodholders.md
 ```

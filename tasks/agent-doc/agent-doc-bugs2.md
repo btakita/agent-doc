@@ -39,13 +39,46 @@ done
 Compacted content:
 - Archived 19 response topic(s): do #ipcproofcloseout, #crdtreset1, and #routeblockux1; stalled Run Agent Doc recovery; dropped recovery evidence prompts; 16 more
 - Prior summary/context: ❯ - JetBrains `TerminalUtilTest.protected prompt input route refusal is actionable not persistent failure` ❯ - `make ...
-<!-- agent:boundary:5380a35d -->
+
+### Re: IPC integration and monsterrodholders queue audit — gpt-5
+
+Short answer: not full if “using lazily-kt/lazily-js” means the plugins consume those standalone packages directly. The core path is in place: `agent-doc-orchestration` depends on `lazily 0.12.2`; Rust exposes `agent_doc_state_projection` / `agent_doc_record_state_event`; the state-backbone spec requires editor bridges to bind that ABI, canonicalize document hashes, report editor patch queued/ack/retry and route events, and render projection slices.
+
+JetBrains and VS Code do that today: JetBrains `StateProjectionBridge`, `PatchWatcher`, and `TerminalUtil` record transport and route facts and log projection summaries; VS Code `native.ts` and `extension.ts` do the same. `lazily-kt` and `lazily-js` each also have reusable `StateProjectionClient` wrappers plus tests. The remaining gap is that the plugins currently duplicate bridge code locally instead of consuming those packages as their integration boundary, and we still need live/cross-editor proof that both editors reduce to the same `DocumentStateProjection` during real patch and route flows.
+
+> **Queue prompt:** agent-doc monsterrodholders.md queue was removed without being processed
+
+I ran `agent-doc queue recover-lost /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md`. It found 20 git-history-only unaccounted heads, including the test-email CSV prompt shown here, but `restore_candidates=0`: no current snapshot, baseline, or patch sidecar carried an authoritative restore candidate. So the removal is visible in git history but not safely restorable by the current recovery command.
+
+Added backlog items in priority order. Top backlog id: `#lzpkgwire`.
+
+Verification: `agent-doc preflight`, `agent-doc plan`, source inspection of Rust/JB/VS Code/lazily wrappers, and `agent-doc queue recover-lost /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md`. No code changed, so I did not run `make check`.
+<!-- agent:boundary:61afd884 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 do [#71wr]
+---
+agent-doc monsterrodholders.md queue was removed without being processed
+```
+• The queue helper is contradictory here: it sees the preset as id-backed, then says there is no matching id-backed
+  head. I’m removing the answered queue row directly and keeping the queue component itself intact.
+
+• Edited tasks/monsterrodholders.md (+0 -1)
+    82  <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+    83 -- We should have the test email addresses in a CSV file. brian.takita+mrh-user-1@gmail.com, brian.takita+mrh-us
+        er-2@gmail.com, brian.takita+mrh-user-3@gmail.com, rberkes+mrh-user-1@gmail.com, rberkes+mrh-user-2@gmail.com,
+        rberkes+mrh-user-3@gmail.com.
+    83  <!-- /agent:queue -->
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• The answered queue row is removed. I’m committing the document cleanup through agent-doc so its snapshot stays
+  aligned, then I’ll rerun the invariant check.
+```
+---
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -72,7 +105,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#71wr] Do we have full IPC integration using lazily-rs, lazily-kt (JB Plugin), lazily-js (VS Code Plugin)? If not, what are the #next-steps?
+- [ ] [#lzpkgwire] Consolidate package-level lazily state-projection bridge: make JetBrains consume lazily-kt and VS Code consume lazily-js (or formally mark plugin-local copies as canonical), then add parity tests for document hashing, event JSON, pointer/free lifecycle, and projection summaries.
+- [ ] [#lzliveproof] Add cross-editor live/state-projection proof for agent-doc IPC: drive JB socket/file IPC and VS Code file IPC through queued/ack/retry plus route started/proven/blocked events, then assert the Rust DocumentStateProjection and compact summaries match.
+- [ ] [#mrhqrestore] Improve agent-doc queue recover-lost for git-history-only queue deletions: produce an operator-reviewed restoration patch or explicit non-restorable recommendation for foreign-owned prompts such as the monsterrodholders test-email CSV row.
 <!-- /agent:backlog -->
 
 ## Review

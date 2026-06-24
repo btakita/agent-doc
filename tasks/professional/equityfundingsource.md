@@ -124,7 +124,15 @@ Escalation: none. Confidence: high.
 Cleared the already-struck queue residue after the lead dialog deploy response and deploy cleanup response were committed. No app work remained.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:64468f52 -->
+
+### Re: IPC Dogfood Note — gpt-5
+
+Acknowledged the automated IPC proof dogfood note that was appended during queue cleanup recovery. The lead-dialog work is already implemented, pushed, deployed, and the queue is stopped with no remaining head.
+
+No actionable follow-up items are needed for this note.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:63869248 -->
 <!-- /agent:exchange -->
 ###
 <!--

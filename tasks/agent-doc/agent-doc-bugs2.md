@@ -123,22 +123,41 @@ Closed the cycle for `tasks/agent-doc/agent-doc-bugs2.md`.
 Verified the protected-prompt route refusal was already fixed by `src/agent-doc` commits `7585b872` and `612b1552`; no code changes were needed. Targeted checks passed, including the Rust route/IPC regressions and the JetBrains `TerminalUtilTest` case.
 
 `agent-doc session-check` is now OK for cycle `cycle-1782328264470`, and queue continuation is currently `false`, so I did not drain the next pinned queue item. The latest session-doc commit is `da21bf244`. Note: the session document still shows local editor/queue drift in the worktree; I left it uncommitted because the authoritative `session-check` closeout is green.
-<!-- agent:boundary:255f5046 -->
+
+### Re: #sz4a — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: [#sz4a]
+
+
+`#sz4a` is closed as already covered by the current route/dispatch implementation, with verification.
+
+The saved pane diagnostic at `.agent-doc/logs/route-submit/1782325723814-direct_pane_dispatch_start_unproven-codex-_3-c75435aee855.txt` shows a Codex pane that stayed at idle chrome with a lone `start` draft after the routed submit attempt. That matches the filed failure class: the pane-input boundary accepted keystrokes, but no routed dispatch-start proof was observed within the bounded proof window.
+
+Current behavior covers this shape:
+- Direct-pane routed dispatch retries Enter at least once per second while the trigger remains visibly drafted, then records `accepted_without_dispatch_start_proof` with a saved pane snapshot and a durable `#jbrunautobug #agent-doc-bug` backlog item when proof never appears.
+- Dispatch-only Codex reroutes with hook tracking require actual dispatch-start proof; a tracked timeout fails closed instead of reporting route success.
+- Managed fresh-start routes may carry `DispatchStartUnproven` into the stronger document-cycle ack check, so a late real start can still prove itself, but a no-start pane is not treated as complete.
+
+Verification passed:
+- `cargo test -p agent-doc-orchestration accepted_only_dispatch_start_proof_fails_only_when_required`
+- `cargo test -p agent-doc-orchestration dispatch_only_tracked_timeout_fails_closed_even_when_accepted_only_is_allowed`
+- `cargo test -p agent-doc-orchestration dispatch_only_codex_requires_start_proof_when_hooks_are_visible`
+- `cargo test -p agent-doc-orchestration route_dispatch_bug_report_item_includes_required_evidence`
+- `cargo test -p agent-doc-orchestration direct_pane_enter_resubmit_is_bounded_while_trigger_remains_visible`
+- `cargo test -p agent-doc-orchestration direct_pane_enter_resubmit_retries_at_least_once_per_second`
+- `cargo test -p agent-doc-orchestration route_submit_observation_marks_accepted_without_dispatch_proof_as_issue`
+- `cargo test -p agent-doc-orchestration dispatch_only_direct_pane_accepted_submit_skips_optional_proof_wait`
+
+No code files changed in this follow-up; I marked `#sz4a` done and left the separate `#xgdn` dispatch-only proof item open.
+<!-- agent:boundary:5387cd29 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-~~~done
-JB `Run Agent Doc` on this document stalled. I recycled + restarted. Now JB `Run Agent Doc` is blocked due to another dispatch.
-```
-resync: pruned 2 stale session(s)
-[route] target tmux session: 0
-Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %1 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input); clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782325177477-direct_pane_protected_prompt_input-codex-_1-1d5c5a3ff075.txt
-```
-~~~
-- ~~[#xgdn]~~
-- :pushpin: [#sz4a]
+- ~~:pushpin: [#sz4a]~~
 - :pushpin: JB `Run Agent Doc` on monsterrodholders.md did not submit. Please diagnose and fix.
 - :pushpin: What are #next-steps to fix agent-doc bugs?
 - :pushpin: Ensure the VS Code plugin has parity with the JB plugin.
@@ -173,7 +192,6 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue -->
 - [ ] [#promptprefixorch1] Fix prompt-prefixed recovery/evidence lines in agent:exchange being classified as user prompt targets and orchestration tasks after interrupted closeout recovery; preserve them as agent evidence or strip prompt markers during recovery.
 - [ ] [#xgdn] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%3 actor_generation=596 editor_attempt_id=1782325712508-18 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_only_dispatch_start_proof content_hash=sha256:3251e072b5c1857ba06e9ba613e1004b5eefef103db7003d7dcf7efe0d698ea8]
-- [ ] [#sz4a] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/professional/equityfundingsource.md stage=dispatch_start_proof pane=%3 actor_generation=596 editor_attempt_id=1782325712508-18 dispatch_proof_state=none elapsed_ms=10109 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782325723814-direct_pane_dispatch_start_unproven-codex-_3-c75435aee855.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_start_proof content_hash=sha256:1ec714087cfb4c5fc783eb9ad2f02a563124b3df04828fbe1140370937f40135]
 <!-- /agent:backlog -->
 
 ## Review

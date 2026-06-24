@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -270,7 +270,31 @@ The struck queue head is already answered: the client-side `property_type` valid
 Changed paths this cleanup cycle: none in app code. Verification/deploy evidence remains the prior cycle: focused tests passed (`22 pass / 0 fail`), full `make check` passed (`1195 pass / 0 fail`), app + Worker builds passed, post-deploy root returned `HTTP 200` and the borrower app returned the expected unauthenticated `HTTP 303` login redirect.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:b9defb0f -->
+
+### Re: URL-Per-Step Wizard Navigation And Deploy — glm-5.2
+
+> **Queue prompt:**
+> Each step in https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 should have a separate URL so the browser back button works. Same with the Lender wizard forms.
+>
+> **Queue prompt:**
+> deploy
+
+Implemented, pushed, and deployed. Each borrower full-application step now has its own URL (`?step=N`), so the browser back/forward buttons navigate between steps.
+
+What changed: the wizard kept its step in React state only, so back/forward did nothing. Added a `step_from_url_()` helper that reads `?step=N` (clamped to the valid range) and wired the step state to it. A `useEffect([step])` pushes a new `history` entry per step change — the first sync uses `replaceState` so a resume/refresh strands no extra back entry, while later changes use `pushState` so back moves one step at a time. A `popstate` listener reads the step back out of the URL when back/forward fires (with a `skip_step_push_ref` guard to avoid re-pushing on the round-trip). The resume heuristic is skipped when an explicit `?step` is present, so a direct link or refresh lands on the exact step the URL says.
+
+On the lender/investor forms: those are already separate URL-addressable pages (`/lenders/accreditation`, `/lenders/dashboard`, etc.), not in-page step wizards, so there is no step state to sync — back/forward already works there.
+
+Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/borrower/full_application.tsx` (`step_from_url_`/`url_has_step_param_` helpers, `useState(step_from_url_)`, resume guard, `pushState`/`popstate` effects), `prds/efs-full-application-intake-spec.md` (documented `#step-url` URL-sync + lender-pages note), and `tests/full-application-resume-step.test.ts` (3 source-level guard tests for the helper, history/popstate wiring, and resume-skip).
+
+Commits: EFS submodule commit `0137ceb feat(borrower): URL-per-step wizard so browser back/forward works (#step-url)` was pushed to `origin/main`. Parent repo gitlink commit `24538eab7 chore(efs): bump URL-per-step wizard submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with unrelated work.
+
+Verification: focused `bun test tests/full-application-resume-step.test.ts tests/apply4-full-application-p1.test.ts` passed (`17 pass / 0 fail`). `git diff --check` passed. Full `bun test` passed (`1198 pass / 0 fail`); app build and Worker build passed. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+
+Deploy: `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `fe001a61-13cb-43eb-9ed0-bb165abe19fa`. Post-deploy checks: public root returned `HTTP 200`; the borrower application URL with `?step=2` returned the expected unauthenticated `HTTP 303` redirect to `/login?role=borrower&next=…step%3D2`, preserving the step through login.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:1466287a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -290,6 +314,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~Each step in https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 should have a separate URL so the browser back button works. Same with the Lender wizard forms.~~
+- ~~deploy~~
+- ~~Each step in https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 should have a separate URL so the browser back button works. Same with the Lender wizard forms.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

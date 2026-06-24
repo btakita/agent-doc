@@ -137,7 +137,14 @@ No changed paths, repo commands, or deployment actions were needed in this close
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:6ac13890 -->
+
+### Re: IPC diagnostic closeout — gpt-5
+
+No product or deploy work remains. This response only closes the IPC diagnostic text appended during recovery; the queue is drained and no actionable follow-up item is needed.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:b7537b01 -->
 <!-- /agent:exchange -->
 ###
 <!--

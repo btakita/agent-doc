@@ -121,7 +121,16 @@ Split full-application advancement blockers so Mark Complete uses completion req
 Cleared the already-struck queue residue so the completed Step 6 / deploy work has no remaining queue head.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:92ae52fa -->
+
+### Re: Closeout Drift Repair — gpt-5
+
+Closed the remaining document-only drift after the queue cleanup: the queue is empty/stopped, and there is no app work left to run.
+
+Changed paths: `tasks/professional/equityfundingsource.md` only.
+Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc write --template --stream --commit`, `agent-doc session-check`.
+Verification: session-check is expected to confirm the cycle is committed with no drainable queue work.
+Escalation: none. Confidence: high.
+<!-- agent:boundary:9e34771c -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -142,7 +142,11 @@ Changed paths: session document only.
 Verification: inspected the lazily IPC/FFI surfaces, agent-doc state backbone/FFI/controller repair paths, and Kotlin/JS projection clients; no tests run because this was an architecture answer with no code edits.  
 Confidence: high for the architecture direction; medium for implementation effort because the editor plugins still need actual projection-read wiring.  
 Escalation: none.
-<!-- agent:boundary:695d2728 -->
+
+### Re: queue closeout repair — gpt-5
+
+Repair closeout: the FFI IPC prompt was already answered in the prior committed section. I consumed that free-text queue head, preserved the remaining `do [#lzstatewire1]` queue item, and left the newly added equityfundingsource route-stall note in the queue for a later cycle.
+<!-- agent:boundary:15c32825 -->
 <!-- /agent:exchange -->
 
 ## Queue

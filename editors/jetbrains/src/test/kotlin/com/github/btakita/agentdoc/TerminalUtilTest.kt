@@ -340,6 +340,105 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `paused queue route is reported as actionable info not persistent route failure`() {
+        val relativePath = "tasks/agent-doc/agent-doc-bugs2.md"
+        val output = """
+            Error: project controller command `dispatch` failed: dispatch blocked for $relativePath: failed_stage=queue_paused reason=operator paused this queue for manual review receipt_id=52 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control
+        """.trimIndent()
+
+        val paused = TerminalUtil.parseRunAgentDocQueuePaused(output)
+        val message = TerminalUtil.buildRunAgentDocQueuePausedMessage(relativePath, paused!!)
+
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.QUEUE_PAUSED, TerminalUtil.classifyRunAgentDocRouteFailure(output))
+        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
+        assertFalse(paused.restartSupervisorRedirect)
+        assertEquals("operator paused this queue for manual review", paused.reason)
+        assertTrue(message.contains("queue is paused"))
+        assertTrue(message.contains("Resume the queue"))
+        assertFalse(message.contains("route failed"))
+        assertFalse(message.contains("Saved exact route output"))
+    }
+
+    @Test
+    fun `stale-supervisor paused queue route offers restart supervisor then resume`() {
+        val relativePath = "tasks/agent-doc/agent-doc-bugs2.md"
+        val output = """
+            Error: project controller command `dispatch` failed: dispatch blocked for $relativePath: failed_stage=queue_paused reason=churn-stop: stale supervisor pid1368698; needs operator recycle receipt_id=42 supervisor_restart_redirect stale_pid=1368698 ui_outcome_contract=ui-outcome-v1 ui_outcome=recovered_and_retried ui_outcome_class=ok next_action=restart_supervisor_once_and_retry
+        """.trimIndent()
+
+        val paused = TerminalUtil.parseRunAgentDocQueuePaused(output)
+        val message = TerminalUtil.buildRunAgentDocQueuePausedMessage(relativePath, paused!!)
+        val opsLine = TerminalUtil.buildQueuePausedRouteNotificationOpsLogLine(
+            timestamp = "2026-06-24T12:34:56Z",
+            relativePath = relativePath,
+            paused = paused,
+        )
+
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.QUEUE_PAUSED, TerminalUtil.classifyRunAgentDocRouteFailure(output))
+        assertTrue(paused.restartSupervisorRedirect)
+        assertEquals("1368698", paused.stalePid)
+        assertTrue(message.contains("Restart Supervisor and resume"))
+        assertTrue(message.contains("Stale supervisor pid: 1368698"))
+        assertTrue(opsLine.contains("jb_queue_paused_route_notification"))
+        assertTrue(opsLine.contains("ui_outcome=recovered_and_retried"))
+        assertTrue(opsLine.contains("action=restart_supervisor_and_resume"))
+    }
+
+    @Test
+    fun `paused queue resume action command carries observed generation and json receipt`() {
+        assertEquals(
+            listOf(
+                "agent-doc",
+                "admin",
+                "queue",
+                "resume",
+                "tasks/agent-doc/agent-doc-bugs2.md",
+                "--project-root",
+                "/repo",
+                "--observed-generation",
+                "792",
+                "--reason",
+                "#qpauseux: JetBrains Resume Queue action",
+                "--json",
+            ),
+            TerminalUtil.buildAdminQueueResumeCommand(
+                "agent-doc",
+                "/repo",
+                "tasks/agent-doc/agent-doc-bugs2.md",
+                792,
+                "#qpauseux: JetBrains Resume Queue action",
+            ),
+        )
+    }
+
+    @Test
+    fun `paused queue resume action parses generation and receipt status`() {
+        val status = """
+            document: /repo/tasks/root.md
+            actor: generation=792 pane=%1 window=@1 state=ready
+            live_pane: state=alive-idle pane=%1 source=authoritative_actor current_command=agent-doc prompt_ready=true tail=>
+        """.trimIndent()
+
+        assertEquals(792L, TerminalUtil.sessionStatusActorGeneration(status))
+        assertNull(TerminalUtil.sessionStatusActorGeneration("document: /repo/tasks/root.md"))
+        assertTrue(TerminalUtil.adminQueueControlAccepted("""{"operation_kind":"queue_resumed","status":"accepted"}"""))
+        assertFalse(TerminalUtil.adminQueueControlAccepted("""{"operation_kind":"queue_resumed","status":"rejected"}"""))
+    }
+
+    @Test
+    fun `paused queue notification source exposes action labels and ops proof markers`() {
+        val source = Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt"
+        ).toFile().readText()
+
+        assertTrue(source.contains("NotificationType.INFORMATION"))
+        assertTrue(source.contains("Restart Supervisor and resume"))
+        assertTrue(source.contains("Resume queue"))
+        assertTrue(source.contains("recordQueuePausedRouteNotificationShown(project, file, paused)"))
+        assertTrue(source.contains("jb_queue_paused_route_action"))
+    }
+
+    @Test
     fun `accepted-only dispatch proof gap reports typed blocked outcome with attempt and snapshot`() {
         val relativePath = "tasks/agent-doc/agent-doc-bugs2.md"
         val output = """

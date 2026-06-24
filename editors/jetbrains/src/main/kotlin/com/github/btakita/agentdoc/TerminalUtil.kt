@@ -23,6 +23,8 @@ object TerminalUtil {
     private const val ROUTE_ERROR_DIAGNOSTICS_DIR = ".agent-doc/state/editor-route-errors"
     private const val RESTART_TELEMETRY_OPS_LOG_MAX_LINES = 400
     private const val UI_OUTCOME_QUEUED_BEHIND_OWNER = "queued_behind_owner"
+    private const val UI_OUTCOME_RECOVERED_AND_RETRIED = "recovered_and_retried"
+    private const val SUPERVISOR_RESTART_REDIRECT_MARKER = "supervisor_restart_redirect"
     internal const val STARTING_ACTOR_ROUTE_MAX_ATTEMPTS = 4
     private val STARTING_ACTOR_ROUTE_RETRY_DELAYS_MILLIS = longArrayOf(2_000L, 4_000L, 8_000L)
     private val BUSY_CLEAR_REFUSAL_HEADER_REGEX = Regex(
@@ -56,6 +58,12 @@ object TerminalUtil {
     private val OPS_LOG_CURRENT_COMMAND_REGEX = Regex("""\bcurrent_command=(\S+)""")
     private val ROUTE_EDITOR_ATTEMPT_REGEX = Regex("""\beditor_attempt_id=(\S+)""")
     private val ROUTE_SNAPSHOT_PATH_REGEX = Regex("""\bsnapshot_path=(\S+)""")
+    private val ROUTE_QUEUE_PAUSED_REASON_REGEX = Regex(
+        """failed_stage=queue_paused\s+reason=(.*?)\s+receipt_id=""",
+        RegexOption.DOT_MATCHES_ALL,
+    )
+    private val ROUTE_QUEUE_PAUSED_STALE_PID_REGEX = Regex("""\bstale_pid=(\d+)""")
+    private val SESSION_STATUS_ACTOR_GENERATION_REGEX = Regex("""\bactor:\s+generation=(\d+)""")
     private val RESTART_TELEMETRY_EVENT_NAMES = listOf(
         "session_restart_force_used",
         "session_restart_busy_pre_interrupt_idle",
@@ -202,11 +210,18 @@ object TerminalUtil {
         val eventNames: List<String>,
     )
 
+    internal data class RunAgentDocQueuePaused(
+        val reason: String,
+        val restartSupervisorRedirect: Boolean,
+        val stalePid: String,
+    )
+
     internal enum class RunAgentDocRouteFailureKind {
         PERSISTENT,
         RETRYABLE_STARTING,
         BUSY_RUNNING,
         QUEUED_PENDING,
+        QUEUE_PAUSED,
         DISPATCH_START_UNPROVEN,
     }
 
@@ -484,6 +499,13 @@ object TerminalUtil {
                             finalStage = "route_queued_pending"
                             finalError = routeAttemptError(exitCode, failureKind, output)
                             break
+                        } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.QUEUE_PAUSED) {
+                            LOG.warn("[route] queue paused for $relativePath: $output")
+                            clearPersistedRouteFailureOutput(cwd, relativePath)
+                            notifyRunAgentDocQueuePaused(project, file, relativePath, output)
+                            finalStage = "route_queue_paused"
+                            finalError = routeAttemptError(exitCode, failureKind, output)
+                            break
                         } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.DISPATCH_START_UNPROVEN) {
                             LOG.warn("[route] dispatch start unproven for $relativePath: $output")
                             clearPersistedRouteFailureOutput(cwd, relativePath)
@@ -682,6 +704,78 @@ object TerminalUtil {
         runRestartSupervisorCommand(project, file, force = false, onComplete = onComplete)
     }
 
+    private fun restartSupervisorAndResumePausedQueue(project: Project, file: VirtualFile) {
+        runRestartSupervisorCommand(
+            project = project,
+            file = file,
+            force = false,
+            afterSuccess = {
+                resumePausedQueue(
+                    project,
+                    file,
+                    "#qpauseux: JetBrains Restart Supervisor and Resume Queue action",
+                )
+            },
+        )
+    }
+
+    private fun resumePausedQueue(
+        project: Project,
+        file: VirtualFile,
+        reason: String = "#qpauseux: JetBrains Resume Queue action",
+        onComplete: (() -> Unit)? = null,
+    ) {
+        val (cwd, relativePath) = resolveProject(project, file)
+        val agentDoc = resolveAgentDoc(cwd)
+        runDocumentCommand(
+            project = project,
+            file = file,
+            command = buildSessionCommand(agentDoc, listOf("status"), relativePath),
+            startedMessage = "Checking session generation for ${file.name}",
+            onSuccess = { statusRelativePath, output ->
+                val generation = sessionStatusActorGeneration(output)
+                if (generation == null) {
+                    notifyWarning(
+                        project,
+                        "Cannot resume queue for $statusRelativePath.\nSession status did not include an actor generation. Use Show status, then resume from the CLI with the observed generation.",
+                    )
+                    onComplete?.invoke()
+                    return@runDocumentCommand
+                }
+                runDocumentCommand(
+                    project = project,
+                    file = file,
+                    command = buildAdminQueueResumeCommand(
+                        agentDoc,
+                        cwd,
+                        statusRelativePath,
+                        generation,
+                        reason,
+                    ),
+                    startedMessage = "Resuming queue for ${file.name}",
+                    onSuccess = { resumedPath, resumeOutput ->
+                        if (adminQueueControlAccepted(resumeOutput)) {
+                            recordQueuePausedRouteActionInvoked(project, file, "resume_queue", "accepted")
+                            notifyInfo(project, "Queue resumed for $resumedPath.\n$resumeOutput")
+                        } else {
+                            recordQueuePausedRouteActionInvoked(project, file, "resume_queue", "rejected")
+                            notifyWarning(project, "Queue resume did not apply for $resumedPath.\n$resumeOutput")
+                        }
+                    },
+                    onFailure = { resumedPath, exitCode, resumeOutput ->
+                        recordQueuePausedRouteActionInvoked(project, file, "resume_queue", "failed")
+                        notifyError(project, "Queue resume failed for $resumedPath (exit $exitCode):\n$resumeOutput")
+                    },
+                    onComplete = onComplete,
+                )
+            },
+            onFailure = { statusRelativePath, exitCode, output ->
+                notifyError(project, "Cannot inspect session generation for $statusRelativePath (exit $exitCode):\n$output")
+                onComplete?.invoke()
+            },
+        )
+    }
+
     internal fun recordRestartAgentMenuInvoked(project: Project, file: VirtualFile) {
         try {
             val (cwd, relativePath) = resolveProject(project, file)
@@ -706,6 +800,87 @@ object TerminalUtil {
     internal fun buildRestartAgentMenuInvokedOpsLogLine(timestamp: String, relativePath: String): String {
         val doc = File(relativePath).nameWithoutExtension.ifBlank { "unknown" }
         return "[$timestamp] restart_agent_menu_invoked file=$relativePath source=jetbrains action=restart_agent doc=$doc"
+    }
+
+    private fun recordQueuePausedRouteNotificationShown(
+        project: Project,
+        file: VirtualFile,
+        paused: RunAgentDocQueuePaused,
+    ) {
+        try {
+            val (cwd, relativePath) = resolveProject(project, file)
+            val agentDocDir = File(cwd, ".agent-doc")
+            if (!agentDocDir.isDirectory) {
+                return
+            }
+            val logsDir = File(agentDocDir, "logs")
+            if (!logsDir.isDirectory && !logsDir.mkdirs()) {
+                LOG.warn("[route] failed to create ops.log directory at ${logsDir.path}")
+                return
+            }
+            val timestamp = Instant.ofEpochSecond(Instant.now().epochSecond).toString()
+            File(logsDir, "ops.log").appendText(
+                buildQueuePausedRouteNotificationOpsLogLine(timestamp, relativePath, paused) + System.lineSeparator(),
+            )
+        } catch (e: Exception) {
+            LOG.warn("[route] failed to record paused-queue notification marker: ${e.message}", e)
+        }
+    }
+
+    private fun recordQueuePausedRouteActionInvoked(
+        project: Project,
+        file: VirtualFile,
+        action: String,
+        status: String,
+    ) {
+        try {
+            val (cwd, relativePath) = resolveProject(project, file)
+            val agentDocDir = File(cwd, ".agent-doc")
+            if (!agentDocDir.isDirectory) {
+                return
+            }
+            val logsDir = File(agentDocDir, "logs")
+            if (!logsDir.isDirectory && !logsDir.mkdirs()) {
+                LOG.warn("[route] failed to create ops.log directory at ${logsDir.path}")
+                return
+            }
+            val timestamp = Instant.ofEpochSecond(Instant.now().epochSecond).toString()
+            File(logsDir, "ops.log").appendText(
+                buildQueuePausedRouteActionOpsLogLine(timestamp, relativePath, action, status) + System.lineSeparator(),
+            )
+        } catch (e: Exception) {
+            LOG.warn("[route] failed to record paused-queue action marker: ${e.message}", e)
+        }
+    }
+
+    internal fun buildQueuePausedRouteNotificationOpsLogLine(
+        timestamp: String,
+        relativePath: String,
+        paused: RunAgentDocQueuePaused,
+    ): String {
+        val doc = File(relativePath).nameWithoutExtension.ifBlank { "unknown" }
+        val action = if (paused.restartSupervisorRedirect) {
+            "restart_supervisor_and_resume"
+        } else {
+            "resume_queue"
+        }
+        val outcome = if (paused.restartSupervisorRedirect) {
+            UI_OUTCOME_RECOVERED_AND_RETRIED
+        } else {
+            "blocked_with_exact_unblocker"
+        }
+        val stalePid = paused.stalePid.ifBlank { "none" }
+        return "[$timestamp] jb_queue_paused_route_notification file=$relativePath source=jetbrains ui_outcome=$outcome action=$action stale_pid=$stalePid unblocker=resume_or_clear_queue_control doc=$doc"
+    }
+
+    internal fun buildQueuePausedRouteActionOpsLogLine(
+        timestamp: String,
+        relativePath: String,
+        action: String,
+        status: String,
+    ): String {
+        val doc = File(relativePath).nameWithoutExtension.ifBlank { "unknown" }
+        return "[$timestamp] jb_queue_paused_route_action file=$relativePath source=jetbrains action=$action status=$status doc=$doc"
     }
 
     /**
@@ -823,6 +998,7 @@ object TerminalUtil {
         project: Project,
         file: VirtualFile,
         force: Boolean,
+        afterSuccess: (() -> Unit)? = null,
         onComplete: (() -> Unit)? = null,
     ) {
         val (telemetryCwd, _) = resolveProject(project, file)
@@ -841,6 +1017,7 @@ object TerminalUtil {
                 } else {
                     showHint(project, message)
                 }
+                afterSuccess?.invoke()
             },
             onFailure = { relativePath, exitCode, output ->
                 // #hj7s: an editor holding the pane refuses for BOTH Restart and
@@ -1126,6 +1303,27 @@ object TerminalUtil {
         add(relativePath)
     }
 
+    internal fun buildAdminQueueResumeCommand(
+        agentDoc: String,
+        projectRoot: String,
+        relativePath: String,
+        observedGeneration: Long,
+        reason: String,
+    ): List<String> = listOf(
+        agentDoc,
+        "admin",
+        "queue",
+        "resume",
+        relativePath,
+        "--project-root",
+        projectRoot,
+        "--observed-generation",
+        observedGeneration.toString(),
+        "--reason",
+        reason,
+        "--json",
+    )
+
     internal fun buildCompactExchangeCommand(
         agentDoc: String,
         relativePath: String,
@@ -1140,6 +1338,18 @@ object TerminalUtil {
 
     internal fun sessionStatusSuccessMessage(relativePath: String, output: String): String =
         output.ifBlank { "Loaded session status for $relativePath" }
+
+    internal fun sessionStatusActorGeneration(output: String): Long? =
+        SESSION_STATUS_ACTOR_GENERATION_REGEX.find(output)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toLongOrNull()
+
+    internal fun adminQueueControlAccepted(output: String): Boolean =
+        Regex(""""status"\s*:\s*"accepted"""").containsMatchIn(output) ||
+            output.lineSequence().any { line ->
+                line.contains("queue_resumed accepted") || line.contains("queue_resumed status=accepted")
+            }
 
     internal fun sessionStatusShowsIdleDirectPane(output: String): Boolean =
         output.lineSequence().any { line ->
@@ -1402,6 +1612,7 @@ object TerminalUtil {
     internal fun classifyRunAgentDocRouteFailure(output: String): RunAgentDocRouteFailureKind {
         return when {
             isRunAgentDocRouteQueued(output) -> RunAgentDocRouteFailureKind.QUEUED_PENDING
+            parseRunAgentDocQueuePaused(output) != null -> RunAgentDocRouteFailureKind.QUEUE_PAUSED
             isDispatchOnlyActiveTurnBlocked(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
             isDispatchOnlyBusyActorWaitTimeout(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
             isLatestRunStillBootingBusy(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
@@ -1456,6 +1667,30 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         return hasUserFacingOutcome(lower, UI_OUTCOME_QUEUED_BEHIND_OWNER) ||
             lower.contains("queued pending dispatch") &&
             (lower.contains("active agent:queue") || lower.contains("agent:queue auto"))
+    }
+
+    internal fun parseRunAgentDocQueuePaused(output: String): RunAgentDocQueuePaused? {
+        val lower = output.lowercase()
+        if (!lower.contains("failed_stage=queue_paused")) {
+            return null
+        }
+        val reason = ROUTE_QUEUE_PAUSED_REASON_REGEX.find(output)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+            .orEmpty()
+        val stalePid = ROUTE_QUEUE_PAUSED_STALE_PID_REGEX.find(output)
+            ?.groupValues
+            ?.getOrNull(1)
+            .orEmpty()
+        val restartRedirect = lower.contains(SUPERVISOR_RESTART_REDIRECT_MARKER) ||
+            hasUserFacingOutcome(lower, UI_OUTCOME_RECOVERED_AND_RETRIED) ||
+            lower.contains("next_action=restart_supervisor_once_and_retry")
+        return RunAgentDocQueuePaused(
+            reason = reason,
+            restartSupervisorRedirect = restartRedirect,
+            stalePid = stalePid,
+        )
     }
 
     private fun hasUserFacingOutcome(lowercaseOutput: String, outcome: String): Boolean {
@@ -1730,6 +1965,28 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
             "It should run when that turn drains."
     }
 
+    internal fun buildRunAgentDocQueuePausedMessage(
+        relativePath: String,
+        paused: RunAgentDocQueuePaused,
+    ): String = buildString {
+        append("Agent Doc queue is paused for ")
+        append(relativePath)
+        append(".\n")
+        if (paused.restartSupervisorRedirect) {
+            append("This pause looks like stale-supervisor churn. Restart Supervisor and resume the queue, then run Agent Doc again.")
+            if (paused.stalePid.isNotBlank()) {
+                append("\nStale supervisor pid: ")
+                append(paused.stalePid)
+            }
+        } else {
+            append("Resume the queue when unattended dispatch should continue, or use Show status to inspect it first.")
+        }
+        if (paused.reason.isNotBlank()) {
+            append("\nReason: ")
+            append(paused.reason.take(600))
+        }
+    }
+
     internal fun buildRunAgentDocDispatchUnprovenMessage(relativePath: String, routeOutput: String): String {
         val lines = routeOutput.lines()
         val attemptId = latestRegexValue(lines, ROUTE_EDITOR_ATTEMPT_REGEX)
@@ -1785,6 +2042,43 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                     showHint(project, "Copied route snapshot path for $relativePath")
                 })
             }
+            notification.notify(project)
+        } catch (_: Exception) {
+            System.err.println("[agent-doc] $summary")
+        }
+    }
+
+    private fun notifyRunAgentDocQueuePaused(
+        project: Project,
+        file: VirtualFile,
+        relativePath: String,
+        routeOutput: String,
+    ) {
+        val paused = parseRunAgentDocQueuePaused(routeOutput)
+            ?: RunAgentDocQueuePaused(reason = "", restartSupervisorRedirect = false, stalePid = "")
+        val summary = buildRunAgentDocQueuePausedMessage(relativePath, paused)
+        recordQueuePausedRouteNotificationShown(project, file, paused)
+        try {
+            val notification = NotificationGroupManager.getInstance()
+                .getNotificationGroup("Agent Doc")
+                .createNotification(summary, NotificationType.INFORMATION)
+            notification.isImportant = true
+            if (paused.restartSupervisorRedirect) {
+                notification.addAction(NotificationAction.createSimple("Restart Supervisor and resume") {
+                    restartSupervisorAndResumePausedQueue(project, file)
+                })
+            } else {
+                notification.addAction(NotificationAction.createSimple("Resume queue") {
+                    resumePausedQueue(project, file)
+                })
+            }
+            notification.addAction(NotificationAction.createSimple("Show status") {
+                showSessionStatus(project, file)
+            })
+            notification.addAction(NotificationAction.createSimple("Copy details") {
+                CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
+                showHint(project, "Copied paused queue details for $relativePath")
+            })
             notification.notify(project)
         } catch (_: Exception) {
             System.err.println("[agent-doc] $summary")

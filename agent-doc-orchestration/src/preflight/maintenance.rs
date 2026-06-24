@@ -2389,7 +2389,12 @@ fn set_in_progress_work_item_markers(
     let components = crate::component::parse(&updated)?;
     for component in components
         .iter()
-        .filter(|component| matches!(component.name.as_str(), "backlog" | "pending" | "icebox"))
+        .filter(|component| {
+            matches!(
+                component.name.as_str(),
+                "backlog" | "pending" | "review" | "icebox"
+            )
+        })
         .rev()
     {
         let (new_body, body_changed) =
@@ -2407,7 +2412,7 @@ fn sync_in_progress_marker_regions(snapshot_content: &str, current_content: &str
         return snapshot_content.to_string();
     };
     let mut updated = snapshot_content.to_string();
-    for name in ["queue", "backlog", "pending", "icebox"] {
+    for name in ["queue", "backlog", "pending", "review", "icebox"] {
         let Some(current_component) = current_components
             .iter()
             .find(|component| component.name == name)
@@ -3939,6 +3944,61 @@ mod tests {
         assert!(updated.contains("- [ ] 🚧 [#alpha] active work"));
         assert!(updated.contains("- [ ] [#beta] stale work"));
         assert!(updated.contains("- [ ] [#cold] stale parked work"));
+    }
+
+    #[test]
+    fn run_queue_maintenance_removes_in_progress_from_completed_items() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#alpha]\n",
+            "- ~~🚧 do [#done]~~\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#alpha] active work\n",
+            "- [x] 🚧 [#done] finished work\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [x] 🚧 [#reviewdone] finished review\n",
+            "<!-- /agent:review -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [x] 🚧 [#cold] finished parked work\n",
+            "<!-- /agent:icebox -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(state.queue_prompts[0], "do [#alpha]");
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("- 🚧 do [#alpha]\n- ~~do [#done]~~"),
+            "queue marker must move to the active head and clear struck items:\n{updated}"
+        );
+        assert!(
+            updated.contains("- [ ] 🚧 [#alpha] active work"),
+            "active backlog items must be marked:\n{updated}"
+        );
+        assert!(
+            updated.contains("- [x] [#done] finished work"),
+            "done backlog items must not keep in-progress markers:\n{updated}"
+        );
+        assert!(
+            updated.contains("- [x] [#reviewdone] finished review"),
+            "done review items must not keep in-progress markers:\n{updated}"
+        );
+        assert!(
+            updated.contains("- [x] [#cold] finished parked work"),
+            "done icebox items must not keep in-progress markers:\n{updated}"
+        );
     }
 
     #[test]

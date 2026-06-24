@@ -1592,8 +1592,9 @@ pub fn set_in_progress_item_ids(body: &str, ids: &HashSet<String>) -> (String, b
     let mut changed = false;
     let rewritten = PendingLayout::parse(body).replace_items(|item| {
         let mut next = item.clone();
-        let should_mark =
-            !next.id.is_empty() && normalized_ids.contains(&next.id.to_ascii_lowercase());
+        let should_mark = !next.id.is_empty()
+            && !matches!(next.state, PendingState::Done)
+            && normalized_ids.contains(&next.id.to_ascii_lowercase());
         if next.in_progress != should_mark {
             next.in_progress = should_mark;
             changed = true;
@@ -2901,6 +2902,34 @@ mod tests {
 
         assert!(changed);
         assert_eq!(updated, "- [ ] [#old] old\n- [ ] 🚧 [#new] new\n");
+    }
+
+    #[test]
+    fn set_in_progress_item_ids_never_marks_done_items() {
+        let body = concat!(
+            "- [x] 🚧 [#done] finished\n",
+            "- [x] [#target] already finished\n",
+            "- [/] [#review] active review\n",
+        );
+        let ids = [
+            "done".to_string(),
+            "target".to_string(),
+            "review".to_string(),
+        ]
+        .into_iter()
+        .collect();
+
+        let (updated, changed) = set_in_progress_item_ids(body, &ids);
+
+        assert!(changed);
+        assert_eq!(
+            updated,
+            concat!(
+                "- [x] [#done] finished\n",
+                "- [x] [#target] already finished\n",
+                "- [/] 🚧 [#review] active review\n",
+            )
+        );
     }
 
     #[test]

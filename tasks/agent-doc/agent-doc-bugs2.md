@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -34,113 +34,25 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-174553.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-181923.md`*
 
 Compacted content:
-- Archived 8 response topic(s): bug handling policy; bug policy config; JB `Run Agent Doc` still does not submit for Codex.; 5 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-
-### Re: editor state projection wiring — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: do [#lzstatewire1]
-
-
-Completed `#lzstatewire1`.
-
-Wired the editor integrations to the Rust-owned state projection:
-
-- JetBrains now binds `agent_doc_state_projection` and `agent_doc_record_state_event`, records route/transport/proof observations, renders a compact projection summary, and includes bridge tests.
-- VS Code now has the same native projection/event bridge, records route and editor patch events, and includes matching tests.
-- `specs/13-state-backbone.md` documents the editor projection bridge contract.
-- `VERSIONS.md` notes the change, and the JetBrains plugin patch version is bumped to `0.2.188`.
-
-Commits pushed:
-
-- `src/agent-doc`: `6b105362` (`fix: wire editor state projections`)
-- parent repo: `5ceac5053` (`agent-doc: update editor projection bridge`), followed by merge commit `370f156b3` to integrate `origin/main`
-
-Verification run:
-
-- `npm --prefix editors/vscode test` passed.
-- `./gradlew test --tests com.github.btakita.agentdoc.StateProjectionBridgeTest` passed.
-- `cargo test -p agent-doc state_projection_ffi_round_trip -- --nocapture` passed via `tsift digest-runner`.
-- `make check` passed via `tsift digest-runner`.
-- `make bump-plugin` passed and produced `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.188-signed.zip`.
-- `make install-full` passed and installed the updated native library.
-
-GitHub Actions note: `gh run list --workflow CI --limit 1` now reports no workflow named `CI` in the parent repo. The available `Agent Doc` workflow for push `370f156b3` failed before running any steps because GitHub reported account billing/spending-limit configuration issues.
-- `make install-full` passed and installed the updated native library.
-- `make bump-plugin` passed and produced `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.188-signed.zip`.
-- `make check` passed via `tsift digest-runner`.
-- `cargo test -p agent-doc state_projection_ffi_round_trip -- --nocapture` passed via `tsift digest-runner`.
-- `./gradlew test --tests com.github.btakita.agentdoc.StateProjectionBridgeTest` passed.
-- `npm --prefix editors/vscode test` passed.
-- parent repo: `5ceac5053` (`agent-doc: update editor projection bridge`), followed by merge commit `370f156b3` to integrate `origin/main`
-- `src/agent-doc`: `6b105362` (`fix: wire editor state projections`)
-- `VERSIONS.md` notes the change, and the JetBrains plugin patch version is bumped to `0.2.188`.
-- `specs/13-state-backbone.md` documents the editor projection bridge contract.
-- VS Code now has the same native projection/event bridge, records route and editor patch events, and includes matching tests.
-- JetBrains now binds `agent_doc_state_projection` and `agent_doc_record_state_event`, records route/transport/proof observations, renders a compact projection summary, and includes bridge tests.
-- `agent-doc session-check` for the three documents
-- `src/boost-client/.agent-doc/sessions.json`
-- `.agent-doc/sessions.json`
-- `src/boost-client/.agent-doc/state/editor-route-attempts/tasks__monsterrodholders.md-37a03006.txt`
-- `.agent-doc/state/editor-route-attempts/tasks__agent-doc__agent-doc-bugs2.md-b9c648a4.txt`
-- `.agent-doc/state/editor-route-attempts/tasks__professional__equityfundingsource.md-102ef8c4.txt`
-- `src/boost-client/tasks/monsterrodholders.md`: pane `%2`, separate submodule project/session registry; recent route either succeeded or queued behind an active owner turn.
-- `tasks/agent-doc/agent-doc-bugs2.md`: pane `%1`, recent `route_success`.
-- `tasks/professional/equityfundingsource.md`: pane `%3`, repeated `PROTECTED_PROMPT_INPUT`, plus a currently interrupted cycle after IPC no-ack.
-
-### Re: JetBrains Codex Enter submit path — gpt-5
-
-> **Queue prompt:**
->
-> JB `Run Agent Doc` does not submit on equityfundingsource.md but does submit on monsterrodholders.md and this document. Why?
-
-
-> **Queue prompt:**
->
-> JB `Run Agent Doc` on Codex is STILL not submitting. Why is the text reliably being sent but sending Enter is so unreliable? Why not send the Enter with the text?
-
-For Codex, the route layer already sends the trigger text and submit key together. The JetBrains action delegates to `agent-doc route --dispatch-only --plain-trigger`, and the binary’s shared live-pane helper uses the Codex submit profile `tmux_text_enter` with `submit_key=Enter`; when the profile has no split delay, it builds one `tmux send-keys` invocation containing both text and `Enter`.
-
-The split text-then-Enter path exists for palette-style harness behavior, not Codex. The local comments call out OpenCode as the case where `/` can open a command palette and swallow an Enter sent in the same tmux call, so that path deliberately waits before sending Enter.
-
-So if JB `Run Agent Doc` still leaves a typed-but-unsubmitted Codex trigger, the failure is not “JetBrains forgot to include Enter.” It means the route typed across a bad readiness boundary: stale supervisor, startup/recycle transition, active/blocked composer, or a proof path that accepted pane input without dispatch-start proof. The right fix is to keep tightening the binary route readiness/proof gates and surface the state projection, not to add a second Enter from the plugin. A second Enter is risky because it can submit the wrong future prompt after the composer catches up.
-
-Relevant local checks already pin this contract: `simworld_jb_run_and_clear_share_codex_enter_submit_contract` expects Codex `tmux_text_enter`/`Enter`, and the dispatch-only direct-pane test asserts the route submits once without extra Enter retries.
-
-### Re: equityfundingsource route difference — gpt-5
-
-> **Queue prompt:**
->
-> JB `Run Agent Doc` does not submit on equityfundingsource.md but does submit on monsterrodholders.md and this document. Why?
-
-The difference is the target pane/session state, not the markdown file.
-
-`equityfundingsource.md` is registered in the root project on pane `%3`. Its route-attempt ledger repeatedly shows `route_protected_prompt_input`: the router refused to type into `%3` because the Codex composer already contained protected draft prompt input. The route snapshots show examples like `Use /skills to list available skills`, `Implement {feature}`, and an older completed EFS response sitting at the prompt. In that state, the binary correctly refuses to inject another `agent-doc ...` trigger.
-
-This document is registered on pane `%1`, and its recent attempts show `route_success`. `monsterrodholders.md` is a separate agent-doc project under `src/boost-client`, with its own `.agent-doc/sessions.json`, and is registered on pane `%2`; its recent attempts either succeeded or queued behind an already-active owner turn.
-
-There is also a current closeout issue specific to `equityfundingsource.md`: `agent-doc session-check` reports that its cycle is still `preflight_started` after an IPC `no_ack`. That interrupted cycle is separate from the original submit-key question, but it explains why equityfundingsource remains brittle while this document routes normally.
-
-Concrete diagnosis:
-
-- `tasks/professional/equityfundingsource.md`: pane `%3`, repeated `PROTECTED_PROMPT_INPUT`, currently interrupted after IPC no-ack.
-- `tasks/agent-doc/agent-doc-bugs2.md`: pane `%1`, recent `route_success`.
-- `src/boost-client/tasks/monsterrodholders.md`: pane `%2`, separate submodule project/session registry; recent route success or queued-behind-owner behavior.
-
-Next operational fix: clear or submit the draft in pane `%3`, then close the interrupted `equityfundingsource.md` cycle through the normal agent-doc write/commit path before judging another JB route attempt.
-
-Evidence checked: the two root route-attempt ledgers, the boost-client monsterrodholders route-attempt ledger, both session registries, and `agent-doc session-check` for all three documents. No code changes were made.
-<!-- agent:boundary:ccbe593a -->
+❯ - Archived 3 response topic(s): editor state projection wiring; JetBrains Codex Enter submit path; equityfundingsource route difference
+❯ - Prior summary/context: prior compacted content: Archived 8 response topic(s): bug handling policy; bug policy config; JB `Run Agent Doc` sti...
+<!-- agent:boundary:fcc646b9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+JB `Run Agent Doc` on this document stalled. I recycled + restarted. Now JB `Run Agent Doc` is blocked due to another dispatch.
+```
+resync: pruned 2 stale session(s)
+[route] target tmux session: 0
+Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %1 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input); clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782325177477-direct_pane_protected_prompt_input-codex-_1-1d5c5a3ff075.txt
+```
+---
+- What are #next-steps to fix agent-doc bugs?
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -167,7 +79,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [/] [#ipcproofcloseout] [recommended] Investigate IPC proof closeout drift that appended patch_id=69d50165 as bare fenced text under an existing `(HEAD)` response instead of opening a clean exchange heading after interrupted finalize recovery.
+- [ ] [#ipcproofcloseout] [recommended] Investigate IPC proof closeout drift that appended patch_id=69d50165 as bare fenced text under an existing `(HEAD)` response instead of opening a clean exchange heading after interrupted finalize recovery.
+- [ ] [#crdtreset1] Fix stale snapshot/CRDT sidecar recovery after compact/manual cleanup: make preflight/finalize converge or emit one safe reset path, with tests for visible-file-shorter-than-snapshot/manual-cleanup cases.
+- [ ] [#routeblockux1] Improve JB/Codex protected-prompt route recovery: surface the blocking pane, draft preview, and snapshot path in the session response/state, and add SimWorld coverage proving refusal does not create queue/dispatch churn.
 <!-- /agent:backlog -->
 
 ## Review

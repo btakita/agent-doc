@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -140,7 +140,35 @@ Acknowledged the automated IPC proof dogfood note from queue cleanup. The queue 
 No actionable follow-up items are needed for this note.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:95e3d563 -->
+
+### Re: Lead Dialog CTA Focus And Deploy — gpt-5
+
+> **Queue prompt:**
+> https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 should focus on the alert CTA when opened and with the direct url. In this case "Resend borrower invite".
+>
+> **Queue prompt:**
+> deploy
+
+Implemented, pushed, and deployed.
+
+Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/admin/application_lead_detail.tsx`, `lib/ui--browser--efs/portal/shared/lead_pipeline_controls.tsx`, `tests/admin-application-lead-detail.test.ts`, and `prds/investor-pipeline-admin.md`. The lead next-step alert CTA is now marked as the top initial dialog action, and embedded `ApplicationLeadDetail` performs a one-time post-load focus pass after the async lead detail fetch. Direct `dialog=lead` URL restores now focus the alert CTA; for the target lead state, that CTA label is `Resend borrower invite`.
+
+Commit: EFS submodule commit `692acf4 fix(admin): focus lead invite CTA` was pushed to `origin/main`. The parent repo `HEAD` already points `src/equityfundingsource-dev` at `692acf4`; I did not push parent `main` because it is ahead/dirty with unrelated work.
+
+Verification: focused `bun test tests/admin-application-lead-detail.test.ts tests/admin-pipeline.test.ts` passed (`73 pass / 0 fail`; it logs the known non-fatal `d1 down` outbox fixture). `git diff --check` passed. Full `make check` passed (`1193 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+
+Deploy: pre-deploy remote D1 migrations reported no pending migrations, D1 info was reachable, and Time Travel bookmark was `0000050c-00000004-00005094-8090079220923e579c4370ba5db5164d`. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `b344beea-543d-43e9-a5ab-e1040222d2bd`. Post-deploy checks: remote D1 migrations still reported no migrations to apply; public root returned `200`; the protected admin lead dialog URL returned `303` behind Cloudflare Access.
+
+Suggested commit message:
+
+```txt
+fix(admin): focus lead invite CTA (#pipeline-leads)
+
+Focus the embedded Deal Pipeline lead next-step invite button after async lead detail load, including direct dialog URL restores. Marks the shared lead alert CTA as the initial dialog action and updates source coverage plus the admin pipeline PRD; no endpoint or schema changes.
+```
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:0f80fd04 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -160,6 +188,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 should focus on the alert CTA when opened and with the direct url. In this case "Resend borrower invite".~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

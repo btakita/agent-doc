@@ -210,8 +210,7 @@ Deploy:
 - Current Version ID: `81c55f56-740c-4d43-8811-8b631a2938e5`
 - Remote D1 check: `bun run cf:d1:migrations:list:remote` reports no migrations to apply.
 - HTTP checks: public root `200`; protected admin dialog URL `303` behind Access.
-
-<!-- agent:boundary:97b57372 -->
+<!-- agent:boundary:6469cff5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -231,8 +230,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application was "Mark Complete" but is still block on the e-sign ![img_36.png](img_36.png). Make the e-sign optional.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

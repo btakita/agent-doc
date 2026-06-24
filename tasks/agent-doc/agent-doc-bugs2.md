@@ -39,7 +39,36 @@ done
 Compacted content:
 ❯ - Archived 3 response topic(s): editor state projection wiring; JetBrains Codex Enter submit path; equityfundingsource route difference
 ❯ - Prior summary/context: prior compacted content: Archived 8 response topic(s): bug handling policy; bug policy config; JB `Run Agent Doc` sti...
-<!-- agent:boundary:6708482a -->
+❯ **IPC proof issue dogfood log**
+
+❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+❯ Issue class: `ipc_proof_insufficient`
+❯ Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=dc60c831-2fbb-4378-b738-1bc70433d1dc invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=12497 candidate_hash=e36e2b2735dbf032414ee881e91f628e4d6eaedecc021aa8b4e4a904b8ef1389 content_ours_len=14629 content_ours_hash=c7431d78df5e6739c4b3b72c5c292ffb0368eb5d933aece1835469351b06e7e5 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782324585135
+```
+
+### Re: do #ipcproofcloseout, #crdtreset1, and #routeblockux1 — gpt-5
+
+Implemented and pushed the code fixes.
+
+Submodule commits:
+- `7585b872` `fix: harden route and closeout diagnostics`
+- `612b1552` `test: cover protected prompt route refusal`
+
+Parent pointer commits were also pushed, including `e9626e632`.
+
+Verification passed:
+- targeted Rust tests
+- JetBrains `TerminalUtilTest`
+- new SimWorld protected-prompt no-dispatch-churn test
+- `make check`
+- `make install-full`
+
+Agent-doc closeout had remained uncommitted because the editor IPC path was blocked by the route-owned supervisor. This headed recovery response preserves the completed implementation evidence and crosses the binary-owned closeout path.
+<!-- agent:boundary:1b6a7906 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -81,9 +110,6 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue -->
 - [ ] [#xgdn] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%3 actor_generation=596 editor_attempt_id=1782325712508-18 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_only_dispatch_start_proof content_hash=sha256:3251e072b5c1857ba06e9ba613e1004b5eefef103db7003d7dcf7efe0d698ea8]
 - [ ] [#sz4a] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/professional/equityfundingsource.md stage=dispatch_start_proof pane=%3 actor_generation=596 editor_attempt_id=1782325712508-18 dispatch_proof_state=none elapsed_ms=10109 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782325723814-direct_pane_dispatch_start_unproven-codex-_3-c75435aee855.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_start_proof content_hash=sha256:1ec714087cfb4c5fc783eb9ad2f02a563124b3df04828fbe1140370937f40135]
-- [ ] [#ipcproofcloseout] [recommended] Investigate IPC proof closeout drift that appended patch_id=69d50165 as bare fenced text under an existing `(HEAD)` response instead of opening a clean exchange heading after interrupted finalize recovery.
-- [ ] [#crdtreset1] Fix stale snapshot/CRDT sidecar recovery after compact/manual cleanup: make preflight/finalize converge or emit one safe reset path, with tests for visible-file-shorter-than-snapshot/manual-cleanup cases.
-- [ ] [#routeblockux1] Improve JB/Codex protected-prompt route recovery: surface the blocking pane, draft preview, and snapshot path in the session response/state, and add SimWorld coverage proving refusal does not create queue/dispatch churn.
 <!-- /agent:backlog -->
 
 ## Review

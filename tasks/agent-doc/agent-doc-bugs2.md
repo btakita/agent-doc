@@ -231,14 +231,39 @@ Confirmed the current JetBrains plugin version in `src/agent-doc/editors/jetbrai
 So the actionable version guidance for the next JetBrains plugin-bearing change is: bump `pluginVersion` from `0.2.181` to `0.2.182`. I treated the `0.1.x` version in the queue note as stale/typoed shorthand and made no source edits in this cycle.
 
 Escalation: none. Verification: inspected `gradle.properties`, `src/agent-doc` status, and the submodule commit. Confidence: high.
-<!-- agent:boundary:6ac220f3 -->
+
+### Re: #advr05 — gpt-5
+
+> **Queue prompt:**
+>
+> do [#advr05]
+
+Completed `#advr05` as already implemented in the current `src/agent-doc` tree; I made no duplicate source edits in this cycle.
+
+Confirmed surfaces:
+
+- JetBrains has `StopAgentAction.kt`, and `plugin.xml` registers `AgentDoc.StopAgent` with text `Stop Agent` alongside `Restart Agent` and `Restart Supervisor Process`.
+- `TerminalUtil.stopAgent` routes to `agent-doc session stop-agent` and keeps the supervisor running so `Restart Agent` can bring the harness back.
+- VS Code contributes `agentDoc.restartAgent` and `agentDoc.stopAgent`, registers both commands, and routes them through the same session command helpers.
+- Current JetBrains plugin version is `0.2.181`, and signed/unsigned artifacts exist: `agent-doc-jetbrains-0.2.181.zip` and `agent-doc-jetbrains-0.2.181-signed.zip`.
+- `src/agent-doc` is clean at `28ba4850 feat(jetbrains): per-structure Markdown style overrides (#lzmdstyle, #9xtw)`.
+
+Verification run for this closeout:
+
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin` passed.
+- `npm test` in `src/agent-doc/editors/vscode` passed: 98 tests.
+- `git diff --check` in `src/agent-doc` passed.
+- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success`, run `28073970198`, for `feat(jetbrains): per-structure Markdown style overrides (#lzmdstyle, …)`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:c370bd79 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~Another session bumped JB plugin to 0.1.181. So you may need to bump to 0.1.182.~~
-- :pushpin: do [#advr05]
+- ~~:pushpin: do [#advr05]~~
 - :pushpin: do [#advr06]
 - :pushpin: do [#advr07]
 - :pushpin: do [#advr08]
@@ -282,7 +307,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr05] [recommended] Advance original #s81q: add Stop Agent and mirror Stop+Restart into VS Code extension menus; implement JB `StopAgentAction.kt`, plugin.xml registration, VS Code command contributions, and signed/unsigned plugin artifacts.
 - [ ] [#advr06] Advance original #recyclerename: rename JB + VS Code "Restart Supervisor Process" UI text to "Recycle Supervisor" while keeping stable action IDs, and ensure Restart Agent and Recycle Supervisor commands sit alongside each other. Plan: tasks/agent-doc/plan-restart-agent.md.
 - [ ] [#advr07] [recommended] Advance original #supinstallvis: make supervisor auto-install/rebuild status visible in pane body or plugin notification surface, choose a non-input-consuming mechanism, add ops/log proof, and avoid disturbing keepalive Enter-to-restart reader.
 - [ ] [#advr08] Advance original #runexitrestart: implement/verify recovery for cleanly exited harness panes by detecting `Press Enter to restart`, restarting the harness, waiting for dispatch-ready proof, and submitting prompt-bearing work so Run Agent Doc cannot drop on clean exit.

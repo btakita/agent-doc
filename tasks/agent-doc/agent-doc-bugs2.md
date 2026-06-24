@@ -75,14 +75,31 @@ agent_doc_bug_policy = "fix"
 ```
 
 Then I finalized [agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md), marked `#bugpolicy1` done, and committed the session closeout at `aef5face6`. `agent-doc session-check` is OK and the queue is empty. The config file is local/untracked by Git in this workspace, so there was no separate config commit to make.
-<!-- agent:boundary:376a660b -->
+
+### Re: JB `Run Agent Doc` still does not submit for Codex. — gpt-5
+
+> **Queue prompt:** JB `Run Agent Doc` still does not submit for Codex.
+
+Fixed in `src/agent-doc` commit `d4219137` and included the parent submodule pointer in this closeout. The route path was still allowing dispatch-only JetBrains reroutes to treat Codex direct-pane text+Enter acceptance as success even when Codex hook tracking was visible, which meant Run Agent Doc could report `route_success` without hook-backed evidence that Codex actually started the submitted prompt.
+
+Changed `agent-doc-orchestration/src/route/dispatch_only.rs` so dispatch-only proof policy is document-aware: Codex with visible `.codex/hooks.json` now waits for dispatch-start proof and fails closed with the existing route-dispatch bug report when only pane-input acceptance is observed. Codex installs without visible hooks keep the acceptance-only fallback. Updated coverage now locks both branches.
+
+Verification:
+- `cargo test -p agent-doc-orchestration dispatch_only_codex -- --nocapture`
+- `cargo test -p agent-doc-orchestration accepted_only_dispatch_start_proof -- --nocapture`
+- `cargo test -p agent-doc-orchestration dispatch_only_proof_policy -- --nocapture`
+- `cargo test -p agent-doc-orchestration dispatch_only_direct_pane_accepted_submit_skips_optional_proof_wait -- --nocapture`
+- `cargo test -p agent-doc-orchestration dispatch_only_submit_proof_gate_accepts_enter_delivery_without_codex_hooks -- --nocapture`
+- `make check` via `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`
+- `gh run list --workflow CI --limit 1` showed latest `CI` run on `main` completed successfully.
+<!-- agent:boundary:0c96d3d6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- JB `Run Agent Doc` still does not submit for Codex.
-- JB `Clear Session Context` on opencode does not get past the dropdown selection.
+- ~~JB `Run Agent Doc` still does not submit for Codex.~~
+- JB `Clear Session Context` on opencode does not get past the dropdown selection submission.
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

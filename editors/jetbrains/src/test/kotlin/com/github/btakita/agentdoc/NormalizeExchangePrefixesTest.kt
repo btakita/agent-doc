@@ -406,6 +406,23 @@ One.
     }
 
     @Test
+    fun `component body inherits editor foreground`() {
+        val visualHighlighterPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/VisualHighlighterManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/VisualHighlighterManager.kt"),
+        ).first { Files.exists(it) }
+        val visualHighlighter = Files.readString(visualHighlighterPath)
+        val componentBodyBranch = visualHighlighter
+            .substringAfter("\"component_body\" ->")
+            .substringBefore("\"scratch_comment_body\"")
+
+        assertTrue(componentBodyBranch.contains("baseAttrs(null).apply"))
+        assertTrue(componentBodyBranch.contains("mutedBackground(editor, accent)"))
+        assertFalse(componentBodyBranch.contains("foregroundColor ="))
+        assertFalse(componentBodyBranch.contains("DefaultLanguageHighlighterColors.METADATA)?.foregroundColor,"))
+    }
+
+    @Test
     fun `file patch success requires ack content before deleting patch file`() {
         val patchWatcherPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),

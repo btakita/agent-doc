@@ -160,15 +160,11 @@ class VisualHighlighterManager private constructor(private val project: Project)
         }
 
         return when (kind) {
-            "component_body" -> TextAttributes().apply {
+            "component_body" -> baseAttrs(null).apply {
                 val accent = editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.METADATA)?.foregroundColor
                 backgroundColor = MarkdownStyleSettings.backgroundFor(
                     kind,
                     mutedBackground(editor, accent),
-                )
-                foregroundColor = MarkdownStyleSettings.foregroundFor(
-                    kind,
-                    com.intellij.ui.JBColor(accent ?: editor.colorsScheme.defaultForeground, accent ?: editor.colorsScheme.defaultForeground),
                 )
                 fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.PLAIN)
             }

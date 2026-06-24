@@ -63,7 +63,43 @@ Compacted content:
 - `semantic_completion_match`: backlog `#krcm` vs DONE `#t0qn` — **false positive.** `#krcm` is the pre-existing `slot.zig:320 Slot.touch` crash on Zig 0.17.0-dev (installed 0.17.0-dev.892; repo targets 0.16). Unrelated to the Signal primitive and still open. The full `zig build test` hits this on 3/4 binaries on 0.17; signal + state_machine tests pass. Not touched here.
 
 Next queue head is `:pushpin: do [#pwvm]`.
-<!-- agent:boundary:4a0b47f0 -->
+
+### Re: #pwvm IPC.lean clarification cluster — answered + ShmBlobArena-parity plan scoped — glm-5.2
+
+> **Queue prompt:**
+>
+> :pushpin: do [#pwvm]
+>
+> do [#9e64]
+>
+> do [#t1xt]
+>
+> do [#dcgp]
+>
+> do [#7gpg]
+>
+> do [#kjfe]
+
+
+`#pwvm` and its five duplicates (`#9e64` rs · `#t1xt`/`#dcgp` py · `#7gpg`/`#kjfe` zig) all ask the same question. Investigated the actual sibling + formal-spec state; the answer is definitive, so I'm closing all six and scoping the one real gap.
+
+**Clarification result:**
+
+| Candidate goal | Status |
+|---|---|
+| **IPC.lean protocol** (Snapshot/Delta/DeltaOp/epoch) | ✅ **DONE** in all 3 siblings + formally proven in `src/lazily-spec/formal/lean/LazilyFormal/IPC.lean` (`applyDelta`/`isSequentialAfter`, memo & signal silence theorems, batch-flush). No work. |
+| **ShmBlobArena parity** | ⚠️ **REAL GAP** — plan scoped (below) |
+| **Lean → Rust proof extraction** | ❌ **Not indicated** — `IPC.lean` models `Payload := Nat` and intentionally omits the ShmBlob transport. Extraction is a separate research-scale effort with no current consumer. |
+
+**The gap:** lazily-rs owns the only `ShmBlobArena<B>` host (`ipc.rs:150` — `with_capacity`/`from_buffer`/`write_blob:220`/`read_blob:269`). lazily-py (`ipc.py`) and lazily-zig (`ipc.zig`) carry only `ShmBlobRef` + `SharedBlob` wire tagging — they can *deserialize* a descriptor from a Rust host but cannot *host* (allocate/write/read) an arena. They're second-class blob consumers today.
+
+**Action this cycle:**
+- Scoped `tasks/software/plan-lazily-shmblob-parity.md` — ports the arena 1:1 to py (`bytearray`+`memoryview`, no native ext — preserves the pure-Python install story #tnbd depends on) and zig (allocator-backed slice), with a lazily-spec cross-sibling conformance test. True cross-process `mmap`/`/dev/shm` is explicitly out of scope (follow-on that swaps the backing buffer).
+- Added one consolidated backlog item `#lzshmblobparity` (end of backlog — won't auto-drain into implementation without operator direction on whether parity is the chosen goal vs. dropping it).
+- Closed the six duplicate clarification items: `#pwvm`, `#9e64`, `#t1xt`, `#dcgp`, `#7gpg`, `#kjfe` → all resolved by this finding.
+
+> Note: preflight flagged `queue_stall_detected` — expected, since OpenCode has no in-session auto-loop; this is the manual continuation of the drain. `#h6qb`/`#krcm` `semantic_completion_match` warnings carry over unchanged (separate items, not touched).
+<!-- agent:boundary:6dba1fba -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,12 +109,12 @@ Next queue head is `:pushpin: do [#pwvm]`.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#t0mf]~~
-- :pushpin: do [#pwvm]
-- do [#9e64]
-- do [#t1xt]
-- do [#dcgp]
-- do [#7gpg]
-- do [#kjfe]
+- ~~:pushpin: do [#pwvm]~~
+- ~~do [#9e64]~~
+- ~~do [#t1xt]~~
+- ~~do [#dcgp]~~
+- ~~do [#7gpg]~~
+- ~~do [#kjfe]~~
 - do [#tnbd]
 - do [#krcm]
 <!-- /agent:queue -->
@@ -88,12 +124,7 @@ Next queue head is `:pushpin: do [#pwvm]`.
 <!-- agent:backlog priority queue -->
 - [ ] [#krcm] #lzsigzig3=[recommended] lazily-zig: pre-existing slot.zig:320 Slot.touch test crash on Zig 0.17.0-dev (installed 0.17.0-dev.892; repo targets 0.16 per commit 9b492d8). 3 of 4 test binaries crash in slot.touch, masking the full suite (signal.zig + state_machine tests pass). Investigate the Slot.touch path under the newer std.Io/async semantics, or pin the CI/dev Zig to 0.16.x until 0.17 is stable. Unrelated to #t0qn (Signal primitive is complete).
 - [ ] [#tnbd] #lzjsffi=[recommended] Migrate lazily-js FFI loader off ffi-napi (unmaintained; native addon fails to build on Node >=23 — napi_add_finalizer ABI break, confirmed at Node 26.1.0). The loadAgentDocFFI() path in src/lazily-js/src/state-projection.js is mock-tested + pure-JS at import time, but VSCode consumers on modern Node cannot install ffi-napi to reach the live stateProjection/recordStateEvent calls. Evaluate koffi or node-ffi-rs as the maintained replacement.
-- [ ] [#pwvm] #lzffileanrs=[recommended] Clarify: IPC.lean protocol already implemented in lazily-rs ipc.rs (Snapshot/Delta/ShmBlobArena). If goal is ShmBlobArena parity in siblings or Lean proof extraction, scope a plan.
-- [ ] [#9e64] #lzffileanrs=[recommended] Clarify: IPC.lean formal theorems already implemented in lazily-rs ipc.rs (Snapshot/Delta/DeltaOp/epoch sequencing). If goal is ShmBlobArena/ShmBlobRef in siblings or Lean-to-Rust proof extraction, scope a plan. Currently ambiguous.
-- [ ] [#t1xt] #lzffileanpy=[recommended] Clarify: lazily-py ipc.py already implements IPC.lean (IpcValue/SharedBlob/Snapshot/Delta). If goal is ShmBlobArena parity or proof extraction, scope a plan.
-- [ ] [#dcgp] #lzffileanpy=[recommended] Clarify: lazily-py ipc.py already implements the IPC.lean protocol (IpcValue/SharedBlob/Snapshot/Delta). If goal is ShmBlobArena parity or proof extraction, scope a plan.
-- [ ] [#7gpg] #lzffileanzig=[recommended] Clarify: lazily-zig ipc.zig already implements IPC.lean. If goal is ShmBlobArena parity or proof extraction, scope a plan.
-- [ ] [#kjfe] #lzffileanzig=[recommended] Clarify: lazily-zig ipc.zig already implements the IPC.lean protocol. If goal is ShmBlobArena parity or proof extraction, scope a plan.
+- [ ] [#lzshmblobparity] #lzshmblobparity=[recommended] ShmBlobArena host parity for lazily-py + lazily-zig: only lazily-rs implements the owning arena (ipc.rs:150 ShmBlobArena<B>: with_capacity/from_buffer/write_blob:220/read_blob:269); py/zig have only ShmBlobRef + SharedBlob wire tagging (ref-only consumers, cannot host). Port arena 1:1 (py: bytearray+memoryview; zig: allocator-backed slice) + lazily-spec conformance test. Plan: tasks/software/plan-lazily-shmblob-parity.md. Resolves #pwvm/#9e64/#t1xt/#dcgp/#7gpg/#kjfe (IPC.lean protocol already DONE+proven; Lean extraction not indicated).
 <!-- /agent:backlog -->
 
 ## Review

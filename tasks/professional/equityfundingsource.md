@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -33,276 +33,36 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-210628.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-223132.md`*
 
 Compacted content:
-❯ - Archived 13 response topic(s): Remove Lead Dialog Open Page And Deploy; Lead Dialog Next Step And Deploy; Deploy Queue Residue Cleanup; 10 more
+❯ - Archived 16 response topic(s): Open Message Conversation Modal And Deploy; Deploy Queue Residue Cleanup; IPC Dogfood Note Closeout; 13 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
-### Re: Open Message Conversation Modal And Deploy — gpt-5
+### Re: Remove Required Indicator From Document Types And Deploy — glm-5.2
 
 > **Queue prompt:**
-> https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 > Open Message Conversation should open the modal...not the page.
+> https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1&step=5 shows "Appraisal Report *", "Preliminary Title Report *", "Property Photos *", "Purchase Agreement *" all as required even though they are not required. Please remove the required indicator in the UI.
 >
 > **Queue prompt:**
 > deploy
 
-Implemented, pushed, and deployed.
+Implemented, pushed, and deployed. The four seeded borrower document types no longer show a red `*` required indicator in the Documents step.
 
-Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/admin/messages.tsx`, `lib/ui--browser--efs/portal/shared/lead_pipeline_controls.tsx`, `lib/ui--browser--efs/portal/shared/ui.tsx`, `tests/admin-application-lead-detail.test.ts`, `tests/admin-pipeline.test.ts`, `prds/equity-funding-source-lending-portal-prd.md`, and `prds/investor-pipeline-admin.md`.
+Root cause: the `document_types` table seeded these four (Appraisal Report, Preliminary Title Report, Property Photos, Purchase Agreement) with `category = 'required'`, and `application-documents.ts` derives `required: category === 'required'` — so the borrower Documents step (`ApplicationDocumentsUpload`) painted `*` beside each. None is actually required to advance: the Documents step has no `validate_step_` gate, so the marker was purely visual noise.
 
-What changed: `Open message conversation` is now an in-page button that dispatches a shared admin-messages open event instead of navigating to `/admin/messages`. The global `AdminMessagesLauncher` listens for that event, opens the existing Messages modal, switches to the borrower tab, and seeds the borrower search from the lead email so the conversation opens inside the modal while the Deal Pipeline lead dialog remains on the page.
+What changed: migration `0109_document_types_optional.sql` updates the four rows from `'required'` to `'optional'` (guarded `WHERE category = 'required'`), and the `settings.tsx` seed defaults were updated to match so fresh installs / re-seeds and the admin document-types editor start from optional. An admin can still re-flag any type required from settings. The `required` derivation is unchanged, so genuinely required types still show the indicator.
 
-Commits: EFS submodule commit `a2a2213 fix(admin): open lead messages in modal` was pushed to `origin/main`. Parent repo gitlink commit `e87bd7b72 chore(efs): bump lead messages modal submodule` was committed locally only; I did not push parent `main` because the parent repo is dirty with unrelated work.
+Changed paths in `src/equityfundingsource-dev`: `app/equityfundingsource/migrations/0109_document_types_optional.sql` (new), `lib/ui--browser--efs/portal/admin/settings.tsx` (seed defaults → optional), `prds/efs-full-application-intake-spec.md` (documented `#doc-types-not-required`), and `tests/app-docs-icon-delete-activity.test.ts` (3 source-level guard tests).
 
-Verification: focused `bun test tests/admin-application-lead-detail.test.ts tests/admin-pipeline.test.ts` passed (`73 pass / 0 fail`; it logs the known non-fatal `d1 down` outbox fixture). `git diff --check` passed. Full `make check` passed (`1193 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+Commits: EFS submodule commit `b37d44e fix(borrower): mark seeded document types optional, not required (#doc-types-not-required)` was pushed to `origin/main`. Parent repo gitlink commit `e80c17055 chore(efs): bump optional document types submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with unrelated work.
 
-Deploy: pre-deploy remote D1 migrations reported no pending migrations, D1 info was reachable for DB `280e1539-b940-4c59-8988-fbed63c12ac0`, and the Time Travel bookmark was `0000050c-00000024-00005094-d5664908049b0e8b3332a57f85746df1`. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `41b78a68-0aeb-4177-9b1e-9bb84c7dad0c`. Post-deploy checks: remote D1 migrations still reported no migrations to apply; public root returned `HTTP 200`; the protected admin lead dialog URL returned `HTTP 303` to the admin login redirect, which is expected without an admin session.
+Verification: focused `bun test tests/app-docs-icon-delete-activity.test.ts` passed (`14 pass / 0 fail`). `git diff --check` passed. Full `bun test` passed (`1201 pass / 0 fail`); app build and Worker build passed. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
 
-Escalation: none. Confidence: high.
-
-### Re: Deploy Queue Residue Cleanup — gpt-5
-
-> **Queue prompt:**
-> deploy
-
-The deploy queue residue is already satisfied by the preceding cycle. No additional app work was needed after EFS commit `a2a2213` was pushed and Worker version `41b78a68-0aeb-4177-9b1e-9bb84c7dad0c` went live.
-
-Changed paths this cleanup cycle: none in app code. Commands this cleanup cycle: `agent-doc preflight`, `agent-doc plan`, and `agent-doc finalize` recovery/cleanup. Verification/deploy evidence remains the prior cycle: focused tests passed (`73 pass / 0 fail`), `git diff --check` passed, full `make check` passed (`1193 pass / 0 fail`, app build, Worker build), remote D1 migrations reported no pending migrations before and after deploy, public root returned `HTTP 200`, and the protected admin lead dialog URL returned the expected unauthenticated `HTTP 303` admin-login redirect.
+Deploy: remote D1 migration `0109_document_types_optional.sql` applied successfully (✅). `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `7491e179-b8b8-44a4-9bdb-82d90040d4b7`. Post-deploy check: public root returned `HTTP 200`.
 
 Escalation: none. Confidence: high.
-❯ **IPC proof issue dogfood log**
-
-❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
-
-❯ Issue class: `ipc_proof_insufficient`
-❯ Affected component: editor IPC / writeback
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=725458f8-9d08-4114-95e2-75b4239e3fd7 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782335678109
-```
-
-### Re: IPC Dogfood Note Closeout — gpt-5
-
-Acknowledged the automatic IPC proof dogfood note from cleanup recovery. The EFS app change is already implemented, pushed, and deployed at Worker version `41b78a68-0aeb-4177-9b1e-9bb84c7dad0c`; the queue is drained and there is no remaining EFS app work from this note.
-
-Changed paths this closeout cycle: none in app code. Commands this closeout cycle: `agent-doc preflight`, `agent-doc plan`, and `agent-doc finalize`. The IPC note records `ipc_proof_insufficient` for editor IPC / writeback during the prior finalize attempt; recovery applied the retained response and cleared the queue.
-
-No actionable EFS follow-up items are needed for the IPC note.
-
-Escalation: none. Confidence: high.
-
-### Re: IPC Dogfood Note Final Closeout — gpt-5
-
-Acknowledged the second IPC proof diagnostic appended during recovery. It records another `ipc_proof_insufficient` editor writeback no-ack for the prior closeout attempt; the EFS product work remains complete and deployed, and the queue is inactive.
-
-Changed paths this closeout cycle: none in app code. Commands this closeout cycle: `agent-doc preflight`, `agent-doc plan`, and `agent-doc finalize` with the committed disk path after repeated editor IPC no-ack recovery loops.
-
-No actionable EFS follow-up items are needed for this IPC diagnostic.
-
-Escalation: none. Confidence: high.
-
-
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=c2b69b23-1a40-4ad1-9f53-873a118f598f invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782335716548
-```
-
-### Re: IPC Proof Drift Closeout — gpt-5
-
-Acknowledged the raw `ipc_proof_insufficient` diagnostic left after the forced closeout attempt. The diagnostic is preserved in the session document, and this response closes it without adding EFS product work.
-
-Changed paths this closeout cycle: none in app code. Commands this closeout cycle: `agent-doc repair --apply-recovery` and `agent-doc write --commit --force-disk` after repeated editor IPC no-ack failures.
-
-No actionable EFS follow-up items are needed for this IPC diagnostic.
-
-Escalation: none. Confidence: high.
-
-### Re: Borrower Lead Prefill And Deploy — gpt-5
-
-> **Queue prompt:**
-> https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 should prefill any data that we have, such as the First Name + Last Name + email address.
->
-> **Queue prompt:**
-> deploy
-
-Implemented, pushed, and deployed.
-
-Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/borrower/full_application.tsx`, `tests/borrower-lead-to-tmo-flow.test.ts`, `tests/apply4-full-application-p1.test.ts`, and `prds/borrower-application-lead-to-tmo-plan.md`.
-
-What changed: a direct borrower application URL with `?lead_id=...` now starts or resumes the lead-backed draft through the authenticated draft POST endpoint with `create_if_missing=true`. That endpoint already validates the lead and applies the existing deterministic `application_lead_prefill_apply_` helper, so the wizard's section fetch sees known lead fields such as first name, last name, email, phone, and property/request data without overwriting borrower-entered values.
-
-Commits: EFS submodule commit `e3d2830 fix(borrower): prefill lead application links` was pushed to `origin/main`. Parent repo gitlink commit `210f8c4ba chore(efs): bump lead prefill submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` by 39 commits with unrelated work.
-
-Verification: focused `bun test tests/borrower-lead-to-tmo-flow.test.ts tests/apply4-full-application-p1.test.ts` passed (`12 pass / 0 fail`). `git diff --check` passed. Full `make check` passed (`1193 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-
-Deploy: pre-deploy remote D1 migrations reported no pending migrations, and the Time Travel bookmark was `0000050d-00000004-00005094-df441773e9b30c807983ba477615bcd3`. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `a964ccdb-ccfa-4c2e-8168-1ec20b0295ec`. Post-deploy checks: remote D1 migrations still reported no migrations to apply; public root returned `HTTP 200`; the protected borrower URL returned the expected unauthenticated `HTTP 303` redirect to `/login?role=borrower&next=%2Fborrowers%2Fnew-application%3Flead_id%3Dc907d851-8870-49aa-a6fc-66d393868ce1`, preserving the lead id through login.
-
-Escalation: none. Confidence: high.
-
-### Re: Deploy Queue Residue Cleanup — gpt-5
-
-> **Queue prompt:**
-> deploy
-
-The deploy queue residue is already satisfied by the preceding cycle. No additional app work was needed after EFS commit `e3d2830` was pushed and Worker version `a964ccdb-ccfa-4c2e-8168-1ec20b0295ec` went live.
-
-Changed paths this cleanup cycle: none in app code. Commands this cleanup cycle: `agent-doc preflight`, `agent-doc plan`, and `agent-doc write --commit --force-disk` recovery/cleanup after repeated editor IPC no-ack failures. Verification/deploy evidence remains the prior cycle: focused tests passed (`12 pass / 0 fail`), `git diff --check` passed, full `make check` passed (`1193 pass / 0 fail`, app build, Worker build), remote D1 migrations reported no pending migrations before and after deploy, public root returned `HTTP 200`, and the protected borrower URL returned the expected unauthenticated `HTTP 303` login redirect preserving the `lead_id`.
-
-Escalation: none. Confidence: high.
-
-### Re: Esc Hotkey Closes Message Dialogs — glm-5.2
-
-> **Queue prompt:**
-> In the borrower portal, lender portal, broker portal...the message dialog should support the Esc hotkey to close the message dialog.
-
-> **Queue prompt:**
-> deploy
-
-Implemented, pushed, and deployed. Esc now closes the floating `PortalMessages` launcher panel in the borrower, lender (investor), and broker portals, plus the admin lender-pipeline launcher.
-
-What changed: the launcher panel was a plain `role="dialog"` div outside `PortalModal`, so it never received Esc. Exported `modal_close_stack_` from `ui.tsx` and gave the launcher its own Esc `keydown` effect that pushes a close handler onto the same stack `PortalModal` uses — Esc closes the topmost dialog first, so a stacked `PortalModal` (or confirm dialog) closes before the launcher does. This matches the established `#dialog-close-esc` convention exactly.
-
-Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/shared/portal_messages.tsx` (import + Esc effect), `lib/ui--browser--efs/portal/shared/ui.tsx` (exported `modal_close_stack_`), `tests/msg-send-shortcut.test.ts` (source-level guard test), and `prds/portal-messages-component.md` (keyboard note).
-
-Commits: EFS submodule commit `78cbe73 feat(portal): Esc closes message launcher via shared modal stack` was pushed to `origin/main`. Parent repo gitlink commit `89d014c78 chore(efs): bump Esc-close message launcher submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with unrelated work.
-
-Verification: focused `bun test tests/msg-send-shortcut.test.ts tests/portal-table-dialog.test.ts` passed (`29 pass / 0 fail`). `git diff --check` passed. Full `make check` passed (`1194 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-
-Deploy: pre-deploy remote D1 migrations reported no migrations to apply. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `ff8f6712-8dee-40ba-8c5a-72b15097454e`. Post-deploy checks: public root returned `HTTP 200`; borrower portal returned `HTTP 200`.
-
-Escalation: none. Confidence: high.
-
-### Re: Highlight Form Fields With Validation Errors — glm-5.2
-
-> **Queue prompt:**
-> In the entire form https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 and the lender forms, if there is a validator error on a field, the field should be highlighted.
-
-> **Queue prompt:**
-> deploy
-
-Implemented, pushed, and deployed. Form fields that fail validation are now visually highlighted (red border + light-red background) across every portal.
-
-What changed: the CSS for `.form-field.has-error` already existed (used by the borrower full-application's custom validation), but no other form wired it up. Added a `use_form_validation_highlight_()` hook in `shared/ui.tsx` that listens globally for native HTML5 `invalid` events — when any `input`/`select`/`textarea` fails constraint validation on submit, the hook adds `has-error` to the closest `.form-field` wrapper so the existing CSS paints the red highlight. The highlight clears on the next `input` event as the user corrects the field. Also exported a shared `FormField` component with an `error` prop for custom per-field validation. Wired the hook into all four portal layouts (borrower, investor/lender, broker, admin) so every form across every portal gets the highlight — including the lender registration, accreditation, deal-detail funding, and vestings forms that previously showed only a plain red error string.
-
-Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/shared/ui.tsx` (hook + `FormField`), `lib/ui--browser--efs/portal/{borrower,investor,broker,admin}/layout.tsx` (hook call), and `tests/form-error-standard.test.ts` (source-level guard test).
-
-Commits: EFS submodule commit `cb40d40 feat(portal): highlight form fields with validation errors` was pushed to `origin/main`. Parent repo gitlink commit `b9ca39472 chore(efs): bump field validation highlight submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with unrelated work.
-
-Verification: focused `bun test tests/form-error-standard.test.ts` passed (`9 pass / 0 fail`). `git diff --check` passed. Full `bun test` passed (`1195 pass / 0 fail`). App build and Worker build passed. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-
-Deploy: pre-deploy remote D1 migrations reported no migrations to apply. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `5e30710d-c674-4f4d-9088-fbe170a002f3`. Post-deploy checks: public root returned `HTTP 200`; borrower application URL returned the expected unauthenticated `HTTP 303` login redirect.
-
-Escalation: none. Confidence: high.
-
-### Re: Queue Residue Cleanup — glm-5.2
-
-> **Queue prompt:**
->
-> ~~In the entire form https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 and the lender forms, if there is a validator error on a field, the field should be highlighted.~~ — auto-struck: answered this cycle (#ftstrike)
-
-
-The struck queue head is already answered: the field-validation-highlight feature was implemented, tested, pushed (EFS `cb40d40`), and deployed (Worker version `5e30710d-c674-4f4d-9088-fbe170a002f3`) in the prior cycle. No additional work is needed.
-
-Changed paths this cleanup cycle: none in app code. Verification/deploy evidence remains the prior cycle: focused tests passed (`9 pass / 0 fail`), full suite passed (`1195 pass / 0 fail`), `git diff --check` passed, app + Worker builds passed, post-deploy root returned `HTTP 200`.
-
-Escalation: none. Confidence: high.
-
-### Re: Struck Queue Residue Drain — glm-5.2
-
-All three queue heads are already struck: the field-validation-highlight feature shipped (EFS `cb40d40`, Worker `5e30710d`) and the deploy completed in the prior cycle. The `queue: start` frontmatter flip re-activated the queue, but every item in it is residue from already-answered work. No additional app work needed.
-
-Escalation: none. Confidence: high.
-
-### Re: Show All Validation Errors At Once — glm-5.2
-
-> **Queue prompt:**
-> In the borrower, broker, and lender forms: If there are multiple fields not validating, show all errors and highlight all the fields at once.
-
-> **Queue prompt:**
-> deploy
-
-Implemented, pushed, and deployed. When multiple fields fail validation, every invalid field is now highlighted and shows its own error message simultaneously — instead of the native browser behavior which only shows one bubble on the first invalid field.
-
-What changed: updated `use_form_validation_highlight_()` in `shared/ui.tsx` to call `e.preventDefault()` on each native `invalid` event, suppressing the single-bubble. For every invalid field it now injects a `.form-field-error` div with the field's `validationMessage` text, so all errors appear at once under their respective fields. The hook also focuses the first invalid field after all invalid events settle (via `setTimeout(0)`) so the user lands on the right field without losing the all-at-once view. Clearing on `input` now also removes the injected error message div.
-
-Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/shared/ui.tsx` (updated hook) and `tests/form-error-standard.test.ts` (extended guard assertions).
-
-Commits: EFS submodule commit `9f3fae8 feat(portal): show all validation errors at once` was pushed to `origin/main`. Parent repo gitlink commit `eb7f4ca96 chore(efs): bump show-all-validation-errors submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with unrelated work.
-
-Verification: focused `bun test tests/form-error-standard.test.ts` passed (`9 pass / 0 fail`). `git diff --check` passed. Full `bun test` passed (`1195 pass / 0 fail`). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-
-Deploy: pre-deploy remote D1 migrations reported no migrations to apply. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `9ad2c0a3-9e46-4673-9034-7b96dc2251e8`. Post-deploy checks: public root returned `HTTP 200`.
-
-Escalation: none. Confidence: high.
-
-### Re: Property Type Client-Side Validation And Deploy — glm-5.2
-
-> **Queue prompt:**
-> I filled out a borrower form missing Property Type and Family or business relationship with the seller? "Missing required values: B. Family or business relationship with the seller? (purchase)."...but only 1 error occurred. Both errors should show up.
->
-> **Queue prompt:**
-> deploy
-
-Implemented, pushed, and deployed. When Property Type and a declaration are both left blank, both errors now surface together.
-
-Root cause: the client-side `validate_step_(4)` in `full_application.tsx` validated loan amount, purpose, street, city, state, ZIP, property value, occupancy, and Declarations A–M — but **not `property_type`** — while the server-side `subject_property_validation_error_` (routes.ts:368) did. The `<select id="property_type">` defaults to a blank `Select…` option, so a borrower who left it blank AND left declaration B unanswered saw only the declaration B error; the missing property type was invisible until the server rejected the save. Added the client-side `property_type` guard mirroring the server check so all missing fields in the subject-property step appear in one "Missing required values" message.
-
-Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/borrower/full_application.tsx` (added `property_type` check to `validate_step_`), `prds/efs-full-application-intake-spec.md` (documented client/server lock-step validation requirement), and `tests/apply4-full-application-p6.test.ts` (source-level guard asserting the client-side `property_type` check).
-
-Commits: EFS submodule commit `d41f7ae fix(borrower): validate property type client-side so all missing fields show` was pushed to `origin/main`. Parent repo gitlink commit `a3079a93e chore(efs): bump property-type client validation submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with unrelated work.
-
-Verification: focused `bun test tests/apply4-full-application-p6.test.ts` passed (`22 pass / 0 fail`). `git diff --check` passed. Full `make check` passed (`1195 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-
-Deploy: `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `c1dcd513-b55b-4827-98da-490742f1312b`. Post-deploy checks: public root returned `HTTP 200`; borrower application URL returned the expected unauthenticated `HTTP 303` redirect to `/login?role=borrower&next=%2Fborrowers%2Fnew-application`.
-
-Escalation: none. Confidence: high.
-
-### Re: Struck Residue Drain — glm-5.2
-
-> **Queue prompt:**
->
-> ~~I filled out a borrower form missing Property Type and Family or business relationship with the seller? "Missing required values: B. Family or business relationship with the seller? (purchase)."...but only 1 error occurred. Both errors should show up.~~ — auto-struck: answered this cycle (#ftstrike)
-
-
-The struck queue head is already answered: the client-side `property_type` validation shipped (EFS `d41f7ae`, pushed to `origin/main`) and deployed (Worker `c1dcd513-b55b-4827-98da-490742f1312b`) in the prior cycle. The `#ftstrike` marker confirms it was auto-struck because it was answered this session. No additional app work is needed.
-
-Changed paths this cleanup cycle: none in app code. Verification/deploy evidence remains the prior cycle: focused tests passed (`22 pass / 0 fail`), full `make check` passed (`1195 pass / 0 fail`), app + Worker builds passed, post-deploy root returned `HTTP 200` and the borrower app returned the expected unauthenticated `HTTP 303` login redirect.
-
-Escalation: none. Confidence: high.
-
-### Re: URL-Per-Step Wizard Navigation And Deploy — glm-5.2
-
-> **Queue prompt:**
-> Each step in https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 should have a separate URL so the browser back button works. Same with the Lender wizard forms.
->
-> **Queue prompt:**
-> deploy
-
-Implemented, pushed, and deployed. Each borrower full-application step now has its own URL (`?step=N`), so the browser back/forward buttons navigate between steps.
-
-What changed: the wizard kept its step in React state only, so back/forward did nothing. Added a `step_from_url_()` helper that reads `?step=N` (clamped to the valid range) and wired the step state to it. A `useEffect([step])` pushes a new `history` entry per step change — the first sync uses `replaceState` so a resume/refresh strands no extra back entry, while later changes use `pushState` so back moves one step at a time. A `popstate` listener reads the step back out of the URL when back/forward fires (with a `skip_step_push_ref` guard to avoid re-pushing on the round-trip). The resume heuristic is skipped when an explicit `?step` is present, so a direct link or refresh lands on the exact step the URL says.
-
-On the lender/investor forms: those are already separate URL-addressable pages (`/lenders/accreditation`, `/lenders/dashboard`, etc.), not in-page step wizards, so there is no step state to sync — back/forward already works there.
-
-Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/borrower/full_application.tsx` (`step_from_url_`/`url_has_step_param_` helpers, `useState(step_from_url_)`, resume guard, `pushState`/`popstate` effects), `prds/efs-full-application-intake-spec.md` (documented `#step-url` URL-sync + lender-pages note), and `tests/full-application-resume-step.test.ts` (3 source-level guard tests for the helper, history/popstate wiring, and resume-skip).
-
-Commits: EFS submodule commit `0137ceb feat(borrower): URL-per-step wizard so browser back/forward works (#step-url)` was pushed to `origin/main`. Parent repo gitlink commit `24538eab7 chore(efs): bump URL-per-step wizard submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with unrelated work.
-
-Verification: focused `bun test tests/full-application-resume-step.test.ts tests/apply4-full-application-p1.test.ts` passed (`17 pass / 0 fail`). `git diff --check` passed. Full `bun test` passed (`1198 pass / 0 fail`); app build and Worker build passed. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-
-Deploy: `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `fe001a61-13cb-43eb-9ed0-bb165abe19fa`. Post-deploy checks: public root returned `HTTP 200`; the borrower application URL with `?step=2` returned the expected unauthenticated `HTTP 303` redirect to `/login?role=borrower&next=…step%3D2`, preserving the step through login.
-
-Escalation: none. Confidence: high.
-
-### Re: Struck Residue Drain — glm-5.2
-
-The struck queue head is already answered: the URL-per-step wizard navigation shipped (EFS `0137ceb`, pushed to `origin/main`) and deployed (Worker `fe001a61-13cb-43eb-9ed0-bb165abe19fa`) in the prior cycle. The `#ftstrike` marker confirms it was auto-struck because it was answered this session. Cleared the struck residue from the queue so it drains cleanly. No additional app work is needed.
-
-Changed paths this cleanup cycle: none in app code. Verification/deploy evidence remains the prior cycle: focused tests passed (`17 pass / 0 fail`), full `bun test` passed (`1198 pass / 0 fail`), app + Worker builds passed, post-deploy root returned `HTTP 200` and the borrower `?step=2` URL returned the expected unauthenticated `HTTP 303` login redirect with the step preserved.
-
-Escalation: none. Confidence: high.
-<!-- agent:boundary:476f8ea4 -->
+<!-- agent:boundary:1c1ee0f8 -->
 <!-- /agent:exchange -->
 ###
 <!--

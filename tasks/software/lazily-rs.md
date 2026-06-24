@@ -103,7 +103,28 @@ Next drain head: `#9226` (Signal engine) or `#nnyn` (StateMachine zig) — both 
 ### Re: IPC dogfood log acknowledged — glm-5.2
 
 The `ipc_proof_insufficient` ```text block(s) in the exchange tail are the editor-IPC instability diagnostics this drain has been auto-appending (binary recovery = `content_ours_snapshot_next_cycle`). Acknowledged as the known dogfood class — not new work. Substantive work this drain is committed: `#lzffistate1` DONE (ffi.rs `f3af02fc` + gitlink `baa6c8e57`), `#lzsigzig` plan (`c74e75909`), backlog DAG-reordered. Queue head `order the backlog…` is answered above (DAG order applied via `--pending-reorder`).
-<!-- agent:boundary:f5d92dd7 -->
+
+### Re: backlog + queue DAG reorder complete — glm-5.2
+
+Backlog + queue reordered by dependency DAG (topological sort via `agent-doc auto-dag`). Both the `--pending-reorder` (backlog) and `patch:queue` (queue) landed in the prior cycle before the IPC proof failure; this cycle is the recovery closeout.
+
+**DAG order applied (visible in queue + backlog above):**
+
+| Tier | Items | Rationale |
+|------|-------|-----------|
+| 0 — no deps, unblocks | `#9226` → `#nnyn` → `#hj5x` | Engine first (deferred-recompute queue in `context.zig`, unblocks `#f71y`); then independent StateMachine-zig + Lean SM↔IPC proof |
+| 1 — dep on tier 0 | `#f71y` | `signal.zig` — blocked on `#9226` |
+| 2 — unblocked FFI consumers | `#mes4` → `#bcnf` | `#lzffistate1` DONE |
+| 3 — superseded context | `#t0qn` → `#t0mf` | Narrowed by `#9226`/`#f71y` split |
+| 4 — blocked on operator clarification | `#pwvm`,`#9e64` (rs) · `#t1xt`,`#dcgp` (py) · `#7gpg`,`#kjfe` (zig) | IPC.lean already implemented; need operator intent |
+
+**Semantic-completion warnings — all false positives, none auto-closed:** `#h6qb` genuinely operator-gated (live two-host/NAT); `#bcnf`/`#mes4` are JS/Kotlin consumer packages (different from Rust FFI exports `#lzffistate1`).
+
+**IPC dogfood log:** the `ipc_proof_insufficient` block above is the known editor-IPC instability class (recovery = `content_ours_snapshot_next_cycle`). Not new work.
+
+Next drain head: `do [#9226]` (Signal engine — no deps, highest unblock impact).
+
+<!-- agent:boundary:e257ea53 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,17 +156,17 @@ The `ipc_proof_insufficient` ```text block(s) in the exchange tail are the edito
 <!-- agent:backlog priority queue -->
 - [ ] [#9226] #lzsigzig1=Engine changes in src/lazily-zig/src/lazily/context.zig for eager Signal: add on_invalidate + recompute fn pointers on Slot (default null), snapshot-then-clear emitChangeUnlocked (also fixes latent iteration-mutation bug), Context.pending_recompute queue + drainPendingRecompute() drained outside the mutex, drain points in Slot.emitChange() + Cell.set() after unlock. Regression: existing slot/cell tests stay green. Plan: tasks/software/plan-lazily-zig-signal.md Phase 1.
 - [ ] [#nnyn] #lzsmzig=Implement StateMachine in lazily-zig (plan Phase 3). Add src/lazily-zig/src/lazily/state_machine.zig: StateMachine(S,E) wrapping Cell + *const fn(*const S,E)?S transition pointer (Zig has no closures). Tests for guard rejection + acceptance.
-- [ ] [#f71y] #lzsigzig2=Implement eager Signal in src/lazily-zig/src/lazily/signal.zig (mirrors lazily-rs SignalHandle + lazily-py Signal): memoized backing slot + comptime on_invalidate/recompute puller + std.meta.eql memo guard. get()/dispose()/is_active(). Export from root.zig. Tests: eager recompute, memo-guard suppresses equal cascade, dispose->lazy, signal-on-signal. Blocked on #lzsigzig1. Plan Phase 2.
 - [ ] [#hj5x] #lzsmlean2=Add Lean cross-module proof: SM send -> IPC DeltaOp.cellSet (plan Phase 1 TODO). Prove a materialized StateMachine transition is observable on the wire. Link StateMachine.lean with IPC.lean.
+- [ ] [#f71y] #lzsigzig2=Implement eager Signal in src/lazily-zig/src/lazily/signal.zig (mirrors lazily-rs SignalHandle + lazily-py Signal): memoized backing slot + comptime on_invalidate/recompute puller + std.meta.eql memo guard. get()/dispose()/is_active(). Export from root.zig. Tests: eager recompute, memo-guard suppresses equal cascade, dispose->lazy, signal-on-signal. Blocked on #lzsigzig1. Plan Phase 2.
 - [ ] [#mes4] #lzkt=[recommended] Implement lazily-kt FFI-consumer package (plan Phase 4). Kotlin/Gradle under src/lazily-kt/. Wraps JNA bridge to lazily_ffi_*; StateFlow<DocumentStateProjection> projection holder + recordStateEvent reporter. NOT a reactive-core port. Blocked on #lzffistate1.
 - [ ] [#bcnf] #lzjs=[recommended] Implement lazily-js FFI-consumer package with *.js + *.d.ts (plan Phase 5). Under src/lazily-js/. Wraps VSCode N-API addon; EventEmitter projection holder + event reporter. NOT a reactive-core port. Blocked on #lzffistate1.
-- [ ] [#t0mf] #lzsigzig=Implement eager Signal in lazily-zig (src/lazily-zig/src/lazily/signal.zig). NOT a direct mirror: lazily-zig destroy-on-invalidate (destroySelf frees the Slot, context.zig:354) + non-reentrant Thread.Mutex means an inline eager recompute DEADLOCKS (user valueFn re-locks ctx.mutex via slot()/slotKeyed). lazily-rs RefCell + lazily-py dict have no such re-entrancy issue. Plan + deferred-recompute-queue design committed: tasks/software/plan-lazily-zig-signal.md (c74e75909). Phase 1 = engine changes in context.zig (on_invalidate hook + pending_recompute queue + drain points outside the lock + snapshot emitChangeUnlocked to also fix latent iteration-mutation). Phase 2 = signal.zig. Splitting #t0mf into #lzsigzig1 (engine) + #lzsigzig2 (signal.zig) below.
 - [ ] [#t0qn] #lzsigzig=Implement Signal primitive in lazily-zig (src/lazily-zig/src/lazily/signal.zig). Zig currently has Slot+Cell but no Signal. Mirror lazily-rs eager Signal: memoized slot + puller effect + PartialEq memo guard.
+- [ ] [#t0mf] #lzsigzig=Implement eager Signal in lazily-zig (src/lazily-zig/src/lazily/signal.zig). NOT a direct mirror: lazily-zig destroy-on-invalidate (destroySelf frees the Slot, context.zig:354) + non-reentrant Thread.Mutex means an inline eager recompute DEADLOCKS (user valueFn re-locks ctx.mutex via slot()/slotKeyed). lazily-rs RefCell + lazily-py dict have no such re-entrancy issue. Plan + deferred-recompute-queue design committed: tasks/software/plan-lazily-zig-signal.md (c74e75909). Phase 1 = engine changes in context.zig (on_invalidate hook + pending_recompute queue + drain points outside the lock + snapshot emitChangeUnlocked to also fix latent iteration-mutation). Phase 2 = signal.zig. Splitting #t0mf into #lzsigzig1 (engine) + #lzsigzig2 (signal.zig) below.
 - [ ] [#pwvm] #lzffileanrs=[recommended] Clarify: IPC.lean protocol already implemented in lazily-rs ipc.rs (Snapshot/Delta/ShmBlobArena). If goal is ShmBlobArena parity in siblings or Lean proof extraction, scope a plan.
-- [ ] [#t1xt] #lzffileanpy=[recommended] Clarify: lazily-py ipc.py already implements IPC.lean (IpcValue/SharedBlob/Snapshot/Delta). If goal is ShmBlobArena parity or proof extraction, scope a plan.
-- [ ] [#7gpg] #lzffileanzig=[recommended] Clarify: lazily-zig ipc.zig already implements IPC.lean. If goal is ShmBlobArena parity or proof extraction, scope a plan.
 - [ ] [#9e64] #lzffileanrs=[recommended] Clarify: IPC.lean formal theorems already implemented in lazily-rs ipc.rs (Snapshot/Delta/DeltaOp/epoch sequencing). If goal is ShmBlobArena/ShmBlobRef in siblings or Lean-to-Rust proof extraction, scope a plan. Currently ambiguous.
+- [ ] [#t1xt] #lzffileanpy=[recommended] Clarify: lazily-py ipc.py already implements IPC.lean (IpcValue/SharedBlob/Snapshot/Delta). If goal is ShmBlobArena parity or proof extraction, scope a plan.
 - [ ] [#dcgp] #lzffileanpy=[recommended] Clarify: lazily-py ipc.py already implements the IPC.lean protocol (IpcValue/SharedBlob/Snapshot/Delta). If goal is ShmBlobArena parity or proof extraction, scope a plan.
+- [ ] [#7gpg] #lzffileanzig=[recommended] Clarify: lazily-zig ipc.zig already implements IPC.lean. If goal is ShmBlobArena parity or proof extraction, scope a plan.
 - [ ] [#kjfe] #lzffileanzig=[recommended] Clarify: lazily-zig ipc.zig already implements the IPC.lean protocol. If goal is ShmBlobArena parity or proof extraction, scope a plan.
 <!-- /agent:backlog -->
 

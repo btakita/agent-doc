@@ -120,7 +120,26 @@ Push / CI state after the implementation:
 - `src/agent-doc` pushed `a565bb49 feat: add state backbone projections` to `origin/main`.
 - Parent repo pushed through merge commit `903f4904a` to `origin/main`, including `4105af85a chore: update agent-doc submodule` and the session closeout commit.
 - Latest `agent-doc` CI after the push is running: `28072965944`, started `2026-06-24T03:25:07Z`.
-<!-- agent:boundary:b4c9ca61 -->
+
+### Re: linking state machines — gpt-5
+
+> **Queue prompt:**
+>
+> Can we link the different State Machines together? Is that advisable or should we keep them discrete?
+
+Keep the state machines discrete as transition authorities, but link them through events and projections.
+
+That means one FSM should not directly drive another FSM's internal transition table. Instead, it emits a typed event such as `EditorAckObserved`, `ActorGenerationChanged`, or `DispatchProofObserved`; projections reduce those events; policy code reads the projections and decides whether to emit the next command/event. This keeps each FSM small and replayable while still allowing the whole workflow to coordinate.
+
+Good links:
+
+- Shared event ledger with stable ids and causation ids.
+- Projection dependencies, for example route dispatch reads supervisor readiness and transport proof projections.
+- Policy layer / behavior-tree-like decision code that reads projections and emits events or commands.
+- Explicit owner generation checks at projection boundaries.
+
+Avoid links where one FSM reaches into another FSM's mutable state or encodes another domain's transitions. That recreates a global FSM by accident and brings back state explosion. The right shape is discrete FSMs plus typed events, deterministic projections, and policy orchestration above them.
+<!-- agent:boundary:902e0aa7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -129,7 +148,7 @@ Push / CI state after the implementation:
 - ~~Fix Insufficient IPC Proof issues.~~
 - ~~Implement state backbone /home/brian/work/btakita/agent-loop/src/agent-doc/specs/13-state-backbone.md. Add additional state machines for other state domains.~~
 - ~~Are you using lazily-rs for all state machines?~~
-- Can we link the different State Machines together? Is that advisable or should we keep them discrete?
+- ~~Can we link the different State Machines together? Is that advisable or should we keep them discrete?~~
 - do [#advr03]
 - do [#advr04]
 - do [#advr05]

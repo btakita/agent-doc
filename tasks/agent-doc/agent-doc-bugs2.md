@@ -256,15 +256,57 @@ Verification run for this closeout:
 - `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success`, run `28073970198`, for `feat(jetbrains): per-structure Markdown style overrides (#lzmdstyle, …)`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:c370bd79 -->
+❯ **IPC proof issue dogfood log**
+
+❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+❯ Issue class: `ipc_proof_insufficient`
+❯ Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=32e760c5-a607-4a96-b776-98cc062b6cc4 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=25214 candidate_hash=c3433aa04952120e58f4136d3a90a302e09953aed26db13539dfdd1b55080e9b content_ours_len=25505 content_ours_hash=c02dfe614ab52ce2cd3384e6f69602619d8e3c0db155067111939cc7d43d105c doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782273729807
+```
+
+### Re: #advr06 — gpt-5
+
+Implemented the `#recyclerename` follow-up.
+
+Changed surfaces:
+- JetBrains `AgentDoc.RestartSupervisorProcess` keeps its stable action ID but now shows `Recycle Supervisor`; `Restart Agent` is adjacent in the JetBrains popup/action ordering, and `Stop Agent` remains adjacent in the IDE menu groups.
+- VS Code `agentDoc.restartSession` keeps its stable command ID but now shows `Agent Doc: Recycle Supervisor`; the command palette, editor context menu, and Alt+Enter QuickPick now place `Recycle Supervisor` beside `Restart Agent` where that lifecycle action is present.
+- The underlying CLI remains `agent-doc session restart-supervisor`; fallback success hints now say the recycle was requested.
+- JetBrains `pluginVersion` is bumped to `0.2.182`; signed and unsigned `0.2.182` zips were built.
+- Editor specs, VS Code README, and `VERSIONS.md` are aligned with the rename/stable-ID contract.
+
+Verification:
+- `npm test` in `src/agent-doc/editors/vscode`: 98 tests passed.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin` in `src/agent-doc/editors/jetbrains`: passed.
+- `make check` in `src/agent-doc`: passed, including clippy, 5056 nextest tests, doctests, and the medium closeout sim.
+- `git diff --check` / cached diff checks passed.
+- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success`, run `28073970198`.
+- Local JetBrains plugin install used the built `agent-doc-jetbrains-0.2.182-signed.zip` and installed to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`; IntelliJ needs a restart to load it.
+
+Commits/push:
+- `src/agent-doc`: `583e1363 feat(editors): rename supervisor restart action`, pushed to `origin/main`.
+- parent repo: `86f9eb356 chore: advance agent-doc submodule`.
+
+### Re: IPC proof issue dogfood log — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#advr06]
+
+
+Acknowledged. The preflight recovery appended an `ipc_proof_insufficient` dogfood note for the prior interrupted-cycle recovery; this turn continued through the binary-owned finalize path instead of direct-editing the session document.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:63fff301 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Another session bumped JB plugin to 0.1.181. So you may need to bump to 0.1.182.~~
-- ~~:pushpin: do [#advr05]~~
-- :pushpin: do [#advr06]
+- ~~:pushpin: do [#advr06]~~
 - :pushpin: do [#advr07]
 - :pushpin: do [#advr08]
 - :pushpin: do [#advr09]
@@ -277,8 +319,8 @@ Escalation: none. Confidence: high.
 - :pushpin: do [#advr16]
 - :pushpin: do [#advr17]
 - :pushpin: do [#advr18]
-- :pushpin: JB `Run Agent Doc` still does not quickly submit the prompt.
 - :pushpin: do [#advr19]
+- :pushpin: JB `Run Agent Doc` still does not quickly submit the prompt.
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -307,7 +349,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr06] Advance original #recyclerename: rename JB + VS Code "Restart Supervisor Process" UI text to "Recycle Supervisor" while keeping stable action IDs, and ensure Restart Agent and Recycle Supervisor commands sit alongside each other. Plan: tasks/agent-doc/plan-restart-agent.md.
 - [ ] [#advr07] [recommended] Advance original #supinstallvis: make supervisor auto-install/rebuild status visible in pane body or plugin notification surface, choose a non-input-consuming mechanism, add ops/log proof, and avoid disturbing keepalive Enter-to-restart reader.
 - [ ] [#advr08] Advance original #runexitrestart: implement/verify recovery for cleanly exited harness panes by detecting `Press Enter to restart`, restarting the harness, waiting for dispatch-ready proof, and submitting prompt-bearing work so Run Agent Doc cannot drop on clean exit.
 - [ ] [#advr09] Advance original #jbrundispatch: replace operator-capture gate with deterministic Run Agent Doc dispatch diagnostics using admin detect, route trace, pane state, dispatch/start proof, and auto-filed route bugs; add regression coverage where possible.

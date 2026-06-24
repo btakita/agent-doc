@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -110,7 +110,17 @@ Added a new section, **"It didn't stop at one machine: the state backbone,"** to
 - agent-loop superproject `3d369bbba` → **pushed** `btakita/agent-loop` (`370f156b3..3d369bbba`). The multi-pane divergence that blocked prior cycles cleared, so earlier local-only gitlink commits (lazily-py `5f8c3a6fb`, the conformance bumps `011c2ee8d`) landed on `origin/main` too.
 
 **Queue bookkeeping:** queue head consumed; queue drained. No actionable follow-up — the post update is complete and the gitlink backlog cleared. Carried-over `semantic_completion_match` on `#h6qb` unchanged (operator-only e2e; agent slice `#lzwebrtcwire` DONE — left gated).
-<!-- agent:boundary:ff9b843a -->
+
+### Re: blog post — free-text head drain — glm-5.2
+
+> **Queue prompt:**
+>
+> Please update the /home/brian/work/btakita/agent-loop/src/briantakita.me-dev/app/briantakita.me/post/content/2026-06-23-lazily-state-machine-cycle-state.md post to include the other State Machines setup in agent-doc using lazily-rs.
+
+Already completed in the response directly above (cycle `a9a0a4127`): the post gained an **"It didn't stop at one machine: the state backbone"** section covering the five other `ThreadSafeStateMachine` subdomains in agent-doc (`QueueHeadMachine`, `TransportPatchMachine`, `ActorLifecycleMachine`, `RouteReadinessMachine`, `ProofGateMachine`) and the event-sourced `EventLedger` / `project()` backbone they compose into. The earlier block's `> **Queue prompt:**` used an ellipsis, which is why this free-text head wasn't struck on the first pass — re-quoting the exact prompt here so `#ftstrike` consumes it.
+
+Full chain pushed: `app/briantakita.me` `c508ad1` → `briantakita.me-dev` `79a714f` → superproject `3d369bbba` (the multi-pane divergence cleared, so prior local-only gitlinks landed too). Markdown verified well-formed. No actionable follow-up.
+<!-- agent:boundary:fcc43201 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -119,7 +129,6 @@ Added a new section, **"It didn't stop at one machine: the state backbone,"** to
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Please update the /home/brian/work/btakita/agent-loop/src/briantakita.me-dev/app/briantakita.me/post/content/2026-06-23-lazily-state-machine-cycle-state.md post to include the other State Machines setup in agent-doc using lazily-rs.
 <!-- /agent:queue -->
 
 ## Backlog

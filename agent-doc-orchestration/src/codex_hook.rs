@@ -369,7 +369,8 @@ fn first_active_queue_prompt_in_content(content: &str) -> Option<String> {
     let entries = crate::queue::parse(queue.content(content)).ok()?;
     let prompt = crate::queue::prompts(&entries)
         .into_iter()
-        .map(|prompt| prompt.text.trim().to_string())
+        .map(|prompt| crate::queue::strip_in_progress_marker(&prompt.text))
+        .map(|prompt| prompt.trim().to_string())
         .find(|prompt| !prompt.is_empty())?;
     if is_context_clear_prompt(&prompt)
         || crate::queue_command::slash_command_text(&prompt).is_some()

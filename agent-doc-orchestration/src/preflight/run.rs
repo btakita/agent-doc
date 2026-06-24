@@ -1398,7 +1398,47 @@ fn realign_baseline_to_converged_queue(current: &str, converged: &str) -> Option
     spliced.push_str(&current[..cur_q.open_start]);
     spliced.push_str(conv_q_text);
     spliced.push_str(&current[cur_q.close_end..]);
+    for component_name in ["backlog", "pending", "icebox"] {
+        if let Some(next) = realign_component_when_only_in_progress_marker_changed(
+            &spliced,
+            converged,
+            component_name,
+        ) {
+            spliced = next;
+        }
+    }
     Some(spliced)
+}
+
+fn realign_component_when_only_in_progress_marker_changed(
+    current: &str,
+    converged: &str,
+    component_name: &str,
+) -> Option<String> {
+    let current_components = crate::component::parse(current).ok()?;
+    let converged_components = crate::component::parse(converged).ok()?;
+    let current_component = current_components
+        .iter()
+        .find(|component| component.name == component_name)?;
+    let converged_component = converged_components
+        .iter()
+        .find(|component| component.name == component_name)?;
+    let current_body = current_component.content(current);
+    let converged_body = converged_component.content(converged);
+    if current_body == converged_body {
+        return None;
+    }
+    if pending_body_without_in_progress_markers(current_body)
+        != pending_body_without_in_progress_markers(converged_body)
+    {
+        return None;
+    }
+    Some(current_component.replace_content(current, converged_body))
+}
+
+fn pending_body_without_in_progress_markers(body: &str) -> String {
+    let ids = std::collections::HashSet::new();
+    crate::pending::set_in_progress_item_ids(body, &ids).0
 }
 
 #[cfg(test)]

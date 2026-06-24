@@ -673,11 +673,13 @@ pub const AGENT_PRIORITIZED_MARKERS: [&str; 6] = [
 /// Canonical single-spelling constants (emoji-shortcode form).
 pub const PRIORITIZED_MARKER: &str = ":pushpin:";
 pub const AGENT_PRIORITIZED_MARKER: &str = ":round_pushpin:";
+pub const IN_PROGRESS_MARKER: &str = "🚧";
 
 /// True when `text` carries an **operator** (strong-emphasis) pin marker at its
 /// head (after optional leading whitespace), in either spelling.
 pub fn is_prioritized(text: &str) -> bool {
-    let t = text.trim_start();
+    let stripped = strip_in_progress_marker(text);
+    let t = stripped.trim_start();
     PRIORITIZED_MARKERS.iter().any(|m| t.starts_with(m))
 }
 
@@ -687,12 +689,42 @@ pub fn is_prioritized(text: &str) -> bool {
 /// differs — so the tiers are cleanly separable; the operator-pin guard is
 /// belt-and-suspenders.
 pub fn is_agent_prioritized(text: &str) -> bool {
-    let t = text.trim_start();
+    let stripped = strip_in_progress_marker(text);
+    let t = stripped.trim_start();
     !is_prioritized(text) && AGENT_PRIORITIZED_MARKERS.iter().any(|m| t.starts_with(m))
 }
 
-/// Strip leading operator/agent pin markers (any spelling) plus surrounding
-/// whitespace from a prompt's text, returning the pin-independent content.
+/// Strip the leading in-progress marker plus surrounding whitespace from a
+/// prompt's text.
+pub fn strip_in_progress_marker(text: &str) -> String {
+    let mut t = text.trim();
+    while let Some(rest) = t.trim_start().strip_prefix(IN_PROGRESS_MARKER) {
+        t = rest.trim_start();
+    }
+    t.trim().to_string()
+}
+
+/// Prefix the visible in-progress marker idempotently.
+pub fn apply_in_progress_marker(text: &str) -> String {
+    format!("{IN_PROGRESS_MARKER} {}", strip_in_progress_marker(text))
+}
+
+fn strip_in_progress_marker_for_display(text: &str) -> Option<String> {
+    let trimmed_start = text.trim_start();
+    let leading_len = text.len() - trimmed_start.len();
+    let leading = &text[..leading_len];
+    let mut rest = trimmed_start;
+    let mut removed = false;
+    while let Some(after_marker) = rest.strip_prefix(IN_PROGRESS_MARKER) {
+        removed = true;
+        rest = after_marker.trim_start();
+    }
+    removed.then(|| format!("{leading}{rest}"))
+}
+
+/// Strip leading operator/agent pin markers (any spelling), the in-progress
+/// marker, plus surrounding whitespace from a prompt's text, returning the
+/// cosmetic-marker-independent content.
 ///
 /// Used to compare two queue prompts for **identity** without being fooled by a
 /// `:pushpin:` / `:round_pushpin:` annotation present on one side only
@@ -702,21 +734,67 @@ pub fn is_agent_prioritized(text: &str) -> bool {
 /// so a head-equality check must normalize it away or it errors out the cycle
 /// (`queue consume: snapshot head prompts ... do not match document head prompts`).
 /// Repeated leading markers are stripped so a doubly-annotated head still
-/// normalizes to its bare content.
+/// normalizes to its bare content. The `🚧` marker is also cosmetic: it indicates
+/// the current in-progress head and must not change queue identity.
 pub fn strip_priority_markers(text: &str) -> String {
     let mut t = text.trim();
     loop {
         let trimmed = t.trim_start();
-        let stripped = PRIORITIZED_MARKERS
-            .iter()
-            .chain(AGENT_PRIORITIZED_MARKERS.iter())
-            .find_map(|m| trimmed.strip_prefix(m));
+        let stripped = trimmed.strip_prefix(IN_PROGRESS_MARKER).or_else(|| {
+            PRIORITIZED_MARKERS
+                .iter()
+                .chain(AGENT_PRIORITIZED_MARKERS.iter())
+                .find_map(|m| trimmed.strip_prefix(m))
+        });
         match stripped {
             Some(rest) => t = rest.trim_start(),
             None => break,
         }
     }
     t.trim().to_string()
+}
+
+/// Clear all queue in-progress markers, then mark the first live prompt when
+/// requested. Returns `None` when the rendered queue would be unchanged.
+pub fn set_first_prompt_in_progress(
+    entries: &[QueueEntry],
+    mark_first_prompt: bool,
+) -> Option<Vec<QueueEntry>> {
+    let mut changed = false;
+    let mut marked = false;
+    let out = entries
+        .iter()
+        .map(|entry| match entry {
+            QueueEntry::Prompt(prompt) => {
+                let mut next = prompt.clone();
+                if let Some(stripped) = strip_in_progress_marker_for_display(&next.text) {
+                    next.text = stripped;
+                    changed = true;
+                }
+                if mark_first_prompt && !marked {
+                    if !crate::queue_command::is_slash_command(&next.text) {
+                        let marked_text = apply_in_progress_marker(&next.text);
+                        if marked_text != next.text {
+                            next.text = marked_text;
+                            changed = true;
+                        }
+                    }
+                    marked = true;
+                }
+                QueueEntry::Prompt(next)
+            }
+            QueueEntry::Completed(prompt) => {
+                let mut next = prompt.clone();
+                if let Some(stripped) = strip_in_progress_marker_for_display(&next.text) {
+                    next.text = stripped;
+                    changed = true;
+                }
+                QueueEntry::Completed(next)
+            }
+            _ => entry.clone(),
+        })
+        .collect::<Vec<_>>();
+    changed.then_some(out)
 }
 
 /// Apply the canonical operator pin to a head **idempotently** (`#pushpinaccum`).
@@ -1632,6 +1710,7 @@ pub fn dedup_pin_variant_do_heads(entries: &[QueueEntry]) -> Option<Vec<QueueEnt
         QueueEntry::Prompt(p) => p.text.as_str(),
         _ => unreachable!("grouped index always points at a Prompt entry"),
     };
+    let logical_prompt_text = |idx: usize| strip_in_progress_marker(prompt_text(idx));
 
     // For each id group with >1 member that are NOT all textually identical:
     // keep the group's earliest position, but overwrite its text with the
@@ -1643,8 +1722,8 @@ pub fn dedup_pin_variant_do_heads(entries: &[QueueEntry]) -> Option<Vec<QueueEnt
         if idxs.len() < 2 {
             continue;
         }
-        let first_text = prompt_text(idxs[0]);
-        if idxs.iter().all(|&i| prompt_text(i) == first_text) {
+        let first_text = logical_prompt_text(idxs[0]);
+        if idxs.iter().all(|&i| logical_prompt_text(i) == first_text) {
             // Intentional "run it twice" — identical heads, leave untouched.
             continue;
         }
@@ -1822,7 +1901,9 @@ pub fn mark_first_n_prompts_completed(entries: &[QueueEntry], count: usize) -> V
         if marked < count
             && let QueueEntry::Prompt(prompt) = entry
         {
-            result.push(QueueEntry::Completed(prompt.clone()));
+            let mut completed = prompt.clone();
+            completed.text = strip_in_progress_marker(&completed.text);
+            result.push(QueueEntry::Completed(completed));
             marked += 1;
             continue;
         }
@@ -1854,7 +1935,9 @@ pub fn detect_head_prompt_modified(
     let file_head = first_prompt(file_entries);
     match (snap_head, file_head) {
         (Some(s), Some(f)) => {
-            if s.text == f.text {
+            let snap_head_text = strip_priority_markers(&s.text);
+            let file_head_text = strip_priority_markers(&f.text);
+            if snap_head_text == file_head_text {
                 return false;
             }
             // `#completed-queue-residue-regression` / `#queue-auto-no-continue`:
@@ -1865,9 +1948,12 @@ pub fn detect_head_prompt_modified(
             // (edited in place or removed). Otherwise a concurrent prepend/reorder
             // would strand every remaining live prompt as inactive residue
             // instead of letting the auto-queue advance to the new head.
-            let snap_head_still_present = file_entries
-                .iter()
-                .any(|entry| matches!(entry, QueueEntry::Prompt(p) if p.text == s.text));
+            let snap_head_still_present = file_entries.iter().any(|entry| {
+                matches!(
+                    entry,
+                    QueueEntry::Prompt(p) if strip_priority_markers(&p.text) == snap_head_text
+                )
+            });
             !snap_head_still_present
         }
         (None, None) => false,
@@ -1926,6 +2012,33 @@ mod tests {
         let rendered = render(&entries);
         assert!(rendered.contains("- re [#opt]"));
         assert!(rendered.contains("- re #opt2"));
+    }
+
+    #[test]
+    fn in_progress_marker_is_cosmetic_for_queue_identity() {
+        assert_eq!(
+            strip_priority_markers("🚧 :pushpin: do [#alpha]"),
+            "do [#alpha]"
+        );
+        assert_eq!(
+            strip_in_progress_marker("🚧 :pushpin: do [#alpha]"),
+            ":pushpin: do [#alpha]"
+        );
+    }
+
+    #[test]
+    fn set_first_prompt_in_progress_moves_visible_marker() {
+        let entries = parse("- 🚧 do [#old]\n- do [#new]\n").unwrap();
+        let marked = set_first_prompt_in_progress(&entries, true).unwrap();
+        assert_eq!(render(&marked), "- 🚧 do [#old]\n- do [#new]\n");
+
+        let entries = parse("- ~~🚧 do [#old]~~\n- do [#new]\n").unwrap();
+        let marked = set_first_prompt_in_progress(&entries, true).unwrap();
+        assert_eq!(render(&marked), "- ~~do [#old]~~\n- 🚧 do [#new]\n");
+
+        let entries = parse("- 🚧 /clear\n- do [#new]\n").unwrap();
+        let marked = set_first_prompt_in_progress(&entries, true).unwrap();
+        assert_eq!(render(&marked), "/clear\n- do [#new]\n");
     }
 
     #[test]

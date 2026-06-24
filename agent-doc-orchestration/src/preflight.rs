@@ -2407,8 +2407,10 @@ fn strike_done_queue_head_prompts(
             && let Some(id) = queue_prompt_done_id(&prompt.text)
             && done_ids.contains(&id)
         {
-            struck.push(prompt.clone());
-            rewritten.push(crate::queue::QueueEntry::Completed(prompt.clone()));
+            let mut completed = prompt.clone();
+            completed.text = crate::queue::strip_in_progress_marker(&completed.text);
+            struck.push(completed.clone());
+            rewritten.push(crate::queue::QueueEntry::Completed(completed));
             continue;
         }
         rewritten.push(entry.clone());
@@ -4027,6 +4029,7 @@ mod tests {
                 id: "done1".to_string(),
                 state: crate::pending::PendingState::Done,
                 gate_type: None,
+                in_progress: false,
                 text: "completed item".to_string(),
                 continuation: String::new(),
             }],
@@ -4060,6 +4063,7 @@ mod tests {
                 id: "done1".to_string(),
                 state: crate::pending::PendingState::Done,
                 gate_type: None,
+                in_progress: false,
                 text: "completed item".to_string(),
                 continuation: String::new(),
             }],
@@ -4094,6 +4098,7 @@ mod tests {
                 id: "done1".to_string(),
                 state: crate::pending::PendingState::Done,
                 gate_type: None,
+                in_progress: false,
                 text: "completed externally".to_string(),
                 continuation: String::new(),
             }],
@@ -4114,6 +4119,7 @@ mod tests {
                 id: "done1".to_string(),
                 state: crate::pending::PendingState::Done,
                 gate_type: None,
+                in_progress: false,
                 text: "completed externally".to_string(),
                 continuation: String::new(),
             }],
@@ -4133,6 +4139,7 @@ mod tests {
             id: "done1".to_string(),
             state: crate::pending::PendingState::Done,
             gate_type: None,
+            in_progress: false,
             text: "completed item".to_string(),
             continuation: String::new(),
         };

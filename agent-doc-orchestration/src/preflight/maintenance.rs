@@ -2162,6 +2162,38 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         eprintln!("[preflight] queue: set queue: stop");
     }
 
+    let mut in_progress_markers_changed = false;
+    let mut current_head_ids = std::collections::HashSet::new();
+    if activation.active
+        && let Some(head) = crate::queue::prompts(&activation.entries_after).first()
+        && let Some(id) = queue_prompt_done_id(&head.text)
+    {
+        current_head_ids.insert(id);
+    }
+    if let Some(marked_entries) =
+        crate::queue::set_first_prompt_in_progress(&activation.entries_after, activation.active)
+    {
+        let new_body = crate::queue::render(&marked_entries);
+        current_content = {
+            let comps = crate::component::parse(&current_content)?;
+            let q = comps
+                .iter()
+                .find(|c| c.name == "queue")
+                .context("queue maintenance: queue component vanished before in-progress marker")?;
+            q.replace_content(&current_content, &new_body)
+        };
+        activation.entries_after = marked_entries;
+        mutated = true;
+        in_progress_markers_changed = true;
+    }
+    let (marked_content, pending_markers_changed) =
+        set_in_progress_work_item_markers(&current_content, &current_head_ids)?;
+    if pending_markers_changed {
+        current_content = marked_content;
+        mutated = true;
+        in_progress_markers_changed = true;
+    }
+
     // Persist file mutations.
     if mutated {
         persist_queue_maintenance_doc(
@@ -2179,6 +2211,10 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         && let Ok(Some(snap_content)) = snapshot::load(file)
     {
         let mut new_snap = snap_content.clone();
+
+        if in_progress_markers_changed {
+            new_snap = sync_in_progress_marker_regions(&new_snap, &current_content);
+        }
 
         if queue_tag_attrs_normalized
             && let Ok(snap_comps) = crate::component::parse(&new_snap)
@@ -2271,7 +2307,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     let queue_prompts: Vec<String> = if activation.active {
         crate::queue::prompts(&activation.entries_after)
             .iter()
-            .map(|p| p.text.clone())
+            .map(|p| crate::queue::strip_in_progress_marker(&p.text))
             .collect()
     } else {
         vec![]
@@ -2342,6 +2378,57 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         synced_queue_ids,
         warnings: queue_warnings,
     })
+}
+
+fn set_in_progress_work_item_markers(
+    content: &str,
+    active_ids: &std::collections::HashSet<String>,
+) -> Result<(String, bool)> {
+    let mut updated = content.to_string();
+    let mut changed = false;
+    let components = crate::component::parse(&updated)?;
+    for component in components
+        .iter()
+        .filter(|component| matches!(component.name.as_str(), "backlog" | "pending" | "icebox"))
+        .rev()
+    {
+        let (new_body, body_changed) =
+            crate::pending::set_in_progress_item_ids(component.content(&updated), active_ids);
+        if body_changed {
+            updated = component.replace_content(&updated, &new_body);
+            changed = true;
+        }
+    }
+    Ok((updated, changed))
+}
+
+fn sync_in_progress_marker_regions(snapshot_content: &str, current_content: &str) -> String {
+    let Ok(current_components) = crate::component::parse(current_content) else {
+        return snapshot_content.to_string();
+    };
+    let mut updated = snapshot_content.to_string();
+    for name in ["queue", "backlog", "pending", "icebox"] {
+        let Some(current_component) = current_components
+            .iter()
+            .find(|component| component.name == name)
+        else {
+            continue;
+        };
+        let current_body = current_component.content(current_content);
+        let Ok(snapshot_components) = crate::component::parse(&updated) else {
+            return updated;
+        };
+        let Some(snapshot_component) = snapshot_components
+            .iter()
+            .find(|component| component.name == name)
+        else {
+            continue;
+        };
+        if snapshot_component.content(&updated) != current_body {
+            updated = snapshot_component.replace_content(&updated, current_body);
+        }
+    }
+    updated
 }
 
 /// Closeout-side repair for same-cycle backlog capture.
@@ -2845,7 +2932,7 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
 
         assert!(
-            updated.contains("- do [#act]"),
+            updated.contains("- 🚧 do [#act]"),
             "actionable item mirrored into queue:\n{updated}"
         );
         assert!(
@@ -2978,7 +3065,7 @@ mod tests {
 
         assert_eq!(state.synced_queue_ids, vec!["alpha".to_string()]);
         assert!(
-            updated.contains("- do [#running]"),
+            updated.contains("- 🚧 do [#running]"),
             "running head stays:\n{updated}"
         );
         assert!(
@@ -3028,7 +3115,7 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
 
         assert!(
-            updated.contains("- do [#alpha]"),
+            updated.contains("- 🚧 do [#alpha]"),
             "the already-running head stays:\n{updated}"
         );
         assert!(
@@ -3074,7 +3161,7 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
 
         assert!(
-            updated.contains("- do [#alpha]"),
+            updated.contains("- 🚧 do [#alpha]"),
             "go-mode must repopulate a drained active queue:\n{updated}"
         );
         assert!(
@@ -3224,7 +3311,7 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
 
         assert!(
-            updated.contains("- do [#alpha]"),
+            updated.contains("- 🚧 do [#alpha]"),
             "the running head stays:\n{updated}"
         );
         assert!(
@@ -3330,7 +3417,7 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
 
         assert!(
-            updated.contains("- do [#ready]"),
+            updated.contains("- 🚧 do [#ready]"),
             "the ready item must sync into the queue:\n{updated}"
         );
         assert!(
@@ -3810,10 +3897,50 @@ mod tests {
         assert_eq!(state.queue_active, Some(true));
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- :round_pushpin: do [#fast]\n- do [#slow]"),
+            updated.contains("- 🚧 :round_pushpin: do [#fast]\n- do [#slow]"),
             "backlog `queue priority` must sort synced queue prompts and mark the promoted item:\n{updated}"
         );
     }
+
+    #[test]
+    fn run_queue_maintenance_marks_current_queue_and_work_items_in_progress() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#alpha]\n",
+            "- 🚧 do [#beta]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#alpha] active work\n",
+            "- [ ] 🚧 [#beta] stale work\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] 🚧 [#cold] stale parked work\n",
+            "<!-- /agent:icebox -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(state.queue_prompts[0], "do [#alpha]");
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("- 🚧 do [#alpha]\n- do [#beta]"),
+            "queue marker must move to active head:\n{updated}"
+        );
+        assert!(updated.contains("- [ ] 🚧 [#alpha] active work"));
+        assert!(updated.contains("- [ ] [#beta] stale work"));
+        assert!(updated.contains("- [ ] [#cold] stale parked work"));
+    }
+
     #[test]
     fn run_queue_maintenance_pins_operator_moved_priority_queue_item() {
         let dir = setup_project();
@@ -3847,7 +3974,7 @@ mod tests {
         assert_eq!(state.queue_active, Some(true));
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- :pushpin: do [#slow]\n- do [#fast]\n- do [#medium]"),
+            updated.contains("- 🚧 :pushpin: do [#slow]\n- do [#fast]\n- do [#medium]"),
             "operator-moved queue prompt should become sticky with :pushpin::\n{updated}"
         );
     }
@@ -3883,7 +4010,7 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
             updated.contains(
-                "- :pushpin: do [#ops]\n\
+                "- 🚧 :pushpin: do [#ops]\n\
                  - :round_pushpin: do [#setup]\n\
                  - :pushpin: do [#ship]\n\
                  - :pushpin: do [#notify]"
@@ -3935,14 +4062,14 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains("queue: start"));
         assert!(updated.contains("<!-- agent:queue auto -->"));
-        assert!(updated.contains("- do [#newhead]"));
+        assert!(updated.contains("- 🚧 do [#newhead]"));
         assert!(!updated.contains("- do [#oldhead]"));
 
         let snap = snapshot::load(&doc).unwrap().unwrap();
         assert!(
             snap.contains("queue: start")
                 && snap.contains("<!-- agent:queue auto -->")
-                && snap.contains("- do [#newhead]")
+                && snap.contains("do [#newhead]")
                 && !snap.contains("- do [#oldhead]"),
             "newly activated queue must be snapshotted as the closeout baseline:\n{snap}"
         );
@@ -4071,7 +4198,7 @@ mod tests {
             updated.contains("- ~~do [#alpha]~~"),
             "done head struck to completed: {updated}"
         );
-        assert!(updated.contains("- do [#beta]"));
+        assert!(updated.contains("- 🚧 do [#beta]"));
         assert!(updated.contains("agent:queue auto"));
         assert!(updated.contains("queue_active: true"));
     }
@@ -4350,13 +4477,13 @@ mod tests {
             updated.contains("queue_active: true"),
             "active preserved: {updated}"
         );
-        assert!(updated.contains("- do [#newhead]"));
+        assert!(updated.contains("- 🚧 do [#newhead]"));
 
         // Snapshot absorbed the edited head so a follow-up pass is idempotent
         // (no spurious item_modified on the now-converged head).
         let snap = snapshot::load(&doc).unwrap().unwrap();
         assert!(
-            snap.contains("- do [#newhead]"),
+            snap.contains("do [#newhead]"),
             "snapshot must absorb the adopted head: {snap}"
         );
         assert!(
@@ -4403,7 +4530,7 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(
-            updated.matches("- do [#adoc-orch-shim-cleanup]").count(),
+            updated.matches("do [#adoc-orch-shim-cleanup]").count(),
             2,
             "duplicate tracked prompts must remain executable queue intent:\n{updated}"
         );
@@ -4456,7 +4583,7 @@ mod tests {
         );
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(
-            updated.matches("- do deploy").count(),
+            updated.matches("do deploy").count(),
             2,
             "maintenance should preserve intentional duplicate free-text prompts:\n{updated}"
         );

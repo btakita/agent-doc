@@ -509,6 +509,7 @@ fn parse_done_archive_items(body: &str) -> Vec<PendingItem> {
                 id,
                 state: PendingState::Done,
                 gate_type: None,
+                in_progress: false,
                 text: format!("{date} {text}"),
                 continuation: String::new(),
             });

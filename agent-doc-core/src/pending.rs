@@ -22,6 +22,8 @@
 use anyhow::{Context, Result, anyhow, bail};
 use std::collections::HashSet;
 
+pub const IN_PROGRESS_MARKER: &str = "🚧";
+
 /// Lifecycle state for a pending item, encoded by its GFM checkbox.
 ///
 /// - `Open` (`[ ]`) — active or not started; default for new items.
@@ -153,6 +155,9 @@ pub struct PendingItem {
     /// Optional typed gate (e.g., "release" for `[/release]`, "deploy" for `[/deploy]`).
     /// Only meaningful when `state == Gated`. `None` means untyped `[/]`.
     pub gate_type: Option<String>,
+    /// Visible, ephemeral marker for the item currently being worked from an
+    /// active queue head. Renders immediately after the checkbox.
+    pub in_progress: bool,
     /// Bullet text after the hash prefix.
     pub text: String,
     /// Raw indented continuation lines that belong to this item (for nested
@@ -172,10 +177,16 @@ impl PendingItem {
             (PendingState::Gated, Some(gt)) => format!("[/{}]", gt),
             _ => format!("[{}]", self.state.box_char()),
         };
+        let in_progress = if self.in_progress {
+            format!(" {IN_PROGRESS_MARKER}")
+        } else {
+            String::new()
+        };
         let mut out = format!(
-            "{} {} [#{}] {}",
+            "{} {}{} [#{}] {}",
             self.marker.render_prefix(ordered_index),
             checkbox,
+            in_progress,
             self.id,
             self.text
         );
@@ -559,6 +570,8 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
         (PendingState::Open, None, rest)
     };
 
+    let (in_progress, after_box) = consume_in_progress_marker(after_box);
+
     // Hash id?
     let (id, text) = if let Some(after_hash) = after_box.strip_prefix("[#") {
         if let Some(close) = after_hash.find(']') {
@@ -596,9 +609,20 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
         id,
         state,
         gate_type,
+        in_progress,
         text: text.trim_end().to_string(),
         continuation: String::new(),
     })
+}
+
+fn consume_in_progress_marker(text: &str) -> (bool, &str) {
+    let mut rest = text.trim_start();
+    let mut seen = false;
+    while let Some(after_marker) = rest.strip_prefix(IN_PROGRESS_MARKER) {
+        seen = true;
+        rest = after_marker.trim_start();
+    }
+    (seen, rest)
 }
 
 /// Remove the first bracketed `[#id]` token in `text` that equals the item's own
@@ -1557,6 +1581,32 @@ pub fn active_item_ids(body: &str) -> Vec<String> {
         .collect()
 }
 
+/// Set the ephemeral in-progress marker on exactly the requested tracked item ids,
+/// clearing stale markers from every other parsed item in the body.
+pub fn set_in_progress_item_ids(body: &str, ids: &HashSet<String>) -> (String, bool) {
+    let normalized_ids: HashSet<String> = ids
+        .iter()
+        .map(|id| normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+        .collect();
+    let mut changed = false;
+    let rewritten = PendingLayout::parse(body).replace_items(|item| {
+        let mut next = item.clone();
+        let should_mark =
+            !next.id.is_empty() && normalized_ids.contains(&next.id.to_ascii_lowercase());
+        if next.in_progress != should_mark {
+            next.in_progress = should_mark;
+            changed = true;
+        }
+        Some(next)
+    });
+    let new_body = rewritten.render();
+    if new_body != body {
+        changed = true;
+    }
+    (new_body, changed)
+}
+
 fn item_has_enqueue_marker(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     lower.contains(":inbox_tray:") || lower.split_whitespace().any(token_is_enqueue_marker)
@@ -2462,6 +2512,7 @@ pub fn op_add_at_with_outcome(
             PendingState::Open
         },
         gate_type: None,
+        in_progress: false,
         text,
         continuation: String::new(),
     };
@@ -2826,6 +2877,30 @@ mod tests {
             "- [ ] [#second] two\n",
         );
         assert_eq!(active_item_ids(body), vec!["first", "second"]);
+    }
+
+    #[test]
+    fn in_progress_marker_after_checkbox_preserves_pending_id() {
+        let body = "- [ ] 🚧 [#first] one\n- [/] 🚧 [#gated] blocked\n";
+        let (_, items, _) = parse_items(body);
+
+        assert_eq!(items[0].id, "first");
+        assert!(items[0].in_progress);
+        assert_eq!(items[1].id, "gated");
+        assert!(items[1].in_progress);
+        assert_eq!(active_item_ids(body), vec!["first"]);
+        assert_eq!(render_items("", &items, ""), body);
+    }
+
+    #[test]
+    fn set_in_progress_item_ids_moves_marker_and_clears_stale_items() {
+        let body = "- [ ] 🚧 [#old] old\n- [ ] [#new] new\n";
+        let ids = ["new".to_string()].into_iter().collect();
+
+        let (updated, changed) = set_in_progress_item_ids(body, &ids);
+
+        assert!(changed);
+        assert_eq!(updated, "- [ ] [#old] old\n- [ ] 🚧 [#new] new\n");
     }
 
     #[test]
@@ -3317,6 +3392,7 @@ mod tests {
             id: "eg0w".to_string(),
             state: PendingState::Gated,
             gate_type: None,
+            in_progress: false,
             text: "CommitLock".to_string(),
             continuation: String::new(),
         };
@@ -3743,6 +3819,7 @@ mod tests {
                 id: "b2c3".to_string(),
                 state: PendingState::Open,
                 gate_type: None,
+                in_progress: false,
                 text: "first appended task".to_string(),
                 continuation: String::new(),
             },
@@ -3751,6 +3828,7 @@ mod tests {
                 id: "d4e5".to_string(),
                 state: PendingState::Gated,
                 gate_type: Some("release".to_string()),
+                in_progress: false,
                 text: "second appended task".to_string(),
                 continuation: String::new(),
             },
@@ -4533,6 +4611,7 @@ mod tests {
             id: "a1b2".to_string(),
             state: PendingState::Gated,
             gate_type: Some("release".to_string()),
+            in_progress: false,
             text: "Release v0.32.4".to_string(),
             continuation: String::new(),
         };

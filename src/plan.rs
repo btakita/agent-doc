@@ -377,7 +377,7 @@ fn active_queue_prompt(content: &str) -> Option<String> {
     }
     agent_doc_orchestration::queue::prompts(&activation.entries_after)
         .first()
-        .map(|prompt| prompt.text.clone())
+        .map(|prompt| agent_doc_orchestration::queue::strip_in_progress_marker(&prompt.text))
 }
 
 fn queue_is_active_for_diff(content: &str, diff_text: &str) -> bool {

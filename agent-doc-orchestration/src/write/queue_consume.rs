@@ -1654,7 +1654,9 @@ pub(crate) fn first_n_queue_prompt_texts(
     entries
         .iter()
         .filter_map(|entry| match entry {
-            crate::queue::QueueEntry::Prompt(prompt) => Some(prompt.text.clone()),
+            crate::queue::QueueEntry::Prompt(prompt) => {
+                Some(crate::queue::strip_in_progress_marker(&prompt.text))
+            }
             _ => None,
         })
         .take(count)
@@ -1707,8 +1709,10 @@ pub(crate) fn mark_entries_completed_by_done_ids(
             crate::queue::QueueEntry::Prompt(prompt)
                 if queue_prompt_done_id(&prompt.text).is_some_and(|id| done_ids.contains(&id)) =>
             {
-                marked_texts.push(prompt.text.clone());
-                crate::queue::QueueEntry::Completed(prompt.clone())
+                let mut completed = prompt.clone();
+                completed.text = crate::queue::strip_in_progress_marker(&completed.text);
+                marked_texts.push(completed.text.clone());
+                crate::queue::QueueEntry::Completed(completed)
             }
             _ => entry.clone(),
         })
@@ -1907,8 +1911,34 @@ pub(crate) fn queue_prompt_node_keys_for_done_ids(
 
 pub(crate) fn consume_queue_nodes_by_key(content: &str, node_keys: &[String]) -> Result<String> {
     let borrowed = node_keys.iter().map(String::as_str).collect::<Vec<_>>();
-    agent_doc_markdown_ast::mutations::consume_nodes(content, "queue", &borrowed)
-        .map_err(|err| anyhow::anyhow!("queue consume: failed to apply node-keyed consume: {err}"))
+    let consumed = agent_doc_markdown_ast::mutations::consume_nodes(content, "queue", &borrowed)
+        .map_err(|err| {
+            anyhow::anyhow!("queue consume: failed to apply node-keyed consume: {err}")
+        })?;
+    Ok(strip_in_progress_marker_from_struck_queue_items(&consumed))
+}
+
+fn strip_in_progress_marker_from_struck_queue_items(content: &str) -> String {
+    let Ok(components) = component::parse(content) else {
+        return content.to_string();
+    };
+    let Some(queue) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return content.to_string();
+    };
+    let body = queue.content(content);
+    let needle_with_space = format!("~~{} ", crate::queue::IN_PROGRESS_MARKER);
+    let needle_bare = format!("~~{}", crate::queue::IN_PROGRESS_MARKER);
+    let updated_body = body
+        .replace(&needle_with_space, "~~")
+        .replace(&needle_bare, "~~");
+    if updated_body == body {
+        content.to_string()
+    } else {
+        queue.replace_content(content, &updated_body)
+    }
 }
 
 pub(crate) fn normalize_queue_prompt_text(text: &str) -> String {
@@ -2636,6 +2666,24 @@ mod core_tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    #[test]
+    fn consume_queue_nodes_by_key_strips_in_progress_marker_before_strike_text() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- 🚧 do [#head]\n",
+            "- do [#tail]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let mut keys = queue_prompt_node_keys_for_count(content, 1).unwrap().keys;
+        let key = keys.remove(0);
+
+        let updated = consume_queue_nodes_by_key(content, &[key]).unwrap();
+
+        assert!(updated.contains("- ~~do [#head]~~\n"), "{updated}");
+        assert!(!updated.contains("~~🚧"), "{updated}");
+        assert!(updated.contains("- do [#tail]\n"), "{updated}");
+    }
 
     #[test]
     fn free_text_head_struck_despite_prompt_prefix_flip_on_answered_prompt() {

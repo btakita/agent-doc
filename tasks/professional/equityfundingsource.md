@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -147,7 +147,7 @@ Verification: focused Bun tests passed (`tests/admin-full-application-approve-ui
 CI/workflows: `gh run list --workflow CI --limit 1` found no workflow named `CI` in either the EFS submodule or the parent repo.
 
 Escalation: none. Confidence: high for code, tests, push, D1/deploy, and unauthenticated smoke coverage; authenticated visual verification of the admin-only Full Application dialog still requires an authenticated browser session.
-<!-- agent:boundary:1206be33 -->
+<!-- agent:boundary:2fa16f1c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -167,8 +167,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~The https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application should have the alert at the top and highlighted fields + sections that need to be addressed to advance the application.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

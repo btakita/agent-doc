@@ -111,13 +111,34 @@ Proof:
 - Verification: this is a document planning/capture mutation; no source tests were needed.
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:a67f8975 -->
+
+### Re: #advr01 — gpt-5
+
+> **Queue prompt:**
+>
+> do [#advr01]
+
+
+Implemented restart-agent Phase 1b kill-guard for frontmatter `agent:` harness switches.
+
+- Code: `src/agent-doc` commit `5b7a32aced0988d87a447e9dc90b12da10deda40` (`fix: defer agent harness switches to boundary restart`).
+- Parent pointer: `851cd6d12` (`chore: update agent-doc submodule`).
+- Changed `load_authoritative_actor_binding` so a healthy live wrong-harness authoritative actor logs `route_authoritative_actor_harness_mismatch_deferred` and defers to the boundary restart path instead of cold-rebinding; stale replacement remains allowed for unhealthy supervisors or closed actors.
+- Updated `specs/06-config.md`, `specs/supervisor.md`, and `VERSIONS.md` for the default-on `agent_doc_agent_change_restart` knob, `harness_change_detected`, `agent_restart_boundary_gate`, `agent_restart_performed`, and the route kill-guard contract.
+- Verification:
+  - Focused live-submodule test passed: `cargo test -p agent-doc-orchestration mismatched_authoritative_actor_can_be_replaced_only_when_not_live_authority`.
+  - Clean replay commit `5b7a32aced0988d87a447e9dc90b12da10deda40`: `make check` passed (`5050` nextest tests, doctests, SimWorld medium seed).
+  - Clean replay commit `5b7a32aced0988d87a447e9dc90b12da10deda40`: `make tmux-ci` passed.
+  - GitHub CI run `28068962411` passed with `make check` and `make tmux-ci`.
+
+Note: the live `src/agent-doc` checkout still has unrelated pre-existing dirty files `agent-doc-orchestration/src/write.rs` and `agent-doc-orchestration/src/write/queue_consume.rs`. I left them unstaged and untouched. Because those dirty files conflict with the remote main update, the parent gitlink was staged directly to the pushed submodule commit rather than switching the live submodule checkout.
+<!-- agent:boundary:dbf96c5e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- do [#advr01]
+- ~~do [#advr01]~~
 - do [#advr02]
 - do [#advr03]
 - do [#advr04]
@@ -164,7 +185,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr01] Advance original #agentreloadrestart: implement restart-agent Phase 1 with frontmatter harness re-resolution, default-on boundary auto-restart, ops markers `harness_change_detected`, `agent_restart_boundary_gate`, `agent_restart_performed`, SimWorld, and make tmux-ci. Plan: tasks/agent-doc/plan-restart-agent.md.
 - [ ] [#advr02] [recommended] Advance original #arrcodexproof: re-run managed Codex capability proof when a boundary restart switches to Codex; wire proof restart into harness-change restart path and add focused regression + make check.
 - [ ] [#advr03] Advance original #j9ja: finish #optverify marker coverage by adding `agent_restart_performed` in #agentreloadrestart execution and a restart-agent menu-invoke marker in #restartagentmenu; then auto-resolve the stale review gate from ops-log proof/disproof markers.
 - [ ] [#advr04] Advance original #restartagentmenu: implement JB `RestartAgentAction.kt`, plugin.xml registration, TerminalUtil restart wiring, pluginVersion bump, signed+unsigned builds, action invocation log, and resolved harness log. Plan: tasks/agent-doc/plan-restart-agent.md.

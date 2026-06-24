@@ -34,127 +34,12 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-043637.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-051651.md`*
 
 Compacted content:
-❯ - Archived 15 response topic(s): state backbone queue closeout - gpt-5; state backbone implementation; lazily-rs state machines; 12 more
-❯ - Prior summary/context: prior compacted content: Archived 4 response topic(s): response overwrite sidecar recovery - gpt-5; #advr02 - gpt-5; ...
-
-### Re: #advr11 — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: do [#advr11]
-
-
-Implemented and verified `#docdriftgrace` for the planned stale-snapshot drift case.
-
-Changes:
-- Added component-scoped stale snapshot drift classification before the old size-ratio reset guard fails closed.
-- Auto-rebases safe visible drift by refreshing snapshot and CRDT sidecars when drift is limited to historical `### Re:` response-block trimming, allowed frontmatter agent changes, and turn-independent component changes such as sibling queue bookkeeping.
-- Preserves fail-closed behavior for active capture response loss and active queue-driver edits.
-- Reloads refreshed snapshots in commit and stream paths after a safe rebase.
-- Added regression coverage for safe historical exchange trimming with sibling queue additions, and for blocking active queue-driver removal.
-- Updated FlowCore token budgets and `VERSIONS.md` for the new audited safe-rebase log marker.
-
-Verification:
-- `cargo fmt`
-- `cargo test -p agent-doc-orchestration stale_snapshot_reset_drift`
-- `cargo test -p agent-doc-orchestration qpcwcmerge`
-- `cargo test -p agent-doc-orchestration commit_blocks_stale_snapshot_commit_when_active_capture_response_missing`
-- `cargo test -p agent-doc --test run_integration preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit`
-- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted`
-- `make check`
-- `git -C src/agent-doc diff --check`
-- `make install`
-- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success` (`28074608395`).
-
-Commits:
-- `src/agent-doc`: `d03d5113 fix(write): rebase safe stale snapshot drift`
-- Parent repo: `289af6b66 chore: advance agent-doc submodule`
-
-Closeout note: this live session document had also been compacted to a `### Session Summary`, which is outside the narrower planned historical-`### Re:` trim classifier. I used `agent-doc reset --from-current --preserve-session` before closeout so the compacted visible document, snapshot, and CRDT sidecars were aligned without dropping session metadata.
-
-### Re: #advr12 — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: do [#advr12]
-
-
-Confirmed `#hap7/#gf5n` covers the same-node partial free-text queue duplication shape. No production guard was needed.
-
-I added a focused regression in `agent-doc-orchestration/src/merge.rs`: `crdt_merge_same_free_text_queue_node_extension_no_truncated_duplicate`. It models a snapshot containing a partial free-text queue item while the operator completes that same queue node and the agent appends exchange content. The merge keeps the completed operator queue line exactly once and does not retain the truncated partial sibling.
-
-Verification:
-- `cargo fmt`
-- `cargo test -p agent-doc-orchestration crdt_merge_same_free_text_queue_node_extension_no_truncated_duplicate -- --test-threads=2`
-- `cargo test -p agent-doc-orchestration crdt_merge -- --test-threads=2`
-- `make check`
-- `git -C src/agent-doc diff --check`
-- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success` (`28074608395`).
-
-Commits:
-- `src/agent-doc`: `1223ebb8 test(merge): cover partial free-text queue extension`
-- Parent repo: `d7fc19723 chore: advance agent-doc submodule`
-- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success` (`28074608395`).
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.PatchGenerationFenceTest` passed.
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.NormalizeExchangePrefixesTest` passed.
-- `cargo test -p agent-doc-orchestration plugin_owner -- --test-threads=2` passed: 8 tests, including single-owner election, stale/dead owner handoff, and release ownership.
-- `make install` rebuilt the binary/cdylib after the stale-install warning.
-- `NativeLib.kt` exposes the FFI methods to Kotlin.
-- `PatchWatcher.ownsDocument()` calls that FFI lease primitive; untargeted/broadcast patch files defer when this window is not the owner, while editor-targeted patches bypass the gate; `dispose()` releases owned documents so another live window can take over.
-- `src/ffi.rs` exports `agent_doc_plugin_owner_try_acquire` and `agent_doc_plugin_owner_release` for the JetBrains plugin.
-- `agent-doc-orchestration/src/plugin_owner.rs` provides the per-document `.agent-doc/plugin-owner/<hash>.json` lease, 30s TTL, live-pid self-heal, owner refresh, and owner-only release.
-- The original plan `tasks/agent-doc/plan-supervisor-direct-queue-edit-race.md` records Phase 1 `#8bfz` as shipped in `237f5fb2`.
-
-### Re: #advr13 — gpt-5
-
-Confirmed `#8bfz` is already implemented in the current tree; no new source change was needed.
-
-Proof points:
-- The original plan `tasks/agent-doc/plan-supervisor-direct-queue-edit-race.md` records Phase 1 `#8bfz` as shipped in `237f5fb2`.
-- `agent-doc-orchestration/src/plugin_owner.rs` provides the per-document `.agent-doc/plugin-owner/<hash>.json` lease, 30s TTL, live-pid self-heal, owner refresh, and owner-only release.
-- `src/ffi.rs` exports `agent_doc_plugin_owner_try_acquire` and `agent_doc_plugin_owner_release` for the JetBrains plugin.
-- `PatchWatcher.ownsDocument()` calls that FFI lease primitive; untargeted/broadcast patch files defer when this window is not the owner, while editor-targeted patches bypass the gate; `dispose()` releases owned documents so another live window can take over.
-- `NativeLib.kt` exposes the FFI methods to Kotlin.
-
-Verification:
-- `make install` rebuilt the binary/cdylib after the stale-install warning.
-- `cargo test -p agent-doc-orchestration plugin_owner -- --test-threads=2` passed: 8 tests, including single-owner election, stale/dead owner handoff, and release ownership.
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.NormalizeExchangePrefixesTest` passed.
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.PatchGenerationFenceTest` passed.
-- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success` (`28074608395`).
-
-Commits: none in this cycle; implementation was already present, and `src/agent-doc` is clean.
-
-### Re: #advr14 — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: do [#advr14]
-
-
-Implemented the JetBrains paused-queue plugin UX for `#qpauseux`.
-
-- `Run Agent Doc` now classifies `failed_stage=queue_paused` as `QUEUE_PAUSED`, clears persisted route-failure diagnostics, and renders an `INFORMATION` notification instead of the raw persistent route error path.
-- Deliberate/admin pauses show `Resume queue`, `Show status`, and `Copy details`; stale-supervisor redirect pauses show `Restart Supervisor and resume`.
-- `Resume queue` first reads `agent-doc session status`, parses `actor: generation=<n>`, then runs `agent-doc admin queue resume --observed-generation <n> --json`.
-- The notification/action paths leave `jb_queue_paused_route_notification` and `jb_queue_paused_route_action` markers in `.agent-doc/logs/ops.log` for render/ops proof.
-- Bumped the JetBrains plugin to `0.2.183` and built both artifacts: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.183.zip` and `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.183-signed.zip`.
-
-Coverage added in `TerminalUtilTest`: generic queue-paused classification/message, stale-supervisor action selection, resume command generation guard, receipt parsing, notification labels, and ops-log marker format.
-
-Verification passed:
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
-- `make bump-plugin`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin`
-- `make check`
-- `git -C src/agent-doc diff --check`
-- `gh run list --workflow CI --limit 1` (latest CI success: `28074608395`)
-
-Commits: submodule `157839f3 feat(jetbrains): handle paused queue route UX`; parent `04d2817a6 chore: advance agent-doc submodule`.
-<!-- agent:boundary:14bc2477 -->
+❯ - Archived 4 response topic(s): #advr11; #advr12; #advr13; 1 more
+❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
+<!-- agent:boundary:9e4ea7fb -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -198,7 +83,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr15] Advance original #jbdisprecycle: convert recycle-boundary Run Agent Doc verification into deterministic proof for exactly one `dispatch_start_proof` with submit and no stranded start_session failure; ops marker `route_dispatch_submit_recycle_settle`.
 - [ ] [#advr16] Advance original #tb4q: complete #qfocsup focused-cycle supervisor clear-and-continue proof with install/recycle if needed, `session-check ui_outcome=deferred_for_supervisor_drain`, `context_reset`, `go_drain_dispatch`, and fresh-agent drain evidence.
 - [ ] [#advr17] Advance original #fbwireverify: complete #fbwire/#fullboundary acceptance with slow-ACK no inflight pileup and wedged no-ACK bounded timeout + ERROR marker + playback artifact; add deterministic tmux-ci/sim coverage where possible.
 - [ ] [#advr18] Advance original #qnodemerge4verify: after JB/VS Code plugin install, live-test non-ASCII edit-during-merge around `café 日本 😀`; prove accepted byte-offset editor ops and no mojibake/interleaving, plus automated log checker for `editor_op_recorded` + `editor_ops_for_base`.

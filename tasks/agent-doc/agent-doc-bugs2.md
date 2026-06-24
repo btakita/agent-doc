@@ -82,20 +82,46 @@ Changed submodule commit: `ad8709344 test(queue): prove focused-cycle supervisor
 Closed #advr17 as already satisfied by the shipped `#fbwire` / `#fullboundary` implementation. The acceptance pieces are present in `85b173fb` and `2367d883`: the supervisor idle-watch runs `convergence_gate_decision` before inter-item dispatch, slow ACK keeps deferring while `inflight > 0` so the next head cannot pile up, wedged no-ACK crosses the bounded timeout into `ForceDiskFallback`, and the fallback emits `convergence_gate_force_disk_fallback severity=error` with a persisted loadable playback artifact.
 
 Fresh verification passed: `cargo test -p agent-doc-orchestration convergence_gate_slow_ack_drain_never_dispatches_while_inflight_positive -- --test-threads=2`, `cargo test -p agent-doc-orchestration convergence_gate_wedged_editor_trips_force_disk_after_timeout -- --test-threads=2`, `cargo test -p agent-doc-orchestration record_convergence_force_disk_fallback_emits_loud_error_and_loadable_playback -- --test-threads=2`, `make tmux-ci`, and the previously-run `make check`. Latest GitHub Actions CI run `28074608395` is successful. No additional code changes were needed for this item.
-<!-- agent:boundary:e1888df3 -->
+
+### Re: #advr18 — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#advr18]
+
+
+Completed the op-capture verification work for `#qnodemerge4verify` and installed the updated local binary/library.
+
+What changed:
+- `agent_doc_record_editor_op` now records byte evidence in `ops.log`: `delete_len`, `insert_bytes`, and `insert_non_ascii`, without logging inserted text.
+- `merge_contents_crdt_with_ops` now logs durable merge-consumer proof when captured ops are actually accepted: `editor_ops_for_base accepted=true ... offsets=... delete_bytes=... insert_bytes=... insert_non_ascii=... #qnodemerge4wire`.
+- Added `agent-doc verify-op-capture <FILE> [--expect-cafe-demo]`, which fails closed unless the target document has both producer-side `editor_op_recorded` and merge-side `editor_ops_for_base accepted=true` evidence. With `--expect-cafe-demo`, it verifies the canonical `café 日本 😀` byte contract: `offset=6`, `delete_len=6`, and non-ASCII insert evidence.
+- Added deterministic regressions for the FFI non-ASCII sidecar path and merge acceptance path, replacing `日本` with `世界` at UTF-8 byte offset `6` and asserting no mojibake.
+
+Verification passed:
+- `cargo fmt`
+- `cargo test record_editor_op_ffi_preserves_non_ascii_byte_offsets -- --test-threads=2`
+- `cargo test -p agent-doc-orchestration merge_with_ops_logs_accepted_non_ascii_byte_offsets -- --test-threads=2`
+- `cargo test op_capture_verify::tests -- --test-threads=2`
+- existing op-capture wiring tests
+- `npm test` in `editors/vscode` (includes existing `café 日本` and emoji UTF-16 to UTF-8 tests)
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` in `editors/jetbrains`
+- `make check` (clippy, 5068 tests, doctests, medium SimWorld corpus)
+- `git diff --check`
+- latest GitHub Actions CI run is green: `28074608395`
+
+Commits:
+- `57ecf388 qnodemerge4: add op-capture verifier` in `src/agent-doc`
+- `99bc090fb chore: advance agent-doc submodule` in the parent repo
+
+For the operator-side IDE replay, the installed checker is now the proof command after the live edit/merge: `agent-doc verify-op-capture <FILE> --expect-cafe-demo`.
+<!-- agent:boundary:344da539 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#advr11]~~
-- ~~:pushpin: do [#advr12]~~
-- ~~:pushpin: do [#advr13]~~
-- ~~:pushpin: do [#advr14]~~
-- ~~:pushpin: do [#advr15]~~
-- ~~:pushpin: do [#advr16]~~
-- ~~:pushpin: do [#advr17]~~
-- :pushpin: do [#advr18]
+- ~~:pushpin: do [#advr18]~~
 - :pushpin: do [#advr19]
 - :pushpin: JB `Run Agent Doc` still does not quickly submit the prompt.
 <!-- /agent:queue -->
@@ -126,7 +152,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr18] Advance original #qnodemerge4verify: after JB/VS Code plugin install, live-test non-ASCII edit-during-merge around `café 日本 😀`; prove accepted byte-offset editor ops and no mojibake/interleaving, plus automated log checker for `editor_op_recorded` + `editor_ops_for_base`.
 - [ ] [#advr19] Advance original #cyh0: identify and instrument remaining File Cache Conflict trigger by capturing exact action, agent-doc command, and ops marker such as `write_authority action=... transport=disk`; distinguish ack-content, VCS-refresh/save, and editor-IPC convergence surfaces.
 <!-- /agent:backlog -->
 

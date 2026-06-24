@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -32,46 +32,35 @@ queue: start
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
+❯ - `bun run build` — green (`build|done`); post registered via regenerated `post/index.ts`.
+❯ - Existing `index.generate.test.ts`: the `raw .md files import without .js suffix` case (the one covering this post) passes; the `.md.ts → .md.js` case is a **pre-existing** failure on HEAD (generator emits `.md`, test expects `.md.js`) — unrelated to this post, left as-is.
+❯ - `btakita/briantakita.me` `044c100` (`post: lazily-rs StateMachine driving agent-doc Cycle State`) → main.
+❯ - `btakita/briantakita.me-dev` `9216f9e` (gitlink bump) → main.
+❯ - `btakita/agent-loop` `9d7253c28` (superproject gitlink bump) → main.
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260623-215925.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260623-223335.md`*
 
 Compacted content:
-❯ - Archived 10 response topic(s): state machine architecture + do #438b; `Machine` naming; rename to `StateMachine`; 7 more
+❯ - Archived 2 response topic(s): do #lzmsrv + #lzdisposedrain; closeout
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
 
+### Re: StateMachine blog post — shipped; closeout — glm-5.2
 
-### Re: do #lzmsrv + #lzdisposedrain — both fixed, verified, shipped — glm-5.2
+> **Queue prompt:** ~~Write a briantakita.me blog post with diagrams about the lazily-rs reactive State Machine…~~ — struck/answered (#ftstrike).
 
-> **Queue prompts:** do [#lzmsrv], do [#lzdisposedrain] (preset `#spec-test-build-install-commit-push`)
+**Done and shipped** (prior cycle; restated cleanly because the wedged editor-IPC orphaned the response body as header-less bullets — those are folded here). Post `2026-06-23-lazily-state-machine-cycle-state.md` (*"Reactive State Machines: How lazily-rs Drives agent-doc's Cycle State"*, `featured: true`) covers the `CyclePhaseMachine` = `ThreadSafeStateMachine<CyclePhase, CycleEvent>` story: the scattered `if phase != X` guards → one pure `transition_phase` table, with the durable JSON sidecar kept as the crash-recovery journal. Four theme-aware inline SVG diagrams.
 
-**Both queue items shipped this cycle.**
+**Verified:** `bun run build` green; post registered via regenerated `post/index.ts`.
 
-**`#lzmsrv` — MSRV declared.** Added `rust-version = "1.88"` to `src/lazily-rs/Cargo.toml` (the crate uses `let_chains` pervasively, stabilized in 1.88) + an MSRV line in `README.md`. A downstream pin at `rust-version = "1.85"` (the edition floor) can no longer resolve-and-fail.
+**Pushed:** `btakita/briantakita.me` `044c100` → `briantakita.me-dev` `9216f9e` → `agent-loop` `9d7253c28` (all main).
 
-**`#lzdisposedrain` — pending_effects drained on dispose.** `Context::dispose_effect` now deschedules **and** clears `pending_effects` of the id **before** recycling it — mirroring `ThreadSafeContext::dispose_effect` (`thread_safe.rs:2577-2578`). More than cosmetic: `free_ids` is LIFO, so a stale `pending_effects` entry could alias a freshly-recycled id and trigger a spurious run of a new node during a later flush. Added internal regression test `dispose_effect_drains_pending_effects_queue`.
+**Prompt targets** (the two compact-archive `❯` lines) need no action — they're session-summary markers from the 22:33:35 compaction, already archived.
 
-**Verification (lazily-rs submodule):**
-- `cargo fmt --check` clean.
-- `cargo clippy --all-features --all-targets -- -D warnings` clean.
-- `cargo test --all-features` — **all suites green**, incl. the new drain test + 15 Loom model tests + state-machine (11+12+async) + spec-compliance (73) + integration (27).
-- `make check` — green except the **known environmental** `benchmark-check` (`#lzbenchbudget`: missing p50/p95 latency rows; not a regression — rust-version + dispose-path touch zero benchmarked code).
-
-**Commits + pushes (executed):**
-- lazily-rs `e16cf71` (`fix: declare MSRV 1.88 (#lzmsrv)`) → `lazily-hub/lazily-rs` main.
-- lazily-rs `f0884f0` (`fix: drain pending_effects in Context::dispose_effect (#lzdisposedrain)`) → `lazily-hub/lazily-rs` main (`36bb381..f0884f0`).
-- superproject `1d5fccf10` (`chore(lazily-rs): bump gitlink`) → `btakita/agent-loop` main (`596f9a795..1d5fccf10`).
-
-**Closeout note:** the editor-IPC path was wedged for this file (`live_prompt_drift_after_preflight`; two refused commits with partial corrupt writes). Recovered by restoring the doc to HEAD + `agent-doc repair --apply-recovery` (`queue_metadata_drift`), then finalized with `--force-disk` (direct disk write) to bypass the broken IPC.
+**Closeout note:** editor-IPC for this file is wedged (`live_prompt_drift_after_preflight`, recurring across cycles); closed out via `--force-disk`. The struck queue head is answered; backlog/review unchanged (4 operator-drive review items, 2 icebox spikes — all genuinely operator/external-gated, none agent-drainable).
 
 Queue drained.
-
-### Re: closeout — session-check resync — glm-5.2
-
-Final closeout commit for the `#lzmsrv` + `#lzdisposedrain` drain. The response and queue drain landed at `f7238365e`; this commit persists the `queue: stop` frontmatter flip + boundary resync so `session-check` matches HEAD. Editor-IPC stayed wedged for this file (`live_prompt_drift_after_preflight`), so all closeout writes used `--force-disk`.
-
-**Substantive work (already committed/pushed earlier this cycle):** lazily-rs `e16cf71` (MSRV 1.88) + `f0884f0` (dispose drain) → `lazily-hub/lazily-rs` main; superproject gitlink `1d5fccf10` → `btakita/agent-loop` main.
-<!-- agent:boundary:1dee5b5c -->
+<!-- agent:boundary:133ff806 -->
 <!-- /agent:exchange -->
 ###
 <!--

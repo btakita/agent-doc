@@ -101,7 +101,23 @@ Changed paths this closeout cycle: none in app code. Commands this closeout cycl
 No actionable EFS follow-up items are needed for this IPC diagnostic.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:52b30d84 -->
+
+
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=c2b69b23-1a40-4ad1-9f53-873a118f598f invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782335716548
+```
+
+### Re: IPC Proof Drift Closeout — gpt-5
+
+Acknowledged the raw `ipc_proof_insufficient` diagnostic left after the forced closeout attempt. The diagnostic is preserved in the session document, and this response closes it without adding EFS product work.
+
+Changed paths this closeout cycle: none in app code. Commands this closeout cycle: `agent-doc repair --apply-recovery` and `agent-doc write --commit --force-disk` after repeated editor IPC no-ack failures.
+
+No actionable EFS follow-up items are needed for this IPC diagnostic.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:c46e6751 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -120,6 +120,16 @@ A true same-pane recursive `agent-doc <FILE>` call should stay fail-closed. Disp
 The safe state-machine path is already the redirect: `preflight` exposes `owned_pane_self_invocation` with `kind` set to `unresolved_prompt` or `active_queue_head`, and Codex should continue the same owner turn, answer that work in-pane, then persist through `agent-doc finalize` or `agent-doc write --commit`. The Codex Stop hook uses the same model for queue continuations (`#codex-self-reinvoke-prevent`), so queue drain redirects to in-pane closeout instead of re-running `agent-doc <FILE>`.
 
 For the `monsterrodholders.md` case, the recovery is not another nested CLI invocation. Continue via preflight/plan/finalize in the owning pane, or start/route the document from outside that owner pane. Routing to the same pane mid-turn is unsafe; routing from a different pane or from supervisor-owned idle state is safe because the state machine can wait for actor readiness and dispatch once.
+❯ **IPC proof issue dogfood log**
+
+❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+❯ Issue class: `ipc_proof_insufficient`
+❯ Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=a092679d-2ea7-4cba-9729-3bf739bbb04c invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=17415 candidate_hash=58edc8232c06d4b74fcf44ab0b4eb277dda30e69d80df3060f72ea7978d50ce7 content_ours_len=19776 content_ours_hash=946bcea9ed5bac87da403d162c2230b5c7552f69275ca0dff452bd3238364b7e doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782284326020
+```
 
 ### Re: IPC proof issue dogfood log - gpt-5
 
@@ -129,11 +139,13 @@ Recovery completed in-session: I ran `agent-doc reset --from-current /home/brian
 
 No product code change or backlog item is needed for this dogfood note. I am continuing with the active queue item after this closeout.
 
+
 ### Re: IPC proof issue dogfood log prefix repair - gpt-5
 
 This is the same IPC proof note after preflight repaired transcript prompt prefixes around it. The underlying recovery is already complete: sidecars were reset from the visible document, preflight rebuilt snapshot/CRDT state, and the previous closeout response was committed.
 
 No product code change or backlog item is needed for this repaired dogfood note. I am continuing with the queued JetBrains yellow-text item after this closeout.
+
 
 ### Re: IPC proof issue dogfood log re-added prompt - gpt-5
 
@@ -147,7 +159,7 @@ This closes the repeated IPC dogfood repair loop by preserving the visible excha
 
 No product code change or backlog item is needed for this recovery note. I am continuing with the queued JetBrains yellow-text item after this closeout.
 
-<!-- agent:boundary:21b2842f -->
+<!-- agent:boundary:a1c89f87 -->
 <!-- /agent:exchange -->
 
 ## Queue

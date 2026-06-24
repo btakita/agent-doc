@@ -34,103 +34,18 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-073352.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-161232.md`*
 
 Compacted content:
-❯ - Archived 11 response topic(s): JetBrains markdown emphasis colors; JetBrains markdown emphasis colors; JetBrains cold-open markdown highlighting - gpt-5; 8 more
-❯ - Prior summary/context: ❯ - submodule: `a788e71e3` (`fix: keep component body text on theme foreground`), pushed to `agent-doc/main` ❯ - push...
-❯ **IPC proof issue dogfood log**
-
-❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
-
-❯ Issue class: `ipc_proof_insufficient`
-❯ Affected component: editor IPC / writeback
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=e91d9537-8972-4d66-b358-497bd4a0c3b5 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=25209 candidate_hash=517cc9774065e4e6053723e7d7022c55759e0a2afcc5b69c364f4e014ca3c9b1 content_ours_len=25557 content_ours_hash=4f3e645e0e8cd2b2e00ab5623371e8a2d59090e100b3e728534d11f35da8cc3e doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782286092889
-```
-
-### Re: IPC proof issue dogfood log — gpt-5
-
-> **Queue prompt:**
->
-> do [#docdriftfinalize]
-
-
-The IPC proof note is acknowledged. This cycle hit the stale snapshot/CRDT sidecar guard after compaction: finalize refused to write because the snapshot was still much larger than the visible compacted file, so I ran `agent-doc reset --from-current /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` and reran preflight. The recovery rebuilt sidecars from the visible document, reaped the stale resolved `#4v2w` queue head, cleared the queue, and set `queue: stop`.
-
-I added follow-up backlog item `#docdriftfinalize` to extend the existing `#docdriftgrace` plan to this finalize/write refusal path. The current top backlog id is `#docdriftfinalize`.
-
-Proof:
-- Commands: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc session-check`, `agent-doc reset --from-current`, `rg` searches for the related drift/backlog history, and `git status --short`.
-- Changed paths: this session document and its done archive through agent-doc recovery/finalize metadata; no product code changed in this cycle.
-- Verification: recovery preflight completed, queue continuation is no longer required, and finalize owns the post-commit `session-check` boundary.
-- Confidence: high.
-- Escalation: none.
-- Root `agent-loop` has no workflow named `CI`; its `Agent Doc` run `28083396280` failed before any runner steps started. Both jobs have the GitHub annotation: recent account payments failed or the spending limit needs to be increased, so there are no failed test logs to fix.
-- `agent-doc` CI run `28083363360` for `d5ea2949` was still `in_progress` when I closed this item.
-- Root commit `219ea93b6` (`agent-doc: accept compact summary snapshot rebase`) pushed to `btakita/agent-loop main`.
-- `src/agent-doc` commit `d5ea2949` (`fix: accept compact summary snapshot rebase`) pushed to `btakita/agent-doc main`.
-- `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` marked the controller for recycle at the next idle boundary.
-- Root `make check` passed after the superproject pointer update.
-- `make precommit` passed in `src/agent-doc`.
-- `make install` installed the updated local binary/library and marked controllers for recycle.
-- `make check` passed in `src/agent-doc`.
-- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture` passed.
-- `cargo test -p agent-doc-orchestration stale_snapshot_reset_drift_ -- --nocapture` passed.
-- Added stream-write positive/negative regressions and updated the FlowCore token budget, `SPEC.md`, and `VERSIONS.md`.
-- Arbitrary `### Session Summary` rewrites without compact markers still fail closed.
-- `guard_no_stale_snapshot_reset_drift` now treats compact-generated `### Session Summary` exchange replacements with compact archive markers as safe historical exchange reductions, so `finalize --stream` can refresh stale pre-compact snapshot/CRDT sidecars instead of refusing and forcing `agent-doc reset --from-current`.
-- Escalation: none.
-- Confidence: medium; the closeout path itself is the dogfood subject, so `session-check` remains the gate.
-- Verification: preflight opened `cycle-1782287548462`, classified the `patch_id=1d90...` fence and `queue: start`/resurrected queue prompt as the current prompt-bearing changes, and this response answers both without adding duplicate backlog.
-- Commands: `agent-doc reset --from-current`, `agent-doc preflight`, `agent-doc plan`, `agent-doc session-check`, `agent-doc read`, and `nl -ba ... | tail`.
-- Changed paths: this session document and its agent-doc metadata/recovery state; no new product source paths.
-- Escalation: none.
-- Confidence: high.
-- Verification: preflight opened `cycle-1782287481057` against the visible document, classified the `patch_id=69d50165` fence as the prompt target, and this response answers that exact target after the failed template closeout.
-- Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc session-check`, `agent-doc read`, and `nl -ba ... | tail` to inspect the visible prompt boundary.
-- Changed paths: this session document and its backlog metadata through agent-doc finalize/recovery; no new product source paths.
-- Confidence: high.
-- Verification: before this closeout, the queue and backlog were empty and `session-check` reported only the open `cycle-1782287296564` waiting for finalize. The new follow-up is gated, so it records the recommendation without creating an active queue head.
-- Commands: `agent-doc session-check`, `agent-doc plan`, `agent-doc read` for exchange/queue/backlog, `rg` for pending-op/finalize guidance, and `ls -l` for the baseline file.
-- Changed paths: this session document and its done archive through agent-doc recovery/finalize metadata; prior product code paths are already committed.
-
-
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=69d50165-a7a8-406d-a902-679456301d0a invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=11911 candidate_hash=cbb1eb13b7735af66e0c5b773b6642343d5589817cb6ab609026063dbaccc3e5 content_ours_len=11602 content_ours_hash=c9e52ddaf1af8aa00d86022b1d22998e4feab1d06e21a3e41144fd89425ee895 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782287257910
-```
-
-
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=1d90ccce-c703-4297-8028-ae4782a0e1fa invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=12865 candidate_hash=20d01d13da3e0a2990d2e8568d6a292ca9d9e39fa6bf7aa075f63cabf0d42ae6 content_ours_len=14373 content_ours_hash=38ad786a993df52b926191ebf6b5a6e348813cb8a42edbe338e60251fcaa20ac doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782287481057
-```
-### Re: IPC proof diagnostics and resurrected queue head — gpt-5
-
-> **Queue prompt:**
->
-> After a codex session JB `Clear Session Context`, when the agent is ready, JB `Run Agent Doc` does not submit.
-
-
-The remaining IPC proof fences are acknowledged. The normal stream/IPC closeout path repeatedly captured responses but merged them above the diagnostic fences, leaving the fences as unresolved prompt text. I reset sidecars from the visible file and used the documented `write --commit --force-disk` repair path so this response lands after the visible prompt text instead of being reordered by the live IPC merge.
-
-The free-text queue head is treated as a resurrected duplicate because preflight matched it to archived completion `#7az7`; no new product source change is needed in this repair. I attempted an exact queue-prompt echo, but the consume path failed with `document has 0 prompt(s) but planned to consume 1`, so this repair records the duplicate without triggering another consume attempt. The residual writeback bug is already tracked by gated backlog item `#ipcproofcloseout`.
-
-Proof:
-- Changed paths: this session document through agent-doc repair write/commit; no new product source paths.
-- Commands: `agent-doc reset --from-current`, `agent-doc write --commit --force-disk`, plus prior `agent-doc preflight`, `agent-doc session-check`, `agent-doc read`, and `nl -ba ... | tail` diagnostics.
-- Verification: this response answers the visible IPC diagnostic fences after the prompt text and records the failed queue-consume proof for the resurrected duplicate head.
-- Confidence: medium; this is a repair of the writeback mechanism itself, so the next `agent-doc session-check` is the required gate.
-- Escalation: none.
-
-<!-- agent:boundary:961852cd -->
+❯ - Archived 2 response topic(s): IPC proof issue dogfood log; IPC proof diagnostics and resurrected queue head
+❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
+<!-- agent:boundary:17259e00 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- This dogfood telemetry is good for my development environment. My goal is to distribute agent-doc to people who are not dogfooding the product. Should we add a configuration parameter to select if bugs should be directly fixed, added to gh issues, or just loggging?
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

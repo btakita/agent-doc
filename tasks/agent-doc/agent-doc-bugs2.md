@@ -66,12 +66,23 @@ agent_doc_bug_policy = "fix"
 ```
 
 Verification: the file now contains the key, and a probe preflight completed without a config parse warning while keeping `#bugpolicy1` as the active queue head for this closeout. Git does not track `.agent-doc/config.toml` in this workspace, so there was no separate config commit to make; the session document closeout records the completed queue item.
-<!-- agent:boundary:9a76926a -->
+Handled the cycle.
+
+I set `.agent-doc/config.toml` to include:
+
+```toml
+agent_doc_bug_policy = "fix"
+```
+
+Then I finalized [agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md), marked `#bugpolicy1` done, and committed the session closeout at `aef5face6`. `agent-doc session-check` is OK and the queue is empty. The config file is local/untracked by Git in this workspace, so there was no separate config commit to make.
+<!-- agent:boundary:376a660b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- JB `Run Agent Doc` still does not submit for Codex.
+- JB `Clear Session Context` on opencode does not get past the dropdown selection.
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

@@ -39,13 +39,48 @@ done
 Compacted content:
 ❯ - Archived 15 response topic(s): state backbone queue closeout - gpt-5; state backbone implementation; lazily-rs state machines; 12 more
 ❯ - Prior summary/context: prior compacted content: Archived 4 response topic(s): response overwrite sidecar recovery - gpt-5; #advr02 - gpt-5; ...
-<!-- agent:boundary:14b3af02 -->
+
+### Re: #advr11 — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#advr11]
+
+
+Implemented and verified `#docdriftgrace` for the planned stale-snapshot drift case.
+
+Changes:
+- Added component-scoped stale snapshot drift classification before the old size-ratio reset guard fails closed.
+- Auto-rebases safe visible drift by refreshing snapshot and CRDT sidecars when drift is limited to historical `### Re:` response-block trimming, allowed frontmatter agent changes, and turn-independent component changes such as sibling queue bookkeeping.
+- Preserves fail-closed behavior for active capture response loss and active queue-driver edits.
+- Reloads refreshed snapshots in commit and stream paths after a safe rebase.
+- Added regression coverage for safe historical exchange trimming with sibling queue additions, and for blocking active queue-driver removal.
+- Updated FlowCore token budgets and `VERSIONS.md` for the new audited safe-rebase log marker.
+
+Verification:
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration stale_snapshot_reset_drift`
+- `cargo test -p agent-doc-orchestration qpcwcmerge`
+- `cargo test -p agent-doc-orchestration commit_blocks_stale_snapshot_commit_when_active_capture_response_missing`
+- `cargo test -p agent-doc --test run_integration preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit`
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted`
+- `make check`
+- `git -C src/agent-doc diff --check`
+- `make install`
+- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success` (`28074608395`).
+
+Commits:
+- `src/agent-doc`: `d03d5113 fix(write): rebase safe stale snapshot drift`
+- Parent repo: `289af6b66 chore: advance agent-doc submodule`
+
+Closeout note: this live session document had also been compacted to a `### Session Summary`, which is outside the narrower planned historical-`### Re:` trim classifier. I used `agent-doc reset --from-current --preserve-session` before closeout so the compacted visible document, snapshot, and CRDT sidecars were aligned without dropping session metadata.
+<!-- agent:boundary:7d0a152b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: do [#advr11]
+- ~~:pushpin: do [#advr11]~~
 - :pushpin: do [#advr12]
 - :pushpin: do [#advr13]
 - :pushpin: do [#advr14]
@@ -83,7 +118,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr11] Advance original #docdriftgrace: implement component-scoped graceful drift resolution that auto-rebases unrelated changes and surfaces only structural conflicts on in-flight prompt/response. Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md.
 - [ ] [#advr12] Advance original #ftqpartialdup: confirm whether #hap7/#gf5n fixes same-node partial free-text queue duplication; if not, add same-node/free-text conflict guard and regression for truncated duplicate queue prompts.
 - [ ] [#advr13] Advance original #8bfz: implement single live JB plugin consumer per document using a per-doc owner lease; non-owner windows defer patch apply + saveDocument, with plugin PatchWatcher + binary lease primitive and multi-window proof.
 - [ ] [#advr14] Advance original #qpauseux: finish paused-queue plugin UX with info/action notifications, Resume or restart-supervisor/resume actions, no raw error toast, plugin artifacts, and render/ops proof.

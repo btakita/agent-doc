@@ -385,16 +385,14 @@ fn line_looks_like_prompt_target(line: &str) -> bool {
     let normalized_imperative = normalize_imperative_candidate(trimmed)
         .is_some_and(|normalized| looks_like_imperative_directive(&normalized));
     let slash_command = line_looks_like_slash_command(trimmed);
+    let prompt_prefixed = trimmed.starts_with('❯') && !line_looks_like_markdown_list_item(trimmed);
     !trimmed.is_empty()
         && !trimmed.starts_with("<!--")
         && !trimmed.starts_with("```")
         && !trimmed.starts_with("~~~")
         && !trimmed.starts_with("### Re:")
         && !line_has_known_response_label_after_prompt(trimmed)
-        && (slash_command
-            || trimmed.starts_with('❯')
-            || trimmed.ends_with('?')
-            || normalized_imperative)
+        && (slash_command || prompt_prefixed || trimmed.ends_with('?') || normalized_imperative)
 }
 
 pub fn text_line_looks_like_prompt_target(line: &str) -> bool {
@@ -487,7 +485,9 @@ pub fn line_looks_like_targeted_prompt_prefix_repair_start(trimmed: &str, is_tar
         return false;
     }
 
-    if trimmed.starts_with('❯') || line_looks_like_soft_prompt_request(unprefixed) {
+    if (trimmed.starts_with('❯') && !line_looks_like_markdown_list_item(trimmed))
+        || line_looks_like_soft_prompt_request(unprefixed)
+    {
         return true;
     }
 
@@ -521,7 +521,8 @@ pub fn line_looks_like_plain_response_after_prompt(trimmed: &str) -> bool {
         return false;
     }
 
-    if trimmed.starts_with("- ")
+    if line_looks_like_markdown_list_item(trimmed)
+        || trimmed.starts_with("- ")
         || trimmed.starts_with("* ")
         || trimmed.starts_with("Plan:")
         || trimmed.starts_with("Verification")
@@ -539,6 +540,11 @@ pub fn line_looks_like_plain_response_after_prompt(trimmed: &str) -> bool {
         || lower.starts_with("i added ")
         || lower.starts_with("i implemented ")
         || lower.starts_with("i left ")
+        || lower.starts_with("i dry-ran ")
+        || lower.starts_with("recovered ")
+        || lower.starts_with("confirmed ")
+        || lower.starts_with("no code files changed")
+        || lower.starts_with("this closeout ")
         || lower.starts_with("updated ")
         || lower.starts_with("fixed ")
         || lower.starts_with("added ")
@@ -971,12 +977,10 @@ fn classify_prompt_bearing_changes_raw(diff: &str) -> Vec<PromptBearingChange> {
     // older prompt-block extractor as a safety net for prompt-target-only consumers
     // and append only truly-missing prompt blocks.
     for text in extract_prompt_target_blocks(diff) {
-        if changes.iter().any(|existing| {
-            existing.kind == PromptBearingChangeKind::PromptTarget
-                && (existing.text == text
-                    || ((existing.text.contains(&text) || text.contains(&existing.text))
-                        && prompt_change_is_already_answered(&existing.text)))
-        }) {
+        if changes
+            .iter()
+            .any(|existing| prompt_target_block_already_classified(existing, &text))
+        {
             continue;
         }
         changes.push(PromptBearingChange {
@@ -986,6 +990,24 @@ fn classify_prompt_bearing_changes_raw(diff: &str) -> Vec<PromptBearingChange> {
     }
 
     changes
+}
+
+fn prompt_target_block_already_classified(
+    existing: &PromptBearingChange,
+    prompt_text: &str,
+) -> bool {
+    if existing.text == prompt_text {
+        return true;
+    }
+    match existing.kind {
+        PromptBearingChangeKind::PromptTarget => {
+            (existing.text.contains(prompt_text) || prompt_text.contains(&existing.text))
+                && prompt_change_is_already_answered(&existing.text)
+        }
+        PromptBearingChangeKind::RecoveryArtifact
+        | PromptBearingChangeKind::BoundaryArtifact
+        | PromptBearingChangeKind::ContentEdit => existing.text.contains(prompt_text),
+    }
 }
 
 pub fn classify_prompt_bearing_changes(diff: &str) -> Vec<PromptBearingChange> {
@@ -2146,12 +2168,14 @@ fn collect_added_text_blocks(diff: &str) -> Vec<Vec<String>> {
     let mut in_fence = false;
     let mut fence_char = '`';
     let mut fence_len = 0usize;
+    let mut in_recovery_response_tail = false;
 
     for line in diff.lines() {
         if line.starts_with("---") || line.starts_with("+++") || line.starts_with("@@") {
             if !current.is_empty() {
                 blocks.push(std::mem::take(&mut current));
             }
+            in_recovery_response_tail = false;
             continue;
         }
 
@@ -2188,11 +2212,31 @@ fn collect_added_text_blocks(diff: &str) -> Vec<Vec<String>> {
             if !current.is_empty() {
                 blocks.push(std::mem::take(&mut current));
             }
+            in_recovery_response_tail = false;
             continue;
         }
 
         if content.starts_with('>') {
             continue;
+        }
+
+        if is_exchange_response_heading(trimmed) {
+            if !current.is_empty() {
+                blocks.push(std::mem::take(&mut current));
+            }
+            in_recovery_response_tail = true;
+            continue;
+        }
+
+        if in_recovery_response_tail {
+            if line_looks_like_targeted_prompt_prefix_repair_start(
+                trimmed,
+                line_looks_like_prompt_target(trimmed),
+            ) {
+                in_recovery_response_tail = false;
+            } else {
+                continue;
+            }
         }
 
         current.push(content.trim_end().to_string());
@@ -3225,6 +3269,36 @@ Done.\n\
     }
 
     #[test]
+    fn classify_prompt_bearing_changes_ignores_prefixed_recovery_evidence() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,11 @@\n\
+            ctx\n\
+            +### Re: stalled Run Agent Doc recovery — gpt-5\n\
+            +\n\
+            +Recovered the stranded closeout first.\n\
+            +\n\
+            +❯ - `./gradlew test --tests 'TerminalUtilTest.protected prompt input route refusal is actionable not persistent failure'`\n\
+            +❯ - `cargo test -p agent-doc-orchestration protected_prompt_draft_preview_redacts_and_bounds_latest_draft`\n\
+            +❯ - `612b1552` `test: cover protected prompt route refusal`\n\
+            +\n\
+            +No code files changed in this follow-up.\n\
+            <!-- /agent:exchange -->\n";
+        let changes = classify_prompt_bearing_changes(diff);
+
+        assert_eq!(
+            changes.len(),
+            1,
+            "recovery evidence must stay grouped: {changes:?}"
+        );
+        assert_eq!(changes[0].kind, PromptBearingChangeKind::RecoveryArtifact);
+        assert!(
+            !changes
+                .iter()
+                .any(|change| change.kind == PromptBearingChangeKind::PromptTarget),
+            "prompt-prefixed recovery evidence must not become prompt targets: {changes:?}"
+        );
+    }
+
+    #[test]
     fn classify_prompt_bearing_changes_marks_inline_correction_as_content_edit() {
         let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\
             The service returned 401 from this endpoint\n\
@@ -3554,6 +3628,24 @@ Done.\n\
         assert_eq!(
             request.trigger_text,
             "❯ synchronous opera ❯ preset #spec-test-build-install-commit-push"
+        );
+    }
+
+    #[test]
+    fn detect_orchestration_request_ignores_prefixed_recovery_evidence() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,10 @@\n ctx\n\
++### Re: stalled Run Agent Doc recovery — gpt-5\n\
++\n\
++I dry-ran the emitted orchestration command. It resolved only already-recorded verification evidence.\n\
++\n\
++❯ - `./gradlew test --tests TerminalUtilTest`\n\
++❯ - `cargo test -p agent-doc-orchestration protected_prompt_draft_preview_redacts_and_bounds_latest_draft`\n\
++❯ - `612b1552` `test: cover protected prompt route refusal`\n\
++\n\
++No code files changed in this follow-up.\n";
+        assert!(
+            detect_orchestration_request(diff).is_none(),
+            "recovered response evidence must not emit orchestration work"
         );
     }
 

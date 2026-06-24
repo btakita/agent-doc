@@ -53,6 +53,16 @@ The highest-leverage cluster is **AsyncContext backend-parity** — it is the ne
 Full list written to `agent:backlog` this cycle. **Top of backlog: `#lzasyncdispose2`** — the in-flight re-run aliasing guard that completes the dispose-correctness story I just started.
 
 Pre-existing `make check` caveat: `benchmark-check` is red (`#lzbenchbudget`, unrelated to this change — budgets not refreshed since the SlotId-cast + eager-Signal landings); `fmt`/`clippy`/`build`/`test`/`test-async`/`test-async-resolve` all pass.
+❯ **IPC proof issue dogfood log**
+
+❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+❯ Issue class: `ipc_proof_insufficient`
+❯ Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=socket_ack_content patch_id=589ea334-bcfb-4908-a9c9-c60ded09bb9c invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=11660 candidate_hash=ad360de1cc96f9e923355ed3abdcab9a59b8285a4d93f1e56a6b6538ffcff5c0 content_ours_len=9211 content_ours_hash=4b62debfd316ac226f2d255f4c84ecbd5a3e0ce90288406e9d0a81b732919b72 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782330985974
+```
 > **Queue prompt:** What are #next-steps to fix lazily bugs?
 
 ### Re: #lzasyncdispose2 — abort in-flight effect re-run on dispose — glm-5.2
@@ -64,14 +74,39 @@ Drained the top `do` queue item. `AsyncContext::dispose_async_effect` recycled t
 The **IPC proof issue dogfood log** that plan flagged as the prompt target is a self-appended agent-doc artifact from the prior interrupted-cycle recovery (`ipc_proof_insufficient`, `live_prompt_drift_after_preflight`) — editor-IPC writeback noise, not actionable lazily-rs work; the write still reached `committed` last cycle. No code action.
 
 Continuing the queue drain (`#lzasynceffdup` next).
+❯ **IPC proof issue dogfood log**
+
+❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+❯ Issue class: `ipc_proof_insufficient`
+❯ Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=socket_ack_content patch_id=d6722a6c-cf2e-4e08-b1c8-edd6bf0747f9 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=14216 candidate_hash=8aed8b5f12a7e6fa6bdd71f5ec4b69460f232fadcd0c8fcd56243fefd784f6e7 content_ours_len=13348 content_ours_hash=002bba5b1f016c3b315264cdcea7cfd7772f87c5fe948642b5c4540e2d1c58b3 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782331218740
+```
 
 ### Re: #lzasynceffdup — dedupe AsyncContext pending effects — glm-5.2
+
+> **Queue prompt:**
+>
+❯ > do [#lzasynceffdup]
+
 
 `AsyncContext.pending_async_effects` was a bare `Vec<SlotId>`: every dependency invalidation pushed the effect id again, so the queue grew O(invalidations) with duplicate ids before each flush (harmless at run time only because a `force_run` re-check skipped the extras). `Context` (`context.rs:123`) and `ThreadSafeContext` (`thread_safe.rs:1219`) both dedupe via a scheduled `HashSet`; the async backend was the lone outlier.
 
 **Fix (lazily-rs `090e104`, pushed):** added `scheduled_async_effects: HashSet<SlotId>` to `AsyncContextInner` and extracted `schedule_async_effect(inner, id)` (mirrors `Context::schedule_effect`) — all three scheduling sites now set `force_run` and enqueue only on `scheduled_async_effects.insert(id)`. `flush_async_effects` clears the set on drain; `dispose_async_effect` removes from it (parity with `Context::dispose_effect:684`). White-box unit test `async_schedule_effect_dedupes_pending_queue` schedules the same id three times and asserts exactly one queue entry + flush-clears the set (fails without the HashSet). Verified: clippy `--all-targets --all-features -D warnings` clean, rustfmt clean, `--features async` suite green, default tests + release build OK.
 
 Next queue head: `#lzstr0mnetinbox` (str0m receive-side unbounded inbox).
+❯ **IPC proof issue dogfood log**
+
+❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+❯ Issue class: `ipc_proof_insufficient`
+❯ Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=socket_ack_content patch_id=96ffa092-fdc0-47eb-989c-308951a16a5a invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=15913 candidate_hash=363a04d74c231071f2468d2ed931251e9baad67240c60ae7cb5c892dd53a69a9 content_ours_len=14160 content_ours_hash=0c49ea38118e80efa8900a6f9812c56ba79285a55686989dbcf4a55992602364 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782332242138
+```
 
 ### Re: #lzstr0mnetinbox — bound Str0mNet receive inbox — glm-5.2
 
@@ -84,7 +119,29 @@ Next queue head: `#lzstr0mnetinbox` (str0m receive-side unbounded inbox).
 **Fix (lazily-rs `e165720`, pushed):** added `MAX_INBOX_FRAMES` (=1024, symmetric with the send cap) with drop-oldest ring semantics (newest retained) and a `dropped_inbox_frames` counter exposed via `Str0mNet::dropped_inbox_frames()` so sustained saturation is diagnosable (non-zero warrants a Snapshot resync). The str0m SCTP stack still owns wire-level reliability; this is the local memory safety valve. Unit test `inbox_caps_at_max_inbox_frames_and_counts_drops` pushes past the cap and asserts the bound, drop count, and drop-oldest retention. Verified: clippy `--all-targets --all-features -D warnings` clean, rustfmt clean, full `--features webrtc-str0m` suite green (incl. the real two-socket `tests/str0m_net.rs` round trip), release build OK.
 
 Next queue head: `#lzstr0mnetacceptanswer` (str0m discards `accept_answer` result).
-<!-- agent:boundary:7d4f5c81 -->
+**IPC proof issue dogfood log**
+
+Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=socket_ack_content patch_id=ac5e1a12-a852-4567-a0b7-92241ad5b0ac invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=17902 candidate_hash=08c5a9291b91beef801393ec92666078f17ad9435771b30fa7f2287cc04d2e0d content_ours_len=15218 content_ours_hash=58f4bce236aacf73ef0dcfb386be4b290b87d4877783b3a3cd4fda6d540126f0 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782332893751
+```
+
+### Re: #lzstr0mnetacceptanswer — surface str0m apply failures — glm-5.2
+
+> **Queue prompt:**
+> 
+> do [#lzstr0mnetacceptanswer]
+
+The str0m driver discarded the result of `rtc.sdp_api().accept_answer(pending, answer)`: an SDP answer that parses (validated eagerly in the public `accept_answer`) can still fail at apply time — ICE/DTLS fingerprint or mid mismatch — and the failure was invisible, so `wait_open` simply timed out with no diagnostic.
+
+**Fix (lazily-rs `7a28283`, pushed):** capture apply-time failures in a new `Shared::last_error` field (let-chained `Err` guard, edition-2024 style) exposed via `Str0mNet::last_error()`, so a `wait_open` timeout has a diagnosable cause. Inline unit test `last_error_round_trips_apply_failure` exercises the plumbing; the real two-socket integration test asserts `last_error` stays clear on a successful handshake. Verified: clippy `--all-targets --all-features -D warnings` clean (after collapsing the nested `if let` into a let-chain per `collapsible_if`), rustfmt clean, `--features webrtc-str0m` suite green (incl. `tests/str0m_net.rs` two-socket round trip), release build OK.
+
+Next queue head: `#lzwsunbounded` (ws_backend unbounded outbound mpsc + drive abandons frames on send error).
+<!-- agent:boundary:4ac6ee13 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -106,7 +163,6 @@ Next queue head: `#lzstr0mnetacceptanswer` (str0m discards `accept_answer` resul
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzstr0mnetacceptanswer] str0m_net.rs driver discards rtc.accept_answer result (:391 let _ =); an ICE/DTLS fingerprint/mid mismatch is invisible and wait_open times out with no diagnostic. Propagate apply-time failure to Shared::last_error so the open-failure surfaces a cause.
 - [ ] [#lzwsunbounded] ws_backend.rs outbound is an unbounded mpsc (:88) and drive abandons queued frames on send error (:117-119 break); producers can keep enqueuing after close. Switch to a bounded channel, surface send failures via WsError, stop producers on close.
 - [ ] [#lzerrfrom] [recommended] Add From<serde_json::Error>/From<postcard::Error> impls for EncodeError/DecodeError ergonomics (open since 2026-06-17). src/ipc.rs.
 - [ ] [#lzsid32] Harden SlotId.0 as-usize casts in thread_safe.rs to usize::try_from for 32-bit safety parity with single-threaded Context (open since 2026-06-17).

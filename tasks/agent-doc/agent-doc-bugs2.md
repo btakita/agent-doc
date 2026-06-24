@@ -39,14 +39,45 @@ done
 Compacted content:
 - Archived 8 response topic(s): bug handling policy; bug policy config; JB `Run Agent Doc` still does not submit for Codex.; 5 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-<!-- agent:boundary:e33d31e3 -->
+
+### Re: editor state projection wiring — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#lzstatewire1]
+
+
+Completed `#lzstatewire1`.
+
+Wired the editor integrations to the Rust-owned state projection:
+
+- JetBrains now binds `agent_doc_state_projection` and `agent_doc_record_state_event`, records route/transport/proof observations, renders a compact projection summary, and includes bridge tests.
+- VS Code now has the same native projection/event bridge, records route and editor patch events, and includes matching tests.
+- `specs/13-state-backbone.md` documents the editor projection bridge contract.
+- `VERSIONS.md` notes the change, and the JetBrains plugin patch version is bumped to `0.2.188`.
+
+Commits pushed:
+
+- `src/agent-doc`: `6b105362` (`fix: wire editor state projections`)
+- parent repo: `5ceac5053` (`agent-doc: update editor projection bridge`), followed by merge commit `370f156b3` to integrate `origin/main`
+
+Verification run:
+
+- `npm --prefix editors/vscode test` passed.
+- `./gradlew test --tests com.github.btakita.agentdoc.StateProjectionBridgeTest` passed.
+- `cargo test -p agent-doc state_projection_ffi_round_trip -- --nocapture` passed via `tsift digest-runner`.
+- `make check` passed via `tsift digest-runner`.
+- `make bump-plugin` passed and produced `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.188-signed.zip`.
+- `make install-full` passed and installed the updated native library.
+
+GitHub Actions note: `gh run list --workflow CI --limit 1` now reports no workflow named `CI` in the parent repo. The available `Agent Doc` workflow for push `370f156b3` failed before running any steps because GitHub reported account billing/spending-limit configuration issues.
+<!-- agent:boundary:ce623120 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Look at the FFI IPC and lazily-kt/lazily-js. Will this help keep state consistent between the editor plugin, FFI plugin, and the CPC?~~
-- :pushpin: do [#lzstatewire1]
+- ~~:pushpin: do [#lzstatewire1]~~
 - JB `Run Agent Doc` on Codex is STILL not submitting. Why is the text reliably being sent but sending Enter is so unreliable? Why not send the Enter with the text?
 ---
 JB `Run Agent Doc` on equityfundingsource.md after JB `Clear Session Context` stalls
@@ -83,7 +114,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzstatewire1] [recommended] Wire agent-doc editor integrations to consume binary-owned state projections: expose/read `agent_doc_state_projection` in JetBrains and VSCode native bindings, emit `StateEvent`s for editor IPC/CPC observations, and render route/transport/proof state from `DocumentStateProjection` instead of local heuristics.
 - [/] [#ipcproofcloseout] [recommended] Investigate IPC proof closeout drift that appended patch_id=69d50165 as bare fenced text under an existing `(HEAD)` response instead of opening a clean exchange heading after interrupted finalize recovery.
 <!-- /agent:backlog -->
 

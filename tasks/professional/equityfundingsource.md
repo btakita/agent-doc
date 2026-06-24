@@ -185,7 +185,7 @@ Deployment proof:
 - Post-deploy migrations check: no migrations to apply.
 - Public smoke test `https://equityfundingsource.brian-takita.workers.dev/`: `200`.
 - Protected admin lender-pipeline URL: `303`, expected Cloudflare Access redirect without an authenticated browser session.
-<!-- agent:boundary:0b101491 -->
+<!-- agent:boundary:449c5c3a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -205,8 +205,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~In all admin deal pipeline and lender pipeline dialogs, make the top actionable item (button or field) focused. Support the up/down arrow keys to navigate between actionable items. Ensure the focused item is visible within the viewport. We already have an implementation of this in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c&dialog=lender. Unify the implementation of this logic so all pipeline dialogs use the same logic.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

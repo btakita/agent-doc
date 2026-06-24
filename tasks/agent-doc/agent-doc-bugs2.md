@@ -39,13 +39,27 @@ done
 Compacted content:
 ❯ - Archived 2 response topic(s): IPC proof issue dogfood log; IPC proof diagnostics and resurrected queue head
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-<!-- agent:boundary:17259e00 -->
+
+### Re: bug handling policy — gpt-5
+
+> **Queue prompt:** This dogfood telemetry is good for my development environment. My goal is to distribute agent-doc to people who are not dogfooding the product. Should we add a configuration parameter to select if bugs should be directly fixed, added to gh issues, or just loggging?
+
+Yes, but I would frame it as an action-routing policy, not just a bug toggle. Dogfood sessions can keep the aggressive direct-fix loop; general installs should default to bounded logging or explicit issue capture, with autonomous fixes only when the project opts in.
+
+A good shape is:
+
+- `agent_doc_bug_policy = "log" | "issue" | "fix"`
+- Default distributed behavior: `log`, or `issue` only when GitHub repo/auth/dedupe are configured.
+- Project/session override through `.agent-doc/config.toml` and frontmatter.
+- Always capture bounded evidence plus a stable fingerprint first; then route the action according to policy.
+
+That separation matters. Telemetry collection should be deterministic and low-surprise for every user, while actions that mutate repos or file external issues should be explicit policy choices. I added a recommended backlog item for this so the config, defaults, dedupe behavior, docs, and tests can be worked as a deliberate feature.
+<!-- agent:boundary:052c2ac2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- This dogfood telemetry is good for my development environment. My goal is to distribute agent-doc to people who are not dogfooding the product. Should we add a configuration parameter to select if bugs should be directly fixed, added to gh issues, or just loggging?
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -74,6 +88,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#bugpolicy1] [recommended] #agent-doc-feature Specify and implement configurable bug-handling policy for distributed agent-doc installs: separate evidence capture from action routing, support log/issue/fix modes with safe defaults, GH issue dedupe, docs, and tests.
 - [/] [#ipcproofcloseout] [recommended] Investigate IPC proof closeout drift that appended patch_id=69d50165 as bare fenced text under an existing `(HEAD)` response instead of opening a clean exchange heading after interrupted finalize recovery.
 <!-- /agent:backlog -->
 

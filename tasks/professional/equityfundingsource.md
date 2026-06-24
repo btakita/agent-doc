@@ -193,7 +193,19 @@ Changed paths this cleanup cycle: none in app code. Commands this cleanup cycle:
 No actionable follow-up items are needed for the IPC note.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:8a116d65 -->
+
+### Re: IPC Dogfood Note Closeout — gpt-5
+
+Acknowledged the second automatic IPC proof dogfood note from cleanup recovery. The deploy queue is drained, the app change remains deployed at Worker version `b344beea-543d-43e9-a5ab-e1040222d2bd`, and there is no remaining EFS app work from this note.
+
+The route-owned supervisor was already marked for recycle at the next idle boundary with `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`. An immediate `agent-doc session restart-supervisor ...` correctly refused because this Codex turn is still the active busy owner; the recycle request is the non-disruptive path.
+
+Changed paths this closeout cycle: none. Commands this closeout cycle: `agent-doc preflight` recovery, `agent-doc session restart-supervisor ...` probe, and `agent-doc read --component queue`.
+
+No actionable follow-up items are needed for this IPC note.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:5f0ed1ae -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -189,14 +189,43 @@ Escalation: none. Confidence: high.
 The `#advr03` implementation response and backlog reap are already committed. This repair closeout persists the queue strike that preflight converged after the IPC retry, so the visible queue now advances to `#advr04` without reopening any code work.
 
 No additional repo code changed after the verification recorded in the `#advr03` response. Backlog now starts at `#advr04`; the done archive has a local `#advr03` append alongside older uncommitted archive drift, so I did not stage that archive wholesale.
-<!-- agent:boundary:87df0907 -->
+
+### Re: #advr04 — gpt-5
+
+> **Queue prompt:**
+>
+> do [#advr04]
+
+Completed `#advr04` as already implemented by the immediately preceding restart-agent work; I did not add duplicate source changes in this cycle.
+
+Confirmed surfaces:
+
+- JetBrains `RestartAgentAction.kt` exists and records `restart_agent_menu_invoked` before calling `TerminalUtil.restartSession`.
+- `plugin.xml` registers `AgentDoc.RestartAgent` with text `Restart Agent`, alongside `Restart Supervisor Process` and `Stop Agent`.
+- `TerminalUtil` writes the optverify-scannable ops-log marker `restart_agent_menu_invoked file=<relative-path> source=jetbrains action=restart_agent`.
+- `editors/jetbrains/gradle.properties` is at `pluginVersion = 0.2.180`.
+- Signed and unsigned plugin artifacts exist: `agent-doc-jetbrains-0.2.180.zip` and `agent-doc-jetbrains-0.2.180-signed.zip`.
+- Supervisor-side harness-change proof is present: `harness_change_detected`, `agent_restart_boundary_gate`, `agent_restart_performed`, plus the route kill-guard test for avoiding cold replacement of a healthy live authoritative actor.
+
+Verification run for this closeout:
+
+- `cargo test -p agent-doc-orchestration agent_change_restart -- --test-threads=2` passed.
+- `cargo test -p agent-doc-orchestration mismatched_authoritative_actor_can_be_replaced_only_when_not_live_authority -- --test-threads=2` passed.
+- `cargo test -p agent-doc-orchestration session_log_event_after_latest_start_resets_on_agent_restart_performed -- --test-threads=2` passed.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin` passed.
+- `git diff --check` passed.
+- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success`, run `28073513496`, for `feat: log restart agent menu marker`.
+
+No new source commit was needed. `src/agent-doc` had unrelated dirty JetBrains style-setting files appear during verification (`VisualHighlighterManager.kt`, `MarkdownStyleConfigurable.kt`, `MarkdownStyleSettings.kt`); I left them untouched and did not stage them for this closeout.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:cd087e42 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#advr03]~~
-- :pushpin: do [#advr04]
+- ~~:pushpin: do [#advr04]~~
 - :pushpin: do [#advr05]
 - :pushpin: do [#advr06]
 - :pushpin: do [#advr07]
@@ -241,7 +270,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr04] Advance original #restartagentmenu: implement JB `RestartAgentAction.kt`, plugin.xml registration, TerminalUtil restart wiring, pluginVersion bump, signed+unsigned builds, action invocation log, and resolved harness log. Plan: tasks/agent-doc/plan-restart-agent.md.
 - [ ] [#advr05] [recommended] Advance original #s81q: add Stop Agent and mirror Stop+Restart into VS Code extension menus; implement JB `StopAgentAction.kt`, plugin.xml registration, VS Code command contributions, and signed/unsigned plugin artifacts.
 - [ ] [#advr06] Advance original #recyclerename: rename JB + VS Code "Restart Supervisor Process" UI text to "Recycle Supervisor" while keeping stable action IDs, and ensure Restart Agent and Recycle Supervisor commands sit alongside each other. Plan: tasks/agent-doc/plan-restart-agent.md.
 - [ ] [#advr07] [recommended] Advance original #supinstallvis: make supervisor auto-install/rebuild status visible in pane body or plugin notification surface, choose a non-input-consuming mechanism, add ops/log proof, and avoid disturbing keepalive Enter-to-restart reader.

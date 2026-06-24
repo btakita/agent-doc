@@ -159,7 +159,7 @@ Verification:
 ❯ - Clean isolated worktree `make check`: clippy, 5046 nextest tests, doctests, and medium simulation passed.
 - Installed the verified clean build with `make install-full`.
 
-❯ Commits:
+Commits:
 - `src/agent-doc` `63edca4d` (`fix: preserve completed queue heads after stale editor drift`), pushed to `origin/main`.
 - Parent gitlink `dbed747e1` (`chore: update agent-doc submodule`).
 - `src/agent-doc` `63edca4d` (`fix: preserve completed queue heads after stale editor drift`), pushed to `origin/main`.
@@ -249,54 +249,37 @@ Verification:
 - `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
 - `agent-doc read ... --component queue`
 - `agent-doc read ... --component backlog`
+- The parent repo has no workflow named `CI`.
+- Latest `agent-doc` CI for this push was still `in_progress` when checked: run `28065394925`.
+- `make install-full` installed the verified build from `/tmp/agent-doc-qstrikework`.
+- Clean worktree `make check`: clippy, 5048 nextest tests, doctests, and medium simulator passed.
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
+- `cargo test -p agent-doc finalize_keeps_free_text_queue_head_when_cycle_answers_foreign_exchange_prompt --test finalize_integration -- --nocapture`
+- `cargo test -p agent-doc finalize_echoes_consumed_free_text_queue_prompt_into_response --test finalize_integration -- --nocapture`
+- `cargo test -p agent-doc-orchestration consume_decision -- --nocapture`
+- `cargo fmt --check`
+- Parent repo `d0518761b` (`chore: update agent-doc submodule`), pushed to `origin/main`.
+- `src/agent-doc` `b0a6f1eb` (`fix: require exact queue head proof before strike`), pushed to `origin/main`.
+- Generic repair/no-op responses and unrelated exchange answers leave the active free-text queue head runnable.
+- Id-backed heads accept explicit same-id closeout signals, including `--done`, `--pending-gate`, `--pending-edit`, and now `--review-resolve`.
+- Free-text heads are consumed only when the current response explicitly quotes/targets that same queue prompt.
+- `queue_consumption_allowed_for_response` now requires exact proof before striking a queue head.
 
 Confidence: high for backlog capture; implementation remains queued as `do [#3ygp]`.
 Escalation: none.
-
-### Re: :pushpin: do [#qstrikework] — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: do [#qstrikework]
-
-Implemented and shipped `#qstrikework`.
-
-What changed:
-- `queue_consumption_allowed_for_response` now requires exact proof before striking a queue head.
-- Free-text heads are consumed only when the current response explicitly quotes/targets that same queue prompt.
-- Id-backed heads accept explicit same-id closeout signals, including `--done`, `--pending-gate`, `--pending-edit`, and now `--review-resolve`.
-- Generic repair/no-op responses and unrelated exchange answers leave the active free-text queue head runnable.
-
-Commits:
-- `src/agent-doc` `b0a6f1eb` (`fix: require exact queue head proof before strike`), pushed to `origin/main`.
-- Parent repo `d0518761b` (`chore: update agent-doc submodule`), pushed to `origin/main`.
-
-Verification:
-- `cargo fmt --check`
-- `cargo test -p agent-doc-orchestration consume_decision -- --nocapture`
-- `cargo test -p agent-doc finalize_echoes_consumed_free_text_queue_prompt_into_response --test finalize_integration -- --nocapture`
-- `cargo test -p agent-doc finalize_keeps_free_text_queue_head_when_cycle_answers_foreign_exchange_prompt --test finalize_integration -- --nocapture`
-- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
-- Clean worktree `make check`: clippy, 5048 nextest tests, doctests, and medium simulator passed.
-- `make install-full` installed the verified build from `/tmp/agent-doc-qstrikework`.
-- Latest `agent-doc` CI for this push was still `in_progress` when checked: run `28065394925`.
-- The parent repo has no workflow named `CI`.
-
-Note: the final preflight re-converged the queue so `#3ygp` is now the visible queue head. This closeout marks `#qstrikework` done and should leave `#3ygp` runnable rather than consuming it.
-<!-- agent:boundary:2a5b93be -->
+<!-- agent:boundary:9fd172e1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~JB `Run Agent Doc` still not submitting. Can we track when this happens and automatically file a bug so I don't have to endlessly repeat myself when you fail to fix the issue? [dogfooding] Can we also have the supervisor detect if the turn started? And if the turn has not started, send Enter and continue retrying until the turn starts?~~
+- :pushpin: do [#3ygp]
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
 - :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#tb4q]: please check logs
 - :pushpin: do [#qcm1verify]: Use the logs to verify.
 - ~~:pushpin: do [#qstrikework]~~
 - :pushpin: do [#1jec]
-- do [#3ygp]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

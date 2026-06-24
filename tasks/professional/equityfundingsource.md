@@ -140,7 +140,18 @@ Verification already recorded for the deployed build:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:2d743861 -->
+
+### Re: IPC proof note — gpt-5
+
+Recorded the agent-doc IPC proof issue note from the deploy-residue recovery.
+
+No code, test, deploy, commit/push, or backlog work was performed for this acknowledgement. The queue is already drained, and the deployment remains Worker version `693fb7c5-c214-494d-a4ad-4df4e87fda5f`.
+
+There were no actionable follow-up items to capture.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:d77570f3 -->
 <!-- /agent:exchange -->
 ###
 <!--

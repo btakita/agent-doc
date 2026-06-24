@@ -33,174 +33,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-173322.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-175342.md`*
 
 Compacted content:
-❯ - Archived 4 response topic(s): Dialog Select Keyboard Navigation; Deploy; Application Review Auto-Move And Deploy; 1 more
+❯ - Archived 3 response topic(s): Admin Application Completion And Deploy; IPC Proof Issue Dogfood Log; Full Application Dialog Focus And Deploy
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: Admin Application Completion And Deploy — gpt-5
-
-> **Queue prompt:** In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, the admin should be able to advance the application by adding the necessary data. The e-signature is optional to advance the application to the Complete step.
-
-Implemented an admin-only path to advance draft full applications to the Complete/submitted step once required data is present, without requiring e-signature for that completion transition.
-
-What changed:
-- The admin full-application status endpoint now accepts `submitted` in addition to `in_review` and `declined`.
-- The `submitted` transition is gated on core application data: borrower name/email, current residence address, loan amount, subject property address, property value, property type, and declarations.
-- Borrower and broker submit endpoints remain e-signature gated.
-- The admin embedded full-application decision card now includes `Mark Complete`, disabled with a missing-data message until the completion gate passes.
-- Application cards can now move to the Complete column through the same admin status endpoint.
-- Pipeline auto-review still runs for applications that were already Complete when opened, but no longer immediately sweeps an application opened as Draft into Review after the admin marks it Complete during the same dialog session.
-
-> **Queue prompt:** deploy
-
-Deployed through the project runbook path, `make deploy`. Cloudflare activated Worker version `f9b7b678-f7f2-4f40-9216-ef12a8e3ca89` at `https://equityfundingsource.brian-takita.workers.dev`.
-
-Changed paths in this cycle:
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/applications/index.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/borrower/applications/repo.ts`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/full_applications.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/full_application_detail.tsx`
-- `src/equityfundingsource-dev/tests/admin-full-application-approve-ui.test.ts`
-- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
-- `src/equityfundingsource-dev/tests/apply4-full-application-p6.test.ts`
-
-Pre-existing modified paths still remain in the EFS submodule and were included in the deployed build:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/ui.tsx`
-- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
-
-Commands:
-- `bun test tests/admin-full-application-approve-ui.test.ts tests/apply4-full-application-p6.test.ts tests/admin-pipeline.test.ts`
-- `git diff --check`
-- `tsift diff-digest`
-- `make check`
-- `gh run list --workflow CI --limit 1`
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`
-- `bun run cf:d1:info`
-- `bun run cf:d1:time-travel:info`
-- `make deploy`
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
-- `curl -s -o /dev/null -w '%{http_code}\n' 'https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6'`
-
-Verification:
-- Focused tests passed: 94 tests across the admin full-application, TMO writeback, and pipeline files.
-- `git diff --check` passed.
-- `make check` passed: 1186 tests, app build, and worker build.
-- Pre-deploy remote D1 migrations: none pending.
-- D1 recovery posture checked; Time Travel bookmark: `00000509-00000000-00005094-f7cc40fb5e53febfca67cef7da291ced`.
-- `make deploy` applied zero D1 migrations and deployed Worker version `f9b7b678-f7f2-4f40-9216-ef12a8e3ca89`.
-- Post-deploy remote D1 migrations: none pending.
-- Public smoke test returned HTTP `200`.
-- The protected admin pipeline deep link returned HTTP `303` to unauthenticated curl, consistent with admin auth redirect; I could not verify the authenticated page render from this shell.
-- `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in this repository.
-
-Confidence: high.
-Escalation: none.
-
-No git commit was made in `src/equityfundingsource-dev`; the repo-local instructions say not to run `git commit` unless explicitly asked.
-
-Suggested git commit message:
-
-```txt
-fix(admin): let admins mark applications complete without e-signature
-
-Add an admin-only submitted/Complete transition for full applications once required borrower, property, and declaration data is present, while keeping borrower submit e-signature gated and approval/TMO writeback gated separately. Updates the embedded full-application decision UI, pipeline Complete-column handling, and focused admin application tests; Worker version f9b7b678-f7f2-4f40-9216-ef12a8e3ca89 is deployed.
-```
-❯ **IPC proof issue dogfood log**
-
-❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
-
-❯ Issue class: `ipc_proof_insufficient`
-❯ Affected component: editor IPC / writeback
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=6411550e-32b4-4fcd-a91d-0e65913c05f1 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782322508129
-```
-
-### Re: IPC Proof Issue Dogfood Log — gpt-5
-
-> **Queue prompt:**
->
-> From https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, remove the "Open Page" button. Focus on the 1st actionable item that is not the close button...Activity History > View All in this dialog.
-
-
-Recorded the automatic IPC proof issue note from the recovered writeback. No EFS application code changes were made in this closeout; it exists only to commit the dogfood note cleanly so the active queue can continue.
-
-Verification:
-- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` recovered the prior response and surfaced the IPC proof diagnostic.
-- `agent-doc session-check` reported the dogfood note as uncommitted exchange drift before this closeout.
-
-Confidence: high.
-Escalation: none.
-
-
-
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=73e36cb3-2116-441c-94b2-910ed200eaf6 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782323066591
-```
-### Re: Full Application Dialog Focus And Deploy — gpt-5
-
-> **Queue prompt:** From https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, remove the "Open Page" button. Focus on the 1st actionable item that is not the close button...Activity History > View All in this dialog.
-
-Implemented the dialog polish that was accidentally consumed by the prior IPC closeout:
-- Removed the stacked full-application dialog header `Open Page` action.
-- Kept the footer `Open Full Application Page` link available.
-- Added initial focus for the embedded Activity History `View all` button once activity entries render, scoped to the dialog action-nav root and using `preventScroll` before scrolling the section into view.
-- Added source-shape coverage for the removed header action and Activity History initial-focus behavior.
-
-> **Queue prompt:** deploy
-
-Deployed the latest build with `make deploy`. Cloudflare activated Worker version `bc490339-0041-48a5-bf48-1823c1711a39` at `https://equityfundingsource.brian-takita.workers.dev`.
-
-Changed paths for the dialog-focus work:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/full_applications.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
-- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
-
-The deployed build also includes the earlier admin Complete-without-e-signature changes and the pre-existing modified EFS paths already noted in the prior response.
-
-Commands:
-- `bun test tests/admin-pipeline.test.ts tests/admin-full-application-approve-ui.test.ts tests/apply4-full-application-p6.test.ts`
-- `git diff --check`
-- `tsift diff-digest`
-- `make check`
-- `gh run list --workflow CI --limit 1`
-- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`
-- `bun run cf:d1:info`
-- `bun run cf:d1:time-travel:info`
-- `make deploy`
-- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
-- `curl -s -o /dev/null -w '%{http_code}\n' 'https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6'`
-
-Verification:
-- Focused tests passed: 94 tests, 819 expects.
-- `git diff --check` passed.
-- `make check` passed: 1186 tests, app build, and worker build.
-- Pre-deploy remote D1 migrations: none pending.
-- D1 info succeeded; Time Travel bookmark: `00000509-00000000-00005094-f7cc40fb5e53febfca67cef7da291ced`.
-- `make deploy` applied zero D1 migrations and deployed Worker version `bc490339-0041-48a5-bf48-1823c1711a39`.
-- Post-deploy remote D1 migrations: none pending.
-- Public smoke test returned HTTP `200`.
-- Protected admin pipeline deep link returned HTTP `303` to unauthenticated curl, consistent with admin auth redirect.
-- `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in this repository.
-
-Confidence: high.
-Escalation: none.
-
-No git commit was made in `src/equityfundingsource-dev`; the repo-local instructions say not to run `git commit` unless explicitly asked.
-
-Suggested git commit message:
-
-```txt
-fix(admin): focus full application dialog activity action
-
-Remove the stacked full-application dialog's redundant Open Page header action and hand initial dialog focus to Activity History > View all once the embedded detail loads, while keeping the footer full-page link. Includes source-shape coverage and deployed Worker version bc490339-0041-48a5-bf48-1823c1711a39.
-```
-
-<!-- agent:boundary:2a04af02 -->
+<!-- agent:boundary:431f982a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -220,6 +58,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, add an alert with explaining the next actionable step to advance the application with a CTA button.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

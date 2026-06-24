@@ -286,6 +286,11 @@ impl SimWorld {
                 }
                 Err(err) => self.coverage.record_block(&err.to_string()),
             },
+            SimCommand::DispatchOperatorPromptWithProtectedDraft => {
+                if let Err(err) = self.dispatch_operator_prompt_with_protected_draft() {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
             SimCommand::ProveDispatchAccepted => {
                 if let Err(err) = self.prove_dispatch_accepted() {
                     self.coverage.record_block(&err.to_string());
@@ -1615,6 +1620,28 @@ impl SimWorld {
         self.record_ops_proof(format!(
             "dispatch_inject pane={} generation={} attempt={}",
             pane_id, self.route.durable.generation, self.coverage.dispatch_injects
+        ));
+        Ok(())
+    }
+
+    pub(crate) fn dispatch_operator_prompt_with_protected_draft(&mut self) -> Result<()> {
+        let pane_id = self.current_dispatch_pane()?;
+        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
+        let pane_content = "› Implement {feature}\n";
+        let Some(reason) = harness.protected_prompt_input_reason(pane_content) else {
+            bail!("protected draft fixture no longer blocks route dispatch");
+        };
+        let draft_preview = harness
+            .last_prompt_candidate(pane_content)
+            .map(|candidate| agent_doc_orchestration::prompt::strip_ansi(&candidate))
+            .map(|preview| agent_doc_orchestration::secret_redact::redact(preview.trim()))
+            .filter(|preview| !preview.is_empty())
+            .unwrap_or_else(|| "<none>".to_string());
+
+        self.coverage.protected_prompt_route_blocks += 1;
+        self.record_ops_proof(format!(
+            "route_dispatch_direct_pane_blocked pane={} harness={} protected_input={} draft_preview={:?}",
+            pane_id, harness.binary, reason, draft_preview
         ));
         Ok(())
     }

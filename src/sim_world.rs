@@ -139,6 +139,10 @@ enum SimCommand {
     /// coalesced. Driven only by targeted tests, not the random generator, so the
     /// seed corpus traces are unchanged.
     DispatchOperatorPrompt,
+    /// `#routeblockux1`: an operator route dispatch found protected prompt input
+    /// already drafted in the target pane. The route must fail closed without
+    /// creating dispatch/proof churn.
+    DispatchOperatorPromptWithProtectedDraft,
     ProveDispatchAccepted,
     StaleSupervisorUpdate,
     ObserveStalePane,
@@ -650,6 +654,7 @@ struct Coverage {
     route_dispatch_acceptances: usize,
     route_dispatch_proofs: usize,
     route_dispatch_coalesced: usize,
+    protected_prompt_route_blocks: usize,
     /// `#rdypoll` (§D / img_52): count of REAL trigger injections into the harness
     /// composer. Mirrors the production `dispatch_inject attempt=N` ops.log marker
     /// so a multi-inject regression (the ~7 stacked un-submitted triggers after a
@@ -3615,6 +3620,31 @@ fn route_sim_blocks_starting_actor_that_closes_before_ready_prompt() {
     assert_eq!(world.coverage.starting_prompt_promotions, 0);
     assert_eq!(world.coverage.route_dispatch_acceptances, 0);
     assert_eq!(world.coverage.route_dispatch_proofs, 0);
+}
+
+#[test]
+fn route_sim_protected_prompt_refusal_has_no_dispatch_churn() {
+    let mut world = SimWorld::new(2_047);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    world
+        .apply(SimCommand::DispatchOperatorPromptWithProtectedDraft)
+        .unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+
+    assert_eq!(world.coverage.protected_prompt_route_blocks, 1);
+    assert_eq!(world.coverage.route_dispatch_acceptances, 0);
+    assert_eq!(world.coverage.route_dispatch_proofs, 0);
+    assert_eq!(world.coverage.dispatch_injects, 0);
+    let ops_log = world.ops_log.join("\n");
+    assert!(
+        ops_log.contains("route_dispatch_direct_pane_blocked")
+            && ops_log.contains("protected_input=drafted prompt input")
+            && ops_log.contains("draft_preview=\"› Implement {feature}\""),
+        "protected-prompt refusal must be actionable without dispatch churn:\n{ops_log}"
+    );
 }
 
 #[test]

@@ -82,7 +82,24 @@ Removed the 8 `:pushpin:`-prefixed queue lines (compaction had duplicated every 
 **Scope note:** shipped ungated (purely additive — new exports + new global, no change to existing behavior). The "compile flag" from the plan is a follow-up if/when a gate is wanted. Phase 2 (lazily-ipc Delta transport) + Phase 3 (plugin UI wiring in JB `NativeLib.kt` / VSCode addon) remain in the plan.
 
 Also stripped the supervisor-re-injected `:pushpin:` prefixes (`#qauthorder` known bug) so the free-text-queue-head guard passes. Next head: `do [#t0qn]` / `do [#nnyn]`.
-<!-- agent:boundary:490a474b -->
+
+### Re: backlog DAG reorder + IPC dogfood logs — glm-5.2
+
+**IPC dogfood logs (prompt targets):** the `ipc_proof_insufficient` ```text blocks (editor writeback `live_prompt_drift_after_preflight` → `content_ours_snapshot_next_cycle`) are the recurring editor-IPC instability symptom this drain has been logging — binary recovery absorbs them, not new work.
+
+**Backlog reordered by dependency DAG** (`#lzffistate1` DONE unblocks the FFI-consumer items):
+
+1. `#9226` (#lzsigzig1) — engine: `on_invalidate` + `pending_recompute` queue + drain + snapshot `emitChangeUnlocked` in `context.zig`. **No deps.** Unblocks #lzsigzig2; also fixes a latent iteration-mutation bug.
+2. `#nnyn` (#lzsmzig) — StateMachine in lazily-zig. **No deps** (Zig has Cell).
+3. `#f71y` (#lzsigzig2) — `signal.zig`. **Blocked on #9226.**
+4. `#hj5x` (#lzsmlean2) — Lean SM↔IPC cross-module proof. **No deps** (StateMachine.lean + IPC.lean both done).
+5. `#mes4` (#lzkt) — [recommended] lazily-kt FFI-consumer. **Unblocked** (#lzffistate1 DONE).
+6. `#bcnf` (#lzjs) — [recommended] lazily-js FFI-consumer. **Unblocked**.
+7. `#t0mf`/`#t0qn` — superseded by the #9226/#f71y split; kept as narrowed context.
+8. `#pwvm`/`#9e64`, `#t1xt`/`#dcgp`, `#7gpg`/`#kjfe` — [recommended] IPC.lean clarification (need operator intent: ShmBlobArena parity vs proof extraction). **Blocked on clarification.**
+
+Next drain head: `#9226` (Signal engine) or `#nnyn` (StateMachine zig) — both independent. Stripped re-injected `:pushpin:` prefixes again (`#qauthorder` bug).
+<!-- agent:boundary:56be399c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -112,20 +129,20 @@ Also stripped the supervisor-re-injected `:pushpin:` prefixes (`#qauthorder` kno
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#f71y] #lzsigzig2=Implement eager Signal in src/lazily-zig/src/lazily/signal.zig (mirrors lazily-rs SignalHandle + lazily-py Signal): memoized backing slot + comptime on_invalidate/recompute puller + std.meta.eql memo guard. get()/dispose()/is_active(). Export from root.zig. Tests: eager recompute, memo-guard suppresses equal cascade, dispose->lazy, signal-on-signal. Blocked on #lzsigzig1. Plan Phase 2.
 - [ ] [#9226] #lzsigzig1=Engine changes in src/lazily-zig/src/lazily/context.zig for eager Signal: add on_invalidate + recompute fn pointers on Slot (default null), snapshot-then-clear emitChangeUnlocked (also fixes latent iteration-mutation bug), Context.pending_recompute queue + drainPendingRecompute() drained outside the mutex, drain points in Slot.emitChange() + Cell.set() after unlock. Regression: existing slot/cell tests stay green. Plan: tasks/software/plan-lazily-zig-signal.md Phase 1.
-- [ ] [#t0mf] #lzsigzig=Implement eager Signal in lazily-zig (src/lazily-zig/src/lazily/signal.zig). NOT a direct mirror: lazily-zig destroy-on-invalidate (destroySelf frees the Slot, context.zig:354) + non-reentrant Thread.Mutex means an inline eager recompute DEADLOCKS (user valueFn re-locks ctx.mutex via slot()/slotKeyed). lazily-rs RefCell + lazily-py dict have no such re-entrancy issue. Plan + deferred-recompute-queue design committed: tasks/software/plan-lazily-zig-signal.md (c74e75909). Phase 1 = engine changes in context.zig (on_invalidate hook + pending_recompute queue + drain points outside the lock + snapshot emitChangeUnlocked to also fix latent iteration-mutation). Phase 2 = signal.zig. Splitting #t0mf into #lzsigzig1 (engine) + #lzsigzig2 (signal.zig) below.
-- [ ] [#pwvm] #lzffileanrs=[recommended] Clarify: IPC.lean protocol already implemented in lazily-rs ipc.rs (Snapshot/Delta/ShmBlobArena). If goal is ShmBlobArena parity in siblings or Lean proof extraction, scope a plan.
-- [ ] [#t1xt] #lzffileanpy=[recommended] Clarify: lazily-py ipc.py already implements IPC.lean (IpcValue/SharedBlob/Snapshot/Delta). If goal is ShmBlobArena parity or proof extraction, scope a plan.
-- [ ] [#7gpg] #lzffileanzig=[recommended] Clarify: lazily-zig ipc.zig already implements IPC.lean. If goal is ShmBlobArena parity or proof extraction, scope a plan.
-- [ ] [#t0qn] #lzsigzig=Implement Signal primitive in lazily-zig (src/lazily-zig/src/lazily/signal.zig). Zig currently has Slot+Cell but no Signal. Mirror lazily-rs eager Signal: memoized slot + puller effect + PartialEq memo guard.
-- [ ] [#9e64] #lzffileanrs=[recommended] Clarify: IPC.lean formal theorems already implemented in lazily-rs ipc.rs (Snapshot/Delta/DeltaOp/epoch sequencing). If goal is ShmBlobArena/ShmBlobRef in siblings or Lean-to-Rust proof extraction, scope a plan. Currently ambiguous.
-- [ ] [#dcgp] #lzffileanpy=[recommended] Clarify: lazily-py ipc.py already implements the IPC.lean protocol (IpcValue/SharedBlob/Snapshot/Delta). If goal is ShmBlobArena parity or proof extraction, scope a plan.
-- [ ] [#kjfe] #lzffileanzig=[recommended] Clarify: lazily-zig ipc.zig already implements the IPC.lean protocol. If goal is ShmBlobArena parity or proof extraction, scope a plan.
 - [ ] [#nnyn] #lzsmzig=Implement StateMachine in lazily-zig (plan Phase 3). Add src/lazily-zig/src/lazily/state_machine.zig: StateMachine(S,E) wrapping Cell + *const fn(*const S,E)?S transition pointer (Zig has no closures). Tests for guard rejection + acceptance.
+- [ ] [#f71y] #lzsigzig2=Implement eager Signal in src/lazily-zig/src/lazily/signal.zig (mirrors lazily-rs SignalHandle + lazily-py Signal): memoized backing slot + comptime on_invalidate/recompute puller + std.meta.eql memo guard. get()/dispose()/is_active(). Export from root.zig. Tests: eager recompute, memo-guard suppresses equal cascade, dispose->lazy, signal-on-signal. Blocked on #lzsigzig1. Plan Phase 2.
 - [ ] [#hj5x] #lzsmlean2=Add Lean cross-module proof: SM send -> IPC DeltaOp.cellSet (plan Phase 1 TODO). Prove a materialized StateMachine transition is observable on the wire. Link StateMachine.lean with IPC.lean.
 - [ ] [#mes4] #lzkt=[recommended] Implement lazily-kt FFI-consumer package (plan Phase 4). Kotlin/Gradle under src/lazily-kt/. Wraps JNA bridge to lazily_ffi_*; StateFlow<DocumentStateProjection> projection holder + recordStateEvent reporter. NOT a reactive-core port. Blocked on #lzffistate1.
 - [ ] [#bcnf] #lzjs=[recommended] Implement lazily-js FFI-consumer package with *.js + *.d.ts (plan Phase 5). Under src/lazily-js/. Wraps VSCode N-API addon; EventEmitter projection holder + event reporter. NOT a reactive-core port. Blocked on #lzffistate1.
+- [ ] [#t0mf] #lzsigzig=Implement eager Signal in lazily-zig (src/lazily-zig/src/lazily/signal.zig). NOT a direct mirror: lazily-zig destroy-on-invalidate (destroySelf frees the Slot, context.zig:354) + non-reentrant Thread.Mutex means an inline eager recompute DEADLOCKS (user valueFn re-locks ctx.mutex via slot()/slotKeyed). lazily-rs RefCell + lazily-py dict have no such re-entrancy issue. Plan + deferred-recompute-queue design committed: tasks/software/plan-lazily-zig-signal.md (c74e75909). Phase 1 = engine changes in context.zig (on_invalidate hook + pending_recompute queue + drain points outside the lock + snapshot emitChangeUnlocked to also fix latent iteration-mutation). Phase 2 = signal.zig. Splitting #t0mf into #lzsigzig1 (engine) + #lzsigzig2 (signal.zig) below.
+- [ ] [#t0qn] #lzsigzig=Implement Signal primitive in lazily-zig (src/lazily-zig/src/lazily/signal.zig). Zig currently has Slot+Cell but no Signal. Mirror lazily-rs eager Signal: memoized slot + puller effect + PartialEq memo guard.
+- [ ] [#pwvm] #lzffileanrs=[recommended] Clarify: IPC.lean protocol already implemented in lazily-rs ipc.rs (Snapshot/Delta/ShmBlobArena). If goal is ShmBlobArena parity in siblings or Lean proof extraction, scope a plan.
+- [ ] [#t1xt] #lzffileanpy=[recommended] Clarify: lazily-py ipc.py already implements IPC.lean (IpcValue/SharedBlob/Snapshot/Delta). If goal is ShmBlobArena parity or proof extraction, scope a plan.
+- [ ] [#7gpg] #lzffileanzig=[recommended] Clarify: lazily-zig ipc.zig already implements IPC.lean. If goal is ShmBlobArena parity or proof extraction, scope a plan.
+- [ ] [#9e64] #lzffileanrs=[recommended] Clarify: IPC.lean formal theorems already implemented in lazily-rs ipc.rs (Snapshot/Delta/DeltaOp/epoch sequencing). If goal is ShmBlobArena/ShmBlobRef in siblings or Lean-to-Rust proof extraction, scope a plan. Currently ambiguous.
+- [ ] [#dcgp] #lzffileanpy=[recommended] Clarify: lazily-py ipc.py already implements the IPC.lean protocol (IpcValue/SharedBlob/Snapshot/Delta). If goal is ShmBlobArena parity or proof extraction, scope a plan.
+- [ ] [#kjfe] #lzffileanzig=[recommended] Clarify: lazily-zig ipc.zig already implements the IPC.lean protocol. If goal is ShmBlobArena parity or proof extraction, scope a plan.
 <!-- /agent:backlog -->
 
 ## Review

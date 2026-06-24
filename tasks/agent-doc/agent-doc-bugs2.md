@@ -354,7 +354,7 @@ Verification: full `make check` passed locally with `5095 passed, 241 skipped`; 
 > When the queue item, review item, icebox item is complete and struck out or `[x]`, remove the 🚧.
 
 Completed in `d8698eeb` and installed. This closeout records the exact free-text queue prompt echo required for binary-owned queue consumption.
-<!-- agent:boundary:0f486133 -->
+<!-- agent:boundary:2b3a899c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -370,17 +370,6 @@ JB `Run Agent Doc` on monsterrodholders.md
 Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %2 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Implement {feature}"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782330092988-direct_pane_protected_prompt_input-codex-_2-8a7508d5a787.txt
 ```
 ~~~
----
-```
-~/work/btakita/agent-loop main ⇡68 *10 !8 ?6                                                                                                                                                                        ✘ INT  agent-loop 16:32:16
-❯ agent-doc session restart-supervisor /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md
-Error: failed to contact supervisor for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md
-
-Caused by:
-    0: failed to connect to supervisor socket
-    1: Connection refused (os error 111)
-```
----
 - ~~:pushpin: do [#promptprefixorch1]~~
 <!-- /agent:queue -->
 <!--

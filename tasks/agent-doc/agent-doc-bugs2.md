@@ -289,14 +289,29 @@ Verification:
 - `make install-full`
 
 Committed and pushed source change `ef50ed8aa187839567552bcf627659099af383ba` (`fix: file route dispatch proof failures`) to `btakita/agent-doc` `main`. Updated and pushed the parent submodule pointer in `btakita/agent-loop` as `a51932f8d` (`chore: update agent-doc submodule`). GitHub Actions CI for the source push was queued as run `28066398449` when checked.
-<!-- agent:boundary:18c6f34a -->
+
+### Re: #fbwireverify
+
+> **Queue prompt:** :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
+
+`#fbwireverify` is operator-gated because the remaining work is not code implementation. It is live acceptance proof for a race/transport behavior that only appears with a real editor plugin and a real agent pane running at the same time.
+
+The test needs two independently controlled live surfaces: one editor/IDE side that can apply or withhold IPC acknowledgements, and one CLI/agent-doc pane that is being driven by the supervisor. The current driving session is itself the agent-doc turn being finalized, so using it as the test subject would collapse observer and subject into the same pane. It also cannot safely simulate a wedged editor consumer, slow editor ACKs, plugin reinstall/restart, and supervisor recycle while still preserving this session's own write/commit boundary.
+
+What the operator has to verify later is concrete:
+
+- Slow-ACK case: after install/recycle, drive a live editor + CLI pair and confirm `ops.log` shows `convergence_gate_defer` with `unmet=inflight_drained` before each dispatch, with no IPC inflight pileup above one.
+- Wedged/no-ACK case: deliberately make the editor consumer stop acknowledging patches and confirm the bounded `CONVERGENCE_GATE_TIMEOUT_MS` path emits `convergence_gate_force_disk_fallback severity=error`, writes a loadable `.agent-doc/playback/<hash>/<cycle>.json` artifact, and the drain continues instead of sticking forever.
+
+So the gate is about needing a human-controlled live topology and failure injection. Deterministic tests and `make check` already covered the shipped code path; this item stays open until that live proof is collected.
+<!-- agent:boundary:3caf2d7d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: do [#3ygp]~~
-- :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
+- ~~:pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.~~
 - :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#tb4q]: please check logs
 - :pushpin: do [#qcm1verify]: Use the logs to verify.

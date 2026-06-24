@@ -32,6 +32,20 @@ done
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+❯ - JetBrains bold/italic visual tokens now inherit the editor's normal foreground instead of `DefaultLanguageHighlighterColors.IDENTIFIER`, so emphasized markdown no longer turns yellow under themes where identifiers are yellow.
+❯ - The shared visual token parser now rejects underscore emphasis markers inside identifier words. `_foo_` and `__foo__` still render italic/bold; `foo_bar_baz` and `foo__bar__baz` stay regular text.
+❯ - Added the Rust regression test, updated the editor integration guide and `VERSIONS.md`, and bumped the JetBrains plugin patch version to `0.2.184`.
+❯ - `cargo test -p agent-doc-core syntax::tests::underscore_emphasis_does_not_match_inside_identifiers` passed.
+❯ - `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` passed.
+❯ - `make check` passed.
+❯ - `make bump-plugin` built `agent-doc-jetbrains-0.2.184.zip` and `agent-doc-jetbrains-0.2.184-signed.zip`.
+❯ - `make install` installed the updated `agent-doc` binary and `libagent_doc.so`.
+❯ - `agent-doc plugin install --local jetbrains` installed the signed plugin into both active `IntelliJIdea2026.1` profile locations. Restart IntelliJ to load it.
+❯ - `make precommit` passed after refreshing the generated agent-doc instruction surfaces with `agent-doc skill install --all`.
+❯ - `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` marked the stale controller to recycle at the next idle boundary.
+❯ - `src/agent-doc` commit `dcc190ed` (`fix: keep editor emphasis on theme foreground`) was pushed to `btakita/agent-doc main`.
+❯ - Superproject commit `1759b6634` (`agent-doc: update editor emphasis fix`) is local only. I did not push the root repo because local `main` is 95 commits ahead and 7 behind `origin/main`, with unrelated dirty task/submodule edits; rebasing/pushing that safely needs a separate root-branch reconciliation. I added `#rootpushdiv` to the backlog for that follow-up.
+❯ - The latest `agent-doc` CI run for `dcc190ed` was still `in_progress` when I closed this cycle.
 ### Session Summary
 
 ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-060507.md`*
@@ -39,7 +53,33 @@ done
 Compacted content:
 ❯ - Archived 1 response topic(s): JB `Run Agent Doc` still does not quickly submit the prompt
 ❯ - Prior summary/context: ❯ - Recent `tasks/agent-doc/agent-doc-bugs2.md` JetBrains route attempts in `.agent-doc/state/editor-route-attempts/t...
-<!-- agent:boundary:8e9a288a -->
+
+### Re: JetBrains markdown emphasis colors — gpt-5
+
+> **Queue prompt:** The JB Plugin renders the content of elements as an unpleasant yellow. Please have the JB Plugin use the current theme for regular text. Variable names with multiple `_` are being misinterpreted as em or bold; only `_foo_` should be italic and `__foo__` should be bold, while `foo_bar_baz` and `foo__bar__baz` stay regular text.
+
+Implemented.
+
+What changed:
+❯ - JetBrains bold/italic visual tokens now inherit the editor's normal foreground instead of `DefaultLanguageHighlighterColors.IDENTIFIER`, so emphasized markdown no longer turns yellow under themes where identifiers are yellow.
+❯ - The shared visual token parser now rejects underscore emphasis markers inside identifier words. `_foo_` and `__foo__` still render italic/bold; `foo_bar_baz` and `foo__bar__baz` stay regular text.
+❯ - Added the Rust regression test, updated the editor integration guide and `VERSIONS.md`, and bumped the JetBrains plugin patch version to `0.2.184`.
+
+Build/install proof:
+❯ - `cargo test -p agent-doc-core syntax::tests::underscore_emphasis_does_not_match_inside_identifiers` passed.
+❯ - `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` passed.
+❯ - `make check` passed.
+❯ - `make bump-plugin` built `agent-doc-jetbrains-0.2.184.zip` and `agent-doc-jetbrains-0.2.184-signed.zip`.
+❯ - `make install` installed the updated `agent-doc` binary and `libagent_doc.so`.
+❯ - `agent-doc plugin install --local jetbrains` installed the signed plugin into both active `IntelliJIdea2026.1` profile locations. Restart IntelliJ to load it.
+❯ - `make precommit` passed after refreshing the generated agent-doc instruction surfaces with `agent-doc skill install --all`.
+❯ - `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` marked the stale controller to recycle at the next idle boundary.
+
+Commit/push status:
+❯ - `src/agent-doc` commit `dcc190ed` (`fix: keep editor emphasis on theme foreground`) was pushed to `btakita/agent-doc main`.
+❯ - Superproject commit `1759b6634` (`agent-doc: update editor emphasis fix`) is local only. I did not push the root repo because local `main` is 95 commits ahead and 7 behind `origin/main`, with unrelated dirty task/submodule edits; rebasing/pushing that safely needs a separate root-branch reconciliation. I added `#rootpushdiv` to the backlog for that follow-up.
+❯ - The latest `agent-doc` CI run for `dcc190ed` was still `in_progress` when I closed this cycle.
+<!-- agent:boundary:babea422 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -47,6 +87,7 @@ Compacted content:
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - The JB Plugin renders the content of elements as an unpleasant yellow. Please have the JB Plugin use the current theme for regular text (white in my current theme ![img_54.png](img_54.png)). Variable names with multiple `_` are being misinterpreted as em or bold. Can we disable the italics/bold font for variable names...multiple `_` starting internally? So only  `_foo_` would be italic and `__foo__` would be bold per markdown. But `foo_bar_baz` would not make `_bar_` italic and `foo__bar__baz` would not make `__bar__` bold...both those cases should be regular text with the regular text color.
 - When the JB Plugin loads a document without it being in the buffer, the colors fallback to the theme markdown. Please ensure the JB Plugin styling is applied in this case.
+- do [#rootpushdiv]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

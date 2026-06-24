@@ -122,6 +122,11 @@ Reconciled `src/lazily-spec/protocol.md` to the canonical wire format. Committed
 - Delta: externally-tagged `{"Delta":{base_epoch,epoch,ops:[...]}}`.
 - DeltaOp table: PascalCase `CellSet|SlotValue|Invalidate|NodeAdd|NodeRemove|EdgeAdd|EdgeRemove` with `node` field (was snake_case + `slot_id`).
 - Invariants + Eager-Signal + Lazy-recon: all `cell_set`/`slot_value`/`invalidate` op refs → PascalCase.
+- `test_deep_signal_chain_propagates_without_recursion` — 200-deep eager-Signal chain recomputes end-to-end on one mutation.
+- `test_signal_over_slot_cycle_invalidates_without_recursion` — the original topology (Signal reads Slot, downstream Slot reads Signal) driven from a Cell mutation.
+- `test_deep_slot_cascade_invalidates_without_recursion` — 300-deep Slot chain invalidates + recomputes without stack overflow.
+- `test_slot_reset_is_reentrancy_safe` — **Fix 2 guard**: `Slot.reset` clears subscribers before notifying; a re-entrant-reset subscriber must not mutually recurse (reverting to notify-before-clear fails this with `RecursionError`).
+- `test_slot_call_does_not_notify_subscribers` — **Fix 1 guard**: computing a Slot must not `touch()` subscribers (re-adding `touch()` to `Slot.__call__` fails this).
 
 Verified: zero snake_case op refs remain; the 5 JSON blocks I touched all parse (the 6th — WebSocket signaling frames — is an intentional multi-frame sequence). Matches lazily-rs `src/ipc.rs:323-459` + every `conformance/*.json` fixture. Doc-only change; the Lean `check` target is unaffected.
 
@@ -148,6 +153,11 @@ Verified: zero snake_case op refs remain; the 5 JSON blocks I touched all parse 
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
+> **Queue prompt:**
+>
+> :pushpin: do [#lzpyregress]
+
+
 ```text
 **IPC proof issue dogfood log**
 Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
@@ -157,7 +167,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=bed87b8e-4bad-4178-b623-0c9e90e4930d invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=18166 candidate_hash=4a2cbb8e322fe5cd39fa7dba825fb6f027011ef3e65e182af743bd41e18f1ebc content_ours_len=18441 content_ours_hash=96d3d3598dc8ebc7389584f28654b8a90c7ff90d6e2958bd7355ef8646a290e3 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782342826547
 ```
-<!-- agent:boundary:73b6dd97 -->
+<!-- agent:boundary:d9773043 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -167,7 +177,7 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#lzktconf]~~
-- 🚧 :pushpin: do [#lzpyregress]
+- ~~🚧 :pushpin: do [#lzpyregress]~~
 - :pushpin: do [#lzzigtodos]
 - ~~do [#lzjshygiene]: Please purge `node_modules/` from the git history.~~
 <!-- /agent:queue -->
@@ -175,7 +185,6 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzpyregress] lazily-py: add a deep/cyclic dependency regression test guarding the Signal→Slot RecursionError fix (commit 30907ea — Slot.__call__ no longer touches during computation; reset clears subscribers before notify). Currently 72 tests pass but the recursion path is unguarded against re-introduction. (v0.11.0 publish tracked separately in review #kb9b.)
 - [ ] [#lzzigtodos] lazily-zig: resolve open context.zig TODOs (rename .direct→.literal at context.zig:226 + CannotGetPtrOfDirectMode→LiteralHasNoPtr :273; before_change_subscribers at cell.zig:35; allocator options context.zig:617/621) and add a soak/cyclic test for Slot destroy↔unsubscribeChangeUnlocked ordering after the two recent memory-safety fixes (UAF 1dd8998 capture-ctx-before-destroy; iteration-during-mutation snapshot in emitChangeUnlocked). zig build test currently green.
 - [ ] [#lzjshygiene] lazily-js: node_modules NOT tracked (verified: git ls-files node_modules -> 0; .gitignore covers it; no commits touch it) — purge UNNEEDED, no history rewrite required. Remaining: validate conformance fixture assertions generically (parity with #lzktconf). npm test green (27 pass).
 <!-- /agent:backlog -->

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -171,7 +171,48 @@ Rewrote `mail/drafts/linkedin/2026-06-24-lazily-state-machine.md` in Brian's voi
 FIRST COMMENT (the link) and the image-attach note (Figure 3, themed render) kept; image note also stripped of its em-dash.
 
 **Committed + pushed:** `mail` `cbb78ac..1919597` → `btakita/mail`; superproject `979e10db7` → `btakita/agent-loop`. The gated posting follow-up stays tracked as `#lilazilysmpost` (operator posts via `corky linkedin` + attaches the themed render).
-<!-- agent:boundary:c6b5efb6 -->
+
+### Re: LinkedIn draft submitted via corky (not published) — glm-5.2
+
+> **Queue prompt:**
+>
+> Submit the draft post to Linked In via the corky api. Do not publish yet so I can review. Show me the link to the post, with the comment, and image.
+
+Created the LinkedIn draft via `corky linkedin draft --author btakita` → `mail/social/20260624-142530-linkedin.md` (frontmatter `status: draft`, `visibility: public`). NOT published — `corky linkedin publish` is the separate step the operator runs after review.
+
+**Draft file:** `mail/social/20260624-142530-linkedin.md`
+
+**Post body** (for review):
+
+> agent-doc runs an AI agent through a response cycle for a markdown document. Every cycle moves through phases: preflight, response captured, write applied, committed. The phase lives in a JSON sidecar so a crashed process can recover.
+>
+> For a long time the legality of each transition was enforced by hand. I had `if state.phase != Committed` checks duplicated across roughly two dozen mutators. It worked until two writers raced.
+>
+> The race was the hard part. Each writer would load the file, mutate one field, and save. Atomic writes meant you never saw a half-written file, but the second save still clobbered the first. Lost updates, not torn reads. A lock on the file wasn't the right shape for it.
+>
+> The fix was to give the state machine a spine. lazily's `StateMachine` is one Cell plus one pure transition function, and I wrapped it around the phase. The whole lifecycle is that one function now. `Some(next)` advances. `None` rejects. Terminals are sticky, and a duplicate `Committed` is accepted but suppressed, because the Cell has a PartialEq guard and won't invalidate on an equal value.
+>
+> The state lives in a reactive Cell, so every transition invalidates the same graph a UI or a gate reads. No callback bus to keep in sync.
+>
+> The pattern scaled further than I expected. The same primitive now backs six closed subdomains in the controller: cycle phase, queue head, editor-IPC patch delivery, actor lifecycle, route readiness, proof gate. Each is a small pure table. They fold into one event-sourced backbone, so crashing the controller and replaying the fact log rebuilds all six deterministically.
+>
+> A state machine isn't a special case sitting next to the reactive library. It's what the reactive library looks like when you only need one cell and a pure function over it.
+
+**First comment** (post immediately after the live post goes live):
+
+> Reactive State Machines: How lazily-rs Drives agent-doc's Cycle State → https://briantakita.me/posts/lazily-state-machine-cycle-state
+>
+> lazily-rs is open source: https://github.com/btakita/lazily-rs
+
+**Image:** Figure 3 from the post — the `CyclePhase` transition graph (PreflightStarted → ResponseCaptured → WriteApplied → Committed, `Abandoned` terminal). The post's diagrams are theme-dependent inline SVG, so attach a themed screenshot/render at posting time, not the raw SVG.
+
+**No LinkedIn URL yet** — the draft is local (`status: draft`). `corky linkedin publish` creates the live post and returns the LinkedIn URL. That step stays operator-gated as `#lilazilysmpost` (needs the themed image render attached at posting time).
+
+**Committed + pushed:** `mail` submodule `1919597..2f2a0c0` → `btakita/mail`; superproject gitlink `1da8f9eb4` → `btakita/agent-loop` (pushed).
+
+**Exchange bookkeeping:** noted the consolidation — the AI-tells-removed bullets now live in the blog-post response section, the duplicate rewritten-voice response is gone, and the `(HEAD)` marker is on the LinkedIn draft section. The `ipc_proof_insufficient` diagnostic block is the auto-appended dogfood annotation from the stale-cycle repair (not a user action).
+
+<!-- agent:boundary:73889598 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -180,7 +221,6 @@ FIRST COMMENT (the link) and the image-attach note (Figure 3, themed render) kep
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Submit the draft post to Linked In. Do not publish yet so I can review. Show me the link to the post, with the comment, and image.
 <!-- /agent:queue -->
 
 ## Backlog

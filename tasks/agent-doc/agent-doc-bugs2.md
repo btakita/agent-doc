@@ -111,7 +111,31 @@ The split text-then-Enter path exists for palette-style harness behavior, not Co
 So if JB `Run Agent Doc` still leaves a typed-but-unsubmitted Codex trigger, the failure is not “JetBrains forgot to include Enter.” It means the route typed across a bad readiness boundary: stale supervisor, startup/recycle transition, active/blocked composer, or a proof path that accepted pane input without dispatch-start proof. The right fix is to keep tightening the binary route readiness/proof gates and surface the state projection, not to add a second Enter from the plugin. A second Enter is risky because it can submit the wrong future prompt after the composer catches up.
 
 Relevant local checks already pin this contract: `simworld_jb_run_and_clear_share_codex_enter_submit_contract` expects Codex `tmux_text_enter`/`Enter`, and the dispatch-only direct-pane test asserts the route submits once without extra Enter retries.
-<!-- agent:boundary:fe9da0fd -->
+
+### Re: equityfundingsource route difference — gpt-5
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` does not submit on equityfundingsource.md but does submit on monsterrodholders.md and this document. Why?
+
+The difference is the target pane/session state, not the markdown file.
+
+`equityfundingsource.md` is registered in the root project on pane `%3`. Its route-attempt ledger repeatedly shows `route_protected_prompt_input`: the router refused to type into `%3` because the Codex composer already contained protected draft prompt input. The route snapshots show examples like `Use /skills to list available skills`, `Implement {feature}`, and an older completed EFS response sitting at the prompt. In that state, the binary correctly refuses to inject another `agent-doc ...` trigger.
+
+This document is registered on pane `%1`, and its recent attempts show `route_success`. `monsterrodholders.md` is a separate agent-doc project under `src/boost-client`, with its own `.agent-doc/sessions.json`, and is registered on pane `%2`; its recent attempts either succeeded or queued behind an already-active owner turn.
+
+There is also a current closeout issue specific to `equityfundingsource.md`: `agent-doc session-check` reports that its cycle is still `preflight_started` after an IPC `no_ack`. That interrupted cycle is separate from the original submit-key question, but it explains why equityfundingsource remains brittle while this document routes normally.
+
+Concrete diagnosis:
+
+- `tasks/professional/equityfundingsource.md`: pane `%3`, repeated `PROTECTED_PROMPT_INPUT`, currently interrupted after IPC no-ack.
+- `tasks/agent-doc/agent-doc-bugs2.md`: pane `%1`, recent `route_success`.
+- `src/boost-client/tasks/monsterrodholders.md`: pane `%2`, separate submodule project/session registry; recent route success or queued-behind-owner behavior.
+
+Next operational fix: clear or submit the draft in pane `%3`, then close the interrupted `equityfundingsource.md` cycle through the normal agent-doc write/commit path before judging another JB route attempt.
+
+Evidence checked: the two root route-attempt ledgers, the boost-client monsterrodholders route-attempt ledger, both session registries, and `agent-doc session-check` for all three documents. No code changes were made.
+<!-- agent:boundary:ccbe593a -->
 <!-- /agent:exchange -->
 
 ## Queue

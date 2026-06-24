@@ -166,7 +166,36 @@ Verification:
 
 Escalation: deploy current `main` when ready; no data correction is required for this specific row.
 Confidence: high.
-<!-- agent:boundary:215b15e7 -->
+
+### Re: Requirements Current for incomplete signup - gpt-5
+
+> **Queue prompt:**
+>
+> I just signed up as btak.div+lender3@gmail.com. This user has Requirements Current in the Lender Pipeline. Why are the requirements current? The lender has not completed the signup...adding documents.
+
+Root cause: `investor_requirements_status_()` treated `users.accredited_confirmed_at` as enough to make annual Requirements `current`. That field is only the lender signup self-attestation, so a new lender who checked the accredited box during signup could incorrectly land in Requirements Current before uploading evidence.
+
+Implemented fix:
+- `app/equityfundingsource/lib/admin/repo.ts` now marks Requirements current only when `accreditation_status === 'verified'`; signup self-attestation alone stays `not_started`.
+- `app/equityfundingsource/lib/admin/investor_management/index.ts` now feeds the pipeline from the latest `lender_accreditation_verifications.status`, with `users.accreditation_status` only as a legacy fallback.
+- `tests/admin-investor-pipeline.test.ts` covers the reported pending/self-attested signup state and the verified-but-missing-account state separately.
+- `prds/investor-pipeline-admin.md` and `docs/master-state-machine.md` document that admin-verified evidence, not self-attestation, drives Requirements Current.
+
+Verification:
+- `git diff --check`
+- `bun test tests/admin-investor-pipeline.test.ts`
+- `make check` (1180 tests, app build, worker build)
+- `gh run list --workflow CI --limit 1` in both the EFS submodule and parent reported: `could not find any workflows named CI`.
+
+Commits:
+- EFS submodule: `dd1969c fix(admin): require verified lender requirements`
+- Parent gitlink: `ff6f88f87 chore: update equityfundingsource submodule`
+
+Deployment: not run for this queue head; the separate `deploy` queue item remains.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:0c84fc41 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -187,7 +216,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, all dialogs should have a unique url using pushState. So the links can be shared.~~
-- I just signed up as btak.div+lender3@gmail.com. This user has Requirements Current in the Lender Pipeline. Why are the requirements current? The lender has not completed the signup...adding documents.
+- ~~I just signed up as btak.div+lender3@gmail.com. This user has Requirements Current in the Lender Pipeline. Why are the requirements current? The lender has not completed the signup...adding documents.~~
 - In the Lender Pipeline > Requirements Dialog, remove the Message Lender section. The contextual messaging (chat bubble) should open to the message the lender for the card.
 - In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field...which would be Close...then Advance Lender. The up arrow key navigates to the previous actionable item.
 - In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field.

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -38,7 +38,25 @@ complete
 Compacted content:
 ❯ - Archived 3 response topic(s): Admin Application Completion And Deploy; IPC Proof Issue Dogfood Log; Full Application Dialog Focus And Deploy
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:431f982a -->
+
+### Re: Application Next-Step Alert And Deploy — gpt-5
+
+> **Queue prompt:**
+> In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, add an alert with explaining the next actionable step to advance the application with a CTA button.
+> deploy
+
+Done. The admin Pipeline application dialog now shows a status-aware next-step alert before the detail rows. The CTA opens the existing stacked Full Application dialog, with copy that either tells the admin to complete required core data and mark the application Complete, or to review/decide on a submitted/in-review application.
+
+Changed paths: `src/equityfundingsource-dev` at `ba39c67`; parent submodule pointer at `ee4a32358`. Key files were `lib/ui--browser--efs/portal/admin/pipeline.tsx`, `lib/ui--browser--efs/portal/admin/full_applications.tsx`, `lib/ui--browser--efs/portal/shared/full_application_detail.tsx`, `app/equityfundingsource/lib/admin/applications/index.ts`, and related Bun tests.
+
+Commits/push/deploy: EFS commit `ba39c67 feat(admin): surface application advancement CTA (#pipeline-full-app-dialog)` was pushed to `origin/main`; parent pointer commit `ee4a32358 chore(efs): bump application advancement submodule` was pushed to `origin/main`; deployed Worker version `891e4b29-bb5c-49c3-ba8e-5a0b28ed6c04`.
+
+Verification: focused Bun tests passed with `94 pass / 0 fail`; `make check` passed with `1186 pass / 0 fail`, app build, and worker build. The digest wrapper flagged the intentional logged `d1 down` fixture from the non-fatal outbox test, but the raw Bun logs report zero failures. D1 preflight/post-deploy checks showed no migrations to apply, D1 info returned, and Time Travel bookmark `00000509-00000000-00005094-f7cc40fb5e53febfca67cef7da291ced` was available. Smoke checks: public `/` returned `200`; the admin deep link returned `303`, consistent with Cloudflare Access redirect.
+
+CI/workflows: `gh run list --workflow CI --limit 1` found no `CI` workflow in either EFS or the parent repo. `gh workflow list` returned no EFS workflows and only `Agent Doc` in the parent repo.
+
+Escalation: none. Confidence: high for the shipped code/deploy path; the final live visual check of the admin-only dialog still requires an authenticated browser session.
+<!-- agent:boundary:b48c8b07 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,7 +76,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, add an alert with explaining the next actionable step to advance the application with a CTA button.
+- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, add an alert with explaining the next actionable step to advance the application with a CTA button.~~
 - deploy
 <!-- /agent:queue -->
 

@@ -93,7 +93,20 @@ Changed paths: `agent-doc-orchestration/src/preflight.rs`, `VERSIONS.md`, `Cargo
 The struck `~~do [#actorswitchdefer]~~` was an explicit operator edit: Part A already shipped (`6c7455a8`), so the immediate queue slice is done. Part B (SimWorld proof + SPEC.md:141 reconciliation) remains tracked in `agent:backlog` under the same id — it is not lost, just not an active queue head right now. Marking the removal intentional so the `#queue-clear-unrun-items` guard stops flagging it; re-queue `do [#actorswitchdefer]` when Part B is ready to drain.
 
 <!-- no-queue-removal-guard -->
-<!-- agent:boundary:83f062f4 -->
+
+### Re: #mrhqrestore shipped — recover-lost classifies git-history + --restore-patch — glm-5.2 (HEAD)
+
+**#mrhqrestore — SHIPPED (71877b2b, v0.34.47).** `queue recover-lost` now classifies every git-history-only candidate as **restorable** vs **non-restorable/foreign**, and `--restore-patch <PATH>` emits an operator-reviewed JSON restoration patch that separates prompts safe to re-queue here from foreign cross-document-contamination ones (e.g. a `monsterrodholders.md` row leaked into this doc). The session document itself is never mutated.
+
+- `is_foreign_owned()` / `foreign_doc_reference()` detect `<name>.md` references to other docs → explicit non-restorable recommendation naming the owning document.
+- Proof message now reports restorable vs non-restorable counts; human report prints a per-candidate `restorable`/`non-restorable` label + recommendation.
+- 3 new/updated regression tests (restorable classification, foreign classification, restore-patch split). Full agent-doc suite green (591 bin + integration, 0 failures); no new clippy warnings.
+- Released `#deploy-just-do-it`: 0.34.46→0.34.47 (agent-doc + orchestration + pyproject + Cargo.lock + VERSIONS.md), `make install-full` done, 2 controllers marked to recycle onto 0.34.47, pushed to origin/main. Tag + crates.io/PyPI publish are the remaining release tail.
+
+**Queue triage:** the 4× duplicated `JB Run Agent Doc` equityfundingsource error blocks + `---` noise are cross-doc/queue-churn symptoms. Duplicates of existing items — "JB File Cache Conflict"→`#p2j4`, "OpenCode reverse numeric lists"→`#4pdp`, code-fence strip→`#npe1`, queue-edit churn→`#0bmv`, equityfundingsource codex→opencode defer→`#actorswitchdefer` Part B; `#ipcqproof` already shipped (v0.34.46). The four genuinely new reports are captured as backlog items `#capproofbg`, `#jbrestartbusy`, `#jbrunhang`, `#jbdupqueue`. `#ocdrainstall` (top) nails the per-cycle stall behind the repeated re-invocations — OpenCode has no auto-loop, so the drain stops after each closeout.
+
+**Top backlog id: #ocdrainstall** (self-drive the drain in-turn; without it every other head forces another manual invocation).
+<!-- agent:boundary:7ba39c8f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -275,7 +288,6 @@ What are #next-steps to fix bugs?
 - [ ] [#4pdp] #ocreverselist=OpenCode reverse-ordered numeric list rendering investigation
 - [ ] [#0bmv] #qeditrace=Consolidate queue-edit-during-active-turn race plans (plan-qdurcrash + plan-supervisor-direct-queue-edit-race)
 - [ ] [#actorswitchdefer] Part B: SimWorld proof idle-watch fires restart when deferred + reconcile SPEC.md:141 defer contract. Part A shipped (6c7455a8).
-- [ ] [#mrhqrestore] Improve agent-doc queue recover-lost for git-history-only queue deletions: produce an operator-reviewed restoration patch or explicit non-restorable recommendation for foreign-owned prompts such as the monsterrodholders test-email CSV row.
 <!-- /agent:backlog -->
 
 ## Review

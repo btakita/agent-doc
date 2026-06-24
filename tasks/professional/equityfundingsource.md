@@ -352,7 +352,14 @@ Cleared the two already-answered free-text queue heads after the closeout commit
 Reconciled the session document through the binary finalize path after preflight recovered the orphaned response body.
 
 No repo work was started in this repair step, and no backlog items were changed.
-<!-- agent:boundary:0a3bf6b8 -->
+Agent-doc closeout is clean now.
+
+Preflight found no new user diff, but it recovered an orphaned response and committed it. `session-check` then exposed an IPC/snapshot mismatch, so I rebuilt the stale local `agent-doc` install, requested supervisor recycle, and committed a small closeout repair through the IPC finalize path.
+
+Latest parent commit: `1e0c4c793 agent-doc(equityfundingsource): 2026-06-23 21:38:34`.
+
+Final `session-check`: OK, with no drainable queue head. One warning remains: the route-owned supervisor may keep using the stale binary until it reaches an idle recycle boundary.
+<!-- agent:boundary:eaa2d3fa -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -39,7 +39,32 @@ done
 Compacted content:
 - Archived 11 response topic(s): JB Run Agent Doc on equityfundingsource.md; IPC proof dogfood log acknowledged; #ipcqproof shipped; 8 more
 - Prior summary/context: prior compacted content: Archived 7 response topic(s): IPC integration and monsterrodholders queue audit; IPC proof i...
-<!-- agent:boundary:4e67ea9d -->
+
+### Re: #jbrestartbusy — code-complete, closed — glm-5.2
+
+Verified `#jbrestartbusy` is **code-complete end-to-end**; marked it done. Both plan files are already implemented, committed (`bb370910 feat: force busy session restart` + the post-turn-false-active work), installed (binary 0.34.48), and the restart suite is green:
+
+```
+cargo test -p agent-doc --bin agent-doc restart
+... 12 passed; 0 failed
+```
+
+| Backlog concern | Fix in place | Evidence |
+|---|---|---|
+| Supervisor reports busy when OpenCode pane is idle; turn state must flip to idle on a non-finalize exit (IPC churn / supervisor version mismatch) | False-active detection + direct-evidence reconcile | `plan-opencode-post-turn-false-active.md` (IMPLEMENTED): bottom-12-line `opencode_active_turn_busy` cue check replaces the all-lines scan, so completed-turn scrollback no longer reads as `alive-busy`. `guard_destructive_operator_on_live_busy_pane` then reconciles the stale busy projection back to ready on real `AliveIdle` evidence (`session_actor_cmd.rs:2495`). |
+| Recycle Supervisor must skip the Interrupt & Restart + confirmation 2-step | `session_restart --force` path | `plan-jb-restart-supervisor-busy-refusal.md` (DONE): refusal message hints `--force` (`session_actor_cmd.rs:2510`); `--force` interrupts+kills busy panes with telemetry `session_restart_force_used` / `_busy_pre_interrupt_idle` / `_busy_force_killed` (`session_actor_cmd.rs:513-540`); JB + VS Code plugins parse the refusal and surface typed actions. |
+
+Working tree is clean — no code or deploy work was needed this cycle; the ship happened in earlier cycles.
+
+### Re: queue resume + flood-pin dedup — glm-5.2
+
+- Resumed the operator-paused queue (`receipt_id=96`). The pause reason was stale — it read "resume after installing 0.34.20 + recycle supervisor"; we are on **0.34.48**, so the resume condition was long satisfied.
+- **Flood-pin collapse:** the ~7 duplicate `:round_pushpin:` actor-switch pins are binary-injected, position-locked pins from the `#rt83/#qflood` phantom-pin churn. There is no per-item queue-strike flag on `agent-doc write`/`finalize` (the binary owns queue convergence via `#qdedupsync` / `#queue-operator-pin-position-lock`), so I could not collapse them from the CLI this cycle without risking a CRDT/convergence fight. Marking `#jbrestartbusy` done strikes its own `do [#jbrestartbusy]` pin. The duplicate actor-switch pins should now be cleaned by the current binary's convergence on subsequent passes, or by the `#rt83/#qflood` product fix — recommend filing that as an explicit backlog item if it recurs.
+
+### Re: live verify (yours, no gate) — glm-5.2
+
+Per your "I will test, file bugs, you check the logs" loop, the one non-code remaining check is the `plan-opencode-post-turn-false-active.md` trailing note: live-verify a real OpenCode pane re-dispatches after a completed turn (no false `alive-busy`; restart works without the 2-step). No review gate filed, per your "no more gates" instruction — flagging here for your next test pass.
+<!-- agent:boundary:6d4ef772 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -48,7 +73,7 @@ Compacted content:
 - 🚧 JB `Recycle Supervisor` receives a message that the agent is busy even though the opencode terminal is idle. The state needs to be updated to idle once the turn completes...even if the turn did not finalize. If the agent stops the turn due IPC churn or a Supervisor version mismatch, the state should indicate the agents idle. No need for the extra 2 steps of to press "Interrupt & Restart" + the confirmation.
 - "Add a bounded `session_startup` wait in `route.rs`/`start.rs` with a hard deadline; on expiry, fail closed with `startup_miss` + an actionable error ("session did not become dispatch-ready in Ns") rather than hanging.": Can you retry or isolate why the session hangs so we can further dogfood these sort of errors?
 - :pushpin: do [#jbrunhang]
-- :pushpin: do [#jbrestartbusy]
+- ~~:pushpin: do [#jbrestartbusy]~~
 ---
 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
@@ -211,7 +236,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#capproofbg] Make the JB Run Agent Doc capacity proof non-blocking: dispatch immediately and run the capacity proof in the background, surfacing failure asynchronously instead of stalling every dispatch.
-- [ ] [#jbrestartbusy] Supervisor reports agent busy when the OpenCode pane is idle: turn state must flip to idle on a non-finalize turn exit (IPC churn / supervisor version mismatch), and Recycle Supervisor must skip the Interrupt & Restart + confirmation 2-step. See plan-jb-restart-supervisor-busy-refusal.md, plan-opencode-post-turn-false-active.md.
 - [ ] [#jbrunhang] JB Run Agent Doc on a session that is not open hangs the next invocation: the first run against a closed session must fail immediately instead of wedging the subsequent dispatch. See plan-controller-stalled-client-start-hang.md.
 - [ ] [#npe1] #codefencestrip=Template patch parser strips trailing code fences at the exchange boundary
 - [ ] [#p2j4] #jbcfdiag=JB File Cache Conflict: investigate remaining write-path triggering the JB VFS dialog beyond IPC-first writes

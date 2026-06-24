@@ -67,7 +67,38 @@ Verification already completed:
 - `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success`, run `28070395022`, on `2026-06-24T02:11:52Z`.
 
 No new backlog item is needed from this response.
-<!-- agent:boundary:3322f089 -->
+
+### Re: state backbone implementation — gpt-5
+
+> **Queue prompt:**
+>
+> Implement state backbone /home/brian/work/btakita/agent-loop/src/agent-doc/specs/13-state-backbone.md. Add additional state machines for other state domains.
+
+Implemented the state backbone as a concrete orchestration module instead of leaving the spec as prose.
+
+Changes:
+
+- Added `agent-doc-orchestration/src/state_backbone.rs` with a typed append-only `EventLedger`, `StateEvent`, `StateFact`, and deterministic `StateBackboneProjection` reducers for document, queue, closeout, transport, supervisor, route, and proof state.
+- Kept the existing `CyclePhaseMachine` as the closeout lifecycle authority and added local FSMs for other closed domains: `QueueHeadMachine`, `TransportPatchMachine`, `ActorLifecycleMachine`, `RouteReadinessMachine`, and `ProofGateMachine`.
+- Added generation-aware owner checks so stale editor IPC / route / supervisor reports are recorded as rejected instead of mutating current projections.
+- Updated `specs/13-state-backbone.md` to point at the implementation and list the state machines now backing the spec.
+
+Verification completed before closeout:
+
+- `cargo fmt --check`
+- `cargo test -p agent-doc-orchestration state_backbone -- --test-threads=2`
+- `cargo clippy -p agent-doc-orchestration -- -D warnings`
+- `make check` (clippy, 5056 nextest tests, doctests, medium SimWorld)
+- `make install-full` (installed `agent-doc 0.34.43`; lib install marked one controller for recycle at next idle boundary)
+- `gh run list --workflow CI --limit 1` showed latest `CI` run `28070395022` completed successfully.
+
+Local commits prepared:
+
+- `src/agent-doc`: `a565bb49 feat: add state backbone projections`
+- parent repo: `4105af85a chore: update agent-doc submodule`
+
+Per the session-doc closeout ordering, I will push after this `agent-doc finalize` commit lands.
+<!-- agent:boundary:ab4f7c11 -->
 <!-- /agent:exchange -->
 
 ## Queue

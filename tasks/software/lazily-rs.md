@@ -64,7 +64,7 @@ Drained the top `do` queue item. `AsyncContext::dispose_async_effect` recycled t
 The **IPC proof issue dogfood log** that plan flagged as the prompt target is a self-appended agent-doc artifact from the prior interrupted-cycle recovery (`ipc_proof_insufficient`, `live_prompt_drift_after_preflight`) — editor-IPC writeback noise, not actionable lazily-rs work; the write still reached `committed` last cycle. No code action.
 
 Continuing the queue drain (`#lzasynceffdup` next).
-<!-- agent:boundary:b93a9eba -->
+<!-- agent:boundary:84636853 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -75,7 +75,7 @@ Continuing the queue drain (`#lzasynceffdup` next).
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~What are #next-steps to fix lazily bugs?~~
 - ~~do [#lzasyncdispose2]~~
-- do [#lzasynceffdup]
+- 🚧 do [#lzasynceffdup]
 - do [#lzstr0mnetinbox]
 - do [#lzstr0mnetacceptanswer]
 - do [#lzwsunbounded]
@@ -86,7 +86,7 @@ Continuing the queue drain (`#lzasynceffdup` next).
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzasynceffdup] [recommended] Backend parity: AsyncContext pending_async_effects (async_context.rs:234) is a Vec with no scheduled_async_effects HashSet, unlike Context (context.rs:123) and ThreadSafeContext (thread_safe.rs:1219) — duplicate ids accumulate O(invalidations) before drain, skipped only by a force_run flag check. Add a HashSet for dedupe + parity.
+- [ ] 🚧 [#lzasynceffdup] [recommended] Backend parity: AsyncContext pending_async_effects (async_context.rs:234) is a Vec with no scheduled_async_effects HashSet, unlike Context (context.rs:123) and ThreadSafeContext (thread_safe.rs:1219) — duplicate ids accumulate O(invalidations) before drain, skipped only by a force_run flag check. Add a HashSet for dedupe + parity.
 - [ ] [#lzstr0mnetinbox] [recommended] str0m_net.rs receive-side Shared::inbox (:133) is an unbounded Mutex<VecDeque>; send side has MAX_PENDING_FRAMES=1024 backpressure but ChannelData pushes (:548) are unbounded — a slow consumer grows memory without limit. Cap inbox + apply backpressure in handle_input.
 - [ ] [#lzstr0mnetacceptanswer] str0m_net.rs driver discards rtc.accept_answer result (:391 let _ =); an ICE/DTLS fingerprint/mid mismatch is invisible and wait_open times out with no diagnostic. Propagate apply-time failure to Shared::last_error so the open-failure surfaces a cause.
 - [ ] [#lzwsunbounded] ws_backend.rs outbound is an unbounded mpsc (:88) and drive abandons queued frames on send error (:117-119 break); producers can keep enqueuing after close. Switch to a bounded channel, surface send failures via WsError, stop producers on close.

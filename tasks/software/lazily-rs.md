@@ -57,7 +57,21 @@ Escalation: no approval prompts were needed. Confidence: high; unrelated dirty w
 The previous closeout intentionally consumed only the lazily-kt free-text queue head. The `:pushpin: do [#bcnf]` and `:pushpin: do [#pwvm]` rows were not consumed by this cycle; both remain queued for their own later `do #id` cycles.
 
 Changed paths: none in this repair closeout. Verification: session-check repair evidence only; the lazily-kt implementation verification remains the prior passing `make check` and GitHub/submodule checks. Escalation: none. Confidence: high.
-<!-- agent:boundary:027207ba -->
+
+### Re: lazily-js GitHub project and submodule — gpt-5
+
+> **Queue prompt:** create a lazily-hub/lazily-js github project. Make src/lazily-js be a git submodule to the lazily-hub/lazily-js
+
+Done. I created the public GitHub repository at https://github.com/lazily-hub/lazily-js, initialized `src/lazily-js` as its own `main` branch repo, committed the existing package metadata there as `78f3adc Initial lazily JavaScript package`, and pushed it to `origin/main`.
+
+Changed paths in the superproject: `.gitmodules` and `src/lazily-js` now point to `git@github.com:lazily-hub/lazily-js.git` as a submodule gitlink at `78f3adc5285596e6b1ac2e27ce080a7339b07eeb`. The superproject conversion is committed as `d4e89629e Add lazily-js submodule` and `git push origin main` reports the remote is up to date.
+
+Verification: `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` passed with exit code 0; `git submodule status src/lazily-js` reports the expected commit; `git -C src/lazily-js status --short --branch` is clean on `main...origin/main`; `gh repo view lazily-hub/lazily-js` confirms the repo is public with default branch `main`. CI check note: `gh run list --workflow CI --limit 1` reported that this repo has no workflow named `CI`, so there was no latest CI run to inspect.
+
+Preflight warnings: semantic completion candidates were reported for review `#h6qb` and backlog `#bcnf`; I left both unchanged because this cycle only handled the free-text lazily-js GitHub/submodule queue head.
+
+Escalation: no approval prompts were needed. Confidence: high; unrelated dirty worktree changes were left untouched.
+<!-- agent:boundary:7c53eb89 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,7 +87,9 @@ Changed paths: none in this repair closeout. Verification: session-check repair 
 - ~~:pushpin: do [#f71y]~~
 - ~~:pushpin: do [#mes4]~~
 - ~~create a lazily-hub/lazily-kt github project. Make src/lazily-kt/ be a git submodule to the lazily-hub/lazily-kt project.~~
-- create a lazily-hub/lazily-js github project. Make src/lazily-js be a git submodule to the lazily-hub/lazily-js
+- ~~create a lazily-hub/lazily-js github project. Make src/lazily-js be a git submodule to the lazily-hub/lazily-js~~
+- Ensure lazily-kt follows the lazily-spec. It seems to be missing much of the spec.
+- Ensure lazily-js follows the lazily-spec...except for what + covered in [#bcnf].
 - :pushpin: do [#bcnf]
 - do [#t0qn]
 - do [#t0mf]

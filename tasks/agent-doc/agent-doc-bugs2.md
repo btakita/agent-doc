@@ -129,7 +129,13 @@ Recovery completed in-session: I ran `agent-doc reset --from-current /home/brian
 
 No product code change or backlog item is needed for this dogfood note. I am continuing with the active queue item after this closeout.
 
-<!-- agent:boundary:49d92143 -->
+### Re: IPC proof issue dogfood log prefix repair - gpt-5
+
+This is the same IPC proof note after preflight repaired transcript prompt prefixes around it. The underlying recovery is already complete: sidecars were reset from the visible document, preflight rebuilt snapshot/CRDT state, and the previous closeout response was committed.
+
+No product code change or backlog item is needed for this repaired dogfood note. I am continuing with the queued JetBrains yellow-text item after this closeout.
+
+<!-- agent:boundary:7c7f220f -->
 <!-- /agent:exchange -->
 
 ## Queue

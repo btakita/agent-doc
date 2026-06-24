@@ -276,6 +276,9 @@ fn context_clear_command_candidate_visible(candidate: &str, command: &str) -> bo
     if candidate == command {
         return true;
     }
+    if command == "/new" && matches!(candidate, "New session" | "session_new") {
+        return true;
+    }
     command == "/new"
         && candidate
             .strip_prefix("/new")
@@ -531,6 +534,32 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client · Context 0% use
             content, "/new", &harness
         ));
     }
+
+    #[test]
+    fn supervisor_pending_payload_detects_opencode_selected_new_session_command() {
+        let harness = crate::harness::HarnessConfig::opencode();
+        let content = concat!(
+            "older output\n",
+            "> New session\n",
+            "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n",
+        );
+
+        assert!(
+            supervisor_pane_payload_pending_in_content(content, "/new", &harness),
+            "OpenCode can replace `/new` with the selected command label before the final submit Enter"
+        );
+
+        let structured = concat!(
+            "older output\n",
+            "> session_new\n",
+            "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n",
+        );
+        assert!(
+            supervisor_pane_payload_pending_in_content(structured, "/new", &harness),
+            "OpenCode can also surface the selected command id before submission"
+        );
+    }
+
     #[test]
     fn stale_busy_reconcile_waits_for_full_debounce() {
         // One idle observation is not enough — a turn spinning up briefly shows no

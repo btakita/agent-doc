@@ -2187,6 +2187,9 @@ fn clear_command_candidate_visible(candidate: &str, command: &str) -> bool {
     if candidate == command {
         return true;
     }
+    if command == "/new" && matches!(candidate, "New session" | "session_new") {
+        return true;
+    }
     command == "/new"
         && candidate
             .strip_prefix("/new")
@@ -4726,6 +4729,31 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert!(clear_command_visible_in_active_input(
             content, "/new", &harness
         ));
+    }
+
+    #[test]
+    fn clear_command_visible_detects_opencode_selected_new_session_command() {
+        let harness = agent_doc_orchestration::harness::HarnessConfig::opencode();
+        let content = concat!(
+            "older output\n",
+            "> New session\n",
+            "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n",
+        );
+
+        assert!(
+            clear_command_visible_in_active_input(content, "/new", &harness),
+            "OpenCode can replace `/new` with the selected command label before the final submit Enter"
+        );
+
+        let structured = concat!(
+            "older output\n",
+            "> session_new\n",
+            "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n",
+        );
+        assert!(
+            clear_command_visible_in_active_input(structured, "/new", &harness),
+            "OpenCode can also surface the selected command id before submission"
+        );
     }
 
     #[test]

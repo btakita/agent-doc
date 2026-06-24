@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -120,7 +120,7 @@ fix(admin): keep dialog arrow navigation from opening selects
 
 Mark shared dialog navigation roots and let closed PortalSelect ArrowUp/ArrowDown events bubble to the dialog action navigator inside those roots, while keeping Enter/Escape and open-list option navigation owned by the select. Updates the Deal Pipeline and Lender Pipeline regression coverage; make check passes and Worker version 1b6da8b5-bab6-4fc2-8140-526ff3425953 is deployed.
 ```
-<!-- agent:boundary:e326a11b -->
+<!-- agent:boundary:54cdfe68 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -140,6 +140,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > should be automatically moved to the Review stage when it is opened. Remove the "Marked for Review" button.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

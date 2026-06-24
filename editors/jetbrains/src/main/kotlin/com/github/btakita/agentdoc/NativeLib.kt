@@ -389,6 +389,17 @@ interface AgentDocLib : Library {
     fun agent_doc_version(): Pointer?
 
     /**
+     * Read the Rust-owned document state projection JSON for a document hash.
+     * Caller must free the returned pointer with [agent_doc_free_string].
+     */
+    fun agent_doc_state_projection(documentHash: String): Pointer?
+
+    /**
+     * Record a typed state-backbone event. Returns 1 on success, 0 on any error.
+     */
+    fun agent_doc_record_state_event(documentHash: String, eventJson: String): Int
+
+    /**
      * Resolve a file's agent-doc project root and relative path.
      *
      * Walks up from [filePath]'s parent looking for the nearest ancestor directory

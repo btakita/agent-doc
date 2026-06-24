@@ -714,6 +714,7 @@ async function executeRunForDocument(
     routeKey: string,
 ): Promise<void> {
     const abortController = new AbortController();
+    let routeGeneration: number | null = null;
     let resolveSettled: () => void = () => {};
     const settled = new Promise<void>((resolve) => {
         resolveSettled = resolve;
@@ -724,9 +725,16 @@ async function executeRunForDocument(
     });
     try {
         await saveMarkdownDocument(filePath);
+        routeGeneration = native.recordRouteDispatchStarted(filePath, routeKey, cwd);
         const output = await runCli(['route', '--dispatch-only', rel], cwd, {
             signal: abortController.signal,
         });
+        native.recordRouteDispatchProven(filePath, routeGeneration, `vscode:${routeKey}`, cwd);
+        const projection = native.stateProjectionForFile(filePath, cwd);
+        const summary = projection ? native.projectionSummary(projection) : null;
+        if (summary) {
+            console.log(`[agent-doc/state-projection] ${native.compactProjectionSummary(summary)} file=${rel}`);
+        }
         showHint(output || `Routed ${rel}`);
         trackedFiles.add(filePath);
         ensurePromptPolling(cwd);
@@ -735,6 +743,7 @@ async function executeRunForDocument(
             showHint(`Run cancelled before Clear Session Context for ${rel}`);
             return;
         }
+        native.recordRouteBlocked(filePath, routeGeneration, err.message, cwd);
         const failure = buildRouteFailurePresentation(rel, err.message);
         showRouteFailureOutput(failure.title, failure.body);
         showError(failure.toast);
@@ -2055,13 +2064,23 @@ class PatchWatcher implements vscode.Disposable {
                 return;
             }
 
+            const projectRoot = this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined;
+            const stateGeneration = native.recordEditorPatchQueued(patch.file, patch.patch_id, projectRoot);
             if (!this.awaitIdleBeforeDocumentMutation(patch.file, 'file patch', uri.fsPath)) {
+                native.recordEditorRetryRequested(
+                    patch.file,
+                    patch.patch_id,
+                    stateGeneration,
+                    'typing_active',
+                    projectRoot,
+                );
                 return;
             }
 
             const applied = await this.applyPatch(patch, uri.fsPath);
 
             if (applied) {
+                native.recordEditorAckObserved(patch.file, patch.patch_id, stateGeneration, projectRoot);
                 // ACK: delete the patch file
                 try {
                     fs.unlinkSync(uri.fsPath);
@@ -2069,6 +2088,13 @@ class PatchWatcher implements vscode.Disposable {
                     this.outputChannel.appendLine(`PatchWatcher: failed to delete patch file: ${e.message}`);
                 }
             } else {
+                native.recordEditorRetryRequested(
+                    patch.file,
+                    patch.patch_id,
+                    stateGeneration,
+                    'file_apply_failed',
+                    projectRoot,
+                );
                 this.outputChannel.appendLine(`PatchWatcher: patch not applied, leaving for retry: ${uri.fsPath}`);
             }
         } catch (e: any) {

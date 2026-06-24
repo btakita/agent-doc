@@ -85,6 +85,28 @@ The closeout projection delegates phase advancement to the existing
 `CyclePhaseMachine`; the other projections use their own small state machines
 for closed subdomains.
 
+## Editor Projection Bridge
+
+Editor integrations must treat the FFI state backbone as the shared foundation.
+JetBrains, VS Code, and later editors should:
+
+- bind `agent_doc_state_projection` and `agent_doc_record_state_event` when the
+  native library exposes them;
+- compute the canonical document hash with the same canonical-path SHA-256 key
+  used by snapshots;
+- report editor transport observations as typed events such as
+  `OwnerGenerationChanged`, `EditorPatchQueued`, `EditorAckObserved`, and
+  `EditorPatchRetryRequested`;
+- report route dispatch observations as route-owner generation plus
+  readiness/proof events instead of relying only on plugin-local booleans; and
+- render route, transport, and proof status from `DocumentStateProjection`
+  slices where status/log output needs current state.
+
+The editor bridge may keep small in-process counters for owner generations, but
+it must not implement a second route, IPC, or proof FSM. If an older native
+library lacks the projection ABI, plugins fail open to existing behavior and log
+that projection reporting is unavailable.
+
 ## Actor Ownership
 
 Live mutable surfaces have exactly one current owner:

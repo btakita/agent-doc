@@ -341,6 +341,7 @@ object TerminalUtil {
         val (cwd, relativePath) = resolveProject(project, file)
         val agentDoc = resolveAgentDoc(cwd)
         val routeKey = RunAgentDocAttemptLedger.routeKey(cwd, relativePath)
+        val documentPath = java.io.File(cwd, relativePath).absolutePath
 
         LOG.warn("[route] sendToTerminal: cwd=$cwd rel=$relativePath binary=$agentDoc")
         attempt?.recordIfCurrent("route_prepare")
@@ -440,10 +441,14 @@ object TerminalUtil {
             Thread {
                 var finalStage: String? = null
                 var finalError: String? = null
+                var routeGeneration: Long? = null
                 try {
                     var routeAttempt = 1
                     while (!handle.wasCanceled() && routeAttempt <= STARTING_ACTOR_ROUTE_MAX_ATTEMPTS) {
                         attempt?.recordIfCurrent("route_start", command = cmd)
+                        if (routeGeneration == null) {
+                            routeGeneration = StateProjectionBridge.recordRouteDispatchStarted(documentPath, routeKey)
+                        }
                         val process = ProcessBuilder(cmd)
                             .directory(java.io.File(cwd))
                             .redirectErrorStream(true)
@@ -537,6 +542,11 @@ object TerminalUtil {
                         } else {
                             LOG.warn("[route] SUCCESS: $output")
                             clearPersistedRouteFailureOutput(cwd, relativePath)
+                            StateProjectionBridge.recordRouteDispatchProven(
+                                documentPath,
+                                routeGeneration,
+                                "jetbrains:${routeKey.hashCode()}:attempt-$routeAttempt",
+                            )
                             finalStage = "route_success"
                             break
                         }
@@ -548,6 +558,16 @@ object TerminalUtil {
                 } finally {
                     finalStage?.let { stage ->
                         attempt?.finishIfCurrent(stage, command = cmd, error = finalError)
+                        if (stage != "route_success" && stage != "route_superseded") {
+                            StateProjectionBridge.recordRouteBlocked(
+                                documentPath,
+                                routeGeneration,
+                                finalError ?: stage,
+                            )
+                        }
+                    }
+                    StateProjectionBridge.projectionSummaryForFile(documentPath)?.let {
+                        LOG.warn("[state-projection] ${it.compact()} file=$relativePath")
                     }
                     handle.markCompleted()
                     inFlightRouteRegistry.clearIfCurrent(routeKey, handle)
@@ -558,6 +578,12 @@ object TerminalUtil {
         } catch (e: Exception) {
             editorCommandRegistry.complete(routeKey, EditorCommandKind.RUN_AGENT_DOC)
             attempt?.finishIfCurrent("route_exception", error = e.message ?: e.javaClass.simpleName)
+            val generation = StateProjectionBridge.recordRouteDispatchStarted(documentPath, routeKey)
+            StateProjectionBridge.recordRouteBlocked(
+                documentPath,
+                generation,
+                e.message ?: e.javaClass.simpleName,
+            )
             onComplete?.invoke()
             notifyError(project, "Failed to run agent-doc: ${e.message}\nLooked for: $agentDoc")
         }

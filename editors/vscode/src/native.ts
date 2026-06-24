@@ -14,6 +14,7 @@
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 
 // Result struct returned by FFI functions that produce text
 interface FfiPatchResult {
@@ -38,6 +39,23 @@ export interface VisualToken {
     end: number;
 }
 
+export interface StateBackboneEvent {
+    event_id: string;
+    causation_id?: string;
+    fact: Record<string, unknown> & {
+        type: string;
+        document_hash: string;
+    };
+}
+
+export interface ProjectionSummary {
+    routeReadiness?: string;
+    routePaneId?: string;
+    latestTransportPatchId?: string;
+    latestTransportPhase?: string;
+    proofMarkers: number;
+}
+
 let lib: any = null;
 let koffi: any = null;
 let loaded = false;
@@ -45,6 +63,7 @@ let loadAttempted = false;
 let loadedPath: string | null = null;
 let loadedMtime: number = 0;
 let currentLockFile: string | null = null;
+const stateGenerations = new Map<string, number>();
 
 export function libMtimeChanged(filePath: string, storedMtime: number): boolean {
     try {
@@ -99,6 +118,8 @@ function resetBindings(): void {
     _resolve_project_path = null;
     _free_string = null;
     _version = null;
+    _state_projection = null;
+    _record_state_event = null;
     _record_editor_op = null;
     _document_base_hash = null;
 }
@@ -208,6 +229,8 @@ let _is_tracked: any = null;
 let _resolve_project_path: any = null;
 let _free_string: any = null;
 let _version: any = null;
+let _state_projection: any = null;
+let _record_state_event: any = null;
 let _reconnect_buffer_decision: any = null;
 let _record_editor_op: any = null;
 let _document_base_hash: any = null;
@@ -316,6 +339,14 @@ function bindFunctions(): void {
     _resolve_project_path = lib.func('agent_doc_resolve_project_path', FfiProjectPathType, ['str']);
     _free_string = lib.func('agent_doc_free_string', 'void', ['char*']);
     _version = lib.func('agent_doc_version', 'char*', []);
+    try {
+        _state_projection = lib.func('agent_doc_state_projection', 'char*', ['str']);
+        _record_state_event = lib.func('agent_doc_record_state_event', 'int32', ['str', 'str']);
+    } catch (e: any) {
+        console.log(`[agent-doc/native] state projection ABI unavailable: ${e.message}`);
+        _state_projection = null;
+        _record_state_event = null;
+    }
     try {
         // #yzer reconnect-reread (VS Code parity with the JB plugin). Optional so an
         // older cdylib without the symbol does not break the rest of the bindings.
@@ -479,6 +510,236 @@ export function recordEditorOp(
         console.warn(`[agent-doc/native] record_editor_op error: ${e.message}`);
         return false;
     }
+}
+
+export function documentHash(filePath: string): string {
+    let canonical: string;
+    try {
+        canonical = fs.realpathSync(filePath);
+    } catch {
+        canonical = path.resolve(filePath);
+    }
+    return crypto.createHash('sha256').update(canonical, 'utf-8').digest('hex');
+}
+
+export function buildStateEvent(
+    documentHashValue: string,
+    type: string,
+    fields: Record<string, unknown>,
+    eventSuffix: string,
+): StateBackboneEvent {
+    return {
+        event_id: `${documentHashValue}:${eventSuffix}`,
+        fact: {
+            type,
+            document_hash: documentHashValue,
+            ...fields,
+        },
+    };
+}
+
+export function projectionSummary(projection: any): ProjectionSummary | null {
+    if (!projection || typeof projection !== 'object') return null;
+    const route = projection.route ?? {};
+    const transport = projection.transport ?? {};
+    const proof = projection.proof ?? {};
+    const patches = transport.patches && typeof transport.patches === 'object'
+        ? Object.entries(transport.patches as Record<string, any>)
+        : [];
+    const sortedPatches = patches.sort(([a], [b]) => a.localeCompare(b));
+    const latest = sortedPatches.length > 0 ? sortedPatches[sortedPatches.length - 1] : undefined;
+    return {
+        routeReadiness: typeof route.readiness === 'string' ? route.readiness : undefined,
+        routePaneId: typeof route.pane_id === 'string' ? route.pane_id : undefined,
+        latestTransportPatchId: latest?.[0],
+        latestTransportPhase: typeof latest?.[1]?.phase === 'string' ? latest[1].phase : undefined,
+        proofMarkers: proof.markers && typeof proof.markers === 'object'
+            ? Object.keys(proof.markers).length
+            : 0,
+    };
+}
+
+export function compactProjectionSummary(summary: ProjectionSummary): string {
+    return `route=${summary.routeReadiness ?? 'unknown'} pane=${summary.routePaneId ?? '-'} `
+        + `transport=${summary.latestTransportPatchId ?? '-'}:${summary.latestTransportPhase ?? '-'} `
+        + `proof_markers=${summary.proofMarkers}`;
+}
+
+export function stateProjection(documentHashValue: string, projectRoot?: string): any | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    if (!_state_projection) return null;
+    let ptr: any = null;
+    try {
+        ptr = _state_projection(documentHashValue);
+        if (!ptr) return null;
+        const raw = koffi.decode(ptr, 'char', -1);
+        if (!raw || raw === 'null') return null;
+        return JSON.parse(raw);
+    } catch (e: any) {
+        console.warn(`[agent-doc/native] state_projection error: ${e.message}`);
+        return null;
+    } finally {
+        if (ptr) _free_string(ptr);
+    }
+}
+
+export function stateProjectionForFile(filePath: string, projectRoot?: string): any | null {
+    return stateProjection(documentHash(filePath), projectRoot);
+}
+
+export function recordStateEvent(
+    documentHashValue: string,
+    event: StateBackboneEvent,
+    projectRoot?: string,
+): boolean {
+    if (!ensureLoaded(projectRoot)) return false;
+    bindFunctions();
+    if (!_record_state_event) return false;
+    try {
+        return _record_state_event(documentHashValue, JSON.stringify(event)) === 1;
+    } catch (e: any) {
+        console.warn(`[agent-doc/native] record_state_event error: ${e.message}`);
+        return false;
+    }
+}
+
+function nextStateGeneration(filePath: string, owner: string): number {
+    const key = `${documentHash(filePath)}:${owner}`;
+    const next = (stateGenerations.get(key) ?? 0) + 1;
+    stateGenerations.set(key, next);
+    return next;
+}
+
+function recordFactForFile(
+    filePath: string,
+    type: string,
+    fields: Record<string, unknown>,
+    eventSuffix: string,
+    projectRoot?: string,
+): boolean {
+    const hash = documentHash(filePath);
+    return recordStateEvent(hash, buildStateEvent(hash, type, fields, eventSuffix), projectRoot);
+}
+
+function recordOwnerGeneration(filePath: string, owner: string, generation: number, projectRoot?: string): void {
+    recordFactForFile(
+        filePath,
+        'owner_generation_changed',
+        { owner, generation },
+        `owner-${owner}-${generation}`,
+        projectRoot,
+    );
+}
+
+export function recordEditorPatchQueued(filePath: string, patchId?: string, projectRoot?: string): number | null {
+    if (!patchId) return null;
+    const generation = nextStateGeneration(filePath, 'editor_ipc_bridge');
+    recordOwnerGeneration(filePath, 'editor_ipc_bridge', generation, projectRoot);
+    recordFactForFile(
+        filePath,
+        'editor_patch_queued',
+        { patch_id: patchId, actor_generation: generation },
+        `editor-patch-queued-${patchId}-${generation}`,
+        projectRoot,
+    );
+    return generation;
+}
+
+export function recordEditorAckObserved(
+    filePath: string,
+    patchId: string | undefined,
+    generation: number | null,
+    projectRoot?: string,
+): void {
+    if (!patchId || generation == null) return;
+    recordFactForFile(
+        filePath,
+        'editor_ack_observed',
+        { patch_id: patchId, actor_generation: generation },
+        `editor-ack-${patchId}-${generation}`,
+        projectRoot,
+    );
+}
+
+export function recordEditorRetryRequested(
+    filePath: string,
+    patchId: string | undefined,
+    generation: number | null,
+    reason: string,
+    projectRoot?: string,
+): void {
+    if (!patchId || generation == null) return;
+    recordFactForFile(
+        filePath,
+        'editor_patch_retry_requested',
+        { patch_id: patchId, actor_generation: generation, reason },
+        `editor-retry-${patchId}-${generation}-${hashText(reason)}`,
+        projectRoot,
+    );
+}
+
+export function recordRouteDispatchStarted(filePath: string, routeKey: string, projectRoot?: string): number {
+    const generation = nextStateGeneration(filePath, 'route_dispatch');
+    recordOwnerGeneration(filePath, 'route_dispatch', generation, projectRoot);
+    recordFactForFile(
+        filePath,
+        'route_readiness_observed',
+        { actor_generation: generation, event: 'dispatch_authorized' },
+        `route-authorized-${hashText(routeKey)}-${generation}`,
+        projectRoot,
+    );
+    return generation;
+}
+
+export function recordRouteDispatchProven(
+    filePath: string,
+    generation: number,
+    proofId: string,
+    projectRoot?: string,
+): void {
+    recordFactForFile(
+        filePath,
+        'route_readiness_observed',
+        { actor_generation: generation, event: 'dispatch_accepted' },
+        `route-accepted-${hashText(proofId)}-${generation}`,
+        projectRoot,
+    );
+    recordFactForFile(
+        filePath,
+        'dispatch_proof_observed',
+        { actor_generation: generation, proof_id: proofId },
+        `route-proof-${hashText(proofId)}-${generation}`,
+        projectRoot,
+    );
+}
+
+export function recordRouteBlocked(
+    filePath: string,
+    generation: number | null,
+    reason: string,
+    projectRoot?: string,
+): void {
+    if (generation == null) return;
+    const reasonHash = hashText(reason);
+    recordFactForFile(
+        filePath,
+        'route_readiness_observed',
+        { actor_generation: generation, event: 'blocked' },
+        `route-blocked-${generation}-${reasonHash}`,
+        projectRoot,
+    );
+    recordFactForFile(
+        filePath,
+        'proof_marker_disproved',
+        { marker: 'dispatch_start', source: reason.slice(0, 160) },
+        `route-proof-disproved-${generation}-${reasonHash}`,
+        projectRoot,
+    );
+}
+
+function hashText(value: string): string {
+    return crypto.createHash('sha256').update(value, 'utf-8').digest('hex').slice(0, 16);
 }
 
 /** Whether the loaded cdylib exposes the reconnect-reread decision FFI. */

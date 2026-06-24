@@ -3,8 +3,13 @@ import assert from 'node:assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import {
+    buildStateEvent,
+    compactProjectionSummary,
+    documentHash,
     libMtimeChanged,
+    projectionSummary,
     writePidLock,
     removePidLock,
     parseReconnectDecision,
@@ -69,6 +74,62 @@ describe('utf16RangeToUtf8Bytes (#qnodemerge4wire non-ASCII offset semantics)', 
             byteOffset: 1,
             deleteBytes: 4,
         });
+    });
+});
+
+describe('state projection bridge (#lzstatewire1)', () => {
+    it('documentHash uses canonical path sha256', () => {
+        const tmp = path.join(os.tmpdir(), `agent_doc_state_${Date.now()}.md`);
+        fs.writeFileSync(tmp, 'state');
+        try {
+            const expected = crypto.createHash('sha256')
+                .update(fs.realpathSync(tmp), 'utf-8')
+                .digest('hex');
+            assert.strictEqual(documentHash(tmp), expected);
+        } finally {
+            fs.unlinkSync(tmp);
+        }
+    });
+
+    it('buildStateEvent matches Rust state backbone serde shape', () => {
+        assert.deepStrictEqual(
+            buildStateEvent(
+                'doc-a',
+                'editor_patch_queued',
+                { patch_id: 'patch-1', actor_generation: 7 },
+                'editor-patch-queued-patch-1-7',
+            ),
+            {
+                event_id: 'doc-a:editor-patch-queued-patch-1-7',
+                fact: {
+                    type: 'editor_patch_queued',
+                    document_hash: 'doc-a',
+                    patch_id: 'patch-1',
+                    actor_generation: 7,
+                },
+            },
+        );
+    });
+
+    it('projectionSummary renders route transport and proof slices', () => {
+        const summary = projectionSummary({
+            document_hash: 'doc-a',
+            route: { generation: 3, pane_id: '%2', readiness: 'dispatch_proven' },
+            transport: { patches: { 'patch-1': { phase: 'queued' }, 'patch-2': { phase: 'acked' } } },
+            proof: { markers: { dispatch_start: { phase: 'observed', sources: ['route'] } } },
+        });
+
+        assert.deepStrictEqual(summary, {
+            routeReadiness: 'dispatch_proven',
+            routePaneId: '%2',
+            latestTransportPatchId: 'patch-2',
+            latestTransportPhase: 'acked',
+            proofMarkers: 1,
+        });
+        assert.strictEqual(
+            compactProjectionSummary(summary!),
+            'route=dispatch_proven pane=%2 transport=patch-2:acked proof_markers=1',
+        );
     });
 });
 

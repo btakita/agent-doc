@@ -473,11 +473,24 @@ class PatchWatcher(private val project: Project) : Disposable {
                     LOG.info("[socket] dedup: patch_id ${patch.patchId} already applied — emitting already_applied")
                     return APPLY_ALREADY_APPLIED
                 }
+                val stateGeneration = StateProjectionBridge.recordEditorPatchQueued(patch.file, patch.patchId)
                 if (!patch.fullContent.isNullOrEmpty()) {
                     LOG.warn("[socket] full-content IPC is disabled; rejecting patch_id ${patch.patchId} for ${patch.file}")
+                    StateProjectionBridge.recordEditorRetryRequested(
+                        patch.file,
+                        patch.patchId,
+                        stateGeneration,
+                        "full_content_ipc_disabled",
+                    )
                     return APPLY_FAILED
                 }
                 if (!awaitIdleBeforeDocumentMutation(patch.file, "socket patch")) {
+                    StateProjectionBridge.recordEditorRetryRequested(
+                        patch.file,
+                        patch.patchId,
+                        stateGeneration,
+                        "typing_active",
+                    )
                     return APPLY_FAILED
                 }
                 var applied = false
@@ -501,6 +514,20 @@ class PatchWatcher(private val project: Project) : Disposable {
                         wasNoOp = lastApplyWasNoOp
                         lastApplyWasNoOp = false
                     }
+                }
+                if (applied || wasNoOp) {
+                    StateProjectionBridge.recordEditorAckObserved(
+                        patch.file,
+                        patch.patchId,
+                        stateGeneration,
+                    )
+                } else {
+                    StateProjectionBridge.recordEditorRetryRequested(
+                        patch.file,
+                        patch.patchId,
+                        stateGeneration,
+                        "socket_apply_failed",
+                    )
                 }
                 if (applied || wasNoOp) {
                     val root = resolveRootFor(patch.file) ?: project.basePath
@@ -840,7 +867,14 @@ class PatchWatcher(private val project: Project) : Disposable {
                 LOG.info("[patch-watcher] #8bfz single-owner: not the live owner of ${patch.file}, deferring untargeted patch to the owner instance: ${patchFile.name}")
                 return
             }
+            val stateGeneration = StateProjectionBridge.recordEditorPatchQueued(patch.file, patch.patchId)
             if (!awaitIdleBeforeDocumentMutation(patch.file, "file patch")) {
+                StateProjectionBridge.recordEditorRetryRequested(
+                    patch.file,
+                    patch.patchId,
+                    stateGeneration,
+                    "typing_active",
+                )
                 schedulePatchRetry(patchFile, "typing active")
                 return
             }
@@ -875,12 +909,35 @@ class PatchWatcher(private val project: Project) : Disposable {
                 if (applyMs > 50) LOG.info("[perf] applyPatch: ${applyMs}ms ${patch.file}")
                 if (applied) {
                     recordApplied(patch.patchId)
+                    StateProjectionBridge.recordEditorAckObserved(
+                        patch.file,
+                        patch.patchId,
+                        stateGeneration,
+                    )
                     patchFile.delete()
                 } else if (lastApplyWasDeferredForConflict) {
+                    StateProjectionBridge.recordEditorRetryRequested(
+                        patch.file,
+                        patch.patchId,
+                        stateGeneration,
+                        "file_cache_conflict_pending",
+                    )
                     schedulePatchRetry(patchFile, "$UI_OUTCOME_REAL_COMPONENT_CONFLICT File Cache Conflict pending")
                 } else if (lastApplyRejectedConflictCancel) {
+                    StateProjectionBridge.recordEditorRetryRequested(
+                        patch.file,
+                        patch.patchId,
+                        stateGeneration,
+                        "file_cache_conflict_cancelled",
+                    )
                     LOG.warn("Patch rejected after File Cache Conflict cancel, leaving file for explicit retry: ${patchFile.name} $UI_OUTCOME_REAL_COMPONENT_CONFLICT")
                 } else {
+                    StateProjectionBridge.recordEditorRetryRequested(
+                        patch.file,
+                        patch.patchId,
+                        stateGeneration,
+                        "file_apply_failed",
+                    )
                     LOG.warn("Patch not applied, leaving file for retry: ${patchFile.name}")
                 }
             }

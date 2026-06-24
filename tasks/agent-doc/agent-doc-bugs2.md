@@ -328,7 +328,34 @@ Verification this cycle:
 No source changes or new repo commits were needed for this item.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:0d7b1927 -->
+
+### Re: #advr08 — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#advr08]
+
+
+Verified `#runexitrestart` is already implemented in the current `src/agent-doc` submodule and closes this queue item.
+
+Evidence:
+- Implementation commit: `1e73e7cb route(#runexitrestart): gate restart-dispatch behind harness dispatch-ready prompt`.
+- The supervisor idle-watch drain no longer trusts the weak edge-triggered pty prompt glyph after a restart. When the actor is not yet `Ready`, it re-verifies with a fresh tmux capture through `supervisor_pane_dispatch_ready` and the same `ready_prompt_candidate` dispatch-ready predicate used by route/cold-start gates.
+- While the restarted harness is still coming up, the drain fails closed and records `dispatch_into_restarting_pane reason=harness_not_dispatch_ready_before_restart_drain_send` instead of typing into the composer.
+- Once a dispatch-ready prompt is observed, the same drain submits exactly once. The SimWorld regression asserts no injected trigger across seven not-ready ticks, then a single `dispatch_inject attempt=1` after readiness proof.
+- `VERSIONS.md` documents the restart-drain fix and its live-proof expectations.
+
+Verification this cycle:
+- `cargo test -p agent-doc route_sim_restart_drain_waits_for_dispatch_ready_prompt_before_send`: passed.
+- `cargo test -p agent-doc route_sim_auto_start_dispatch_waits_for_dispatch_ready_prompt_before_send`: passed.
+- `git diff --check` in `src/agent-doc`: passed.
+- `git status --short` in `src/agent-doc`: clean.
+- `gh run list --workflow CI --limit 1`: latest CI completed successfully, run `28074608395`.
+
+No source changes or new repo commits were needed for this item.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:ede89eb0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -336,7 +363,7 @@ Escalation: none. Confidence: high.
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: do [#advr06]~~
 - ~~:pushpin: do [#advr07]~~
-- :pushpin: do [#advr08]
+- ~~:pushpin: do [#advr08]~~
 - :pushpin: do [#advr09]
 - :pushpin: do [#advr10]
 - :pushpin: do [#advr11]
@@ -377,7 +404,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr08] Advance original #runexitrestart: implement/verify recovery for cleanly exited harness panes by detecting `Press Enter to restart`, restarting the harness, waiting for dispatch-ready proof, and submitting prompt-bearing work so Run Agent Doc cannot drop on clean exit.
 - [ ] [#advr09] Advance original #jbrundispatch: replace operator-capture gate with deterministic Run Agent Doc dispatch diagnostics using admin detect, route trace, pane state, dispatch/start proof, and auto-filed route bugs; add regression coverage where possible.
 - [ ] [#advr10] Advance original #editorbufwin: finish editor-buffer-wins P2 by auto-recovering and committing preserved queue additions when replay normalization neutralizes the queue component. Plan: tasks/agent-doc/plan-editor-buffer-wins-queue-merge.md.
 - [ ] [#advr11] Advance original #docdriftgrace: implement component-scoped graceful drift resolution that auto-rebases unrelated changes and surfaces only structural conflicts on in-flight prompt/response. Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md.

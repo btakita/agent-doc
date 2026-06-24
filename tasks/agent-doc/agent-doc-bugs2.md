@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -54,7 +54,7 @@ A good shape is:
 - Always capture bounded evidence plus a stable fingerprint first; then route the action according to policy.
 
 That separation matters. Telemetry collection should be deterministic and low-surprise for every user, while actions that mutate repos or file external issues should be explicit policy choices. I added a recommended backlog item for this so the config, defaults, dedupe behavior, docs, and tests can be worked as a deliberate feature.
-<!-- agent:boundary:6084f735 -->
+<!-- agent:boundary:007c63e0 -->
 <!-- /agent:exchange -->
 
 ## Queue

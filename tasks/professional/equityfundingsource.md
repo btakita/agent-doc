@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -76,7 +76,51 @@ fix(admin): keep dialog arrow navigation from opening selects
 
 Mark shared dialog navigation roots and let closed PortalSelect ArrowUp/ArrowDown events bubble to the dialog action navigator inside those roots, while keeping Enter/Escape and open-list option navigation owned by the select. Updates the Deal Pipeline and Lender Pipeline regression coverage; make check passes.
 ```
-<!-- agent:boundary:037706a0 -->
+
+### Re: Deploy — gpt-5
+
+> **Queue prompt:** deploy
+
+Deployed the current EFS Worker through the project runbook path, `make deploy`. Cloudflare returned Worker version `1b6da8b5-bab6-4fc2-8140-526ff3425953` for `https://equityfundingsource.brian-takita.workers.dev`.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/ui.tsx`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+
+Commands:
+- `tsift diff-digest`
+- `git diff --check`
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`
+- `bun run cf:d1:info`
+- `bun run cf:d1:time-travel:info`
+- `make check`
+- `make deploy`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
+- `gh run list --workflow CI --limit 1`
+
+Verification:
+- Remote D1 migrations before deploy: none pending.
+- D1 recovery posture checked; current Time Travel bookmark: `00000506-00000052-00005094-c35c411cebeed0ff492dca4b7bd57c23`.
+- `make check` passed: 1184 tests, app build, worker build.
+- Deploy applied zero D1 migrations and uploaded/activated the Worker.
+- Remote D1 migrations after deploy: none pending.
+- Public smoke test returned HTTP `200`.
+- CI lookup could not find a workflow named `CI` in this repository.
+
+Confidence: high.
+Escalation: none.
+
+No git commit was made; the three EFS files above remain modified in `src/equityfundingsource-dev` because this queue head requested deploy only and the repo-local instruction says not to run `git commit` unless explicitly asked.
+
+Suggested git commit message:
+
+```txt
+fix(admin): keep dialog arrow navigation from opening selects
+
+Mark shared dialog navigation roots and let closed PortalSelect ArrowUp/ArrowDown events bubble to the dialog action navigator inside those roots, while keeping Enter/Escape and open-list option navigation owned by the select. Updates the Deal Pipeline and Lender Pipeline regression coverage; make check passes and Worker version 1b6da8b5-bab6-4fc2-8140-526ff3425953 is deployed.
+```
+<!-- agent:boundary:e326a11b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -96,9 +140,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~The shared upload component in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c&dialog=advance-lender and https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 should directly upload and save...no Save button.~~
-- ~~The up/down dialog navigation should not open a select element. Pressing down while on a select should move to the next item. Pressing Enter on a select should open the select element with up/down navigating between the items. Pressing enter selects the select item and closes the select. Pressing Esc closes the select without a new selection.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

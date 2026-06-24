@@ -150,7 +150,46 @@ Confidence: high.
 ```text
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=614f38da-0b33-487b-af23-18a3825aec73 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782268963919
 ```
-<!-- agent:boundary:7c969ec7 -->
+
+### Re: Selected admin message user deploy closeout — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Deployed and smoke-checked the selected-user admin Messages fix after the implementation/spec/test queue head was completed.
+
+Final changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/messages.tsx`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
+- `src/equityfundingsource-dev/tests/borrower-messages.test.ts`
+
+Verification:
+- `git diff --check` — passed.
+- `bun test tests/admin-pipeline.test.ts tests/borrower-messages.test.ts tests/portal-messages-component.test.ts tests/messages-unified.test.ts` — passed, 95 tests.
+- `make check` — passed after the final PRD/test update, 1173 tests plus app build and Worker build.
+- `gh run list --workflow CI --limit 1` in both EFS and parent repos — no workflow named `CI` exists.
+
+Deployment:
+- Pre-deploy remote D1 migration list: `No migrations to apply!`.
+- D1 Time Travel bookmark was available: `000004f6-0000007a-00005094-bdbebf6c9d1ca7591ccd9e3806ead1e6`.
+- Final `make deploy` passed and activated Worker version `a49e20dc-8d74-42ee-9ca7-11874530a794` at `https://equityfundingsource.brian-takita.workers.dev`.
+- Post-deploy remote D1 migration list: `No migrations to apply!`.
+- Smoke tests: `/` returned `200`; `/admin/messages` and `/admin/pipeline?status=new&dialog=lead` returned expected admin-auth redirects `303`.
+
+Commits:
+- EFS submodule: `fef3eb3c9b0108795416f78468c1f3503443d133` (`fix(admin): focus selected message users`), pushed to `equityfundingsource-dev/main`.
+- EFS submodule: `eaeb98d36d82245fa04e0b59480e915647a18bdb` (`test(admin): specify message user focus`), pushed to `equityfundingsource-dev/main`.
+- Parent submodule pointer: `8a5178bf766c689a010d214b883492525b486dcd` (`chore: update equityfundingsource submodule`), pushed to `agent-loop/main` from `origin/main` without publishing unrelated local parent commits.
+
+I left unrelated dirty parent-worktree files and unrelated local parent commits untouched.
+
+No actionable follow-up items remain from this queue item.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:a4a3ae82 -->
 <!-- /agent:exchange -->
 ###
 <!--

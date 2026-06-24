@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -84,7 +84,7 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 **Pushed:** `btakita/briantakita.me` `464ac2a` → `briantakita.me-dev` `8b5354d` → `agent-loop` `68508b770` (all main).
 
 Note: this is a content-local lift, not a theme change — the shared dark `--color-card` in `config/blog_site.ts` is the underlying low-contrast value, but changing it would affect the whole site, so the override is scoped to these diagrams. A site-wide card/fill contrast pass is a separate task if you want it.
-<!-- agent:boundary:d1f2e5aa -->
+<!-- agent:boundary:c11b9d45 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -93,6 +93,7 @@ Note: this is a content-local lift, not a theme change — the shared dark `--co
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- How can I support dark mode in JB while using the sitewide CSS in briantakita.me?
 - do [#mpt7]
 <!-- /agent:queue -->
 

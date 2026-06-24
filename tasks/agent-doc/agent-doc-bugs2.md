@@ -311,14 +311,14 @@ Implemented and verified. The exact queue-topic closeout is using the full promp
 Code changes are in submodule `941c3b50 fix: mark active agent-doc work`; the parent pointer is `91601b2a6 agent-doc: mark active work items`; the session response commit is `7f1ad1b01`.
 
 No new actionable follow-up items were needed.
-<!-- agent:boundary:a5f3bdd1 -->
+<!-- agent:boundary:85944014 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.~~
-- :pushpin: do [#promptprefixorch1]
+- 🚧 :pushpin: do [#promptprefixorch1]
 ---
 JB `Run Agent Doc` on monsterrodholders.md
 ```

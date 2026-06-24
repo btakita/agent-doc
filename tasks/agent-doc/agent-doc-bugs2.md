@@ -40,6 +40,13 @@ done
 - pushed submodule commit `a788e71e3` and GitHub Actions CI run `28080790474` passed
 - submodule: `a788e71e3` (`fix: keep component body text on theme foreground`), pushed to `agent-doc/main`
 - root pointer: `84116d682` (`agent-doc: update component body foreground fix`), local root commit only
+❯ - submodule: `a788e71e3` (`fix: keep component body text on theme foreground`), pushed to `agent-doc/main`
+❯ - pushed submodule commit `a788e71e3` and GitHub Actions CI run `28080790474` passed
+❯ - `make precommit`
+❯ - `make check`
+❯ - full JetBrains `./gradlew test buildPlugin`
+❯ - `make bump-plugin`
+❯ - focused JetBrains Gradle test for `NormalizeExchangePrefixesTest`
 ❯ - JetBrains bold/italic visual tokens now inherit the editor's normal foreground instead of `DefaultLanguageHighlighterColors.IDENTIFIER`, so emphasized markdown no longer turns yellow under themes where identifiers are yellow.
 ❯ - The shared visual token parser now rejects underscore emphasis markers inside identifier words. `_foo_` and `__foo__` still render italic/bold; `foo_bar_baz` and `foo__bar__baz` stay regular text.
 ❯ - Added the Rust regression test, updated the editor integration guide and `VERSIONS.md`, and bumped the JetBrains plugin patch version to `0.2.184`.
@@ -159,13 +166,34 @@ This closes the repeated IPC dogfood repair loop by preserving the visible excha
 
 No product code change or backlog item is needed for this recovery note. I am continuing with the queued JetBrains yellow-text item after this closeout.
 
-<!-- agent:boundary:a1c89f87 -->
+### Re: JetBrains component body text color - gpt-5
+
+> **Queue prompt:** The JB Plugin yellow text is still yellow. ![img_55.png](img_55.png). It should match the theme ![img_54.png](img_54.png).
+
+Fixed. The screenshot showed the remaining yellow text was the agent-doc component/queue body text, not the markdown bold/italic path from the prior fix.
+
+I changed the JetBrains `component_body` highlighter to inherit the editor's normal foreground via `baseAttrs(null)` while keeping the muted component background and font-style override. That removes the metadata/yellow foreground fallback without losing the visual component body banding.
+
+I also added a static regression test, updated the editor integration docs and `VERSIONS.md`, bumped the plugin to `0.2.186`, rebuilt it, and installed it into both IntelliJIdea2026.1 plugin directories. Restart the IDE to load the newly installed plugin.
+
+Verification passed:
+- focused JetBrains Gradle test for `NormalizeExchangePrefixesTest`
+- `make bump-plugin`
+- full JetBrains `./gradlew test buildPlugin`
+- `make check`
+- `make precommit`
+- pushed submodule commit `a788e71e3` and GitHub Actions CI run `28080790474` passed
+
+Committed updates:
+- submodule: `a788e71e3` (`fix: keep component body text on theme foreground`), pushed to `agent-doc/main`
+- root pointer: `84116d682` (`agent-doc: update component body foreground fix`), local root commit only
+<!-- agent:boundary:c4d06583 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- The JB Plugin yellow text is still yellow. ![img_55.png](img_55.png). It should match the theme ![img_54.png](img_54.png).
+- ~~The JB Plugin yellow text is still yellow. ![img_55.png](img_55.png). It should match the theme ![img_54.png](img_54.png).~~
 - If the operator cancels a turn in the console, then runs JB `Run Agent Doc`...the dispatch hangs. This happened in equityfundingsource.md.
 - do [#rootpushdiv]
 <!-- /agent:queue -->

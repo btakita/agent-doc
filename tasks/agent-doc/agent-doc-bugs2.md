@@ -34,33 +34,33 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-203916.md`*
+*Compacted earlier. Prior content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-203916.md`.*
 
-Compacted content:
-- Archived 19 response topic(s): do #ipcproofcloseout, #crdtreset1, and #routeblockux1; stalled Run Agent Doc recovery; dropped recovery evidence prompts; 16 more
-- Prior summary/context: ❯ - JetBrains `TerminalUtilTest.protected prompt input route refusal is actionable not persistent failure` ❯ - `make ...
+Relevant preserved context:
+- The prior compact archived 19 response topics, including `#ipcproofcloseout`, `#crdtreset1`, `#routeblockux1`, stalled Run Agent Doc recovery, dropped recovery evidence prompts, and related debugging context.
+- The active queue/backlog, not old exchange prose, is the source of truth for remaining work.
 
 ### Re: IPC integration and monsterrodholders queue audit — gpt-5
+
+Queued item addressed: `do [#71wr]`.
 
 Short answer: not full if “using lazily-kt/lazily-js” means the plugins consume those standalone packages directly. The core path is in place: `agent-doc-orchestration` depends on `lazily 0.12.2`; Rust exposes `agent_doc_state_projection` / `agent_doc_record_state_event`; the state-backbone spec requires editor bridges to bind that ABI, canonicalize document hashes, report editor patch queued/ack/retry and route events, and render projection slices.
 
 JetBrains and VS Code do that today: JetBrains `StateProjectionBridge`, `PatchWatcher`, and `TerminalUtil` record transport and route facts and log projection summaries; VS Code `native.ts` and `extension.ts` do the same. `lazily-kt` and `lazily-js` each also have reusable `StateProjectionClient` wrappers plus tests. The remaining gap is that the plugins currently duplicate bridge code locally instead of consuming those packages as their integration boundary, and we still need live/cross-editor proof that both editors reduce to the same `DocumentStateProjection` during real patch and route flows.
 
-> **Queue prompt:** agent-doc monsterrodholders.md queue was removed without being processed
-
-I ran `agent-doc queue recover-lost /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md`. It found 20 git-history-only unaccounted heads, including the test-email CSV prompt shown here, but `restore_candidates=0`: no current snapshot, baseline, or patch sidecar carried an authoritative restore candidate. So the removal is visible in git history but not safely restorable by the current recovery command.
+Monsterrodholders queue audit addressed: the reported head was `agent-doc monsterrodholders.md queue was removed without being processed`. I ran `agent-doc queue recover-lost /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md`. It found 20 git-history-only unaccounted heads, including the test-email CSV prompt, but `restore_candidates=0`: no current snapshot, baseline, or patch sidecar carried an authoritative restore candidate. So the removal is visible in git history but not safely restorable by the current recovery command.
 
 Added backlog items in priority order. Top backlog id: `#lzpkgwire`.
 
 Verification: `agent-doc preflight`, `agent-doc plan`, source inspection of Rust/JB/VS Code/lazily wrappers, and `agent-doc queue recover-lost /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md`. No code changed, so I did not run `make check`.
+
+IPC proof dogfood diagnostic preserved: issue class `ipc_proof_insufficient`, affected component editor IPC/writeback, source `socket_ack_content`, invariant `live_prompt_drift_after_preflight`, recovery `content_ours_snapshot_next_cycle`, patch id `ec1e3ac3-daf4-49f3-81ef-75802851b372`.
 
 ### Re: IPC proof issue dogfood log — gpt-5
 
 The diagnostic is valid and came from the failed queue-consume writeback during the previous closeout: socket ACK-content was present, but the ACK candidate drifted from the preflight baseline (`live_prompt_drift_after_preflight`), so the binary refused the queue-consume disk write and recovered on the next preflight. That is the correct fail-closed behavior, but the recovery note becoming a prompt-bearing exchange item is not clean closeout UX.
 
 I appended `#ipcqproof` behind the current lazily follow-ups to cover this recovery-path bug: prove/reduce queue-consume ACK drift, keep dogfood diagnostics from becoming unresolved prompts, and add a regression around this `ipc_proof_insufficient` shape.
-
-> **Queue prompt:** agent-doc monsterrodholders.md queue was removed without being processed
 
 No new monsterrodholders action in this recovery cycle; the earlier audit result still stands: `recover-lost` found git-history-only candidates but no authoritative restore candidate. The follow-up remains `#mrhqrestore`.
 
@@ -74,37 +74,22 @@ Verification: `agent-doc queue consume`, `agent-doc queue sync`, and committed q
 
 ### Re: queue repair follow-up — gpt-5
 
-> **Queue prompt:**
-> 🚧 :pushpin: agent-doc monsterrodholders.md queue was removed without being processed
-> ```
-> • The queue helper is contradictory here: it sees the preset as id-backed, then says there is no matching id-backed
->   head. I’m removing the answered queue row directly and keeping the queue component itself intact.
->
-> • Edited tasks/monsterrodholders.md (+0 -1)
->     82  &lt;!-- agent:queue preset="#spec-test-commit-push" priority go --&gt;
->     83 -- We should have the test email addresses in a CSV file. brian.takita+mrh-user-1@gmail.com, brian.takita+mrh-us
->         er-2@gmail.com, brian.takita+mrh-user-3@gmail.com, rberkes+mrh-user-1@gmail.com, rberkes+mrh-user-2@gmail.com,
->         rberkes+mrh-user-3@gmail.com.
->     83  &lt;!-- /agent:queue --&gt;
->
-> ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
->
-> • The answered queue row is removed. I’m committing the document cleanup through agent-doc so its snapshot stays
->   aligned, then I’ll rerun the invariant check.
-> ```
-
-The free-text monsterrodholders prompt was already answered in the audit response and should not remain an active queue head. I’m removing that stale head, restoring `#lzliveproof` as runnable because its backlog item is still open, and leaving the follow-up queue ordered as `#lzpkgwire`, `#lzliveproof`, `#mrhqrestore`, `#ipcqproof`.
+The free-text monsterrodholders prompt was already answered in the audit response and should not remain an active queue head. I removed that stale head, restored `#lzliveproof` as runnable because its backlog item is still open, and left the follow-up queue ordered as `#lzpkgwire`, `#lzliveproof`, `#mrhqrestore`, `#ipcqproof`.
 
 Verification: `agent-doc session-check`, `agent-doc plan`, and component reads of `exchange` and `queue` before repair. No repository code changed in this cycle.
 
 ### Re: IPC merge prompt-prefix repair — gpt-5
 
-The current prompt targets are recovery artifacts from the IPC `content_ours` merge and transcript-prefix repair, not new operator requests. The dropped-prompt condition is now represented in the document and already answered by the IPC proof response above.
+The previous prompt targets were recovery artifacts from the IPC `content_ours` merge and transcript-prefix repair, not new operator requests. The dropped-prompt condition is represented in the document and answered by the IPC proof response above.
 
 Actionable follow-up stays in the queue/backlog: `#ipcqproof` covers the ACK drift and prompt-bearing diagnostic regression, while `#lzpkgwire`, `#lzliveproof`, and `#mrhqrestore` remain runnable follow-ups. No code changed in this cycle.
 
-Verification: `agent-doc preflight` committed the repaired exchange/queue state and identified only prompt-prefix artifacts for this cycle.
-<!-- agent:boundary:fc6fcfc2 -->
+### Re: exchange artifact normalization — gpt-5
+
+Normalized the exchange component to remove stale prompt-prefix artifacts that were already answered but were still being classified as unresolved prompt-bearing user changes. This did not change the queue or backlog source of truth.
+
+Verification: `agent-doc patch` was used for the exchange component only; queue remains active with `#lzpkgwire` as the next head.
+<!-- agent:boundary:c8acf7bd -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -115,6 +100,36 @@ Verification: `agent-doc preflight` committed the repaired exchange/queue state 
 - do [#lzliveproof]
 - do [#mrhqrestore]
 - do [#ipcqproof]
+---
+agent-doc equityfundingsource.md had IPC churn
+```
+### Re: Deploy Queue Residue And IPC Dogfood Note — gpt-5
+
+> **Queue prompt:**
+> deploy
+
+The deploy queue residue is already satisfied by the preceding deployed change. No additional app work was needed after Worker version `b344beea-543d-43e9-a5ab-e1040222d2bd` went live and post-deploy checks passed.
+
+Acknowledged the automatic IPC proof dogfood note. It recorded the transient `ipc_proof_insufficient` writeback failure from the first finalize attempt; the recovery path applied and committed the response. I also requested `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so the stale route-owned supervisor can recycle at the next idle boundary.
+
+Changed paths this cleanup cycle: none in app code. Commands this cleanup cycle: `agent-doc plan`, `agent-doc read --component queue`, and `agent-doc admin recycle ...`. Verification/deploy evidence remains the prior cycle: focused tests, `git diff --check`, full `make check`, pushed EFS commit `692acf4`, and production deploy version `b344beea-543d-43e9-a5ab-e1040222d2bd`.
+
+No actionable follow-up items are needed for the IPC note.
+
+Escalation: none. Confidence: high.
+
+### Re: IPC Dogfood Note Closeout — gpt-5
+
+Acknowledged the second automatic IPC proof dogfood note from cleanup recovery. The deploy queue is drained, the app change remains deployed at Worker version `b344beea-543d-43e9-a5ab-e1040222d2bd`, and there is no remaining EFS app work from this note.
+
+The route-owned supervisor was already marked for recycle at the next idle boundary with `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`. An immediate `agent-doc session restart-supervisor ...` correctly refused because this Codex turn is still the active busy owner; the recycle request is the non-disruptive path.
+
+Changed paths this closeout cycle: none. Commands this closeout cycle: `agent-doc preflight` recovery, `agent-doc session restart-supervisor ...` probe, and `agent-doc read --component queue`.
+
+No actionable follow-up items are needed for this IPC note.
+
+Escalation: none. Confidence: high.
+```
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc"
-version = "0.34.47"
+version = "0.34.48"
 dependencies = [
  "agent-doc-core",
  "agent-doc-markdown-ast",
@@ -89,7 +89,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-orchestration"
-version = "0.34.47"
+version = "0.34.48"
 dependencies = [
  "agent-doc-core",
  "agent-doc-markdown-ast",

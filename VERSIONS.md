@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.48
+
+- OpenCode auto-loop self-drive (`#ocdrainstall` Part A): the installed OpenCode skill now mandates in-turn drain self-drive — after a proven `write --commit` closeout with `queue_continuation_required=true` and `queue_drainable_head_count>0`, the agent keeps running preflight→respond→write --commit in the same turn instead of stopping and forcing per-head operator re-invocation. "Low context budget" / "focused cycle" are documented as stalls (`#drain-no-defer`), not stop reasons.
+
 ## 0.34.47
 
 - `queue recover-lost`: git-history-only candidates are now classified as restorable vs non-restorable/foreign, and `--restore-patch <PATH>` emits an operator-reviewed restoration patch (JSON) separating restorable prompts from foreign-owned (cross-document contamination) ones. The session document is never mutated. Closes `#mrhqrestore`.

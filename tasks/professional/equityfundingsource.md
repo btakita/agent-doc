@@ -71,7 +71,29 @@ Commit/deploy: EFS commit `bf7b27d` (`fix(admin): align pipeline edit controls`)
 Verification: `bun test tests/admin-full-application-approve-ui.test.ts tests/admin-investor-pipeline.test.ts` passed (`108 pass / 0 fail`). `git diff --check` was clean. `make check` passed (`1191 pass / 0 fail`, app build, Worker build). Pre-deploy D1 checks showed no pending remote migrations, D1 info available, and a current Time Travel bookmark. Post-deploy `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote` again showed no pending migrations, and `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/` returned `200`. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:8fb07aef -->
+
+### Re: Step 6 Review & Sign Optional And Deploy — gpt-5
+
+> **Queue prompt:**
+> https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Step 6 - Review & Sign should be optional. This should not block advancing the application. "Before advancing this application" "Address the highlighted fields and sections below before marking complete or accepting the application." "Step 6 - Review & Sign" "Submitted, EFS status, E-sign consent". None of "Submitted, EFS status, E-sign consent" should be blocker to "Mark Complete".
+>
+> **Queue prompt:**
+> deploy
+
+Implemented and deployed.
+
+Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/admin/full_applications.tsx`, `lib/ui--browser--efs/portal/admin/pipeline.tsx`, `prds/67v2-admin-loan-pipeline-kanban.md`, `tests/admin-full-application-approve-ui.test.ts`, and `tests/admin-pipeline.test.ts`.
+
+Behavior: the stacked/standalone Full Application detail now uses completion requirements while the Mark Complete action is present, so Step 6 - Review & Sign does not appear in the top "Before advancing this application" blocker list for Mark Complete. The pipeline application card checklist also splits by action: incomplete cards show "Before Mark Complete" with completion blockers only; review/accept cards still use the stricter Accept Application gate. The server-side Mark Complete gate was already e-signature optional, and tests now guard that completion requirements omit `Submitted`, `EFS status`, and `E-sign consent`.
+
+Commits: EFS submodule commit `65509f4 fix(admin): make review signature optional for completion` was pushed to `origin/main`. Parent gitlink commit `0a6a098cc chore(efs): bump review completion gate submodule` was committed locally only; I did not push parent `main` because it already had two unrelated unpushed `lazily-rs` commits, and pushing would have published unrelated work.
+
+Verification: focused tests passed (`bun test tests/admin-full-application-approve-ui.test.ts tests/admin-pipeline.test.ts tests/apply4-full-application-p6.test.ts`: `98 pass / 0 fail`). `git diff --check` was clean. Full check passed (`make check`: `1191 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` found no workflow named `CI` in the EFS submodule.
+
+Deploy: pre-deploy D1 checks showed no pending remote migrations, D1 info reachable, and Time Travel bookmark `00000509-0000002a-00005094-801e11d7a8151dcf75679ae0c68505e4`. `make deploy` completed; Worker URL `https://equityfundingsource.brian-takita.workers.dev`; Version ID `9c8ebd7c-692e-48d3-bd3e-b7749d86ecc4`. Post-deploy migration list still had no pending migrations; public root returned `200`; the admin pipeline URL returned `303` behind Cloudflare Access.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:a1d67c51 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -91,6 +113,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Step 6 - Review & Sign should be optional. This should not block advancing the application. "Before advancing this application" "Address the highlighted fields and sections below before marking complete or accepting the application." "Step 6 - Review & Sign" "Submitted, EFS status, E-sign consent". None of "Submitted, EFS status, E-sign consent" should be blocker to "Mark Complete".
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

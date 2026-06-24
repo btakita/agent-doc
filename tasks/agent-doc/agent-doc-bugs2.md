@@ -100,7 +100,13 @@ Recovery stays fail-closed on the binary-owned path (`retry_without_disk_write` 
 Regression `ipc_dogfood_note_is_recovery_artifact_not_prompt_bearing` pins all four invariants — RecoveryArtifact classification, no `❯` normalization, no prompt-only tail, fail-closed recovery — for both the `live_prompt_drift_after_preflight` and `missing_response_probe` variants. Full suite (5097) + clippy green; `make install-full` done and the supervisor is marked to recycle onto 0.34.46.
 
 Changed paths: `agent-doc-orchestration/src/preflight.rs`, `VERSIONS.md`, `Cargo.toml` + workspace member manifests + `Cargo.lock`, `pyproject.toml`. Next queue head is `#mrhqrestore` (still 🚧 gated) — recycling the supervisor will clear the stale `#rt83/#qflood` pause and let it drain.
-<!-- agent:boundary:301dc813 -->
+
+### Re: queue-removal guard acknowledged for #actorswitchdefer — glm-5-2
+
+The struck `~~do [#actorswitchdefer]~~` was an explicit operator edit: Part A already shipped (`6c7455a8`), so the immediate queue slice is done. Part B (SimWorld proof + SPEC.md:141 reconciliation) remains tracked in `agent:backlog` under the same id — it is not lost, just not an active queue head right now. Marking the removal intentional so the `#queue-clear-unrun-items` guard stops flagging it; re-queue `do [#actorswitchdefer]` when Part B is ready to drain.
+
+<!-- no-queue-removal-guard -->
+<!-- agent:boundary:633de44a -->
 <!-- /agent:exchange -->
 
 ## Queue

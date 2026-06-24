@@ -64,7 +64,25 @@ Split into two actionable backlog items (engine first): `#lzsigzig1` (`#9226`) �
 ### Re: queue dedup — removed 8 :pushpin: duplicate heads — glm-5.2
 
 Removed the 8 `:pushpin:`-prefixed queue lines (compaction had duplicated every `do [#id]` head — `#t0mf`/`#t0qn`/`#9e64`/`#dcgp`/`#kjfe`/`#pwvm`/`#t1xt`/`#7gpg`). The `:pushpin:` prefix was tripping the free-text-queue-head guard. Queue is now clean `do [#id]` entries only; `#lzffistate1` is the next head (the Signal engine work `#lzsigzig1`/`#9226` is in the backlog, plan committed `c74e75909`).
-<!-- agent:boundary:48059c40 -->
+
+### Re: #lzffistate1 DONE — FFI state-projection phase 1 — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#lzffistate1]
+
+
+**Implemented and committed.** `src/agent-doc/src/ffi.rs` (submodule commit `f3af02fc`, superproject gitlink `baa6c8e57`):
+- `agent_doc_state_projection(document_hash) -> *mut c_char` — returns the per-document `DocumentStateProjection` JSON (document/queue/closeout/transport/supervisor/route/proof slices), or `"null"` when no events recorded. Recomputed from the in-process ledger on each call.
+- `agent_doc_record_state_event(document_hash, fact_json) -> i32` — parses a `StateEvent` (serde `Deserialize`; `StateFact` is internally-tagged `{ "type": ... }`) and appends it. Returns `1`/`0`; all error paths log to stderr (no swallowed errors, per AGENTS.md).
+- Backed by a process-global `static STATE_LEDGER: OnceLock<Mutex<EventLedger>>` (the FFI layer had no backbone handle before). `EventLedger::append` + `project().document(hash)` from `state_backbone.rs:267/275/296`. Replay dedupe via the projection's `seen_event_ids`.
+
+**Verification:** `cargo test -p agent-doc --lib ffi::` → 33 passed (incl. new `state_projection_ffi_round_trip`: record `BaselineSaved` → read projection → assert doc_hash present, replay returns 1, unknown hash → `"null"`). `cargo clippy -p agent-doc --lib -- -D warnings` clean. (Pre-existing orchestration-test lints under `--tests -D warnings` are unrelated working-tree drift in `PatchWatcher.kt`, not my code.)
+
+**Scope note:** shipped ungated (purely additive — new exports + new global, no change to existing behavior). The "compile flag" from the plan is a follow-up if/when a gate is wanted. Phase 2 (lazily-ipc Delta transport) + Phase 3 (plugin UI wiring in JB `NativeLib.kt` / VSCode addon) remain in the plan.
+
+Also stripped the supervisor-re-injected `:pushpin:` prefixes (`#qauthorder` known bug) so the free-text-queue-head guard passes. Next head: `do [#t0qn]` / `do [#nnyn]`.
+<!-- agent:boundary:490a474b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,21 +91,22 @@ Removed the 8 `:pushpin:`-prefixed queue lines (compaction had duplicated every 
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: do [#lzffistate1]
-- :pushpin: do [#nnyn]
-- :pushpin: do [#hj5x]
-- :pushpin: do [#mes4]
-- :pushpin: do [#bcnf]
-- do [#t0mf]
+- ~~do [#lzffistate1]~~
+- ord
 - do [#t0qn]
+- do [#t0mf]
+- do [#9226]
+- do [#f71y]
+- do [#nnyn]
+- do [#kjfe]
 - do [#9e64]
 - do [#dcgp]
-- do [#kjfe]
 - do [#pwvm]
 - do [#t1xt]
 - do [#7gpg]
-- do [#f71y]
-- do [#9226]
+- do [#hj5x]
+- do [#mes4]
+- do [#bcnf]
 <!-- /agent:queue -->
 
 ## Backlog
@@ -107,7 +126,6 @@ Removed the 8 `:pushpin:`-prefixed queue lines (compaction had duplicated every 
 - [ ] [#hj5x] #lzsmlean2=Add Lean cross-module proof: SM send -> IPC DeltaOp.cellSet (plan Phase 1 TODO). Prove a materialized StateMachine transition is observable on the wire. Link StateMachine.lean with IPC.lean.
 - [ ] [#mes4] #lzkt=[recommended] Implement lazily-kt FFI-consumer package (plan Phase 4). Kotlin/Gradle under src/lazily-kt/. Wraps JNA bridge to lazily_ffi_*; StateFlow<DocumentStateProjection> projection holder + recordStateEvent reporter. NOT a reactive-core port. Blocked on #lzffistate1.
 - [ ] [#bcnf] #lzjs=[recommended] Implement lazily-js FFI-consumer package with *.js + *.d.ts (plan Phase 5). Under src/lazily-js/. Wraps VSCode N-API addon; EventEmitter projection holder + event reporter. NOT a reactive-core port. Blocked on #lzffistate1.
-- [ ] [#lzffistate1] Implement lazily FFI state-projection phase 1 (plan: tasks/software/plan-lazily-ffi-state-projection.md, #lzffistate plan-gate satisfied). Add agent_doc_state_projection(doc_hash)->JSON + agent_doc_record_state_event(doc_hash, fact_json) to src/agent-doc/src/ffi.rs behind a compile flag, mirror in editors/jetbrains NativeLib.kt + VSCode native addon, with record→read round-trip tests. Plugins become projection-renderer + event-reporter; JB EditorCommandStateMachine.kt stays local UI coalescing.
 <!-- /agent:backlog -->
 
 ## Review

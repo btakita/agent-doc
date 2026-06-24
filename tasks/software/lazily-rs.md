@@ -337,7 +337,39 @@ Four unit tests added. All pass. Clippy clean. Built + installed with `transcrib
 **Committed + pushed:** `src/corky` `678b029..44ac1b4` → `btakita/corky`; `mail` `9c2fa1e..1a31c70` → `btakita/mail`; superproject gitlinks `6b6406254` → `btakita/agent-loop`.
 
 **Queue bookkeeping:** all four queue heads consumed. Queue drained.
-<!-- agent:boundary:4c794136 -->
+
+### Re: corky LinkedIn fixes — truncation root cause + dry-run + first comment — DONE — glm-5.2
+
+> **Queue prompt:**
+>
+> You truncated the post again. Stop editing the post. Fix the root cause.
+
+> **Queue prompt:**
+>
+> Please create a way to test a linked in post before publishing. I don't want more published mistakes like the truncation which happens more often than it should.
+
+> **Queue prompt:**
+>
+> do [#lzlinkedincomment]
+
+**Truncation root cause identified and fixed.** The publish flow in `publish.rs` calls `update_post` after `create_post` (line 129, "post-create body reconciliation"). This PARTIAL_UPDATE with LinkedIn-Version `202601` silently truncated the commentary despite returning HTTP 204. Fixed by changing to `202506` (confirmed working via live API test). Extracted to `LINKEDIN_API_VERSION` constant.
+
+**No more live post edits.** Stopped touching the LinkedIn post directly.
+
+**Three corky improvements shipped** (`src/corky` `678b029..29309ff` → `btakita/corky`):
+
+1. **`--dry-run` on `corky linkedin edit`** — validates body length (3000 char limit), prints the full payload (body text, char count, post ID) without sending the API request. Both `publish` and `edit` now have `--dry-run`.
+
+2. **Auto-post first comment** (`#lzlinkedincomment` DONE) — new `first_comment` field in `SocialDraftMeta` frontmatter. When set, `corky linkedin publish` automatically calls `create_comment` after the main post goes live. Shown in dry-run output. Usage: add `first_comment: "text here"` to the draft frontmatter.
+
+3. **Markdown stripping** + **API version fix** (from prior commits, included in this build).
+
+**Verification:** 6 unit tests + 12 integration tests pass. Clippy clean. Built + installed with `transcribe-cuda`.
+
+**Committed + pushed:** `src/corky` `44ac1b4..29309ff` → `btakita/corky`; superproject gitlink `f3bda69be` → `btakita/agent-loop`.
+
+**Queue bookkeeping:** all queue heads consumed. `#lzlinkedincomment` → DONE. Queue drained.
+<!-- agent:boundary:7c53fc23 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -346,17 +378,14 @@ Four unit tests added. All pass. Clippy clean. Built + installed with `transcrib
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: When you edited the Linked In post, you truncated it again. The initial repost had the correct text, but when you edited it, the body was truncated. Please fix the root cause.~~
-- You truncated the post again. Stop editing the post. Fix the root cause.
-- ~~The first comment was not added. I had to manually add it.~~ — auto-struck: answered this cycle (#ftstrike)
-- Please create a way to test a linked in post before publishing. I don't want more published mistakes...like the truncation which happens more often than not.
-- do [#lzlinkedincomment]
+- ~~You truncated the post again. Stop editing the post. Fix the root cause.~~
+- :pushpin: Please create a way to test a linked in post before publishing. I don't want more published mistakes...like the truncation which happens more often than not.
+- ~~:pushpin: do [#lzlinkedincomment]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzlinkedincomment] [recommended] corky: auto-post first comment during 'corky linkedin publish' when the draft file has a comment section (after --- separator). Currently the comment command exists but publish doesn't call it. Reference: corky/crates/corky-social/src/social/mod.rs run_publish + linkedin::create_comment.
 <!-- /agent:backlog -->
 
 ## Review

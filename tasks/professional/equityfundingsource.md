@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -425,7 +425,65 @@ No additional code or deployment work was performed in this repair step.
 Cleared the answered pipeline keyboard-navigation and deploy prompts from `agent:queue` after the Stop hook found the component still populated.
 
 No additional code, test, deploy, or repo changes were made in this repair step.
-<!-- agent:boundary:0002c8a8 -->
+
+### Re: Pipeline initial card focus and deploy — gpt-5
+
+> **Queue prompt:**
+>
+> When navigating to the Deal Pipeline or Lender Pipeline page, select the first card available...top item in the first column with cards...If no cards, select the first column +/-.
+
+> **Queue prompt:**
+>
+> deploy
+
+Implemented, pushed, and deployed.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/broker/dashboard.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/broker/my_pipeline.tsx`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/broker-portal.test.ts`
+- parent submodule pointer `src/equityfundingsource-dev`
+
+What changed:
+- Deal Pipeline and Lender Pipeline boards now focus the first keyboard target after board data renders: the top card in the first visible lane with cards, falling back to the first lane +/- toggle when no card is available.
+- Lender Pipeline now keeps the empty board rendered when there are zero lenders, with the no-lenders notice above it, so the first empty lane toggle remains focusable.
+- The prior uncommitted pipeline keyboard-navigation work is now committed too: Deal/Lender board arrow navigation and Broker My Pipeline row keyboard navigation.
+
+Verification:
+- `bun test tests/admin-pipeline.test.ts tests/admin-investor-pipeline.test.ts tests/broker-portal.test.ts` — passed, 190 tests.
+- `git diff --check` — passed.
+- `make check` — passed after rebasing on current `origin/main`: 1173 tests plus app and Worker builds. The expected non-fatal `d1 down` test log appeared from the outbox failure test.
+- `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo — no workflow named `CI` exists.
+
+Deployment:
+- Pre-deploy remote migration list — `No migrations to apply!`.
+- Pre-deploy D1 info succeeded; Time Travel bookmark `000004f6-00000074-00005094-08fb19216bf612333287bbb6cb058cca` recorded.
+- `make deploy` — passed; no migrations applied, 1 updated browser asset uploaded, Worker deployed at `https://equityfundingsource.brian-takita.workers.dev`.
+- Current Worker version: `035bf151-3115-4f44-abf0-4ce273145ec0`.
+- Post-deploy remote migration list — `No migrations to apply!`.
+- Post-deploy smoke tests: `/` returned `200`; `/admin/pipeline` and `/admin/lender-pipeline` returned expected admin-auth redirects `303`.
+
+Commits:
+- EFS submodule: `af203f1d5c4a9668cc14c958e7e6636d1006499b` (`feat(portal): add pipeline keyboard navigation`), pushed to `equityfundingsource-dev/main`.
+- Parent repo: `75c2ff67b` (`chore: update equityfundingsource submodule`), pushed to `agent-loop/main`. The parent push also published pre-existing local ahead commits that were already on `main` before this pointer commit.
+
+Escalation: none.
+Preflight warnings were existing backlog/review cleanup candidates and were left untouched.
+There were no actionable follow-up items to capture.
+Confidence: high.
+
+Suggested commit message:
+
+```txt
+feat(portal): add pipeline keyboard navigation
+
+Add keyboard navigation and initial focus targets to Deal, Lender, and Broker pipeline views so admins can enter each pipeline at the first available card, fall back to the lane +/- control when empty, and continue moving by keyboard. Covers the behavior with admin pipeline, lender pipeline, and broker portal tests; deployed Worker version 035bf151-3115-4f44-abf0-4ce273145ec0.
+```
+<!-- agent:boundary:c265a65e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -445,6 +503,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~When navigating to the Deal Pipeline or Lender Pipeline page, select the first card available...top item in the first column with cards...If no cards, select the first column +/-.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -229,7 +229,16 @@ Recommended next steps, in order:
 6. After the queue-drain fixes above, compact or repair the exchange drift only through the binary-owned path. The document still has historical reordered assistant fragments, and those are causing noisy preflight plans, but they should not be manually edited around the closeout machinery.
 
 No repo files changed for this planning-only queue item.
-<!-- agent:boundary:6cbad6ee -->
+
+### Re: next-steps prompt target recovery — gpt-5
+
+
+> > :pushpin: What are #next-steps to fix agent-doc bugs?
+
+That quoted line is the already-answered free-text queue prompt from the committed `### Re: What are #next-steps to fix agent-doc bugs? — gpt-5` response. The queue row is already struck in `agent:queue`, and the previous response contains the ordered next steps.
+
+No repo files changed in this recovery-only closeout, and there are no new backlog items to capture from this recovery note.
+<!-- agent:boundary:42f53ce6 -->
 <!-- /agent:exchange -->
 
 ## Queue

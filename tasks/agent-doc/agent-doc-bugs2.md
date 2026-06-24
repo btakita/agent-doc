@@ -327,12 +327,25 @@ Commits: `74882f62` in `src/agent-doc` (`fix: ignore recovered prompt-prefixed e
 Verification: full `make check` passed locally with `5093 passed, 241 skipped`; focused diff classifier/orchestration regression tests passed; `git diff --check` passed. The latest GitHub `Agent Doc` workflow did not start because GitHub reported an account billing/spending-limit annotation, not a test failure.
 
 ### Re: When the queue item, review item, icebox item is complete and struck out or `[x]`, remove the 🚧. — gpt-5
+
+> **Queue prompt:**
+>
+> 🚧 When the queue item, review item, icebox item is complete and struck out or `[x]`, remove the 🚧.
+
 Implemented completed-marker cleanup. Queue maintenance already stripped `🚧` from struck queue entries; tracked item marker maintenance now refuses to mark `[x]` items and clears stale markers from backlog, pending, review, and icebox components, with snapshot marker sync covering review too.
 
 Commits: `d8698eeb` in `src/agent-doc` (`fix: clear completed in-progress markers`) and parent pointer commit `d548161bd` (`agent-doc: clear completed in-progress markers`). I installed the updated binary with `make install`.
 
 Verification: full `make check` passed locally with `5095 passed, 241 skipped`; focused pending and preflight maintenance tests passed; `git diff --check` passed. The latest GitHub `Agent Doc` workflow still did not start because GitHub reports an account billing/spending-limit annotation.
-<!-- agent:boundary:f7f16a72 -->
+
+### Re: When the queue item, review item, icebox item is complete and struck out or `[x]`, remove the 🚧. — gpt-5
+
+> **Queue prompt:**
+>
+> When the queue item, review item, icebox item is complete and struck out or `[x]`, remove the 🚧.
+
+Completed in `d8698eeb` and installed. This closeout records the exact free-text queue prompt echo required for binary-owned queue consumption.
+<!-- agent:boundary:4ab0f346 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -340,13 +353,14 @@ Verification: full `make check` passed locally with `5095 passed, 241 skipped`; 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.~~
 - ~~:pushpin: do [#promptprefixorch1]~~
-- 🚧 When the queue item, review item, icebox item is complete and struck out or `[x]`, remove the 🚧.
+- ~~🚧 When the queue item, review item, icebox item is complete and struck out or `[x]`, remove the 🚧.~~
 ---
 JB `Run Agent Doc` on monsterrodholders.md
 ```
 [route] target tmux session: 0
 Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %2 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Implement {feature}"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782330092988-direct_pane_protected_prompt_input-codex-_2-8a7508d5a787.txt
 ```
+---
 ---
 ```
 ~/work/btakita/agent-loop main ⇡68 *10 !8 ?6                                                                                                                                                                        ✘ INT  agent-loop 16:32:16

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -38,7 +38,10 @@ complete
 Compacted content:
 ❯ - Archived 3 response topic(s): Advance Lender Details Navigation And Deploy; Deploy; Direct Dialog Initial Focus And Deploy
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:78cf6f58 -->
+No new user-visible changes were detected in `/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`, so I stopped before opening a response cycle.
+
+Preflight did repair and commit transcript prompt prefixes, creating commit `5eea37c09`. It also reported a stale `agent-doc` install and one legacy gated backlog item; no drainable queue head is available right now.
+<!-- agent:boundary:e9339207 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,7 +61,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- The shared upload component in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c&dialog=advance-lender and https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 should directly upload and save...no Save button.
+- ~~The shared upload component in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c&dialog=advance-lender and https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 should directly upload and save...no Save button.~~
 - The up/down dialog navigation should not open a select element. Pressing down while on a select should move to the next item. Pressing Enter on a select should open the select element with up/down navigating between the items. Pressing enter selects the select item and closes the select. Pressing Esc closes the select without a new selection.
 - deploy
 <!-- /agent:queue -->

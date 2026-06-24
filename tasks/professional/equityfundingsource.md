@@ -139,7 +139,18 @@ Verification: focused `bun test tests/borrower-lead-to-tmo-flow.test.ts tests/ap
 Deploy: pre-deploy remote D1 migrations reported no pending migrations, and the Time Travel bookmark was `0000050d-00000004-00005094-df441773e9b30c807983ba477615bcd3`. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `a964ccdb-ccfa-4c2e-8168-1ec20b0295ec`. Post-deploy checks: remote D1 migrations still reported no migrations to apply; public root returned `HTTP 200`; the protected borrower URL returned the expected unauthenticated `HTTP 303` redirect to `/login?role=borrower&next=%2Fborrowers%2Fnew-application%3Flead_id%3Dc907d851-8870-49aa-a6fc-66d393868ce1`, preserving the lead id through login.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:98e4e713 -->
+
+### Re: Deploy Queue Residue Cleanup — gpt-5
+
+> **Queue prompt:**
+> deploy
+
+The deploy queue residue is already satisfied by the preceding cycle. No additional app work was needed after EFS commit `e3d2830` was pushed and Worker version `a964ccdb-ccfa-4c2e-8168-1ec20b0295ec` went live.
+
+Changed paths this cleanup cycle: none in app code. Commands this cleanup cycle: `agent-doc preflight`, `agent-doc plan`, and `agent-doc write --commit --force-disk` recovery/cleanup after repeated editor IPC no-ack failures. Verification/deploy evidence remains the prior cycle: focused tests passed (`12 pass / 0 fail`), `git diff --check` passed, full `make check` passed (`1193 pass / 0 fail`, app build, Worker build), remote D1 migrations reported no pending migrations before and after deploy, public root returned `HTTP 200`, and the protected borrower URL returned the expected unauthenticated `HTTP 303` login redirect preserving the `lead_id`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:35c659be -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -159,8 +170,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 should prefill any data that we have, such as the First Name + Last Name + email address.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

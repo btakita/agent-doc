@@ -39,7 +39,28 @@ done
 Compacted content:
 ❯ - Archived 4 response topic(s): #advr11; #advr12; #advr13; 1 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-<!-- agent:boundary:9e4ea7fb -->
+
+### Re: #advr15 — gpt-5
+
+Converted the recycle-boundary `Run Agent Doc` verification into deterministic proof coverage for `#jbdisprecycle`.
+
+The runtime R1/R2/R3 fixes were already shipped (`ad55b993`, `d21079b7`): dispatch gates before pane input while `recycle_inflight` is set, `start_session` retries while the recycle marker is fresh, and `route/dispatch.rs` logs `route_dispatch_submit_recycle_settle` before the post-settle submit retry.
+
+I added the missing deterministic proof layer in SimWorld:
+- The modeled post-recycle dispatch now records `route_dispatch_submit_recycle_settle ... action=submit_once_after_settle` before rejoining the normal dispatch path.
+- Dispatch proof now records `dispatch_start_proof ... proof=submitted` when a pending dispatch is proved.
+- `route_sim_dispatch_defers_during_recycle_then_injects_once_after_settle` now asserts: no injection while recycling, exactly one post-settle `dispatch_inject attempt=1`, exactly one recycle-settle submit marker, exactly one `dispatch_start_proof`, no `attempt=2`, and no stranded `start_session failed` text.
+
+Verification passed:
+- `cargo fmt`
+- `cargo test recycle -- --test-threads=2`
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --test-threads=2`
+- `make check`
+- `git -C src/agent-doc diff --check`
+- `gh run list --workflow CI --limit 1` (latest CI success: `28074608395`)
+
+Commits: submodule `896563a9 test(sim): prove recycle-boundary dispatch submit`; parent `ec9d1f2d3 chore: advance agent-doc submodule`.
+<!-- agent:boundary:6b0db543 -->
 <!-- /agent:exchange -->
 
 ## Queue

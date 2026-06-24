@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,102 +33,17 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-062213.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-063545.md`*
 
 Compacted content:
-❯ - Archived 10 response topic(s): Shareable lender-pipeline dialog URLs; IPC recovery closeout; Why `btak.div+lender3@gmail.com` is showing Requirements Current; 7 more
-❯ - Prior summary/context: prior compacted content: EFS: `2415765` `feat(admin): share lender pipeline dialog URLs`; Parent gitlink: `9a5cfc236`...
-### Re: IPC recovery closeout — gpt-5
-
-> **Queue prompt:**
->
-> deploy
-
-
-> **Queue prompt:**
->
-> In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field...which would be Close...then Advance Lender. The up arrow key navigates to the previous actionable item.
-
-
-> **Queue prompt:**
->
-> In the Lender Pipeline > Requirements Dialog, remove the Message Lender section. The contextual messaging (chat bubble) should open to the message the lender for the card.
-
-
-> **Queue prompt:**
->
-> I just signed up as btak.div+lender3@gmail.com. This user has Requirements Current in the Lender Pipeline. Why are the requirements current? The lender has not completed the signup...adding documents.
-
-
-Recovered the orphaned closeout and corrected the queue state. The prior recovery pass struck the next Requirements Current prompt even though this cycle only completed the shareable lender-pipeline dialog URL work, so I restored that prompt as the live queue head.
-
-Verification:
-- `agent-doc read /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md --component queue` confirmed the queue drift before this correction.
-- No product code changes in this closeout.
-
-Escalation: none.
-Confidence: high.
-**IPC proof issue dogfood log**
-
-Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
-
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=37a37991-3c3a-40fa-928c-115be03c9973 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782281871260
-```
-
-### Re: Duplicate lender3 Signed Up cards — gpt-5
-
-> **Queue prompt:**
->
-> In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c&dialog=lender, why are there 2 btak.dev+lender3@gmail.com cards in the Signed Up stage?
-
-They are not two rows for the exact same email. Production D1 currently has two active lender `users` rows with nearly identical Gmail plus-addresses:
-
-- `05c518e4-d881-4b8e-8317-e0382a2b2e31` — `btak.div+lender3@gmail.com`, created `2026-06-24 04:09:35 UTC`.
-- `0d35f9e9-068f-459d-ac58-feb7d1a19a7c` — `btak.dev+lender3@gmail.com`, created `2026-06-24 05:07:00 UTC`.
-
-The URL's `dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c` points to the `btak.dev+lender3@gmail.com` row. The other card is `btak.div+lender3@gmail.com`, not `btak.dev+lender3@gmail.com`; the two are easy to misread because the name and rest of the address are the same.
-
-Why both are in Signed Up:
-- both are `role='lender'` and `status='active'`;
-- both have `accreditation_status='pending'`;
-- neither has a `lender_accreditation_verifications` evidence row;
-- neither has a `lender_request` row;
-- neither has a `lender_account`.
-
-The Lender Pipeline endpoint returns one card per `users.role='lender'` user ID, and the React card key is `card.user_id`, so these two distinct user IDs are expected to render as two cards. A production exact-duplicate scan with `GROUP BY lower(email) HAVING COUNT(*) > 1` returned no rows.
-
-Changed paths: none. I did not mutate product code or production data; deactivating or merging one of these accounts would be an explicit admin/data-cleanup decision, not a safe automatic fix.
-
-Verification:
-- `tsift status` in `src/equityfundingsource-dev` reported a fresh index.
-- Queried production D1 for the two lender3 users and confirmed the distinct `btak.div` vs `btak.dev` rows.
-- Queried production D1 for related accreditation-verification and lender-request rows; none exist for either user.
-- Queried production D1 for exact duplicate lowercased emails; none exist.
-- Ran a read-only production D1 projection that computes both rows as `signed_up`.
-- Inspected `admin_investor_pipeline_GET_`, `investors_pipeline_columns_`, the card render loop, and the signup path; the endpoint/card rendering is keyed by user ID, and signup lowercases/checks the exact submitted email before insert.
-- EFS worktree remained clean at `7e89423`.
-
-Session-doc recovery note:
-- `agent-doc reset --from-current` was required because the session sidecars were stale after earlier IPC failures.
-- An older orphaned IPC response was recovered first, then I struck four stale already-completed queue heads that were reintroduced by the recovery (`Message Lender`, arrow navigation, duplicate arrow navigation, and `deploy`). The queue is now drained.
-
-Escalation: none.
-Confidence: high.
-❯ **IPC proof issue dogfood log**
-
-❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
-
-❯ Issue class: `ipc_proof_insufficient`
-❯ Affected component: editor IPC / writeback
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=f0cd2e07-6a5e-4ca9-8ebc-11422c4ad06e invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782282557185
-```
+❯ - Archived 5 response topic(s): IPC recovery closeout; Duplicate lender3 Signed Up cards; IPC recovery note; 2 more
+❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 ### Re: IPC recovery note — gpt-5
+
+> **Queue prompt:**
+>
+> I deactivated btak.div+lender3@gmail.com, but the card still remains in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=05c518e4-d881-4b8e-8317-e0382a2b2e31&dialog=lender. Deactivated lenders should be removed from the Lender Pipeline. Create a Deactivated Lenders tab in the Lender Pipeline...and place the deactivated lenders in the tab as a searchable table.
+
 
 Recorded the IPC proof diagnostic that was appended during recovery. The duplicate-card investigation response is present in the exchange, and the queue is drained.
 
@@ -141,37 +56,17 @@ Verification:
 
 Escalation: none.
 Confidence: high.
-### Re: Drift closeout — gpt-5
+**IPC proof issue dogfood log**
 
-Committed the remaining agent-doc IPC diagnostic drift after the retained responses were recovered. No EFS product code or production data changed.
+Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
 
-Changed paths: `tasks/professional/equityfundingsource.md` only.
-
-Verification:
-- `agent-doc repair --apply-recovery` abandoned the empty preflight cycle.
-- `agent-doc session-check` identified only uncommitted exchange drift before this repair closeout.
-
-Escalation: none.
-Confidence: medium; the direct disk path was used only after repeated editor IPC proof failures retained and recovered the response but kept leaving post-commit drift.
-
-
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
 
 ```text
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=23576efe-92c2-4b1d-833d-211c85da27b1 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782282608517
 ```
-### Re: Final closeout repair — gpt-5
-
-Closed the remaining agent-doc follow-up classifier after IPC recovery. The substantive duplicate-card answer is already recorded above; this entry only closes the document-write invariant.
-
-Changed paths: `tasks/professional/equityfundingsource.md` only.
-
-Verification:
-- `agent-doc commit` refused the existing drift as a follow-up prompt and directed this `agent-doc write --commit` path.
-- Queue is empty; no EFS product code changed.
-
-Escalation: none.
-Confidence: medium.
-<!-- agent:boundary:e913627b -->
+<!-- agent:boundary:2def9759 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -191,6 +86,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~I deactivated btak.div+lender3@gmail.com, but the card still remains in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=05c518e4-d881-4b8e-8317-e0382a2b2e31&dialog=lender. Deactivated lenders should be removed from the Lender Pipeline. Create a Deactivated Lenders tab in the Lender Pipeline...and place the deactivated lenders in the tab as a searchable table.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -68,6 +68,38 @@ fn assert_source_contains(path: &str, needle: &str) {
     assert!(source.contains(needle), "{path} must contain `{needle}`");
 }
 
+#[test]
+fn vscode_run_agent_doc_uses_jetbrains_route_contract() {
+    let vscode = "editors/vscode/src/extension.ts";
+    assert_source_contains(vscode, "buildRunRouteCommandArgs");
+    assert_source_contains(vscode, "'--dispatch-only'");
+    assert_source_contains(vscode, "'--plain-trigger'");
+    assert_source_contains(vscode, "'--debounce'");
+    assert_source_contains(vscode, "'0'");
+    assert_source_contains(vscode, "'--wait-for-ready'");
+    assert_source_contains(vscode, "ROUTE_WAIT_FOR_READY_SECONDS = '120'");
+    assert_source_contains(vscode, "collectVisibleMarkdownColumns(cwd)");
+    assert_source_contains(vscode, "'--col'");
+    assert_source_contains(vscode, "'--focus'");
+}
+
+#[test]
+fn vscode_manifest_exposes_jetbrains_parity_commands() {
+    let package_json = "editors/vscode/package.json";
+    assert_source_contains(package_json, "\"version\": \"0.2.32\"");
+    assert_source_contains(package_json, "\"command\": \"agentDoc.fixDocument\"");
+    assert_source_contains(package_json, "\"command\": \"agentDoc.loadTmuxWindow\"");
+    assert_source_contains(
+        package_json,
+        "\"command\": \"agentDoc.interruptClearSessionContext\"",
+    );
+
+    let popup = "editors/vscode/src/popupMenu.ts";
+    assert_source_contains(popup, "'fixDocument'");
+    assert_source_contains(popup, "'loadTmuxWindow'");
+    assert_source_contains(popup, "'interruptClear'");
+}
+
 fn assert_guard_before_sink(path: &str, anchor: &str, guard: &str, sink: &str) {
     let source = read_source(path);
     let anchor_idx = source

@@ -3,9 +3,23 @@ import assert from 'node:assert';
 import { buildOverflowPopupMenuItems, buildPrimaryPopupMenuItems } from './popupMenu';
 
 describe('popupMenu', () => {
-    it('keeps compact exchange and supervisor restart in the primary numbered menu', () => {
+    it('keeps editor parity actions in the primary numbered menu', () => {
         const primary = buildPrimaryPopupMenuItems();
         const ids = primary.map(item => item.id);
+        assert.deepStrictEqual(ids.slice(0, 12), [
+            'submit',
+            'claim',
+            'fixDocument',
+            'compactExchange',
+            'syncLayout',
+            'loadTmuxWindow',
+            'status',
+            'restartSupervisor',
+            'restartAgent',
+            'clear',
+            'interruptClear',
+            'doctor',
+        ]);
         assert(primary.some(item => item.id === 'compactExchange'));
         assert(primary.some(item => item.id === 'restartSupervisor'));
         assert.deepStrictEqual(
@@ -14,12 +28,21 @@ describe('popupMenu', () => {
         );
         assert(!primary.some(item => item.id === 'runWithJunie'));
         assert(!primary.some(item => item.id === 'forceClaim'));
+        assert(!primary.some(item => item.id === 'stopAgent'));
     });
 
-    it('keeps Junie and force claim in the overflow menu', () => {
+    it('keeps lower-frequency operator actions in the overflow menu', () => {
         assert.deepStrictEqual(
             buildOverflowPopupMenuItems().map(item => item.id),
-            ['runWithJunie', 'forceClaim'],
+            [
+                'runWithJunie',
+                'forceClaim',
+                'stopAgent',
+                'cancelTurn',
+                'killSupervisor',
+                'resyncFixSessions',
+                'gcStaleSessions',
+            ],
         );
     });
 });

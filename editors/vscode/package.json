@@ -2,7 +2,7 @@
   "name": "agent-doc",
   "displayName": "Agent Doc",
   "description": "Submit markdown documents to AI agents via agent-doc",
-  "version": "0.2.31",
+  "version": "0.2.32",
   "publisher": "btakita",
   "icon": "icon.png",
   "license": "MIT",
@@ -39,12 +39,20 @@
         "title": "Agent Doc: Run with Junie"
       },
       {
+        "command": "agentDoc.fixDocument",
+        "title": "Agent Doc: Fix Document"
+      },
+      {
         "command": "agentDoc.compactExchange",
         "title": "Agent Doc: Compact Exchange"
       },
       {
         "command": "agentDoc.syncLayout",
         "title": "Agent Doc: Sync Layout"
+      },
+      {
+        "command": "agentDoc.loadTmuxWindow",
+        "title": "Agent Doc: Load Tmux Window"
       },
       {
         "command": "agentDoc.showSessionStatus",
@@ -73,6 +81,10 @@
       {
         "command": "agentDoc.clearSessionContext",
         "title": "Agent Doc: Clear Session Context"
+      },
+      {
+        "command": "agentDoc.interruptClearSessionContext",
+        "title": "Agent Doc: Interrupt and Clear Session Context"
       },
       {
         "command": "agentDoc.copySessionDiagnostics",
@@ -116,6 +128,14 @@
     "menus": {
       "commandPalette": [
         {
+          "command": "agentDoc.fixDocument",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "agentDoc.loadTmuxWindow",
+          "when": "editorLangId == markdown"
+        },
+        {
           "command": "agentDoc.restartSession",
           "when": "editorLangId == markdown"
         },
@@ -133,34 +153,71 @@
         },
         {
           "command": "agentDoc.killSupervisor",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "agentDoc.clearSessionContext",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "agentDoc.interruptClearSessionContext",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "agentDoc.copySessionDiagnostics",
           "when": "editorLangId == markdown"
         }
       ],
       "editor/context": [
         {
-          "command": "agentDoc.restartSession",
+          "command": "agentDoc.fixDocument",
           "when": "editorLangId == markdown",
           "group": "agentDoc@0"
         },
         {
-          "command": "agentDoc.restartAgent",
+          "command": "agentDoc.loadTmuxWindow",
           "when": "editorLangId == markdown",
           "group": "agentDoc@1"
         },
         {
-          "command": "agentDoc.stopAgent",
+          "command": "agentDoc.restartSession",
           "when": "editorLangId == markdown",
           "group": "agentDoc@2"
         },
         {
-          "command": "agentDoc.cancelTurn",
+          "command": "agentDoc.restartAgent",
           "when": "editorLangId == markdown",
           "group": "agentDoc@3"
         },
         {
-          "command": "agentDoc.killSupervisor",
+          "command": "agentDoc.stopAgent",
           "when": "editorLangId == markdown",
           "group": "agentDoc@4"
+        },
+        {
+          "command": "agentDoc.cancelTurn",
+          "when": "editorLangId == markdown",
+          "group": "agentDoc@5"
+        },
+        {
+          "command": "agentDoc.killSupervisor",
+          "when": "editorLangId == markdown",
+          "group": "agentDoc@6"
+        },
+        {
+          "command": "agentDoc.clearSessionContext",
+          "when": "editorLangId == markdown",
+          "group": "agentDoc@7"
+        },
+        {
+          "command": "agentDoc.interruptClearSessionContext",
+          "when": "editorLangId == markdown",
+          "group": "agentDoc@8"
+        },
+        {
+          "command": "agentDoc.copySessionDiagnostics",
+          "when": "editorLangId == markdown",
+          "group": "agentDoc@9"
         }
       ]
     }

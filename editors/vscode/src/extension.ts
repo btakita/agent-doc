@@ -41,6 +41,7 @@ import {
     buildTabChangeCommand,
     flattenVisibleColumns,
     isPreservedLayoutOutput,
+    normalizeVisibleColumns,
     shouldReplayQueuedTabChange,
     shouldScheduleDeferredTabSyncRetry,
     type TabSyncState,
@@ -60,6 +61,7 @@ let resolvedAgentDoc: string | null = null;
 const SYNC_CLI_TIMEOUT_MS = 30_000;
 const FOCUS_CLI_TIMEOUT_MS = 750;
 const ROUTE_CANCEL_WAIT_MS = 5_000;
+const ROUTE_WAIT_FOR_READY_SECONDS = '120';
 const EDITOR_ID = `vscode-${process.pid}-${crypto.randomUUID()}`;
 
 // #qnodemerge4wire Phase 4: per-document text shadow (the previous full text).
@@ -652,6 +654,43 @@ function buildSyncLayoutCommand(
     return buildSyncCommandArgs(columns, focusFile, { noAutostart });
 }
 
+function buildRouteLayoutArgs(columns: string[][], focusFile?: string): string[] {
+    const normalizedColumns = normalizeVisibleColumns(columns);
+    const args: string[] = [];
+    if (normalizedColumns.length > 1) {
+        for (const column of normalizedColumns) {
+            args.push('--col', column.join(','));
+        }
+    } else {
+        const visibleMd = flattenVisibleColumns(normalizedColumns);
+        if (visibleMd.length > 0) {
+            args.push('--col', visibleMd.join(','));
+        }
+    }
+    if (focusFile) {
+        args.push('--focus', focusFile);
+    }
+    return args;
+}
+
+function buildRunRouteCommandArgs(
+    relativePath: string,
+    columns: string[][],
+    focusFile?: string,
+): string[] {
+    return [
+        'route',
+        '--dispatch-only',
+        '--plain-trigger',
+        '--debounce',
+        '0',
+        '--wait-for-ready',
+        ROUTE_WAIT_FOR_READY_SECONDS,
+        relativePath,
+        ...buildRouteLayoutArgs(columns, focusFile),
+    ];
+}
+
 // ---------------------------------------------------------------------------
 // Feature 1: Run (Submit)
 // ---------------------------------------------------------------------------
@@ -726,9 +765,11 @@ async function executeRunForDocument(
     try {
         await saveMarkdownDocument(filePath);
         routeGeneration = native.recordRouteDispatchStarted(filePath, routeKey, cwd);
-        const output = await runCli(['route', '--dispatch-only', rel], cwd, {
-            signal: abortController.signal,
-        });
+        const output = await runCli(
+            buildRunRouteCommandArgs(rel, collectVisibleMarkdownColumns(cwd), rel),
+            cwd,
+            { signal: abortController.signal },
+        );
         native.recordRouteDispatchProven(filePath, routeGeneration, `vscode:${routeKey}`, cwd);
         const projection = native.stateProjectionForFile(filePath, cwd);
         const summary = projection ? native.projectionSummary(projection) : null;
@@ -971,6 +1012,41 @@ async function gcStaleSessionsAction(): Promise<void> {
     await runProjectCleanupCommand('GC Stale Sessions', ['gc']);
 }
 
+async function fixDocumentAction(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !isMarkdown(editor)) return;
+
+    const root = getWorkspaceRoot(editor.document.uri);
+    if (!root) {
+        showError('File is not in a workspace');
+        return;
+    }
+
+    try {
+        await editor.document.save();
+        const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
+        const output = await runCli(['fix', rel], cwd, { timeoutMs: 30_000 });
+        showHint(output || `Fixed ${rel}`);
+    } catch (err: any) {
+        showError(`fix document failed: ${err.message}`);
+    }
+}
+
+async function loadTmuxWindowAction(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !isMarkdown(editor)) return;
+
+    const root = getWorkspaceRoot(editor.document.uri);
+    if (!root) {
+        showError('File is not in a workspace');
+        return;
+    }
+
+    const { cwd } = resolveProject(root, editor.document.uri.fsPath);
+    showHint('Loading tmux window...');
+    await syncLayoutInternal(cwd, true, false);
+}
+
 async function compactExchangeAction(): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || !isMarkdown(editor)) return;
@@ -1145,6 +1221,21 @@ async function copySessionDiagnosticsAction(): Promise<void> {
     );
 }
 
+async function interruptClearSessionContextAction(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !isMarkdown(editor)) return;
+
+    const root = getWorkspaceRoot(editor.document.uri);
+    if (!root) {
+        showError('File is not in a workspace');
+        return;
+    }
+
+    await editor.document.save();
+    const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
+    await interruptAndClearSessionContext(cwd, rel);
+}
+
 // ---------------------------------------------------------------------------
 // Feature 2: Claim
 // ---------------------------------------------------------------------------
@@ -1289,7 +1380,8 @@ async function syncLayoutAction(): Promise<void> {
     commandRunning = true;
 
     try {
-        await syncLayoutInternal(root, true, true);
+        const { cwd } = resolveProject(root, editor.document.uri.fsPath);
+        await syncLayoutInternal(cwd, true, true);
     } finally {
         commandRunning = false;
     }
@@ -1308,8 +1400,11 @@ async function syncLayoutInternal(root: string, notify: boolean, noAutostart: bo
     let focusFile: string | undefined;
     if (activeEditor && isMarkdown(activeEditor)) {
         const activeRoot = getWorkspaceRoot(activeEditor.document.uri);
-        if (activeRoot === root) {
-            focusFile = relativePath(root, activeEditor.document.uri.fsPath);
+        if (activeRoot) {
+            const activeProject = resolveProject(activeRoot, activeEditor.document.uri.fsPath);
+            if (activeProject.cwd === root) {
+                focusFile = activeProject.relativePath;
+            }
         }
     }
 
@@ -1623,11 +1718,17 @@ async function popupMenuAction(): Promise<void> {
         case 'claim':
             await claimAction();
             break;
+        case 'fixDocument':
+            await fixDocumentAction();
+            break;
         case 'compactExchange':
             await compactExchangeAction();
             break;
         case 'syncLayout':
             await syncLayoutAction();
+            break;
+        case 'loadTmuxWindow':
+            await loadTmuxWindowAction();
             break;
         case 'status':
             await showSessionStatusAction();
@@ -1640,6 +1741,9 @@ async function popupMenuAction(): Promise<void> {
             break;
         case 'clear':
             await clearSessionContextAction();
+            break;
+        case 'interruptClear':
+            await interruptClearSessionContextAction();
             break;
         case 'doctor':
             await copySessionDiagnosticsAction();
@@ -1656,6 +1760,21 @@ async function popupMenuAction(): Promise<void> {
                     break;
                 case 'forceClaim':
                     await forceClaimAction();
+                    break;
+                case 'stopAgent':
+                    await stopAgentAction();
+                    break;
+                case 'cancelTurn':
+                    await cancelTurnAction();
+                    break;
+                case 'killSupervisor':
+                    await killSupervisorAction();
+                    break;
+                case 'resyncFixSessions':
+                    await resyncFixSessionsAction();
+                    break;
+                case 'gcStaleSessions':
+                    await gcStaleSessionsAction();
                     break;
             }
             break;
@@ -2658,12 +2777,20 @@ export function activate(context: vscode.ExtensionContext): void {
     );
 
     context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.fixDocument', fixDocumentAction)
+    );
+
+    context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.compactExchange', compactExchangeAction)
     );
 
     // Feature 3: Sync Layout
     context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.syncLayout', syncLayoutAction)
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.loadTmuxWindow', loadTmuxWindowAction)
     );
 
     context.subscriptions.push(
@@ -2690,6 +2817,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.clearSessionContext', clearSessionContextAction)
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.interruptClearSessionContext', interruptClearSessionContextAction)
     );
 
     context.subscriptions.push(

@@ -54,6 +54,12 @@ id, actor generation, patch id, queue node key, backlog id, and causation id.
 The event log is append-only. Corrections are new events that supersede earlier
 facts by projection rules; they are not in-place mutation of old facts.
 
+Implementation: `agent-doc-orchestration/src/state_backbone.rs` defines
+`StateEvent`, `StateFact`, and `EventLedger`. The ledger deduplicates event ids
+during projection replay so duplicate delivery stays idempotent, while
+`causation_id` preserves the chain from prompt, queue head, IPC patch, route
+dispatch, or proof marker to the emitted fact.
+
 ## Projections
 
 Current state is derived by deterministic reducers over the event ledger and the
@@ -73,6 +79,12 @@ Reducers must be idempotent and replay-testable. If two modules need the same
 answer, they should consume the same projection instead of recomputing from
 free-form logs or partial document text.
 
+Implementation: `StateBackboneProjection` reduces the event ledger into
+document, queue, closeout, transport, supervisor, route, and proof projections.
+The closeout projection delegates phase advancement to the existing
+`CyclePhaseMachine`; the other projections use their own small state machines
+for closed subdomains.
+
 ## Actor Ownership
 
 Live mutable surfaces have exactly one current owner:
@@ -88,6 +100,11 @@ may report facts, but projections must reject reports whose generation or epoch
 does not match the current owner. This is why restart and capability proof code
 uses epochs rather than trusting any later-arriving thread result.
 
+Implementation: owner reports carry a `StateOwner` and generation. The backbone
+projection records rejected stale events instead of applying late reports from
+an old editor IPC bridge, route dispatcher, supervisor, queue orchestrator, or
+document writer.
+
 ## Where Other Models Fit
 
 | Model | Fit | Use |
@@ -98,6 +115,17 @@ uses epochs rather than trusting any later-arriving thread result.
 | Coroutine | Good protocol expression | linear handshakes such as writeback, startup proof wait, or clean-exit restart; persist checkpoints as events |
 | Event-driven | Strong backbone fit when typed | append-only events, causation ids, idempotent reducers, replay tests |
 | MPC | Not a fit | agent-doc state is discrete workflow convergence, not continuous control optimization |
+
+Implemented local FSMs:
+
+| FSM | Domain | Purpose |
+|---|---|---|
+| `CyclePhaseMachine` | closeout | existing turn lifecycle authority |
+| `QueueHeadMachine` | queue | pending, selected, deferred, completed head lifecycle |
+| `TransportPatchMachine` | transport | queued IPC patch, insufficient proof, retry, ACK, force-disk fallback |
+| `ActorLifecycleMachine` | supervisor/owner | starting, ready, busy, waiting-input, restarting, stale, closed |
+| `RouteReadinessMachine` | route | pane observed through dispatch proof |
+| `ProofGateMachine` | proof | marker observed versus disproved |
 
 ## Regression Rule
 

@@ -142,6 +142,7 @@ pub mod sessions;
 pub mod snapshot;
 pub mod start;
 pub mod startup_miss;
+pub mod state_backbone;
 pub mod status_cmd;
 pub mod stream;
 pub mod supervisor;

@@ -187,7 +187,38 @@ Verification passed:
 Committed updates:
 - submodule: `a788e71e3` (`fix: keep component body text on theme foreground`), pushed to `agent-doc/main`
 - root pointer: `84116d682` (`agent-doc: update component body foreground fix`), local root commit only
-<!-- agent:boundary:c4d06583 -->
+
+### Re: If the operator cancels a turn in the console, then runs JB `Run Agent Doc`...the dispatch hangs. This happened in equityfundingsource.md.
+
+Fixed in `src/agent-doc`.
+
+The stale-draft detector now treats any later harness prompt as proof that an older `agent-doc ...` trigger is scrollback, not the current composer draft. That covers the equityfundingsource-style cancelled prompt followed by `Conversation interrupted` and a newer live Codex draft like `Use /skills to list available skills`.
+
+I also made the direct-pane route path fail closed when the target composer contains protected unsent prompt input. Instead of appending the route trigger or pressing Enter into that draft, it preserves a route-submit snapshot, returns an actionable refusal with `snapshot_path=...`, and leaves the user draft alone.
+
+JetBrains now classifies that refusal as protected prompt input and shows an actionable warning rather than a persistent generic route failure. I bumped the plugin to `0.2.187`, built and signed it, and installed it locally into both IDEA 2026.1 plugin roots.
+
+Commits:
+
+- agent-doc submodule: `04cd0bd1 fix: block run-agent-doc on protected drafts` pushed to `btakita/agent-doc main`
+- root pointer: `fc233ee59 agent-doc: block run-agent-doc on protected drafts`
+
+Verification:
+
+- `cargo test -p agent-doc-orchestration direct_pane_existing_draft_detection -- --nocapture`
+- `cargo test -p agent-doc-orchestration is_prompt_line -- --nocapture`
+- `cargo test -p agent-doc-orchestration protected_prompt_input_reason -- --nocapture`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin`
+- `make check`
+- `make precommit`
+- GitHub Actions CI run `28082046269` passed, including `make check` and `make tmux-ci`.
+
+Local installs completed:
+
+- `make install`
+- `agent-doc plugin install --local jetbrains` for `/home/brian/.config/JetBrains/IntelliJIdea2026.1` and `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`
+<!-- agent:boundary:c627668b -->
 <!-- /agent:exchange -->
 
 ## Queue

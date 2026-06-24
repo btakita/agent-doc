@@ -369,7 +369,11 @@ Four unit tests added. All pass. Clippy clean. Built + installed with `transcrib
 **Committed + pushed:** `src/corky` `44ac1b4..29309ff` → `btakita/corky`; superproject gitlink `f3bda69be` → `btakita/agent-loop`.
 
 **Queue bookkeeping:** all queue heads consumed. `#lzlinkedincomment` → DONE. Queue drained.
-<!-- agent:boundary:7c53fc23 -->
+
+### Re: IPC diagnostic — acknowledged — glm-5.2
+
+The `ipc_proof_insufficient` diagnostic blocks in the exchange are auto-appended dogfood annotations from editor IPC issues during this session. They are not user prompts — no action needed.
+<!-- agent:boundary:b7caadbd -->
 <!-- /agent:exchange -->
 ###
 <!--

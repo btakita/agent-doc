@@ -127,7 +127,27 @@ Also shipped this drain (prior cycle, IPC-scrambled but committed):
 - Zig 0.16 compat — `GraphMutex` spinlock + ArrayList `.empty` + `ThreadSafeAllocator` guard (submodule `9b492d8`, gitlink `045d90abe`)
 
 **Next drain head:** `do [#hj5x]` (Lean SM↔IPC cross-module proof) or `do [#f71y]` (signal.zig Phase 2, now unblocked by #9226).
-<!-- agent:boundary:30fede7c -->
+
+### Re: #hj5x DONE — Lean SM↔IPC cross-module proof — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#hj5x]
+
+**Implemented and committed.** `src/lazily-spec/formal/lean/LazilyFormal/StateMachineIPC.lean` (submodule `2506182`, gitlink `0987e59b8`):
+
+7 theorems linking `StateMachine.lean` with `IPC.lean` via `sendToOps` (translates a `send` into `cellSetOps`):
+- `guard_rejection_no_ops` — rejected event → no ops
+- `changed_transition_emits_cellSet` — changed state → exactly one `cellSet`
+- `self_transition_no_ops` — eql guard suppresses (matches runtime)
+- `changed_transition_accepts_delta` — changed → valid sequential delta (peer accepts)
+- `guard_rejection_accepts_empty_delta` — rejected → empty but valid delta
+- `wire_payload_matches_new_state` — wire payload = new state
+
+`lake build` passes (Lean 4.30.0). Imported from `LazilyFormal.lean`.
+
+**Next drain head:** `do [#f71y]` (signal.zig Phase 2 — now unblocked by #9226).
+<!-- agent:boundary:95f9edb7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -139,7 +159,7 @@ Also shipped this drain (prior cycle, IPC-scrambled but committed):
 - ~~:pushpin: do [#9226]~~
 - ~~update lazily-zig, add support for 0.16.0~~
 - ~~:pushpin: do [#nnyn]~~
-- :pushpin: do [#hj5x]
+- ~~:pushpin: do [#hj5x]~~
 - :pushpin: do [#f71y]
 - :pushpin: do [#mes4]
 - :pushpin: do [#bcnf]
@@ -156,7 +176,6 @@ Also shipped this drain (prior cycle, IPC-scrambled but committed):
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#hj5x] #lzsmlean2=Add Lean cross-module proof: SM send -> IPC DeltaOp.cellSet (plan Phase 1 TODO). Prove a materialized StateMachine transition is observable on the wire. Link StateMachine.lean with IPC.lean.
 - [ ] [#f71y] #lzsigzig2=Implement eager Signal in src/lazily-zig/src/lazily/signal.zig (mirrors lazily-rs SignalHandle + lazily-py Signal): memoized backing slot + comptime on_invalidate/recompute puller + std.meta.eql memo guard. get()/dispose()/is_active(). Export from root.zig. Tests: eager recompute, memo-guard suppresses equal cascade, dispose->lazy, signal-on-signal. Blocked on #lzsigzig1. Plan Phase 2.
 - [ ] [#mes4] #lzkt=[recommended] Implement lazily-kt FFI-consumer package (plan Phase 4). Kotlin/Gradle under src/lazily-kt/. Wraps JNA bridge to lazily_ffi_*; StateFlow<DocumentStateProjection> projection holder + recordStateEvent reporter. NOT a reactive-core port. Blocked on #lzffistate1.
 - [ ] [#bcnf] #lzjs=[recommended] Implement lazily-js FFI-consumer package with *.js + *.d.ts (plan Phase 5). Under src/lazily-js/. Wraps VSCode N-API addon; EventEmitter projection holder + event reporter. NOT a reactive-core port. Blocked on #lzffistate1.

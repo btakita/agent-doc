@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -184,7 +184,19 @@ fix(admin): auto-review opened pipeline applications
 
 Move submitted pipeline application cards into the Under Review stage when their pipeline dialog opens, remove the manual Mark in Review decision button, and update the admin pipeline/full-application tests. The Worker is deployed as version 03fc99ce-4dbd-453a-8c21-b08c7d989c31 with no pending D1 migrations.
 ```
-<!-- agent:boundary:34645583 -->
+
+### Re: Deploy Queue Closeout — gpt-5
+
+> **Queue prompt:** deploy
+
+Already completed in the preceding closeout: `make deploy` activated Worker version `03fc99ce-4dbd-453a-8c21-b08c7d989c31`, post-deploy D1 migrations had none pending, and the public smoke test returned HTTP `200`.
+
+Changed paths: no additional file changes for this closeout.
+Commands: no additional deploy command was run for this residue-only closeout.
+Verification: this response only clears the remaining free-text queue row that was left active after agent-doc repaired the main response.
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:4aefd795 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -204,8 +216,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > should be automatically moved to the Review stage when it is opened. Remove the "Marked for Review" button.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

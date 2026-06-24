@@ -32,6 +32,17 @@ done
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+❯ - `cargo test --test finalize_integration finalize_stale_snapshot_blocks_pending_flags_before_mutating_backlog`
+❯ - `cargo test -p agent-doc-orchestration protected_prompt_draft_preview_redacts_and_bounds_latest_draft`
+❯ - JetBrains `TerminalUtilTest.protected prompt input route refusal is actionable not persistent failure`
+❯ - `cargo test -p agent-doc --bin agent-doc route_sim_protected_prompt_refusal_has_no_dispatch_churn`
+❯ - `make bump-plugin`
+❯ - `make check`
+❯ - `make install-full`
+❯ - `src/agent-doc` `7585b872` (`fix: harden route and closeout diagnostics`)
+❯ - `src/agent-doc` `612b1552` (`test: cover protected prompt route refusal`)
+❯ - parent repo `c77917dc0` (`agent-doc: harden route closeout diagnostics`)
+❯ - parent repo `e9626e632` (`agent-doc: add protected route sim coverage`)
 ### Session Summary
 
 ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-181923.md`*

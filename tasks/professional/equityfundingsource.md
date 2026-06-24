@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -71,7 +71,25 @@ Verification: `make check` passed with `1186 pass / 0 fail`, app build, and Work
 CI/workflows: `gh run list --workflow CI --limit 1` found no workflow named `CI` in either the EFS submodule or the parent repo.
 
 Escalation: none. Confidence: high for deploy/build/D1/smoke coverage; authenticated visual verification of the admin-only dialog still requires an authenticated browser session.
-<!-- agent:boundary:ac6352c8 -->
+
+### Re: Accept Application Guidance And Deploy — gpt-5
+
+> **Queue prompt:**
+> In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, add guidance on what needs to be completed before being able to Accept Application.
+> deploy
+
+Done. The Deal Pipeline application dialog now fetches the selected full-application detail, runs the same shared approval blocker gate used by the Accept action, and shows a `Before Accept Application` checklist in the existing next-step alert. The checklist shows exact missing items, a loading/error state, or a ready message when submission, core data, declarations, and e-signature are complete.
+
+Changed paths: `src/equityfundingsource-dev` at `295ca29`; parent submodule pointer at `a5bdda62b`. Key files were `lib/ui--browser--efs/portal/admin/pipeline.tsx`, `tests/admin-pipeline.test.ts`, and `prds/67v2-admin-loan-pipeline-kanban.md`. Unrelated dirty files in the parent repo were left untouched.
+
+Commits/push/deploy: EFS commit `295ca29 feat(admin): show application accept blockers (#pipeline-full-app-dialog)` was pushed to `origin/main`; parent pointer commit `a5bdda62b chore(efs): bump application guidance submodule` was pushed to `origin/main`; deployed Worker version `16958120-9119-48d8-8352-7354c99a9358` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Verification: focused tests passed (`bun test tests/admin-pipeline.test.ts tests/admin-full-application-approve-ui.test.ts`: `72 pass / 0 fail`). Full local verification passed (`make check`: `1186 pass / 0 fail`, app build, and Worker build). Pre-deploy D1 checks reported no pending migrations, D1 info returned for database `280e1539-b940-4c59-8988-fbed63c12ac0`, and Time Travel bookmark `00000509-00000010-00005094-54e662098a450514cb2e36b3dd1b69a7` was available. Deploy ran through `make deploy`; post-deploy migrations still report none pending. Smoke checks returned `200` for `/` and `303` for the admin pipeline deep link, consistent with Cloudflare Access on admin routes.
+
+CI/workflows: `gh run list --workflow CI --limit 1` found no workflow named `CI` in either the EFS submodule or the parent repo.
+
+Escalation: none. Confidence: high for code, tests, push, D1/deploy, and unauthenticated smoke coverage; final visual verification of the admin-only dialog still requires an authenticated browser session.
+<!-- agent:boundary:845f4059 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -91,6 +109,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, add guidance on what needs to be completed before being able to Accept Application.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

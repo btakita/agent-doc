@@ -267,7 +267,17 @@ Recovered from a stuck `response_captured` cycle (IPC went fully degraded after 
 **Cycle history this session:** `#lzsmpy` DONE (StateMachine in lazily-py, commit `9199550`). `StateMachine.lean` DONE (commit `9fbc669`). `plan-lazily-state-machine-mirroring.md` + `plan-lazily-ffi-state-projection.md` Phase 2 contract committed (`3ead752bc`).
 
 **Session note:** exchange is large; supervisor was recycled to fresh. Continuing queue drain — next head is `do [#lzffistate]` / `do [#nnyn]`.
-<!-- agent:boundary:9db0ebdc -->
+
+### Re: #lzffistate spike closed — plan-gate satisfied; #lzffistate1 is next head — glm-5.2
+
+Closed `#lzffistate` — its deliverable was the phased plan (`tasks/software/plan-lazily-ffi-state-projection.md`, committed `557afa87a`); plan-gate is satisfied and phase-1 impl is split into `#lzffistate1` (the next queue head). Located the exact API `#lzffistate1` will bind: `state_backbone.rs:296` (`document(document_hash)` reader), `:301` (record path, deduped by `seen_event_ids`), `:313` (`DocumentStateProjection` struct). `ffi.rs` has the `agent_doc_*` export conventions but not yet these two exports.
+
+**IPC dogfood logs (prompt targets):** the two `ipc_proof_insufficient` lines — `live_prompt_drift_after_preflight`→`content_ours_snapshot_next_cycle`, and `no_ack`→`retry_without_disk_write` — are symptom logs of editor IPC instability during this drain. The binary's recovery paths are absorbing them; not new work, already recorded in the dogfood section above.
+
+**`#h6qb` semantic_completion_match:** stays `[operator-drive]`. Agent-doable slice `#lzwebrtcwire` is DONE (SignalingClient↔Str0mNet wired, localhost handshake tested); the remaining cross-host/NAT validation through the live `#yxjw` Worker is genuinely operator-only.
+
+**Backlog drift:** ~8 duplicate queue IDs (`#t0mf`/`#t0qn`, `#pwvm`/`#9e64`, `#t1xt`/`#dcgp`, `#7gpg`/`#kjfe`) are residue from the IPC-lost capture recovery cycles. Non-blocking; they reaped surface as the drain advances. Next real head after `#lzffistate1` is `#nnyn` (StateMachine in lazily-zig).
+<!-- agent:boundary:59a5d885 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -276,7 +286,7 @@ Recovered from a stuck `response_captured` cycle (IPC went fully degraded after 
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#lzffistate]
+- ~~do [#lzffistate]~~
 - do [#lzffistate1]
 - do [#nnyn]
 - do [#hj5x]
@@ -312,7 +322,6 @@ Recovered from a stuck `response_captured` cycle (IPC went fully degraded after 
 - [ ] [#mes4] #lzkt=[recommended] Implement lazily-kt FFI-consumer package (plan Phase 4). Kotlin/Gradle under src/lazily-kt/. Wraps JNA bridge to lazily_ffi_*; StateFlow<DocumentStateProjection> projection holder + recordStateEvent reporter. NOT a reactive-core port. Blocked on #lzffistate1.
 - [ ] [#bcnf] #lzjs=[recommended] Implement lazily-js FFI-consumer package with *.js + *.d.ts (plan Phase 5). Under src/lazily-js/. Wraps VSCode N-API addon; EventEmitter projection holder + event reporter. NOT a reactive-core port. Blocked on #lzffistate1.
 - [ ] [#lzffistate1] Implement lazily FFI state-projection phase 1 (plan: tasks/software/plan-lazily-ffi-state-projection.md, #lzffistate plan-gate satisfied). Add agent_doc_state_projection(doc_hash)->JSON + agent_doc_record_state_event(doc_hash, fact_json) to src/agent-doc/src/ffi.rs behind a compile flag, mirror in editors/jetbrains NativeLib.kt + VSCode native addon, with record→read round-trip tests. Plugins become projection-renderer + event-reporter; JB EditorCommandStateMachine.kt stays local UI coalescing.
-- [ ] [#lzffistate] [recommended] Spike: FFI state-projection + event-intake exports so JB/VSCode plugins consume the binary's lazily-powered state_backbone FSMs (RouteReadiness/TransportPatch/ActorLifecycle/ProofGate) instead of re-deriving them. Add agent_doc_state_projection(doc_hash)->JSON (DocumentStateProjection slices) + agent_doc_record_state_event(doc_hash, fact_json) behind the existing JNA bridge (ffi.rs / NativeLib.kt). Plugins become thin event-reporter + projection-renderer per the FFI-first rule; EditorCommandStateMachine.kt stays local UI coalescing. Prototyped behind a compile flag. Plan first.
 <!-- /agent:backlog -->
 
 ## Review

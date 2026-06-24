@@ -39,7 +39,21 @@ queue: stop
 Compacted content:
 ❯ - Archived 11 response topic(s): #lzshmblobconf cross-sibling ShmBlobArena conformance; blog post; blog post; 8 more
 ❯ - Prior summary/context: prior compacted content: Archived 6 response topic(s): #t0mf eager Signal in lazily-zig; #pwvm IPC.lean clarification...
-<!-- agent:boundary:f4000864 -->
+
+### Re: lazily-rs bug next-steps — glm-5.2
+
+Drained the queue prompt against a fresh tsift-indexed scan of `src/lazily-rs/` plus the done archive. **Most previously-logged bugs are already fixed at HEAD:** `#lzstr0mframe` (silent frame loss + unbounded `out_pending` → re-queue on write err + `MAX_PENDING_FRAMES=1024` backpressure gate), `#lzstr0mpolldrive` (`socket.send_to` errors now handled explicitly), `#lzloomtimeout` (Loom model bounded — `preemption_bound=4`, `max_duration=60s`), `#lzrepourl` (now `lazily-hub/lazily-rs`), `#lzmsrv` (MSRV 1.88 declared), `#lzdisposedrain` (both `pending`+`scheduled` drained).
+
+**Fixed this cycle — `#lzasyncdispose` (lazily-rs `caa6035`, pushed):** `AsyncContext::dispose_async_effect` (`async_context.rs:1022`) tore down dependency edges and recycled the node id but **never ran the effect's stored cleanup** — a direct violation of the SPEC contract at `SPEC.md:799` ("Dispose async effect and await cleanup") and the lone outlier vs `Context::dispose_effect` (`context.rs:695`) and `ThreadSafeContext::dispose_effect` (`thread_safe.rs:2589`), which both run cleanup on dispose. Async cleanups (resource teardown registered by `effect_async`) were silently leaked. Fix takes the cleanup out of the node under the graph lock and runs it after the lock releases, mirroring `flush_async_effects` (`:1161`, drops the lock before `cleanup()`). Regression test `async_context_effect_async_cleanup_runs_on_dispose` added. Verified: rustfmt clean on changed files; clippy `--all-targets --all-features -D warnings` clean; `--features async` suite green (integration 28 + state-machine 10 + stress 3 + resolve-loop 2); release build OK. (Pre-existing fmt drift in untouched `tests/conformance.rs`/`tests/ipc.rs` left alone to keep the diff scoped.)
+
+### Re: backlog (priority order) — glm-5.2
+
+The highest-leverage cluster is **AsyncContext backend-parity** — it is the newest, least-mature backend and the reactive core the state-machine primitive builds on, so its dispose/dedupe gaps are the most likely to bite a real consumer. Then str0m reliability (the networked transport is approaching its live two-host gate `#h6qb`), then the long-open ergonomics items.
+
+Full list written to `agent:backlog` this cycle. **Top of backlog: `#lzasyncdispose2`** — the in-flight re-run aliasing guard that completes the dispose-correctness story I just started.
+
+Pre-existing `make check` caveat: `benchmark-check` is red (`#lzbenchbudget`, unrelated to this change — budgets not refreshed since the SlotId-cast + eager-Signal landings); `fmt`/`clippy`/`build`/`test`/`test-async`/`test-async-resolve` all pass.
+<!-- agent:boundary:786549d1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -54,6 +68,13 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzasyncdispose2] [recommended] Completeness follow-on to #lzasyncdispose (caa6035): AsyncContext::dispose_async_effect still recycles the SlotId (free_ids LIFO) while a spawned effect re-run task (flush_async_effects spawn, async_context.rs:1157) may be in-flight across its .await; when it re-locks it writes cleanup + edges into whatever node now holds the recycled id (aliasing). Guard: abort/track the in-flight JoinHandle on dispose, or generation-check before storing cleanup/edges. Add an async stress test (dispose during pending re-run).
+- [ ] [#lzasynceffdup] [recommended] Backend parity: AsyncContext pending_async_effects (async_context.rs:234) is a Vec with no scheduled_async_effects HashSet, unlike Context (context.rs:123) and ThreadSafeContext (thread_safe.rs:1219) — duplicate ids accumulate O(invalidations) before drain, skipped only by a force_run flag check. Add a HashSet for dedupe + parity.
+- [ ] [#lzstr0mnetinbox] [recommended] str0m_net.rs receive-side Shared::inbox (:133) is an unbounded Mutex<VecDeque>; send side has MAX_PENDING_FRAMES=1024 backpressure but ChannelData pushes (:548) are unbounded — a slow consumer grows memory without limit. Cap inbox + apply backpressure in handle_input.
+- [ ] [#lzstr0mnetacceptanswer] str0m_net.rs driver discards rtc.accept_answer result (:391 let _ =); an ICE/DTLS fingerprint/mid mismatch is invisible and wait_open times out with no diagnostic. Propagate apply-time failure to Shared::last_error so the open-failure surfaces a cause.
+- [ ] [#lzwsunbounded] ws_backend.rs outbound is an unbounded mpsc (:88) and drive abandons queued frames on send error (:117-119 break); producers can keep enqueuing after close. Switch to a bounded channel, surface send failures via WsError, stop producers on close.
+- [ ] [#lzerrfrom] [recommended] Add From<serde_json::Error>/From<postcard::Error> impls for EncodeError/DecodeError ergonomics (open since 2026-06-17). src/ipc.rs.
+- [ ] [#lzsid32] Harden SlotId.0 as-usize casts in thread_safe.rs to usize::try_from for 32-bit safety parity with single-threaded Context (open since 2026-06-17).
 <!-- /agent:backlog -->
 
 ## Review

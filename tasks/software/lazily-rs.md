@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -56,7 +56,7 @@ Fix: mirror str0m's `push_inbox_frame` — cap at `MAX_INBOX_FRAMES`, drop+count
 `Str0mLoopback` inbox (`str0m_backend.rs:204`) is also an unbounded `push_back`. Deterministic in-process test harness (not a network DoS vector), so lowest priority, but applying the same cap gives uniform backpressure semantics across every `DataChannel` backend.
 
 Backlog is prioritized top → bottom. **Top item id: `#e4tf`** (`#lzasyncrerunabort` — core async-primitive correctness, proven reproducer). Both HIGH items are clean to land; on confirmation I'll execute `#xdsx` first (lowest-risk, well-precedented) then `#e4tf` (regression test ready from the reproducer).
-<!-- agent:boundary:11a93b54 -->
+<!-- agent:boundary:dd12bfc3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,6 +66,9 @@ Backlog is prioritized top → bottom. **Top item id: `#e4tf`** (`#lzasyncreruna
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 What are #next-steps to fix lazily bugs?
+- [#e4tf]
+- [#xdsx]
+- [#hses]
 <!-- /agent:queue -->
 
 ## Backlog

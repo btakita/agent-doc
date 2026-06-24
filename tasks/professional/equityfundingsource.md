@@ -120,7 +120,71 @@ fix(admin): keep dialog arrow navigation from opening selects
 
 Mark shared dialog navigation roots and let closed PortalSelect ArrowUp/ArrowDown events bubble to the dialog action navigator inside those roots, while keeping Enter/Escape and open-list option navigation owned by the select. Updates the Deal Pipeline and Lender Pipeline regression coverage; make check passes and Worker version 1b6da8b5-bab6-4fc2-8140-526ff3425953 is deployed.
 ```
-<!-- agent:boundary:54cdfe68 -->
+
+### Re: Application Review Auto-Move And Deploy — gpt-5
+
+> **Queue prompt:** In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > should be automatically moved to the Review stage when it is opened. Remove the "Marked for Review" button.
+
+Implemented the pipeline application dialog behavior and removed the manual review action.
+
+What changed:
+- Submitted/Complete application cards now auto-request `in_review` through the existing `/api/admin/full-applications/:id/status` path when their pipeline dialog opens, including deep links like the provided URL.
+- The old full-application `Mark in Review` decision button is removed; Decline, Accept and Send to TMO, and Remove remain.
+- Tests now lock the auto-review effect, the removed manual review button, and the updated approval-card button-row anchor.
+
+> **Queue prompt:** deploy
+
+Deployed through the project runbook path, `make deploy`. Cloudflare activated Worker version `03fc99ce-4dbd-453a-8c21-b08c7d989c31` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Changed paths in this cycle:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/full_applications.tsx`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/apply4-full-application-p6.test.ts`
+- `src/equityfundingsource-dev/tests/admin-full-application-approve-ui.test.ts`
+
+Pre-existing modified paths still remain in the EFS submodule and were included in the deployed build:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/ui.tsx`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+
+Commands:
+- `bun test tests/admin-pipeline.test.ts tests/apply4-full-application-p6.test.ts`
+- `bun test tests/admin-full-application-approve-ui.test.ts tests/admin-pipeline.test.ts tests/apply4-full-application-p6.test.ts`
+- `git diff --check`
+- `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`
+- `bun run cf:d1:info`
+- `bun run cf:d1:time-travel:info`
+- `make check`
+- `make deploy`
+- `curl -s -o /dev/null -w '%{http_code}\n' https://equityfundingsource.brian-takita.workers.dev/`
+- `curl -s -o /dev/null -w '%{http_code}\n' 'https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6'`
+- `gh run list --workflow CI --limit 1`
+
+Verification:
+- Focused tests passed: 92 tests across the affected admin pipeline/full-application files.
+- `git diff --check` passed.
+- Pre-deploy remote D1 migrations: none pending.
+- D1 recovery posture checked; Time Travel bookmark: `00000507-00000000-00005094-19ad6bd87b633c2d6d76e83187ab0a3b`.
+- `make check` passed after fixing one stale source-shape test anchor: 1184 tests, app build, and worker build.
+- `make deploy` applied zero D1 migrations and deployed Worker version `03fc99ce-4dbd-453a-8c21-b08c7d989c31`.
+- Post-deploy remote D1 migrations: none pending.
+- Public smoke test returned HTTP `200`.
+- The admin pipeline URL returned HTTP `303` to unauthenticated curl, consistent with protected admin access; I could not verify the authenticated page render from this shell.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in this repository.
+
+Confidence: high.
+Escalation: none.
+
+No git commit was made in `src/equityfundingsource-dev`; the repo-local instructions say not to commit unless explicitly asked.
+
+Suggested git commit message:
+
+```txt
+fix(admin): auto-review opened pipeline applications
+
+Move submitted pipeline application cards into the Under Review stage when their pipeline dialog opens, remove the manual Mark in Review decision button, and update the admin pipeline/full-application tests. The Worker is deployed as version 03fc99ce-4dbd-453a-8c21-b08c7d989c31 with no pending D1 migrations.
+```
+<!-- agent:boundary:34645583 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -140,7 +204,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > should be automatically moved to the Review stage when it is opened. Remove the "Marked for Review" button.
+- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > should be automatically moved to the Review stage when it is opened. Remove the "Marked for Review" button.~~
 - deploy
 <!-- /agent:queue -->
 

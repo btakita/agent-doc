@@ -359,7 +359,61 @@ Preflight found no new user diff, but it recovered an orphaned response and comm
 Latest parent commit: `1e0c4c793 agent-doc(equityfundingsource): 2026-06-23 21:38:34`.
 
 Final `session-check`: OK, with no drainable queue head. One warning remains: the route-owned supervisor may keep using the stale binary until it reaches an idle recycle boundary.
-<!-- agent:boundary:eaa2d3fa -->
+
+### Re: Pipeline keyboard navigation and deploy — gpt-5
+
+> **Queue prompt:**
+>
+> In the pipeline views (Deal + Broker), the arrow keys navigate between the items. Up/Down in the same column, Left/Right move between columns. Pressing up at the first item or empty column selects the +/- toggle. Enter activates the selected item.
+
+> **Queue prompt:**
+>
+> deploy
+
+Implemented and deployed keyboard navigation for the pipeline views.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/broker/dashboard.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/broker/my_pipeline.tsx`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/broker-portal.test.ts`
+
+What changed:
+- Deal Pipeline board cards and +/- lane toggles now support arrow-key focus navigation: Up/Down within a lane, Left/Right between lanes, Up from the first card to the lane toggle, and empty/collapsed lanes focus the toggle.
+- Lender Pipeline mirrors the same board keyboard model because it shares the same collapsible lane interaction.
+- Broker My Pipeline table rows are keyboard-selectable: Up/Down moves the active row and updates the detail panel; Enter activates the focused row.
+
+Verification:
+- `git diff --check` — passed.
+- `bun test tests/admin-pipeline.test.ts tests/admin-investor-pipeline.test.ts tests/broker-portal.test.ts` — passed, 190 tests.
+- `make check` — passed, 1170 tests plus app build and Worker build; the expected non-fatal `d1 down` log remains from the outbox failure test.
+- `gh run list --workflow CI --limit 1` in both EFS and parent repos — no workflow named `CI` exists.
+
+Deployment:
+- Pre-deploy remote migration list — `No migrations to apply!`.
+- Pre-deploy D1 info succeeded; Time Travel bookmark `000004f6-00000064-00005094-cdc8cb457f0ab2e5b052471146ef5931` recorded.
+- `make deploy` — passed; no migrations applied, 1 updated browser asset uploaded, Worker deployed at `https://equityfundingsource.brian-takita.workers.dev`.
+- Current Worker version: `e53148b0-7045-4b77-a459-95c39941477d`.
+- Post-deploy remote migration list — `No migrations to apply!`.
+- Post-deploy smoke tests: `/` returned `200`; `/admin/pipeline` and `/brokers/my-pipeline` returned expected auth redirects `303`.
+
+Commits:
+- Not committed or pushed: `src/equityfundingsource-dev/AGENTS.md` says not to run `git commit` unless explicitly asked. I added a recommended backlog follow-up for commit/push approval.
+
+Escalation: none.
+Confidence: high.
+
+Suggested commit message:
+
+```txt
+feat(portal): add pipeline keyboard navigation
+
+Add arrow-key navigation to the Deal and Lender pipeline boards, including focus handoff to lane expand/collapse toggles, and make Broker My Pipeline rows keyboard-selectable so the detail panel follows the active deal. Covers the behavior with admin pipeline, lender pipeline, and broker portal tests; deployed Worker version e53148b0-7045-4b77-a459-95c39941477d.
+```
+<!-- agent:boundary:701d5b43 -->
 <!-- /agent:exchange -->
 ###
 <!--

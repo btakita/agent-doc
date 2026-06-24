@@ -119,7 +119,14 @@ Verification passed now:
 - `./gradlew test --tests 'com.github.btakita.agentdoc.TerminalUtilTest.protected prompt input route refusal is actionable not persistent failure'`
 
 No code files changed in this cycle; `src/agent-doc` stayed clean. The remaining actionable route proof failures are `#xgdn` and `#sz4a`, with the newer `monsterrodholders.md` Run Agent Doc issue next in queue.
-<!-- agent:boundary:829e5262 -->
+
+### Re: exchange-prompt-dropped-on-merge closeout — gpt-5
+
+Confirmed this was recovery residue, not a new implementation task. The visible exchange evidence is now committed, and the emitted orchestration dry-run still resolves only already-run verification evidence and prior commit IDs.
+
+No code files changed in this follow-up. The protected-prompt `Run Agent Doc` queue item is fenced done, and the next actionable queue head is `#sz4a`. There are no new actionable follow-up items beyond the existing `#promptprefixorch1` backlog item.
+
+<!-- agent:boundary:90d475b7 -->
 <!-- /agent:exchange -->
 
 ## Queue

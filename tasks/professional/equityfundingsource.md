@@ -93,7 +93,42 @@ feat(admin): share typed document upload field
 
 Unify the Lead Documents and Lender Pipeline per-type document upload rows behind a shared admin upload field, keeping the compact drop-zone plus icon-button behavior consistent across admin workflows. Updates PRDs and source-level regression tests for lead uploads, lender-pipeline signup visibility, and multi-file upload coverage.
 ```
-<!-- agent:boundary:54b83344 -->
+❯ **IPC proof issue dogfood log**
+
+❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+❯ Issue class: `ipc_proof_insufficient`
+❯ Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=3ad9fa06-a357-41a7-b899-a964154331c5 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782274306691
+```
+
+### Re: btak.dev+lender3@gmail.com was not sent a verification email. A verification email should be required to login.
+
+> **Queue prompt:**
+>
+> btak.dev+lender3@gmail.com was not sent a verification email. A verification email should be required to login.
+
+
+Implemented email verification gating for public portal auth.
+
+- Public borrower/broker/lender signup now creates the account without a session, sends a one-time verification/sign-in link, and redirects to the email-link page.
+- Password login now verifies the password first, then blocks unverified public accounts with a 403 and sends/resends a verification link instead of creating a session.
+- Consuming email-login, invite-login, password-reset, or Access/Google flows stamps `users.email_verified_at`; existing users are backfilled verified by migration `0108_user_email_verification.sql`.
+- Updated auth/email-link tests, fixtures, and the lending portal PRD.
+
+Verification:
+- Focused auth/provisioning tests passed.
+- `git diff --check` passed.
+- `make check` passed: 1179 tests, app build, and Worker build.
+- `gh run list --workflow CI --limit 1` in both EFS and parent reported no workflow named `CI`.
+
+Pushed:
+- EFS: `95a8b0a` (`feat(auth): require email verification before login`)
+- Parent gitlink: `7d4a14593` (`chore: update equityfundingsource submodule`)
+
+<!-- agent:boundary:014a1bdd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -114,7 +149,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~I signed up as a lender with btak.dev+lender3@gmail.com, but the lender did not show up in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline.~~
-- btak.dev+lender3@gmail.com was not sent a verification email. A verification email should be required to login.
+- ~~btak.dev+lender3@gmail.com was not sent a verification email. A verification email should be required to login.~~
 - ~~The file upload components in https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=lead&dialog_lead_id=e2a41d4b-250c-4197-a370-4f5b786a5bcf should match the file upload components in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline. Unify the admin file upload components to a single reusable component modeled after https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline.~~ — auto-struck: answered this cycle (#ftstrike) 
 <!-- /agent:queue -->
 

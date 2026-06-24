@@ -41,7 +41,42 @@ Compacted content:
 No new user-visible changes were detected in `/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`, so I stopped before opening a response cycle.
 
 Preflight did repair and commit transcript prompt prefixes, creating commit `5eea37c09`. It also reported a stale `agent-doc` install and one legacy gated backlog item; no drainable queue head is available right now.
-<!-- agent:boundary:e9339207 -->
+
+### Re: Dialog Select Keyboard Navigation — gpt-5
+
+> **Queue prompt:** The up/down dialog navigation should not open a select element. Pressing down while on a select should move to the next item. Pressing Enter on a select should open the select element with up/down navigating between the items. Pressing enter selects the select item and closes the select. Pressing Esc closes the select without a new selection.
+
+Implemented the shared dialog/select keyboard behavior in `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/ui.tsx`.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/ui.tsx`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+
+What changed:
+- Dialog navigation roots now mark themselves for child controls.
+- Closed `PortalSelect` ArrowUp/ArrowDown events inside dialog navigation roots now bubble to the shared dialog action navigator, so focus moves to the previous/next dialog control instead of opening the select.
+- Open `PortalSelect` menus still own ArrowUp/ArrowDown for option movement.
+- Enter/Space open the closed select or select the active open option.
+- Escape closes an open select menu and stops the modal Escape handler from closing the dialog.
+
+Verification:
+- `bun test tests/admin-pipeline.test.ts tests/admin-investor-pipeline.test.ts`
+- `make check`
+- `git diff --check`
+- `gh run list --workflow CI --limit 1` could not inspect CI because this repo has no workflow named `CI`; `gh workflow list` returned no workflows.
+
+Confidence: high.
+Escalation: none.
+
+Suggested git commit message:
+
+```txt
+fix(admin): keep dialog arrow navigation from opening selects
+
+Mark shared dialog navigation roots and let closed PortalSelect ArrowUp/ArrowDown events bubble to the dialog action navigator inside those roots, while keeping Enter/Escape and open-list option navigation owned by the select. Updates the Deal Pipeline and Lender Pipeline regression coverage; make check passes.
+```
+<!-- agent:boundary:037706a0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -62,7 +97,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~The shared upload component in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c&dialog=advance-lender and https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 should directly upload and save...no Save button.~~
-- The up/down dialog navigation should not open a select element. Pressing down while on a select should move to the next item. Pressing Enter on a select should open the select element with up/down navigating between the items. Pressing enter selects the select item and closes the select. Pressing Esc closes the select without a new selection.
+- ~~The up/down dialog navigation should not open a select element. Pressing down while on a select should move to the next item. Pressing Enter on a select should open the select element with up/down navigating between the items. Pressing enter selects the select item and closes the select. Pressing Esc closes the select without a new selection.~~
 - deploy
 <!-- /agent:queue -->
 

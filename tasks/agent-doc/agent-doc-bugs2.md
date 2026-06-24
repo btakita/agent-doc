@@ -54,12 +54,13 @@ A good shape is:
 - Always capture bounded evidence plus a stable fingerprint first; then route the action according to policy.
 
 That separation matters. Telemetry collection should be deterministic and low-surprise for every user, while actions that mutate repos or file external issues should be explicit policy choices. I added a recommended backlog item for this so the config, defaults, dedupe behavior, docs, and tests can be worked as a deliberate feature.
-<!-- agent:boundary:052c2ac2 -->
+<!-- agent:boundary:6084f735 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- [#bugpolicy1]: In agent-loop, set the config to fix.
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

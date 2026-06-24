@@ -39,7 +39,24 @@ queue: stop
 Compacted content:
 ❯ - Archived 7 response topic(s): lazily-rs bug next-steps; backlog (priority order); #lzasyncdispose2; 4 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-<!-- agent:boundary:8998375f -->
+
+### Re: lazily-rs bug next-steps — glm-5.2
+
+Found 2 confirmed bugs + 1 low-priority consistency item. Full suite (`cargo test --all-features`) + clippy across every feature combination pass clean, so these are latent runtime bugs the current suite doesn't exercise.
+
+**1. `#e4tf` / #lzasyncrerunabort — async effect re-run leaks (HIGH, proven)**
+`flush_async_effects` (`src/lazily-rs/src/async_context.rs:1176-1209`) spawns the effect re-run and overwrites `e.in_flight` **without aborting** the prior still-`.await`ing task. When an `effect_async` dependency changes again mid-flight, a second concurrent run spawns and the first `JoinHandle` is silently dropped (task keeps running). Empirical reproducer: `compute_count=2` (double concurrent execution) + `cleanup_count=0` (the overwritten run's cleanup is never invoked → leaked handle/subscription).
+Fix: mirror `dispose_async_effect` (`:1054-1055`) — `take()` + `abort()` the prior `in_flight` before spawning the re-run, and add the reproducer as a regression test.
+
+**2. `#xdsx` / #lzwsinboundunbounded — WebSocket inbound unbounded (HIGH)**
+`WsDataChannel` inbound is a bare unbounded `VecDeque` (`src/lazily-rs/src/ws_backend.rs:92,147,151`). A consumer slower than the socket reader grows receive memory without bound — the exact class already fixed for the str0m inbox (`#lzstr0mnetinbox`, `str0m_net.rs:131-150,577-583`) and the WS outbound (`#lzwsunbounded`). The str0m backend sibling was capped; the WS inbound was missed.
+Fix: mirror str0m's `push_inbox_frame` — cap at `MAX_INBOX_FRAMES`, drop+count oldest via `AtomicUsize`, expose `dropped_inbox_frames()`.
+
+**3. `#hses` / #lzstr0mloopbackinbox — loopback inbox consistency (LOW, recommended)**
+`Str0mLoopback` inbox (`str0m_backend.rs:204`) is also an unbounded `push_back`. Deterministic in-process test harness (not a network DoS vector), so lowest priority, but applying the same cap gives uniform backpressure semantics across every `DataChannel` backend.
+
+Backlog is prioritized top → bottom. **Top item id: `#e4tf`** (`#lzasyncrerunabort` — core async-primitive correctness, proven reproducer). Both HIGH items are clean to land; on confirmation I'll execute `#xdsx` first (lowest-risk, well-precedented) then `#e4tf` (regression test ready from the reproducer).
+<!-- agent:boundary:11a93b54 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,12 +65,15 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- What are #next-steps to fix lazily bugs?
+- 🚧 What are #next-steps to fix lazily bugs?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#e4tf] #lzasyncrerunabort=Fix AsyncContext effect re-run leak: flush_async_effects (async_context.rs:1176-1209) overwrites e.in_flight WITHOUT aborting the prior still-.awaiting task when an effect_async dependency is re-invalidated mid-flight. Proven reproducer: compute_count=2 (double concurrent execution) + cleanup_count=0 (overwritten run's cleanup is leaked, never invoked). Mirror dispose_async_effect (:1054-1055): take+abort prior in_flight before spawning the re-run. Core async-primitive correctness bug; affects any effect doing I/O/timers.
+- [ ] [#xdsx] #lzwsinboundunbounded=Bound WsDataChannel INBOUND queue: ws_backend.rs:92,147,151 does bare inbound.lock().push_back(payload) on an unbounded VecDeque. A consumer slower than the socket reader grows receive memory without bound — same bug class as the already-fixed #lzstr0mnetinbox (str0m_net.rs:131-150,577-583) and #lzwsunbounded (outbound). Fix: mirror str0m_net — cap at MAX_INBOX_FRAMES, drop+count oldest via AtomicUsize, expose dropped_inbox_frames().
+- [ ] [#hses] [recommended] #lzstr0mloopbackinbox=Low-priority consistency: Str0mLoopback inbox (str0m_backend.rs:82,94,204) is also an unbounded push_back. Deterministic in-process test harness (not a network DoS vector), so lower priority than #lzwsinboundunbounded, but apply the same cap for uniform backpressure semantics across all DataChannel backends.
 <!-- /agent:backlog -->
 
 ## Review

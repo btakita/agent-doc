@@ -137,7 +137,14 @@ Compacted content:
 
 **Remaining backlog:**
 1. `#pypi-trusted-publisher` — still blocked externally (PyPI `invalid-publisher`)
-<!-- agent:boundary:a4f53e7d -->
+
+### Re: Recovery closeout — gpt-5
+
+I ran the required orchestration handoff, but it failed closed because the repaired exchange now contains duplicate task-like lines for `#pypi-trusted-publisher`, so the DAG builder reported `duplicate dag task id #pypi-trusted-publisher`.
+
+Manual closeout for this cycle: no Corky repo files were changed, no new bug backlog items were added, and the current top remaining item is `#pypi-trusted-publisher`. `#fix-social-tests` and `#diarize-span-release` should be treated as completed based on the prior recorded closeout; the stale `Top of backlog: #fix-social-tests` line above is historical drift from the interrupted recovery, not the current queue state.
+
+<!-- agent:boundary:63c56798 -->
 <!-- /agent:exchange -->
 ###
 <!--

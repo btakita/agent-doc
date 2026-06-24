@@ -24,6 +24,11 @@
                                  id="com.github.btakita.agentdoc.colorConfigurable"
                                  instance="com.github.btakita.agentdoc.AgentDocColorConfigurable"
                                  displayName="Agent Doc Colors"/>
+        <applicationService serviceImplementation="com.github.btakita.agentdoc.MarkdownStyleSettings"/>
+        <applicationConfigurable parentId="tools"
+                                 id="com.github.btakita.agentdoc.markdownStyleConfigurable"
+                                 instance="com.github.btakita.agentdoc.MarkdownStyleConfigurable"
+                                 displayName="Agent Doc Markdown Style"/>
     </extensions>
 
     <projectListeners>

@@ -119,78 +119,91 @@ class VisualHighlighterManager private constructor(private val project: Project)
 
     private fun attrsFor(editor: Editor, kind: String): TextAttributes {
         fun baseAttrs(base: TextAttributes?): TextAttributes {
+            val fgBase = MarkdownStyleSettings.foregroundFor(
+                kind,
+                com.intellij.ui.JBColor(
+                    base?.foregroundColor ?: editor.colorsScheme.defaultForeground,
+                    base?.foregroundColor ?: editor.colorsScheme.defaultForeground,
+                ),
+            )
             return TextAttributes(
-                base?.foregroundColor,
+                fgBase,
                 base?.backgroundColor,
                 base?.effectColor,
                 base?.effectType,
-                base?.fontType ?: Font.PLAIN,
+                MarkdownStyleSettings.fontStyleFor(kind, base?.fontType ?: Font.PLAIN),
             )
         }
 
         return when (kind) {
             "component_body" -> TextAttributes().apply {
-                backgroundColor = mutedBackground(
-                    editor,
-                    editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.METADATA)?.foregroundColor
+                val accent = editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.METADATA)?.foregroundColor
+                backgroundColor = MarkdownStyleSettings.backgroundFor(
+                    kind,
+                    mutedBackground(editor, accent),
                 )
+                foregroundColor = MarkdownStyleSettings.foregroundFor(
+                    kind,
+                    com.intellij.ui.JBColor(accent ?: editor.colorsScheme.defaultForeground, accent ?: editor.colorsScheme.defaultForeground),
+                )
+                fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.PLAIN)
             }
             "scratch_comment_body" -> baseAttrs(
                 editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.BLOCK_COMMENT)
             ).apply {
-                backgroundColor = mutedBackground(editor, foregroundColor)
-                fontType = Font.ITALIC
+                backgroundColor = MarkdownStyleSettings.backgroundFor(kind, mutedBackground(editor, foregroundColor))
+                fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.ITALIC)
             }
             "component_open", "component_close" -> baseAttrs(
                 editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.METADATA)
             ).apply {
-                fontType = Font.BOLD
+                fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.BOLD)
             }
             "patch_open", "patch_close" -> baseAttrs(
                 editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.MARKUP_ATTRIBUTE)
             ).apply {
-                fontType = Font.BOLD
+                fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.BOLD)
             }
             "boundary" -> baseAttrs(
                 editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.KEYWORD)
             ).apply {
-                fontType = Font.ITALIC
+                fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.ITALIC)
             }
             "scratch_comment" -> baseAttrs(
                 editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.BLOCK_COMMENT)
             ).apply {
-                fontType = Font.ITALIC
+                fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.ITALIC)
             }
             // #editor-bold-markdown-rendering: render markdown emphasis inline.
             "bold" -> baseAttrs(editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.IDENTIFIER))
-                .apply { fontType = Font.BOLD }
+                .apply { fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.BOLD) }
             "italic" -> baseAttrs(editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.IDENTIFIER))
-                .apply { fontType = Font.ITALIC }
+                .apply { fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.ITALIC) }
             "prompt" -> baseAttrs(
                 editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.STRING)
             ).apply {
-                fontType = Font.BOLD
+                fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.BOLD)
             }
             "response_heading" -> baseAttrs(
                 editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.FUNCTION_DECLARATION)
             ).apply {
-                fontType = Font.BOLD
+                fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.BOLD)
             }
             "tracked_id" -> baseAttrs(
                 editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.CONSTANT)
             ).apply {
-                fontType = Font.BOLD
+                fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.BOLD)
                 effectType = EffectType.ROUNDED_BOX
                 effectColor = foregroundColor
-                backgroundColor = mutedBackground(editor, foregroundColor)
+                backgroundColor = MarkdownStyleSettings.backgroundFor(kind, mutedBackground(editor, foregroundColor))
             }
             "label_tag" -> baseAttrs(
                 editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.MARKUP_ATTRIBUTE)
             ).apply {
-                fontType = Font.BOLD
+                fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.BOLD)
                 effectType = EffectType.ROUNDED_BOX
                 effectColor = foregroundColor
-                backgroundColor = mutedBackground(editor, foregroundColor)
+                backgroundColor = MarkdownStyleSettings.backgroundFor(kind, mutedBackground(editor, foregroundColor))
             }
             else -> TextAttributes()
         }

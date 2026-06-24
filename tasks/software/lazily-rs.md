@@ -236,7 +236,7 @@ Marking `#8wmj` done. Remaining StateMachine parity: `#nnyn` (lazily-zig, Phase 
 > **Queue prompt:**
 >
 > ~~Can we make lazily support a bidirectional lazily<->lazily FFI communication channel?…~~ — auto-struck: answered prior cycle (#ftstrike)
-<!-- agent:boundary:ee2d8a2d -->
+<!-- agent:boundary:ea361f57 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -245,23 +245,16 @@ Marking `#8wmj` done. Remaining StateMachine parity: `#nnyn` (lazily-zig, Phase 
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~See /home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-orchestration/src/state_backbone.rs. Should we have a lazily-kt and lazily-js package to support the JB and VSCode plugins? Would the JB and VSCode plugins benefit from the lazily state machine? Would it make sense for these plugins to use lazily FFI to communicate with the FFI plugin?~~
-- ~~See /home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-orchestration/src/state_backbone.rs. Should we have a lazily-kt and lazily-js package to support the JB and VSCode plugins? Would the JB and VSCode plugins benefit from the lazily state machine? Would it make sense to use lazily FFI for bi-directional communication between editor plugins and the FFI plugin?~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Should we create lazily-kt and lazily-js for the plugins to help with FFI communication with the FFI plugin?~~
-- Can we make lazily support a bidirectional lazily<->lazily FFI communication channel? And in doing so, revisit the thin reporter spec. Whether the JB Plugin & VS Code plugin may trigger state transitions or be read-only state projections. It seems plausible that a lazily FFI channel would be beneficial to keep state aligned. If we do have a FFI channel, the Cell
 - do [#lzffistate]
 - do [#lzffistate1]
-- ~~Should the State Machine be part of lazily-spec? To facilitate State Machine mirroring?~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Spec FFI channel implementation in lazily-spec.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Implement State Machine in lazily-zig~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Implement State Machine in lazily-py~~ — auto-struck: answered this cycle (#ftstrike)
-- Implement lazily-kt
-- ~~Implement lazily-js. Use *.js + *.d.ts.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~do [#8wmj]~~
 - do [#nnyn]
 - do [#hj5x]
 - do [#mes4]
 - do [#bcnf]
+- Implement Signal in lazily-zig
+- Implement IPC.lean in lazily-rs
+- Implement IPC.lean in lazily-zig
+- Implement IPC.lean in lazily-py
 <!-- /agent:queue -->
 
 ## Backlog

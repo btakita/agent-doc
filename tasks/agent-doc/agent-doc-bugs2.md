@@ -32,6 +32,14 @@ done
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+- focused JetBrains Gradle test for `NormalizeExchangePrefixesTest`
+- `make bump-plugin`
+- full JetBrains `./gradlew test buildPlugin`
+- `make check`
+- `make precommit`
+- pushed submodule commit `a788e71e3` and GitHub Actions CI run `28080790474` passed
+- submodule: `a788e71e3` (`fix: keep component body text on theme foreground`), pushed to `agent-doc/main`
+- root pointer: `84116d682` (`agent-doc: update component body foreground fix`), local root commit only
 ❯ - JetBrains bold/italic visual tokens now inherit the editor's normal foreground instead of `DefaultLanguageHighlighterColors.IDENTIFIER`, so emphasized markdown no longer turns yellow under themes where identifiers are yellow.
 ❯ - The shared visual token parser now rejects underscore emphasis markers inside identifier words. `_foo_` and `__foo__` still render italic/bold; `foo_bar_baz` and `foo__bar__baz` stay regular text.
 ❯ - Added the Rust regression test, updated the editor integration guide and `VERSIONS.md`, and bumped the JetBrains plugin patch version to `0.2.184`.
@@ -112,30 +120,14 @@ A true same-pane recursive `agent-doc <FILE>` call should stay fail-closed. Disp
 The safe state-machine path is already the redirect: `preflight` exposes `owned_pane_self_invocation` with `kind` set to `unresolved_prompt` or `active_queue_head`, and Codex should continue the same owner turn, answer that work in-pane, then persist through `agent-doc finalize` or `agent-doc write --commit`. The Codex Stop hook uses the same model for queue continuations (`#codex-self-reinvoke-prevent`), so queue drain redirects to in-pane closeout instead of re-running `agent-doc <FILE>`.
 
 For the `monsterrodholders.md` case, the recovery is not another nested CLI invocation. Continue via preflight/plan/finalize in the owning pane, or start/route the document from outside that owner pane. Routing to the same pane mid-turn is unsafe; routing from a different pane or from supervisor-owned idle state is safe because the state machine can wait for actor readiness and dispatch once.
-<!-- agent:boundary:26b785af -->
+<!-- agent:boundary:083b54e7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~The JB Plugin renders the content of elements as an unpleasant yellow. Please have the JB Plugin use the current theme for regular text (white in my current theme ![img_54.png](img_54.png)). Variable names with multiple `_` are being misinterpreted as em or bold. Can we disable the italics/bold font for variable names...multiple `_` starting internally? So only  `_foo_` would be italic and `__foo__` would be bold per markdown. But `foo_bar_baz` would not make `_bar_` italic and `foo__bar__baz` would not make `__bar__` bold...both those cases should be regular text with the regular text color.~~
-- ~~When the JB Plugin loads a document without it being in the buffer, the colors fallback to the theme markdown. Please ensure the JB Plugin styling is applied in this case.~~
-~~~done
-:round_pushpin: agent-doc monsterrodholders.md using Codex has an error. Can we manage the CLI ordering using our state machines? Is there a way to support recursive calls by dispatching or somehow redirecting the call?
-```
-• agent-doc tasks/monsterrodholders.md did not start a new cycle because this Codex pane already owns that document.
-  agent-doc blocked it as a recursive direct invocation to avoid deadlock.
-
-  Session state looks healthy: actor ready, supervisor healthy, no manual cancel needed. The working tree still has one
-  local task-doc edit at tasks/monsterrodholders.md:90:
-
-  - The fallback for the invalid token is malformed ![img_8.png](img_8.png)
-
-  To launch a fresh managed cycle, run the command from outside this owned pane, or use agent-doc start tasks/
-  monsterrodholders.md.
-```
-~~~
-- The JB Plugin yellow text is still yellow. ![img_55.png](img_55.png)
+- The JB Plugin yellow text is still yellow. ![img_55.png](img_55.png). It should match the theme ![img_54.png](img_54.png).
+- If the operator cancels a turn in the console, then runs JB `Run Agent Doc`...the dispatch hangs. This happened in equityfundingsource.md.
 - do [#rootpushdiv]
 <!-- /agent:queue -->
 <!--

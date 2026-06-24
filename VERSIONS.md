@@ -871,6 +871,13 @@ agent-doc markdown visual tokens are reapplied after the IDE resolves the
 dialog. Test
 `file cache conflict path refreshes visual highlighters`.
 
+- **JetBrains cold-open tabs apply agent-doc visual highlighting.** The
+JetBrains plugin now reschedules `VisualHighlighterManager` from
+`FileEditorManagerListener` file-open and selection-change events so markdown
+files loaded from disk without an existing IDE buffer receive agent-doc visual
+tokens instead of falling back to plain theme markdown styling. Test
+`cold opened markdown files refresh visual highlighters`.
+
 - **Preflight/plan propose semantic completion matches.** The shared
 `tsift-memory` session-memory path now exposes advisory semantic completion
 candidates for open backlog/review items and free-text queue prompts that are

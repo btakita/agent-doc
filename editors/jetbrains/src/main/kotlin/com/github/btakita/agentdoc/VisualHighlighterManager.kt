@@ -1,6 +1,7 @@
 package com.github.btakita.agentdoc
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.DefaultLanguageHighlighterColors
@@ -14,6 +15,9 @@ import com.intellij.openapi.editor.markup.HighlighterLayer
 import com.intellij.openapi.editor.markup.HighlighterTargetArea
 import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerEvent
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.vfs.VirtualFile
@@ -39,6 +43,18 @@ class VisualHighlighterManager private constructor(private val project: Project)
                 refreshEditor(event.editor)
             }
         }, this)
+        project.messageBus.connect(this).subscribe(
+            FileEditorManagerListener.FILE_EDITOR_MANAGER,
+            object : FileEditorManagerListener {
+                override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
+                    refreshMarkdownFileAfterEditorEvent(file)
+                }
+
+                override fun selectionChanged(event: FileEditorManagerEvent) {
+                    event.newFile?.let { refreshMarkdownFileAfterEditorEvent(it) }
+                }
+            },
+        )
         com.intellij.openapi.vfs.VirtualFileManager.getInstance().addVirtualFileListener(
             object : VirtualFileListener {
                 override fun contentsChanged(event: VirtualFileEvent) {
@@ -59,6 +75,14 @@ class VisualHighlighterManager private constructor(private val project: Project)
             // Best-effort PSI cache drop; the VisualHighlighterManager still refreshes via documentChanged
         }
         scheduleRefresh(document)
+    }
+
+    private fun refreshMarkdownFileAfterEditorEvent(file: VirtualFile) {
+        if (!file.name.endsWith(".md")) return
+        ApplicationManager.getApplication().invokeLater {
+            if (project.isDisposed) return@invokeLater
+            refreshFile(file)
+        }
     }
 
     private fun scheduleRefresh(document: Document) {

@@ -390,6 +390,22 @@ One.
     }
 
     @Test
+    fun `cold opened markdown files refresh visual highlighters`() {
+        val visualHighlighterPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/VisualHighlighterManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/VisualHighlighterManager.kt"),
+        ).first { Files.exists(it) }
+        val visualHighlighter = Files.readString(visualHighlighterPath)
+
+        assertTrue(visualHighlighter.contains("FileEditorManagerListener.FILE_EDITOR_MANAGER"))
+        assertTrue(visualHighlighter.contains("override fun fileOpened(source: FileEditorManager, file: VirtualFile)"))
+        assertTrue(visualHighlighter.contains("override fun selectionChanged(event: FileEditorManagerEvent)"))
+        assertTrue(visualHighlighter.contains("private fun refreshMarkdownFileAfterEditorEvent(file: VirtualFile)"))
+        assertTrue(visualHighlighter.contains("ApplicationManager.getApplication().invokeLater"))
+        assertTrue(visualHighlighter.contains("refreshFile(file)"))
+    }
+
+    @Test
     fun `file patch success requires ack content before deleting patch file`() {
         val patchWatcherPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),

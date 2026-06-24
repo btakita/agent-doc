@@ -286,7 +286,63 @@ Escalation: none.
 Preflight warnings were existing backlog/review cleanup candidates and were left untouched.
 There were no actionable follow-up items to capture.
 Confidence: high.
-<!-- agent:boundary:99b068fe -->
+
+### Re: Admin message keyboard navigation and deploy — gpt-5
+
+> **Queue prompt:**
+>
+> In Admin message dialog: While the search input is focused, support Up/Down arrow keys to select previous/next message. Enter will focus on the conversation input. While in the conversation input, Esc will focus on the search input.
+
+> **Queue prompt:**
+>
+> deploy
+
+Implemented, pushed, and deployed.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/messages.tsx`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- parent submodule pointer `src/equityfundingsource-dev`
+
+What changed:
+- Added explicit search/composer focus helpers in the admin Messages dialog.
+- Up/Down from the search input now selects the previous/next visible conversation while keeping the search field usable.
+- Enter from the search input focuses the conversation composer.
+- Escape from the composer returns focus to the search input.
+- Extended the existing admin launcher regression test to lock the keyboard-navigation contract.
+
+Verification:
+- `bun test tests/admin-pipeline.test.ts` — passed, 63 tests; the expected non-fatal `d1 down` log remains from the outbox failure test.
+- `git diff --check` — passed.
+- `make check` — passed, 1170 tests plus app build and worker build.
+- `gh run list --workflow CI --limit 1` in both EFS and parent repos — no workflow named `CI` exists.
+
+Deployment:
+- Pre-deploy `git pull --rebase origin main` — already up to date.
+- Pre-deploy remote migration list — `No migrations to apply!`.
+- Pre-deploy D1 info succeeded; Time Travel bookmark `000004f6-00000064-00005094-cdc8cb457f0ab2e5b052471146ef5931` recorded.
+- `make deploy` — passed; no migrations applied, 1 updated browser asset uploaded, Worker deployed at `https://equityfundingsource.brian-takita.workers.dev`.
+- Current Worker version: `4aedf8cb-47de-47ed-8818-4f03fc818752`.
+- Post-deploy migration list — `No migrations to apply!`.
+- Post-deploy smoke tests: `/` returned `200`; `/admin/pipeline` returned expected admin auth redirect `303`.
+
+Commits:
+- EFS submodule: `af537e6130ccdfb842d450dc46d05bf8e160f6b8` (`feat(admin): add message dialog keyboard navigation`), pushed to `equityfundingsource-dev/main`.
+- Parent repo: `5b093017f` (`chore: update equityfundingsource submodule`), pushed to `agent-loop/main`.
+
+Escalation: none.
+Preflight warnings were existing backlog/review cleanup candidates and were left untouched.
+There were no actionable follow-up items to capture.
+Confidence: high.
+
+Suggested commit message:
+
+```txt
+feat(admin): add message dialog keyboard navigation
+
+Add keyboard navigation to the admin Messages dialog so Up/Down from search moves between conversations, Enter focuses the composer, and Escape returns from the composer to search. Covers the contract in the admin pipeline regression test and deploys the Worker.
+```
+<!-- agent:boundary:55086c0d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -306,6 +362,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- In Admin message dialog: While the search input is focused, support Up/Down arrow keys to select previous/next message. Enter will focus on the conversation input. While in the conversation input, Esc will focus on the search input.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

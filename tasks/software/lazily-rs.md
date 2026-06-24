@@ -138,7 +138,7 @@ Great clarification — and it surfaces a category my last answer wrongly folded
 **So: recommended to mirror?** Yes — for the *payload*, via `SharedBlob` descriptor. No — for a raw pointer into Rust memory. The line is "descriptor + managed arena with integrity guards" vs. "dereferenceable address-space pointer." My prior "references (no)" was right only for category 3/4 (reactive-graph references and raw handles); it was wrong to imply category 2 (blob-by-reference) is off-limits — lazily already ships the mechanism.
 
 **Plan updated:** folded this three-way contract (inline value / blob-by-descriptor / structural-edge / raw-pointer-never) into Phase 2 of `tasks/software/plan-lazily-ffi-state-projection.md`, including the `ShmBlobArena` validation path so Phase 2 picks `SharedBlob` for large projection payloads instead of re-inlining them.
-<!-- agent:boundary:758f4e11 -->
+<!-- agent:boundary:1e28dbf6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -153,6 +153,12 @@ Great clarification — and it surfaces a category my last answer wrongly folded
 - Can we make lazily support a bidirectional lazily<->lazily FFI communication channel? And in doing so, revisit the thin reporter spec. Whether the JB Plugin & VS Code plugin may trigger state transitions or be read-only state projections. It seems plausible that a lazily FFI channel would be beneficial to keep state aligned. If we do have a FFI channel, the Cell
 - do [#lzffistate]
 - do [#lzffistate1]
+- Should the State Machine be part of lazily-spec? To facilitate State Machine mirroring?
+- Spec FFI channel implementation in lazily-spec.
+- Implement State Machine in lazily-zig
+- Implement State Machine in lazily-py
+- Implement lazily-kt
+- Implement lazily-js. Use *.js + *.d.ts.
 <!-- /agent:queue -->
 
 ## Backlog

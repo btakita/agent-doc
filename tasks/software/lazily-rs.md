@@ -208,7 +208,35 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 > **Queue prompt:**
 >
 > ~~Implement lazily-js. Use *.js + *.d.ts.~~ — auto-struck: captured as #lzjs (Phase 5, FFI-consumer, blocked on #lzffistate1) (#ftstrike)
-<!-- agent:boundary:b71e1c4e -->
+
+
+
+```text
+ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=15c44d88-6511-4e5d-8f17-a71dfa4c9790 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=26087 candidate_hash=ac43c3efedf84cf57c00f95d1d385cfc5601b7c4cc17f2e1e2545e518963b566 content_ours_len=29304 content_ours_hash=aa6688a4c1c0bc8e2ac5f29c260f5443eb8ae5f3d459239f020b5a43b25d0da1 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782276540130
+```
+
+### Re: #lzsmpy DONE — StateMachine in lazily-py + queue cleanup — glm-5.2
+
+> **Queue prompt:** do [#8wmj] (#lzsmpy — Implement StateMachine in lazily-py)
+
+**Implemented and committed.** `src/lazily-py/src/lazily/state_machine.py` (commit `9199550`, gitlink `04ac79336`):
+- `StateMachine(ctx, initial, transition)` wrapping `Cell[S]` — mirrors `lazily-rs` `StateMachine<S,E>`
+- `send(event) -> bool` — `True` = accepted, `False` = guard rejection (`None` from transition fn)
+- `state` property — auto-subscribes when read inside a Slot/Signal (reactive invalidation on transition)
+- `on_transition(handler)` — fires `(old, new)` on state change, returns disposer; not called on registration (matches lazily-rs effect semantics)
+- Self-transition suppression via Cell's `PartialEq` guard (returning equal state = accepted but no propagation)
+- 7 tests (traffic-light FSM, guard rejection, self-transition noop, on_transition fires/dispose/old-new-correct, reactive invalidation). All 65 lazily-py tests pass.
+
+Marking `#8wmj` done. Remaining StateMachine parity: `#nnyn` (lazily-zig, Phase 3), `#hj5x` (Lean cross-module proof, Phase 1 TODO).
+
+> **Queue prompt:**
+>
+> ~~Implement lazily-kt~~ — auto-struck: captured as #mes4 (Phase 4, FFI-consumer, blocked on #lzffistate1) (#ftstrike)
+
+> **Queue prompt:**
+>
+> ~~Can we make lazily support a bidirectional lazily<->lazily FFI communication channel?…~~ — auto-struck: answered prior cycle (#ftstrike)
+<!-- agent:boundary:ee2d8a2d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -229,7 +257,7 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 - ~~Implement State Machine in lazily-py~~ — auto-struck: answered this cycle (#ftstrike)
 - Implement lazily-kt
 - ~~Implement lazily-js. Use *.js + *.d.ts.~~ — auto-struck: answered this cycle (#ftstrike)
-- do [#8wmj]
+- ~~do [#8wmj]~~
 - do [#nnyn]
 - do [#hj5x]
 - do [#mes4]
@@ -239,7 +267,6 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#8wmj] #lzsmpy=Implement StateMachine in lazily-py (plan: tasks/software/plan-lazily-state-machine-mirroring.md Phase 2). Add src/lazily-py/src/lazily/state_machine.py: StateMachine(initial, transition) wrapping Cell, send(event)->bool, state property. Mirror lazily-rs API. Tests: tests/test_state_machine.py.
 - [ ] [#nnyn] #lzsmzig=Implement StateMachine in lazily-zig (plan Phase 3). Add src/lazily-zig/src/lazily/state_machine.zig: StateMachine(S,E) wrapping Cell + *const fn(*const S,E)?S transition pointer (Zig has no closures). Tests for guard rejection + acceptance.
 - [ ] [#hj5x] #lzsmlean2=Add Lean cross-module proof: SM send -> IPC DeltaOp.cellSet (plan Phase 1 TODO). Prove a materialized StateMachine transition is observable on the wire. Link StateMachine.lean with IPC.lean.
 - [ ] [#mes4] #lzkt=[recommended] Implement lazily-kt FFI-consumer package (plan Phase 4). Kotlin/Gradle under src/lazily-kt/. Wraps JNA bridge to lazily_ffi_*; StateFlow<DocumentStateProjection> projection holder + recordStateEvent reporter. NOT a reactive-core port. Blocked on #lzffistate1.

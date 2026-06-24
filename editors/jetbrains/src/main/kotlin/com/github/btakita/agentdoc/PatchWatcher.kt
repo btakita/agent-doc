@@ -14,6 +14,7 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.util.Alarm
 import java.io.File
+import java.time.Instant
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.nio.file.FileSystems
@@ -537,6 +538,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 }
             }
             "vcs_refresh" -> {
+                recordProjectSurfaceOps("vcs_refresh", "refresh_vcs", "commit_vcs_refresh", "triggered")
                 refreshVcs()
                 APPLY_APPLIED
             }
@@ -583,11 +585,13 @@ class PatchWatcher(private val project: Project) : Disposable {
             val document = fdm.getDocument(targetFile)
                 ?: run {
                     LOG.warn("[socket] save_document: no Document for $filePath")
+                    recordEditorSurfaceOps(filePath, "vcs_refresh_save", "save_document", "save_document", patchId, "missing_document")
                     return@invokeAndWait
                 }
             fdm.saveDocument(document)
             savedContent = document.text
             LOG.info("[socket] save_document: flushed ${document.textLength} chars to disk for $filePath")
+            recordEditorSurfaceOps(filePath, "vcs_refresh_save", "save_document", "save_document", patchId, "saved")
         }
         val content = savedContent ?: return false
         return writeAckContent(patchId, content, filePath)
@@ -900,7 +904,13 @@ class PatchWatcher(private val project: Project) : Disposable {
         }
         if (!lib.agent_doc_write_ack_content(root, patchId, content)) {
             LOG.warn("[ack-content] FFI write_ack_content returned false for patch_id $patchId")
+            filePath?.let {
+                recordEditorSurfaceOps(it, "ack_content", "write_ack_content", "write_finalize_ipc", patchId, "failed")
+            }
             return false
+        }
+        filePath?.let {
+            recordEditorSurfaceOps(it, "ack_content", "write_ack_content", "write_finalize_ipc", patchId, "ok")
         }
         return true
     }
@@ -1033,9 +1043,18 @@ class PatchWatcher(private val project: Project) : Disposable {
         if (hasPendingMemoryDiskConflict(targetFile)) {
             markPatchDeferredForMemoryDiskConflict(patch)
             lastApplyWasDeferredForConflict = true
+            val proof = fileCacheConflictProof(patch, document, targetFile, fdm)
+            recordFileCacheConflictOps(
+                patch,
+                "pending",
+                "editor_ipc_convergence",
+                "apply_patch",
+                "write_finalize_ipc",
+                proof,
+            )
             LOG.warn(
                 "[patch-watcher] File Cache Conflict pending for ${patch.file}; deferring patch until user resolves dialog " +
-                    "${fileCacheConflictProof(patch, document, targetFile, fdm)} $UI_OUTCOME_REAL_COMPONENT_CONFLICT"
+                    "$proof $UI_OUTCOME_REAL_COMPONENT_CONFLICT"
             )
             refreshVisualHighlightersAfterFileCacheConflict(targetFile, "pending")
             return false
@@ -1050,9 +1069,18 @@ class PatchWatcher(private val project: Project) : Disposable {
             )
         ) {
             lastApplyRejectedConflictCancel = true
+            val proof = fileCacheConflictProof(patch, document, targetFile, fdm)
+            recordFileCacheConflictOps(
+                patch,
+                "cancel",
+                "editor_ipc_convergence",
+                "apply_patch",
+                "write_finalize_ipc",
+                proof,
+            )
             LOG.warn(
                 "[patch-watcher] File Cache Conflict kept memory changes for ${patch.file}; rejecting patch without mutating document " +
-                    "${fileCacheConflictProof(patch, document, targetFile, fdm)} $UI_OUTCOME_REAL_COMPONENT_CONFLICT"
+                    "$proof $UI_OUTCOME_REAL_COMPONENT_CONFLICT"
             )
             refreshVisualHighlightersAfterFileCacheConflict(targetFile, "cancel")
             return false
@@ -1263,6 +1291,93 @@ class PatchWatcher(private val project: Project) : Disposable {
         return "conflict_key=${patchConflictKey(patch)} patch_id=${patch.patchId ?: "-"} " +
             "document_unsaved=${fdm.isDocumentUnsaved(document)} document_stamp=${document.modificationStamp} " +
             "file_stamp=${targetFile.modificationStamp}"
+    }
+
+    private fun recordFileCacheConflictOps(
+        patch: IpcPatch,
+        outcome: String,
+        surface: String,
+        action: String,
+        agentCommand: String,
+        proof: String,
+    ) {
+        val root = resolveRootFor(patch.file) ?: return
+        val relativePath = File(patch.file).relativeToOrSelf(File(root)).path
+        appendOpsLog(
+            root,
+            buildFileCacheConflictOpsLogLine(
+                timestamp = Instant.ofEpochSecond(Instant.now().epochSecond).toString(),
+                relativePath = relativePath,
+                outcome = outcome,
+                surface = surface,
+                action = action,
+                agentCommand = agentCommand,
+                proof = proof,
+            ),
+            "[patch-watcher]",
+        )
+    }
+
+    private fun recordEditorSurfaceOps(
+        filePath: String,
+        surface: String,
+        action: String,
+        agentCommand: String,
+        patchId: String?,
+        status: String,
+    ) {
+        val root = resolveRootFor(filePath) ?: return
+        val relativePath = File(filePath).relativeToOrSelf(File(root)).path
+        appendOpsLog(
+            root,
+            buildEditorSurfaceOpsLogLine(
+                timestamp = Instant.ofEpochSecond(Instant.now().epochSecond).toString(),
+                relativePath = relativePath,
+                surface = surface,
+                action = action,
+                agentCommand = agentCommand,
+                patchId = patchId,
+                status = status,
+            ),
+            "[patch-watcher]",
+        )
+    }
+
+    private fun recordProjectSurfaceOps(
+        surface: String,
+        action: String,
+        agentCommand: String,
+        status: String,
+    ) {
+        val root = project.basePath ?: return
+        appendOpsLog(
+            root,
+            buildEditorSurfaceOpsLogLine(
+                timestamp = Instant.ofEpochSecond(Instant.now().epochSecond).toString(),
+                relativePath = ".",
+                surface = surface,
+                action = action,
+                agentCommand = agentCommand,
+                patchId = null,
+                status = status,
+            ),
+            "[patch-watcher]",
+        )
+    }
+
+    private fun appendOpsLog(root: String, line: String, logPrefix: String) {
+        try {
+            val agentDocDir = File(root, ".agent-doc")
+            if (!agentDocDir.isDirectory) return
+            val logsDir = File(agentDocDir, "logs")
+            if (!logsDir.isDirectory && !logsDir.mkdirs()) {
+                LOG.warn("$logPrefix failed to create ops.log directory at ${logsDir.path}")
+                return
+            }
+            File(logsDir, "ops.log").appendText(line + System.lineSeparator())
+        } catch (e: Exception) {
+            LOG.warn("$logPrefix failed to append ops.log marker: ${e.message}", e)
+        }
     }
 
     private fun refreshVisualHighlightersAfterFileCacheConflict(targetFile: VirtualFile, outcome: String) {
@@ -2592,6 +2707,34 @@ internal fun documentMutationDiagnosticUtil(
         "post=${documentMutationContentHashUtil(postContent)} mod_stamp=$modStamp idle=$idleReached " +
         "pre_user_region_len=${preRegion.length} post_user_region_len=${postRegion.length} " +
         "user_region_changed=${preRegion != postRegion}"
+}
+
+internal fun buildFileCacheConflictOpsLogLine(
+    timestamp: String,
+    relativePath: String,
+    outcome: String,
+    surface: String,
+    action: String,
+    agentCommand: String,
+    proof: String,
+): String {
+    val doc = File(relativePath).nameWithoutExtension.ifBlank { "unknown" }
+    return "[$timestamp] file_cache_conflict_detected source=jetbrains outcome=$outcome " +
+        "surface=$surface action=$action agent_command=$agentCommand file=$relativePath $proof doc=$doc #cyh0"
+}
+
+internal fun buildEditorSurfaceOpsLogLine(
+    timestamp: String,
+    relativePath: String,
+    surface: String,
+    action: String,
+    agentCommand: String,
+    patchId: String?,
+    status: String,
+): String {
+    val doc = File(relativePath).nameWithoutExtension.ifBlank { "project" }
+    return "[$timestamp] editor_surface_event source=jetbrains surface=$surface action=$action " +
+        "agent_command=$agentCommand status=$status file=$relativePath patch_id=${patchId ?: "-"} doc=$doc #cyh0"
 }
 
 private fun collectReHeadingsUtil(content: String): Set<String> {

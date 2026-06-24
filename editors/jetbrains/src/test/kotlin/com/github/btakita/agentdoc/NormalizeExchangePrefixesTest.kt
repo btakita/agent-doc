@@ -302,6 +302,61 @@ One.
         assertTrue(source.contains("File Cache Conflict kept memory changes"))
         assertTrue(source.contains("ui_outcome=real_component_conflict"))
         assertTrue(source.contains("schedulePatchRetry(patchFile, \"${'$'}UI_OUTCOME_REAL_COMPONENT_CONFLICT File Cache Conflict pending\")"))
+        assertTrue(source.contains("recordFileCacheConflictOps("))
+        assertTrue(source.contains("\"editor_ipc_convergence\""))
+        assertTrue(source.contains("\"write_finalize_ipc\""))
+    }
+
+    @Test
+    fun `file cache conflict ops marker identifies action command and surface`() {
+        val line = buildFileCacheConflictOpsLogLine(
+            timestamp = "2026-06-24T12:34:56Z",
+            relativePath = "tasks/agent-doc/agent-doc-bugs2.md",
+            outcome = "pending",
+            surface = "editor_ipc_convergence",
+            action = "apply_patch",
+            agentCommand = "write_finalize_ipc",
+            proof = "conflict_key=patch-1 patch_id=patch-1 document_unsaved=true document_stamp=10 file_stamp=20",
+        )
+
+        assertEquals(
+            "[2026-06-24T12:34:56Z] file_cache_conflict_detected source=jetbrains outcome=pending " +
+                "surface=editor_ipc_convergence action=apply_patch agent_command=write_finalize_ipc " +
+                "file=tasks/agent-doc/agent-doc-bugs2.md conflict_key=patch-1 patch_id=patch-1 " +
+                "document_unsaved=true document_stamp=10 file_stamp=20 doc=agent-doc-bugs2 #cyh0",
+            line,
+        )
+    }
+
+    @Test
+    fun `editor surface ops marker distinguishes ack content save and vcs surfaces`() {
+        val ack = buildEditorSurfaceOpsLogLine(
+            timestamp = "2026-06-24T12:34:56Z",
+            relativePath = "tasks/agent-doc/agent-doc-bugs2.md",
+            surface = "ack_content",
+            action = "write_ack_content",
+            agentCommand = "write_finalize_ipc",
+            patchId = "patch-1",
+            status = "ok",
+        )
+        val vcs = buildEditorSurfaceOpsLogLine(
+            timestamp = "2026-06-24T12:34:57Z",
+            relativePath = ".",
+            surface = "vcs_refresh",
+            action = "refresh_vcs",
+            agentCommand = "commit_vcs_refresh",
+            patchId = null,
+            status = "triggered",
+        )
+
+        assertTrue(ack.contains("editor_surface_event"))
+        assertTrue(ack.contains("surface=ack_content"))
+        assertTrue(ack.contains("action=write_ack_content"))
+        assertTrue(ack.contains("agent_command=write_finalize_ipc"))
+        assertTrue(ack.contains("patch_id=patch-1"))
+        assertTrue(vcs.contains("surface=vcs_refresh"))
+        assertTrue(vcs.contains("agent_command=commit_vcs_refresh"))
+        assertTrue(vcs.contains("doc=project"))
     }
 
     @Test

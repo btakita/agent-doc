@@ -4393,7 +4393,7 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
             crate::ops_log::log_op(
                 path,
                 &format!(
-                    "write_authority action=routed len={} hash={}",
+                    "write_authority action=routed transport=write_queue len={} hash={}",
                     content.len(),
                     crate::ops_log::content_hash(content)
                 ),
@@ -4601,7 +4601,7 @@ mod tests {
         let ops = fs::read_to_string(tmp.path().join(".agent-doc").join("logs").join("ops.log"))
             .unwrap_or_default();
         assert!(
-            ops.contains("write_authority action=routed"),
+            ops.contains("write_authority action=routed transport=write_queue"),
             "a visible-document write must report the routed decision to ops.log: {ops:?}"
         );
     }

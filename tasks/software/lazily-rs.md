@@ -81,7 +81,7 @@ Delivered plan Phase 3 (`tasks/software/plan-lazily-shmblob-parity.md`): a share
 **Queue bookkeeping:** `#bagt` (`#lzshmblobconf`) → DONE. Plan `plan-lazily-shmblob-parity.md` fully delivered (all 3 phases). No new backlog item — the parity work is complete. Queue drained.
 
 Note: none of lazily-spec/py/rs/zig has a `CI` workflow — local evidence stands. Carried-over `semantic_completion_match` on `#h6qb` unchanged (operator-only e2e; agent slice `#lzwebrtcwire` DONE — left gated).
-<!-- agent:boundary:a4992d9c -->
+<!-- agent:boundary:a2d92d5c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -90,6 +90,7 @@ Note: none of lazily-spec/py/rs/zig has a `CI` workflow — local evidence stand
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Please update the /home/brian/work/btakita/agent-loop/src/briantakita.me-dev/app/briantakita.me/post/content/2026-06-23-lazily-state-machine-cycle-state.md post to include the other State Machines setup in agent-doc using lazily-rs.
 <!-- /agent:queue -->
 
 ## Backlog

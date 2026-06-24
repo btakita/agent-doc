@@ -153,7 +153,7 @@ Next queue head: `#lzwsunbounded` (ws_backend unbounded outbound mpsc + drive ab
 **Fix (lazily-rs `a41aaec`, pushed):** switch to a bounded `mpsc::channel(WS_OUTBOUND_CAPACITY = 1024)` and make the sync `send_frame` use `try_send`, mapping `Full` → `WsError::Backpressure` (new variant) and `Closed` → `WsError::Closed` — so a producer faster than the socket drains is surfaced flow control instead of unbounded growth, and the frames abandoned on a write-error break are now bounded. Test `ws_send_frame_surfaces_backpressure_when_buffer_fills` exploits the single-threaded `#[tokio::test]` runtime (a tight sync loop never yields to the driver) to fill the bounded channel deterministically and asserts `Backpressure`. Verified: clippy `--all-targets --all-features -D warnings` clean, rustfmt clean, `--features websocket` suite green, release build OK.
 
 Remaining queue: `#lzerrfrom` (error From impls), `#lzsid32` (SlotId 32-bit casts).
-<!-- agent:boundary:de1aeccb -->
+<!-- agent:boundary:d57a83ac -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -167,15 +167,15 @@ Remaining queue: `#lzerrfrom` (error From impls), `#lzsid32` (SlotId 32-bit cast
 - ~~do [#lzasynceffdup]~~
 - ~~:pushpin: do [#lzstr0mnetinbox]~~
 - ~~:pushpin: do [#lzstr0mnetacceptanswer]~~
-- 🚧 :pushpin: do [#lzwsunbounded]
-- :pushpin: do [#lzerrfrom]
+- ~~:pushpin: do [#lzwsunbounded]~~
+- 🚧 :pushpin: do [#lzerrfrom]
 - :pushpin: do [#lzsid32]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzerrfrom] [recommended] Add From<serde_json::Error>/From<postcard::Error> impls for EncodeError/DecodeError ergonomics (open since 2026-06-17). src/ipc.rs.
+- [ ] 🚧 [#lzerrfrom] [recommended] Add From<serde_json::Error>/From<postcard::Error> impls for EncodeError/DecodeError ergonomics (open since 2026-06-17). src/ipc.rs.
 - [ ] [#lzsid32] Harden SlotId.0 as-usize casts in thread_safe.rs to usize::try_from for 32-bit safety parity with single-threaded Context (open since 2026-06-17).
 <!-- /agent:backlog -->
 

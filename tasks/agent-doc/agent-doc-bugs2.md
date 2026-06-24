@@ -128,7 +128,78 @@ Proof:
 - Confidence: high on the state-model recommendation; medium on exact implementation sequencing until we inspect current state modules in `src/agent-doc` for the follow-up.
 - Escalation: none.
 - Push: not pushed; no source changes were made.
-<!-- agent:boundary:7b09dba2 -->
+Compacted content:
+- Archived prior response topics and recovery notes from this long-running agent-doc session.
+- Current cycle repaired an interleaved exchange produced after stale prompt routing, then answered and implemented the state-backbone follow-up.
+
+### Re: response overwrite sidecar recovery - gpt-5
+
+> **Queue prompt:**
+>
+> The response is still overwriting parts of the previous response.
+
+The earlier recovery cycle repaired the live stale-sidecar state without changing `src/agent-doc` source. The focused overwrite/rebase regressions passed, and the latest remote CI run at that point was green.
+
+### Re: #advr02 - gpt-5
+
+> **Queue prompt:**
+>
+> do [#advr02]
+
+The managed Codex proof restart fix was implemented in the prior cycle.
+
+- `agent-doc-orchestration/src/start.rs`: added proof epochs so stale proof threads cannot satisfy a newer launch gate.
+- `agent-doc-orchestration/src/start/run.rs`: centralized proof setup from `HarnessLaunchSpec` and restarts managed proof collection after harness-change restarts.
+- `agent-doc-orchestration/src/startup_miss.rs`: proof scans reset on `agent_restart_performed`.
+- `agent-doc-orchestration/src/route.rs`: added the post-restart proof regression.
+
+Verification covered the focused proof regressions, `make check`, `make install`, and latest CI status. Commits were `d71bd627` in `src/agent-doc` and parent gitlink commit `2f517d881`.
+
+### Re: state backbone - gpt-5
+
+> **Queue prompt:**
+>
+> I want to have a backbone for all state. We should keep the Cycle State Machine. But for the rest of the state would any be a good match?
+
+Yes. Keep the Cycle State Machine as the global lifecycle authority, but use an append-only typed event ledger plus deterministic projections as the durable backbone for the rest of the state. That gives agent-doc one replayable truth without forcing document state, queue state, transport state, supervisor state, proof state, and editor IPC state into one giant FSM.
+
+The model I documented is:
+
+- Cycle FSM: owns only turn lifecycle: preflight, plan, execute, finalize, commit, session-check, interruption, and recovery.
+- Typed event ledger: records facts such as `PreflightStarted`, `BaselineSaved`, `QueueHeadSelected`, `ResponseCaptured`, `EditorAckObserved`, `IpcProofInsufficient`, `CommitObserved`, `AgentRestartPerformed`, and `CapabilityProofObserved`.
+- Deterministic projections: derive document, queue, closeout, transport, supervisor, route, and proof state from events.
+- Actor ownership: one owner mutates each live surface at a time: document writer, supervisor, route/dispatch actor, editor IPC bridge, and harness pane actor.
+- Local FSMs: remain appropriate for closed subdomains such as transport connection, proof gate readiness, pane lifecycle, recycle lifecycle, and writeback lifecycle.
+
+Model fit:
+
+| Alternative | Fit | Where it belongs |
+| :--- | :--- | :--- |
+| FSM | Good locally, too rigid globally | Keep the Cycle State Machine and small local lifecycle machines. |
+| Behavior Trees | Weak as durable state, useful as policy | Recovery or dispatch decision policy that reads projections and emits commands. |
+| GOAP | Poor fit for the backbone | Too much planning machinery for correctness-critical writeback. |
+| Coroutines | Useful for protocols, not durable state | Linear handshakes, waiting loops, and restart sequences, with progress persisted as events/checkpoints. |
+| Event-driven | Strong fit when disciplined | Use typed events, append-only storage, idempotent reducers, causation IDs, owner epochs, and replay tests. |
+| MPC | Not a fit | Agent-doc is discrete workflow convergence, not continuous control optimization. |
+
+Implemented `#statebb1` as docs/spec work:
+
+- Added `src/agent-doc/specs/13-state-backbone.md`.
+- Linked it from `src/agent-doc/SPEC.md`, `docs/README.md`, `docs/SUMMARY.md`, and `docs/reference/flow-map.md`.
+- Recorded it in `src/agent-doc/VERSIONS.md` for `0.34.44`.
+- Committed `src/agent-doc` as `b3239b70 docs: define state backbone`.
+- Committed the parent submodule pointer as `35659b5a0 chore: update agent-doc submodule`.
+
+Proof:
+
+- Changed paths: `src/agent-doc/specs/13-state-backbone.md`, `src/agent-doc/SPEC.md`, `src/agent-doc/docs/README.md`, `src/agent-doc/docs/SUMMARY.md`, `src/agent-doc/docs/reference/flow-map.md`, `src/agent-doc/VERSIONS.md`, parent `src/agent-doc` gitlink, and this session document.
+- Commands: `tsift status`; `agent-doc preflight`; `agent-doc plan`; interrupted stale `agent-doc orchestrate`; `git -C src/agent-doc diff --cached --check`; `make check`; `gh run list --workflow CI --limit 1`; scoped git commits.
+- Verification: `make check` passed in `src/agent-doc` with Clippy, 5053 nextest tests, doctests, and the wider closeout sim. Latest GitHub Actions `CI` run was `completed success` for run `28070395022` on `2026-06-24T02:11:52Z`.
+- Push: not pushed; the parent repo already had unrelated ahead-of-origin commits.
+- Escalation: none.
+- Confidence: high for the documented state model and docs/spec integration.
+
+<!-- agent:boundary:2bd96c0b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -199,7 +270,6 @@ What are #next-steps to fix bugs?
 - [ ] [#advr17] Advance original #fbwireverify: complete #fbwire/#fullboundary acceptance with slow-ACK no inflight pileup and wedged no-ACK bounded timeout + ERROR marker + playback artifact; add deterministic tmux-ci/sim coverage where possible.
 - [ ] [#advr18] Advance original #qnodemerge4verify: after JB/VS Code plugin install, live-test non-ASCII edit-during-merge around `café 日本 😀`; prove accepted byte-offset editor ops and no mojibake/interleaving, plus automated log checker for `editor_op_recorded` + `editor_ops_for_base`.
 - [ ] [#advr19] Advance original #cyh0: identify and instrument remaining File Cache Conflict trigger by capturing exact action, agent-doc command, and ops marker such as `write_authority action=... transport=disk`; distinguish ack-content, VCS-refresh/save, and editor-IPC convergence surfaces.
-- [ ] [#statebb1] [recommended] Define the agent-doc state backbone: keep the Cycle State Machine as the global lifecycle FSM, add an append-only typed event ledger with deterministic projections for document/queue/transport/proof/supervisor state, and document where local FSMs/coroutines are allowed versus behavior-tree/GOAP/MPC-style policy helpers.
 <!-- /agent:backlog -->
 
 ## Review

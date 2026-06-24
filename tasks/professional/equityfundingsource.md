@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -91,7 +91,7 @@ Verification: focused `bun test tests/msg-send-shortcut.test.ts` passed (`15 pas
 Deploy: remote D1 reported "No migrations to apply!" `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `1248dcf6-ee93-4cd3-bc56-0a23d049a242`. Post-deploy check: public root returned `HTTP 200`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:f1b5090b -->
+<!-- agent:boundary:da37ca09 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -111,6 +111,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- 🚧 https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?step=0 for btak.dev+borrower3@gmail.com
+  still does not capture already filled out borrower data (e.g. "Date of Birth"). Have we captured this borrower's data?
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

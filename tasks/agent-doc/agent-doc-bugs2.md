@@ -39,12 +39,41 @@ done
 Compacted content:
 - Archived 4 response topic(s): response overwrite sidecar recovery - gpt-5; #advr02 - gpt-5; state backbone - gpt-5; 1 more
 - Prior summary/context: prior compacted content: Archived prior response topics and recovery notes from this long-running agent-doc session.;...
+
+### Re: state backbone queue closeout - gpt-5
+
+> **Queue prompt:**
+>
+> Fix Insufficient IPC Proof issues.
+
+
+> **Queue prompt:**
+>
+> I want to have a backbone for all state. We should keep the Cycle State Machine. But for the rest of the state would any be a good match?
+
+Closed this through the supported queue-response path after repairing the corrupted exchange component.
+
+The answer and implementation are now both present in the session document and repo history: keep the Cycle State Machine for the global turn lifecycle, and use typed append-only events plus deterministic projections and actor ownership for the rest of agent-doc state. FSMs remain useful for small closed subdomains; behavior-tree-like logic is only a policy layer; GOAP and MPC are not a good durable-state backbone for this workflow.
+
+Committed docs/spec work:
+
+- `src/agent-doc`: `b3239b70 docs: define state backbone`
+- Parent repo: `35659b5a0 chore: update agent-doc submodule`
+- Session exchange repair: `7dbe13d66 agent-doc(agent-doc-bugs2): 2026-06-23 22:57:52`
+
+Verification already completed:
+
+- `make check` in `src/agent-doc` passed with Clippy, 5053 nextest tests, doctests, and the wider closeout sim.
+- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success`, run `28070395022`, on `2026-06-24T02:11:52Z`.
+
+No new backlog item is needed from this response.
+<!-- agent:boundary:3322f089 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- Fix Insufficient IPC Proof issues.
+- ~~Fix Insufficient IPC Proof issues.~~
 - Implement state backbone /home/brian/work/btakita/agent-loop/src/agent-doc/specs/13-state-backbone.md. Add additional state machines for other state domains.
 - do [#advr03]
 - do [#advr04]

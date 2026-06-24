@@ -16,6 +16,7 @@ pub(crate) struct DirectPaneAcceptance {
     /// (text+Enter), not a bare Enter. (#jbrundispatch directive 2 — "detect if the
     /// prompt was not dispatched into the session, and send + submit it".)
     not_dispatched: bool,
+    diagnostic_path: Option<PathBuf>,
 }
 
 const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR: Duration = Duration::from_millis(900);
@@ -165,6 +166,7 @@ pub(crate) fn poll_direct_pane_acceptance(
                         elapsed,
                         trigger_visible: false,
                         not_dispatched,
+                        diagnostic_path: None,
                     };
                 }
             }
@@ -179,9 +181,11 @@ pub(crate) fn poll_direct_pane_acceptance(
         .as_ref()
         .map(|(visible, _, _, _)| *visible)
         .unwrap_or(false);
+    let mut diagnostic_path = None;
     if let Some((visible, capture_len, capture_hash, content)) = last_capture.as_ref() {
         if *visible {
-            preserve_route_pane_snapshot(file, pane, harness, phase, content);
+            diagnostic_path =
+                preserve_route_pane_snapshot(file, pane, harness, phase, content).path;
         }
         log_route_submit_observation(RouteSubmitObservationFacts {
             file,
@@ -220,6 +224,7 @@ pub(crate) fn poll_direct_pane_acceptance(
         // A timed-out window with the trigger still drafted is "submit didn't fire",
         // handled by the bare-Enter resubmit — not a non-dispatch.
         not_dispatched: false,
+        diagnostic_path,
     }
 }
 
@@ -504,6 +509,7 @@ fn send_direct_pane_enter_resubmit_until_stable(
     let mut status = initial.status;
     let mut trigger_visible = initial.trigger_visible;
     let mut elapsed = initial.elapsed;
+    let mut diagnostic_path = initial.diagnostic_path;
     let mut attempts_sent = 0usize;
 
     while direct_pane_can_continue_enter_resubmit(
@@ -525,6 +531,9 @@ fn send_direct_pane_enter_resubmit_until_stable(
         elapsed += retry.elapsed;
         status = retry.status;
         trigger_visible = retry.trigger_visible;
+        if retry.diagnostic_path.is_some() {
+            diagnostic_path = retry.diagnostic_path;
+        }
     }
 
     DirectPaneAcceptance {
@@ -534,6 +543,7 @@ fn send_direct_pane_enter_resubmit_until_stable(
         // The bare-Enter resubmit path only handles a drafted (visible) trigger, so a
         // non-dispatch is never produced here.
         not_dispatched: false,
+        diagnostic_path,
     }
 }
 
@@ -755,17 +765,19 @@ pub(crate) fn send_command_unchecked(
     let trigger = harness.trigger_command(file_path);
     let payload = routed_trigger_payload(&trigger);
     validate_routed_trigger_payload(harness, &trigger, &payload)?;
+    let mut existing_draft_diagnostic_path = None;
     let existing_draft_visible = match sessions::capture_pane(tmux, pane) {
         Ok(content) => {
             let visible = direct_pane_existing_draft_visible(&content, &trigger, harness);
             if visible {
-                preserve_route_pane_snapshot(
+                existing_draft_diagnostic_path = preserve_route_pane_snapshot(
                     file,
                     pane,
                     harness,
                     "direct_pane_existing_draft_visible",
                     &content,
-                );
+                )
+                .path;
             }
             visible
         }
@@ -790,11 +802,13 @@ pub(crate) fn send_command_unchecked(
                 elapsed: Duration::ZERO,
                 trigger_visible: true,
                 not_dispatched: false,
+                diagnostic_path: existing_draft_diagnostic_path,
             },
         );
         return Ok(CommandDispatchResult {
             status: first.status,
             elapsed: first.elapsed,
+            diagnostic_path: first.diagnostic_path,
         });
     }
 
@@ -885,12 +899,14 @@ pub(crate) fn send_command_unchecked(
         return Ok(CommandDispatchResult {
             status: CommandDispatchStatus::TimedOut,
             elapsed: acceptance.elapsed,
+            diagnostic_path: acceptance.diagnostic_path,
         });
     }
     if acceptance.status == CommandDispatchStatus::Accepted {
         return Ok(CommandDispatchResult {
             status: acceptance.status,
             elapsed: acceptance.elapsed,
+            diagnostic_path: acceptance.diagnostic_path,
         });
     }
 
@@ -907,6 +923,7 @@ pub(crate) fn send_command_unchecked(
     Ok(CommandDispatchResult {
         status: second.status,
         elapsed: second.elapsed,
+        diagnostic_path: second.diagnostic_path,
     })
 }
 
@@ -1101,19 +1118,7 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
             timeout.as_secs()
         ),
     );
-    log_route_submit_observation(RouteSubmitObservationFacts {
-        file,
-        pane,
-        harness,
-        phase: "supervisor_dispatch_start_proof",
-        observation: RouteSubmitObservation::AcceptedWithoutDispatchProof,
-        trigger_visible: None,
-        elapsed: proof_start.elapsed(),
-        capture_len: None,
-        capture_hash: None,
-        proof: None,
-    });
-    match sessions::capture_pane(tmux, pane) {
+    let diagnostic_path = match sessions::capture_pane(tmux, pane) {
         Ok(content) => {
             let snapshot = preserve_route_pane_snapshot(
                 file,
@@ -1129,14 +1134,39 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
                 "supervisor_dispatch_start_unproven",
                 &snapshot,
             );
+            snapshot.path
         }
         Err(err) => {
             eprintln!(
                 "[route] warning: failed to capture pane {} after unproven supervisor dispatch: {}",
                 pane, err
             );
+            None
         }
-    }
+    };
+    log_route_submit_observation(RouteSubmitObservationFacts {
+        file,
+        pane,
+        harness,
+        phase: "supervisor_dispatch_start_proof",
+        observation: RouteSubmitObservation::AcceptedWithoutDispatchProof,
+        trigger_visible: None,
+        elapsed: proof_start.elapsed(),
+        capture_len: None,
+        capture_hash: None,
+        proof: None,
+    });
+    file_route_dispatch_bug_report(RouteDispatchBugReportFacts {
+        file,
+        pane,
+        harness,
+        phase: "supervisor_dispatch_start_proof",
+        issue: "accepted_without_dispatch_start_proof",
+        result: RouteSubmitObservation::AcceptedWithoutDispatchProof.label(),
+        elapsed: proof_start.elapsed(),
+        proof: None,
+        diagnostic_path: diagnostic_path.as_deref(),
+    });
     if options.print_unproven_progress {
         eprintln!(
             "[route] authoritative actor accepted the {} reopen for {} in pane {}, but no routed submission proof appeared after {}s",
@@ -1680,19 +1710,7 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
                     timeout.as_secs()
                 ),
             );
-            log_route_submit_observation(RouteSubmitObservationFacts {
-                file,
-                pane,
-                harness,
-                phase: "dispatch_start_proof",
-                observation: RouteSubmitObservation::AcceptedWithoutDispatchProof,
-                trigger_visible: None,
-                elapsed: proof_start.elapsed(),
-                capture_len: None,
-                capture_hash: None,
-                proof: None,
-            });
-            match sessions::capture_pane(tmux, pane) {
+            let diagnostic_path = match sessions::capture_pane(tmux, pane) {
                 Ok(content) => {
                     let snapshot = preserve_route_pane_snapshot(
                         file,
@@ -1708,14 +1726,39 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
                         "direct_pane_dispatch_start_unproven",
                         &snapshot,
                     );
+                    snapshot.path
                 }
                 Err(err) => {
                     eprintln!(
                         "[route] warning: failed to capture pane {} after unproven direct dispatch: {}",
                         pane, err
                     );
+                    None
                 }
-            }
+            };
+            log_route_submit_observation(RouteSubmitObservationFacts {
+                file,
+                pane,
+                harness,
+                phase: "dispatch_start_proof",
+                observation: RouteSubmitObservation::AcceptedWithoutDispatchProof,
+                trigger_visible: None,
+                elapsed: proof_start.elapsed(),
+                capture_len: None,
+                capture_hash: None,
+                proof: None,
+            });
+            file_route_dispatch_bug_report(RouteDispatchBugReportFacts {
+                file,
+                pane,
+                harness,
+                phase: "dispatch_start_proof",
+                issue: "accepted_without_dispatch_start_proof",
+                result: RouteSubmitObservation::AcceptedWithoutDispatchProof.label(),
+                elapsed: proof_start.elapsed(),
+                proof: None,
+                diagnostic_path: diagnostic_path.as_deref(),
+            });
             if options.print_unproven_progress {
                 eprintln!(
                     "[route] bare {} reopen for {} was accepted in pane {}, but no routed submission proof appeared after {}s",
@@ -1737,6 +1780,17 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
                 harness,
                 "submit_timed_out_without_proof",
             );
+            file_route_dispatch_bug_report(RouteDispatchBugReportFacts {
+                file,
+                pane,
+                harness,
+                phase: "direct_pane_submit_final",
+                issue: "prompt_not_submitted",
+                result: "submit_timed_out_without_proof",
+                elapsed: proof_start.elapsed(),
+                proof: None,
+                diagnostic_path: submit_result.diagnostic_path.as_deref(),
+            });
             anyhow::bail!(
                 "routed {} trigger for {} left the bare reopen drafted in pane {} and still showed no routed submission proof after waiting {}s",
                 harness.binary,

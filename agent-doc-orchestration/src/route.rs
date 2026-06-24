@@ -243,10 +243,11 @@ fn dispatch_only_busy_refusal_wait_secs(default: Duration) -> u64 {
     wait_for_ready_override().unwrap_or(default).as_secs()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CommandDispatchResult {
     status: CommandDispatchStatus,
     elapsed: Duration,
+    diagnostic_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -468,6 +469,21 @@ fn editor_route_attempt_id() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn route_current_actor_generation(file: &Path) -> Option<u64> {
+    let canonical = file.canonicalize().ok()?;
+    let root = crate::snapshot::find_project_root(&canonical)?;
+    crate::session_actor::load_record_in(&root, canonical.to_string_lossy().as_ref())
+        .ok()
+        .flatten()
+        .map(|record| record.generation)
+}
+
+fn route_ops_log_path(file: &Path) -> Option<PathBuf> {
+    let canonical = file.canonicalize().ok()?;
+    let root = crate::snapshot::find_project_root(&canonical)?;
+    Some(root.join(".agent-doc/logs/ops.log"))
+}
+
 fn append_editor_route_attempt(message: &mut String) {
     if let Some(attempt_id) = editor_route_attempt_id() {
         message.push_str(&format!(" editor_attempt_id={attempt_id}"));
@@ -626,6 +642,128 @@ struct RouteSubmitObservationFacts<'a> {
     capture_len: Option<usize>,
     capture_hash: Option<&'a str>,
     proof: Option<RoutedDispatchStartProof>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RouteDispatchBugReportFacts<'a> {
+    file: &'a Path,
+    pane: &'a str,
+    harness: &'a HarnessConfig,
+    phase: &'a str,
+    issue: &'a str,
+    result: &'a str,
+    elapsed: Duration,
+    proof: Option<RoutedDispatchStartProof>,
+    diagnostic_path: Option<&'a Path>,
+}
+
+fn route_dispatch_bug_report_item(facts: RouteDispatchBugReportFacts<'_>) -> Result<String> {
+    let doc_id = crate::pending_cmd::doc_id_for(facts.file);
+    let component = format!("route/{}", route_snapshot_field(facts.phase));
+    let content_hash =
+        crate::ops_log::content_hash(&format!("{}:{}:{}", doc_id, facts.phase, facts.issue));
+    let symptom_key = crate::pending::SymptomDedupeKey::new(
+        "run_agent_doc_route_dispatch_failure",
+        doc_id,
+        component,
+        format!("sha256:{content_hash}"),
+    )?;
+    let generation = route_current_actor_generation(facts.file)
+        .map(|generation| generation.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let editor_attempt = editor_route_attempt_id().unwrap_or_else(|| "unknown".to_string());
+    let proof = facts
+        .proof
+        .map(|proof| proof.dispatch_stage_label().to_string())
+        .unwrap_or_else(|| "none".to_string());
+    let diagnostic_path = facts
+        .diagnostic_path
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "none".to_string());
+    let ops_log_path = route_ops_log_path(facts.file)
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let marker = format!(
+        "route_submit_issue(issue={},phase={},result={})",
+        facts.issue,
+        route_snapshot_field(facts.phase),
+        route_snapshot_field(facts.result)
+    );
+
+    Ok(format!(
+        "JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class={} document={} stage={} pane={} actor_generation={} editor_attempt_id={} dispatch_proof_state={} elapsed_ms={} diagnostic_path={} ops_log_path={} ops_log_marker={} {}",
+        facts.issue,
+        facts.file.display(),
+        facts.phase,
+        facts.pane,
+        generation,
+        editor_attempt,
+        proof,
+        facts.elapsed.as_millis(),
+        diagnostic_path,
+        ops_log_path,
+        marker,
+        symptom_key.marker()
+    ))
+}
+
+fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
+    let item = match route_dispatch_bug_report_item(facts) {
+        Ok(item) => item,
+        Err(err) => {
+            crate::ops_log::log_op(
+                facts.file,
+                &format!(
+                    "route_dispatch_bug_backlog_item_failed file={} pane={} harness={} phase={} issue={} error={}",
+                    facts.file.display(),
+                    facts.pane,
+                    facts.harness.binary,
+                    facts.phase,
+                    facts.issue,
+                    crate::secret_redact::redact(&err.to_string())
+                        .replace(char::is_whitespace, "_")
+                ),
+            );
+            return;
+        }
+    };
+    let items = [item];
+    match crate::pending_cmd::add_many(facts.file, &items, false) {
+        Ok(ids) => {
+            let id = ids
+                .first()
+                .map(|id| id.as_str())
+                .unwrap_or("deduped_existing");
+            crate::ops_log::log_op(
+                facts.file,
+                &format!(
+                    "route_dispatch_bug_backlog_filed file={} pane={} harness={} phase={} issue={} id={} inserted={}",
+                    facts.file.display(),
+                    facts.pane,
+                    facts.harness.binary,
+                    facts.phase,
+                    facts.issue,
+                    id,
+                    !ids.is_empty()
+                ),
+            );
+        }
+        Err(err) => {
+            crate::ops_log::log_op(
+                facts.file,
+                &format!(
+                    "route_dispatch_bug_backlog_file_failed file={} pane={} harness={} phase={} issue={} error={}",
+                    facts.file.display(),
+                    facts.pane,
+                    facts.harness.binary,
+                    facts.phase,
+                    facts.issue,
+                    crate::secret_redact::redact(&err.to_string())
+                        .replace(char::is_whitespace, "_")
+                ),
+            );
+        }
+    }
 }
 
 fn route_submit_observation_message(facts: RouteSubmitObservationFacts<'_>) -> String {
@@ -7168,6 +7306,121 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             "{issue}"
         );
     }
+
+    #[test]
+    fn route_dispatch_bug_report_item_includes_required_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("run-agent-doc.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+        )
+        .unwrap();
+        crate::session_actor::project_binding_in(
+            dir.path(),
+            doc.to_str().unwrap(),
+            "session-1",
+            "%7",
+            "@1",
+            "test",
+            "route",
+        )
+        .unwrap();
+        let diagnostic = dir.path().join(".agent-doc/logs/route-submit/snapshot.txt");
+        let facts = RouteDispatchBugReportFacts {
+            file: &doc,
+            pane: "%7",
+            harness: &HarnessConfig::codex(),
+            phase: "dispatch_start_proof",
+            issue: "accepted_without_dispatch_start_proof",
+            result: "accepted_without_dispatch_start_proof",
+            elapsed: Duration::from_secs(10),
+            proof: None,
+            diagnostic_path: Some(&diagnostic),
+        };
+
+        let item = route_dispatch_bug_report_item(facts).unwrap();
+
+        assert!(item.contains("#jbrunautobug"), "{item}");
+        assert!(item.contains("#agent-doc-bug"), "{item}");
+        assert!(
+            item.contains("failure_class=accepted_without_dispatch_start_proof"),
+            "{item}"
+        );
+        assert!(item.contains("stage=dispatch_start_proof"), "{item}");
+        assert!(item.contains("pane=%7"), "{item}");
+        assert!(item.contains("actor_generation=1"), "{item}");
+        assert!(item.contains("dispatch_proof_state=none"), "{item}");
+        assert!(item.contains("diagnostic_path="), "{item}");
+        assert!(item.contains("ops_log_path="), "{item}");
+        assert!(
+            item.contains(
+                "ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof"
+            ),
+            "{item}"
+        );
+        assert!(
+            item.contains("[symptom-key invariant=run_agent_doc_route_dispatch_failure"),
+            "{item}"
+        );
+    }
+
+    #[test]
+    fn route_dispatch_bug_report_dedupes_same_document_stage() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("run-agent-doc.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+        )
+        .unwrap();
+        let first_diagnostic = dir.path().join(".agent-doc/logs/route-submit/first.txt");
+        let second_diagnostic = dir.path().join(".agent-doc/logs/route-submit/second.txt");
+        let base = RouteDispatchBugReportFacts {
+            file: &doc,
+            pane: "%7",
+            harness: &HarnessConfig::codex(),
+            phase: "direct_pane_submit_final",
+            issue: "prompt_not_submitted",
+            result: "submit_timed_out_without_proof",
+            elapsed: Duration::from_secs(30),
+            proof: None,
+            diagnostic_path: Some(&first_diagnostic),
+        };
+        file_route_dispatch_bug_report(base);
+        file_route_dispatch_bug_report(RouteDispatchBugReportFacts {
+            diagnostic_path: Some(&second_diagnostic),
+            ..base
+        });
+
+        let content = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            content
+                .matches("[symptom-key invariant=run_agent_doc_route_dispatch_failure")
+                .count(),
+            1,
+            "{content}"
+        );
+        assert!(content.contains("diagnostic_path="), "{content}");
+        assert!(
+            content.contains("first.txt") && content.contains("second.txt"),
+            "{content}"
+        );
+        assert!(
+            content.contains("  evidence: JetBrains Run Agent Doc route/dispatch failed"),
+            "{content}"
+        );
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("route_dispatch_bug_backlog_filed")
+                && ops.contains("inserted=true")
+                && ops.contains("inserted=false"),
+            "{ops}"
+        );
+    }
+
     #[test]
     fn tracked_harness_clear_requires_fresh_restart_only_for_exact_clear_prompt() {
         assert!(tracked_harness_clear_requires_fresh_restart(

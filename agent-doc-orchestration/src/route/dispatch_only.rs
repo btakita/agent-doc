@@ -501,6 +501,17 @@ pub(crate) fn require_dispatch_only_dispatch_start_proof(
         );
     }
     crate::ops_log::log_op(file, &accepted_only_dispatch_start_log_message(facts));
+    file_route_dispatch_bug_report(RouteDispatchBugReportFacts {
+        file,
+        pane,
+        harness,
+        phase: "dispatch_only_dispatch_start_proof",
+        issue: "accepted_without_dispatch_start_proof",
+        result: "accepted_without_dispatch_start_proof",
+        elapsed: routed_dispatch_start_timeout(harness),
+        proof: Some(dispatch_start),
+        diagnostic_path: None,
+    });
     anyhow::bail!(accepted_only_dispatch_start_refusal_message(facts));
 }
 

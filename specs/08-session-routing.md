@@ -95,6 +95,17 @@ dispatch-start proof, degraded-authority, and prompt-ready-barrier classifiers
 from `flow::routed_reopen`; `route.rs` remains the tmux/supervisor/controller
 I/O boundary.
 
+**Auto-filed Run Agent Doc route bugs (`#3ygp`):** When route exhausts a bounded
+submit or dispatch-start proof path, it must file a session-document backlog item
+tagged `#jbrunautobug #agent-doc-bug`. The item records the failure class,
+document, stage, pane, best-effort actor generation, editor attempt id, dispatch
+proof, saved route-submit diagnostic path, and `ops.log` marker/path. The
+symptom key is stable for the same document/stage/failure so repeated JetBrains
+`Run Agent Doc` failures append evidence to one active backlog item instead of
+creating duplicate work. The existing direct-pane submit recovery still retries
+visible drafted triggers through the bounded Enter-resubmit loop before this bug
+filing path runs.
+
 **Dead-harness pre-send guard (#1vhn):** the dispatch-ready prompt proof can go
 stale between the readiness check and the actual send if the harness crashes or
 exits to a bare interactive shell in that window. Before typing the routed

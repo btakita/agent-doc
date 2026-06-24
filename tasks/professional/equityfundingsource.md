@@ -141,7 +141,19 @@ Verification:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:280b1f8b -->
+### Re: Drift closeout — gpt-5
+
+Committed the remaining agent-doc IPC diagnostic drift after the retained responses were recovered. No EFS product code or production data changed.
+
+Changed paths: `tasks/professional/equityfundingsource.md` only.
+
+Verification:
+- `agent-doc repair --apply-recovery` abandoned the empty preflight cycle.
+- `agent-doc session-check` identified only uncommitted exchange drift before this repair closeout.
+
+Escalation: none.
+Confidence: medium; the direct disk path was used only after repeated editor IPC proof failures retained and recovered the response but kept leaving post-commit drift.
+<!-- agent:boundary:0f9113eb -->
 <!-- /agent:exchange -->
 ###
 <!--

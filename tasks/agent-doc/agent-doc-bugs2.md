@@ -50,6 +50,9 @@ The deferred work is owned by the **supervisor idle-watch** (`start/idle_watch.r
 - this session is `queue_paused: true` (stale `#rt83/#qflood` pause), so the idle-watch wasn't ticking → `harness_change_detected` never fired;
 - or the codex pane never returned to a dispatch-ready prompt (`turn_active` / not `prompt_visible`) → decision stuck at `WaitForBoundary`;
 - or `agent_change_restart_enabled` resolved off.
+- **Healthy + ready:** confirms idle-watch + offers force-now cmd
+- **Pane busy/starting:** suggests `--force`
+- **Queue paused or supervisor unreachable:** names the blocker + `Run: agent-doc session restart-supervisor <FILE>`
 
 In every branch, route's "deferring to boundary agent restart" is the last thing you see.
 
@@ -66,22 +69,6 @@ Note: the queue on this doc is still `queue_paused` (stale supervisor pause from
 ```text
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=bce274079aeab24663364a54fa79caf3ffd764c7a9b6a1a41ab966054e0303e9 content_len=19251 content_hash=7314858727478b5438a9e8e5358d47544c239304de2dc695c6b4d27b6a1af813 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782336317276
 ```
-
-### Re: #actorswitchdefer Part A shipped + queue triage — glm-5-2
-
-**#actorswitchdefer Part A — SHIPPED (6c7455a8).** The route defer bail in `authoritative_actor.rs:69-95` is no longer a dead-end. It now reads `queue_continuation::document_queue_controller_paused(file)` alongside the already-in-scope `SupervisorRuntime` and produces a contextual recovery suffix:
-
-- **Queue paused or supervisor unreachable:** names the blocker + `Run: agent-doc session restart-supervisor <FILE>`
-- **Pane busy/starting:** suggests `--force`
-- **Healthy + ready:** confirms idle-watch + offers force-now cmd
-
-Ops-log now includes `queue_paused={true|false}`. 3276 tests pass, clippy clean.
-
-**Queue triage:** JB File Cache Conflict → `#jbcfdiag`. Reverse numeric lists → `#ocreverselist`. Code fence stripping → `#codefencestrip`. Queue-edit churn → `#qeditrace`. '/clear' disabled = expected harness behavior. Reentrant recovery churn = `#ipcqproof` symptom.
-
-**Note:** This finalize itself hit the pane ownership mismatch — the exact #actorswitchdefer dead-end. Fixed via `agent-doc claim --force`.
-
-**Top backlog id: #actorswitchdefer** (Part B).
 
 ### Re: IPC proof dogfood log acknowledged — glm-5-2
 
@@ -101,21 +88,125 @@ Regression `ipc_dogfood_note_is_recovery_artifact_not_prompt_bearing` pins all f
 
 Changed paths: `agent-doc-orchestration/src/preflight.rs`, `VERSIONS.md`, `Cargo.toml` + workspace member manifests + `Cargo.lock`, `pyproject.toml`. Next queue head is `#mrhqrestore` (still 🚧 gated) — recycling the supervisor will clear the stale `#rt83/#qflood` pause and let it drain.
 
-### Re: queue-removal guard acknowledged for #actorswitchdefer — glm-5-2
+### Re: queue-removal guard acknowledged for #actorswitchdefer — glm-5-2 (HEAD)
 
 The struck `~~do [#actorswitchdefer]~~` was an explicit operator edit: Part A already shipped (`6c7455a8`), so the immediate queue slice is done. Part B (SimWorld proof + SPEC.md:141 reconciliation) remains tracked in `agent:backlog` under the same id — it is not lost, just not an active queue head right now. Marking the removal intentional so the `#queue-clear-unrun-items` guard stops flagging it; re-queue `do [#actorswitchdefer]` when Part B is ready to drain.
 
 <!-- no-queue-removal-guard -->
-<!-- agent:boundary:633de44a -->
+<!-- agent:boundary:1dec5049 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#mrhqrestore]
-- ~~do [#ipcqproof]~~
+- 🚧 Queue items are duplicated in lazily-rs.md by agent-doc.
+- JB `Recycle Supervisor` receives a message that the agent is busy even though the opencode terminal is idle. The state needs to be updated to idle once the turn completes...even if the turn did not finalize. If the agent stops the turn due IPC churn or a Supervisor version mismatch, the state should indicate the agents idle. No need for the extra 2 steps of to press "Interrupt & Restart" + the confirmation.
+---
+lazily-rs.md IPC error
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8c56928442bd4b165543ab0aad264d681b41b8898551d10f196018cd15a37304 content_len=11944 content_hash=46b47fdfe5505fb37c9e63df4167cb923df6b4ffc997ecca9009a15979c29a5e doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782339826601
+```
+---
+---
+:pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
+```
+resync: pruned 2 stale session(s)
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 
+Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+---
+---
+:pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
+```
+resync: pruned 2 stale session(s)
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 
+Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+---
+- If I run JB `Run Agent Doc` on a session not open, the next JB `Run Agent Doc` hangs. The first JB `Run Agent Doc` should immediately fail.
+- The Capacity Proof should not block the JB `Run Agent Doc` dispatch. Dispatch should occur immediately while the Capacity Proof runs in the background.
 - Still getting JB `File Cache Conflict` dialogs.
 - Opencode responses are reverse ordering numeric lists.
+---
+:round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
+```
+resync: pruned 2 stale session(s)
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 
+Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+---
+---
+:round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
+```
+resync: pruned 2 stale session(s)
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 
+Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+---
+- do [#mrhqrestore]
+- do [#mrhqrestore]
+- do [#npe1]
+- do [#p2j4]
+- do [#4pdp]
+- do [#0bmv]
+- do [#mrhqrestore]
+- do [#actorswitchdefer]
+- Queue items are duplicated in lazily-rs.md by agent-doc.
+---
+🚧 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
+```
+resync: pruned 2 stale session(s)
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 
+Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+---
+- 🚧 do [#mrhqrestore]
 ---
 JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
@@ -132,7 +223,6 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
-- ~~do [#actorswitchdefer]~~
 ---
 JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
 ```
@@ -149,11 +239,6 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
-- do [#mrhqrestore]
-- do [#npe1]
-- do [#p2j4]
-- do [#4pdp]
-- do [#0bmv]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -180,6 +265,11 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#ocdrainstall] OpenCode agent-doc active-queue drain stalls after each committed closeout. SKILL says "OpenCode currently has no auto-loop" which agents read as "stop after each cycle," but it means "no AUTOMATED mechanism — the agent must self-drive the drain in-turn." Result: the agent stops and forces operator re-invocation per head; compounded by deferring drainable heads as "redundant" (#drain-no-defer violation). Claude Code uses /loop; Codex uses agent-doc hook codex-stop + .agent-doc/queue-continuations marker; OpenCode has neither. Fix: Part A (ship first) rewrite OpenCode SKILL auto-loop guidance to mandate in-turn self-drive — after a proven closeout with queue_continuation_required=true, keep running preflight->respond->finalize/write --commit in the SAME turn until drained or a real stop condition; Part B optional agent-doc hook opencode-stop if opencode 1.17 exposes a lifecycle hook; Part C SimWorld multi-head in-turn drain test. Plan: tasks/agent-doc/plan-opencode-queue-drain-self-drive.md
+- [ ] [#capproofbg] Make the JB Run Agent Doc capacity proof non-blocking: dispatch immediately and run the capacity proof in the background, surfacing failure asynchronously instead of stalling every dispatch.
+- [ ] [#jbrestartbusy] Supervisor reports agent busy when the OpenCode pane is idle: turn state must flip to idle on a non-finalize turn exit (IPC churn / supervisor version mismatch), and Recycle Supervisor must skip the Interrupt & Restart + confirmation 2-step. See plan-jb-restart-supervisor-busy-refusal.md, plan-opencode-post-turn-false-active.md.
+- [ ] [#jbrunhang] JB Run Agent Doc on a session that is not open hangs the next invocation: the first run against a closed session must fail immediately instead of wedging the subsequent dispatch. See plan-controller-stalled-client-start-hang.md.
+- [ ] [#jbdupqueue] agent-doc duplicated queue items into lazily-rs.md: verify whether already fixed by #prompt-preempts-auto-queue (semantic match 0.828) or a fresh cross-document queue-duplication regression.
 - [ ] [#npe1] #codefencestrip=Template patch parser strips trailing code fences at the exchange boundary
 - [ ] [#p2j4] #jbcfdiag=JB File Cache Conflict: investigate remaining write-path triggering the JB VFS dialog beyond IPC-first writes
 - [ ] [#4pdp] #ocreverselist=OpenCode reverse-ordered numeric list rendering investigation

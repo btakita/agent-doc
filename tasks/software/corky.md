@@ -114,7 +114,19 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/corky.md source=socket_ack_content patch_id=5d96cfbd-5ae9-4578-9df1-1191291303e8 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=12002 candidate_hash=ae4a42ed9d1f3d8dab778278c3d07cf1a273a6660bb3b66f6bc8350278a82d97 content_ours_len=12362 content_ours_hash=ee3c7966174db5823da7842a7892803b2eb991fa135203e1dcfb8a9b3fbb9475 doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782335669784
 ```
-<!-- agent:boundary:13e39163 -->
+
+### Re: corky bug next-steps — reaped already-shipped items — glm-5.2
+
+Verified against the v0.29.0 workspace crates and reaped the backlog items that are already implemented:
+
+- **`#ckygmailthread` → done.** Gmail threading Bug 1 + Bug 2 both shipped: `crates/corky-mail/src/sync/markdown.rs:145` parses/stores `Message-ID`; `crates/corky-mail/src/draft/send.rs:101-104` adds `threadId` to the Gmail send body and emits `In-Reply-To`/`References` (send.rs:186-189). AGENTS.md codifies "set both `in_reply_to` and `thread_id`."
+- **`#ckydiarizespan` → done.** `max_speaker_span_ratio()` at `crates/corky-transcribe/src/transcribe/diarize.rs:394`, used by `run_adaptive_diarization()` cascade at `engine.rs:826-843`.
+- **`#ckyschedrun` → done.** `corky::schedule::run()` at `src/main.rs:261`, driven by `schedule_tick()` in the watch loop (`src/watch.rs:122-124`).
+
+Remaining corky backlog (genuinely open, not bugs): `#ckystale` (refresh the v0.12–v0.13 session history to v0.29 + fresh `#code-review` across the 5 crates) and `#ckybench` (add criterion benchmarks — the perf report has no numeric baseline yet). **Top of corky backlog: `#ckystale`.**
+
+> **Queue prompt:** Add #next-steps to fix corky bugs.
+<!-- agent:boundary:40c1e332 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -125,22 +137,19 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- 🚧 Add #next-steps to fix corky bugs.
+- ~~Add #next-steps to fix corky bugs.~~
 - [#ckystale]
-- [#ckygmailthread]
-- [#ckydiarizespan]
+- ~~[#ckygmailthread]~~
+- ~~[#ckydiarizespan]~~
 - [#ckybench]
-- [#ckyschedrun]
+- ~~[#ckyschedrun]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
 - [ ] [#ckystale] [recommended] Refresh corky.md session history: doc is frozen at v0.12-v0.13 prose but corky is v0.29.0 split into 5 workspace crates (corky-core/-google/-mail/-social/-transcribe). Most prose "Open items" are already DONE: corky schedule run (main.rs:261 + watch.rs:122), diarization span cascade (corky-transcribe diarize.rs:394 + engine.rs:826), Gmail threading Bug 1/message_id storage (corky-mail sync/markdown.rs:33,110-174). Remaining: verify Gmail send-side threadId inclusion (Bug 2). After refresh, run a fresh #code-review across the 5 crates to surface CURRENT bugs (no TODO/FIXME found in crates today).
-- [ ] [#ckygmailthread] [recommended] Gmail API threading: (Bug 1) in_reply_to in draft YAML accepts a Gmail thread ID but the In-Reply-To header requires an RFC 2822 Message-ID (<CA...@mail.gmail.com>) — store Message-IDs in conversation markdown during sync OR resolve thread ID->Message-ID via Gmail API when composing replies; (Bug 2) send_via_gmail_api/push_to_drafts_via_gmail_api send only {"raw":...} — Gmail API needs "threadId" in the body to thread replies. Add thread_id field to draft frontmatter + include in API request JSON. Files: src/sync/markdown.rs, src/draft/mod.rs (lines ~371-433).
-- [ ] [#ckydiarizespan] [recommended] Diarization span fix: cascade to smaller chunks (600s->120s->30s) when any speaker block >60% of total audio via max_speaker_span_ratio() in diarize.rs + span check in run_adaptive_diarization() (engine.rs). Working-tree changes exist in src/corky but are UNCOMMITTED/unreleased — commit, test, ship.
 - [ ] [#ckybench] Add criterion benchmarks (no perf instrumentation exists today): cover the watch loop tick, sync incremental pull, and draft composition/HTML conversion (pulldown-cmark). Gives the operator-requested performance report a numeric baseline instead of ad-hoc timing.
-- [ ] [#ckyschedrun] corky schedule run: scan mail/drafts/*.md for scheduled_at past due + status: approved, auto-send via `corky draft push --send`. Enables cron-based scheduled email sends without the Gmail web UI.
 <!-- /agent:backlog -->
 
 ## Review

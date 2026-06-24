@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -483,7 +483,17 @@ feat(portal): add pipeline keyboard navigation
 
 Add keyboard navigation and initial focus targets to Deal, Lender, and Broker pipeline views so admins can enter each pipeline at the first available card, fall back to the lane +/- control when empty, and continue moving by keyboard. Covers the behavior with admin pipeline, lender pipeline, and broker portal tests; deployed Worker version 035bf151-3115-4f44-abf0-4ce273145ec0.
 ```
-<!-- agent:boundary:c265a65e -->
+
+### Re: Deploy queue residue closeout — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Struck the answered `deploy` queue head after the main repair response was committed but `session-check` found this free-text row still active.
+
+No additional code, test, deploy, or repo work was performed in this repair step.
+<!-- agent:boundary:1c351232 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -503,8 +513,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~When navigating to the Deal Pipeline or Lender Pipeline page, select the first card available...top item in the first column with cards...If no cards, select the first column +/-.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

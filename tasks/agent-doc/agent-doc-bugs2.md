@@ -106,14 +106,12 @@ Actionable follow-up stays in the queue/backlog: `#ipcqproof` covers the ACK dri
 Normalized the exchange component to remove stale prompt-prefix artifacts that were already answered but were still being classified as unresolved prompt-bearing user changes. This did not change the queue or backlog source of truth.
 
 Verification: `agent-doc patch` was used for the exchange component only; queue remains active with `#lzpkgwire` as the next head.
-<!-- agent:boundary:1492db74 -->
+<!-- agent:boundary:ab9123d5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#71wr]~~
-- ~~do [#lzpkgwire]~~
 - 🚧 do [#lzliveproof]
 - do [#mrhqrestore]
 - do [#ipcqproof]
@@ -135,6 +133,9 @@ Changed paths this closeout cycle: none. Commands this closeout cycle: `agent-do
 No actionable follow-up items are needed for this IPC note.
 Escalation: none. Confidence: high.
 ```
+---
+- Still getting JB `File Cache Conflict` dialogs.
+- Opencode responses are reverse ordering numeric lists.
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -161,7 +162,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzliveproof] Add cross-editor live/state-projection proof for agent-doc IPC: drive JB socket/file IPC and VS Code file IPC through queued/ack/retry plus route started/proven/blocked events, then assert the Rust DocumentStateProjection and compact summaries match.
+- [ ] 🚧 [#lzliveproof] Add cross-editor live/state-projection proof for agent-doc IPC: drive JB socket/file IPC and VS Code file IPC through queued/ack/retry plus route started/proven/blocked events, then assert the Rust DocumentStateProjection and compact summaries match.
 - [ ] [#mrhqrestore] Improve agent-doc queue recover-lost for git-history-only queue deletions: produce an operator-reviewed restoration patch or explicit non-restorable recommendation for foreign-owned prompts such as the monsterrodholders test-email CSV row.
 - [ ] [#ipcqproof] Fix IPC proof dogfood closeout recovery: add a regression for queue-consume socket_ack_content / live_prompt_drift_after_preflight ACK mismatch, ensure diagnostics do not become unresolved prompt-bearing exchange items, and keep fail-closed recovery on the binary-owned path.
 <!-- /agent:backlog -->

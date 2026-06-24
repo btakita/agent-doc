@@ -205,7 +205,29 @@ Changed paths this closeout cycle: none. Commands this closeout cycle: `agent-do
 No actionable follow-up items are needed for this IPC note.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:5f0ed1ae -->
+
+### Re: Deal Pipeline Card Meaning — gpt-5
+
+> **Queue prompt:**
+> In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1, what is the Deal Pipeline card? I don't recognize these steps. They look like a sales pipeline.
+
+You're reading it correctly: that card is the lead workflow/status card, not a separate EFS loan/deal underwriting step. It is titled `Deal Pipeline` because the embedded lead detail component is reused inside the Deal Pipeline dialog and shares the pipeline status controls.
+
+For this lead dialog, the card renders:
+
+- lead status: `New`, `Contacted`, `Converted`, `Archived`
+- staff-email notification state
+- `Send borrower invite` / `Resend borrower invite` CTA
+
+Those stages are sales/CRM-ish because this record is still a prequalification lead before there is a full application or TMO loan. The backend maps open leads (`new` / `contacted`) into the board's `Draft Applications` funnel column; `converted` and `archived` leave the active lead funnel. Once the borrower has a full application, the board uses application states (`draft`, `submitted`, `in_review`, `accepted`), and once there is a TMO loan it uses loan/TMO statuses such as `Available Deals`, `Loan Estimate`, `Intent to Proceed`, and `Processing`.
+
+So the label is misleading in this context. A clearer title would be `Lead Workflow` or `Lead Follow-up`; the current behavior is about advancing a lead toward the borrower full-application path, not managing a lender/investor deal sale.
+
+Changed paths: none.
+Commands: inspected `pipeline.tsx`, `application_lead_detail.tsx`, `lead_pipeline_controls.tsx`, and `repo.ts`; checked the live URL/API, which redirects to admin login or returns `unauthenticated` without an admin session.
+Verification: no tests run because this was an explanation-only cycle.
+Escalation: none. Confidence: high.
+<!-- agent:boundary:72376da6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -225,6 +247,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- 🚧 In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1, what is the Deal Pipeline card? I don't recognize these steps. They look like a sales pipeline.
 <!-- /agent:queue -->
 
 ## Backlog

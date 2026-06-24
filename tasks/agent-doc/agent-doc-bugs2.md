@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -71,21 +71,38 @@ Verification run:
 - `make install-full` passed and installed the updated native library.
 
 GitHub Actions note: `gh run list --workflow CI --limit 1` now reports no workflow named `CI` in the parent repo. The available `Agent Doc` workflow for push `370f156b3` failed before running any steps because GitHub reported account billing/spending-limit configuration issues.
-<!-- agent:boundary:ce623120 -->
+- `make install-full` passed and installed the updated native library.
+- `make bump-plugin` passed and produced `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.188-signed.zip`.
+- `make check` passed via `tsift digest-runner`.
+- `cargo test -p agent-doc state_projection_ffi_round_trip -- --nocapture` passed via `tsift digest-runner`.
+- `./gradlew test --tests com.github.btakita.agentdoc.StateProjectionBridgeTest` passed.
+- `npm --prefix editors/vscode test` passed.
+- parent repo: `5ceac5053` (`agent-doc: update editor projection bridge`), followed by merge commit `370f156b3` to integrate `origin/main`
+- `src/agent-doc`: `6b105362` (`fix: wire editor state projections`)
+- `VERSIONS.md` notes the change, and the JetBrains plugin patch version is bumped to `0.2.188`.
+- `specs/13-state-backbone.md` documents the editor projection bridge contract.
+- VS Code now has the same native projection/event bridge, records route and editor patch events, and includes matching tests.
+- JetBrains now binds `agent_doc_state_projection` and `agent_doc_record_state_event`, records route/transport/proof observations, renders a compact projection summary, and includes bridge tests.
+
+### Re: JetBrains Codex Enter submit path — gpt-5
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` on Codex is STILL not submitting. Why is the text reliably being sent but sending Enter is so unreliable? Why not send the Enter with the text?
+
+For Codex, the route layer already sends the trigger text and submit key together. The JetBrains action delegates to `agent-doc route --dispatch-only --plain-trigger`, and the binary’s shared live-pane helper uses the Codex submit profile `tmux_text_enter` with `submit_key=Enter`; when the profile has no split delay, it builds one `tmux send-keys` invocation containing both text and `Enter`.
+
+The split text-then-Enter path exists for palette-style harness behavior, not Codex. The local comments call out OpenCode as the case where `/` can open a command palette and swallow an Enter sent in the same tmux call, so that path deliberately waits before sending Enter.
+
+So if JB `Run Agent Doc` still leaves a typed-but-unsubmitted Codex trigger, the failure is not “JetBrains forgot to include Enter.” It means the route typed across a bad readiness boundary: stale supervisor, startup/recycle transition, active/blocked composer, or a proof path that accepted pane input without dispatch-start proof. The right fix is to keep tightening the binary route readiness/proof gates and surface the state projection, not to add a second Enter from the plugin. A second Enter is risky because it can submit the wrong future prompt after the composer catches up.
+
+Relevant local checks already pin this contract: `simworld_jb_run_and_clear_share_codex_enter_submit_contract` expects Codex `tmux_text_enter`/`Enter`, and the dispatch-only direct-pane test asserts the route submits once without extra Enter retries.
+<!-- agent:boundary:c49c71e7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#lzstatewire1]~~
-- JB `Run Agent Doc` on Codex is STILL not submitting. Why is the text reliably being sent but sending Enter is so unreliable? Why not send the Enter with the text?
----
-JB `Run Agent Doc` on equityfundingsource.md after JB `Clear Session Context` stalls
-```
-resync: pruned 2 stale session(s)
-[route] target tmux session: 0
-Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md into pane %3 for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md because the composer contains protected prompt input (drafted prompt input); clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782321367966-direct_pane_protected_prompt_input-codex-_3-6903dbc74abe.txt
-```
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

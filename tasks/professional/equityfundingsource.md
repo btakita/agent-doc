@@ -93,7 +93,13 @@ Verification: focused tests passed (`bun test tests/admin-full-application-appro
 Deploy: pre-deploy D1 checks showed no pending remote migrations, D1 info reachable, and Time Travel bookmark `00000509-0000002a-00005094-801e11d7a8151dcf75679ae0c68505e4`. `make deploy` completed; Worker URL `https://equityfundingsource.brian-takita.workers.dev`; Version ID `9c8ebd7c-692e-48d3-bd3e-b7749d86ecc4`. Post-deploy migration list still had no pending migrations; public root returned `200`; the admin pipeline URL returned `303` behind Cloudflare Access.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:a1d67c51 -->
+
+### Re: Queue Closeout Repair — gpt-5
+
+Struck the two answered free-text queue rows after the deploy response was committed, so the queue will not re-run the completed Step 6 / deploy work.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:44f59a27 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -113,8 +119,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Step 6 - Review & Sign should be optional. This should not block advancing the application. "Before advancing this application" "Address the highlighted fields and sections below before marking complete or accepting the application." "Step 6 - Review & Sign" "Submitted, EFS status, E-sign consent". None of "Submitted, EFS status, E-sign consent" should be blocker to "Mark Complete".
-- deploy
+- ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Step 6 - Review & Sign should be optional. This should not block advancing the application. "Before advancing this application" "Address the highlighted fields and sections below before marking complete or accepting the application." "Step 6 - Review & Sign" "Submitted, EFS status, E-sign consent". None of "Submitted, EFS status, E-sign consent" should be blocker to "Mark Complete".~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~deploy~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

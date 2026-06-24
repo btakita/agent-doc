@@ -91,7 +91,19 @@ Verification: focused `bun test tests/msg-send-shortcut.test.ts` passed (`15 pas
 Deploy: remote D1 reported "No migrations to apply!" `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `1248dcf6-ee93-4cd3-bc56-0a23d049a242`. Post-deploy check: public root returned `HTTP 200`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:da37ca09 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=36a8f437-18f5-46e1-aeeb-52c10dbdaeb1 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782338579569
+```
+<!-- agent:boundary:f6266c55 -->
 <!-- /agent:exchange -->
 ###
 <!--

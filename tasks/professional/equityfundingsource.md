@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -38,7 +38,7 @@ complete
 Compacted content:
 - Archived 2 response topic(s): IPC recovery note; Deactivated lenders deployed
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:ebe96438 -->
+<!-- agent:boundary:447753c5 -->
 <!-- /agent:exchange -->
 ###
 <!--

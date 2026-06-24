@@ -127,8 +127,8 @@ Verification:
 - `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success`, run `28070395022`, on `2026-06-24T02:11:52Z`.
 
 No new backlog item is needed from this response.
-<!-- agent:boundary:77d4c58d -->
 <!-- no-free-text-queue-head-guard -->
+<!-- agent:boundary:77d4c58d -->
 <!-- /agent:exchange -->
 
 ## Queue

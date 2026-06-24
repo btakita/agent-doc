@@ -86,7 +86,17 @@ Verified `node_modules/` is **not tracked** in src/lazily-js — nothing to purg
 The "node_modules committed → bloat" premise in my earlier cross-port response was **wrong** — I read `ls` (working tree) instead of `git ls-files` (tracked). The state you want — no node_modules in history — already exists, so no history rewrite / `git filter-repo` is needed. Corrected #lzjshygiene in place; its remaining actionable work is the conformance-fixture `assertions` validation (parity with #lzktconf).
 
 > **Queue prompt:** - do [#lzjshygiene]: Please purge `node_modules/` from the git history.
-<!-- agent:boundary:9b60c5a2 -->
+
+### Re: lazily-js next-steps — glm-5.2
+
+Deeper check confirms lazily-js is **clean** — `npm test` 27 pass, no TODO/FIXME, and thorough input validation (`src/index.js:22` enforces non-negative **safe-integer** NodeIds per protocol.md's 2^53 rule; byte-range 0..255 checks; externally-tagged variant validation). The IPC model mirrors lazily-kt and round-trips all 6 conformance fixtures.
+
+The only actionable next-step is already captured as **#lzjshygiene** (validate the conformance fixture `assertions` generically — currently only the `wire` block is round-tripped, so fixture metadata drift passes silently). node_modules confirmed not tracked last cycle. Nothing new to add to the backlog.
+
+> **Queue prompt:** What are #next-steps to fix lazily-js bugs?
+
+Note: the remaining planning heads (zig/py/rs `#next-steps`) are likewise already covered by backlog items `#lzzigtodos`, `#lzpyregress`, and `#lzspecdrift`; the substantive work is the `do [#id]` implementation queue.
+<!-- agent:boundary:f92060a1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -96,7 +106,7 @@ The "node_modules committed → bloat" premise in my earlier cross-port response
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~What are #next-steps to fix lazily-kt bugs?~~
-- 🚧 What are #next-steps to fix lazily-js bugs?
+- ~~What are #next-steps to fix lazily-js bugs?~~
 - What are #next-steps to fix lazily-zig bugs?
 - What are #next-steps to fix lazily-py bugs?
 - What are #next-steps to fix lazily-rs bugs?

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
-agent: codex
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Session History
@@ -89,79 +89,12 @@ queue: stop
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260624-205718.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260624-222347.md`*
 
 Compacted content:
-- Archived 5 response topic(s): GPU-required local corky builds; Closeout repair; Sheets create/share; 2 more
-
-### Re: Next steps to fix corky bugs — glm-5.2
-
-> **Queue prompt:**
->
-> What are #next-steps to fix corky bugs?
-
-
-**Bug triage results.** Reviewed the corky v0.29.0 codebase against the documented open items:
-
-**Already fixed (no action needed):**
-- ~~Gmail API threading Bug 1~~ — `in_reply_to` (RFC 2822 Message-ID) and `thread_id` (Gmail internal ID) are now separate fields in draft YAML. Both `In-Reply-To` header and `threadId` API body are set correctly. (`crates/corky-mail/src/draft/mod.rs:39-40,148-149,254-258`)
-- ~~Gmail API threading Bug 2~~ — `send_via_gmail_api` and `push_to_drafts_via_gmail_api` now include `threadId` in the Gmail API request body. (`draft/mod.rs:415-417,452-454`)
-- ~~Diarization span fix~~ — `max_speaker_span_ratio()` + `CHUNK_CASCADE` (600s→120s→30s) implemented in `corky-transcribe`. Needs release verification.
-
-**Critical — test suite does not compile (top priority):**
-- `first_comment` field added to `SocialDraftMeta` in commit `29309ff` but **7 test initializers** weren't updated. `cargo test --workspace --no-run` fails with `E0063` across `tests/test_social_publish.rs:16` and `tests/test_social_draft.rs` (6 sites). This blocks `make check` entirely.
-
-**Still open:**
-- `#pypi-trusted-publisher` — PyPI run 26195923707 fails `invalid-publisher`; needs trusted publisher configured on PyPI for `repo:btakita/corky:environment:pypi`.
-
-**Re: "Why is 1 test ignored?"** — No `#[ignore]` attributes found anywhere in the corky codebase or test files. This question appears stale; the "1 ignored test" may have been from a prior version.
-
-**Re: Performance report** — Corky v0.29.0 is a 5-crate workspace (`corky-core`, `corky-mail`, `corky-google`, `corky-social`, `corky-transcribe`). The test suite cannot be benchmarked due to the compilation failure above. Once `#fix-social-tests` lands, `make check` will give real numbers. The LinkedIn module (`corky-social`) has the most recent churn (5 commits) and is where the regression was introduced.
-
-**Backlog (priority order):**
-1. `#fix-social-tests` — Fix 7 `SocialDraftMeta` initializers missing `first_comment`
-2. `#pypi-trusted-publisher` — PyPI trusted publisher setup (existing, blocked externally)
-3. `#diarize-span-release` — Verify diarization cascade fix is committed and released
-1. `#pypi-trusted-publisher` — still blocked externally (PyPI `invalid-publisher`)
-1. `#pypi-trusted-publisher` — top remaining item; blocked outside the repo until PyPI trusted publishing is configured for `repo:btakita/corky:environment:pypi`.
-1. `#pypi-trusted-publisher` — top remaining item, still externally blocked by PyPI `invalid-publisher` until the PyPI project has a trusted publisher matching `repo:btakita/corky:environment:pypi`.
-- `cargo fmt --check` — clean
-- `cargo clippy --workspace` — clean (only pre-existing imap-proto warning)
-- `cargo test --workspace` — all pass (0 failed, 0 ignored)
-1. `#pypi-trusted-publisher` — top remaining item; blocked outside the repo until PyPI trusted publishing is configured for `repo:btakita/corky:environment:pypi`.
-
-**Top of backlog: `#fix-social-tests`**
-**IPC proof issue dogfood log**
-
-Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
-
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/corky.md source=socket_ack_content patch_id=0a57749d-d864-4df6-8090-cdead7843646 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=10110 candidate_hash=4f40225a7389aa524bdd91920652e54a95730bc80fb1115ac4fef1561a434785 content_ours_len=11530 content_ours_hash=e581d069fc11b98c9a8ea0a30edee8d803db923bbfe90cdc4a8fdde5a753dcdb doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782335429300
-```
-
-### Re: Recovery closeout — gpt-5
-
-I ran the required orchestration handoff, but it failed closed because the repaired exchange now contains duplicate task-like lines for `#pypi-trusted-publisher`, so the DAG builder reported `duplicate dag task id #pypi-trusted-publisher`.
-
-Manual closeout for this cycle: no Corky repo files were changed, no new bug backlog items were added, and the current top remaining item is `#pypi-trusted-publisher`. `#fix-social-tests` and `#diarize-span-release` should be treated as completed based on the prior recorded closeout; the stale `Top of backlog: #fix-social-tests` line above is historical drift from the interrupted recovery, not the current queue state.
-Processed `tasks/software/corky.md`.
-
-> **Queue prompt:**
->
-> ~~What are #next-steps to fix corky bugs?~~ — auto-struck: answered this cycle (#ftstrike)
-
-
-Session state is now clean:
-- `agent-doc session-check` passes.
-- No queue continuation is required.
-- `#pypi-trusted-publisher` was restored as a gated Review item.
-- `tasks/software/corky.md` is clean in git after commit `40f1fe263`.
-
-No Corky source files were changed, and I did not rerun Corky tests in this recovery cycle.
-<!-- agent:boundary:77a01925 -->
+❯ - Archived 2 response topic(s): Next steps to fix corky bugs; Recovery closeout
+❯ - Prior summary/context: prior compacted content: Archived 5 response topic(s): GPU-required local corky builds; Closeout repair; Sheets creat...
+<!-- agent:boundary:cd30274f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -172,6 +105,7 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- 🚧 Add #next-steps to fix corky bugs.
 <!-- /agent:queue -->
 
 ## Backlog

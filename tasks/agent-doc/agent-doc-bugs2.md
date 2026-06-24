@@ -330,6 +330,15 @@ Verification: full `make check` passed locally with `5093 passed, 241 skipped`; 
 
 > **Queue prompt:**
 >
+> JB `Run Agent Doc` on monsterrodholders.md
+> ```
+> [route] target tmux session: 0
+> Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %2 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Implement {feature}"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782330092988-direct_pane_protected_prompt_input-codex-_2-8a7508d5a787.txt
+> ```
+
+
+> **Queue prompt:**
+>
 > 🚧 When the queue item, review item, icebox item is complete and struck out or `[x]`, remove the 🚧.
 
 Implemented completed-marker cleanup. Queue maintenance already stripped `🚧` from struck queue entries; tracked item marker maintenance now refuses to mark `[x]` items and clears stale markers from backlog, pending, review, and icebox components, with snapshot marker sync covering review too.
@@ -345,7 +354,7 @@ Verification: full `make check` passed locally with `5095 passed, 241 skipped`; 
 > When the queue item, review item, icebox item is complete and struck out or `[x]`, remove the 🚧.
 
 Completed in `d8698eeb` and installed. This closeout records the exact free-text queue prompt echo required for binary-owned queue consumption.
-<!-- agent:boundary:4ab0f346 -->
+<!-- agent:boundary:0f486133 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -354,13 +363,13 @@ Completed in `d8698eeb` and installed. This closeout records the exact free-text
 - ~~:pushpin: Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.~~
 - ~~:pushpin: do [#promptprefixorch1]~~
 - ~~🚧 When the queue item, review item, icebox item is complete and struck out or `[x]`, remove the 🚧.~~
----
+~~~done
 JB `Run Agent Doc` on monsterrodholders.md
 ```
 [route] target tmux session: 0
 Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %2 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Implement {feature}"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782330092988-direct_pane_protected_prompt_input-codex-_2-8a7508d5a787.txt
 ```
----
+~~~
 ---
 ```
 ~/work/btakita/agent-loop main ⇡68 *10 !8 ?6                                                                                                                                                                        ✘ INT  agent-loop 16:32:16

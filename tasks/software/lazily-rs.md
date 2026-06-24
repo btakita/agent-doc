@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 3d9ff8e4-bafd-4e1f-b48d-550d3c976904
-agent: codex
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -34,62 +34,12 @@ queue: stop
 <!-- agent:exchange -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260624-204347.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260624-213908.md`*
 
 Compacted content:
-❯ - Archived 7 response topic(s): lazily-rs bug next-steps; backlog (priority order); #lzasyncdispose2; 4 more
+❯ - Archived 3 response topic(s): lazily-rs bug next-steps; lazily-rs bug fixes #e4tf + #xdsx shipped; #hses + #gxzm
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-
-### Re: lazily-rs bug next-steps — glm-5.2
-
-Found 2 confirmed bugs + 1 low-priority consistency item. Full suite (`cargo test --all-features`) + clippy across every feature combination pass clean, so these are latent runtime bugs the current suite doesn't exercise.
-
-**1. `#e4tf` / #lzasyncrerunabort — async effect re-run leaks (HIGH, proven)**
-`flush_async_effects` (`src/lazily-rs/src/async_context.rs:1176-1209`) spawns the effect re-run and overwrites `e.in_flight` **without aborting** the prior still-`.await`ing task. When an `effect_async` dependency changes again mid-flight, a second concurrent run spawns and the first `JoinHandle` is silently dropped (task keeps running). Empirical reproducer: `compute_count=2` (double concurrent execution) + `cleanup_count=0` (the overwritten run's cleanup is never invoked → leaked handle/subscription).
-Fix: mirror `dispose_async_effect` (`:1054-1055`) — `take()` + `abort()` the prior `in_flight` before spawning the re-run, and add the reproducer as a regression test.
-
-**2. `#xdsx` / #lzwsinboundunbounded — WebSocket inbound unbounded (HIGH)**
-`WsDataChannel` inbound is a bare unbounded `VecDeque` (`src/lazily-rs/src/ws_backend.rs:92,147,151`). A consumer slower than the socket reader grows receive memory without bound — the exact class already fixed for the str0m inbox (`#lzstr0mnetinbox`, `str0m_net.rs:131-150,577-583`) and the WS outbound (`#lzwsunbounded`). The str0m backend sibling was capped; the WS inbound was missed.
-Fix: mirror str0m's `push_inbox_frame` — cap at `MAX_INBOX_FRAMES`, drop+count oldest via `AtomicUsize`, expose `dropped_inbox_frames()`.
-
-**3. `#hses` / #lzstr0mloopbackinbox — loopback inbox consistency (LOW, recommended)**
-`Str0mLoopback` inbox (`str0m_backend.rs:204`) is also an unbounded `push_back`. Deterministic in-process test harness (not a network DoS vector), so lowest priority, but applying the same cap gives uniform backpressure semantics across every `DataChannel` backend.
-
-Backlog is prioritized top → bottom. **Top item id: `#e4tf`** (`#lzasyncrerunabort` — core async-primitive correctness, proven reproducer). Both HIGH items are clean to land; on confirmation I'll execute `#xdsx` first (lowest-risk, well-precedented) then `#e4tf` (regression test ready from the reproducer).
-> **Queue prompt:** What are #next-steps to fix lazily bugs?
-
-### Re: lazily-rs bug fixes #e4tf + #xdsx shipped — glm-5.2
-
-Picked up the queue-backed backlog items and landed both HIGH-priority fixes. Build + full suite green; pushed to origin/main.
-
-**#e4tf `#lzasyncrerunabort` — FIXED (5b1ac88).** `flush_async_effects` now takes + aborts the prior `in_flight` under the lock before spawning the re-run, mirroring `dispose_async_effect`. Regression test `effect_rerun_aborts_prior_inflight` asserts exactly one completed run (was 2 pre-fix) and that the surviving cleanup fires once on dispose. Verified the test FAILS without the abort (`left: 2`) and passes with it.
-
-**#xdsx `#lzwsinboundunbounded` — FIXED (279eb74).** `WsDataChannel` inbound is now capped at `WS_INBOUND_CAPACITY` (1024), shedding oldest-first and counted via `dropped_inbound_frames()`, mirroring the str0m inbox fix (`#lzstr0mnetinbox`). Unit test `inbound_caps_at_capacity_and_counts_drops` covers cap + drop + count.
-
-**Bonus CI unblock (6a41992):** `tests/conformance.rs` carried a non-fmt-clean line that kept the CI "Check formatting" step red on main; `make fmt` normalized it.
-
-**Verification:** `cargo test --all-features` → 0 failures; clippy clean across async / websocket / webrtc-str0m / signaling-client / ffi / ipc-binary / instrumentation; `cargo fmt --check` clean; `cargo build --all-features` green. Pushed a41aaec..6a41992.
-
-**Pre-existing (not a regression):** `make benchmark-check` is red on clean HEAD too — `BENCHMARKS.md` lacks p50/p95 latency rows for the `thread_safe_*` contention benchmarks. Filed as `#lzbmcheckdrift`. Untouched by these fixes.
-
-Remaining backlog: `#hses` (low-priority loopback inbox consistency) + the new `#lzbmcheckdrift`.
-> **Queue prompt:** [#hses]
-> **Queue prompt:** do [#gxzm]
-
-### Re: #hses + #gxzm — gpt-5
-
-Completed both drainable queue items.
-
-`#hses` / `#lzstr0mloopbackinbox` is fixed in lazily-rs commit `b8d4140` and pushed to `origin/main`. `Str0mLoopback` now caps each endpoint inbox at `MAX_INBOX_FRAMES` (1024), sheds oldest-first when saturated, and exposes `Str0mChannel::dropped_inbox_frames()` so tests can assert loss/backpressure. Added regression coverage in `str0m_backend::tests::loopback_inbox_caps_at_capacity_and_counts_drops`.
-
-`#gxzm` / `#lzbmcheckdrift` is fixed in the same commit by regenerating `BENCHMARKS.md` with `make benchmark-update`; `make benchmark-check` now passes with the required thread_safe contention latency evidence present.
-
-Parent gitlink commit `a53e18d2a` is also pushed to `agent-loop` `main`, advancing `src/lazily-rs` to `b8d4140`.
-
-Verification: focused `cargo test loopback_inbox_caps_at_capacity_and_counts_drops --features webrtc-str0m` passed; `make benchmark-check` passed; full `make check` passed. Latest lazily-rs GitHub Actions `CI` run for `b8d4140` (`28131233684`) is still in progress after push; the parent `agent-loop` repo has no workflow named `CI`.
-
-No new lazily-rs bug backlog items from this cycle; after marking `#hses` and `#gxzm` done, this queue should be drained.
-<!-- agent:boundary:84e21612 -->
+<!-- agent:boundary:4fab2b9e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,6 +48,7 @@ No new lazily-rs bug backlog items from this cycle; after marking `#hses` and `#
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 What are #next-steps to fix lazily bugs?
 <!-- /agent:queue -->
 
 ## Backlog

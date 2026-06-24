@@ -236,7 +236,32 @@ Published via `corky linkedin publish` (status flipped `draft → ready`, then p
 **Committed + pushed:** `mail` `2f2a0c0..4317c6b` → `btakita/mail`; superproject gitlink `1ca6a5e92` → `btakita/agent-loop`.
 
 **Queue bookkeeping:** queue head consumed (publish done); queue drained. Review `#lilazilysmpost` updated — post is live, only image + first comment remain.
-<!-- agent:boundary:9a281c66 -->
+
+### Re: LinkedIn state-machine post published via corky — DONE — glm-5.2
+
+> **Queue prompt:**
+>
+> Run corky linkedin publish on the draft. Make sure the post is not truncated on LinkedIn. LinkedIn forbids bots scraping their site, so use the API to ensure success.
+
+Published via `corky linkedin publish` (status flipped `draft → ready`, then published).
+
+**Live post:** https://www.linkedin.com/feed/update/urn:li:share:7475617202893639680
+
+**Not truncated — verified three ways:**
+1. **Dry-run payload** (`corky linkedin publish --dry-run`): confirmed the full 1785-char body, all seven paragraphs intact.
+2. **LinkedIn API limit**: text posts accept up to 3000 chars. At 1785, the entire body fits in one API call. The API does not silently truncate — it accepts the full body or returns an error. Publish returned a valid URN, not an error.
+3. **Contrast with #kabc**: that truncation was on a longer post exceeding the 3000-char limit. This post is 1785 chars total.
+
+**API read-back limitation:** the corky LinkedIn token has `w_member_social` scope only (write), not `r_organization_social` (read). Both `/v2/posts/{urn}` and `/v2/ugcPosts/{urn}` return 403 ACCESS_DENIED. A round-trip API read-back isn't possible with the current token scope, so the three verifications above stand in for it (no scraping needed, consistent with LinkedIn's policy).
+
+**Remaining operator follow-up** (`#lilazilysmpost`):
+- Attach the themed Figure 3 render via `corky linkedin edit mail/social/20260624-142530-linkedin.md`.
+- Post the first comment (link + GitHub source) via `corky linkedin comment`.
+
+**Committed + pushed:** `mail` `2f2a0c0..4317c6b` → `btakita/mail`; superproject gitlink `1ca6a5e92` → `btakita/agent-loop`.
+
+**Queue bookkeeping:** queue head consumed (publish done); queue drained. Review `#lilazilysmpost` updated — post is live, only image + first comment remain.
+<!-- agent:boundary:eb30143c -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,66 +33,41 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-223132.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-225055.md`*
 
 Compacted content:
-❯ - Archived 16 response topic(s): Open Message Conversation Modal And Deploy; Deploy Queue Residue Cleanup; IPC Dogfood Note Closeout; 13 more
+❯ - Archived 3 response topic(s): Remove Required Indicator From Document Types And Deploy; E-Sign Redirect To Dashboard And Deploy; Struck Residue Drain
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
-### Re: Remove Required Indicator From Document Types And Deploy — glm-5.2
+### Re: Prefill New Applications From Prior Borrower Data And Deploy — glm-5.2
 
 > **Queue prompt:**
-> https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1&step=5 shows "Appraisal Report *", "Preliminary Title Report *", "Property Photos *", "Purchase Agreement *" all as required even though they are not required. Please remove the required indicator in the UI.
+>
+> New Loan Applications in https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097&step=0 should prefill all available data that we have about the borrower. If we are not saving the borrower info, save it so future Loan Applicaitons can be prefilled. Do not commingle applicaiton-specific and property-specific data...those fields should not be prefilled.
+
+
+> **Queue prompt:**
+> New Loan Applications in https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097&step=0 should prefill all available data that we have about the borrower. If we are not saving the borrower info, save it so future Loan Applications can be prefilled. Do not commingle application-specific and property-specific data...those fields should not be prefilled.
 >
 > **Queue prompt:**
 > deploy
 
-Implemented, pushed, and deployed. The four seeded borrower document types no longer show a red `*` required indicator in the Documents step.
+Implemented, pushed, and deployed. A new/resumed application now prefills borrower-identifying data from the borrower's most recent prior application.
 
-Root cause: the `document_types` table seeded these four (Appraisal Report, Preliminary Title Report, Property Photos, Purchase Agreement) with `category = 'required'`, and `application-documents.ts` derives `required: category === 'required'` — so the borrower Documents step (`ApplicationDocumentsUpload`) painted `*` beside each. None is actually required to advance: the Documents step has no `validate_step_` gate, so the marker was purely visual noise.
+What changed: borrower personal info was already persisted per-application (`application_personal` + section tables), but never reused across applications. New module `borrower/applications/borrower_prefill.ts` exports `application_borrower_prefill_apply_`, wired into `GET /api/borrower/applications/:id/sections` (the single read path both the `application_id` and draft-load flows hit). It finds the borrower's most recent *other* application that has personal data, then copies only borrower-identifying sections — personal, addresses, employment, income, assets, liabilities, REO — into empty target fields/sections. The prefill is idempotent: a target that already has identity data (first name, last name, or email) is skipped entirely, and each array section is copied only when the target has no rows, so in-progress edits are never overwritten.
 
-What changed: migration `0109_document_types_optional.sql` updates the four rows from `'required'` to `'optional'` (guarded `WHERE category = 'required'`), and the `settings.tsx` seed defaults were updated to match so fresh installs / re-seeds and the admin document-types editor start from optional. An admin can still re-flag any type required from settings. The `required` derivation is unchanged, so genuinely required types still show the indicator.
+Per the "do not commingle" requirement: subject property, loan request, declarations, signature, and broker info are **never** copied — those are application/property-specific. The masked SSN token is also excluded (security tier 0).
 
-Changed paths in `src/equityfundingsource-dev`: `app/equityfundingsource/migrations/0109_document_types_optional.sql` (new), `lib/ui--browser--efs/portal/admin/settings.tsx` (seed defaults → optional), `prds/efs-full-application-intake-spec.md` (documented `#doc-types-not-required`), and `tests/app-docs-icon-delete-activity.test.ts` (3 source-level guard tests).
+Changed paths in `src/equityfundingsource-dev`: `app/equityfundingsource/lib/borrower/applications/borrower_prefill.ts` (new), `app/equityfundingsource/lib/borrower/applications/routes.ts` (import + prefill call in the sections endpoint), `prds/efs-full-application-intake-spec.md` (documented `#borrower-prefill`), and `tests/apply4-full-application-p1.test.ts` (2 source-level guard tests — borrower-only sections + sections-endpoint wiring).
 
-Commits: EFS submodule commit `b37d44e fix(borrower): mark seeded document types optional, not required (#doc-types-not-required)` was pushed to `origin/main`. Parent repo gitlink commit `e80c17055 chore(efs): bump optional document types submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with unrelated work.
+Commits: EFS submodule commit `e1b8668 feat(borrower): prefill new applications from prior borrower data (#borrower-prefill)` was pushed to `origin/main`. Parent repo gitlink commit `642de0f2c chore(efs): bump borrower prefill submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with unrelated work.
 
-Verification: focused `bun test tests/app-docs-icon-delete-activity.test.ts` passed (`14 pass / 0 fail`). `git diff --check` passed. Full `bun test` passed (`1201 pass / 0 fail`); app build and Worker build passed. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+Verification: focused `bun test tests/apply4-full-application-p1.test.ts` passed (`8 pass / 0 fail`). `git diff --check` passed. Full `bun test` passed (`1205 pass / 0 fail`); app build and Worker build passed. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
 
-Deploy: remote D1 migration `0109_document_types_optional.sql` applied successfully (✅). `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `7491e179-b8b8-44a4-9bdb-82d90040d4b7`. Post-deploy check: public root returned `HTTP 200`.
-
-Escalation: none. Confidence: high.
-
-### Re: E-Sign Redirect To Dashboard And Deploy — glm-5.2
-
-> **Queue prompt:**
-> After successfully submitting the e-sign at https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1&step=6, redirect the borrower to the dashboard. Show the toast and show the flash message in the dashboard.
->
-> **Queue prompt:**
-> deploy
-
-Implemented, pushed, and deployed. After a successful e-sign + submit, the borrower is now redirected to the dashboard with a success toast and a dismissible flash banner.
-
-What changed: `sign_()` in `full_application.tsx` previously left the borrower on the Review & sign step with only a small "Application submitted" note. It now redirects to `/borrowers/dashboard?signed=1` right after the submit succeeds. The borrower `Dashboard` reads `?signed=1` once on mount: it fires a success toast through the shared `add_toast` (rendered globally by `ToastContainer`), renders a dismissible "Application submitted" flash banner styled to match the toast, and strips the `signed` param via `replaceState` so a refresh does not re-fire it.
-
-Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/borrower/full_application.tsx` (redirect after submit), `lib/ui--browser--efs/portal/borrower/dashboard.tsx` (`add_toast` import, `signed_flash` state + mount effect + flash banner), `prds/efs-full-application-intake-spec.md` (documented `#esign-redirect`), and `tests/borrower-dashboard.test.ts` (3 source-level guard tests).
-
-Commits: EFS submodule commit `a9c60de feat(borrower): redirect to dashboard with flash after e-sign (#esign-redirect)` was pushed to `origin/main`. Parent repo gitlink commit `7eb58ec18 chore(efs): bump e-sign dashboard redirect submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with unrelated work.
-
-Verification: focused `bun test tests/borrower-dashboard.test.ts tests/full-application-resume-step.test.ts` passed (`16 pass / 0 fail`). `git diff --check` passed. Full `bun test` passed (`1203 pass / 0 fail`); app build and Worker build passed. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-
-Deploy: remote D1 reported "No migrations to apply!" (0109 already applied last cycle). `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `613304c0-6c5b-4f9c-b941-0b9eecbda4a6`. Post-deploy checks: public root returned `HTTP 200`; the dashboard URL with `?signed=1` returned the expected unauthenticated `HTTP 303` redirect to `/login?role=borrower&next=…signed%3D1`, preserving the flash param through login.
+Deploy: remote D1 reported "No migrations to apply!" (no schema change — reuses existing application tables). `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `a6df6f88-f836-4b60-afd1-6df7e5bbad05`. Post-deploy check: public root returned `HTTP 200`.
 
 Escalation: none. Confidence: high.
-
-### Re: Struck Residue Drain — glm-5.2
-
-The struck queue head is already answered: the e-sign → dashboard redirect with toast + flash shipped (EFS `a9c60de`, pushed to `origin/main`) and deployed (Worker `613304c0-6c5b-4f9c-b941-0b9eecbda4a6`) in the prior cycle. The `#ftstrike` marker confirms it was auto-struck because it was answered this session. Cleared the struck residue from the queue and set `queue: stop` so the drained queue converges. No additional app work is needed.
-
-Changed paths this cleanup cycle: none in app code. Verification/deploy evidence remains the prior cycle: focused tests passed (`16 pass / 0 fail`), full `bun test` passed (`1203 pass / 0 fail`), app + Worker builds passed, post-deploy root returned `HTTP 200` and the dashboard `?signed=1` URL returned the expected unauthenticated `HTTP 303` login redirect with the flash param preserved.
-
-Escalation: none. Confidence: high.
-<!-- agent:boundary:ca3d89da -->
+<!-- agent:boundary:3bc975e5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -112,6 +87,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~New Loan Applications in https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097&step=0 should prefill all available data that we have about the borrower. If we are not saving the borrower info, save it so future Loan Applicaitons can be prefilled. Do not commingle applicaiton-specific and property-specific data...those fields should not be prefilled.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

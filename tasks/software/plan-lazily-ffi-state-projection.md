@@ -61,6 +61,17 @@ The "lazily FFI for bi-directional communication" the operator asked about **is 
 - Reuse `lazily-rs` `IpcMessage::{Snapshot, Delta}` (`lazily-rs/src/ffi.rs`) as the transport for incremental projection updates instead of full JSON snapshots. Binary emits a Delta when a single slice changes; plugin applies to its cached projection.
 - This is an optimization over Phase 1, not a prerequisite. Gate on a measured cost from full-snapshot polling.
 
+#### Values-vs-references mirroring contract (what crosses the channel)
+
+The plugin never receives a dereferenceable Rust pointer. lazily-ipc already encodes the full taxonomy (`lazily-rs/src/ipc.rs`), so Phase 2 only chooses among existing variants — it does not invent new reference semantics:
+
+1. **Inline values (small structured data) → `IpcValue::Inline(IpcPayload)`** (`ipc.rs:47`). Serialize the projection slice bytes into every Delta. Mirror freely — these are plain owned bytes crossing the ABI.
+2. **Large object/blob values → `IpcValue::SharedBlob(ShmBlobRef)`** (`ipc.rs:47`, descriptor at `ipc.rs:32`). **This IS the recommended way to mirror a "reference to an object/blob."** `ShmBlobRef` carries `{offset, len, generation, epoch, checksum}` into a managed `ShmBlobArena` (`ipc.rs:150`); the arena validates magic/version/generation/epoch/len/checksum on every read (`read_blob`, `ipc.rs:269`) to reject stale/torn regions after wraparound. The plugin reads through the arena (or an equivalent shared-memory mapping) by descriptor — it never holds a raw Rust pointer. Use this when a projection payload (e.g. a large document digest) is too big to inline per-delta.
+3. **Reactive dependency graph → structural data only.** Topology crosses as `EdgeSnapshot`/`EdgeAdd`/`EdgeRemove` over `NodeId`s (`ipc.rs:375/472/477`) — serializable graph *shape*, not live reactive references. The plugin may render the shape but cannot reconstruct reactive *behavior* (closures, propagation) from it; that stays binary-side.
+4. **Raw Rust pointers / typed handles (`&T`, `Arc<T>`, `*mut T`) → NEVER.** `ffi.rs:1-6` and `ipc.rs:8-10` explicitly prohibit exposing live contexts, references, closures, or typed handles to foreign runtimes. `NodeState::Opaque` (`ipc.rs:330`) is the escape hatch for a known node whose value cannot be serialized — it advertises existence without leaking the reference.
+
+**Net rule for the operator's clarifying question:** a Cell whose value is a pointer/reference to an object or blob IS mirrorable — as a `SharedBlob` descriptor into a managed arena, with integrity guards — and IS NOT mirrorable as a raw pointer into Rust memory. The descriptor is the reference; the arena is the backing store; generation/checksum guard against drift.
+
 ### Phase 3 — Plugin UI wiring
 
 - JB: `PromptPanel` / status bar reads `agent_doc_state_projection` to show route/closeout/proof phase; replaces heuristic phase guesses. `EditorCommandStateMachine.kt` stays local UI coalescing (keystroke batching, focus timers) — explicitly NOT a durable FSM.

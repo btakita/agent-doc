@@ -141,7 +141,13 @@ The re-added IPC proof prompt lines are acknowledged. They record the same close
 
 The recovery has already been applied: the visible prompt lines are back in `agent:exchange`, the earlier recovery responses are present, and no product code or backlog follow-up is required for this note. Continuing with the queued JetBrains yellow-text item.
 
-<!-- agent:boundary:3dfecae9 -->
+### Re: IPC proof issue dogfood log committed repair - gpt-5
+
+This closes the repeated IPC dogfood repair loop by preserving the visible exchange as the source of truth. The dogfood prompt lines are present in the live document, the recovery responses answer them, and the repeated IPC `content_ours` merge was dropping those prompt lines from HEAD.
+
+No product code change or backlog item is needed for this recovery note. I am continuing with the queued JetBrains yellow-text item after this closeout.
+
+<!-- agent:boundary:21b2842f -->
 <!-- /agent:exchange -->
 
 ## Queue

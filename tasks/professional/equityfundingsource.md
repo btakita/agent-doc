@@ -229,7 +229,41 @@ Deployment: not run for this queue head; the separate `deploy` queue item remain
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:52865b26 -->
+
+### Re: Requirements dialog arrow navigation - gpt-5
+
+> **Queue prompt:**
+>
+> In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field...which would be Close...then Advance Lender. The up arrow key navigates to the previous actionable item.
+
+Implemented, committed, and pushed.
+
+Changed behavior:
+- Card/Requirements dialog now marks alert and footer actions for modal-local keyboard navigation.
+- Alert-level Advance lender button gets initial focus when present and supports Enter natively.
+- ArrowDown/ArrowUp cycles through marked actions in order, including alert Advance Lender, footer Close, and footer CTAs, without changing board-level lane navigation.
+- Stacked Profile/Advance Lender dialogs opt out of the card-dialog focus loop.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
+- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
+- `src/equityfundingsource-dev/prds/investor-pipeline-admin.md`
+
+Verification:
+- `git diff --check`
+- `bun test tests/admin-investor-pipeline.test.ts tests/advance-lender-dialog.test.ts` — 105 tests, 0 failures.
+- `make check` — 1182 tests, app build, worker build passed.
+- `gh run list --workflow CI --limit 1` in both EFS and parent reported `could not find any workflows named CI`.
+
+Commits:
+- EFS submodule: `7e89423 fix(admin): add requirements dialog arrow navigation`
+- Parent gitlink: `2c2ec9452 chore: update equityfundingsource submodule`
+
+Deployment: not run for this queue head; the separate `deploy` queue item remains.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:1ce65b89 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -252,8 +286,8 @@ After 20:30
 - ~~In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, all dialogs should have a unique url using pushState. So the links can be shared.~~
 - ~~I just signed up as btak.div+lender3@gmail.com. This user has Requirements Current in the Lender Pipeline. Why are the requirements current? The lender has not completed the signup...adding documents.~~
 - ~~In the Lender Pipeline > Requirements Dialog, remove the Message Lender section. The contextual messaging (chat bubble) should open to the message the lender for the card.~~
-- In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field...which would be Close...then Advance Lender. The up arrow key navigates to the previous actionable item.
-- In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field.
+- ~~In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field...which would be Close...then Advance Lender. The up arrow key navigates to the previous actionable item.~~
+- ~~In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field.~~ — auto-struck: answered this cycle (#ftstrike)
 - deploy
 <!-- /agent:queue -->
 

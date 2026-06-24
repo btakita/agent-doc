@@ -1,8 +1,10 @@
 //! Lost queue recovery audit for foreign-owned session documents.
 //!
-//! The command is intentionally read-only: it reconstructs historical queue
-//! heads from durable local evidence and reports which prompts are unaccounted
-//! in the current document.
+//! The command is intentionally read-only with respect to the session document:
+//! it reconstructs historical queue heads from durable local evidence and
+//! reports which prompts are unaccounted in the current document. The optional
+//! `--restore-patch` emits a separate operator-reviewed restoration patch file
+//! (it never mutates the session document itself).
 
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
@@ -26,7 +28,7 @@ pub(crate) struct LostQueueReport {
     pub source_count: usize,
     pub covered_ids: Vec<String>,
     pub restore_candidates: Vec<RestoreCandidate>,
-    pub git_history_only_candidates: Vec<RestoreCandidate>,
+    pub git_history_only_candidates: Vec<GitHistoryCandidate>,
     pub proof: RecoveryProof,
 }
 
@@ -35,6 +37,18 @@ pub(crate) struct RestoreCandidate {
     pub text: String,
     pub id: Option<String>,
     pub sources: Vec<String>,
+}
+
+/// A historical queue head found only in git history, classified by whether it
+/// is safe to restore into this document.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(crate) struct GitHistoryCandidate {
+    pub candidate: RestoreCandidate,
+    /// True when the prompt does not reference a foreign document and is a
+    /// candidate for operator-reviewed restoration here.
+    pub restorable: bool,
+    /// Explicit per-candidate guidance (restore hint or non-restorable reason).
+    pub recommendation: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -49,8 +63,26 @@ struct QueueSource {
     content: String,
 }
 
-pub(crate) fn run(file: &Path, json: bool, max_git_versions: usize) -> Result<()> {
+pub(crate) fn run(
+    file: &Path,
+    json: bool,
+    max_git_versions: usize,
+    restore_patch: Option<&Path>,
+) -> Result<()> {
     let report = build_report(file, max_git_versions)?;
+    if let Some(patch_path) = restore_patch {
+        let value = restore_patch_value(file, &report);
+        fs::write(patch_path, serde_json::to_string_pretty(&value)?)
+            .with_context(|| format!("failed to write restore patch to {}", patch_path.display()))?;
+        if !json {
+            println!(
+                "restore_patch written={} restorable={} non_restorable={}",
+                patch_path.display(),
+                value["restorable_count"].as_u64().unwrap_or(0),
+                value["non_restorable_count"].as_u64().unwrap_or(0),
+            );
+        }
+    }
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -110,7 +142,13 @@ pub(crate) fn build_report(file: &Path, max_git_versions: usize) -> Result<LostQ
         {
             restore_candidates.push(candidate);
         } else {
-            git_history_only_candidates.push(candidate);
+            let restorable = !is_foreign_owned(&candidate.text, &canonical);
+            let recommendation = restore_recommendation(&candidate.text, &canonical, restorable);
+            git_history_only_candidates.push(GitHistoryCandidate {
+                candidate,
+                restorable,
+                recommendation,
+            });
         }
     }
 
@@ -129,11 +167,18 @@ pub(crate) fn build_report(file: &Path, max_git_versions: usize) -> Result<LostQ
             message: "No queue heads were found in snapshots, sidecars, or git history; no restore is needed.".to_string(),
         }
     } else if !git_history_only_candidates.is_empty() {
+        let restorable = git_history_only_candidates
+            .iter()
+            .filter(|candidate| candidate.restorable)
+            .count();
+        let foreign = git_history_only_candidates.len() - restorable;
         RecoveryProof {
             status: "git_history_only_review".to_string(),
             message: format!(
-                "{} git-history-only queue head(s) are unaccounted, but no current snapshot/baseline/sidecar restore candidate was found.",
-                git_history_only_candidates.len()
+                "{} git-history-only queue head(s) are unaccounted ({} restorable, {} non-restorable/foreign); no current snapshot/baseline/sidecar restore candidate was found.",
+                git_history_only_candidates.len(),
+                restorable,
+                foreign
             ),
         }
     } else {
@@ -172,11 +217,17 @@ fn print_human_report(report: &LostQueueReport) {
         if !report.git_history_only_candidates.is_empty() {
             println!("git_history_only_candidates:");
             for candidate in &report.git_history_only_candidates {
-                match &candidate.id {
-                    Some(id) => println!("- {} (id: #{})", candidate.text, id),
-                    None => println!("- {}", candidate.text),
+                match &candidate.candidate.id {
+                    Some(id) => println!("- {} (id: #{})", candidate.candidate.text, id),
+                    None => println!("- {}", candidate.candidate.text),
                 }
-                println!("  sources: {}", candidate.sources.join(", "));
+                println!("  sources: {}", candidate.candidate.sources.join(", "));
+                let label = if candidate.restorable {
+                    "restorable"
+                } else {
+                    "non-restorable"
+                };
+                println!("  {label}: {}", candidate.recommendation);
             }
         }
         return;
@@ -417,6 +468,77 @@ fn queue_prompt_id(text: &str) -> Option<String> {
     (!id.is_empty()).then(|| id.to_ascii_lowercase())
 }
 
+/// Returns true when `text` references a session document other than `file`
+/// (e.g. a `monsterrodholders.md` prompt leaked into this document's queue via
+/// cross-document contamination). Such prompts are non-restorable here.
+fn is_foreign_owned(text: &str, file: &Path) -> bool {
+    foreign_doc_reference(text, file).is_some()
+}
+
+/// Extracts the first foreign `<name>.md` reference in `text`, where `<name>`
+/// differs from the current document's file stem.
+fn foreign_doc_reference(text: &str, file: &Path) -> Option<String> {
+    let self_stem = file.file_stem().and_then(|stem| stem.to_str())?;
+    for raw in text.split_whitespace() {
+        let token = raw.trim_matches(|c: char| {
+            !c.is_alphanumeric() && c != '-' && c != '_' && c != '.'
+        });
+        if let Some(stem) = token.strip_suffix(".md")
+            && !stem.is_empty()
+            && stem != self_stem
+        {
+            return Some(format!("{stem}.md"));
+        }
+    }
+    None
+}
+
+fn restore_recommendation(text: &str, file: &Path, restorable: bool) -> String {
+    if restorable {
+        return "Git-history-only with no foreign-document reference; re-queue \
+            into this document after operator review."
+            .to_string();
+    }
+    let foreign = foreign_doc_reference(text, file)
+        .unwrap_or_else(|| "a foreign document".to_string());
+    format!(
+        "Non-restorable here: prompt references {foreign} and is likely \
+            cross-document contamination; restore it under the owning document."
+    )
+}
+
+/// Builds the operator-reviewed restoration patch value: restorable candidates
+/// (safe to re-queue here) separated from non-restorable foreign ones.
+fn restore_patch_value(file: &Path, report: &LostQueueReport) -> Value {
+    let mut restorable = Vec::new();
+    let mut non_restorable = Vec::new();
+    for candidate in &report.git_history_only_candidates {
+        if candidate.restorable {
+            restorable.push(serde_json::json!({
+                "text": candidate.candidate.text,
+                "id": candidate.candidate.id,
+                "sources": candidate.candidate.sources,
+            }));
+        } else {
+            non_restorable.push(serde_json::json!({
+                "text": candidate.candidate.text,
+                "id": candidate.candidate.id,
+                "recommendation": candidate.recommendation,
+            }));
+        }
+    }
+    serde_json::json!({
+        "file": file.display().to_string(),
+        "restorable_count": restorable.len(),
+        "non_restorable_count": non_restorable.len(),
+        "restorable": restorable,
+        "non_restorable": non_restorable,
+        "apply_hint": "Re-queue each restorable prompt into this document's agent:queue \
+            block after review, or add it to agent:backlog with the `queue` attribute and run \
+            `agent-doc queue sync`. Do not restore non_restorable (foreign) prompts here.",
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -493,13 +615,76 @@ mod tests {
         let report = build_report(&file, 5).unwrap();
         assert!(report.restore_candidates.is_empty());
         assert_eq!(report.git_history_only_candidates.len(), 1);
-        assert_eq!(report.git_history_only_candidates[0].text, "do [#fromgit]");
+        let candidate = &report.git_history_only_candidates[0];
+        assert_eq!(candidate.candidate.text, "do [#fromgit]");
         assert!(
-            report.git_history_only_candidates[0]
+            candidate
+                .candidate
                 .sources
                 .iter()
                 .any(|source| source.starts_with("git:"))
         );
+        // No foreign-document reference → restorable, with a restore hint.
+        assert!(candidate.restorable);
+        assert!(candidate.recommendation.contains("re-queue"));
+    }
+
+    #[test]
+    fn recover_lost_classifies_foreign_git_prompt_as_non_restorable() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        fs::write(
+            &file,
+            doc_with_queue("- review the monsterrodholders.md test-email CSV row\n", ""),
+        )
+        .unwrap();
+        run_git(dir.path(), &["init"]);
+        run_git(dir.path(), &["config", "user.email", "test@example.com"]);
+        run_git(dir.path(), &["config", "user.name", "Test User"]);
+        run_git(dir.path(), &["add", "session.md"]);
+        run_git(dir.path(), &["commit", "-m", "foreign prompt"]);
+        fs::write(&file, doc_with_queue("", "")).unwrap();
+
+        let report = build_report(&file, 5).unwrap();
+        assert_eq!(report.git_history_only_candidates.len(), 1);
+        let candidate = &report.git_history_only_candidates[0];
+        assert!(!candidate.restorable);
+        assert!(candidate.recommendation.contains("Non-restorable"));
+        assert!(candidate.recommendation.contains("monsterrodholders.md"));
+    }
+
+    #[test]
+    fn recover_lost_restore_patch_separates_restorable_from_foreign() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        fs::write(
+            &file,
+            doc_with_queue(
+                "- do [#fromgit]\n- review monsterrodholders.md CSV row\n",
+                "",
+            ),
+        )
+        .unwrap();
+        run_git(dir.path(), &["init"]);
+        run_git(dir.path(), &["config", "user.email", "test@example.com"]);
+        run_git(dir.path(), &["config", "user.name", "Test User"]);
+        run_git(dir.path(), &["add", "session.md"]);
+        run_git(dir.path(), &["commit", "-m", "mixed queue"]);
+        fs::write(&file, doc_with_queue("", "")).unwrap();
+
+        let report = build_report(&file, 5).unwrap();
+        let value = restore_patch_value(&file, &report);
+        assert_eq!(value["restorable_count"].as_u64(), Some(1));
+        assert_eq!(value["non_restorable_count"].as_u64(), Some(1));
+        // The restorable entry is the non-foreign prompt.
+        assert_eq!(value["restorable"][0]["text"], "do [#fromgit]");
+        // The foreign entry carries a non-restorable recommendation.
+        assert!(value["non_restorable"][0]["recommendation"]
+            .as_str()
+            .unwrap()
+            .contains("Non-restorable"));
     }
 
     fn run_git(cwd: &Path, args: &[&str]) {

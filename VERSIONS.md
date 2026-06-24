@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.47
+
+- `queue recover-lost`: git-history-only candidates are now classified as restorable vs non-restorable/foreign, and `--restore-patch <PATH>` emits an operator-reviewed restoration patch (JSON) separating restorable prompts from foreign-owned (cross-document contamination) ones. The session document is never mutated. Closes `#mrhqrestore`.
+
 ## 0.34.46
 
 - **IPC proof dogfood diagnostics no longer become unresolved prompt-bearing exchange items (`#ipcqproof`).** The `ipc_proof_insufficient` note appended during interrupted-cycle recovery (e.g. a queue-consume `socket_ack_content` ACK mismatch on `live_prompt_drift_after_preflight`, or a `missing_response_probe` patch consumed without the response body) now opens with a `### Re:` response heading. The prompt-bearing diff classifier therefore treats it as a binary-authored `RecoveryArtifact` instead of a user `PromptTarget`, so it is no longer `❯`-normalized into a prompt-only exchange tail that forced a follow-up acknowledgment cycle. Recovery stays fail-closed on the binary-owned path (`recovery=retry_without_disk_write` / `content_ours_snapshot_next_cycle`, never `direct_write_fallback`). New regression `ipc_dogfood_note_is_recovery_artifact_not_prompt_bearing` pins the classification, prompt-prefix normalization, prompt-only-tail, and fail-closed invariants for both diagnostic variants.

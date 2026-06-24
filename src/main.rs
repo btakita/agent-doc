@@ -1857,6 +1857,11 @@ enum QueueAction {
         /// Maximum git versions to scan for historical queue heads
         #[arg(long, default_value_t = 50)]
         max_git_versions: usize,
+        /// Write an operator-reviewed restoration patch (JSON) for git-history-only
+        /// candidates to this path. Restorable prompts are separated from
+        /// non-restorable foreign-owned ones; the session document is never mutated.
+        #[arg(long, value_name = "RESTORE_PATCH_PATH")]
+        restore_patch: Option<PathBuf>,
     },
     /// One-shot sync from backlog items with `queue` attribute into agent:queue
     Sync {
@@ -3562,7 +3567,8 @@ fn main() -> anyhow::Result<()> {
                 file,
                 json,
                 max_git_versions,
-            } => queue_recovery::run(&file, json, max_git_versions),
+                restore_patch,
+            } => queue_recovery::run(&file, json, max_git_versions, restore_patch.as_deref()),
             QueueAction::Sync { file } => agent_doc_orchestration::queue_cmd::sync(&file),
             QueueAction::Consume {
                 file,

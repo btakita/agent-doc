@@ -137,6 +137,11 @@ Note: the live `src/agent-doc` checkout still has unrelated pre-existing dirty f
 
 > **Queue prompt:**
 >
+> Add an emoji that annotates the current queue item and backlog item. Pick the most appropriate emoji.
+
+
+> **Queue prompt:**
+>
 > commit uncommitted files in agent-doc
 
 Committed the uncommitted `src/agent-doc` changes and recorded the parent submodule pointer.
@@ -147,9 +152,13 @@ Committed the uncommitted `src/agent-doc` changes and recorded the parent submod
 - Commit: `src/agent-doc` submodule commit `660e4a58` (`fix: guard free-text queue consumption`); parent gitlink commit `0be2b13d7` (`chore: update agent-doc submodule`).
 - Confidence: high.
 - Escalation: none.
+- Confidence: medium; this document’s visible overwrite drift was repaired, while the underlying overwrite symptom remains queued for a focused fix.
+- Verification: queue/backlog targets were re-read before finalize; no source code changed, so I did not run `make check`.
+- Commands: `tsift status`; `agent-doc preflight`; `agent-doc plan`; interrupted stale `agent-doc orchestrate tasks/agent-doc/agent-doc-bugs2.md --mode sequential --from-exchange` after it misclassified prior response bullets; `agent-doc repair --apply-recovery`; `git restore --source=HEAD -- tasks/agent-doc/agent-doc-bugs2.md`; `agent-doc finalize`.
+- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md`.
 
 I did not push; this queue item requested committing the local uncommitted files.
-<!-- agent:boundary:90d6daf2 -->
+<!-- agent:boundary:5ba6e2a1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -157,8 +166,9 @@ I did not push; this queue item requested committing the local uncommitted files
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#advr01]~~
 - ~~commit uncommitted files in agent-doc~~
-- Add an emoji that annotates the current queue item and backlog item. Pick the most appropriate emoji.
-- do [#advr02]
+- ~~Add an emoji that annotates the current queue item and backlog item. Pick the most appropriate emoji.~~
+- The response is still overwriting parts of the previous response.
+- 📍 do [#advr02]
 - do [#advr03]
 - do [#advr04]
 - do [#advr05]
@@ -176,6 +186,7 @@ I did not push; this queue item requested committing the local uncommitted files
 - do [#advr17]
 - do [#advr18]
 - do [#advr19]
+- JB `Run Agent Doc` still does not quickly submit the prompt.
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -204,7 +215,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr02] [recommended] Advance original #arrcodexproof: re-run managed Codex capability proof when a boundary restart switches to Codex; wire proof restart into harness-change restart path and add focused regression + make check.
+- [ ] [#advr02] 📍 [recommended] Advance original #arrcodexproof: re-run managed Codex capability proof when a boundary restart switches to Codex; wire proof restart into harness-change restart path and add focused regression + make check.
 - [ ] [#advr03] Advance original #j9ja: finish #optverify marker coverage by adding `agent_restart_performed` in #agentreloadrestart execution and a restart-agent menu-invoke marker in #restartagentmenu; then auto-resolve the stale review gate from ops-log proof/disproof markers.
 - [ ] [#advr04] Advance original #restartagentmenu: implement JB `RestartAgentAction.kt`, plugin.xml registration, TerminalUtil restart wiring, pluginVersion bump, signed+unsigned builds, action invocation log, and resolved harness log. Plan: tasks/agent-doc/plan-restart-agent.md.
 - [ ] [#advr05] [recommended] Advance original #s81q: add Stop Agent and mirror Stop+Restart into VS Code extension menus; implement JB `StopAgentAction.kt`, plugin.xml registration, VS Code command contributions, and signed/unsigned plugin artifacts.

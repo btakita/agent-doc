@@ -120,7 +120,19 @@ Added a new section, **"It didn't stop at one machine: the state backbone,"** to
 Already completed in the response directly above (cycle `a9a0a4127`): the post gained an **"It didn't stop at one machine: the state backbone"** section covering the five other `ThreadSafeStateMachine` subdomains in agent-doc (`QueueHeadMachine`, `TransportPatchMachine`, `ActorLifecycleMachine`, `RouteReadinessMachine`, `ProofGateMachine`) and the event-sourced `EventLedger` / `project()` backbone they compose into. The earlier block's `> **Queue prompt:**` used an ellipsis, which is why this free-text head wasn't struck on the first pass — re-quoting the exact prompt here so `#ftstrike` consumes it.
 
 Full chain pushed: `app/briantakita.me` `c508ad1` → `briantakita.me-dev` `79a714f` → superproject `3d369bbba` (the multi-pane divergence cleared, so prior local-only gitlinks landed too). Markdown verified well-formed. No actionable follow-up.
-<!-- agent:boundary:fcc43201 -->
+
+### Re: deploy briantakita.me — DONE (Cloudflare Pages deploy green) — glm-5.2
+
+> **Queue prompt:**
+>
+> deploy briantakita.me
+
+Deployment is automatic: `briantakita.me-dev/.github/workflows/deploy.yml` runs `Deploy to Cloudflare Pages` on every push to `main`. Last cycle's gitlink bump (`79a714f` → `btakita/briantakita.me-dev` main, carrying the new blog-post section) already triggered it — so this task resolves to verifying the workflow run, which the binary owns end-to-end (bun build + S3 assets + prerender → `wrangler-action` → Cloudflare Pages, credentials in GitHub Secrets).
+
+**Verification:** `gh run list --workflow deploy.yml --repo btakita/briantakita.me-dev` → the run for commit *"briantakita.me: bump gitlink — lazily-sm state backbone post"* is **`completed success`** (56s). Its built-in smoke test passed (`/`, `/about`, `/posts`, `/robots.txt` all 200, plus `assets.briantakita.me/.../briantakita-og.jpg`). The **"It didn't stop at one machine: the state backbone"** section is live on briantakita.me.
+
+No agent-doable deploy action beyond verification — the deploy is CI-owned and push-triggered (no manual `make deploy`, no local credentials). The `drainable=0` classification fit: the work was the push (already done last cycle) plus this CI confirmation.
+<!-- agent:boundary:7813a01e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,6 +141,8 @@ Full chain pushed: `app/briantakita.me` `c508ad1` → `briantakita.me-dev` `79a7
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~deploy briantakita.me~~
+- Draft a LinkedIn teaser post with the 1st comment being the link. Include the image of the Cycle State machine.
 <!-- /agent:queue -->
 
 ## Backlog

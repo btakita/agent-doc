@@ -147,7 +147,16 @@ I ran the required orchestration handoff, but it failed closed because the repai
 
 Manual closeout for this cycle: no Corky repo files were changed, no new bug backlog items were added, and the current top remaining item is `#pypi-trusted-publisher`. `#fix-social-tests` and `#diarize-span-release` should be treated as completed based on the prior recorded closeout; the stale `Top of backlog: #fix-social-tests` line above is historical drift from the interrupted recovery, not the current queue state.
 
-<!-- agent:boundary:194dee67 -->
+### Re: Next steps prompt — gpt-5
+
+> **Queue prompt:** What are #next-steps to fix corky bugs?
+
+No new Corky bug follow-up items should be added from this cycle. The current backlog priority is only:
+1. `#pypi-trusted-publisher` — top remaining item; blocked outside the repo until PyPI trusted publishing is configured for `repo:btakita/corky:environment:pypi`.
+
+The earlier `#fix-social-tests` and `#diarize-span-release` entries are completed historical items, not current backlog heads.
+
+<!-- agent:boundary:3cc50db2 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -147,7 +147,7 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/c
 I ran the required orchestration handoff, but it failed closed because the repaired exchange now contains duplicate task-like lines for `#pypi-trusted-publisher`, so the DAG builder reported `duplicate dag task id #pypi-trusted-publisher`.
 
 Manual closeout for this cycle: no Corky repo files were changed, no new bug backlog items were added, and the current top remaining item is `#pypi-trusted-publisher`. `#fix-social-tests` and `#diarize-span-release` should be treated as completed based on the prior recorded closeout; the stale `Top of backlog: #fix-social-tests` line above is historical drift from the interrupted recovery, not the current queue state.
-<!-- agent:boundary:0df561c3 -->
+<!-- agent:boundary:9dce3b18 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -165,6 +165,12 @@ Please give me a report the performance
 
 <!-- agent:backlog -->
 <!-- /agent:backlog -->
+
+## Review
+
+<!-- agent:review -->
+- [/] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi. Repo workflow is configured and pushed in Corky commit feb074e; PyPI run 26195923707 now builds all artifacts but is blocked by PyPI invalid-publisher until the project has a trusted publisher matching repo:btakita/corky:environment:pypi.
+<!-- /agent:review -->
 
 ## Completed / Reaped
 

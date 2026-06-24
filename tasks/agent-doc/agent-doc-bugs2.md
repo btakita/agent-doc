@@ -142,13 +142,31 @@ Closeout note: this cycle's write hit the `#ipc-crdt-response-drift` bug (CRDT m
 2. **Binary-side (deeper, the real ask):** when an OpenCode turn ends *without* finalize (IPC churn / supervisor version mismatch), the supervisor's turn-state stays `alive-busy` even though the live pane is idle. `#opencode-post-turn-false-active` (shipped) already added a bottom-cue idle check for the dispatch path; the symmetric fix is to apply that same idle bottom-cue re-classification in the `session_restart` busy gate so an idle pane is treated as idle regardless of stale supervisor turn-state. Filed as the concrete next implementation step under `#jbrestartbusy`.
 
 Plan `plan-jb-restart-supervisor-busy-refusal.md` already covers hypothesis (1); I'm appending the (2) auto-idle requirement there. Not marking `--done` — this needs the focused implementation cycle + SimWorld proof, and the JB-side half needs your plugin install.
-<!-- agent:boundary:fc2cbf97 -->
+
+### Re: #jbrunhang investigated — root cause narrowed to route pane-wait — glm-5.2
+
+> **Queue prompt:**
+> 🚧 If I run JB `Run Agent Doc` on a session not open, the next JB `Run Agent Doc` hangs. The first JB `Run Agent Doc` should immediately fail.
+
+**#jbrunhang — root cause narrowed.** `plan-controller-stalled-client-start-hang.md` hypothesized a sequential controller accept loop monopolized by a stalled client. That is **outdated**: `project_controller/rpc.rs:2454-2463` already `std::thread::spawn`s per accepted client (concurrent), and `CONTROLLER_RPC_TIMEOUT = 5s` (`project_controller.rs:61`) bounds client reads. So the controller RPC is not where the hang lives today.
+
+The remaining hang is in the **route/start pane-creation wait**: when JB `Run Agent Doc` targets a document whose tmux session is not open, `route`/`start` creates a fresh pane and waits for a dispatch-ready prompt. If the session fails to come up (or the prompt never appears), the wait is effectively unbounded — the first invocation hangs instead of failing fast, and a second invocation piles on behind the same stuck controller/handoff.
+
+**Concrete fix direction (for the impl cycle):**
+1. Add a bounded `session_startup` wait in `route.rs`/`start.rs` with a hard deadline; on expiry, fail closed with `startup_miss` + an actionable error ("session did not become dispatch-ready in Ns") rather than hanging.
+2. Detect "session not open" up front and either create-then-verify with the same bound, or fail immediately if the configured session can't be attached.
+3. SimWorld regression: a `starting` actor that never reaches a dispatch-ready prompt must produce a bounded `startup_miss`, not an infinite wait.
+
+Advances `plan-controller-stalled-client-start-hang.md` (mark its accept-loop hypothesis resolved; scope shifts to bounded session-startup). Needs the focused impl cycle + live JB repro.
+<!-- agent:boundary:6e334f64 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 JB `Recycle Supervisor` receives a message that the agent is busy even though the opencode terminal is idle. The state needs to be updated to idle once the turn completes...even if the turn did not finalize. If the agent stops the turn due IPC churn or a Supervisor version mismatch, the state should indicate the agents idle. No need for the extra 2 steps of to press "Interrupt & Restart" + the confirmation.
+- :pushpin: do [#jbrunhang]
+- :pushpin: do [#jbrestartbusy]
 ---
 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
@@ -197,7 +215,7 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
-- If I run JB `Run Agent Doc` on a session not open, the next JB `Run Agent Doc` hangs. The first JB `Run Agent Doc` should immediately fail.
+- ~~If I run JB `Run Agent Doc` on a session not open, the next JB `Run Agent Doc` hangs. The first JB `Run Agent Doc` should immediately fail.~~ — auto-struck: answered this cycle (#ftstrike)
 - The Capacity Proof should not block the JB `Run Agent Doc` dispatch. Dispatch should occur immediately while the Capacity Proof runs in the background.
 - Still getting JB `File Cache Conflict` dialogs.
 - Opencode responses are reverse ordering numeric lists.
@@ -284,8 +302,6 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 - do [#actorswitchdefer]
 - do [#ocdrainstall]
 - do [#capproofbg]
-- do [#jbrestartbusy]
-- do [#jbrunhang]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

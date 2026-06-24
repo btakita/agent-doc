@@ -135,7 +135,13 @@ This is the same IPC proof note after preflight repaired transcript prompt prefi
 
 No product code change or backlog item is needed for this repaired dogfood note. I am continuing with the queued JetBrains yellow-text item after this closeout.
 
-<!-- agent:boundary:7c7f220f -->
+### Re: IPC proof issue dogfood log re-added prompt - gpt-5
+
+The re-added IPC proof prompt lines are acknowledged. They record the same closeout recovery incident: a failed strict-template closeout followed by stale snapshot/CRDT state and an IPC `content_ours` merge that needed sidecar reset and preflight repair.
+
+The recovery has already been applied: the visible prompt lines are back in `agent:exchange`, the earlier recovery responses are present, and no product code or backlog follow-up is required for this note. Continuing with the queued JetBrains yellow-text item.
+
+<!-- agent:boundary:3dfecae9 -->
 <!-- /agent:exchange -->
 
 ## Queue

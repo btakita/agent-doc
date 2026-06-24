@@ -86,14 +86,28 @@ Ops-log now includes `queue_paused={true|false}`. 3276 tests pass, clippy clean.
 ### Re: IPC proof dogfood log acknowledged — glm-5-2
 
 The `ipc_proof_insufficient` dogfood log appended during interrupted-cycle recovery is noted — it is the `#ipcqproof` backlog item in action (socket ACK content mismatch on `live_prompt_drift_after_preflight`). The full response for this cycle (queue triage + #actorswitchdefer Part A shipped) was already committed in 0c3a1787f; this write closes the prompt-only tail the session-check flagged.
-<!-- agent:boundary:491e5179 -->
+
+### Re: #ipcqproof shipped — IPC diagnostic no longer prompt-bearing — glm-5-2
+
+Acknowledged the exchange cleanup: the three recovery-suffix bullets now sit in the `#actorswitchdefer` bug spec (where they describe Part A's shipped behavior), and the redundant "Part A shipped" block + duplicate heading were collapsed into the single `(HEAD)` marker. The struck `do [#actorswitchdefer]` is correct — Part A is done; Part B stays in backlog.
+
+**#ipcqproof — SHIPPED (7b31fb9a, v0.34.46).** Root cause: the `ipc_proof_insufficient` dogfood note appended during interrupted-cycle recovery was bare text closing the exchange tail, so `classify_prompt_bearing_block` (agent-doc-core/diff.rs) tagged it `PromptTarget` → the write path `❯`-normalized it → `prompt_only_exchange_tail` saw a prompt-only tail → forced an extra acknowledgment cycle. That is the exact "IPC proof dogfood log acknowledged" churn on this doc.
+
+Fix (`preflight.rs::format_ipc_dogfood_note`): the note now opens with a `### Re:` heading and folds its body into a fenced block. The first non-blank line matches `is_recovery_artifact_line`, so the whole note is one `RecoveryArtifact` block — `first_unstarted_prompt_bearing_change` skips it, `prompt_prefix_normalization_targets` ignores it (no `❯`), and `prompt_only_exchange_tail` clears on the response heading. A fence-opening line after a blank joins the heading's block, and blank lines inside a fence never split it, so the entire note stays a single recovery-artifact block.
+
+Recovery stays fail-closed on the binary-owned path (`retry_without_disk_write` / `content_ours_snapshot_next_cycle`, never `direct_write_fallback`).
+
+Regression `ipc_dogfood_note_is_recovery_artifact_not_prompt_bearing` pins all four invariants — RecoveryArtifact classification, no `❯` normalization, no prompt-only tail, fail-closed recovery — for both the `live_prompt_drift_after_preflight` and `missing_response_probe` variants. Full suite (5097) + clippy green; `make install-full` done and the supervisor is marked to recycle onto 0.34.46.
+
+Changed paths: `agent-doc-orchestration/src/preflight.rs`, `VERSIONS.md`, `Cargo.toml` + workspace member manifests + `Cargo.lock`, `pyproject.toml`. Next queue head is `#mrhqrestore` (still 🚧 gated) — recycling the supervisor will clear the stale `#rt83/#qflood` pause and let it drain.
+<!-- agent:boundary:301dc813 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 do [#mrhqrestore]
-- do [#ipcqproof]
+- ~~do [#ipcqproof]~~
 - Still getting JB `File Cache Conflict` dialogs.
 - Opencode responses are reverse ordering numeric lists.
 ---
@@ -166,7 +180,6 @@ What are #next-steps to fix bugs?
 - [ ] [#0bmv] #qeditrace=Consolidate queue-edit-during-active-turn race plans (plan-qdurcrash + plan-supervisor-direct-queue-edit-race)
 - [ ] [#actorswitchdefer] Part B: SimWorld proof idle-watch fires restart when deferred + reconcile SPEC.md:141 defer contract. Part A shipped (6c7455a8).
 - [ ] [#mrhqrestore] Improve agent-doc queue recover-lost for git-history-only queue deletions: produce an operator-reviewed restoration patch or explicit non-restorable recommendation for foreign-owned prompts such as the monsterrodholders test-email CSV row.
-- [ ] [#ipcqproof] Fix IPC proof dogfood closeout recovery: add a regression for queue-consume socket_ack_content / live_prompt_drift_after_preflight ACK mismatch, ensure diagnostics do not become unresolved prompt-bearing exchange items, and keep fail-closed recovery on the binary-owned path.
 <!-- /agent:backlog -->
 
 ## Review

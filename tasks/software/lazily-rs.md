@@ -84,7 +84,34 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 **Pushed:** `btakita/briantakita.me` `464ac2a` → `briantakita.me-dev` `8b5354d` → `agent-loop` `68508b770` (all main).
 
 Note: this is a content-local lift, not a theme change — the shared dark `--color-card` in `config/blog_site.ts` is the underlying low-contrast value, but changing it would affect the whole site, so the override is scoped to these diagrams. A site-wide card/fill contrast pass is a separate task if you want it.
-<!-- agent:boundary:c11b9d45 -->
+
+### Re: dark mode in JB plugin + #mpt7 sitewide contrast — glm-5.2
+
+> **Queue prompt:**
+>
+> How can I support dark mode in JB while using the sitewide CSS in briantakita.me?
+
+
+> **Queue prompts:** How can I support dark mode in JB while using the sitewide CSS in briantakita.me? · do [#mpt7]
+
+**JB = JetBrains agent-doc plugin** (confirmed: `tasks/resume.md` "agent-doc JB plugin"). Short answer: the JB plugin is **Swing, not web** — briantakita.me's CSS can't be applied directly, but its **color values** can be bridged via `JBColor`. `PromptPanel.kt:18` already does dark mode the IntelliJ way: `JBColor(Color(245,243,228), Color(50,48,35))` = `(light, dark)` — the second arg auto-applies under a dark LaF (Darcula).
+
+**To reuse the briantakita.me sitewide values** (source of truth = `config/blog_site.ts` `color_scheme_vars`, the same triplets emitted to `:root` + `@media(prefers-color-scheme:dark)`), map each semantic var to a `JBColor` pair:
+
+| web var (light/dark) | JB usage |
+|---|---|
+| `--color-fill` 251,254,251 / 33,39,55 | panel/preview background |
+| `--color-text-base` 40,39,40 / 234,237,243 | label/editor foreground |
+| `--color-card` 230,230,230 / 92,110,158 | secondary surface (cards, prompt bg) |
+| `--color-border` 236,233,233 / 171,75,8 | `JBColor.border()` / dividers |
+| `--color-accent` 0,108,172 / 255,107,1 | focused-border / links / actions |
+
+e.g. `val card = JBColor(Color(230,230,230), Color(92,110,158))` mirrors `--color-card` exactly. **Recommended single-source-of-truth:** extract `color_scheme_vars` to a shared JSON that both the site and the JB plugin read (plugin generates `JBColor`s from it at build time), so they never drift. Replace `PromptPanel.kt`'s hardcoded pairs with the shared values. **Caveat:** this only themes Swing surfaces — any HTML/JCEF preview would inject `site__color_scheme_vars__css_` straight into its `<head>` and follow `prefers-color-scheme` for free.
+
+**#mpt7 DONE** — raised dark `--color-card` `52,63,96` → `92,110,158` in `config/blog_site.ts`. Verified ~3:1 vs bg `33,39,55` (was ~1.3:1) while keeping white-text-on-card ~4.3:1 (the two constraints nearly conflict — can't get 3:1 card-vs-bg AND 4.5:1 text from one value, so I picked the balance + rely on borders for delineation). `bun run build` green. Pushed: `briantakita.me` `46da770` → `briantakita.me-dev` `81807da` → `agent-loop` `b73df3598`.
+
+**Operator follow-up (non-blocking):** eyeball-verify the live site in dark mode (post cards, code blocks, nav) — I can't render-check it. If `92,110,158` reads too light/dark anywhere, tweak in `config/blog_site.ts` dark block. The diagram-scoped override (`#lzdarkchart`, `108,128,180`) stays — it gives the diagrams extra pop and is harmless now that the base is lifted.
+<!-- agent:boundary:8921732a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -93,14 +120,13 @@ Note: this is a content-local lift, not a theme change — the shared dark `--co
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- How can I support dark mode in JB while using the sitewide CSS in briantakita.me?
-- do [#mpt7]
+- ~~How can I support dark mode in JB while using the sitewide CSS in briantakita.me?~~
+- ~~do [#mpt7]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#mpt7] #lzdarktheme [recommended] Site-wide dark-mode --color-card (52,63,96) vs --color-fill bg (33,39,55) is ~1.3:1 — low contrast for filled surfaces (cards, diagram boxes). Raise dark --color-card in src/briantakita.me-dev/app/briantakita.me/config/blog_site.ts to a ~3:1+ value vs bg and eyeball-verify the whole site (post cards, code blocks, nav). Scoped SVG override (#lzdarkchart) is DONE (commit 464ac2a); this is the broader theme fix.
 <!-- /agent:backlog -->
 
 ## Review

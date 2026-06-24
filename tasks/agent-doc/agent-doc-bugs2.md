@@ -81,7 +81,20 @@ Proof:
 - Added stream-write positive/negative regressions and updated the FlowCore token budget, `SPEC.md`, and `VERSIONS.md`.
 - Arbitrary `### Session Summary` rewrites without compact markers still fail closed.
 - `guard_no_stale_snapshot_reset_drift` now treats compact-generated `### Session Summary` exchange replacements with compact archive markers as safe historical exchange reductions, so `finalize --stream` can refresh stale pre-compact snapshot/CRDT sidecars instead of refusing and forcing `agent-doc reset --from-current`.
-<!-- agent:boundary:9982411a -->
+
+### Re: IPC proof issue dogfood log after closeout recovery — gpt-5
+
+The IPC proof diagnostic with `patch_id=69d50165-a7a8-406d-a902-679456301d0a` is acknowledged. It describes the closeout retry after `#docdriftfinalize`: finalize captured the response, queue consumption failed to prove the editor write, and the next preflight recovered by retiring the wedged capture, rebuilding from the visible document, committing `84f40c5dc`, and leaving the queue empty with `queue: stop`.
+
+I added gated follow-up `#ipcproofcloseout` for the residual dogfood shape: the recovery left the proof text attached under the existing `(HEAD)` exchange area rather than opening a clean new response heading. The product fix for the compact-summary stale snapshot refusal is already done in `src/agent-doc` commit `d5ea2949` and root pointer commit `219ea93b6`; `#docdriftfinalize` is archived in `tasks/agent-doc-bugs2.done.md`.
+
+Proof:
+- Changed paths: this session document and its done archive through agent-doc recovery/finalize metadata; prior product code paths are already committed.
+- Commands: `agent-doc session-check`, `agent-doc plan`, `agent-doc read` for exchange/queue/backlog, `rg` for pending-op/finalize guidance, and `ls -l` for the baseline file.
+- Verification: before this closeout, the queue and backlog were empty and `session-check` reported only the open `cycle-1782287296564` waiting for finalize. The new follow-up is gated, so it records the recommendation without creating an active queue head.
+- Confidence: high.
+- Escalation: none.
+<!-- agent:boundary:5b5c7649 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -121,6 +134,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [/] [#ipcproofcloseout] [recommended] Investigate IPC proof closeout drift that appended patch_id=69d50165 as bare fenced text under an existing `(HEAD)` response instead of opening a clean exchange heading after interrupted finalize recovery.
 <!-- /agent:backlog -->
 
 ## Review

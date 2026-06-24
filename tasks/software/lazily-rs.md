@@ -32,6 +32,16 @@ queue: start
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
+- **lazily-rs** — Phase 6 done; core/producer.
+- **lazily-kt** — `gradle test` ✓ (IPC conformance + agent-doc FFI state-projection client; NOT a reactive-core port).
+- **lazily-js** — `npm test` ✓ 27 pass (IPC + koffi FFI consumer).
+- **lazily-zig** — `zig build test` ✓ (full native impl: Cell/Signal/StateMachine/Context + ShmBlobArena).
+- **lazily-py** — `pytest` ✓ 72 pass (full native impl; v0.11.0 publish pending per review #kb9b).
+- **lazily-kt** (queue head): conformance tests only round-trip the fixture `wire` block; the `assertions` metadata (node_count, op_count, is_sequential, blob_*) is never validated generically — fixture drift passes silently. No `gradlew` wrapper (relies on system `gradle` → CI repro gap).
+- **lazily-js**: same conformance-assertions gap; `node_modules/` is committed to the submodule (bloat) — should be gitignored.
+- **lazily-zig**: open TODOs in `context.zig` (rename `.direct`→`.literal` :226/:273, `before_change_subscribers` cell.zig:35, allocator options :617/:621). Two recent memory-safety fixes (UAF `1dd8998`; iteration-during-mutation in `emitChangeUnlocked`) warrant a soak/cyclic test for Slot destroy↔unsubscribe ordering.
+- **lazily-py**: the Signal→Slot `RecursionError` fix (`30907ea`) has no deep/cyclic regression test guarding it.
+- **lazily-rs**: no open bug (done); only rs-adjacent work is the shared protocol.md reconciliation.
 ### Session Summary
 
 ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260624-213908.md`*
@@ -39,7 +49,7 @@ queue: start
 Compacted content:
 ❯ - Archived 3 response topic(s): lazily-rs bug next-steps; lazily-rs bug fixes #e4tf + #xdsx shipped; #hses + #gxzm
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-<!-- agent:boundary:4fab2b9e -->
+<!-- agent:boundary:c848ed66 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,12 +58,31 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 What are #next-steps to fix lazily-kt bugs?
+- What are #next-steps to fix lazily-js bugs?
+- What are #next-steps to fix lazily-zig bugs?
+- What are #next-steps to fix lazily-py bugs?
+- What are #next-steps to fix lazily-rs bugs?
 - 🚧 What are #next-steps to fix lazily bugs?
+- 🚧 What are #next-steps to fix lazily-js bugs?
+- 🚧 What are #next-steps to fix lazily-zig bugs?
+- 🚧 What are #next-steps to fix lazily-py bugs?
+- 🚧 What are #next-steps to fix lazily-rs bugs?
+- do [#lzspecdrift]
+- do [#lzktconf]
+- do [#lzpyregress]
+- do [#lzzigtodos]
+- do [#lzjshygiene]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzspecdrift] [recommended] CROSS-CUTTING (lazily-spec): reconcile src/lazily-spec/protocol.md wire format to the canonical shape actually emitted by lazily-rs src/ipc.rs:323-459 and encoded in every lazily-spec/conformance/*.json fixture — externally-tagged {"Snapshot":{epoch,nodes:[{node,type_tag,state:{Payload:[bytes]|SharedBlob{offset,len,generation,epoch,checksum}|Opaque}}],edges,roots}} and {"Delta":{base_epoch,epoch,ops:[{CellSet|SlotValue|Invalidate|NodeAdd|NodeRemove|EdgeAdd|EdgeRemove}{...}]}} with inline byte arrays. protocol.md is STALE: it documents {type:"snapshot", slot_id, state:"resolved"|"dirty"|"unset", payload:base64, snake_case ops cell_set/slot_value} which NOTHING implements. Any new port authored against protocol.md today is wire-incompatible. Spec-only doc fix; verify lazily-spec mdBook builds. Highest leverage — unblocks/all ports.
+- [ ] [#lzktconf] lazily-kt (queue head): IpcConformanceTest only round-trips the fixture `wire` block; the `assertions` metadata (node_count, edge_count, root_count, op_count, has_all_op_variants, blob_offset/len/epoch, is_sequential) is never validated generically, so fixture drift passes silently. Add a generic assertions validator. Also: no gradlew wrapper checked in (Makefile runs bare `gradle` → CI reproducibility gap); add gradle wrapper. gradle test currently green.
+- [ ] [#lzpyregress] lazily-py: add a deep/cyclic dependency regression test guarding the Signal→Slot RecursionError fix (commit 30907ea — Slot.__call__ no longer touches during computation; reset clears subscribers before notify). Currently 72 tests pass but the recursion path is unguarded against re-introduction. (v0.11.0 publish tracked separately in review #kb9b.)
+- [ ] [#lzzigtodos] lazily-zig: resolve open context.zig TODOs (rename .direct→.literal at context.zig:226 + CannotGetPtrOfDirectMode→LiteralHasNoPtr :273; before_change_subscribers at cell.zig:35; allocator options context.zig:617/621) and add a soak/cyclic test for Slot destroy↔unsubscribeChangeUnlocked ordering after the two recent memory-safety fixes (UAF 1dd8998 capture-ctx-before-destroy; iteration-during-mutation snapshot in emitChangeUnlocked). zig build test currently green.
+- [ ] [#lzjshygiene] lazily-js: gitignore node_modules/ (currently committed to the submodule → repo bloat) and validate conformance fixture `assertions` generically (parity with #lzktconf). npm test currently green (27 pass).
 <!-- /agent:backlog -->
 
 ## Review

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -53,7 +53,7 @@ The highest-leverage cluster is **AsyncContext backend-parity** — it is the ne
 Full list written to `agent:backlog` this cycle. **Top of backlog: `#lzasyncdispose2`** — the in-flight re-run aliasing guard that completes the dispose-correctness story I just started.
 
 Pre-existing `make check` caveat: `benchmark-check` is red (`#lzbenchbudget`, unrelated to this change — budgets not refreshed since the SlotId-cast + eager-Signal landings); `fmt`/`clippy`/`build`/`test`/`test-async`/`test-async-resolve` all pass.
-<!-- agent:boundary:786549d1 -->
+<!-- agent:boundary:bd30fde9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,6 +63,13 @@ Pre-existing `make check` caveat: `benchmark-check` is red (`#lzbenchbudget`, un
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - What are #next-steps to fix lazily bugs?
+- do [#lzasyncdispose2]
+- do [#lzasynceffdup]
+- do [#lzstr0mnetinbox]
+- do [#lzstr0mnetacceptanswer]
+- do [#lzwsunbounded]
+- do [#lzerrfrom]
+- do [#lzsid32]
 <!-- /agent:queue -->
 
 ## Backlog

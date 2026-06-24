@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -83,14 +83,25 @@ No new follow-up backlog item is needed from this IPC telemetry note. `#advance-
 ```text
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=9d04336f-6af2-4a7e-89d6-62d63a895517 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=20046 candidate_hash=0814c3876aeabcad6d7be9f17261101e985e2edd144c8f0fc26b4d025e580df4 content_ours_len=50021 content_ours_hash=44851fb2ef72b930cbaa8e613adb11d3e9f642bfb568fa0cc598b477fc7d09ac doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782263068189
 ```
-<!-- agent:boundary:b96f51a8 -->
+Completed the agent-doc cycle.
+
+> **Queue prompt:**
+>
+> #advance-review
+
+
+`#t0d0` is closed as an audit: current `src/agent-doc` already separates pane-input acceptance from dispatch/start proof, logs `accepted_without_dispatch_start_proof`, and fails closed for tracked unproven dispatches. No source patch was needed.
+
+Verification passed:
+`route_submit_observation`, `dispatch_only_tracked_timeout_fails_closed_even_when_accepted_only_is_allowed`, and `codex_dispatch_start_tracking_enabled`. Latest `src/agent-doc` CI was green: `28066398449`.
+
+Session document closeout is committed as `3f6d5c32a`, and `agent-doc session-check` is OK. `#advance-review` remains queued, but there is no drainable continuation right now. Note: `tasks/agent-doc-bugs2.done.md` remains locally modified; it was already dirty in the worktree and I did not commit it.
+<!-- agent:boundary:d38e5ae4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~[#t0d0]~~
-- #advance-review
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

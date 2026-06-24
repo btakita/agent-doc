@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
-agent: codex
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -89,153 +89,11 @@ queue: stop
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260609-163159.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260624-205718.md`*
 
 Compacted content:
-- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-
-### Re: GPU-required local corky builds — gpt-5
-
-> **Queue prompt:**
->
-> Require all local corky builds + installs to have gpu support. Add local build instructions to the agent harness files.
-
-
-Completed.
-
-Changed paths:
-- `src/corky/Makefile` now requires `CORKY_LOCAL_GPU_FEATURE` for local build, check, release, install, and wheel targets; on this Linux workstation it resolves to `transcribe-cuda`, and the targets fail closed if no GPU feature is selected.
-- `src/corky/install.sh` now requires the CUDA/Metal release artifact when the local platform selects one instead of falling back to CPU.
-- `src/corky/AGENTS.md`, `src/corky/DEV.md`, `src/corky/README.md`, `src/corky/SPEC.md`, and the build/install docs now point local agents at GPU-required build/install commands and document the no-CPU-fallback rule.
-- Updated the gitignored local harness override `src/corky/CLAUDE.local.md` so this CUDA workstation also tells agents to use `make check`, `make release`, and `make install` with GPU support.
-
-Commands and verification:
-- `CORKY_LOCAL_GPU_FEATURE= make build` fails closed with the new GPU-required error.
-- `make precommit` passed with `--features transcribe-cuda` for clippy, tests, and `audit-docs`.
-- `make release` passed with `cargo build --release --features transcribe-cuda` and refreshed `.bin/corky`.
-- `make install` passed with `cargo install --path . --features transcribe-cuda` and replaced `~/.cargo/bin/corky`.
-- `./.bin/corky --version` and `~/.cargo/bin/corky --version` both report `corky 0.29.0`.
-- Latest GitHub Actions `CI` run on `main` was `completed success`.
-
-Commits and push:
-- Pushed corky submodule commit `244f664` (`Require GPU for local builds`) to `btakita/corky main`.
-- Pushed owner repo commit `f3abae72d` (`Update corky submodule for GPU builds`) to `btakita/agent-loop main`.
-
-Escalation: none.
-Confidence: high.
-❯ - Pushed owner repo commit `f3abae72d` (`Update corky submodule for GPU builds`) to `btakita/agent-loop main`.
-❯ - Pushed corky submodule commit `244f664` (`Require GPU for local builds`) to `btakita/corky main`.
-❯ - Latest GitHub Actions `CI` run on `main` was `completed success`.
-❯ - `./.bin/corky --version` and `~/.cargo/bin/corky --version` both report `corky 0.29.0`.
-❯ - `make install` passed with `cargo install --path . --features transcribe-cuda` and replaced `~/.cargo/bin/corky`.
-❯ - `make release` passed with `cargo build --release --features transcribe-cuda` and refreshed `.bin/corky`.
-❯ - `make precommit` passed with `--features transcribe-cuda` for clippy, tests, and `audit-docs`.
-❯ - `CORKY_LOCAL_GPU_FEATURE= make build` fails closed with the new GPU-required error.
-❯ - Updated the gitignored local harness override `src/corky/CLAUDE.local.md` so this CUDA workstation also tells agents to use `make check`, `make release`, and `make install` with GPU support.
-❯ - `src/corky/AGENTS.md`, `src/corky/DEV.md`, `src/corky/README.md`, `src/corky/SPEC.md`, and the build/install docs now point local agents at GPU-required build/install commands and document the no-CPU-fallback rule.
-❯ - `src/corky/install.sh` now requires the CUDA/Metal release artifact when the local platform selects one instead of falling back to CPU.
-❯ - `src/corky/Makefile` now requires `CORKY_LOCAL_GPU_FEATURE` for local build, check, release, install, and wheel targets; on this Linux workstation it resolves to `transcribe-cuda`, and the targets fail closed if no GPU feature is selected.
-
-### Re: Closeout repair — gpt-5
-
-The GPU-build response above is the authoritative closeout for this queue item. The prompt-prefixed duplicate lines immediately above were a terminal echo artifact from the failed finalize attempt; no additional repo work was performed in this repair step.
-
-### Re: Sheets create/share — gpt-5
-
-> **Queue prompt:**
->
-> [#sheets-create-share]
-
-
-Completed `#sheets-create-share`.
-
-Changed paths:
-- `src/corky/src/cli.rs` and `src/corky/src/main.rs` add and dispatch `corky sheets create <TITLE>` and `corky sheets share <SHEET> <EMAIL> [--role reader|writer|commenter] [--notify]`.
-- `src/corky/crates/corky-google/src/doc/sheets.rs` implements Sheets `spreadsheets.create` and Drive `permissions.create`, including role validation, no-notify default, ID/URL output, and request/URL unit coverage.
-- `src/corky/tests/test_cli.rs` adds CLI registration tests for both new commands.
-- `src/corky/AGENTS.md`, `SKILL.md`, `.claude/skills/corky/SKILL.md`, bundled skill assets, README, SPEC, command guide, and VERSIONS now document the create/share workflow and OAuth scopes.
-
-Commands and verification:
-- `cargo test --workspace --features transcribe-cuda sheets` passed.
-- `make precommit` passed with CUDA-feature clippy, tests, and `audit-docs`.
-- `make release` passed with `cargo build --release --features transcribe-cuda`.
-- `make install` passed with `cargo install --path . --features transcribe-cuda` and replaced `~/.cargo/bin/corky`.
-- `./.bin/corky --version` and `~/.cargo/bin/corky --version` both report `corky 0.29.0`.
-- Installed `corky sheets create --help` and `corky sheets share --help` show the new command surfaces.
-- Did not run live Google create/share mutations; coverage is local unit/CLI/request construction plus build/install.
-- Latest GitHub Actions `CI` run for `Add Sheets create and share commands` was still `in_progress` when checked after push, so closeout uses the passing local suite per queue rules.
-
-Commits and push:
-- Pushed corky submodule commit `6e23893` (`Add Sheets create and share commands`) to `btakita/corky main`.
-- Pushed owner repo commit `8233008cc` (`Update corky submodule for Sheets create share`) to `btakita/agent-loop main`.
-
-Escalation: none.
-Confidence: high.
-
-### Re: LinkedIn slot-cell-signal draft formatting — opus-4-8
-
-> **Queue prompt:**
->
-> Please review /home/brian/work/btakita/agent-loop/mail/drafts/linkedin/2026-06-15-slot-cell-signal.md. Is it correctly formatted for the post and the first comment?
-
-
-Yes — `mail/drafts/linkedin/2026-06-15-slot-cell-signal.md` is correctly formatted for both the post and the first comment. It matches the `linkedin` skill conventions (`runbooks/linkedin-post.md`) and the house style of your other lazily drafts.
-
-**Post body (lines 1–19) ✓**
-- Plain text, no markdown bold — nothing renders as literal asterisks.
-- No external links in the body — the only URL is isolated to the first comment, so LinkedIn won't suppress reach.
-- Strong standalone hook line ("Most reactive libraries make you pick a side: lazy or eager.") and a closing engagement question ("What's your reactive default — lazy or eager?").
-- Line breaks separate each primitive into a scannable beat (Slot / Cell / Signal).
-
-**First comment (lines 22–26) ✓**
-- Split with the standard `---` + `FIRST COMMENT (post immediately after):` marker, same as your other drafts — `corky linkedin post` will pick up the body/comment boundary.
-- Holds the repo link (`github.com/btakita/lazily-rs`) plus the benchmark stat — links live here, not in the body.
-
-**Two optional notes (not blockers):**
-- Spaced em dashes appear on lines 3, 7, 11, 19. Your writing-voice preference is `...` over ` — `, but every lazily draft so far uses em dashes, so this is consistent house style — leaving it as-is is fine; only worth a pass if you want to align all the drafts at once.
-- The first comment claims "~8ns single-threaded on the v0.11.0 Criterion benchmarks" — consistent with your 2026-06-16 draft, so no conflict.
-
-Ready to post as-is. When you're set, `corky linkedin post mail/drafts/linkedin/2026-06-15-slot-cell-signal.md` publishes the body and adds the first comment.
-
-### Re: LinkedIn publish truncation — gpt-5
-
-Fixed.
-
-What went wrong:
-- The local Corky social files for the Lazily posts retained the full bodies, so the truncation was not caused by markdown storage.
-- The Lazily session already showed that `corky linkedin edit` repaired a truncated published post with the same full body. That isolates the risky boundary to LinkedIn create-time publishing: `POST /rest/posts` accepted the request and returned success, but the live post could still appear truncated.
-- The installed LinkedIn skill also advertised `corky linkedin post`, while the CLI only exposed `corky linkedin publish`, which made the documented posting path stale.
-
-Changed paths:
-- `src/corky/crates/corky-social/src/social/publish.rs` now marks the created draft published first, then immediately re-applies the full body via LinkedIn `PARTIAL_UPDATE`. If reconciliation fails, the draft stays published with the post id so a retry does not create a duplicate; the error tells the operator to run `corky linkedin edit`.
-- `src/corky/src/cli.rs` adds `corky linkedin post` as an alias for `publish`.
-- `src/corky/tests/test_linkedin_api.rs` asserts the create payload carries full commentary and the update endpoint sends the full commentary patch.
-- `src/corky/tests/test_cli.rs` covers the `linkedin post` alias.
-- Updated `README.md`, `SPEC.md`, `VERSIONS.md`, and LinkedIn skill/runbook copies to document the reconciliation behavior and current managed-draft posting path.
-
-Commands and verification:
-- `cargo fmt --check` passed.
-- `cargo test --workspace --features transcribe-cuda update_post_sends_full_commentary_patch` passed.
-- `cargo test --workspace --features transcribe-cuda create_post_text_only` passed.
-- `cargo test --workspace --features transcribe-cuda test_cli_linkedin_post_alias` passed.
-- `make precommit` passed: CUDA-feature clippy, full workspace tests, and `audit-docs`.
-- `make release` passed and refreshed `.bin/corky`.
-- `make install` passed and installed `~/.cargo/bin/corky`.
-- `./.bin/corky --version` and `corky --version` both report `corky 0.29.0`.
-- `corky linkedin post --help` resolves to the publish command.
-- Corky GitHub Actions `CI` for `d35d9c0` was `in_progress` when checked; owner repo has no workflow named `CI` (`gh workflow list` only shows `Agent Doc`).
-
-Commits and push:
-- Pushed Corky submodule commit `d35d9c0` (`Fix LinkedIn publish body reconciliation`) to `btakita/corky main`.
-- Pushed owner repo commit `46e802e6a` (`Update corky submodule for LinkedIn publish fix`) to `btakita/agent-loop main`.
-
-Notes:
-- I left the pre-existing unstaged `src/corky/AGENTS.md` tsift marker change untouched.
-- I did not perform another live LinkedIn post mutation; verification is local API contract coverage plus build/install.
-
-Escalation: none.
-Confidence: high.
-<!-- agent:boundary:d1ee3de8 -->
+- Archived 5 response topic(s): GPU-required local corky builds; Closeout repair; Sheets create/share; 2 more
+<!-- agent:boundary:7c149ae5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -246,7 +104,7 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-I make a couple of linkedin posts via lazily-rs.md. Both posts were deployed truncated. Please evaluate what went wrong and fix.
+- Waht are #next-steps to fix corky bugs?
 <!-- /agent:queue -->
 
 ## Backlog

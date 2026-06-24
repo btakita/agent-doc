@@ -383,7 +383,39 @@ Verification:
 No source changes or new repo commits were needed.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:8fce0bb5 -->
+
+### Re: #advr10 — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#advr10]
+
+
+Implemented `#editorbufwin` P2 for replay-neutralized queue additions.
+
+What changed:
+- Added a guarded commit-seam recovery in `agent-doc-orchestration/src/git.rs`: when `snapshot == HEAD` but the visible document differs only by safe `agent:queue` additions neutralized by replay normalization, commit now persists the visible queue addition into the snapshot/HEAD instead of closing as already-current.
+- The recovery is deliberately narrow: it requires closeout/recovery evidence (`ipc_snapshot_adoption_blocked`, dropped-queue proof, or stale-exchange-collapse cleanup), requires all HEAD queue entries to still be present, and accepts only extra active prompt entries. Ordinary independent queue edits still remain independent and do not become owner-pane self-invocation work.
+- Updated the stale exchange-collapse regression to prove the preserved queue follow-up is now committed, and kept the completed-row unstrike / content_ours deletion guards intact.
+- Added a 0.34.44 version note and updated the FlowCore token budget audit for the new `reason=preserved_queue_addition_replay_neutralized` marker.
+
+Commits:
+- `0034c341` in `src/agent-doc`: `fix(commit): persist replay-neutralized queue additions`.
+- `3555d1e36` in the parent repo: `chore: advance agent-doc submodule`.
+
+Verification:
+- `cargo test -p agent-doc-orchestration commit_already_current_commits_preserved_queue_additions_neutralized_by_replay`: passed.
+- `cargo test -p agent-doc-orchestration commit_already_current_repairs_stale_agent_response_collapse_and_commits_queue_follow_up`: passed.
+- `cargo test -p agent-doc --test run_integration preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit`: passed.
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted`: passed.
+- Additional focused guards passed: `qpcwcmerge`, `postcommit_queue_reconcile`, `postcommit_worktree_preserves_when_content_lost_but_queue_work_added`, and `ipc_live_prompt_drift_content_ours_ignores_unproven_live_queue_deletions`.
+- `make check`: passed, including 5057 nextest tests and the medium deterministic sim budget gate.
+- `git -C src/agent-doc diff --check`: clean.
+- Latest GitHub Actions CI observed: `28074608395`, completed successfully on 2026-06-24.
+- `make install`: completed; installed the fresh `agent-doc` binary/cdylib and marked controllers for auto-recycle at the next idle boundary.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:be60d294 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -393,7 +425,7 @@ Escalation: none. Confidence: high.
 - ~~:pushpin: do [#advr07]~~
 - ~~:pushpin: do [#advr08]~~
 - ~~:pushpin: do [#advr09]~~
-- :pushpin: do [#advr10]
+- ~~:pushpin: do [#advr10]~~
 - :pushpin: do [#advr11]
 - :pushpin: do [#advr12]
 - :pushpin: do [#advr13]
@@ -432,7 +464,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr10] Advance original #editorbufwin: finish editor-buffer-wins P2 by auto-recovering and committing preserved queue additions when replay normalization neutralizes the queue component. Plan: tasks/agent-doc/plan-editor-buffer-wins-queue-merge.md.
 - [ ] [#advr11] Advance original #docdriftgrace: implement component-scoped graceful drift resolution that auto-rebases unrelated changes and surfaces only structural conflicts on in-flight prompt/response. Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md.
 - [ ] [#advr12] Advance original #ftqpartialdup: confirm whether #hap7/#gf5n fixes same-node partial free-text queue duplication; if not, add same-node/free-text conflict guard and regression for truncated duplicate queue prompts.
 - [ ] [#advr13] Advance original #8bfz: implement single live JB plugin consumer per document using a per-doc owner lease; non-owner windows defer patch apply + saveDocument, with plugin PatchWatcher + binary lease primitive and multi-window proof.

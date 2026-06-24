@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': ''
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 # agent-loop operations
@@ -98,7 +98,21 @@ Session note: the exchange is at warn-level accretion, but the queue is active, 
 Agent-doc cycle completed and committed for [agent-loop.md](/home/brian/work/btakita/agent-loop/tasks/software/agent-loop.md).
 
 I treated the JetBrains `Run Agent Doc` restart delay as a bug report, added a concrete backlog item for investigating pane-input acceptance vs dispatch/start proof, and verified closeout with `agent-doc session-check`. The queue now reports no remaining continuation prompt.
-<!-- agent:boundary:5153173d -->
+
+### Re: #advance-review — gpt-5
+
+> **Queue prompt:**
+>
+> #advance-review
+
+I checked this session document for review work to advance. `tasks/software/agent-loop.md` has no `agent:review` component, and its frontmatter does not define a local `#advance-review` prompt preset. That makes the queue head inert in this document rather than an actionable review sweep.
+
+I added one backlog item to normalize this: define the `#advance-review` preset/review section for this document, or remove the token from the queue pattern so it cannot wedge the stop hook again.
+
+Changed paths: session document only. Commands: agent-doc preflight/plan/read/finalize plus `rg` checks for `#advance-review` and `agent:review`. Verification: confirmed there is no review component or local preset in this document before committing the closeout. Confidence: high for the document state; medium for the stop-hook behavior because the hook still reported the inert token after session-check said no continuation. Escalation: none.
+
+Session note: exchange accretion is still warn-level, but the active queue closeout takes priority over compaction.
+<!-- agent:boundary:b010cb2b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -107,13 +121,12 @@ I treated the JetBrains `Run Agent Doc` restart delay as a bug report, added a c
 ## Queue
 
 <!-- agent:queue go -->
-- ~~JB `Run Agent Doc` while codex session was restarting had a long delay to add the prompt and did not submit.~~
-- #advance-review
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#2f3v] Define or remove the unregistered `#advance-review` queue token in `tasks/software/agent-loop.md`; this document has no `agent:review` component and no local preset for that token.
 - [ ] [#t0d0] Investigate JetBrains `Run Agent Doc` delay/submission miss while a Codex session is restarting; require diagnostics that separate pane-input acceptance from dispatch/start proof.
 - [ ] [#bx57] Disable unused MCP servers — currently managed via Claude Code UI, not settings.json
 - [ ] [#wr52] Run litellm proxy pointing at vllm

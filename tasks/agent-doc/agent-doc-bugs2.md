@@ -39,6 +39,18 @@ done
 Relevant preserved context:
 - The prior compact archived 19 response topics, including `#ipcproofcloseout`, `#crdtreset1`, `#routeblockux1`, stalled Run Agent Doc recovery, dropped recovery evidence prompts, and related debugging context.
 - The active queue/backlog, not old exchange prose, is the source of truth for remaining work.
+❯ - `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; the active workflow is `Agent Doc`. Latest `Agent Doc` run `28129203412` was already failed on an earlier push, with empty-step `check` and `tmux-ci` jobs, so this records as an external CI-start/workflow failure rather than a local regression signal.
+❯ - Root `make check` through `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`: passed.
+❯ - `./gradlew test` in `src/agent-doc/editors/jetbrains`: passed.
+❯ - `npm test` in `src/agent-doc/editors/vscode`: passed.
+❯ - `gradle test` in `src/lazily-kt`: passed.
+❯ - `npm test` and `npm run build` in `src/lazily-js`: passed.
+❯ - `src/agent-doc` `5c0e719b` `test: pin editor state bridge parity`
+❯ - `src/lazily-kt` `213c691` `feat: add state projection bridge support`
+❯ - `src/lazily-js` `f3c926a` `feat: add state projection parity helpers`
+❯ - `src/agent-doc`: documented that VS Code and JetBrains plugin-local bridges are canonical for their editor runtimes, added comments at both plugin bridges, and added VS Code parity tests against `@lazily/js` pure helpers.
+❯ - `src/lazily-kt`: added `StateProjectionBridgeSupport` for document hashing, canonical event JSON, and projection summaries; added Kotlin tests for those contracts.
+❯ - `src/lazily-js`: added reusable state-projection helper APIs for document hashing, event JSON construction, projection summaries, compact summaries, pointer decoding/freeing, and FFI wrapper construction; added TypeScript declarations and parity/lifecycle tests.
 
 ### Re: IPC integration and monsterrodholders queue audit — gpt-5
 
@@ -86,17 +98,22 @@ Actionable follow-up stays in the queue/backlog: `#ipcqproof` covers the ACK dri
 
 ### Re: exchange artifact normalization — gpt-5
 
+> **Queue prompt:**
+>
+> do [#lzpkgwire]
+
+
 Normalized the exchange component to remove stale prompt-prefix artifacts that were already answered but were still being classified as unresolved prompt-bearing user changes. This did not change the queue or backlog source of truth.
 
 Verification: `agent-doc patch` was used for the exchange component only; queue remains active with `#lzpkgwire` as the next head.
-<!-- agent:boundary:c44e873f -->
+<!-- agent:boundary:8ffa0118 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#71wr]~~
-- 🚧 do [#lzpkgwire]
+- ~~🚧 do [#lzpkgwire]~~
 - do [#lzliveproof]
 - do [#mrhqrestore]
 - do [#ipcqproof]
@@ -144,7 +161,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzpkgwire] Consolidate package-level lazily state-projection bridge: make JetBrains consume lazily-kt and VS Code consume lazily-js (or formally mark plugin-local copies as canonical), then add parity tests for document hashing, event JSON, pointer/free lifecycle, and projection summaries.
 - [ ] [#lzliveproof] Add cross-editor live/state-projection proof for agent-doc IPC: drive JB socket/file IPC and VS Code file IPC through queued/ack/retry plus route started/proven/blocked events, then assert the Rust DocumentStateProjection and compact summaries match.
 - [ ] [#mrhqrestore] Improve agent-doc queue recover-lost for git-history-only queue deletions: produce an operator-reviewed restoration patch or explicit non-restorable recommendation for foreign-owned prompts such as the monsterrodholders test-email CSV row.
 - [ ] [#ipcqproof] Fix IPC proof dogfood closeout recovery: add a regression for queue-consume socket_ack_content / live_prompt_drift_after_preflight ACK mismatch, ensure diagnostics do not become unresolved prompt-bearing exchange items, and keep fail-closed recovery on the binary-owned path.

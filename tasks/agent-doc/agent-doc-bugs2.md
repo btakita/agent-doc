@@ -94,17 +94,24 @@ Implemented and verified. JetBrains bold/italic visual tokens now inherit the ed
 Verification passed with `cargo test -p agent-doc-core syntax::tests::underscore_emphasis_does_not_match_inside_identifiers`, `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`, `make check`, `make bump-plugin`, `make install`, and `make precommit`. The signed `0.2.184` JetBrains plugin was installed into both active `IntelliJIdea2026.1` profile locations, and `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` marked the stale controller to recycle at the next idle boundary.
 
 Commit status: `src/agent-doc` commit `dcc190ed` was pushed to `btakita/agent-doc main`. Superproject commit `1759b6634` remains local because root `main` is 95 commits ahead and 7 behind `origin/main` with unrelated dirty task/submodule edits; I added `#rootpushdiv` to track that separate root-branch reconciliation before pushing root commits. The latest `agent-doc` CI run for `dcc190ed` was still in progress when this response was written.
-<!-- agent:boundary:b29673ee -->
+
+### Re: JetBrains cold-open markdown highlighting - gpt-5
+
+> **Queue prompt:** When the JB Plugin loads a document without it being in the buffer, the colors fallback to the theme markdown. Please ensure the JB Plugin styling is applied in this case.
+
+Implemented. `VisualHighlighterManager` now subscribes to `FileEditorManagerListener.FILE_EDITOR_MANAGER` and reschedules visual-token refresh from `fileOpened` and `selectionChanged` via `ApplicationManager.invokeLater`, so markdown opened or selected cold from disk gets agent-doc styling after the editor/document is ready. I added a static JetBrains test and updated the guide/version docs. The JetBrains plugin version is now `0.2.185`.
+
+Verified with the focused Gradle test, `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`, `make bump-plugin`, `make check`, `make precommit`, and pushed submodule CI run `28080189925`, which completed successfully. I installed the rebuilt plugin zip into both `IntelliJIdea2026.1` plugin directories. Submodule commit: `196d1bd6`; root pointer commit: `6a970d863` remains local because the superproject is still ahead/behind `origin/main`.
+<!-- agent:boundary:910c7bef -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~The JB Plugin renders the content of elements as an unpleasant yellow. Please have the JB Plugin use the current theme for regular text (white in my current theme ![img_54.png](img_54.png)). Variable names with multiple `_` are being misinterpreted as em or bold. Can we disable the italics/bold font for variable names...multiple `_` starting internally? So only  `_foo_` would be italic and `__foo__` would be bold per markdown. But `foo_bar_baz` would not make `_bar_` italic and `foo__bar__baz` would not make `__bar__` bold...both those cases should be regular text with the regular text color.~~
-- When the JB Plugin loads a document without it being in the buffer, the colors fallback to the theme markdown. Please ensure the JB Plugin styling is applied in this case.
-- do [#rootpushdiv]
+- ~~When the JB Plugin loads a document without it being in the buffer, the colors fallback to the theme markdown. Please ensure the JB Plugin styling is applied in this case.~~
 ---
-agent-doc monsterrodholders.md using Codex has an error. Can we manage the CLI ordering using our state machines? Is there a way to support recursive calls by dispatching or somehow redirecting the call?
+:round_pushpin: agent-doc monsterrodholders.md using Codex has an error. Can we manage the CLI ordering using our state machines? Is there a way to support recursive calls by dispatching or somehow redirecting the call?
 ```
 • agent-doc tasks/monsterrodholders.md did not start a new cycle because this Codex pane already owns that document.
   agent-doc blocked it as a recursive direct invocation to avoid deadlock.
@@ -118,6 +125,7 @@ agent-doc monsterrodholders.md using Codex has an error. Can we manage the CLI o
   monsterrodholders.md.
 ```
 ---
+- do [#rootpushdiv]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

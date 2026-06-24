@@ -146,7 +146,11 @@ No product task was requested in this follow-up cycle. The preflight target is t
 
 No additional backlog item applies.
 
-<!-- agent:boundary:64c9fce1 -->
+### Re: agent-doc recovery closeout
+
+No remaining queue prompt is active. This cycle only reflected the IPC recovery marker after the previous retained-response repair; the queue is drained and the verification-email work is complete.
+
+<!-- agent:boundary:0be93996 -->
 <!-- /agent:exchange -->
 ###
 <!--

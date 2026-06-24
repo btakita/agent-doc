@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Session History
@@ -147,7 +147,21 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/c
 I ran the required orchestration handoff, but it failed closed because the repaired exchange now contains duplicate task-like lines for `#pypi-trusted-publisher`, so the DAG builder reported `duplicate dag task id #pypi-trusted-publisher`.
 
 Manual closeout for this cycle: no Corky repo files were changed, no new bug backlog items were added, and the current top remaining item is `#pypi-trusted-publisher`. `#fix-social-tests` and `#diarize-span-release` should be treated as completed based on the prior recorded closeout; the stale `Top of backlog: #fix-social-tests` line above is historical drift from the interrupted recovery, not the current queue state.
-<!-- agent:boundary:9dce3b18 -->
+Processed `tasks/software/corky.md`.
+
+> **Queue prompt:**
+>
+> ~~What are #next-steps to fix corky bugs?~~ — auto-struck: answered this cycle (#ftstrike)
+
+
+Session state is now clean:
+- `agent-doc session-check` passes.
+- No queue continuation is required.
+- `#pypi-trusted-publisher` was restored as a gated Review item.
+- `tasks/software/corky.md` is clean in git after commit `40f1fe263`.
+
+No Corky source files were changed, and I did not rerun Corky tests in this recovery cycle.
+<!-- agent:boundary:d2454cd5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -158,7 +172,6 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- 🚧 ~~What are #next-steps to fix corky bugs?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

@@ -12,6 +12,11 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * The plugin only reports observed facts and renders the projection JSON. The
  * durable state machines and stale-generation checks remain in the binary.
+ *
+ * #lzpkgwire: JetBrains keeps this plugin-local bridge canonical for runtime
+ * packaging because the plugin is built with the IntelliJ/Kotlin 1.9/JBR17
+ * toolchain while lazily-kt is a standalone Kotlin 2/JVM21 package. Keep the
+ * pure helper behavior pinned to lazily-kt's StateProjectionBridgeSupport tests.
  */
 object StateProjectionBridge {
     private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(StateProjectionBridge::class.java)

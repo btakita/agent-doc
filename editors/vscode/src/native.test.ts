@@ -4,17 +4,28 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { pathToFileURL } from 'url';
 import {
-    buildStateEvent,
-    compactProjectionSummary,
-    documentHash,
-    libMtimeChanged,
-    projectionSummary,
-    writePidLock,
-    removePidLock,
-    parseReconnectDecision,
-    utf16RangeToUtf8Bytes,
+  buildStateEvent,
+  compactProjectionSummary,
+  documentHash,
+  libMtimeChanged,
+  projectionSummary,
+  writePidLock,
+  removePidLock,
+  parseReconnectDecision,
+  utf16RangeToUtf8Bytes,
 } from './native';
+
+async function importLazilyStateProjection(): Promise<any> {
+  const moduleUrl = pathToFileURL(
+    path.resolve(__dirname, '../../../../lazily-js/src/state-projection.js'),
+  ).href;
+  const dynamicImport = new Function('specifier', 'return import(specifier)') as (
+    specifier: string,
+  ) => Promise<any>;
+  return dynamicImport(moduleUrl);
+}
 
 describe('parseReconnectDecision (#yzer reconnect-reread, VS Code/JB parity)', () => {
     it('parses a reread_disk decision with content', () => {
@@ -111,26 +122,66 @@ describe('state projection bridge (#lzstatewire1)', () => {
         );
     });
 
-    it('projectionSummary renders route transport and proof slices', () => {
-        const summary = projectionSummary({
-            document_hash: 'doc-a',
-            route: { generation: 3, pane_id: '%2', readiness: 'dispatch_proven' },
-            transport: { patches: { 'patch-1': { phase: 'queued' }, 'patch-2': { phase: 'acked' } } },
-            proof: { markers: { dispatch_start: { phase: 'observed', sources: ['route'] } } },
-        });
-
-        assert.deepStrictEqual(summary, {
-            routeReadiness: 'dispatch_proven',
-            routePaneId: '%2',
-            latestTransportPatchId: 'patch-2',
-            latestTransportPhase: 'acked',
-            proofMarkers: 1,
-        });
-        assert.strictEqual(
-            compactProjectionSummary(summary!),
-            'route=dispatch_proven pane=%2 transport=patch-2:acked proof_markers=1',
-        );
+  it('projectionSummary renders route transport and proof slices', () => {
+    const summary = projectionSummary({
+      document_hash: 'doc-a',
+      route: { generation: 3, pane_id: '%2', readiness: 'dispatch_proven' },
+      transport: { patches: { 'patch-1': { phase: 'queued' }, 'patch-2': { phase: 'acked' } } },
+      proof: { markers: { dispatch_start: { phase: 'observed', sources: ['route'] } } },
     });
+
+    assert.deepStrictEqual(summary, {
+      routeReadiness: 'dispatch_proven',
+      routePaneId: '%2',
+      latestTransportPatchId: 'patch-2',
+      latestTransportPhase: 'acked',
+      proofMarkers: 1,
+    });
+    assert.strictEqual(
+      compactProjectionSummary(summary!),
+      'route=dispatch_proven pane=%2 transport=patch-2:acked proof_markers=1',
+    );
+  });
+
+  it('matches @lazily/js pure helper contract (#lzpkgwire)', async () => {
+    const lazily = await importLazilyStateProjection();
+    const tmp = path.join(os.tmpdir(), `agent_doc_state_${Date.now()}_parity.md`);
+    fs.writeFileSync(tmp, 'state');
+    try {
+      assert.strictEqual(documentHash(tmp), lazily.documentHash(tmp));
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+
+    const event = buildStateEvent(
+      'doc-a',
+      'editor_patch_queued',
+      { patch_id: 'patch-1', actor_generation: 7 },
+      'editor-patch-queued-patch-1-7',
+    );
+    assert.deepStrictEqual(
+      event,
+      lazily.buildStateEvent(
+        'doc-a',
+        'editor_patch_queued',
+        { patch_id: 'patch-1', actor_generation: 7 },
+        'editor-patch-queued-patch-1-7',
+      ),
+    );
+
+    const projection = {
+      document_hash: 'doc-a',
+      route: { generation: 3, pane_id: '%2', readiness: 'dispatch_proven' },
+      transport: { patches: { 'patch-1': { phase: 'queued' }, 'patch-2': { phase: 'acked' } } },
+      proof: { markers: { dispatch_start: { phase: 'observed', sources: ['route'] } } },
+    };
+    const summary = projectionSummary(projection)!;
+    assert.deepStrictEqual(summary, lazily.projectionSummary(projection));
+    assert.strictEqual(
+      compactProjectionSummary(summary),
+      lazily.compactProjectionSummary(summary),
+    );
+  });
 });
 
 describe('libMtimeChanged', () => {

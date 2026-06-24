@@ -513,20 +513,24 @@ export function recordEditorOp(
 }
 
 export function documentHash(filePath: string): string {
-    let canonical: string;
-    try {
-        canonical = fs.realpathSync(filePath);
-    } catch {
-        canonical = path.resolve(filePath);
-    }
-    return crypto.createHash('sha256').update(canonical, 'utf-8').digest('hex');
+  let canonical: string;
+  try {
+    canonical = fs.realpathSync(filePath);
+  } catch {
+    canonical = path.resolve(filePath);
+  }
+  return crypto.createHash('sha256').update(canonical, 'utf-8').digest('hex');
 }
 
+// #lzpkgwire: this VS Code extension is compiled as CommonJS, while
+// @lazily/js is an ESM package. The extension keeps this plugin-local bridge as
+// canonical for runtime packaging, and native.test.ts pins these pure helpers
+// against @lazily/js so the duplicate adapter cannot silently drift.
 export function buildStateEvent(
-    documentHashValue: string,
-    type: string,
-    fields: Record<string, unknown>,
-    eventSuffix: string,
+  documentHashValue: string,
+  type: string,
+  fields: Record<string, unknown>,
+  eventSuffix: string,
 ): StateBackboneEvent {
     return {
         event_id: `${documentHashValue}:${eventSuffix}`,

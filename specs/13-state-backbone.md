@@ -107,6 +107,19 @@ it must not implement a second route, IPC, or proof FSM. If an older native
 library lacks the projection ABI, plugins fail open to existing behavior and log
 that projection reporting is unavailable.
 
+Package-level bridge parity is explicit:
+
+- `lazily-kt` and `lazily-js` own reusable state-projection clients and pure
+  helper contracts for canonical document hashing, `StateEvent` JSON,
+  projection summary rendering, and pointer/free lifecycle.
+- JetBrains keeps a plugin-local canonical bridge instead of depending directly
+  on `lazily-kt`, because the plugin build is constrained by the IntelliJ
+  Kotlin/JBR toolchain while `lazily-kt` is a standalone Kotlin/JVM package.
+- VS Code keeps a plugin-local canonical bridge instead of importing
+  `@lazily/js` at runtime, because the extension is CommonJS-packaged while
+  `@lazily/js` is ESM. VS Code tests must compare its pure helpers against the
+  package helpers so this duplicate adapter cannot silently drift.
+
 ## Actor Ownership
 
 Live mutable surfaces have exactly one current owner:

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,246 +33,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-200744.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-210628.md`*
 
 Compacted content:
-❯ - Archived 9 response topic(s): Full Application Property Type Dropdown; Pipeline Edit Field Audit And Deploy; Step 6 Review & Sign Optional And Deploy; 6 more
+❯ - Archived 13 response topic(s): Remove Lead Dialog Open Page And Deploy; Lead Dialog Next Step And Deploy; Deploy Queue Residue Cleanup; 10 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: Remove Lead Dialog Open Page And Deploy — gpt-5
-
-> **Queue prompt:**
-> In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1, remove Open Page button.
->
-> **Queue prompt:**
-> deploy
-
-Implemented, pushed, and deployed.
-
-Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/admin/pipeline.tsx`, `tests/admin-pipeline.test.ts`, and `prds/investor-pipeline-admin.md`. The Deal Pipeline lead dialog no longer renders the header `Open Page` button; the footer `Open Lead` deep-link remains available for admins who need the standalone lead page.
-
-Commits: EFS submodule commit `2e6a267 fix(admin): remove lead dialog open page button` was pushed to `origin/main`. Parent repo gitlink commit `89851f8c2 chore(efs): bump lead dialog submodule` was committed locally only; I did not push parent `main` because it is already ahead and dirty with unrelated work.
-
-Verification: focused `bun test tests/admin-pipeline.test.ts` passed (`64 pass / 0 fail`; it logs the known `d1 down` fixture in the non-fatal outbox test). `git diff --check` passed. Full `make check` passed (`1192 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run in either the EFS submodule or parent repo because neither has a workflow named `CI`.
-
-Deploy: pre-deploy remote D1 migrations reported no pending migrations, D1 info was reachable, and Time Travel bookmark was `0000050b-00000028-00005094-d711a439306e78783077d8c94632d00b`. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `23025fdb-6771-4184-9015-a4425b223197`. Post-deploy checks: remote D1 migrations still reported no migrations to apply; public root returned `200`; the protected admin lead dialog URL returned `303` behind Cloudflare Access.
-
-Suggested commit message:
-
-```txt
-fix(admin): remove lead dialog open page button (#pipeline-leads)
-
-Remove the duplicate header Open Page action from the Deal Pipeline lead dialog while keeping the footer Open Lead deep-link. Updates the pipeline regression test and PRD note, with no schema or endpoint changes.
-```
-
-Escalation: none. Confidence: high.
-
-### Re: Lead Dialog Next Step And Deploy — gpt-5
-
-> **Queue prompt:**
->
-> 🚧 https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1. Remove the Open Lead button.
-
-
-> **Queue prompt:**
-> https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1. Remove the Open Lead button.
->
-> **Queue prompt:**
-> In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1, show an alert with a CTA to advance the lead to the next stage. Does it mean the lead should sign up for an account? I believe btak.dev+borrower3@gmail.com already signed in.
->
-> **Queue prompt:**
-> deploy
-
-Implemented, pushed, and deployed.
-
-Answer: the next stage is not necessarily creating a new account. The admin CTA now sends or resends the borrower invite for the full-application path. If the borrower already has an account, the same invite path lets them sign in and continue rather than creating a second account.
-
-Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/admin/application_lead_detail.tsx`, `lib/ui--browser--efs/portal/admin/pipeline.tsx`, `lib/ui--browser--efs/portal/shared/lead_pipeline_controls.tsx`, `tests/admin-application-lead-detail.test.ts`, `tests/admin-pipeline.test.ts`, and `prds/investor-pipeline-admin.md`. The Deal Pipeline lead dialog no longer shows standalone `Open Page` / `Open Lead` actions. The embedded lead detail now shows a top next-step alert with a `Send borrower invite` / `Resend borrower invite` CTA using the existing invite endpoint.
-
-Commits: EFS submodule commit `8abe2db fix(admin): surface lead invite next step` was pushed to `origin/main`. Parent repo gitlink commit `370807f6d chore(efs): bump lead next step submodule` was committed locally only; I did not push parent `main` because it is already ahead and dirty with unrelated work.
-
-Verification: focused `bun test tests/admin-pipeline.test.ts tests/admin-application-lead-detail.test.ts` passed (`72 pass / 0 fail`; it logs the known `d1 down` fixture in the non-fatal outbox test). `git diff --check` passed. Full `make check` passed (`1192 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run in either the EFS submodule or parent repo because neither has a workflow named `CI`.
-
-Deploy: pre-deploy remote D1 migrations reported no pending migrations, D1 info was reachable, and Time Travel bookmark was `0000050b-00000030-00005094-f2fece13b078fb4ae70ceae427111275`. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `6131143f-9cec-4323-884e-b1a3305404dd`. Post-deploy checks: remote D1 migrations still reported no migrations to apply; public root returned `200`; the protected admin lead dialog URL returned `303` behind Cloudflare Access.
-
-Suggested commit message:
-
-```txt
-fix(admin): surface lead invite next step (#pipeline-leads)
-
-Replace standalone lead-page actions in the Deal Pipeline lead dialog with a top next-step alert that sends or resends the borrower invite for the full-application path. Existing borrower accounts can use the same invite to sign in and continue; no schema or endpoint changes.
-```
-
-Escalation: none. Confidence: high.
-
-### Re: Deploy Queue Residue Cleanup — gpt-5
-
-> **Queue prompt:**
->
-> ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1, show an alert with a CTA to advance the lead to the next stage. Does it mean the lead should sign up for an account? I believe btak.dev+borrower3@gmail.com already signed in.~~ — auto-struck: answered this cycle (#ftstrike)
-
-
-> **Queue prompt:**
-> deploy
-
-Struck the answered deploy queue residue after the deployed lead-dialog response committed. No additional app work remained.
-
-Escalation: none. Confidence: high.
-
-### Re: Queue Residue Cleanup — gpt-5
-
-Cleared the already-struck queue residue after the lead dialog deploy response and deploy cleanup response were committed. No app work remained.
-
-Escalation: none. Confidence: high.
-
-### Re: IPC Dogfood Note — gpt-5
-
-Acknowledged the automated IPC proof dogfood note that was appended during queue cleanup recovery. The lead-dialog work is already implemented, pushed, deployed, and the queue is stopped with no remaining head.
-
-No actionable follow-up items are needed for this note.
-
-Escalation: none. Confidence: high.
-
-### Re: IPC Dogfood Note Closeout — gpt-5
-
-Acknowledged the automated IPC proof dogfood note from queue cleanup. The queue is stopped and there is no remaining lead-dialog or deploy work.
-
-No actionable follow-up items are needed for this note.
-
-Escalation: none. Confidence: high.
-
-### Re: Lead Dialog CTA Focus And Deploy — gpt-5
-
-> **Queue prompt:**
-> https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 should focus on the alert CTA when opened and with the direct url. In this case "Resend borrower invite".
->
-> **Queue prompt:**
-> deploy
-
-Implemented, pushed, and deployed.
-
-Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/admin/application_lead_detail.tsx`, `lib/ui--browser--efs/portal/shared/lead_pipeline_controls.tsx`, `tests/admin-application-lead-detail.test.ts`, and `prds/investor-pipeline-admin.md`. The lead next-step alert CTA is now marked as the top initial dialog action, and embedded `ApplicationLeadDetail` performs a one-time post-load focus pass after the async lead detail fetch. Direct `dialog=lead` URL restores now focus the alert CTA; for the target lead state, that CTA label is `Resend borrower invite`.
-
-Commit: EFS submodule commit `692acf4 fix(admin): focus lead invite CTA` was pushed to `origin/main`. The parent repo `HEAD` already points `src/equityfundingsource-dev` at `692acf4`; I did not push parent `main` because it is ahead/dirty with unrelated work.
-
-Verification: focused `bun test tests/admin-application-lead-detail.test.ts tests/admin-pipeline.test.ts` passed (`73 pass / 0 fail`; it logs the known non-fatal `d1 down` outbox fixture). `git diff --check` passed. Full `make check` passed (`1193 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-
-Deploy: pre-deploy remote D1 migrations reported no pending migrations, D1 info was reachable, and Time Travel bookmark was `0000050c-00000004-00005094-8090079220923e579c4370ba5db5164d`. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `b344beea-543d-43e9-a5ab-e1040222d2bd`. Post-deploy checks: remote D1 migrations still reported no migrations to apply; public root returned `200`; the protected admin lead dialog URL returned `303` behind Cloudflare Access.
-
-Suggested commit message:
-
-```txt
-fix(admin): focus lead invite CTA (#pipeline-leads)
-
-Focus the embedded Deal Pipeline lead next-step invite button after async lead detail load, including direct dialog URL restores. Marks the shared lead alert CTA as the initial dialog action and updates source coverage plus the admin pipeline PRD; no endpoint or schema changes.
-```
-
-Escalation: none. Confidence: high.
-❯ **IPC proof issue dogfood log**
-
-❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
-
-❯ Issue class: `ipc_proof_insufficient`
-❯ Affected component: editor IPC / writeback
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=8b947586-54b3-4eae-903e-6975bee0a257 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782333341357
-```
-
-### Re: Deploy Queue Residue And IPC Dogfood Note — gpt-5
-
-> **Queue prompt:**
-> deploy
-
-The deploy queue residue is already satisfied by the preceding deployed change. No additional app work was needed after Worker version `b344beea-543d-43e9-a5ab-e1040222d2bd` went live and post-deploy checks passed.
-
-Acknowledged the automatic IPC proof dogfood note. It recorded the transient `ipc_proof_insufficient` writeback failure from the first finalize attempt; the recovery path applied and committed the response. I also requested `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` so the stale route-owned supervisor can recycle at the next idle boundary.
-
-Changed paths this cleanup cycle: none in app code. Commands this cleanup cycle: `agent-doc plan`, `agent-doc read --component queue`, and `agent-doc admin recycle ...`. Verification/deploy evidence remains the prior cycle: focused tests, `git diff --check`, full `make check`, pushed EFS commit `692acf4`, and production deploy version `b344beea-543d-43e9-a5ab-e1040222d2bd`.
-
-No actionable follow-up items are needed for the IPC note.
-
-Escalation: none. Confidence: high.
-
-### Re: IPC Dogfood Note Closeout — gpt-5
-
-Acknowledged the second automatic IPC proof dogfood note from cleanup recovery. The deploy queue is drained, the app change remains deployed at Worker version `b344beea-543d-43e9-a5ab-e1040222d2bd`, and there is no remaining EFS app work from this note.
-
-The route-owned supervisor was already marked for recycle at the next idle boundary with `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`. An immediate `agent-doc session restart-supervisor ...` correctly refused because this Codex turn is still the active busy owner; the recycle request is the non-disruptive path.
-
-Changed paths this closeout cycle: none. Commands this closeout cycle: `agent-doc preflight` recovery, `agent-doc session restart-supervisor ...` probe, and `agent-doc read --component queue`.
-
-No actionable follow-up items are needed for this IPC note.
-
-Escalation: none. Confidence: high.
-
-### Re: Deal Pipeline Card Meaning — gpt-5
-
-> **Queue prompt:**
-> In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1, what is the Deal Pipeline card? I don't recognize these steps. They look like a sales pipeline.
-
-You're reading it correctly: that card is the lead workflow/status card, not a separate EFS loan/deal underwriting step. It is titled `Deal Pipeline` because the embedded lead detail component is reused inside the Deal Pipeline dialog and shares the pipeline status controls.
-
-For this lead dialog, the card renders:
-
-- lead status: `New`, `Contacted`, `Converted`, `Archived`
-- staff-email notification state
-- `Send borrower invite` / `Resend borrower invite` CTA
-
-Those stages are sales/CRM-ish because this record is still a prequalification lead before there is a full application or TMO loan. The backend maps open leads (`new` / `contacted`) into the board's `Draft Applications` funnel column; `converted` and `archived` leave the active lead funnel. Once the borrower has a full application, the board uses application states (`draft`, `submitted`, `in_review`, `accepted`), and once there is a TMO loan it uses loan/TMO statuses such as `Available Deals`, `Loan Estimate`, `Intent to Proceed`, and `Processing`.
-
-So the label is misleading in this context. A clearer title would be `Lead Workflow` or `Lead Follow-up`; the current behavior is about advancing a lead toward the borrower full-application path, not managing a lender/investor deal sale.
-
-Changed paths: none.
-Commands: inspected `pipeline.tsx`, `application_lead_detail.tsx`, `lead_pipeline_controls.tsx`, and `repo.ts`; checked the live URL/API, which redirects to admin login or returns `unauthenticated` without an admin session.
-Verification: no tests run because this was an explanation-only cycle.
-Escalation: none. Confidence: high.
-
-### Re: Queue Residue Cleanup — gpt-5
-
-Cleared the answered free-text queue head after the Deal Pipeline card explanation committed. No additional EFS app work was needed.
-
-Changed paths: none in app code.
-Commands: `agent-doc preflight`, `agent-doc session-check`, `agent-doc admin inspect`, and queue component read/cleanup through `agent-doc finalize`.
-Verification: explanation-only cleanup; no tests run.
-Escalation: none. Confidence: high.
-
-### Re: Remove Deal Pipeline Lead Status Dropdown — gpt-5
-
-> **Queue prompt:**
-> Remove "Deal Pipeline" card dropdown. The CRM status can be inferred by the conversation and pipeline status. The conversation is self-evident. Just have the button and a link to open the message conversation.
-
-Implemented and committed.
-
-Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/admin/application_lead_detail.tsx`, `lib/ui--browser--efs/portal/admin/messages.tsx`, `lib/ui--browser--efs/portal/admin/pipeline.tsx`, `lib/ui--browser--efs/portal/shared/lead_pipeline_controls.tsx`, `tests/admin-application-lead-detail.test.ts`, `tests/admin-pipeline.test.ts`, `tests/portal-table-dialog.test.ts`, `prds/equity-funding-source-lending-portal-prd.md`, and `prds/investor-pipeline-admin.md`.
-
-What changed: the reused lead detail no longer renders the separate `Deal Pipeline` card or lead CRM status dropdown. The top lead next-step alert now keeps the send/resend borrower invite button and adds `Open message conversation`, linking to `/admin/messages?role=borrower&q=<lead email>`. The Messages hub now reads `q=` and feeds it into the existing preferred-user flow, so the borrower thread is searched/opened and the reply box is focused.
-
-Commits: EFS submodule commit `7669e49 fix(admin): simplify lead follow-up card`; parent gitlink commit `987c8bd01 chore(efs): bump lead follow-up submodule`. Both are local commits; I did not push or deploy because this queue item did not request deploy.
-
-Verification: focused `bun test tests/admin-application-lead-detail.test.ts tests/admin-pipeline.test.ts tests/portal-table-dialog.test.ts tests/application-leads.test.ts` passed (`93 pass / 0 fail`). `git diff --check` passed. Full `make check` passed (`1193 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-
-Escalation: none. Confidence: high.
-
-### Re: Deploy Lead Follow-up Change — gpt-5
-
-> **Queue prompt:**
-> deploy
-
-Pushed and deployed.
-
-The EFS submodule commit `7669e49 fix(admin): simplify lead follow-up card` is now pushed to `origin/main`. The production Worker deploy completed successfully at `https://equityfundingsource.brian-takita.workers.dev` with Current Version ID `9eff0e78-a089-4554-97b6-fac79f5e784d`.
-
-Deploy evidence: pre-deploy remote D1 migrations reported `No migrations to apply`; D1 info was reachable for DB `280e1539-b940-4c59-8988-fbed63c12ac0`; Time Travel bookmark before deploy was `0000050c-00000020-00005094-f3536d826ff65b1bc511b111f7e755d8`. `make deploy` built the Worker, applied remote migrations (again no pending migrations), uploaded one changed browser asset, and deployed the Worker.
-
-Post-deploy checks: remote D1 migrations still report `No migrations to apply`; public root returned `HTTP 200`; the protected admin pipeline lead-dialog URL returned `HTTP 303` to `/login?role=admin&next=...`, which is expected without an admin session.
-
-Changed paths this deploy cycle: none. The code change was already committed in the prior cycle; this cycle pushed EFS `main` and deployed it. The EFS submodule is clean and matches `origin/main`. The parent repo still has unrelated dirty work plus local agent-doc commits; I did not push parent `main`.
-
-Verification carried forward from the code cycle: focused Bun tests passed (`93 pass / 0 fail`), `git diff --check` passed, and full `make check` passed (`1193 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-
-Escalation: none. Confidence: high.
-<!-- agent:boundary:ef1aaf6d -->
+<!-- agent:boundary:eb2a1426 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -292,6 +58,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- 🚧 https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=lead&dialog_lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 > Open Message Conversation should open the modal...not the page.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

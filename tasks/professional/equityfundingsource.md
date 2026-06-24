@@ -151,7 +151,17 @@ There were no actionable follow-up items to capture.
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:d77570f3 -->
+**IPC proof issue dogfood log**
+
+Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=1cbbeb3d-dc59-47d8-ac7c-4bb516c743d6 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782267881983
+```
+<!-- agent:boundary:71afd827 -->
 <!-- /agent:exchange -->
 ###
 <!--

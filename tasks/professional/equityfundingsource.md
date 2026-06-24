@@ -33,162 +33,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-065804.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-074750.md`*
 
 Compacted content:
-- Archived 2 response topic(s): IPC recovery note; Deactivated lenders deployed
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: Lender pipeline message dialogs — gpt-5
-
-> **Queue prompt:** All lender pipeline dialogs for a lender should contextualize the Message dialog to the lender. Remove and delete any embedded lender message components in the lender pipeline dialogs.
-
-Implemented and committed.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
-- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
-- `src/equityfundingsource-dev/tests/advance-lender-dialog.test.ts`
-- `src/equityfundingsource-dev/tests/borrower-messages.test.ts`
-- `src/equityfundingsource-dev/tests/message-avatar-shortcut.test.ts`
-- `src/equityfundingsource-dev/tests/msg-send-shortcut.test.ts`
-
-What changed:
-- Removed the embedded deal-interest lender message panel from the lender pipeline workflow list.
-- Removed the embedded lender-account message panel from `AdvanceLenderModal` and mounted the lender-scoped `PortalMessages` launcher there instead.
-- Deleted stale embedded lender-message helper/import code from `investor_pipeline.tsx`.
-- Updated source-contract tests so Deal Detail keeps deal-scoped lender threads, while Lender Pipeline uses `admin_lender_messages_context_(card.user_id)` and keeps only borrower workflow messaging inline.
-
-Verification:
-- `bun test tests/advance-lender-dialog.test.ts tests/admin-investor-pipeline.test.ts tests/msg-send-shortcut.test.ts tests/message-avatar-shortcut.test.ts tests/borrower-messages.test.ts` passed: 146 pass, 0 fail.
-- `tsift --envelope digest-runner --kind test --path . --shell-command 'bun run check'` exited 0.
-- `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` exited 0. The digest flagged the expected `d1 down` log emitted by a passing non-fatal outbox test, not a command failure.
-- `gh run list --workflow CI --limit 1` in both the EFS submodule and the superproject returned `could not find any workflows named CI`, so there was no latest CI run to inspect.
-
-Commits:
-- EFS submodule: `77d8376 fix: use lender message launcher in pipeline dialogs`
-- Superproject pointer: `5dfca3df0 chore: advance equityfundingsource submodule`
-
-Confidence: high.
-Escalation: none.
-
-### Re: Deploy — gpt-5
-
-> **Queue prompt:** deploy
-
-Deployed the committed EFS worker build.
-
-Deployment result:
-- Worker: `equityfundingsource`
-- URL: `https://equityfundingsource.brian-takita.workers.dev`
-- Version ID: `3ea3cf58-6487-4b67-9e32-23ae02f8b38e`
-- Remote D1 migrations: no migrations to apply.
-- Assets: uploaded 1 new/modified static asset; 43 already uploaded.
-
-Commands:
-- `bun run deploy:worker`
-- `git status --short` in `src/equityfundingsource-dev` showed no generated file churn after deploy.
-
-Verification:
-- Deploy command exited 0 after build, asset packing, remote D1 migration check, asset upload, and Wrangler deploy.
-- Prior to deploy, `bun run check` and `make check` both exited 0 through tsift digest-runner.
-
-Changed paths: none in this deploy cycle.
-Confidence: high.
-Escalation: none.
-❯ **IPC proof issue dogfood log**
-
-❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
-
-❯ Issue class: `ipc_proof_insufficient`
-❯ Affected component: editor IPC / writeback
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=12469303-d0d3-442b-b90f-d519be7b0718 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782284846675
-```
-
-### Re: IPC proof dogfood note — gpt-5
-
-The IPC proof dogfood note is recorded in the session document. No additional EFS repo work is needed for that note; the lender-pipeline fix and deploy are already committed, deployed, and the queue is drained.
-
-### Re: IPC diagnostic closeout — gpt-5
-
-The remaining exchange drift is the automatically appended IPC diagnostic from writeback recovery. No EFS code or deploy work remains; this response only closes that diagnostic cycle after repeated editor IPC no-ack failures.
-
-
-
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=2c92b633-cc43-4f0d-9bf8-ea88099db908 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782284911349
-```
-
-### Re: IPC diagnostic closeout — gpt-5
-
-The remaining uncommitted exchange drift is the automatically appended IPC diagnostic from the writeback recovery path. No EFS code or deploy work remains; this response only closes that diagnostic cycle.
-### Re: Pipeline dialog keyboard navigation — gpt-5
-
-> In all admin deal pipeline and lender pipeline dialogs, make the top actionable item (button or field) focused. Support the up/down arrow keys to navigate between actionable items. Ensure the focused item is visible within the viewport. We already have an implementation of this in https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c&dialog=lender. Unify the implementation of this logic so all pipeline dialogs use the same logic.
-
-Implemented and pushed.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/ui.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
-- `src/equityfundingsource-dev/prds/investor-pipeline-admin.md`
-- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
-- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
-- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
-- `src/equityfundingsource-dev/tests/message-avatar-shortcut.test.ts`
-- `src/equityfundingsource-dev/tests/document-viewer.test.ts`
-- `src/equityfundingsource-dev/tests/download-security.test.ts`
-- `src/equityfundingsource-dev/tests/advance-lender-documents.test.ts`
-- `src/equityfundingsource-dev/tests/borrower-messages.test.ts`
-- `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts`
-- `src/equityfundingsource-dev` submodule pointer
-
-What changed:
-- Added shared `use_dialog_action_navigation_` in shared UI code with reusable initial-focus, ArrowDown/ArrowUp navigation, disabled/hidden filtering, and `scrollIntoView({ block: 'nearest', inline: 'nearest' })` visibility behavior.
-- Wired all admin Deal Pipeline dialogs and Lender Pipeline dialogs through the shared hook instead of keeping the lender-dialog-only implementation.
-- Marked each dialog's first intended action with `data-dialog-initial-focus="true"` and generic action navigation attributes.
-- Disabled parent-dialog navigation while stacked child dialogs are open where applicable.
-- Updated PRDs and source-contract tests for the shared dialog keyboard behavior and rebased document/message component contracts.
-
-Commits:
-- EFS submodule: `34c3304 fix(admin): share pipeline dialog keyboard nav` pushed to `btakita/equityfundingsource-dev:main`.
-- Superproject: `58fb5b3d1 chore: update equityfundingsource submodule` pushed to `btakita/agent-loop:main`.
-
-Verification:
-- `bun test tests/admin-pipeline.test.ts tests/admin-investor-pipeline.test.ts tests/advance-lender-dialog.test.ts` passed before the rebase.
-- `bun test tests/message-avatar-shortcut.test.ts tests/document-viewer.test.ts tests/download-security.test.ts tests/advance-lender-documents.test.ts tests/admin-investor-pipeline.test.ts tests/borrower-messages.test.ts tests/investor-portal-e2e.test.ts` passed: 196 pass, 0 fail.
-- `make check` in `src/equityfundingsource-dev` exited 0. The digest still surfaced the known non-fatal `error: d1 down` failure-path log.
-- `make check` in the superproject exited 0.
-- `gh run list --workflow CI --limit 1` was checked in both repos; both returned `could not find any workflows named CI`.
-
-Confidence: high. The behavior is centralized in one hook and covered by source-contract tests for both pipeline surfaces.
-
-Escalation: none.
-
-### Re: Deploy — gpt-5
-
-> deploy
-
-Deployed with the documented EFS runbook flow.
-
-Deployment proof:
-- Pre-deploy `bun run --cwd app/equityfundingsource cf:d1:migrations:list:remote`: no migrations to apply.
-- Pre-deploy `bun run cf:d1:info`: remote D1 reachable.
-- Pre-deploy `bun run cf:d1:time-travel:info`: current bookmark `00000502-00000036-00005094-bc36dbfd8e1586a5978bcb35dcef60cf`.
-- `make deploy` succeeded.
-- Worker Version ID: `64829c8a-213a-4f43-9234-321b1f39a46d`.
-- Post-deploy migrations check: no migrations to apply.
-- Public smoke test `https://equityfundingsource.brian-takita.workers.dev/`: `200`.
-- Protected admin lender-pipeline URL: `303`, expected Cloudflare Access redirect without an authenticated browser session.
-
-### Re: Agent-doc closeout metadata — gpt-5
-
-Accepted the post-commit agent-doc heading annotation drift and closed the session document through the finalize path. No additional EFS code, verification, push, or deploy work was performed in this metadata closeout.
-<!-- agent:boundary:ad4fb7a2 -->
+❯ - Archived 8 response topic(s): Lender pipeline message dialogs; Deploy; IPC proof dogfood note; 5 more
+❯ - Prior summary/context: prior compacted content: Archived 2 response topic(s): IPC recovery note; Deactivated lenders deployed
+<!-- agent:boundary:3f59114b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -208,6 +58,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Down arrow is blocked on https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c&dialog=advance-lender > Open TMO LOS. The down arrow should also focus on `<details>` tags in the shared up/down logic. When the `<details>` is opened, the child field is also selectable. When `<details>` is closed, the child field is not selectable.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -68,12 +68,24 @@ Verification passed:
 - `make install-full`
 
 Agent-doc closeout had remained uncommitted because the editor IPC path was blocked by the route-owned supervisor. This headed recovery response preserves the completed implementation evidence and crosses the binary-owned closeout path.
-<!-- agent:boundary:1b6a7906 -->
+
+### Re: stalled Run Agent Doc recovery — gpt-5
+
+> **Queue prompt:** After the auto-recycle, agent-doc turn did not restart. JB `Run Agent Doc` stalled with no feedback. No prompt. Only an auto-prompt + an auto-clear both without a submit.
+
+Recovered the stranded closeout first. The prior `response_captured` cycle is now committed, and the follow-up preflight opened a fresh cycle. During recovery, preflight auto-struck the already-resolved `do [#ipcproofcloseout]`, `do [#crdtreset1]`, and `do [#routeblockux1]` queue prompts from the done state.
+
+I dry-ran the emitted orchestration command. It resolved only the already-recorded verification evidence from the previous response: targeted Rust tests, JetBrains `TerminalUtilTest`, SimWorld protected-prompt coverage, `make check`, and `make install-full`. I did not rerun those as new tasks because they were recovery residue, not a new task list.
+
+Next concrete follow-up is now `#promptprefixorch1`: fix prompt-prefixed recovery/evidence lines being classified as user prompt targets and orchestration work after interrupted closeout recovery. Current actionable backlog still also has `#xgdn` and `#sz4a` for route/dispatch proof failures.
+<!-- agent:boundary:2bf709df -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~After the auto-recycle, agent-doc turn did not restart. JB `Run Agent Doc` stalled with no feedback. No prompt. Only an auto-prompt + an auto-clear both without a submit.~~
+---
 JB `Run Agent Doc` on this document stalled. I recycled + restarted. Now JB `Run Agent Doc` is blocked due to another dispatch.
 ```
 resync: pruned 2 stale session(s)
@@ -82,6 +94,15 @@ Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/
 ```
 ---
 - What are #next-steps to fix agent-doc bugs?
+- ~~do [#ipcproofcloseout]~~
+- ~~do [#crdtreset1]~~
+- ~~do [#routeblockux1]~~
+- [#xgdn]
+- [#sz4a]
+- Ensure the VS Code plugin has parity with the JB plugin.
+- For tasks added from dogfooding issues, please add a configuration to select the agent document to write the backlog items to. The default is the current document. For agent-loop configure the document to this document.
+- Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.
+- do [#promptprefixorch1]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -108,6 +129,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#promptprefixorch1] Fix prompt-prefixed recovery/evidence lines in agent:exchange being classified as user prompt targets and orchestration tasks after interrupted closeout recovery; preserve them as agent evidence or strip prompt markers during recovery.
 - [ ] [#xgdn] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%3 actor_generation=596 editor_attempt_id=1782325712508-18 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_only_dispatch_start_proof content_hash=sha256:3251e072b5c1857ba06e9ba613e1004b5eefef103db7003d7dcf7efe0d698ea8]
 - [ ] [#sz4a] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/professional/equityfundingsource.md stage=dispatch_start_proof pane=%3 actor_generation=596 editor_attempt_id=1782325712508-18 dispatch_proof_state=none elapsed_ms=10109 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782325723814-direct_pane_dispatch_start_unproven-codex-_3-c75435aee855.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_start_proof content_hash=sha256:1ec714087cfb4c5fc783eb9ad2f02a563124b3df04828fbe1140370937f40135]
 <!-- /agent:backlog -->

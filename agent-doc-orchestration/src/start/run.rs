@@ -145,6 +145,38 @@ fn build_harness_launch_spec(
     })
 }
 
+fn configure_managed_capability_proof_for_spec(
+    shared: &Arc<SupervisorShared>,
+    spec: &HarnessLaunchSpec,
+    fm: &frontmatter::Frontmatter,
+    global_config: &config::Config,
+    session_log: &mut Option<std::fs::File>,
+) -> Option<std::thread::JoinHandle<()>> {
+    let proof_epoch = shared.next_capability_proof_epoch();
+    if !spec.capability_proof_required {
+        shared.set_capability_proof_gate(CapabilityProofGate::NotRequired, None);
+        return None;
+    }
+
+    shared.set_capability_proof_gate(CapabilityProofGate::Pending, None);
+    log_event(
+        session_log,
+        &format!("{}_capability_proof status=pending", spec.harness.binary),
+    );
+    Some(spawn_managed_capability_proof_thread(
+        shared.clone(),
+        ManagedCapabilityProofTask {
+            proof_epoch,
+            harness_binary: spec.harness.binary.clone(),
+            args: spec.base_args.clone(),
+            env: spec.resolved_env.clone(),
+            frontmatter: fm.clone(),
+            global_config: global_config.clone(),
+            session_log: session_log.as_ref().and_then(|f| f.try_clone().ok()),
+        },
+    ))
+}
+
 pub fn run_with_reap_policy(
     file: &Path,
     force: bool,
@@ -637,18 +669,17 @@ pub fn run_with_reap_policy(
     // `harness` was already resolved above for the early recursive-guard / shared
     // state; the spec re-resolves it (identical inputs ⇒ identical harness) and
     // also carries `base_args`/`resolved_env`/`capability_proof_required`.
-    let HarnessLaunchSpec {
-        mut harness,
-        mut base_args,
-        mut resolved_env,
-        capability_proof_required,
-    } = build_harness_launch_spec(
+    let initial_launch_spec = build_harness_launch_spec(
         &fm,
         &global_config,
         &canonical,
         &mut session_log,
         route_owned,
     )?;
+    let mut harness = initial_launch_spec.harness.clone();
+    let mut base_args = initial_launch_spec.base_args.clone();
+    let mut resolved_env = initial_launch_spec.resolved_env.clone();
+    let mut capability_proof_frontmatter = fm.clone();
 
     // Query initial terminal size
     let initial_size = {
@@ -696,24 +727,13 @@ pub fn run_with_reap_policy(
         Some(crate::session_actor::ActorState::Starting),
         Some(pane_id.clone()),
     ));
-    let capability_proof_thread = if capability_proof_required {
-        shared.set_capability_proof_gate(CapabilityProofGate::Pending, None);
-        log_event(
-            &mut session_log,
-            &format!("{}_capability_proof status=pending", harness.binary),
-        );
-        Some(spawn_managed_capability_proof_thread(
-            shared.clone(),
-            harness.binary.clone(),
-            base_args.clone(),
-            resolved_env.clone(),
-            fm.clone(),
-            global_config.clone(),
-            session_log.as_ref().and_then(|f| f.try_clone().ok()),
-        ))
-    } else {
-        None
-    };
+    let mut capability_proof_thread = configure_managed_capability_proof_for_spec(
+        &shared,
+        &initial_launch_spec,
+        &capability_proof_frontmatter,
+        &global_config,
+        &mut session_log,
+    );
 
     // Start IPC listener
     let shared_for_ipc = shared.clone();
@@ -878,9 +898,22 @@ pub fn run_with_reap_policy(
                         {
                             let old_harness = harness.binary.clone();
                             let new_harness = restart_spec.harness.binary.clone();
-                            harness = restart_spec.harness;
-                            base_args = restart_spec.base_args;
-                            resolved_env = restart_spec.resolved_env;
+                            harness = restart_spec.harness.clone();
+                            base_args = restart_spec.base_args.clone();
+                            resolved_env = restart_spec.resolved_env.clone();
+                            capability_proof_frontmatter = restart_fm.clone();
+                            // Retire the old harness proof before the restart marker lands in
+                            // the session log, so stale proof events cannot satisfy post-restart
+                            // route checks.
+                            let _ = shared.next_capability_proof_epoch();
+                            shared.set_capability_proof_gate(
+                                if restart_spec.capability_proof_required {
+                                    CapabilityProofGate::Pending
+                                } else {
+                                    CapabilityProofGate::NotRequired
+                                },
+                                None,
+                            );
                             // A harness change must spawn the NEW harness fresh — never
                             // adopt the OLD harness child preserved across a reexec.
                             pending_adopt = None;
@@ -899,6 +932,18 @@ pub fn run_with_reap_policy(
                                     "agent_restart_performed old_harness={} new_harness={} action=spawn_fresh_harness",
                                     old_harness, new_harness
                                 ),
+                            );
+                            if let Some(handle) = capability_proof_thread.take()
+                                && handle.is_finished()
+                            {
+                                let _ = handle.join();
+                            }
+                            capability_proof_thread = configure_managed_capability_proof_for_spec(
+                                &shared,
+                                &restart_spec,
+                                &capability_proof_frontmatter,
+                                &global_config,
+                                &mut session_log,
                             );
                         }
                         // Unchanged harness (the common case) — INERT, no swap.

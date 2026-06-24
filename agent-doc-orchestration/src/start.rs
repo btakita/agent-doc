@@ -115,7 +115,7 @@ use portable_pty::PtySize;
 use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, TryLockError};
 use std::time::{Duration, Instant};
 
@@ -1833,17 +1833,31 @@ fn supervisor_perform_reexec(
     )))
 }
 
-fn spawn_managed_capability_proof_thread(
-    shared: Arc<SupervisorShared>,
+struct ManagedCapabilityProofTask {
+    proof_epoch: u64,
     harness_binary: String,
     args: Vec<String>,
     env: std::collections::HashMap<String, String>,
-    fm: frontmatter::Frontmatter,
+    frontmatter: frontmatter::Frontmatter,
     global_config: config::Config,
-    mut session_log: Option<std::fs::File>,
+    session_log: Option<std::fs::File>,
+}
+
+fn spawn_managed_capability_proof_thread(
+    shared: Arc<SupervisorShared>,
+    task: ManagedCapabilityProofTask,
 ) -> std::thread::JoinHandle<()> {
+    let ManagedCapabilityProofTask {
+        proof_epoch,
+        harness_binary,
+        args,
+        env,
+        frontmatter,
+        global_config,
+        mut session_log,
+    } = task;
     let thread_name = format!("{harness_binary}-capability-proof");
-    let policy = crate::agent::resolve_managed_proof_policy(&fm, &global_config);
+    let policy = crate::agent::resolve_managed_proof_policy(&frontmatter, &global_config);
     std::thread::Builder::new()
         .name(thread_name)
         .spawn(move || {
@@ -1854,24 +1868,45 @@ fn spawn_managed_capability_proof_thread(
             // but recoverable rather than dead.
             let mut attempt: u32 = 0;
             loop {
+                if !shared.capability_proof_epoch_current(proof_epoch) {
+                    return;
+                }
                 attempt += 1;
                 match crate::agent::codex::prove_managed_session_capabilities(
                     &harness_binary,
                     &args,
                     &env,
-                    &fm,
+                    &frontmatter,
                     &global_config,
                     &harness_binary,
                     policy.probe_timeout,
                 ) {
                     Ok(Some(event)) => {
+                        if !shared.set_capability_proof_gate_for_epoch(
+                            proof_epoch,
+                            CapabilityProofGate::Proven,
+                            None,
+                        ) {
+                            return;
+                        }
+                        if !shared.capability_proof_epoch_current(proof_epoch) {
+                            return;
+                        }
                         surface_managed_capability_proof_status(&shared, &harness_binary, &event);
-                        shared.set_capability_proof_gate(CapabilityProofGate::Proven, None);
                         log_event(&mut session_log, &event);
                         return;
                     }
                     Ok(None) => {
-                        shared.set_capability_proof_gate(CapabilityProofGate::NotRequired, None);
+                        if !shared.set_capability_proof_gate_for_epoch(
+                            proof_epoch,
+                            CapabilityProofGate::NotRequired,
+                            None,
+                        ) {
+                            return;
+                        }
+                        if !shared.capability_proof_epoch_current(proof_epoch) {
+                            return;
+                        }
                         log_event(
                             &mut session_log,
                             &format!("{}_capability_proof status=not_required", harness_binary),
@@ -1888,10 +1923,16 @@ fn spawn_managed_capability_proof_thread(
                             crate::agent::ProofRetryDecision::Retry { backoff } => {
                                 // Keep the gate `Pending` (gated but not failed)
                                 // while we back off and re-prove.
-                                shared.set_capability_proof_gate(
+                                if !shared.set_capability_proof_gate_for_epoch(
+                                    proof_epoch,
                                     CapabilityProofGate::Pending,
                                     Some(detail.clone()),
-                                );
+                                ) {
+                                    return;
+                                }
+                                if !shared.capability_proof_epoch_current(proof_epoch) {
+                                    return;
+                                }
                                 let retry_event = format!(
                                     "{}_capability_proof status=retry attempt={attempt}/{} backoff_ms={} error={detail:?}",
                                     harness_binary,
@@ -1912,10 +1953,16 @@ fn spawn_managed_capability_proof_thread(
                                 continue;
                             }
                             crate::agent::ProofRetryDecision::GiveUp => {
-                                shared.set_capability_proof_gate(
+                                if !shared.set_capability_proof_gate_for_epoch(
+                                    proof_epoch,
                                     CapabilityProofGate::Failed,
                                     Some(detail.clone()),
-                                );
+                                ) {
+                                    return;
+                                }
+                                if !shared.capability_proof_epoch_current(proof_epoch) {
+                                    return;
+                                }
                                 shared.transition_actor_state(
                                     crate::session_actor::ActorState::Blocked,
                                     "supervisor",
@@ -2323,6 +2370,7 @@ pub(crate) struct SupervisorShared {
     suppress_stale_ctrl_d_until_prompt: AtomicBool,
     /// Gate for managed Codex launches that require live network/SSH/write-root proof.
     capability_proof_gate: AtomicU8,
+    capability_proof_epoch: AtomicU64,
     capability_proof_error: Mutex<Option<String>>,
 }
 
@@ -2375,6 +2423,7 @@ impl SupervisorShared {
             prompt_visible_once: AtomicBool::new(false),
             suppress_stale_ctrl_d_until_prompt: AtomicBool::new(false),
             capability_proof_gate: AtomicU8::new(CapabilityProofGate::NotRequired as u8),
+            capability_proof_epoch: AtomicU64::new(0),
             capability_proof_error: Mutex::new(None),
         }
     }
@@ -2387,6 +2436,29 @@ impl SupervisorShared {
         *self.capability_proof_error.lock().unwrap() = error;
         self.capability_proof_gate
             .store(gate as u8, Ordering::Relaxed);
+    }
+
+    fn next_capability_proof_epoch(&self) -> u64 {
+        self.capability_proof_epoch
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1)
+    }
+
+    fn capability_proof_epoch_current(&self, epoch: u64) -> bool {
+        self.capability_proof_epoch.load(Ordering::Relaxed) == epoch
+    }
+
+    fn set_capability_proof_gate_for_epoch(
+        &self,
+        epoch: u64,
+        gate: CapabilityProofGate,
+        error: Option<String>,
+    ) -> bool {
+        if !self.capability_proof_epoch_current(epoch) {
+            return false;
+        }
+        self.set_capability_proof_gate(gate, error);
+        true
     }
 
     fn capability_dispatch_blocker(&self) -> Option<String> {
@@ -3941,6 +4013,35 @@ Done.
             blocker.contains("opencode child network probe timed out after 45s"),
             "blocker must carry the proof-failure detail: {blocker}"
         );
+    }
+    #[test]
+    fn capability_proof_epoch_ignores_stale_thread_result() {
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        let stale_epoch = shared.next_capability_proof_epoch();
+        assert!(shared.set_capability_proof_gate_for_epoch(
+            stale_epoch,
+            CapabilityProofGate::Pending,
+            None,
+        ));
+
+        let current_epoch = shared.next_capability_proof_epoch();
+        assert!(shared.set_capability_proof_gate_for_epoch(
+            current_epoch,
+            CapabilityProofGate::Pending,
+            Some("new proof running".to_string()),
+        ));
+        assert!(!shared.set_capability_proof_gate_for_epoch(
+            stale_epoch,
+            CapabilityProofGate::Proven,
+            None,
+        ));
+        assert_eq!(shared.capability_proof_gate(), CapabilityProofGate::Pending);
+        assert!(shared.set_capability_proof_gate_for_epoch(
+            current_epoch,
+            CapabilityProofGate::Proven,
+            None,
+        ));
+        assert_eq!(shared.capability_proof_gate(), CapabilityProofGate::Proven);
     }
     #[test]
     fn auto_trigger_clear_command_bypasses_dispatch_gate_and_submits_enter() {

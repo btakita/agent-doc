@@ -6512,6 +6512,46 @@ mod tests {
         );
     }
     #[test]
+    fn managed_capability_proof_status_requires_post_restart_proof() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let session_id = "route-proof-after-restart";
+        let doc = write_codex_proof_status_fixture(
+            dir.path(),
+            session_id,
+            "codex_capability_proof status=proven network=proven ssh_targets=0 writable_roots=0",
+        );
+        std::fs::write(
+            dir.path()
+                .join(".agent-doc/logs")
+                .join(format!("{session_id}.log")),
+            format!(
+                "[1] session_start file={} pane=%1 session={}\n\
+                 [2] codex_capability_proof status=proven network=proven ssh_targets=0 writable_roots=0\n\
+                 [3] agent_restart_performed old_harness=claude new_harness=codex action=spawn_fresh_harness\n",
+                doc.display(),
+                session_id
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(
+            managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex()).unwrap(),
+            ManagedCapabilityProofStatus::Missing
+        );
+
+        crate::startup_miss::append_session_log_event(
+            &doc,
+            session_id,
+            "codex_capability_proof status=proven network=proven ssh_targets=0 writable_roots=0",
+        )
+        .unwrap();
+        assert_eq!(
+            managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex()).unwrap(),
+            ManagedCapabilityProofStatus::Proven
+        );
+    }
+    #[test]
     fn managed_capability_proof_status_opencode_tracks_pending_and_failed() {
         let dir = tempfile::tempdir().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());

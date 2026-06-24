@@ -438,6 +438,10 @@ fn session_log_has_event_after_latest_start_matching(
             found_after_latest_start = false;
             continue;
         }
+        if event.starts_with("agent_restart_performed ") {
+            found_after_latest_start = false;
+            continue;
+        }
         if event.starts_with(event_prefix) && matches_event(event) {
             found_after_latest_start = true;
         }
@@ -791,6 +795,45 @@ mod tests {
             "[1] session_start file=test.md pane=%41 session=session-123 generation=1\n\
              [2] codex_capability_proof status=proven network=proven ssh_targets=0 writable_roots=1\n\
              [3] session_start file=test.md pane=%42 session=session-123 generation=2\n",
+        )
+        .unwrap();
+
+        assert!(
+            !session_log_has_event_after_latest_start(
+                &doc,
+                "session-123",
+                "codex_capability_proof status=proven"
+            )
+            .unwrap()
+        );
+
+        append_session_log_event(
+            &doc,
+            "session-123",
+            "codex_capability_proof status=proven network=proven ssh_targets=0 writable_roots=1",
+        )
+        .unwrap();
+        assert!(
+            session_log_has_event_after_latest_start(
+                &doc,
+                "session-123",
+                "codex_capability_proof status=proven"
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn session_log_event_after_latest_start_resets_on_agent_restart_performed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let doc = setup_project(tmp.path());
+        let logs_dir = tmp.path().join(".agent-doc/logs");
+        fs::create_dir_all(&logs_dir).unwrap();
+        fs::write(
+            logs_dir.join("session-123.log"),
+            "[1] session_start file=test.md pane=%41 session=session-123 generation=1\n\
+             [2] codex_capability_proof status=proven network=proven ssh_targets=0 writable_roots=1\n\
+             [3] agent_restart_performed old_harness=claude new_harness=codex action=spawn_fresh_harness\n",
         )
         .unwrap();
 

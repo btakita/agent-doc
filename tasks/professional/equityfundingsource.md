@@ -227,7 +227,66 @@ fix(admin): make messages launcher full screen
 
 Render the admin Messages launcher in the shared full-screen PortalModal so Escape and the standard close affordance close it, and size the embedded conversation body with the modal-body scroll contract. Covers the launcher contract with admin pipeline tests and deploys the Worker.
 ```
-<!-- agent:boundary:3f6fd7bd -->
+
+### Re: Message dialog shortcuts and deploy — gpt-5
+
+> **Queue prompt:**
+>
+> Add Ctrl+M/Cmd+M to toggle the message dialog open/close on all portals.
+
+> **Queue prompt:**
+>
+> In the Admin Message dialog, add Alt+B to open Borrowers tab, Alt+L to open Lenders tab, Alt+r to open Brokers tab. Underline the B, L, and r.
+
+> **Queue prompt:**
+>
+> In the Admin Message dialog, when a tab is opened, select the search input so the admin can begin typing in the search term.
+
+> **Queue prompt:**
+>
+> deploy
+
+Implemented, pushed, and deployed.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/ui.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/portal_messages.tsx`
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/messages.tsx`
+- `src/equityfundingsource-dev/tests/msg-send-shortcut.test.ts`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- parent submodule pointer `src/equityfundingsource-dev`
+
+What changed:
+- Added a shared Ctrl/Cmd+M message-dialog shortcut helper.
+- Wired Ctrl/Cmd+M to toggle the borrower, lender, broker, and admin floating message launchers. Inline admin thread cards do not bind the global shortcut.
+- Added Admin Message dialog Alt+B, Alt+L, and Alt+R role-tab shortcuts.
+- Underlined the shortcut letters in Borrowers, Lenders, and Brokers.
+- Focuses and selects the Admin Message dialog search input when the dialog opens, when the Messages tab opens, and when a role tab is selected.
+
+Verification:
+- `bun test tests/msg-send-shortcut.test.ts tests/admin-pipeline.test.ts` — passed, 76 tests.
+- `bun test tests/portal-messages-component.test.ts tests/message-avatar-shortcut.test.ts tests/msg-send-shortcut.test.ts tests/admin-pipeline.test.ts` — passed, 106 tests.
+- `git diff --check` — passed.
+- `make check` — passed after rebasing onto current `origin/main`: 1170 tests plus app build and worker build.
+- `gh run list --workflow CI --limit 1` in both the EFS submodule and parent repo — no workflow named `CI` exists.
+
+Deployment:
+- Pre-deploy D1 migration list showed pending `0104_deal_photos.sql`, `0105_borrower_document_requests.sql`, and `0106_other_documents.sql` from the remote commits rebased under this work.
+- Pre-deploy D1 info and Time Travel info succeeded; bookmark `000004f6-0000003a-00005094-3854784ad3a70f53f7cd3bd60f051cfa` recorded before deploy.
+- `make deploy` — passed; applied migrations `0104` through `0106`, uploaded 2 updated browser assets, and deployed Worker `https://equityfundingsource.brian-takita.workers.dev`.
+- Current Worker version: `6eabdc5f-ad2a-46b2-9113-6219bd06d37c`.
+- Post-deploy migration list — `No migrations to apply!`.
+- Post-deploy smoke tests: `/` returned `200`; `/admin/pipeline` returned expected admin-login redirect `303`.
+
+Commits:
+- EFS submodule: `5b7e58017f2f10f88bbc84a51350de41c3fe2086` (`feat(portal): add message dialog shortcuts`), pushed to `equityfundingsource-dev/main`.
+- Parent repo: `baa17c268c207486decb449f06a2957958913355` (`chore: update equityfundingsource submodule`), pushed to `agent-loop/main`.
+
+Escalation: none.
+Preflight warnings were existing backlog/review cleanup candidates and were left untouched.
+There were no actionable follow-up items to capture.
+Confidence: high.
+<!-- agent:boundary:be53c268 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -247,6 +306,10 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Add Ctrl+M/Cmd+M to toggle the message dialog open/close on all portals.
+- In the Admin Message dialog, add Alt+B to open Borrowers tab, Alt+L to open Lenders tab, Alt+r to open Brokers tab. Underline the B, L, and r.
+- In the Admin Message dialog, when a tab is opened, select the search input so the admin can begin typing in the search term.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

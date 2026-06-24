@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -89,7 +89,32 @@ Verification: focused tests passed (`bun test tests/admin-pipeline.test.ts tests
 CI/workflows: `gh run list --workflow CI --limit 1` found no workflow named `CI` in either the EFS submodule or the parent repo.
 
 Escalation: none. Confidence: high for code, tests, push, D1/deploy, and unauthenticated smoke coverage; final visual verification of the admin-only dialog still requires an authenticated browser session.
-<!-- agent:boundary:845f4059 -->
+❯ **IPC proof issue dogfood log**
+
+❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+❯ Issue class: `ipc_proof_insufficient`
+❯ Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=32e0a4ef-0749-4838-961c-454946a78238 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782324870083
+```
+
+### Re: Deploy Queue Closeout And IPC Proof Note — gpt-5
+
+> **Queue prompt:**
+> deploy
+
+Done. No second deploy was needed: the deploy requested by this queue head was already completed in the preceding implementation cycle through `make deploy`, which rebuilt the Worker, confirmed no pending remote D1 migrations, and activated Worker version `16958120-9119-48d8-8352-7354c99a9358` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+The IPC proof dogfood note was recorded during closeout recovery after the first finalize attempt did not get an editor-write proof. I kept recovery on the agent-doc path; preflight repaired and committed the captured response, and this response closes the remaining `deploy` queue head. There is no EFS backlog item to add from that diagnostic note; it belongs to agent-doc internals and this cycle recovered successfully.
+
+Changed paths: no new EFS code changes for this follow-up; the deployed code remains `src/equityfundingsource-dev` commit `295ca29`, with parent pointer commit `a5bdda62b` already pushed. The only expected new change here is the agent-doc session closeout.
+
+Verification: deploy evidence remains the completed `make deploy`; post-deploy checks reported no pending D1 migrations, public `/` returned `200`, and the admin pipeline deep link returned `303` behind Cloudflare Access. `gh run list --workflow CI --limit 1` found no workflow named `CI` in either the EFS submodule or the parent repo.
+
+Escalation: none. Confidence: high for deploy completion and queue closeout; authenticated visual verification of the admin-only dialog still requires an authenticated browser session.
+<!-- agent:boundary:1180fede -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,8 +134,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, add guidance on what needs to be completed before being able to Accept Application.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

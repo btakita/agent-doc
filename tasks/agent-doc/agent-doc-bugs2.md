@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -54,13 +54,24 @@ A good shape is:
 - Always capture bounded evidence plus a stable fingerprint first; then route the action according to policy.
 
 That separation matters. Telemetry collection should be deterministic and low-surprise for every user, while actions that mutate repos or file external issues should be explicit policy choices. I added a recommended backlog item for this so the config, defaults, dedupe behavior, docs, and tests can be worked as a deliberate feature.
-<!-- agent:boundary:007c63e0 -->
+
+### Re: bug policy config — gpt-5
+
+> **Queue prompt:** [#bugpolicy1]: In agent-loop, set the config to fix.
+
+Set the local agent-loop project config to dogfood/fix mode by adding this top-level key to `.agent-doc/config.toml`:
+
+```toml
+agent_doc_bug_policy = "fix"
+```
+
+Verification: the file now contains the key, and a probe preflight completed without a config parse warning while keeping `#bugpolicy1` as the active queue head for this closeout. Git does not track `.agent-doc/config.toml` in this workspace, so there was no separate config commit to make; the session document closeout records the completed queue item.
+<!-- agent:boundary:9a76926a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- [#bugpolicy1]: In agent-loop, set the config to fix.
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]
@@ -89,7 +100,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#bugpolicy1] [recommended] #agent-doc-feature Specify and implement configurable bug-handling policy for distributed agent-doc installs: separate evidence capture from action routing, support log/issue/fix modes with safe defaults, GH issue dedupe, docs, and tests.
 - [/] [#ipcproofcloseout] [recommended] Investigate IPC proof closeout drift that appended patch_id=69d50165 as bare fenced text under an existing `(HEAD)` response instead of opening a clean exchange heading after interrupted finalize recovery.
 <!-- /agent:backlog -->
 

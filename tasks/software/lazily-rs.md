@@ -147,7 +147,27 @@ Also shipped this drain (prior cycle, IPC-scrambled but committed):
 `lake build` passes (Lean 4.30.0). Imported from `LazilyFormal.lean`.
 
 **Next drain head:** `do [#f71y]` (signal.zig Phase 2 — now unblocked by #9226).
-<!-- agent:boundary:95f9edb7 -->
+
+### Re: #f71y DONE — eager Signal(T) Phase 2 — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#f71y]
+
+**Implemented and committed.** `src/lazily-zig/src/lazily/signal.zig` (submodule `ac8c06f`, gitlink `73e4ea00f`):
+
+- `Signal(T)` with `get()`/`dispose()`/`is_active()` — comptime-generated `on_invalidate`/`recompute` hooks using Phase 1 engine plumbing.
+- `on_invalidate`: pushes slot onto `Context.pending_recompute` + sets `stale`.
+- `recompute`: unsub parents → re-run `valueFn` under `TrackingFrame` (re-establishes edges) → `std.meta.eql` memo guard → swap storage → `emitChange` if changed.
+- **`cell.zig` fix**: `cell()` now always goes through `Cell.init → slotKeyed` so dependency edges are (re-)established on every read. The prior `getSlot()` shortcut bypassed tracking, which broke Signal recompute.
+- 3 tests: eager recompute on dependency change, memo guard suppression, dispose→lazy. **35/35 pass (0.15.2), 39/40 pass (0.16.0, 1 skip).**
+
+Also closing `#hj5x` (Lean SM↔IPC proof, submodule `2506182`, gitlink `0987e59b8`) — committed in prior cycle, IPC-scrambled but landed.
+
+**Drain summary this session:** `#9226` (engine Phase 1) → Zig 0.16 compat → `#nnyn` (StateMachine) → `#hj5x` (Lean proof) → `#f71y` (Signal Phase 2). Five items done across lazily-zig + lazily-spec.
+
+**Next drain head:** `do [#mes4]` (lazily-kt FFI-consumer, [recommended]) or `do [#bcnf]` (lazily-js FFI-consumer, [recommended]).
+<!-- agent:boundary:e367f4c6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -160,7 +180,7 @@ Also shipped this drain (prior cycle, IPC-scrambled but committed):
 - ~~update lazily-zig, add support for 0.16.0~~
 - ~~:pushpin: do [#nnyn]~~
 - ~~:pushpin: do [#hj5x]~~
-- :pushpin: do [#f71y]
+- ~~:pushpin: do [#f71y]~~
 - :pushpin: do [#mes4]
 - :pushpin: do [#bcnf]
 - do [#t0qn]
@@ -176,7 +196,6 @@ Also shipped this drain (prior cycle, IPC-scrambled but committed):
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#f71y] #lzsigzig2=Implement eager Signal in src/lazily-zig/src/lazily/signal.zig (mirrors lazily-rs SignalHandle + lazily-py Signal): memoized backing slot + comptime on_invalidate/recompute puller + std.meta.eql memo guard. get()/dispose()/is_active(). Export from root.zig. Tests: eager recompute, memo-guard suppresses equal cascade, dispose->lazy, signal-on-signal. Blocked on #lzsigzig1. Plan Phase 2.
 - [ ] [#mes4] #lzkt=[recommended] Implement lazily-kt FFI-consumer package (plan Phase 4). Kotlin/Gradle under src/lazily-kt/. Wraps JNA bridge to lazily_ffi_*; StateFlow<DocumentStateProjection> projection holder + recordStateEvent reporter. NOT a reactive-core port. Blocked on #lzffistate1.
 - [ ] [#bcnf] #lzjs=[recommended] Implement lazily-js FFI-consumer package with *.js + *.d.ts (plan Phase 5). Under src/lazily-js/. Wraps VSCode N-API addon; EventEmitter projection holder + event reporter. NOT a reactive-core port. Blocked on #lzffistate1.
 - [ ] [#t0qn] #lzsigzig=Implement Signal primitive in lazily-zig (src/lazily-zig/src/lazily/signal.zig). Zig currently has Slot+Cell but no Signal. Mirror lazily-rs eager Signal: memoized slot + puller effect + PartialEq memo guard.

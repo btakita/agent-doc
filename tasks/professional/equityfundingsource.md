@@ -48,7 +48,62 @@ Affected component: editor IPC / writeback
 ```text
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=ef0011cd-3f18-4924-a230-8f97eecc086f invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782270210105
 ```
-<!-- agent:boundary:58c314bc -->
+
+### Re: Message auto-create + deploy — gpt-5
+
+> **Queue prompt:**
+>
+> There should be no Create Conversation button. Auto-create the conversation if one does not exist. Make sure message textarea is focused when the message dialog is opened from an application dialog.
+
+> **Queue prompt:**
+>
+> deploy
+
+Implemented, committed, pushed, and deployed the admin Messages auto-create behavior.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/messages.tsx`
+- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
+- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
+- `src/equityfundingsource-dev/tests/borrower-messages.test.ts`
+
+What changed:
+- Removed the selected-user Create session button from admin Messages.
+- Selecting a borrower/user without an existing thread now calls the existing admin session-create endpoint automatically.
+- Application-dialog context launches now load or create the borrower thread and focus the reply textarea after the thread is ready.
+- PRD and regression assertions now specify auto-create plus reply-textarea focus instead of button focus.
+
+Verification:
+- `bun test tests/admin-pipeline.test.ts tests/borrower-messages.test.ts tests/portal-messages-component.test.ts tests/messages-unified.test.ts` — passed, 95 tests / 0 failures. The digest flagged `error: d1 down`, but that is the expected non-fatal outbox failure fixture in `admin-pipeline.test.ts`.
+- `git diff --check` — passed.
+- `make check` — passed, 1173 tests / 0 failures plus app and Worker builds.
+- `gh run list --workflow CI --limit 1` in both EFS and parent repos — no workflow named `CI` exists.
+
+Deployment:
+- Pre-deploy remote D1 migration list: `No migrations to apply!`.
+- D1 info was reachable for DB `280e1539-b940-4c59-8988-fbed63c12ac0`.
+- D1 Time Travel bookmark was available: `000004f6-00000092-00005094-83f3684cfe83e7c53369bcc91f258a1b`.
+- `make deploy` passed and activated Worker version `46e00b67-101d-4a7a-b813-f58f8b22b89c` at `https://equityfundingsource.brian-takita.workers.dev`.
+- Post-deploy remote D1 migration list: `No migrations to apply!`.
+- Smoke tests: `/` returned `200`; `/admin/messages` and `/admin/pipeline?status=new&dialog=application` returned expected admin-auth redirects `303`.
+
+Commits:
+- EFS submodule: `4a0294fc6e3d1bbb0071d34d2e7c214d87344ec6` (`fix(admin): auto-create selected message threads`), pushed to `equityfundingsource-dev/main`.
+- Parent submodule pointer: `25e28e9d785c484afb56ae86d57b0a29238ad130` (`chore: update equityfundingsource submodule`), pushed to `agent-loop/main` from a clean temporary `origin/main` worktree so unrelated local parent commits were not published.
+
+I left unrelated dirty parent-worktree files and unrelated local parent commits untouched. The EFS submodule worktree is clean.
+
+Escalation: none.
+Confidence: high.
+
+Suggested commit message:
+
+```txt
+fix(admin): auto-create selected message threads
+
+Remove the manual Create session button in admin Messages, create missing selected-user threads through the existing admin endpoint, and focus the reply textarea after contextual application-dialog launches load or create the borrower conversation. Updates PRD and regression assertions for the new auto-create behavior.
+```
+<!-- agent:boundary:e9e68771 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -68,7 +123,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- There should be no Create Conversation button. Auto-create the conversation if one does not exist. Make sure message textarea is focused when the message dialog is opened from an application dialog.
+- ~~There should be no Create Conversation button. Auto-create the conversation if one does not exist. Make sure message textarea is focused when the message dialog is opened from an application dialog.~~
 - deploy
 <!-- /agent:queue -->
 

@@ -87,7 +87,26 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/l
 **Verification:** `mise exec zig@0.15.2 -- zig build test --summary all` → **28/28 tests pass**. No slots use the hooks yet (purely additive) — existing slot/cell tests exercise the snapshot path and stay green.
 
 **Scope:** Phase 1 only (engine). Phase 2 (`#f71y`) = `signal.zig` implementing `Signal(T)` with comptime-generated `on_invalidate`/`recompute` fns + tests. `#f71y` was blocked on this item — now unblocked.
-<!-- agent:boundary:acfd473a -->
+
+### Re: Zig 0.16 support added to lazily-zig — glm-5.2
+
+> **Queue prompt:**
+>
+> update lazily-zig, add support for 0.16.0
+
+**Implemented and committed.** Submodule `9b492d8`, superproject gitlink `045d90abe`. Installed `zig@0.16.0` via mise and fixed two API breaks:
+
+- **`std.Thread.Mutex` removed in 0.16** → added `GraphMutex` comptime type in `context.zig`: `std.Thread.Mutex` for `< 0.16`, spinlock over `std.atomic.Mutex` for `>= 0.16`.
+- **`std.heap.ThreadSafeAllocator` removed in 0.16** → guarded the thread-safe contention test in `cell.zig` (`SkipZigTest` for `>= 0.16`); `cell_0_16_test.zig` uses `std.testing.allocator` directly.
+- **`ArrayList` init**: comptime `.{} ↔ .empty` (0.16 removed default field values).
+- `.mise.toml`: added `test_0_16` task.
+
+**Verification:** 28/28 pass (0.15.2), 32/33 pass (0.16.0, 1 skip = `ThreadSafeAllocator` test).
+
+Note: `#9226` (Signal engine Phase 1) was committed in the prior cycle (`0c2c81a` / gitlink `e69684c6e`) — the response was scrambled by IPC transit but the work landed. Both commits are on `main`.
+
+**Next drain head:** `do [#nnyn]` (StateMachine in lazily-zig) or `do [#f71y]` (signal.zig Phase 2, now unblocked).
+<!-- agent:boundary:69236c47 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -97,7 +116,7 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/l
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: do [#9226]~~
-- update lazily-zig, add support for 0.16.0
+- ~~update lazily-zig, add support for 0.16.0~~
 - :pushpin: do [#nnyn]
 - :pushpin: do [#hj5x]
 - :pushpin: do [#f71y]

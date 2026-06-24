@@ -59,7 +59,35 @@ Compaction archived 4 topics cleanly. Exchange tail is clear. Sidecar snapshot w
 **Semantic-completion warnings (3):** all false positives, none auto-closed — `#h6qb` is genuinely operator-gated (live two-host/NAT); `#bcnf`/`#mes4` are JS/Kotlin consumer packages, distinct from the Rust FFI exports in `#lzffistate1`.
 
 **Next head:** `do [#9226]` — lazily-zig Signal engine (deferred-recompute queue in `context.zig`, plan `c74e75909`). Flip `queue: go` or `queue: auto` in frontmatter to resume the drain, or point me at a specific item.
-<!-- agent:boundary:92266cd0 -->
+❯ **IPC proof issue dogfood log**
+
+❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+❯ Issue class: `ipc_proof_insufficient`
+❯ Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=socket_ack_content patch_id=2de2f20d-95ca-4e81-9a41-02a297107b33 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=11941 candidate_hash=cfa0bba8393931e6c79be6283ec57c348006791ed303b22f2db57348510bf1f4 content_ours_len=20372 content_ours_hash=62e4dcfd82e39c90e6415373dc870ac8675f098d15aa4114c74f358ce81ebb9c doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782281390181
+```
+
+### Re: #9226 DONE — Signal engine Phase 1 (lazily-zig context.zig) — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#9226]
+
+**Implemented and committed.** `src/lazily-zig/src/lazily/context.zig` + `cell.zig` + `build.zig` (submodule commit `0c2c81a`, superproject gitlink `e69684c6e`):
+
+- **`Slot` fields** (default `null`/`false` — zero impact on existing slots): `on_invalidate: ?*const fn(*Slot) void`, `recompute: ?*const fn(*Slot) void`, `stale: bool`.
+- **`Context` queue**: `pending_recompute: std.ArrayList(*Slot)` + `draining_recompute: bool` re-entrancy guard. `drainPendingRecompute()` pops LIFO, calls `slot.recompute(slot)` **outside the mutex** — user `valueFn` can re-lock per-op without deadlock.
+- **`emitChangeUnlocked` rewritten**: snapshot dependents into allocator slice → **clear map first** → iterate snapshot. Fixes the latent iteration-during-mutation bug (`destroySelf` → `unsubscribeChangeUnlocked` removed entries from the map mid-iteration). For each dependent: if `on_invalidate != null` → call hook (enqueue + mark stale, do NOT destroy); else `destroyUnlocked(true)` as before.
+- **Drain points**: `Slot.emitChange()` (after `unlock`) and `Cell.set()` (after callback loop).
+- **`build.zig`**: `@hasField(std.Build, "args")` guard for Zig 0.17 compat (pre-existing `b.args` API break, not Signal-related).
+
+**Verification:** `mise exec zig@0.15.2 -- zig build test --summary all` → **28/28 tests pass**. No slots use the hooks yet (purely additive) — existing slot/cell tests exercise the snapshot path and stay green.
+
+**Scope:** Phase 1 only (engine). Phase 2 (`#f71y`) = `signal.zig` implementing `Signal(T)` with comptime-generated `on_invalidate`/`recompute` fns + tests. `#f71y` was blocked on this item — now unblocked.
+<!-- agent:boundary:acfd473a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -68,7 +96,8 @@ Compaction archived 4 topics cleanly. Exchange tail is clear. Sidecar snapshot w
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: do [#9226]
+- ~~:pushpin: do [#9226]~~
+- update lazily-zig, add support for 0.16.0
 - :pushpin: do [#nnyn]
 - :pushpin: do [#hj5x]
 - :pushpin: do [#f71y]
@@ -87,7 +116,6 @@ Compaction archived 4 topics cleanly. Exchange tail is clear. Sidecar snapshot w
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#9226] #lzsigzig1=Engine changes in src/lazily-zig/src/lazily/context.zig for eager Signal: add on_invalidate + recompute fn pointers on Slot (default null), snapshot-then-clear emitChangeUnlocked (also fixes latent iteration-mutation bug), Context.pending_recompute queue + drainPendingRecompute() drained outside the mutex, drain points in Slot.emitChange() + Cell.set() after unlock. Regression: existing slot/cell tests stay green. Plan: tasks/software/plan-lazily-zig-signal.md Phase 1.
 - [ ] [#nnyn] #lzsmzig=Implement StateMachine in lazily-zig (plan Phase 3). Add src/lazily-zig/src/lazily/state_machine.zig: StateMachine(S,E) wrapping Cell + *const fn(*const S,E)?S transition pointer (Zig has no closures). Tests for guard rejection + acceptance.
 - [ ] [#hj5x] #lzsmlean2=Add Lean cross-module proof: SM send -> IPC DeltaOp.cellSet (plan Phase 1 TODO). Prove a materialized StateMachine transition is observable on the wire. Link StateMachine.lean with IPC.lean.
 - [ ] [#f71y] #lzsigzig2=Implement eager Signal in src/lazily-zig/src/lazily/signal.zig (mirrors lazily-rs SignalHandle + lazily-py Signal): memoized backing slot + comptime on_invalidate/recompute puller + std.meta.eql memo guard. get()/dispose()/is_active(). Export from root.zig. Tests: eager recompute, memo-guard suppresses equal cascade, dispose->lazy, signal-on-signal. Blocked on #lzsigzig1. Plan Phase 2.

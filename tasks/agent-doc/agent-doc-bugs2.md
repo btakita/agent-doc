@@ -94,7 +94,25 @@ Proof:
 - Verification: before this closeout, the queue and backlog were empty and `session-check` reported only the open `cycle-1782287296564` waiting for finalize. The new follow-up is gated, so it records the recommendation without creating an active queue head.
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:5b5c7649 -->
+
+### Re: IPC proof diagnostics after closeout recovery — gpt-5
+
+The fresh IPC proof diagnostic with `patch_id=1d90ccce-c703-4297-8028-ae4782a0e1fa` is acknowledged. It came from the retry that attempted to answer `patch_id=69d50165` inline: the response was captured, but write proof was still insufficient, so preflight retired the wedged capture and appended this dogfood note.
+
+The residual follow-up is already represented by gated backlog item `#ipcproofcloseout`; I am not adding another duplicate item in this retry. No product code changed in this recovery pass.
+
+### Re: After a codex session JB `Clear Session Context`, when the agent is ready, JB `Run Agent Doc` does not submit. — gpt-5
+
+This queue head reappeared during the same stale sidecar/CRDT recovery. Preflight reported it as semantically matching archived completion `#7az7`, so I am treating it as a resurrected duplicate rather than starting a new product change. If the bug reappears with fresh logs after the current binary/recycle state, it should be filed as a new item with that evidence.
+
+Proof:
+- Changed paths: this session document and its agent-doc metadata/recovery state; no new product source paths.
+- Commands: `agent-doc reset --from-current`, `agent-doc preflight`, `agent-doc plan`, `agent-doc session-check`, `agent-doc read`, and `nl -ba ... | tail`.
+- Verification: preflight opened `cycle-1782287548462`, classified the `patch_id=1d90...` fence and `queue: start`/resurrected queue prompt as the current prompt-bearing changes, and this response answers both without adding duplicate backlog.
+- Confidence: medium; the closeout path itself is the dogfood subject, so `session-check` remains the gate.
+- Escalation: none.
+
+<!-- agent:boundary:269cc7c3 -->
 <!-- /agent:exchange -->
 
 ## Queue

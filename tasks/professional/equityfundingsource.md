@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -103,7 +103,7 @@ fix(admin): auto-create selected message threads
 
 Remove the manual Create session button in admin Messages, create missing selected-user threads through the existing admin endpoint, and focus the reply textarea after contextual application-dialog launches load or create the borrower conversation. Updates PRD and regression assertions for the new auto-create behavior.
 ```
-<!-- agent:boundary:e9e68771 -->
+<!-- agent:boundary:48ba3e98 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -123,8 +123,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~There should be no Create Conversation button. Auto-create the conversation if one does not exist. Make sure message textarea is focused when the message dialog is opened from an application dialog.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

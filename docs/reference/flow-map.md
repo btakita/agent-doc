@@ -3,7 +3,10 @@
 This reference records the first FlowCore ownership map. It is an inventory,
 not a behavior change plan: command modules still execute the current hot path,
 while `src/flow` provides typed state, pure decisions, and mirror-mode
-operational events.
+operational events. The broader durable-state contract is defined in
+[`State Backbone`](../../specs/13-state-backbone.md): keep the Cycle State
+Machine scoped to response-turn closeout, then derive queue/document/transport/
+supervisor/proof state from typed events and deterministic projections.
 
 ## Owning Flows
 

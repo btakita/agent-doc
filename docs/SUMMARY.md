@@ -28,6 +28,7 @@
 # Reference
 
 - [Specification](reference/specs.md)
+- [State Backbone](../specs/13-state-backbone.md)
 - [Flow Map](reference/flow-map.md)
 - [Active Turn Lifecycle And Replay Paths](reference/active-turn-lifecycle-and-replay.md)
 - [IPC](reference/ipc.md)

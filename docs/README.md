@@ -72,6 +72,7 @@ The canonical spec entry point is [SPEC.md](../SPEC.md). Split specs live under
 - [Security](../specs/10-security.md)
 - [Debounce](../specs/11-debounce.md)
 - [Deterministic Simulation](../specs/12-deterministic-simulation.md)
+- [State Backbone](../specs/13-state-backbone.md)
 - [Pending System](../specs/pending-system.md)
 - [Supervisor](../specs/supervisor.md)
 - [Codex Support](../specs/codex-support.md)

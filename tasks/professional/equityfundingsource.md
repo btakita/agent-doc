@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -124,7 +124,30 @@ Changed paths: no new code changes; this is an agent-doc session closeout only.
 Verification: the queue has been drained and the requested deploy evidence is already recorded above. No additional tests or deploys were needed for this metadata-only closeout.
 
 Escalation: none. Confidence: high that the requested EFS work and deploy are complete; the remaining matter is only agent-doc IPC bookkeeping.
-<!-- agent:boundary:ad7c0185 -->
+
+### Re: Full Application Blocker Highlighting And Deploy — gpt-5
+
+> **Queue prompt:**
+>
+> The https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application should have the alert at the top and highlighted fields + sections that need to be addressed to advance the application.
+
+
+> **Queue prompt:**
+> The https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application should have the alert at the top and highlighted fields + sections that need to to be addressed to advance the application.
+> deploy
+
+Done. The admin Full Application detail now receives the same approval-gate requirements used by the Accept action, renders a top `Before advancing this application` alert, and highlights the matching section cards and visible field rows. The guidance is opt-in from the admin page, so the borrower Application Status view continues to use the shared detail component without admin advancement language.
+
+Changed paths: `src/equityfundingsource-dev` at `e02fef7`; parent submodule pointer at `1133cf4f2`. Key files were `lib/ui--browser--efs/portal/shared/full_application_detail.tsx`, `lib/ui--browser--efs/portal/admin/full_applications.tsx`, `lib/ui--server--efs/portal.ts`, `tests/admin-full-application-approve-ui.test.ts`, and `prds/67v2-admin-loan-pipeline-kanban.md`.
+
+Commits/push/deploy: EFS commit `e02fef7 feat(admin): highlight application advancement blockers (#pipeline-full-app-dialog)` was pushed to `origin/main`; parent pointer commit `1133cf4f2 chore(efs): bump application blocker highlighting submodule` was pushed to `origin/main`; deployed Worker version `f1736ccf-1044-46ad-a7ed-d001eab69bdd` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Verification: focused Bun tests passed (`tests/admin-full-application-approve-ui.test.ts tests/admin-pipeline.test.ts`: `74 pass / 0 fail`). Full local verification passed twice after edits (`make check`: latest run `1188 pass / 0 fail`, app build, and Worker build). The tsift digest wrapper flagged the intentional logged `d1 down` non-fatal outbox fixture, but the raw Bun summaries report zero failures. Pre-deploy D1 checks reported no pending migrations, D1 info returned for database `280e1539-b940-4c59-8988-fbed63c12ac0`, and Time Travel bookmark `00000509-00000010-00005094-54e662098a450514cb2e36b3dd1b69a7` was available. Deploy ran through `make deploy`; post-deploy migrations still report none pending. Smoke checks returned `200` for `/` and `303` for the admin pipeline deep link, consistent with Cloudflare Access on admin routes.
+
+CI/workflows: `gh run list --workflow CI --limit 1` found no workflow named `CI` in either the EFS submodule or the parent repo.
+
+Escalation: none. Confidence: high for code, tests, push, D1/deploy, and unauthenticated smoke coverage; authenticated visual verification of the admin-only Full Application dialog still requires an authenticated browser session.
+<!-- agent:boundary:1206be33 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -144,6 +167,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~The https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application should have the alert at the top and highlighted fields + sections that need to be addressed to advance the application.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

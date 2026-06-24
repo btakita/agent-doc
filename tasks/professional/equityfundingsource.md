@@ -114,7 +114,17 @@ Changed paths: no new EFS code changes for this follow-up; the deployed code rem
 Verification: deploy evidence remains the completed `make deploy`; post-deploy checks reported no pending D1 migrations, public `/` returned `200`, and the admin pipeline deep link returned `303` behind Cloudflare Access. `gh run list --workflow CI --limit 1` found no workflow named `CI` in either the EFS submodule or the parent repo.
 
 Escalation: none. Confidence: high for deploy completion and queue closeout; authenticated visual verification of the admin-only dialog still requires an authenticated browser session.
-<!-- agent:boundary:1180fede -->
+
+### Re: IPC Recovery Closeout — gpt-5
+
+The IPC recovery note is acknowledged. It is diagnostic metadata from the agent-doc writeback path, not a new EFS product request. I did not add an EFS backlog item for it.
+
+Changed paths: no new code changes; this is an agent-doc session closeout only.
+
+Verification: the queue has been drained and the requested deploy evidence is already recorded above. No additional tests or deploys were needed for this metadata-only closeout.
+
+Escalation: none. Confidence: high that the requested EFS work and deploy are complete; the remaining matter is only agent-doc IPC bookkeeping.
+<!-- agent:boundary:ad7c0185 -->
 <!-- /agent:exchange -->
 ###
 <!--

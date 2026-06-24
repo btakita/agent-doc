@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -122,7 +122,25 @@ Verification for the deployed build:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:d34d61ea -->
+
+### Re: Deploy residue closeout — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+Cleared the remaining `deploy` queue head after the Worker deployment had already completed.
+
+No additional code, test, deploy, commit, or push work was performed in this residue closeout. The deployed Worker version remains `693fb7c5-c214-494d-a4ad-4df4e87fda5f` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Verification already recorded for the deployed build:
+- `make deploy` passed.
+- Post-deploy remote migration list: `No migrations to apply!`.
+- Smoke tests: `/` returned `200`; `/admin/pipeline` and `/admin/lender-pipeline` returned expected admin-auth redirects `303`.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:2d743861 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -142,8 +160,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#n4c1]
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

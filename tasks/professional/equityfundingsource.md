@@ -130,7 +130,31 @@ Changed paths: `tasks/professional/equityfundingsource.md` only.
 Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc write --template --stream --commit`, `agent-doc session-check`.
 Verification: session-check is expected to confirm the cycle is committed with no drainable queue work.
 Escalation: none. Confidence: high.
-<!-- agent:boundary:9e34771c -->
+
+### Re: Full Application Top Advance CTA And Deploy — gpt-5
+
+> **Queue prompt:**
+> https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application should have an alert with the next steps and a CTA to advance the application at the top. "Mark Complete" requires substantial scrolling to get to it.
+>
+> **Queue prompt:**
+> deploy
+
+Implemented, pushed, and deployed.
+
+Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/shared/full_application_detail.tsx`, `lib/ui--browser--efs/portal/admin/full_applications.tsx`, `lib/ui--server--efs/portal.ts`, `tests/admin-full-application-approve-ui.test.ts`, and `prds/67v2-admin-loan-pipeline-kanban.md`.
+
+Behavior: the Full Application top advancement alert now has a focused action slot. In the completion stage it shows the existing **Mark Complete** action at the top of the detail view; in the acceptance stage it shows the existing **Accept and Send to TMO** action. The alert also renders a ready state when no blockers remain, so admins do not have to scroll to the bottom decision card to advance a long application. The top CTA reuses the same handlers, disabled states, titles, and validation gates as the bottom decision card.
+
+Commits: EFS commit `888d71c fix(admin): surface full application advance action` is pushed to `origin/main`. Parent gitlink commit `8dbf7c171 chore(efs): bump full application advance action submodule` is committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with many unrelated local commits/changes, and pushing would publish unrelated work.
+
+Verification: focused tests passed (`bun test tests/admin-full-application-approve-ui.test.ts tests/admin-pipeline.test.ts`: `76 pass / 0 fail`; tsift separately flagged the known logged `error: d1 down` fixture string, but the command exited 0). `git diff --check` passed. Full `make check` passed (`1191 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` found no workflow named `CI` in both the EFS submodule and parent repo.
+
+Deploy: `make deploy` succeeded. Remote D1 migrations reported `No migrations to apply`. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `eb0a41c2-9818-4ab5-b355-410787bebd7f`. Post-deploy smoke checks: public root returned `200`; the deep-linked admin pipeline URL returned `303` behind Cloudflare Access; remote migration list still reported no migrations to apply.
+
+No actionable follow-up items are needed from this cycle.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:60a28e6c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -150,6 +174,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application should have an alert with the next steps and a CTA to advance the application at the top. "Mark Complete" requires substantial scrolling to get to it.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

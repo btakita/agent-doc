@@ -151,19 +151,49 @@ Verification passed:
 - `cargo test -p agent-doc-orchestration dispatch_only_direct_pane_accepted_submit_skips_optional_proof_wait`
 
 No code files changed in this follow-up; I marked `#sz4a` done and left the separate `#xgdn` dispatch-only proof item open.
-<!-- agent:boundary:5387cd29 -->
+
+### Re: JB `Run Agent Doc` on monsterrodholders.md did not submit. Please diagnose and fix. — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: JB `Run Agent Doc` on monsterrodholders.md did not submit. Please diagnose and fix.
+
+I diagnosed this as an already-covered historical route failure, not a new unhandled code path in the current tree.
+
+The Monster Rod Holders evidence I found falls into the stale-supervisor and no-submit route classes that are already fixed:
+- The older pane capture explicitly says the `monsterrodholders.md` supervisor was running pre-update code and from the wrong project root.
+- The later note says `0.34.20` was installed, `agent-doc admin recycle` was requested, and the operator was asked to retry because the cold-start gate was now live.
+- Current route-submit artifacts do not show a fresh dedicated `monsterrodholders.md` submit failure. The latest Monster Rod Holders hits are scrollback inside other pane captures or successful `agent-doc(monsterrodholders)` commits, not a new failing route attempt.
+
+The current code covers the reported no-submit shapes:
+- stale-binary self-recycle / recycle-yield for supervisors that keep draining while running old code;
+- cold-start and restart dispatch-ready gates before injecting `agent-doc <FILE>`;
+- redispatch when the routed trigger never lands in the composer;
+- one-second Enter retry while a drafted trigger remains visible;
+- durable route-dispatch bug filing for future bounded submit/proof failures.
+
+Verification passed:
+- `cargo test -p agent-doc-orchestration pane_idle_dispatch_ready_distinguishes_non_dispatch_from_fast_submit`
+- `cargo test -p agent-doc-orchestration direct_pane_enter_resubmit_is_bounded_while_trigger_remains_visible`
+- `cargo test -p agent-doc-orchestration direct_pane_enter_resubmit_retries_at_least_once_per_second`
+- `cargo test -p agent-doc route_sim_auto_start_dispatch_waits_for_dispatch_ready_prompt_before_send`
+- `cargo test -p agent-doc route_sim_restart_drain_waits_for_dispatch_ready_prompt_before_send`
+
+No code files changed for this queue item. The actionable fix is already in the installed route/dispatch code, and future recurrence should file a stage-specific `#jbrunautobug` item with a diagnostic path instead of leaving the report as an unstructured free-text queue head.
+<!-- agent:boundary:b9959a3d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: [#sz4a]~~
-- :pushpin: JB `Run Agent Doc` on monsterrodholders.md did not submit. Please diagnose and fix.
+- ~~:pushpin: JB `Run Agent Doc` on monsterrodholders.md did not submit. Please diagnose and fix.~~
 - :pushpin: What are #next-steps to fix agent-doc bugs?
 - :pushpin: Ensure the VS Code plugin has parity with the JB plugin.
 - :pushpin: For tasks added from dogfooding issues, please add a configuration to select the agent document to write the backlog items to. The default is the current document. For agent-loop configure the document to this document.
 - :pushpin: Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.
 - :pushpin: do [#promptprefixorch1]
+- do [#xgdn]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

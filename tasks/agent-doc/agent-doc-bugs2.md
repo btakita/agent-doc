@@ -53,7 +53,19 @@ I ran `agent-doc queue recover-lost /home/brian/work/btakita/agent-loop/src/boos
 Added backlog items in priority order. Top backlog id: `#lzpkgwire`.
 
 Verification: `agent-doc preflight`, `agent-doc plan`, source inspection of Rust/JB/VS Code/lazily wrappers, and `agent-doc queue recover-lost /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md`. No code changed, so I did not run `make check`.
-<!-- agent:boundary:abdce112 -->
+
+### Re: IPC proof issue dogfood log — gpt-5
+
+The diagnostic is valid and came from the failed queue-consume writeback during the previous closeout: socket ACK-content was present, but the ACK candidate drifted from the preflight baseline (`live_prompt_drift_after_preflight`), so the binary refused the queue-consume disk write and recovered on the next preflight. That is the correct fail-closed behavior, but the recovery note becoming a prompt-bearing exchange item is not clean closeout UX.
+
+I appended `#ipcqproof` behind the current lazily follow-ups to cover this recovery-path bug: prove/reduce queue-consume ACK drift, keep dogfood diagnostics from becoming unresolved prompts, and add a regression around this `ipc_proof_insufficient` shape.
+
+> **Queue prompt:** agent-doc monsterrodholders.md queue was removed without being processed
+
+No new monsterrodholders action in this recovery cycle; the earlier audit result still stands: `recover-lost` found git-history-only candidates but no authoritative restore candidate. The follow-up remains `#mrhqrestore`.
+
+Verification: `agent-doc session-check`, recovery preflight state, and `ops.log` diagnostics. No code changed.
+<!-- agent:boundary:67c36eb7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -79,7 +91,7 @@ Verification: `agent-doc preflight`, `agent-doc plan`, source inspection of Rust
   aligned, then I’ll rerun the invariant check.
 ```
 ---
-- do [#lzpkgwire]
+- ~~do [#lzpkgwire]~~
 - do [#lzliveproof]
 - do [#mrhqrestore]
 <!-- /agent:queue -->
@@ -111,6 +123,7 @@ What are #next-steps to fix bugs?
 - [ ] [#lzpkgwire] Consolidate package-level lazily state-projection bridge: make JetBrains consume lazily-kt and VS Code consume lazily-js (or formally mark plugin-local copies as canonical), then add parity tests for document hashing, event JSON, pointer/free lifecycle, and projection summaries.
 - [ ] [#lzliveproof] Add cross-editor live/state-projection proof for agent-doc IPC: drive JB socket/file IPC and VS Code file IPC through queued/ack/retry plus route started/proven/blocked events, then assert the Rust DocumentStateProjection and compact summaries match.
 - [ ] [#mrhqrestore] Improve agent-doc queue recover-lost for git-history-only queue deletions: produce an operator-reviewed restoration patch or explicit non-restorable recommendation for foreign-owned prompts such as the monsterrodholders test-email CSV row.
+- [ ] [#ipcqproof] Fix IPC proof dogfood closeout recovery: add a regression for queue-consume socket_ack_content / live_prompt_drift_after_preflight ACK mismatch, ensure diagnostics do not become unresolved prompt-bearing exchange items, and keep fail-closed recovery on the binary-owned path.
 <!-- /agent:backlog -->
 
 ## Review

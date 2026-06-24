@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -62,12 +62,13 @@ Proof:
 - Verification: recovery preflight completed, queue continuation is no longer required, and finalize owns the post-commit `session-check` boundary.
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:01297463 -->
+<!-- agent:boundary:8b50696f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- do [#docdriftfinalize]
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

@@ -150,7 +150,17 @@ No additional backlog item applies.
 
 No remaining queue prompt is active. This cycle only reflected the IPC recovery marker after the previous retained-response repair; the queue is drained and the verification-email work is complete.
 
-<!-- agent:boundary:0be93996 -->
+
+
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=ee45284c-7fdc-46d3-9dcf-3814907966e7 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782275972625
+```
+### Re: agent-doc recovery drift closeout
+
+The remaining session-document drift is only agent-doc recovery bookkeeping from the IPC proof loop. The verification-email task is complete, the queue is drained, and no product follow-up remains active.
+
+<!-- agent:boundary:2f6144fa -->
 <!-- /agent:exchange -->
 ###
 <!--

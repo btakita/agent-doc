@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,59 +33,11 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-022812.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-031338.md`*
 
 Compacted content:
-❯ - Archived 4 response topic(s): Unified admin chat interface; Deploy queue closeout; Deploy residue closeout; 1 more
+❯ - Archived 4 response topic(s): Borrower message selection + deploy; Preset residue closeout; Deploy residue closeout; 1 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: Borrower message selection + deploy — gpt-5
-
-> **Queue prompt:**
->
-> When I select an application from a borrower such as https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=lead&dialog_lead_id=e2a41d4b-250c-4197-a370-4f5b786a5bcf, and I then open the Message dialog, the borrower conversation should be selected.
-
-> **Queue prompt:**
->
-> deploy
-
-Implemented, committed, pushed, and deployed the admin Messages launcher borrower selection fix. I also included and closed the previously deployed pipeline +/- focus-preservation work tracked by `#n4c1`.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/messages.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/pipeline.tsx`
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`
-- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
-- `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`
-
-What changed:
-- The bottom-right admin Messages launcher now detects active `/admin/pipeline` lead/application dialogs, resolves the selected borrower through existing admin lead/application APIs, switches to the Borrowers tab, and loads the matching borrower thread by email.
-- Standalone `/admin/application-leads/:id` and `/admin/loan-applications/:id` pages get the same contextual borrower selection behavior.
-- Deal Pipeline and Lender Pipeline collapse toggles preserve keyboard focus after Enter toggles +/-.
-- Regression assertions cover the contextual message launcher and pipeline focus behavior.
-
-Verification:
-- `bun test tests/admin-pipeline.test.ts` — passed, 63 tests.
-- `bun test tests/portal-messages-component.test.ts tests/borrower-messages.test.ts tests/messages-unified.test.ts` — passed, 32 tests.
-- `bun test tests/admin-investor-pipeline.test.ts` — passed, 92 tests.
-- `git diff --check` — passed.
-- `make check` — passed, 1173 tests plus app build and Worker build.
-- `gh run list --workflow CI --limit 1` in both EFS and parent repos — no workflow named `CI` exists.
-
-Deployment:
-- Pre-deploy remote D1 migration list: `No migrations to apply!`.
-- D1 Time Travel bookmark was available: `000004f6-00000078-00005094-9d846883e65c7e7e8918d2c0a8f1ea00`.
-- `make deploy` passed.
-- Deploy applied no migrations and activated Worker version `23a232b2-68bd-4ab9-bc68-f12db711b49c` at `https://equityfundingsource.brian-takita.workers.dev`.
-- Post-deploy remote D1 migration list: `No migrations to apply!`.
-- Smoke tests: `/` returned `200`; the reported `/admin/pipeline?...dialog=lead...` URL and `/admin/lender-pipeline` returned expected admin-auth redirects `303`.
-
-Commits:
-- EFS submodule: `36c8a516629c396d72d65ea3d2398b2b85ee956c` (`fix(admin): preserve pipeline focus and contextual messages`), pushed to `equityfundingsource-dev/main`.
-- Parent submodule pointer: `544d110ba` (`chore: update equityfundingsource submodule`), pushed to `agent-loop/main`.
-
-Escalation: none.
-Confidence: high.
 **IPC proof issue dogfood log**
 
 Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
@@ -94,102 +46,9 @@ Issue class: `ipc_proof_insufficient`
 Affected component: editor IPC / writeback
 
 ```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=4c9627c4-2911-4f53-a5bd-2e0f8e5c2b88 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782268211341
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=ef0011cd-3f18-4924-a230-8f97eecc086f invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782270210105
 ```
-
-### Re: Preset residue closeout — gpt-5
-
-> **Queue prompt:**
->
-> commit + push all uncommitted files.
-
-> **Queue prompt:**
->
-> deploy
-
-Closed the remaining preset-generated queue residue after the borrower message selection deployment.
-
-No additional app code, tests, build, or deploy work was needed in this residue closeout. The intended EFS changes were already committed and pushed as `36c8a516629c396d72d65ea3d2398b2b85ee956c`, the parent submodule pointer was already committed and pushed as `544d110ba`, and the Worker remains deployed as version `23a232b2-68bd-4ab9-bc68-f12db711b49c`.
-
-I did not commit unrelated dirty parent-worktree files outside this task/session.
-
-Verification already recorded for the deployed build:
-- `make check` passed, 1173 tests plus app build and Worker build.
-- `make deploy` passed.
-- Post-deploy remote D1 migration list: `No migrations to apply!`.
-- Smoke tests: `/` returned `200`; the reported `/admin/pipeline?...dialog=lead...` URL and `/admin/lender-pipeline` returned expected admin-auth redirects `303`.
-
-Escalation: none.
-Confidence: high.
-❯ **IPC proof issue dogfood log**
-
-❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
-
-❯ Issue class: `ipc_proof_insufficient`
-❯ Affected component: editor IPC / writeback
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=2bc9172b-ba36-4731-876a-472e1c00b2bb invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782268950340
-```
-
-### Re: Deploy residue closeout — gpt-5
-
-> **Queue prompt:**
->
-> deploy
-
-Cleared the final deploy residue queue head. No additional deploy was run because this exact deployment already completed in the previous closeout: Worker version `23a232b2-68bd-4ab9-bc68-f12db711b49c` is live, remote D1 reports `No migrations to apply!`, `/` returns `200`, and the admin pipeline/lender-pipeline routes return expected admin-auth redirects `303`.
-
-There were no actionable follow-up items to capture.
-
-Escalation: none.
-Confidence: high.
-
-
-
-```text
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=614f38da-0b33-487b-af23-18a3825aec73 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782268963919
-```
-
-### Re: Selected admin message user deploy closeout — gpt-5
-
-> **Queue prompt:**
->
-> deploy
-
-Deployed and smoke-checked the selected-user admin Messages fix after the implementation/spec/test queue head was completed.
-
-Final changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/messages.tsx`
-- `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`
-- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
-- `src/equityfundingsource-dev/tests/borrower-messages.test.ts`
-
-Verification:
-- `git diff --check` — passed.
-- `bun test tests/admin-pipeline.test.ts tests/borrower-messages.test.ts tests/portal-messages-component.test.ts tests/messages-unified.test.ts` — passed, 95 tests.
-- `make check` — passed after the final PRD/test update, 1173 tests plus app build and Worker build.
-- `gh run list --workflow CI --limit 1` in both EFS and parent repos — no workflow named `CI` exists.
-
-Deployment:
-- Pre-deploy remote D1 migration list: `No migrations to apply!`.
-- D1 Time Travel bookmark was available: `000004f6-0000007a-00005094-bdbebf6c9d1ca7591ccd9e3806ead1e6`.
-- Final `make deploy` passed and activated Worker version `a49e20dc-8d74-42ee-9ca7-11874530a794` at `https://equityfundingsource.brian-takita.workers.dev`.
-- Post-deploy remote D1 migration list: `No migrations to apply!`.
-- Smoke tests: `/` returned `200`; `/admin/messages` and `/admin/pipeline?status=new&dialog=lead` returned expected admin-auth redirects `303`.
-
-Commits:
-- EFS submodule: `fef3eb3c9b0108795416f78468c1f3503443d133` (`fix(admin): focus selected message users`), pushed to `equityfundingsource-dev/main`.
-- EFS submodule: `eaeb98d36d82245fa04e0b59480e915647a18bdb` (`test(admin): specify message user focus`), pushed to `equityfundingsource-dev/main`.
-- Parent submodule pointer: `8a5178bf766c689a010d214b883492525b486dcd` (`chore: update equityfundingsource submodule`), pushed to `agent-loop/main` from `origin/main` without publishing unrelated local parent commits.
-
-I left unrelated dirty parent-worktree files and unrelated local parent commits untouched.
-
-No actionable follow-up items remain from this queue item.
-
-Escalation: none.
-Confidence: high.
-<!-- agent:boundary:a4a3ae82 -->
+<!-- agent:boundary:58c314bc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -209,6 +68,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- There should be no Create Conversation button. Auto-create the conversation if one does not exist. Make sure message textarea is focused when the message dialog is opened from an application dialog.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

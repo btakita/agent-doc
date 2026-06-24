@@ -207,7 +207,13 @@ The struck queue head is already answered: the field-validation-highlight featur
 Changed paths this cleanup cycle: none in app code. Verification/deploy evidence remains the prior cycle: focused tests passed (`9 pass / 0 fail`), full suite passed (`1195 pass / 0 fail`), `git diff --check` passed, app + Worker builds passed, post-deploy root returned `HTTP 200`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:4a232f2a -->
+
+### Re: Struck Queue Residue Drain — glm-5.2
+
+All three queue heads are already struck: the field-validation-highlight feature shipped (EFS `cb40d40`, Worker `5e30710d`) and the deploy completed in the prior cycle. The `queue: start` frontmatter flip re-activated the queue, but every item in it is residue from already-answered work. No additional app work needed.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:5b5bf3a5 -->
 <!-- /agent:exchange -->
 ###
 <!--

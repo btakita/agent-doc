@@ -82,7 +82,11 @@ Ops-log now includes `queue_paused={true|false}`. 3276 tests pass, clippy clean.
 **Note:** This finalize itself hit the pane ownership mismatch — the exact #actorswitchdefer dead-end. Fixed via `agent-doc claim --force`.
 
 **Top backlog id: #actorswitchdefer** (Part B).
-<!-- agent:boundary:c5df72b0 -->
+
+### Re: IPC proof dogfood log acknowledged — glm-5-2
+
+The `ipc_proof_insufficient` dogfood log appended during interrupted-cycle recovery is noted — it is the `#ipcqproof` backlog item in action (socket ACK content mismatch on `live_prompt_drift_after_preflight`). The full response for this cycle (queue triage + #actorswitchdefer Part A shipped) was already committed in 0c3a1787f; this write closes the prompt-only tail the session-check flagged.
+<!-- agent:boundary:491e5179 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -1694,6 +1694,127 @@ pub extern "C" fn agent_doc_version() -> *mut c_char {
     CString::new(env!("CARGO_PKG_VERSION")).unwrap().into_raw()
 }
 
+/// Process-global lazily state-backbone event ledger backing the FFI
+/// state-projection exports. Phase 1 of `tasks/software/plan-lazily-ffi-state-projection.md`
+/// (`#lzffistate1`): plugins become thin event-reporters + projection-renderers while
+/// the binary owns the durable FSMs. Default-initialized on first access.
+static STATE_LEDGER: std::sync::OnceLock<
+    std::sync::Mutex<agent_doc_orchestration::state_backbone::EventLedger>,
+> = std::sync::OnceLock::new();
+
+fn state_ledger() -> &'static std::sync::Mutex<agent_doc_orchestration::state_backbone::EventLedger>
+{
+    STATE_LEDGER.get_or_init(|| {
+        std::sync::Mutex::new(agent_doc_orchestration::state_backbone::EventLedger::new())
+    })
+}
+
+/// Read the binary's lazily-powered state projection for a document.
+///
+/// Returns a NUL-terminated JSON string of `DocumentStateProjection`
+/// (document/queue/closeout/transport/supervisor/route/proof slices) for the given
+/// `document_hash`, or `"null"` when no events have been recorded for it. The
+/// projection is recomputed from the in-process event ledger on every call. Plugins
+/// render this without re-deriving the durable FSMs (FFI-first rule).
+///
+/// Caller must free the returned pointer with `agent_doc_free_string`.
+///
+/// # Safety
+///
+/// `document_hash` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_state_projection(document_hash: *const c_char) -> *mut c_char {
+    let doc_hash = match unsafe { CStr::from_ptr(document_hash) }.to_str() {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!(
+                "[state-projection] agent_doc_state_projection: non-UTF-8 document_hash; returning null: {err}"
+            );
+            return CString::new("null").unwrap().into_raw();
+        }
+    };
+    let json = match state_ledger().lock() {
+        Ok(ledger) => match ledger.project().document(doc_hash) {
+            Some(doc) => serde_json::to_string(doc).unwrap_or_else(|err| {
+                eprintln!(
+                    "[state-projection] agent_doc_state_projection: serialize failed for {doc_hash}: {err}"
+                );
+                "null".to_string()
+            }),
+            None => "null".to_string(),
+        },
+        Err(err) => {
+            eprintln!(
+                "[state-projection] agent_doc_state_projection: ledger lock poisoned: {err}"
+            );
+            "null".to_string()
+        }
+    };
+    CString::new(json)
+        .unwrap_or_else(|_| CString::new("null").unwrap())
+        .into_raw()
+}
+
+/// Record a lazily state-backbone event from a plugin.
+///
+/// `fact_json` must be a JSON object deserializable as a `StateEvent`
+/// (`{ "event_id": "...", "fact": { "type": "baseline_saved", ... } }`). The event
+/// is appended to the in-process ledger; the projection's `seen_event_ids` dedupe
+/// absorbs replays. Returns `1` on success, `0` on a parse/lock failure (logged to
+/// stderr). Plugins trigger transitions by reporting events here rather than running
+/// durable FSMs in-process (FFI-first rule).
+///
+/// # Safety
+///
+/// `document_hash` and `fact_json` must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_record_state_event(
+    document_hash: *const c_char,
+    fact_json: *const c_char,
+) -> i32 {
+    let doc_hash = match unsafe { CStr::from_ptr(document_hash) }.to_str() {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!(
+                "[state-projection] agent_doc_record_state_event: non-UTF-8 document_hash: {err}"
+            );
+            return 0;
+        }
+    };
+    let fact_str = match unsafe { CStr::from_ptr(fact_json) }.to_str() {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!(
+                "[state-projection] agent_doc_record_state_event: non-UTF-8 fact_json for {doc_hash}: {err}"
+            );
+            return 0;
+        }
+    };
+    let event: agent_doc_orchestration::state_backbone::StateEvent = match serde_json::from_str(
+        fact_str,
+    ) {
+        Ok(e) => e,
+        Err(err) => {
+            eprintln!(
+                "[state-projection] agent_doc_record_state_event: failed to parse StateEvent JSON for {doc_hash}: {err}"
+            );
+            return 0;
+        }
+    };
+    match state_ledger().lock() {
+        Ok(mut ledger) => {
+            ledger.append(event);
+            1
+        }
+        Err(err) => {
+            eprintln!(
+                "[state-projection] agent_doc_record_state_event: ledger lock poisoned for {doc_hash}: {err}"
+            );
+            0
+        }
+    }
+}
+
 /// Inspect one actor through the project controller and return the same JSON
 /// shape as `agent-doc admin inspect --json`.
 ///
@@ -2103,6 +2224,65 @@ fn force_link_core_ffi_symbols() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn state_projection_ffi_round_trip() {
+        use agent_doc_orchestration::state_backbone::{StateEvent, StateFact};
+
+        let doc_hash = "state_projection_ffi_round_trip_doc";
+        let event = StateEvent::new(
+            "evt-ffi-roundtrip-1",
+            StateFact::BaselineSaved {
+                document_hash: doc_hash.to_string(),
+                cycle_id: "cycle-1".to_string(),
+                baseline_hash: "baseline-1".to_string(),
+                baseline_path: None,
+            },
+        );
+        let fact_json = CString::new(serde_json::to_string(&event).unwrap()).unwrap();
+        let doc_hash_c = CString::new(doc_hash).unwrap();
+
+        let rc = unsafe { agent_doc_record_state_event(doc_hash_c.as_ptr(), fact_json.as_ptr()) };
+        assert_eq!(
+            1, rc,
+            "record_state_event should succeed on valid StateEvent JSON"
+        );
+
+        let proj_ptr = unsafe { agent_doc_state_projection(doc_hash_c.as_ptr()) };
+        let proj = unsafe { CStr::from_ptr(proj_ptr) }
+            .to_str()
+            .unwrap()
+            .to_string();
+        drop(unsafe { CString::from_raw(proj_ptr) });
+
+        assert_ne!(
+            "null", proj,
+            "projection should exist after recording an event"
+        );
+        assert!(
+            proj.contains(doc_hash),
+            "projection should reference the document hash: {proj}"
+        );
+
+        // Replaying the same event_id still appends (returns 1); the projection's
+        // seen_event_ids dedupe absorbs the duplicate on the next project() call.
+        let replay_rc =
+            unsafe { agent_doc_record_state_event(doc_hash_c.as_ptr(), fact_json.as_ptr()) };
+        assert_eq!(1, replay_rc, "replay record should still return success");
+
+        // Unknown document_hash yields "null".
+        let missing_c = CString::new("no-such-doc-hash").unwrap();
+        let missing_ptr = unsafe { agent_doc_state_projection(missing_c.as_ptr()) };
+        let missing = unsafe { CStr::from_ptr(missing_ptr) }
+            .to_str()
+            .unwrap()
+            .to_string();
+        drop(unsafe { CString::from_raw(missing_ptr) });
+        assert_eq!(
+            "null", missing,
+            "unknown document_hash should project to null"
+        );
+    }
 
     #[test]
     fn record_editor_op_ffi_writes_base_keyed_sidecar() {

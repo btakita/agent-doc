@@ -72,7 +72,19 @@ Continuing the queue drain (`#lzasynceffdup` next).
 **Fix (lazily-rs `090e104`, pushed):** added `scheduled_async_effects: HashSet<SlotId>` to `AsyncContextInner` and extracted `schedule_async_effect(inner, id)` (mirrors `Context::schedule_effect`) — all three scheduling sites now set `force_run` and enqueue only on `scheduled_async_effects.insert(id)`. `flush_async_effects` clears the set on drain; `dispose_async_effect` removes from it (parity with `Context::dispose_effect:684`). White-box unit test `async_schedule_effect_dedupes_pending_queue` schedules the same id three times and asserts exactly one queue entry + flush-clears the set (fails without the HashSet). Verified: clippy `--all-targets --all-features -D warnings` clean, rustfmt clean, `--features async` suite green, default tests + release build OK.
 
 Next queue head: `#lzstr0mnetinbox` (str0m receive-side unbounded inbox).
-<!-- agent:boundary:dd6d9dec -->
+
+### Re: #lzstr0mnetinbox — bound Str0mNet receive inbox — glm-5.2
+
+> **Queue prompt:**
+> 
+> do [#lzstr0mnetinbox]
+
+`Shared::inbox` (the receive side of `Str0mNetChannel`) was an unbounded `Mutex<VecDeque<Vec<u8>>>`: `handle_event` pushed every inbound `ChannelData` frame without limit. The send side already caps the driver outbound queue at `MAX_PENDING_FRAMES=1024` (`#lzstr0mframe`), but the receive side had no gate — a consumer polling `try_recv_frame` slower than the peer produces grew receive memory without bound.
+
+**Fix (lazily-rs `e165720`, pushed):** added `MAX_INBOX_FRAMES` (=1024, symmetric with the send cap) with drop-oldest ring semantics (newest retained) and a `dropped_inbox_frames` counter exposed via `Str0mNet::dropped_inbox_frames()` so sustained saturation is diagnosable (non-zero warrants a Snapshot resync). The str0m SCTP stack still owns wire-level reliability; this is the local memory safety valve. Unit test `inbox_caps_at_max_inbox_frames_and_counts_drops` pushes past the cap and asserts the bound, drop count, and drop-oldest retention. Verified: clippy `--all-targets --all-features -D warnings` clean, rustfmt clean, full `--features webrtc-str0m` suite green (incl. the real two-socket `tests/str0m_net.rs` round trip), release build OK.
+
+Next queue head: `#lzstr0mnetacceptanswer` (str0m discards `accept_answer` result).
+<!-- agent:boundary:967dd4a3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -94,7 +106,6 @@ Next queue head: `#lzstr0mnetinbox` (str0m receive-side unbounded inbox).
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzstr0mnetinbox] [recommended] str0m_net.rs receive-side Shared::inbox (:133) is an unbounded Mutex<VecDeque>; send side has MAX_PENDING_FRAMES=1024 backpressure but ChannelData pushes (:548) are unbounded — a slow consumer grows memory without limit. Cap inbox + apply backpressure in handle_input.
 - [ ] [#lzstr0mnetacceptanswer] str0m_net.rs driver discards rtc.accept_answer result (:391 let _ =); an ICE/DTLS fingerprint/mid mismatch is invisible and wait_open times out with no diagnostic. Propagate apply-time failure to Shared::last_error so the open-failure surfaces a cause.
 - [ ] [#lzwsunbounded] ws_backend.rs outbound is an unbounded mpsc (:88) and drive abandons queued frames on send error (:117-119 break); producers can keep enqueuing after close. Switch to a bounded channel, surface send failures via WsError, stop producers on close.
 - [ ] [#lzerrfrom] [recommended] Add From<serde_json::Error>/From<postcard::Error> impls for EncodeError/DecodeError ergonomics (open since 2026-06-17). src/ipc.rs.

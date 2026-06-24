@@ -111,7 +111,7 @@ The only actionable next-step is already captured as **#lzjshygiene** (validate 
 > **Queue prompt:** What are #next-steps to fix lazily-js bugs?
 
 Note: the remaining planning heads (zig/py/rs `#next-steps`) are likewise already covered by backlog items `#lzzigtodos`, `#lzpyregress`, and `#lzspecdrift`; the substantive work is the `do [#id]` implementation queue.
-<!-- agent:boundary:82f3f570 -->
+<!-- agent:boundary:4b23de5a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -125,7 +125,7 @@ Note: the remaining planning heads (zig/py/rs `#next-steps`) are likewise alread
 - ~~What are #next-steps to fix lazily-zig bugs?~~
 - ~~What are #next-steps to fix lazily-py bugs?~~
 - ~~What are #next-steps to fix lazily-rs bugs?~~
-- do [#lzspecdrift]
+- 🚧 do [#lzspecdrift]
 - do [#lzktconf]
 - do [#lzpyregress]
 - do [#lzzigtodos]

@@ -119,6 +119,11 @@ Package-level bridge parity is explicit:
   `@lazily/js` at runtime, because the extension is CommonJS-packaged while
   `@lazily/js` is ESM. VS Code tests must compare its pure helpers against the
   package helpers so this duplicate adapter cannot silently drift.
+- Rust owns the authoritative `ProjectionSummary` compact string. Editor
+  compact-summary helpers must keep matching `route=<readiness> pane=<pane>
+  transport=<patch>:<phase> proof_markers=<count>`, and Rust coverage must drive
+  JB socket IPC, JB file IPC, and VS Code file IPC through live queued/retry/ack
+  transport plus route started/proven/blocked events.
 
 ## Actor Ownership
 

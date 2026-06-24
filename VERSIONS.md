@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.45
+
+- **Cross-editor live IPC state-projection proof is pinned (`#lzliveproof`).** The Rust state backbone now exposes a `ProjectionSummary` / compact summary contract matching the JetBrains and VS Code editor bridge helpers. Coverage drives JetBrains socket IPC, JetBrains file IPC, and VS Code file IPC through queued, retry, and ack transport transitions plus route started/proven/blocked events, then asserts the authoritative `DocumentStateProjection` fields and compact route/transport/proof summaries.
+
 ## 0.34.44
 
 - **Package-level lazily state-projection parity is explicit (`#lzpkgwire`).** `lazily-kt` and `lazily-js` now expose pure bridge helpers for canonical document hashing, `StateEvent` JSON, compact projection summaries, and native projection pointer/free lifecycle. The editor bridges stay plugin-local canonical under their current packaging constraints (JetBrains IntelliJ/Kotlin/JBR toolchain, VS Code CommonJS extension versus ESM `@lazily/js`), and tests pin VS Code against the package helper contract while Kotlin package coverage mirrors the JetBrains helper behavior.

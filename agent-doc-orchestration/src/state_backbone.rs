@@ -338,6 +338,10 @@ impl DocumentStateProjection {
         }
     }
 
+    pub fn projection_summary(&self) -> ProjectionSummary {
+        ProjectionSummary::from_document(self)
+    }
+
     fn apply(&mut self, fact: &StateFact) {
         match fact {
             StateFact::BaselineSaved {
@@ -614,6 +618,50 @@ impl DocumentStateProjection {
         self.rejected_stale_events
             .push(RejectedStaleEvent { domain, owner });
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectionSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_readiness: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_pane_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_transport_patch_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_transport_phase: Option<String>,
+    pub proof_markers: usize,
+}
+
+impl ProjectionSummary {
+    pub fn from_document(projection: &DocumentStateProjection) -> Self {
+        let latest_patch = projection.transport.patches.iter().next_back();
+        Self {
+            route_readiness: serde_name(&projection.route.readiness),
+            route_pane_id: projection.route.pane_id.clone(),
+            latest_transport_patch_id: latest_patch.map(|(patch_id, _)| patch_id.clone()),
+            latest_transport_phase: latest_patch.and_then(|(_, patch)| serde_name(&patch.phase)),
+            proof_markers: projection.proof.markers.len(),
+        }
+    }
+
+    pub fn compact(&self) -> String {
+        format!(
+            "route={} pane={} transport={}:{} proof_markers={}",
+            self.route_readiness.as_deref().unwrap_or("unknown"),
+            self.route_pane_id.as_deref().unwrap_or("-"),
+            self.latest_transport_patch_id.as_deref().unwrap_or("-"),
+            self.latest_transport_phase.as_deref().unwrap_or("-"),
+            self.proof_markers
+        )
+    }
+}
+
+fn serde_name<T: Serialize>(value: &T) -> Option<String> {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|json| json.as_str().map(str::to_string))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1401,8 +1449,213 @@ pub fn transition_proof_gate(
 mod tests {
     use super::*;
 
-    fn state_event(event_id: &str, fact: StateFact) -> StateEvent {
+    fn state_event(event_id: impl Into<String>, fact: StateFact) -> StateEvent {
         StateEvent::new(event_id, fact)
+    }
+
+    fn socket_ack_events(
+        prefix: &str,
+        document_hash: &str,
+        patch_id: &str,
+        generation: u64,
+    ) -> Vec<StateEvent> {
+        vec![
+            state_event(
+                format!("{prefix}:editor-generation"),
+                StateFact::OwnerGenerationChanged {
+                    document_hash: document_hash.into(),
+                    owner: StateOwner::EditorIpcBridge,
+                    generation,
+                },
+            ),
+            state_event(
+                format!("{prefix}:patch-queued"),
+                StateFact::EditorPatchQueued {
+                    document_hash: document_hash.into(),
+                    patch_id: patch_id.into(),
+                    actor_generation: generation,
+                },
+            ),
+            state_event(
+                format!("{prefix}:patch-acked"),
+                StateFact::EditorAckObserved {
+                    document_hash: document_hash.into(),
+                    patch_id: patch_id.into(),
+                    actor_generation: generation,
+                },
+            ),
+        ]
+    }
+
+    fn file_retry_then_ack_events(
+        prefix: &str,
+        document_hash: &str,
+        patch_id: &str,
+        generation: u64,
+        reason: &str,
+    ) -> Vec<StateEvent> {
+        vec![
+            state_event(
+                format!("{prefix}:editor-generation-{generation}"),
+                StateFact::OwnerGenerationChanged {
+                    document_hash: document_hash.into(),
+                    owner: StateOwner::EditorIpcBridge,
+                    generation,
+                },
+            ),
+            state_event(
+                format!("{prefix}:patch-queued-{generation}"),
+                StateFact::EditorPatchQueued {
+                    document_hash: document_hash.into(),
+                    patch_id: patch_id.into(),
+                    actor_generation: generation,
+                },
+            ),
+            state_event(
+                format!("{prefix}:proof-insufficient"),
+                StateFact::IpcProofInsufficient {
+                    document_hash: document_hash.into(),
+                    patch_id: patch_id.into(),
+                    actor_generation: generation,
+                    reason: reason.into(),
+                },
+            ),
+            state_event(
+                format!("{prefix}:retry-requested"),
+                StateFact::EditorPatchRetryRequested {
+                    document_hash: document_hash.into(),
+                    patch_id: patch_id.into(),
+                    actor_generation: generation,
+                    reason: "retry_without_disk_write".into(),
+                },
+            ),
+            state_event(
+                format!("{prefix}:editor-generation-{}", generation + 1),
+                StateFact::OwnerGenerationChanged {
+                    document_hash: document_hash.into(),
+                    owner: StateOwner::EditorIpcBridge,
+                    generation: generation + 1,
+                },
+            ),
+            state_event(
+                format!("{prefix}:patch-requeued"),
+                StateFact::EditorPatchQueued {
+                    document_hash: document_hash.into(),
+                    patch_id: patch_id.into(),
+                    actor_generation: generation + 1,
+                },
+            ),
+            state_event(
+                format!("{prefix}:patch-acked"),
+                StateFact::EditorAckObserved {
+                    document_hash: document_hash.into(),
+                    patch_id: patch_id.into(),
+                    actor_generation: generation + 1,
+                },
+            ),
+        ]
+    }
+
+    fn route_started_events(
+        prefix: &str,
+        document_hash: &str,
+        pane_id: &str,
+        generation: u64,
+    ) -> Vec<StateEvent> {
+        vec![
+            state_event(
+                format!("{prefix}:route-generation"),
+                StateFact::OwnerGenerationChanged {
+                    document_hash: document_hash.into(),
+                    owner: StateOwner::RouteDispatch,
+                    generation,
+                },
+            ),
+            state_event(
+                format!("{prefix}:route-pane"),
+                StateFact::RoutePaneObserved {
+                    document_hash: document_hash.into(),
+                    pane_id: pane_id.into(),
+                    actor_generation: generation,
+                },
+            ),
+            state_event(
+                format!("{prefix}:route-prompt-ready"),
+                StateFact::RouteReadinessObserved {
+                    document_hash: document_hash.into(),
+                    actor_generation: generation,
+                    event: RouteReadinessEvent::PromptReady,
+                },
+            ),
+            state_event(
+                format!("{prefix}:route-started"),
+                StateFact::RouteReadinessObserved {
+                    document_hash: document_hash.into(),
+                    actor_generation: generation,
+                    event: RouteReadinessEvent::DispatchAuthorized,
+                },
+            ),
+        ]
+    }
+
+    fn route_proven_events(
+        prefix: &str,
+        document_hash: &str,
+        generation: u64,
+        proof_id: &str,
+    ) -> Vec<StateEvent> {
+        vec![
+            state_event(
+                format!("{prefix}:route-accepted"),
+                StateFact::RouteReadinessObserved {
+                    document_hash: document_hash.into(),
+                    actor_generation: generation,
+                    event: RouteReadinessEvent::DispatchAccepted,
+                },
+            ),
+            state_event(
+                format!("{prefix}:route-proven"),
+                StateFact::DispatchProofObserved {
+                    document_hash: document_hash.into(),
+                    actor_generation: generation,
+                    proof_id: proof_id.into(),
+                },
+            ),
+            state_event(
+                format!("{prefix}:proof-marker-observed"),
+                StateFact::ProofMarkerObserved {
+                    document_hash: document_hash.into(),
+                    marker: "dispatch_start".into(),
+                    source: proof_id.into(),
+                },
+            ),
+        ]
+    }
+
+    fn route_blocked_events(
+        prefix: &str,
+        document_hash: &str,
+        generation: u64,
+        reason: &str,
+    ) -> Vec<StateEvent> {
+        vec![
+            state_event(
+                format!("{prefix}:route-blocked"),
+                StateFact::RouteReadinessObserved {
+                    document_hash: document_hash.into(),
+                    actor_generation: generation,
+                    event: RouteReadinessEvent::Blocked,
+                },
+            ),
+            state_event(
+                format!("{prefix}:proof-marker-disproved"),
+                StateFact::ProofMarkerDisproved {
+                    document_hash: document_hash.into(),
+                    marker: "dispatch_start".into(),
+                    source: reason.into(),
+                },
+            ),
+        ]
     }
 
     #[test]
@@ -1533,6 +1786,143 @@ mod tests {
         assert_eq!(
             doc.transport.patches["patch-1"].phase,
             TransportPatchPhase::Acked
+        );
+    }
+
+    #[test]
+    fn cross_editor_live_ipc_projection_summaries_match_bridge_contract() {
+        let mut events = Vec::new();
+        events.extend(socket_ack_events(
+            "jb-socket",
+            "doc-jb-socket",
+            "jb-socket-patch",
+            11,
+        ));
+        events.extend(route_started_events(
+            "jb-socket",
+            "doc-jb-socket",
+            "%11",
+            31,
+        ));
+        events.extend(route_proven_events(
+            "jb-socket",
+            "doc-jb-socket",
+            31,
+            "jb-socket-dispatch",
+        ));
+
+        events.extend(file_retry_then_ack_events(
+            "jb-file",
+            "doc-jb-file",
+            "jb-file-patch",
+            21,
+            "socket_ack_timeout",
+        ));
+        events.extend(route_started_events("jb-file", "doc-jb-file", "%12", 32));
+        events.extend(route_blocked_events(
+            "jb-file",
+            "doc-jb-file",
+            32,
+            "route blocked before retry proof",
+        ));
+
+        events.extend(file_retry_then_ack_events(
+            "vscode-file",
+            "doc-vscode-file",
+            "vscode-file-patch",
+            41,
+            "file_ipc_timeout",
+        ));
+        events.extend(route_started_events(
+            "vscode-file",
+            "doc-vscode-file",
+            "%13",
+            33,
+        ));
+        events.extend(route_proven_events(
+            "vscode-file",
+            "doc-vscode-file",
+            33,
+            "vscode-file-dispatch",
+        ));
+
+        let projection = StateBackboneProjection::from_events(&events);
+
+        let jb_socket = projection.document("doc-jb-socket").unwrap();
+        assert_eq!(
+            jb_socket.transport.patches["jb-socket-patch"].phase,
+            TransportPatchPhase::Acked
+        );
+        assert_eq!(
+            jb_socket.route.readiness,
+            RouteReadinessPhase::DispatchProven
+        );
+        assert!(
+            jb_socket
+                .route
+                .dispatch_proofs
+                .contains("jb-socket-dispatch")
+        );
+        assert_eq!(
+            serde_json::to_value(jb_socket.projection_summary()).unwrap(),
+            serde_json::json!({
+                "routeReadiness": "dispatch_proven",
+                "routePaneId": "%11",
+                "latestTransportPatchId": "jb-socket-patch",
+                "latestTransportPhase": "acked",
+                "proofMarkers": 1,
+            })
+        );
+        assert_eq!(
+            jb_socket.projection_summary().compact(),
+            "route=dispatch_proven pane=%11 transport=jb-socket-patch:acked proof_markers=1"
+        );
+
+        let jb_file = projection.document("doc-jb-file").unwrap();
+        assert_eq!(
+            jb_file.transport.patches["jb-file-patch"].phase,
+            TransportPatchPhase::Acked
+        );
+        assert_eq!(
+            jb_file.transport.last_unproven_reason.as_deref(),
+            Some("socket_ack_timeout")
+        );
+        assert_eq!(
+            jb_file.transport.last_retry_reason.as_deref(),
+            Some("retry_without_disk_write")
+        );
+        assert_eq!(jb_file.route.readiness, RouteReadinessPhase::Blocked);
+        assert_eq!(
+            jb_file.proof.markers["dispatch_start"].phase,
+            ProofGatePhase::Disproved
+        );
+        assert_eq!(
+            jb_file.projection_summary().compact(),
+            "route=blocked pane=%12 transport=jb-file-patch:acked proof_markers=1"
+        );
+
+        let vscode_file = projection.document("doc-vscode-file").unwrap();
+        assert_eq!(
+            vscode_file.transport.patches["vscode-file-patch"].phase,
+            TransportPatchPhase::Acked
+        );
+        assert_eq!(
+            vscode_file.transport.last_unproven_reason.as_deref(),
+            Some("file_ipc_timeout")
+        );
+        assert_eq!(
+            vscode_file.route.readiness,
+            RouteReadinessPhase::DispatchProven
+        );
+        assert!(
+            vscode_file
+                .route
+                .dispatch_proofs
+                .contains("vscode-file-dispatch")
+        );
+        assert_eq!(
+            vscode_file.projection_summary().compact(),
+            "route=dispatch_proven pane=%13 transport=vscode-file-patch:acked proof_markers=1"
         );
     }
 

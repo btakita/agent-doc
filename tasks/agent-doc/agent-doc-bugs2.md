@@ -39,7 +39,7 @@ done
 Compacted content:
 - Archived 19 response topic(s): do #ipcproofcloseout, #crdtreset1, and #routeblockux1; stalled Run Agent Doc recovery; dropped recovery evidence prompts; 16 more
 - Prior summary/context: ❯ - JetBrains `TerminalUtilTest.protected prompt input route refusal is actionable not persistent failure` ❯ - `make ...
-<!-- agent:boundary:e32cb9ac -->
+<!-- agent:boundary:3e23e0eb -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -71,6 +71,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#71wr] Do we have full IPC integration using lazily-rs, lazily-kt (JB Plugin), lazily-js (VS Code Plugin)? If not, what are the #next-steps?
 <!-- /agent:backlog -->
 
 ## Review

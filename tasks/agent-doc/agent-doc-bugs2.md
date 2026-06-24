@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -32,6 +32,16 @@ done
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+❯ - Recent `tasks/agent-doc/agent-doc-bugs2.md` JetBrains route attempts in `.agent-doc/state/editor-route-attempts/tasks__agent-doc__agent-doc-bugs2.md-b9c648a4.txt` completed quickly: 1277ms, 1091ms, 277ms, 270ms, 229ms, and 1267ms for the successful samples I checked.
+❯ - The current installed submit path already has the quick retry behavior: a live `equityfundingsource.md` attempt logged `route_submit_issue ... issue=prompt_not_submitted` at 1059ms, immediately sent `route_submit_resubmit ... key=Enter`, and then accepted in 152ms.
+❯ - The current `agent-doc-bugs2.md` owner is not submit-ready right now: `agent-doc session status` reports `actor state=starting`, `live_pane: state=alive-busy`, `prompt_ready=false`, tail `tab to queue message`, and the session log says `idle_queue_watch_skipped ... reason=editor_typing_active`.
+❯ - I tried the safe refresh path, `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md`; it correctly refused because the actor is still starting and the document changed after the last committed cycle. I did not use `--force`.
+❯ - `agent-doc preflight tasks/agent-doc/agent-doc-bugs2.md`
+❯ - `agent-doc reset --from-current tasks/agent-doc/agent-doc-bugs2.md` after the visible file compacted and stale sidecars blocked finalize
+❯ - `agent-doc session status tasks/agent-doc/agent-doc-bugs2.md`
+❯ - `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md` (safe refusal)
+❯ - `tail -n 80 .agent-doc/state/editor-route-attempts/tasks__agent-doc__agent-doc-bugs2.md-b9c648a4.txt`
+❯ - `rg` over `.agent-doc/logs/ops.log` for route submit/dispatch markers
 ### Session Summary
 
 ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-055704.md`*
@@ -49,13 +59,34 @@ Affected component: editor IPC / writeback
 ```text
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=c695cb4e-a178-426a-af2d-54597f475e60 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=14852 candidate_hash=2c87e52bd79c83bbcb1c24d2fb1a447ceb2c3bbef71d9b4ef5b20ead37ca2bdd content_ours_len=15094 content_ours_hash=17e2163450eca7e718edd528de557795088ee212beddd6ac5048f8918c88b344 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782280562177
 ```
-<!-- agent:boundary:7e678985 -->
+
+### Re: JB `Run Agent Doc` still does not quickly submit the prompt — gpt-5
+
+> JB `Run Agent Doc` still does not quickly submit the prompt.
+
+I checked this against the current code and the live artifacts rather than making another blind route change. No source changes this cycle.
+
+What the current logs show:
+- Recent `tasks/agent-doc/agent-doc-bugs2.md` JetBrains route attempts in `.agent-doc/state/editor-route-attempts/tasks__agent-doc__agent-doc-bugs2.md-b9c648a4.txt` completed quickly: 1277ms, 1091ms, 277ms, 270ms, 229ms, and 1267ms for the successful samples I checked.
+- The current installed submit path already has the quick retry behavior: a live `equityfundingsource.md` attempt logged `route_submit_issue ... issue=prompt_not_submitted` at 1059ms, immediately sent `route_submit_resubmit ... key=Enter`, and then accepted in 152ms.
+- The current `agent-doc-bugs2.md` owner is not submit-ready right now: `agent-doc session status` reports `actor state=starting`, `live_pane: state=alive-busy`, `prompt_ready=false`, tail `tab to queue message`, and the session log says `idle_queue_watch_skipped ... reason=editor_typing_active`.
+- I tried the safe refresh path, `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md`; it correctly refused because the actor is still starting and the document changed after the last committed cycle. I did not use `--force`.
+
+Conclusion: for this document, the current symptom is the guarded busy/starting state of the live owner, not an unsubmitted prompt path in the route code. The right next live test is after the current owner reaches `prompt_ready=true` or the queued turn fully closes/recycles. Also, from the prior item, the updated JetBrains plugin zip still needs an interactive IDE-profile install before plugin-side markers are available.
+
+Commands/proof:
+- `agent-doc preflight tasks/agent-doc/agent-doc-bugs2.md`
+- `agent-doc reset --from-current tasks/agent-doc/agent-doc-bugs2.md` after the visible file compacted and stale sidecars blocked finalize
+- `agent-doc session status tasks/agent-doc/agent-doc-bugs2.md`
+- `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md` (safe refusal)
+- `tail -n 80 .agent-doc/state/editor-route-attempts/tasks__agent-doc__agent-doc-bugs2.md-b9c648a4.txt`
+- `rg` over `.agent-doc/logs/ops.log` for route submit/dispatch markers
+<!-- agent:boundary:4718be18 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: JB `Run Agent Doc` still does not quickly submit the prompt.
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

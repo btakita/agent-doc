@@ -56,7 +56,7 @@ In every branch, route's "deferring to boundary agent restart" is the last thing
 **Next step (captured):** added `#actorswitchdefer` (top of backlog) + plan `tasks/agent-doc/plan-actor-switch-defer-recovery.md`. Two parts — (A) enrich the route bail with supervisor health/pause state and a concrete `agent-doc session restart-supervisor <FILE>` recovery hint (small, safe, unblocks today); (B) SimWorld proof that the idle-watch actually fires the restart when deferred (or surfaces paused/stuck), plus reconciling SPEC.md:141 (which still says "fall back to create/rebind," contradicting the shipped defer). The fail-closed rule for healthy actors stays — this only fixes the message and proves the deferred path.
 
 Note: the queue on this doc is still `queue_paused` (stale supervisor pause from `#rt83/#qflood`; we're now on 0.34.43, well past the "install 0.34.20 + recycle supervisor" resume condition). `#mrhqrestore` and `#ipcqproof` remain gated. Say the word and I'll (1) run Part A of `#actorswitchdefer` in a focused cycle, and/or (2) recycle the supervisor so `#mrhqrestore`/`#ipcqproof` can drain.
-<!-- agent:boundary:da548d3d -->
+<!-- agent:boundary:188a8580 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -67,14 +67,22 @@ Note: the queue on this doc is still `queue_paused` (stale supervisor pause from
 - Still getting JB `File Cache Conflict` dialogs.
 - Opencode responses are reverse ordering numeric lists.
 ---
-JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op
+JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. Th
 ```
 resync: pruned 2 stale session(s)
 [route] target tmux session: 0
 Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
+```
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 
+Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
 ---
-- 🚧 do [#mrhqrestore]
+- do [#mrhqrestore]
 - do [#ipcqproof]
 - do [#actorswitchdefer]
 <!-- /agent:queue -->
@@ -104,7 +112,7 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#actorswitchdefer] Route defer on harness switch (codex→opencode) dead-ends with no operator recovery: enrich the `defer_to_boundary_restart` bail in route/authoritative_actor.rs with supervisor state + a `session restart-supervisor <FILE>` hint, and add SimWorld proof the idle-watch fires the restart (or surfaces paused/stuck). Plan: tasks/agent-doc/plan-actor-switch-defer-recovery.md
-- [ ] [#mrhqrestore] Improve agent-doc queue recover-lost for git-history-only queue deletions: produce an operator-reviewed restoration patch or explicit non-restorable recommendation for foreign-owned prompts such as the monsterrodholders test-email CSV row.
+- [ ] 🚧 [#mrhqrestore] Improve agent-doc queue recover-lost for git-history-only queue deletions: produce an operator-reviewed restoration patch or explicit non-restorable recommendation for foreign-owned prompts such as the monsterrodholders test-email CSV row.
 - [ ] [#ipcqproof] Fix IPC proof dogfood closeout recovery: add a regression for queue-consume socket_ack_content / live_prompt_drift_after_preflight ACK mismatch, ensure diagnostics do not become unresolved prompt-bearing exchange items, and keep fail-closed recovery on the binary-owned path.
 <!-- /agent:backlog -->
 

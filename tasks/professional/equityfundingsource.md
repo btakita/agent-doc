@@ -108,7 +108,34 @@ fix(admin): let admins mark applications complete without e-signature
 
 Add an admin-only submitted/Complete transition for full applications once required borrower, property, and declaration data is present, while keeping borrower submit e-signature gated and approval/TMO writeback gated separately. Updates the embedded full-application decision UI, pipeline Complete-column handling, and focused admin application tests; Worker version f9b7b678-f7f2-4f40-9216-ef12a8e3ca89 is deployed.
 ```
-<!-- agent:boundary:c23a2087 -->
+❯ **IPC proof issue dogfood log**
+
+❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+❯ Issue class: `ipc_proof_insufficient`
+❯ Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=6411550e-32b4-4fcd-a91d-0e65913c05f1 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782322508129
+```
+
+### Re: IPC Proof Issue Dogfood Log — gpt-5
+
+> **Queue prompt:**
+>
+> From https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, remove the "Open Page" button. Focus on the 1st actionable item that is not the close button...Activity History > View All in this dialog.
+
+
+Recorded the automatic IPC proof issue note from the recovered writeback. No EFS application code changes were made in this closeout; it exists only to commit the dogfood note cleanly so the active queue can continue.
+
+Verification:
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` recovered the prior response and surfaced the IPC proof diagnostic.
+- `agent-doc session-check` reported the dogfood note as uncommitted exchange drift before this closeout.
+
+Confidence: high.
+Escalation: none.
+
+<!-- agent:boundary:cd0da0fb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,7 +156,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, the admin should be able to advance the application by adding the necessary data. The e-signature is optional to advance the application to the Complete step.~~
-- From https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, remove the "Open Page" button. Focus on the 1st actionable item that is not the close button...Activity History > View All in this dialog.
+- ~~From https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, remove the "Open Page" button. Focus on the 1st actionable item that is not the close button...Activity History > View All in this dialog.~~
 - deploy
 <!-- /agent:queue -->
 

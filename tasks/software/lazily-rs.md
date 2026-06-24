@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -171,7 +171,7 @@ Rewrote `mail/drafts/linkedin/2026-06-24-lazily-state-machine.md` in Brian's voi
 FIRST COMMENT (the link) and the image-attach note (Figure 3, themed render) kept; image note also stripped of its em-dash.
 
 **Committed + pushed:** `mail` `cbb78ac..1919597` → `btakita/mail`; superproject `979e10db7` → `btakita/agent-loop`. The gated posting follow-up stays tracked as `#lilazilysmpost` (operator posts via `corky linkedin` + attaches the themed render).
-<!-- agent:boundary:2f398162 -->
+<!-- agent:boundary:c6b5efb6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -180,6 +180,7 @@ FIRST COMMENT (the link) and the image-attach note (Figure 3, themed render) kep
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Submit the draft post to Linked In. Do not publish yet so I can review. Show me the link to the post, with the comment, and image.
 <!-- /agent:queue -->
 
 ## Backlog

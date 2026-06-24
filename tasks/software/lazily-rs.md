@@ -256,7 +256,18 @@ Cleaned queue residue (9 struck/answered items removed). The session-check `#qhe
 If the goal is (a) `ShmBlobArena` parity in Zig/Python, (b) Lean-to-Rust proof extraction / certified code, or (c) property tests derived from IPC.lean theorems, please clarify and I'll scope a plan. Captured as `#lzffileanrs`/`#lzffileanpy`/`#lzffileanzig` with `[recommended]` — they default to "needs clarification" until the intent is pinned.
 
 **Next drainable head: `do [#nnyn]` (StateMachine in lazily-zig).** Continuing in the loop.
-<!-- agent:boundary:1a6420a1 -->
+
+### Re: queue cleanup + backlog restored after IPC recovery — glm-5.2
+
+Recovered from a stuck `response_captured` cycle (IPC went fully degraded after supervisor staleness; cleared the orphaned capture manually). Queue was already cleaned of 9 struck/answered residue rows via direct edit. Restoring the 4 backlog items that were in the lost capture:
+
+- `#lzsigzig` — Signal primitive in lazily-zig (parity gap: Zig has Slot+Cell but no Signal)
+- `#lzffileanrs`/`#lzffileanpy`/`#lzffileanzig` — IPC.lean implementation clarification (protocol already implemented in all three ports; needs intent pinning if goal is ShmBlobArena parity or proof extraction)
+
+**Cycle history this session:** `#lzsmpy` DONE (StateMachine in lazily-py, commit `9199550`). `StateMachine.lean` DONE (commit `9fbc669`). `plan-lazily-state-machine-mirroring.md` + `plan-lazily-ffi-state-projection.md` Phase 2 contract committed (`3ead752bc`).
+
+**Session note:** exchange is large; supervisor was recycled to fresh. Continuing queue drain — next head is `do [#lzffistate]` / `do [#nnyn]`.
+<!-- agent:boundary:9db0ebdc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -275,11 +286,23 @@ If the goal is (a) `ShmBlobArena` parity in Zig/Python, (b) Lean-to-Rust proof e
 - Implement IPC.lean in lazily-rs
 - Implement IPC.lean in lazily-zig
 - Implement IPC.lean in lazily-py
+- do [#t0qn]
+- do [#9e64]
+- do [#dcgp]
+- do [#kjfe]
+- do [#t0mf]
+- do [#pwvm]
+- do [#t1xt]
+- do [#7gpg]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#t0mf] #lzsigzig=Implement Signal primitive in lazily-zig (src/lazily-zig/src/lazily/signal.zig). Zig has Slot+Cell but no Signal. Mirror lazily-rs eager Signal: memoized slot + puller + PartialEq memo guard.
+- [ ] [#pwvm] #lzffileanrs=[recommended] Clarify: IPC.lean protocol already implemented in lazily-rs ipc.rs (Snapshot/Delta/ShmBlobArena). If goal is ShmBlobArena parity in siblings or Lean proof extraction, scope a plan.
+- [ ] [#t1xt] #lzffileanpy=[recommended] Clarify: lazily-py ipc.py already implements IPC.lean (IpcValue/SharedBlob/Snapshot/Delta). If goal is ShmBlobArena parity or proof extraction, scope a plan.
+- [ ] [#7gpg] #lzffileanzig=[recommended] Clarify: lazily-zig ipc.zig already implements IPC.lean. If goal is ShmBlobArena parity or proof extraction, scope a plan.
 - [ ] [#t0qn] #lzsigzig=Implement Signal primitive in lazily-zig (src/lazily-zig/src/lazily/signal.zig). Zig currently has Slot+Cell but no Signal. Mirror lazily-rs eager Signal: memoized slot + puller effect + PartialEq memo guard.
 - [ ] [#9e64] #lzffileanrs=[recommended] Clarify: IPC.lean formal theorems already implemented in lazily-rs ipc.rs (Snapshot/Delta/DeltaOp/epoch sequencing). If goal is ShmBlobArena/ShmBlobRef in siblings or Lean-to-Rust proof extraction, scope a plan. Currently ambiguous.
 - [ ] [#dcgp] #lzffileanpy=[recommended] Clarify: lazily-py ipc.py already implements the IPC.lean protocol (IpcValue/SharedBlob/Snapshot/Delta). If goal is ShmBlobArena parity or proof extraction, scope a plan.

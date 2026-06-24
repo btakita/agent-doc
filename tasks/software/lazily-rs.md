@@ -150,7 +150,28 @@ Drafted `mail/drafts/linkedin/2026-06-24-lazily-state-machine.md` (matching the 
 **Committed + pushed:** `mail` submodule `8c1f562..cbb78ac` → `btakita/mail`; superproject gitlink `cf15c5bbe` → `btakita/agent-loop` (pushed).
 
 **Follow-up:** posting itself is operator-gated (needs `corky linkedin` + the themed image render) → filed as gated review `#lilazilysmpost`, mirroring the `#kabc` architecture-post flow.
-<!-- agent:boundary:ac5bc405 -->
+
+### Re: LinkedIn teaser — rewritten in Brian's voice (AI tells removed) — DONE — glm-5.2
+
+> **Queue prompt:**
+>
+> Edited the LinkedIn teaser draft to remove AI tells. Use my natural "voice" in this post.
+
+Rewrote `mail/drafts/linkedin/2026-06-24-lazily-state-machine.md` in Brian's voice, calibrated against the `6feb206` forward note ("tighten to Brian's voice") and the published slot-cell-signal post.
+
+**AI tells removed:**
+- **Em-dashes** — all gone (0 in the body). Brian explicitly strips them; the forward note uses commas/periods instead.
+- **"The bug: / The fix:" essay labels** — replaced with plain narrative paragraphs.
+- **Rhetorical-question hook** ("So why do so many end up as a scattered pile…") — dropped. Now opens direct: "agent-doc runs an AI agent through a response cycle…".
+- **Formulaic engagement question** at the close — dropped; ends on the conceptual line.
+- **Flowery/dramatic transitions** ("It didn't stop at one machine", "composing into", "bolted onto") — replaced with plain first-person ("The pattern scaled further than I expected").
+
+**Voice now:** first-person, concrete, modest. Plain connectors (`and`, `so`, `because`). Short sentences. Same technical substance (the lost-update race, the one pure table, `Some`/`None`, sticky terminals, the six-machine backbone) in a conversational register matching the forward note.
+
+FIRST COMMENT (the link) and the image-attach note (Figure 3, themed render) kept; image note also stripped of its em-dash.
+
+**Committed + pushed:** `mail` `cbb78ac..1919597` → `btakita/mail`; superproject `979e10db7` → `btakita/agent-loop`. The gated posting follow-up stays tracked as `#lilazilysmpost` (operator posts via `corky linkedin` + attaches the themed render).
+<!-- agent:boundary:2f398162 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -159,7 +180,6 @@ Drafted `mail/drafts/linkedin/2026-06-24-lazily-state-machine.md` (matching the 
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Edited the LinkedIn teaser draft to remove AI tells. Use my natural "voice" in this post.
 <!-- /agent:queue -->
 
 ## Backlog

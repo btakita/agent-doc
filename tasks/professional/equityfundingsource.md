@@ -80,7 +80,29 @@ Deployment result: Worker Version ID `44e71a7d-6573-421e-b8d5-86e9aaafe8d6`, URL
 Post-deploy verification: remote migrations still show `No migrations to apply`, `/` returns HTTP `200`, and the requested admin lender-pipeline URL returns HTTP `303` at the Cloudflare Access/admin-auth boundary. No additional code paths changed in this deploy-only closeout.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:23c0cad9 -->
+
+### Re: Direct Dialog Initial Focus And Deploy — gpt-5
+
+> **Queue prompt:** When loading https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c&dialog=advance-lender or any other dialog directly, the 1st actionable button/field/details is not selected. Ensure the actionable item is set on load.
+
+Implemented in EFS. `PortalModal` now keeps its accessibility panel-focus fallback, but it first checks whether focus is already inside the dialog panel; if the shared `use_dialog_action_navigation_` hook has focused the first actionable descendant, the panel no longer steals focus back on the next animation frame. This preserves initial action focus for direct URL restores such as `dialog_user_id` / `dialog=*`, and still leaves the modal panel focus fallback for dialogs without an inner focus target.
+
+Changed paths: `src/equityfundingsource-dev/lib/ui--browser--efs/portal/shared/ui.tsx`, `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`, `src/equityfundingsource-dev/prds/investor-pipeline-admin.md`, `src/equityfundingsource-dev/tests/admin-pipeline.test.ts`, `src/equityfundingsource-dev/tests/admin-investor-pipeline.test.ts`, `src/equityfundingsource-dev/tests/portal-table-dialog.test.ts`, plus rebased test-contract updates in `src/equityfundingsource-dev/tests/investor-portal-e2e.test.ts` and `src/equityfundingsource-dev/tests/lender-account-messages.test.ts` for the two remote commits that landed before push. Parent repo pointer updated at `src/equityfundingsource-dev`.
+
+Verification: `bun test tests/admin-pipeline.test.ts tests/admin-investor-pipeline.test.ts tests/portal-table-dialog.test.ts` passed; after rebasing onto the remote commits, `bun test tests/investor-portal-e2e.test.ts tests/lender-account-messages.test.ts` passed; final `make check` passed with 1184 tests plus app build and worker build; `git diff --check` passed. GitHub Actions check: `gh run list --workflow CI --limit 1` reported no workflow named `CI`, and `gh workflow list` returned no workflows.
+
+Committed and pushed EFS commit `6672e83` (`fix(admin): preserve dialog action focus on direct open`) to `btakita/equityfundingsource-dev:main`. Committed and pushed parent pointer commit `72474a802` (`chore(efs): advance dialog focus fix pointer`) to `btakita/agent-loop:main`.
+
+> **Queue prompt:** deploy
+
+Deployed through `make deploy`. Pre-deploy checks showed clean synced EFS `main`, no pending remote D1 migrations, readable D1 info for DB `280e1539-b940-4c59-8988-fbed63c12ac0`, and current D1 Time Travel bookmark `00000506-00000042-00005094-092d7b3b17313cfd2aaac4f35b1009a8`.
+
+Deployment completed at `https://equityfundingsource.brian-takita.workers.dev` with Worker Version ID `fb2333f9-9752-44ac-a498-6da0b78f0890`.
+
+Post-deploy checks: remote D1 migrations still report `No migrations to apply`, `/` returns HTTP `200`, and the requested direct admin lender-pipeline dialog URL returns HTTP `303` to `/login?role=admin&next=...`, as expected at the admin-auth boundary. I did not perform authenticated live browser verification inside the admin page.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:fa7fa962 -->
 <!-- /agent:exchange -->
 ###
 <!--

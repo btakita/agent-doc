@@ -213,7 +213,23 @@ Verification passed:
 - latest GitHub Actions CI check was green: run `28121997991`, `completed success`, workflow `CI`, commit title `test: cover protected prompt route refusal`.
 
 Install note: the VS Code plugin needs the `0.2.32` update installed before these UI command changes appear in the editor.
-<!-- agent:boundary:229c7191 -->
+
+### Re: What are #next-steps to fix agent-doc bugs? — gpt-5
+
+> **Queue prompt:**
+> :pushpin: What are #next-steps to fix agent-doc bugs?
+
+Recommended next steps, in order:
+
+1. Install and smoke-test the VS Code `0.2.32` extension update from the parity fix, then verify `Run Agent Doc`, Fix Document, Load Tmux Window, and Interrupt and Clear Session Context from VS Code against a live session.
+2. Fix the prompt-prefix/orchestration classifier issue next. Current preflight output is still misclassifying prior assistant closeout bullets as fresh user orchestration requests, so `#promptprefixorch1` should stay high priority.
+3. Add the dogfooding backlog-target configuration so auto-filed bug items can be routed to this document by default for agent-loop instead of landing in whichever session happened to detect the issue.
+4. Add the live `🚧` current-item annotation for queue/backlog/icebox items so active work is visible during a turn and stale active markers get cleaned up reliably at closeout.
+5. Reconcile `#xgdn` against the completed `#sz4a` route-dispatch proof work. The semantic-completion warning says it is probably already resolved, so the next action should be proof-based closeout or a narrowly scoped remaining-delta item.
+6. After the queue-drain fixes above, compact or repair the exchange drift only through the binary-owned path. The document still has historical reordered assistant fragments, and those are causing noisy preflight plans, but they should not be manually edited around the closeout machinery.
+
+No repo files changed for this planning-only queue item.
+<!-- agent:boundary:6cbad6ee -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -221,7 +237,7 @@ Install note: the VS Code plugin needs the `0.2.32` update installed before thes
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: [#sz4a]~~
 - ~~:pushpin: JB `Run Agent Doc` on monsterrodholders.md did not submit. Please diagnose and fix.~~
-- :pushpin: What are #next-steps to fix agent-doc bugs?
+- ~~:pushpin: What are #next-steps to fix agent-doc bugs?~~
 - ~~:pushpin: Ensure the VS Code plugin has parity with the JB plugin.~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: For tasks added from dogfooding issues, please add a configuration to select the agent document to write the backlog items to. The default is the current document. For agent-loop configure the document to this document.
 - :pushpin: Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.

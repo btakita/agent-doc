@@ -252,7 +252,38 @@ Verification:
 
 Confidence: high for backlog capture; implementation remains queued as `do [#3ygp]`.
 Escalation: none.
-<!-- agent:boundary:a88088bb -->
+
+### Re: :pushpin: do [#qstrikework] — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#qstrikework]
+
+Implemented and shipped `#qstrikework`.
+
+What changed:
+- `queue_consumption_allowed_for_response` now requires exact proof before striking a queue head.
+- Free-text heads are consumed only when the current response explicitly quotes/targets that same queue prompt.
+- Id-backed heads accept explicit same-id closeout signals, including `--done`, `--pending-gate`, `--pending-edit`, and now `--review-resolve`.
+- Generic repair/no-op responses and unrelated exchange answers leave the active free-text queue head runnable.
+
+Commits:
+- `src/agent-doc` `b0a6f1eb` (`fix: require exact queue head proof before strike`), pushed to `origin/main`.
+- Parent repo `d0518761b` (`chore: update agent-doc submodule`), pushed to `origin/main`.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test -p agent-doc-orchestration consume_decision -- --nocapture`
+- `cargo test -p agent-doc finalize_echoes_consumed_free_text_queue_prompt_into_response --test finalize_integration -- --nocapture`
+- `cargo test -p agent-doc finalize_keeps_free_text_queue_head_when_cycle_answers_foreign_exchange_prompt --test finalize_integration -- --nocapture`
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
+- Clean worktree `make check`: clippy, 5048 nextest tests, doctests, and medium simulator passed.
+- `make install-full` installed the verified build from `/tmp/agent-doc-qstrikework`.
+- Latest `agent-doc` CI for this push was still `in_progress` when checked: run `28065394925`.
+- The parent repo has no workflow named `CI`.
+
+Note: the final preflight re-converged the queue so `#3ygp` is now the visible queue head. This closeout marks `#qstrikework` done and should leave `#3ygp` runnable rather than consuming it.
+<!-- agent:boundary:2a5b93be -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -263,7 +294,7 @@ Escalation: none.
 - :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#tb4q]: please check logs
 - :pushpin: do [#qcm1verify]: Use the logs to verify.
-- :pushpin: do [#qstrikework]
+- ~~:pushpin: do [#qstrikework]~~
 - :pushpin: do [#1jec]
 - do [#3ygp]
 <!-- /agent:queue -->
@@ -295,7 +326,6 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#3ygp] #jbrunautobug #agent-doc-bug Automatically file a session-doc backlog item when JetBrains Run Agent Doc route/dispatch fails after retries; include the saved route diagnostic path, failure class, pane/generation, dispatch/turn-start proof, and ops.log marker; dedupe repeated failures for the same document/stage; and have the supervisor detect whether the turn actually started after submit, retry Enter/submission until a bounded start proof is observed, then file the bug with evidence if the turn never starts.
-- [ ] [#qstrikework] #agent-doc-bug Prevent queue items from being struck unless the current cycle proves that exact head was worked: the response quotes the exact free-text head, or a --done/--pending-gate/--review-resolve targets the backing id. Add regression coverage for interrupted finalize recovery where a later operator-verify or free-text head is auto-quoted/struck while the response only repairs an earlier prompt.
 - [ ] [#qnodemerge4verify] [operator-verify] #agent-doc-bug #qnodemerge4wire Phase 4 live non-ASCII verification (agent-doc submodule 4650054c; base-hash FFI + JB 0.2.173 + VS Code 0.2.29 reporters committed+pushed, make check + JB gradle + tsc/tests green, cdylib lib-installed). REMAINING operator-gated: (1) install the JB plugin zip from disk (build/distributions/agent-doc-jetbrains-0.2.173-signed.zip) + restart IDEA, and install the VS Code .vsix (editors/vscode/agent-doc-0.2.29.vsix) + reload window — the Kotlin/TS reporter changes need a plugin reinstall, the cdylib FFI is already hot-reloaded. (2) In a live editor, type a NON-ASCII edit (e.g. insert/delete around "café 日本 😀") into a session doc while an agent merge runs; confirm ops.log shows editor_op_recorded kind=insert/delete with BYTE offsets (not UTF-16) and that the concurrent merge aligns to the real edit boundary (no character interleaving / mojibake). The base-hash gate + replay==theirs gate make a misaligned op fall back to the diff-guess safely, so a wrong offset cannot corrupt — verification confirms the ops are ACCEPTED (editor_ops_for_base match), not merely safe.
 - [ ] [#fbwireverify] [operator-verify] #agent-doc-bug #fbwireverify Live two-pane make tmux-ci acceptance for #fbwire/#fullboundary Phase 2 (agent-doc submodule 85b173fb; committed+pushed, make check green 4956, clippy clean; NOT installed per STOP-cutting-releases). After make install (cargo install --path . + cargo build --release + agent-doc lib-install) + agent-doc admin recycle at a recycle boundary, drive two live panes: (1) a slow-ACK editor drain must never pile IPC inflight > 1 — confirm ops.log shows convergence_gate_defer lines (unmet=inflight_drained) before each dispatch and NO inflight>1; (2) a wedged (no-ACK) editor must trip the bounded CONVERGENCE_GATE_TIMEOUT_MS (30s) → ERROR-level convergence_gate_force_disk_fallback severity=error + a loadable .agent-doc/playback/<hash>/<cycle>.json artifact, and the drain proceeds (never permanently stuck). Operator-gated: needs two live editor/CLI panes the driving session cannot host.
 - [ ] [#tb4q] [operator-verify] #qfocsupverify #agent-doc-bug Live-verify #qfocsup supervisor clear-and-continue for [focused-cycle] heads (agent-doc submodule 67829f3f; committed, make check green, NOT installed per STOP-cutting-releases). After make install + agent-doc admin recycle: with a [focused-cycle] head at the queue head and no in-session-drainable work, confirm the supervisor idle-watch force-clears the session (/clear) and re-dispatches the head to a fresh session instead of going idle. Proof: session-check ui_outcome=deferred_for_supervisor_drain on the yielding turn, then ops.log context_reset + go_drain_dispatch + a fresh agent draining the head.

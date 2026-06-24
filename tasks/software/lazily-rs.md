@@ -71,7 +71,21 @@ Verification: `tsift --envelope digest-runner --kind test --path . --shell-comma
 Preflight warnings: semantic completion candidates were reported for review `#h6qb` and backlog `#bcnf`; I left both unchanged because this cycle only handled the free-text lazily-js GitHub/submodule queue head.
 
 Escalation: no approval prompts were needed. Confidence: high; unrelated dirty worktree changes were left untouched.
-<!-- agent:boundary:7c53eb89 -->
+
+### Re: lazily-kt spec conformance — gpt-5
+
+> **Queue prompt:** Ensure lazily-kt follows the lazily-spec. It seems to be missing much of the spec.
+
+Done. I implemented the missing Kotlin IPC spec surface in `src/lazily-kt`: externally tagged `IpcMessage` Snapshot/Delta frames, `NodeState`, `IpcValue`, `ShmBlobRef`, all 7 `DeltaOp` variants, epoch gap handling via `DeltaApplyStatus`, JSON encode/decode helpers, and permission-filtered Snapshot/Delta views. The Kotlin binding now round-trips the canonical lazily-spec fixture shape instead of only exposing the agent-doc state-projection FFI wrapper.
+
+Changed paths in the submodule commit `f8d6a78 Add lazily IPC conformance model`: `.gitignore`, `AGENTS.md`, `Makefile`, `build.gradle.kts`, `src/main/kotlin/io/github/lazily/Ipc.kt`, `src/test/kotlin/io/github/lazily/IpcTest.kt`, `src/test/kotlin/io/github/lazily/IpcConformanceTest.kt`, and vendored `src/test/resources/conformance/*.json` fixtures. The submodule commit was pushed to `lazily-hub/lazily-kt/main`.
+
+Changed paths in the superproject: `src/lazily-kt` gitlink now points at `f8d6a78`. The gitlink update was committed as `62a04f52e Update lazily-kt spec conformance` and pushed to `origin/main`.
+
+Verification: `make check` passed in `src/lazily-kt`; root `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` passed with exit code 0; `gh run list --workflow CI --limit 1` reported no workflow named `CI` in both the superproject and `lazily-kt`, so there was no latest CI run to inspect.
+
+Preflight warnings: the semantic-completion candidates for review `#h6qb` and backlog `#bcnf` were unrelated to this lazily-kt queue head and were left unchanged. Escalation: no approval prompts were needed. Confidence: high. Existing unrelated dirty files in the superproject were left untouched.
+<!-- agent:boundary:09ae44cf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,7 +102,7 @@ Escalation: no approval prompts were needed. Confidence: high; unrelated dirty w
 - ~~:pushpin: do [#mes4]~~
 - ~~create a lazily-hub/lazily-kt github project. Make src/lazily-kt/ be a git submodule to the lazily-hub/lazily-kt project.~~
 - ~~create a lazily-hub/lazily-js github project. Make src/lazily-js be a git submodule to the lazily-hub/lazily-js~~
-- Ensure lazily-kt follows the lazily-spec. It seems to be missing much of the spec.
+- ~~Ensure lazily-kt follows the lazily-spec. It seems to be missing much of the spec.~~
 - Ensure lazily-js follows the lazily-spec...except for what + covered in [#bcnf].
 - :pushpin: do [#bcnf]
 - do [#t0qn]

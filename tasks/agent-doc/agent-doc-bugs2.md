@@ -96,14 +96,14 @@ Verification: `agent-doc queue consume`, `agent-doc queue sync`, and committed q
 The free-text monsterrodholders prompt was already answered in the audit response and should not remain an active queue head. I’m removing that stale head, restoring `#lzliveproof` as runnable because its backlog item is still open, and leaving the follow-up queue ordered as `#lzpkgwire`, `#lzliveproof`, `#mrhqrestore`, `#ipcqproof`.
 
 Verification: `agent-doc session-check`, `agent-doc plan`, and component reads of `exchange` and `queue` before repair. No repository code changed in this cycle.
-<!-- agent:boundary:0a6c58a8 -->
+<!-- agent:boundary:46beed7d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#71wr]~~
-- do [#lzpkgwire]
+- 🚧 do [#lzpkgwire]
 - do [#lzliveproof]
 - do [#mrhqrestore]
 - do [#ipcqproof]

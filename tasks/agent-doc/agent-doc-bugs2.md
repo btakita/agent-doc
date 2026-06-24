@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -39,12 +39,13 @@ done
 Compacted content:
 - Archived 19 response topic(s): do #ipcproofcloseout, #crdtreset1, and #routeblockux1; stalled Run Agent Doc recovery; dropped recovery evidence prompts; 16 more
 - Prior summary/context: ❯ - JetBrains `TerminalUtilTest.protected prompt input route refusal is actionable not persistent failure` ❯ - `make ...
-<!-- agent:boundary:3e23e0eb -->
+<!-- agent:boundary:5380a35d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 do [#71wr]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

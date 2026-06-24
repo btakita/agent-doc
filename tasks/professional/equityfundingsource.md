@@ -294,7 +294,15 @@ Verification: focused `bun test tests/full-application-resume-step.test.ts tests
 Deploy: `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `fe001a61-13cb-43eb-9ed0-bb165abe19fa`. Post-deploy checks: public root returned `HTTP 200`; the borrower application URL with `?step=2` returned the expected unauthenticated `HTTP 303` redirect to `/login?role=borrower&next=…step%3D2`, preserving the step through login.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:1466287a -->
+
+### Re: Struck Residue Drain — glm-5.2
+
+The struck queue head is already answered: the URL-per-step wizard navigation shipped (EFS `0137ceb`, pushed to `origin/main`) and deployed (Worker `fe001a61-13cb-43eb-9ed0-bb165abe19fa`) in the prior cycle. The `#ftstrike` marker confirms it was auto-struck because it was answered this session. Cleared the struck residue from the queue so it drains cleanly. No additional app work is needed.
+
+Changed paths this cleanup cycle: none in app code. Verification/deploy evidence remains the prior cycle: focused tests passed (`17 pass / 0 fail`), full `bun test` passed (`1198 pass / 0 fail`), app + Worker builds passed, post-deploy root returned `HTTP 200` and the borrower `?step=2` URL returned the expected unauthenticated `HTTP 303` login redirect with the step preserved.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:476f8ea4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -314,9 +322,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Each step in https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 should have a separate URL so the browser back button works. Same with the Lender wizard forms.~~
-- ~~deploy~~
-- ~~Each step in https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?lead_id=c907d851-8870-49aa-a6fc-66d393868ce1 should have a separate URL so the browser back button works. Same with the Lender wizard forms.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

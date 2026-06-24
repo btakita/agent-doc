@@ -2,7 +2,7 @@
 
 agent-doc is designed to be triggered from your editor with a single hotkey.
 
-Both official editor plugins also add lightweight visual distinction for agent-doc structures in markdown: component comments, patch comments, boundary markers, `### Re:` headings, `❯` prompts, tracked `[#id]` tags, and plain HTML scratch comments plus their bodies are highlighted directly in the editor, while fenced code examples are left alone.
+Both official editor plugins also add lightweight visual distinction for agent-doc structures in markdown: component comments, patch comments, boundary markers, `### Re:` headings, `❯` prompts, tracked `[#id]` tags, and plain HTML scratch comments plus their bodies are highlighted directly in the editor, while fenced code examples are left alone. Markdown emphasis is rendered with bold/italic font style while inheriting the editor's normal text color; underscores inside identifier words such as `foo_bar_baz` are not treated as emphasis delimiters.
 
 ## JetBrains (IntelliJ, WebStorm, etc.)
 

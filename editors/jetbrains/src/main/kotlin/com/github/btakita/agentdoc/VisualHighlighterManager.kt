@@ -175,9 +175,9 @@ class VisualHighlighterManager private constructor(private val project: Project)
                 fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.ITALIC)
             }
             // #editor-bold-markdown-rendering: render markdown emphasis inline.
-            "bold" -> baseAttrs(editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.IDENTIFIER))
+            "bold" -> baseAttrs(null)
                 .apply { fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.BOLD) }
-            "italic" -> baseAttrs(editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.IDENTIFIER))
+            "italic" -> baseAttrs(null)
                 .apply { fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.ITALIC) }
             "prompt" -> baseAttrs(
                 editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.STRING)

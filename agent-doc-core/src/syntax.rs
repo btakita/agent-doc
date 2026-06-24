@@ -135,13 +135,25 @@ fn scan_emphasis_runs(
     let is_marker = |i: usize, consumed: &[bool]| -> bool {
         is_marker_chars(i) && (0..mlen).all(|k| !consumed[i + k])
     };
+    let is_open_marker = |i: usize, consumed: &[bool]| -> bool {
+        is_marker(i, consumed)
+            && (marker != b'_'
+                || i == 0
+                || !is_ascii_identifier_continue(bytes[i.saturating_sub(1)]))
+    };
+    let is_close_marker = |i: usize, consumed: &[bool]| -> bool {
+        is_marker(i, consumed)
+            && (marker != b'_'
+                || i + mlen >= bytes.len()
+                || !is_ascii_identifier_continue(bytes[i + mlen]))
+    };
     let mut i = 0usize;
     while i + mlen <= bytes.len() {
-        if is_marker(i, consumed) {
+        if is_open_marker(i, consumed) {
             let mut j = i + mlen;
             let mut close = None;
             while j + mlen <= bytes.len() {
-                if is_marker(j, consumed) {
+                if is_close_marker(j, consumed) {
                     close = Some(j);
                     break;
                 }
@@ -168,6 +180,10 @@ fn scan_emphasis_runs(
         }
         i += 1;
     }
+}
+
+fn is_ascii_identifier_continue(byte: u8) -> bool {
+    byte == b'_' || byte.is_ascii_alphanumeric()
 }
 
 enum CommentKind<'a> {
@@ -449,6 +465,16 @@ mod tests {
         assert_eq!(
             tokens_of(doc, VisualTokenKind::Italic),
             vec!["*soft*".to_string(), "_under_".to_string()]
+        );
+    }
+
+    #[test]
+    fn underscore_emphasis_does_not_match_inside_identifiers() {
+        let doc = "foo_bar_baz foo__bar__baz _foo_ __foo__ word _bar_ next\n";
+        assert_eq!(tokens_of(doc, VisualTokenKind::Bold), vec!["__foo__"]);
+        assert_eq!(
+            tokens_of(doc, VisualTokenKind::Italic),
+            vec!["_foo_".to_string(), "_bar_".to_string()]
         );
     }
 

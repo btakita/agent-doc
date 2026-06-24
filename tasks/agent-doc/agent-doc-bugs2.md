@@ -74,14 +74,37 @@ Commits:
 - Parent repo: `289af6b66 chore: advance agent-doc submodule`
 
 Closeout note: this live session document had also been compacted to a `### Session Summary`, which is outside the narrower planned historical-`### Re:` trim classifier. I used `agent-doc reset --from-current --preserve-session` before closeout so the compacted visible document, snapshot, and CRDT sidecars were aligned without dropping session metadata.
-<!-- agent:boundary:7d0a152b -->
+
+### Re: #advr12 — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#advr12]
+
+
+Confirmed `#hap7/#gf5n` covers the same-node partial free-text queue duplication shape. No production guard was needed.
+
+I added a focused regression in `agent-doc-orchestration/src/merge.rs`: `crdt_merge_same_free_text_queue_node_extension_no_truncated_duplicate`. It models a snapshot containing a partial free-text queue item while the operator completes that same queue node and the agent appends exchange content. The merge keeps the completed operator queue line exactly once and does not retain the truncated partial sibling.
+
+Verification:
+- `cargo fmt`
+- `cargo test -p agent-doc-orchestration crdt_merge_same_free_text_queue_node_extension_no_truncated_duplicate -- --test-threads=2`
+- `cargo test -p agent-doc-orchestration crdt_merge -- --test-threads=2`
+- `make check`
+- `git -C src/agent-doc diff --check`
+- `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success` (`28074608395`).
+
+Commits:
+- `src/agent-doc`: `1223ebb8 test(merge): cover partial free-text queue extension`
+- Parent repo: `d7fc19723 chore: advance agent-doc submodule`
+<!-- agent:boundary:8d2b59dd -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: do [#advr11]~~
-- :pushpin: do [#advr12]
+- ~~:pushpin: do [#advr12]~~
 - :pushpin: do [#advr13]
 - :pushpin: do [#advr14]
 - :pushpin: do [#advr15]
@@ -118,7 +141,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr12] Advance original #ftqpartialdup: confirm whether #hap7/#gf5n fixes same-node partial free-text queue duplication; if not, add same-node/free-text conflict guard and regression for truncated duplicate queue prompts.
 - [ ] [#advr13] Advance original #8bfz: implement single live JB plugin consumer per document using a per-doc owner lease; non-owner windows defer patch apply + saveDocument, with plugin PatchWatcher + binary lease primitive and multi-window proof.
 - [ ] [#advr14] Advance original #qpauseux: finish paused-queue plugin UX with info/action notifications, Resume or restart-supervisor/resume actions, no raw error toast, plugin artifacts, and render/ops proof.
 - [ ] [#advr15] Advance original #jbdisprecycle: convert recycle-boundary Run Agent Doc verification into deterministic proof for exactly one `dispatch_start_proof` with submit and no stranded start_session failure; ops marker `route_dispatch_submit_recycle_settle`.

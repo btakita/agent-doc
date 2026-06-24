@@ -32,16 +32,6 @@ queue: start
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
-- **lazily-rs** — Phase 6 done; core/producer.
-- **lazily-kt** — `gradle test` ✓ (IPC conformance + agent-doc FFI state-projection client; NOT a reactive-core port).
-- **lazily-js** — `npm test` ✓ 27 pass (IPC + koffi FFI consumer).
-- **lazily-zig** — `zig build test` ✓ (full native impl: Cell/Signal/StateMachine/Context + ShmBlobArena).
-- **lazily-py** — `pytest` ✓ 72 pass (full native impl; v0.11.0 publish pending per review #kb9b).
-- **lazily-kt** (queue head): conformance tests only round-trip the fixture `wire` block; the `assertions` metadata (node_count, op_count, is_sequential, blob_*) is never validated generically — fixture drift passes silently. No `gradlew` wrapper (relies on system `gradle` → CI repro gap).
-- **lazily-js**: same conformance-assertions gap; `node_modules/` is committed to the submodule (bloat) — should be gitignored.
-- **lazily-zig**: open TODOs in `context.zig` (rename `.direct`→`.literal` :226/:273, `before_change_subscribers` cell.zig:35, allocator options :617/:621). Two recent memory-safety fixes (UAF `1dd8998`; iteration-during-mutation in `emitChangeUnlocked`) warrant a soak/cyclic test for Slot destroy↔unsubscribe ordering.
-- **lazily-py**: the Signal→Slot `RecursionError` fix (`30907ea`) has no deep/cyclic regression test guarding it.
-- **lazily-rs**: no open bug (done); only rs-adjacent work is the shared protocol.md reconciliation.
 ### Session Summary
 
 ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260624-213908.md`*
@@ -49,7 +39,43 @@ queue: start
 Compacted content:
 ❯ - Archived 3 response topic(s): lazily-rs bug next-steps; lazily-rs bug fixes #e4tf + #xdsx shipped; #hses + #gxzm
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-<!-- agent:boundary:c848ed66 -->
+
+### Re: lazily bug-fix next-steps (cross-port) — glm-5.2
+
+Investigated all five ports. **Health is green across the board** — no red tests:
+- **lazily-rs** — Phase 6 done; core/producer.
+- **lazily-kt** — `gradle test` ✓ (IPC conformance + agent-doc FFI state-projection client; NOT a reactive-core port).
+- **lazily-js** — `npm test` ✓ 27 pass (IPC + koffi FFI consumer).
+- **lazily-zig** — `zig build test` ✓ (full native impl: Cell/Signal/StateMachine/Context + ShmBlobArena).
+- **lazily-py** — `pytest` ✓ 72 pass (full native impl; v0.11.0 publish pending per review #kb9b).
+
+So the "bugs" here are **spec/conformance drift + hardening gaps**, not failing tests. Highest-leverage finding is cross-cutting:
+
+**`src/lazily-spec/protocol.md` is stale.** It documents a wire shape nothing implements — `{type:"snapshot", slot_id, state:"resolved"|"dirty"|"unset", payload:"base64", ops:"cell_set"/"slot_value"}` (snake_case, base64). The canonical format — emitted by lazily-rs `ipc.rs:323-343` (`NodeState::{Payload,SharedBlob,Opaque}`, field `node`), encoded in every `lazily-spec/conformance/*.json` fixture, and round-tripped by all four consumers — is externally-tagged `{"Snapshot":{epoch,nodes:[{node,type_tag,state:{Payload:[bytes]|SharedBlob{…}|Opaque}}],edges,roots}}` / `{"Delta":{base_epoch,epoch,ops:[{CellSet|SlotValue|Invalidate|NodeAdd|NodeRemove|EdgeAdd|EdgeRemove}{…}]}}` with inline byte arrays. A new port authored against protocol.md today would be wire-incompatible. lazily-rs, the fixtures, and kt/js/zig/py all agree — protocol.md is the lone outlier.
+
+**Per-port next-steps:**
+- **lazily-kt** (queue head): conformance tests only round-trip the fixture `wire` block; the `assertions` metadata (node_count, op_count, is_sequential, blob_*) is never validated generically — fixture drift passes silently. No `gradlew` wrapper (relies on system `gradle` → CI repro gap).
+- **lazily-js**: same conformance-assertions gap; `node_modules/` is committed to the submodule (bloat) — should be gitignored.
+- **lazily-zig**: open TODOs in `context.zig` (rename `.direct`→`.literal` :226/:273, `before_change_subscribers` cell.zig:35, allocator options :617/:621). Two recent memory-safety fixes (UAF `1dd8998`; iteration-during-mutation in `emitChangeUnlocked`) warrant a soak/cyclic test for Slot destroy↔unsubscribe ordering.
+- **lazily-py**: the Signal→Slot `RecursionError` fix (`30907ea`) has no deep/cyclic regression test guarding it.
+- **lazily-rs**: no open bug (done); only rs-adjacent work is the shared protocol.md reconciliation.
+
+> **Queue prompt:** What are #next-steps to fix lazily-kt bugs?
+
+Captured 5 prioritized backlog items (`#lzspecdrift`, `#lzktconf`, `#lzpyregress`, `#lzzigtodos`, `#lzjshygiene`). **Top of backlog: `#lzspecdrift`** — protocol.md reconciliation; cross-cutting, low-risk spec-only, unblocks every port. (Recovered via `--force-disk` after a wedged editor-IPC CRDT path repeatedly duplicated the exchange/queue; operator may want to reload the editor to resync the live buffer.)
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8c56928442bd4b165543ab0aad264d681b41b8898551d10f196018cd15a37304 content_len=11944 content_hash=46b47fdfe5505fb37c9e63df4167cb923df6b4ffc997ecca9009a15979c29a5e doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782339826601
+```
+<!-- agent:boundary:b13fe880 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,12 +84,7 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 What are #next-steps to fix lazily-kt bugs?
-- What are #next-steps to fix lazily-js bugs?
-- What are #next-steps to fix lazily-zig bugs?
-- What are #next-steps to fix lazily-py bugs?
-- What are #next-steps to fix lazily-rs bugs?
-- 🚧 What are #next-steps to fix lazily bugs?
+- ~~What are #next-steps to fix lazily-kt bugs?~~
 - 🚧 What are #next-steps to fix lazily-js bugs?
 - 🚧 What are #next-steps to fix lazily-zig bugs?
 - 🚧 What are #next-steps to fix lazily-py bugs?

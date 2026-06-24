@@ -64,7 +64,7 @@ Split into two actionable backlog items (engine first): `#lzsigzig1` (`#9226`) �
 ### Re: queue dedup — removed 8 :pushpin: duplicate heads — glm-5.2
 
 Removed the 8 `:pushpin:`-prefixed queue lines (compaction had duplicated every `do [#id]` head — `#t0mf`/`#t0qn`/`#9e64`/`#dcgp`/`#kjfe`/`#pwvm`/`#t1xt`/`#7gpg`). The `:pushpin:` prefix was tripping the free-text-queue-head guard. Queue is now clean `do [#id]` entries only; `#lzffistate1` is the next head (the Signal engine work `#lzsigzig1`/`#9226` is in the backlog, plan committed `c74e75909`).
-<!-- agent:boundary:096c3915 -->
+<!-- agent:boundary:48059c40 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,19 +73,11 @@ Removed the 8 `:pushpin:`-prefixed queue lines (compaction had duplicated every 
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: do [#t0mf]
-- do [#lzffistate1]
-- do [#nnyn]
-- do [#hj5x]
-- do [#mes4]
-- do [#bcnf]
-- :pushpin: do [#t0qn]
-- :pushpin: do [#9e64]
-- :pushpin: do [#dcgp]
-- :pushpin: do [#kjfe]
-- :pushpin: do [#pwvm]
-- :pushpin: do [#t1xt]
-- :pushpin: do [#7gpg]
+- :pushpin: do [#lzffistate1]
+- :pushpin: do [#nnyn]
+- :pushpin: do [#hj5x]
+- :pushpin: do [#mes4]
+- :pushpin: do [#bcnf]
 - do [#t0mf]
 - do [#t0qn]
 - do [#9e64]
@@ -94,6 +86,8 @@ Removed the 8 `:pushpin:`-prefixed queue lines (compaction had duplicated every 
 - do [#pwvm]
 - do [#t1xt]
 - do [#7gpg]
+- do [#f71y]
+- do [#9226]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
-agent: opencode
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -96,6 +96,11 @@ Compacted content:
 
 ### Re: Next steps to fix corky bugs — glm-5.2
 
+> **Queue prompt:**
+>
+> What are #next-steps to fix corky bugs?
+
+
 **Bug triage results.** Reviewed the corky v0.29.0 codebase against the documented open items:
 
 **Already fixed (no action needed):**
@@ -117,26 +122,24 @@ Compacted content:
 1. `#fix-social-tests` — Fix 7 `SocialDraftMeta` initializers missing `first_comment`
 2. `#pypi-trusted-publisher` — PyPI trusted publisher setup (existing, blocked externally)
 3. `#diarize-span-release` — Verify diarization cascade fix is committed and released
+1. `#pypi-trusted-publisher` — still blocked externally (PyPI `invalid-publisher`)
+1. `#pypi-trusted-publisher` — top remaining item; blocked outside the repo until PyPI trusted publishing is configured for `repo:btakita/corky:environment:pypi`.
+1. `#pypi-trusted-publisher` — top remaining item, still externally blocked by PyPI `invalid-publisher` until the PyPI project has a trusted publisher matching `repo:btakita/corky:environment:pypi`.
+- `cargo fmt --check` — clean
+- `cargo clippy --workspace` — clean (only pre-existing imap-proto warning)
+- `cargo test --workspace` — all pass (0 failed, 0 ignored)
 
 **Top of backlog: `#fix-social-tests`**
+**IPC proof issue dogfood log**
 
-### Re: #fix-social-tests + #diarize-span-release — glm-5.2
+Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
 
-> **Queue prompt:** What are #next-steps to fix corky bugs?
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
 
-**`#wwsp` (fix-social-tests) — DONE.** The test files already had `first_comment: None,` applied in the working tree (7 initializers across `tests/test_social_publish.rs` and `tests/test_social_draft.rs`). Fixed broken indentation in `publish.rs` where the first_comment block had been dedented to column 0. Ran `cargo fmt` to clean up pre-existing formatting drift in `linkedin.rs` and `main.rs`.
-
-**Verification:**
-- `cargo test --workspace` — all pass (0 failed, 0 ignored)
-- `cargo clippy --workspace` — clean (only pre-existing imap-proto warning)
-- `cargo fmt --check` — clean
-
-**Commit:** `76f75f2` on corky main — `fix(social): add first_comment field to test initializers + fix publish.rs indentation`
-
-**`#84xz` (diarize-span-release) — DONE.** The diarization span cascade fix (`max_speaker_span_ratio()` + `CHUNK_CASCADE [600.0, 120.0, 30.0]`) is committed in `f79ba50` and released as part of **v0.29.0**. No further action needed.
-
-**Remaining backlog:**
-1. `#pypi-trusted-publisher` — still blocked externally (PyPI `invalid-publisher`)
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/corky.md source=socket_ack_content patch_id=0a57749d-d864-4df6-8090-cdead7843646 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=10110 candidate_hash=4f40225a7389aa524bdd91920652e54a95730bc80fb1115ac4fef1561a434785 content_ours_len=11530 content_ours_hash=e581d069fc11b98c9a8ea0a30edee8d803db923bbfe90cdc4a8fdde5a753dcdb doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782335429300
+```
 
 ### Re: Recovery closeout — gpt-5
 
@@ -144,16 +147,7 @@ I ran the required orchestration handoff, but it failed closed because the repai
 
 Manual closeout for this cycle: no Corky repo files were changed, no new bug backlog items were added, and the current top remaining item is `#pypi-trusted-publisher`. `#fix-social-tests` and `#diarize-span-release` should be treated as completed based on the prior recorded closeout; the stale `Top of backlog: #fix-social-tests` line above is historical drift from the interrupted recovery, not the current queue state.
 
-### Re: Next steps prompt — gpt-5
-
-> **Queue prompt:** What are #next-steps to fix corky bugs?
-
-No new Corky bug follow-up items should be added from this cycle. The current backlog priority is only:
-1. `#pypi-trusted-publisher` — top remaining item; blocked outside the repo until PyPI trusted publishing is configured for `repo:btakita/corky:environment:pypi`.
-
-The earlier `#fix-social-tests` and `#diarize-span-release` entries are completed historical items, not current backlog heads.
-
-<!-- agent:boundary:8be64775 -->
+<!-- agent:boundary:194dee67 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -164,9 +158,7 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~What are #next-steps to fix corky bugs?~~
-- ~~[#wwsp]~~
-- ~~[#84xz]~~
+- 🚧 ~~What are #next-steps to fix corky bugs?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

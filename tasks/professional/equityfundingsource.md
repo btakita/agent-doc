@@ -236,7 +236,24 @@ Changed paths: none in app code.
 Commands: `agent-doc preflight`, `agent-doc session-check`, `agent-doc admin inspect`, and queue component read/cleanup through `agent-doc finalize`.
 Verification: explanation-only cleanup; no tests run.
 Escalation: none. Confidence: high.
-<!-- agent:boundary:5e102d8a -->
+
+### Re: Remove Deal Pipeline Lead Status Dropdown — gpt-5
+
+> **Queue prompt:**
+> Remove "Deal Pipeline" card dropdown. The CRM status can be inferred by the conversation and pipeline status. The conversation is self-evident. Just have the button and a link to open the message conversation.
+
+Implemented and committed.
+
+Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/admin/application_lead_detail.tsx`, `lib/ui--browser--efs/portal/admin/messages.tsx`, `lib/ui--browser--efs/portal/admin/pipeline.tsx`, `lib/ui--browser--efs/portal/shared/lead_pipeline_controls.tsx`, `tests/admin-application-lead-detail.test.ts`, `tests/admin-pipeline.test.ts`, `tests/portal-table-dialog.test.ts`, `prds/equity-funding-source-lending-portal-prd.md`, and `prds/investor-pipeline-admin.md`.
+
+What changed: the reused lead detail no longer renders the separate `Deal Pipeline` card or lead CRM status dropdown. The top lead next-step alert now keeps the send/resend borrower invite button and adds `Open message conversation`, linking to `/admin/messages?role=borrower&q=<lead email>`. The Messages hub now reads `q=` and feeds it into the existing preferred-user flow, so the borrower thread is searched/opened and the reply box is focused.
+
+Commits: EFS submodule commit `7669e49 fix(admin): simplify lead follow-up card`; parent gitlink commit `987c8bd01 chore(efs): bump lead follow-up submodule`. Both are local commits; I did not push or deploy because this queue item did not request deploy.
+
+Verification: focused `bun test tests/admin-application-lead-detail.test.ts tests/admin-pipeline.test.ts tests/portal-table-dialog.test.ts tests/application-leads.test.ts` passed (`93 pass / 0 fail`). `git diff --check` passed. Full `make check` passed (`1193 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:e0f35970 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -256,12 +273,14 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~do [#q1w3]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
+- [ ] 🚧 [#q1w3] Remove "Deal Pipeline" card dropdown. The CRM status can be inferred by the conversation and pipeline status. The conversation is self-evident. Just have the button and a link to open the message conversation.
 <!-- /agent:backlog -->
 
 ## Review

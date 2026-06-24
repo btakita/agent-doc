@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 3d9ff8e4-bafd-4e1f-b48d-550d3c976904
-agent: codex
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -99,7 +99,34 @@ Changed paths in the superproject: `src/lazily-js` gitlink now points at `1afbce
 Verification: `make check` passed in `src/lazily-js` (`npm run build` plus 15 Node tests); root `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` passed with exit code 0; `gh run list --workflow CI --limit 1` reported no workflow named `CI` in both the superproject and `lazily-js`, so there was no latest CI run to inspect.
 
 Preflight warnings: the semantic-completion warnings for review `#h6qb` and backlog `#bcnf` were not part of this free-text spec-conformance queue head. Escalation: no approval prompts were needed. Confidence: high. Existing unrelated dirty files in the superproject were left untouched.
-<!-- agent:boundary:35bde115 -->
+
+### Re: lazily-js FFI-consumer package (#bcnf) — glm-5.2
+
+> **Queue prompt:**
+>
+> :pushpin: do [#bcnf]
+
+
+Done. I implemented the lazily-js FFI-consumer package under `src/lazily-js`, mirroring the lazily-kt `StateProjectionClient` (#mes4, the Kotlin Phase-4 reference) with JS idioms.
+
+**Semantic-completion warning resolution:** the preflight `semantic_completion_match` flagged #bcnf as possibly resolved by #lzffistate1 (score 1.836). That is a false positive — #lzffistate1 added the *Rust FFI exports* + native-addon glue (the backend), while #bcnf is the *JS consumer SDK* that wraps that channel into a usable API. Different layers; #lzffistate1 only unblocked #bcnf. I proceeded with implementation.
+
+**What landed:**
+- `src/state-projection.js` — `StateProjectionClient` (extends `EventEmitter`): projection holder that emits `"projection"` events on `refresh()`, plus `recordStateEvent(factJson)` reporter. `loadAgentDocFFI(libPath?)` wraps the agent-doc C ABI (`agent_doc_state_projection` / `agent_doc_record_state_event` / `agent_doc_free_string`) via `createRequire`-deferred `ffi-napi`+`ref-napi`, encapsulating the pointer read/free lifecycle so the consumer never handles raw C pointers. Native deps resolve only when `loadAgentDocFFI()` is called, keeping `make check` pure-JS.
+- `src/state-projection.d.ts` — full type declarations for `LazilyFFI`, `loadAgentDocFFI`, `StateProjectionClient` (with typed `"projection"` event overloads).
+- `test/state-projection.test.js` — 8 mock-FFI tests (refresh updates + emits, null/unavailable handling, repeated-refresh change propagation, recordStateEvent success/failure, documentHash binding). No native dependency.
+- `package.json` — added `./state-projection` subpath export, `ref-napi` dependency, and `state-projection.js` to the `build` check.
+
+This is the EventEmitter analogue of lazily-kt's StateFlow-based client: plugins become thin projection-renderer + event-reporter, NOT a reactive-core port (FFI-first rule).
+
+**Pre-existing dependency note (not a regression):** `npm install` fails because `ffi-napi` 4.0.3 is unmaintained and its native addon does not compile against Node v26.1.0 (`napi_add_finalizer` ABI break). This affects only the runtime native-load path, never `make check` (tests inject mocks). Recorded follow-up `#lzjsffi` to migrate to a maintained FFI library.
+
+Changed paths (submodule `lazily-hub/lazily-js`, commit `c5607e1`): `package.json`, `src/state-projection.js`, `src/state-projection.d.ts`, `test/state-projection.test.js`. Superproject gitlink update: `1c825988b`.
+
+Verification: `make check` in `src/lazily-js` passes — `npm run build` (node --check on both modules) + 23 Node tests (15 IPC + 8 state-projection), 0 fail. `git -C src/lazily-js status --short --branch` clean on `main...origin/main`. `gh run list --workflow CI --limit 1` reported no workflow named `CI` in both the superproject and `lazily-js`, so there was no latest CI run to inspect.
+
+Escalation: no approval prompts were needed. Confidence: high. The semantic-completion warnings for review `#h6qb` and backlog `#bcnf` were addressed this cycle (`#bcnf` now done; `#h6qb` is a separate live-two-host WebRTC item, left unchanged).
+<!-- agent:boundary:1c8c6ff1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -108,17 +135,7 @@ Preflight warnings: the semantic-completion warnings for review `#h6qb` and back
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#9226]~~
-- ~~update lazily-zig, add support for 0.16.0~~
-- ~~:pushpin: do [#nnyn]~~
-- ~~:pushpin: do [#hj5x]~~
-- ~~:pushpin: do [#f71y]~~
-- ~~:pushpin: do [#mes4]~~
-- ~~create a lazily-hub/lazily-kt github project. Make src/lazily-kt/ be a git submodule to the lazily-hub/lazily-kt project.~~
-- ~~create a lazily-hub/lazily-js github project. Make src/lazily-js be a git submodule to the lazily-hub/lazily-js~~
-- ~~Ensure lazily-kt follows the lazily-spec. It seems to be missing much of the spec.~~
-- ~~Ensure lazily-js follows the lazily-spec...except for what + covered in [#bcnf].~~
-- :pushpin: do [#bcnf]
+- ~~:pushpin: do [#bcnf]~~
 - do [#t0qn]
 - do [#t0mf]
 - :pushpin: do [#pwvm]
@@ -127,12 +144,13 @@ Preflight warnings: the semantic-completion warnings for review `#h6qb` and back
 - do [#dcgp]
 - do [#7gpg]
 - do [#kjfe]
+- do [#tnbd]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#bcnf] #lzjs=[recommended] Implement lazily-js FFI-consumer package with *.js + *.d.ts (plan Phase 5). Under src/lazily-js/. Wraps VSCode N-API addon; EventEmitter projection holder + event reporter. NOT a reactive-core port. Blocked on #lzffistate1.
+- [ ] [#tnbd] #lzjsffi=[recommended] Migrate lazily-js FFI loader off ffi-napi (unmaintained; native addon fails to build on Node >=23 — napi_add_finalizer ABI break, confirmed at Node 26.1.0). The loadAgentDocFFI() path in src/lazily-js/src/state-projection.js is mock-tested + pure-JS at import time, but VSCode consumers on modern Node cannot install ffi-napi to reach the live stateProjection/recordStateEvent calls. Evaluate koffi or node-ffi-rs as the maintained replacement.
 - [ ] [#t0qn] #lzsigzig=Implement Signal primitive in lazily-zig (src/lazily-zig/src/lazily/signal.zig). Zig currently has Slot+Cell but no Signal. Mirror lazily-rs eager Signal: memoized slot + puller effect + PartialEq memo guard.
 - [ ] [#t0mf] #lzsigzig=Implement eager Signal in lazily-zig (src/lazily-zig/src/lazily/signal.zig). NOT a direct mirror: lazily-zig destroy-on-invalidate (destroySelf frees the Slot, context.zig:354) + non-reentrant Thread.Mutex means an inline eager recompute DEADLOCKS (user valueFn re-locks ctx.mutex via slot()/slotKeyed). lazily-rs RefCell + lazily-py dict have no such re-entrancy issue. Plan + deferred-recompute-queue design committed: tasks/software/plan-lazily-zig-signal.md (c74e75909). Phase 1 = engine changes in context.zig (on_invalidate hook + pending_recompute queue + drain points outside the lock + snapshot emitChangeUnlocked to also fix latent iteration-mutation). Phase 2 = signal.zig. Splitting #t0mf into #lzsigzig1 (engine) + #lzsigzig2 (signal.zig) below.
 - [ ] [#pwvm] #lzffileanrs=[recommended] Clarify: IPC.lean protocol already implemented in lazily-rs ipc.rs (Snapshot/Delta/ShmBlobArena). If goal is ShmBlobArena parity in siblings or Lean proof extraction, scope a plan.

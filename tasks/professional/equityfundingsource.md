@@ -78,7 +78,47 @@ Affected component: editor IPC / writeback
 ```text
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=37a37991-3c3a-40fa-928c-115be03c9973 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782281871260
 ```
-<!-- agent:boundary:8804a705 -->
+
+### Re: Duplicate lender3 Signed Up cards — gpt-5
+
+> **Queue prompt:**
+>
+> In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c&dialog=lender, why are there 2 btak.dev+lender3@gmail.com cards in the Signed Up stage?
+
+They are not two rows for the exact same email. Production D1 currently has two active lender `users` rows with nearly identical Gmail plus-addresses:
+
+- `05c518e4-d881-4b8e-8317-e0382a2b2e31` — `btak.div+lender3@gmail.com`, created `2026-06-24 04:09:35 UTC`.
+- `0d35f9e9-068f-459d-ac58-feb7d1a19a7c` — `btak.dev+lender3@gmail.com`, created `2026-06-24 05:07:00 UTC`.
+
+The URL's `dialog_user_id=0d35f9e9-068f-459d-ac58-feb7d1a19a7c` points to the `btak.dev+lender3@gmail.com` row. The other card is `btak.div+lender3@gmail.com`, not `btak.dev+lender3@gmail.com`; the two are easy to misread because the name and rest of the address are the same.
+
+Why both are in Signed Up:
+- both are `role='lender'` and `status='active'`;
+- both have `accreditation_status='pending'`;
+- neither has a `lender_accreditation_verifications` evidence row;
+- neither has a `lender_request` row;
+- neither has a `lender_account`.
+
+The Lender Pipeline endpoint returns one card per `users.role='lender'` user ID, and the React card key is `card.user_id`, so these two distinct user IDs are expected to render as two cards. A production exact-duplicate scan with `GROUP BY lower(email) HAVING COUNT(*) > 1` returned no rows.
+
+Changed paths: none. I did not mutate product code or production data; deactivating or merging one of these accounts would be an explicit admin/data-cleanup decision, not a safe automatic fix.
+
+Verification:
+- `tsift status` in `src/equityfundingsource-dev` reported a fresh index.
+- Queried production D1 for the two lender3 users and confirmed the distinct `btak.div` vs `btak.dev` rows.
+- Queried production D1 for related accreditation-verification and lender-request rows; none exist for either user.
+- Queried production D1 for exact duplicate lowercased emails; none exist.
+- Ran a read-only production D1 projection that computes both rows as `signed_up`.
+- Inspected `admin_investor_pipeline_GET_`, `investors_pipeline_columns_`, the card render loop, and the signup path; the endpoint/card rendering is keyed by user ID, and signup lowercases/checks the exact submitted email before insert.
+- EFS worktree remained clean at `7e89423`.
+
+Session-doc recovery note:
+- `agent-doc reset --from-current` was required because the session sidecars were stale after earlier IPC failures.
+- An older orphaned IPC response was recovered first, then I struck four stale already-completed queue heads that were reintroduced by the recovery (`Message Lender`, arrow navigation, duplicate arrow navigation, and `deploy`). The queue is now drained.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:864bec5e -->
 <!-- /agent:exchange -->
 ###
 <!--

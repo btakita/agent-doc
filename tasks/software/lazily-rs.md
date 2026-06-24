@@ -167,7 +167,28 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=bed87b8e-4bad-4178-b623-0c9e90e4930d invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=18166 candidate_hash=4a2cbb8e322fe5cd39fa7dba825fb6f027011ef3e65e182af743bd41e18f1ebc content_ours_len=18441 content_ours_hash=96d3d3598dc8ebc7389584f28654b8a90c7ff90d6e2958bd7355ef8646a290e3 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782342826547
 ```
-<!-- agent:boundary:d9773043 -->
+
+### Re: do [#lzpyregress] — Signal→Slot RecursionError regression suite shipped — glm-5.2
+
+*(Recovered response — the original closeout committed the backlog reap + queue strike but the response body was dropped by a wedged editor-IPC CRDT path; work was already pushed as `c255482`. No new backlog follow-ups: #lzpyregress was reaped last cycle.)*
+
+**Spec:** no spec change — `SPEC.md` already documents the re-entrancy guarantees from the 30907ea fix.
+
+**Tests — dedicated regression module** (`tests/test_recursion_regression.py`, +141). Five tests pin the two surgical fixes and stress the recursion path:
+- `test_slot_call_does_not_notify_subscribers` — **Fix 1 guard**: computing a Slot must not `touch()` subscribers.
+- `test_slot_reset_is_reentrancy_safe` — **Fix 2 guard**: `Slot.reset` clears subscribers before notifying; a re-entrant-reset subscriber must not mutually recurse.
+- `test_deep_slot_cascade_invalidates_without_recursion` — 300-deep Slot chain invalidates + recomputes without stack overflow.
+- `test_signal_over_slot_cycle_invalidates_without_recursion` — the original topology (Signal reads Slot, downstream Slot reads Signal) driven from a Cell mutation.
+- `test_deep_signal_chain_propagates_without_recursion` — 200-deep eager-Signal chain recomputes end-to-end.
+
+**Mutation-checked (guards proven real):** restored the pre-fix `slot.py` (parent of 30907ea) → both Fix-1/Fix-2 guard tests **failed**, the re-entrant one with the exact `RecursionError: maximum recursion depth exceeded`; restored fixed `slot.py` (verified clean vs HEAD).
+
+**Build + install:** `uv build` → `lazily-0.11.0` sdist + wheel; fresh-venv install imports `lazily` 0.11.0 clean. **Lint/type:** ruff clean; `ty check src` shows 2 pre-existing `invalid-argument-type` diagnostics (state_machine.py/cell.py, present on baseline too). **Suite:** 77 passed (was 72 + 5).
+
+**Changed paths:** `src/lazily-py` → `c255482`; superproject gitlink `8a1b33132`. **Confidence:** high (mutation-tested). **Escalation:** none.
+
+`#lzpyregress` → done. Next queue head: `#lzzigtodos`.
+<!-- agent:boundary:2ceca391 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -177,8 +198,8 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#lzktconf]~~
-- ~~🚧 :pushpin: do [#lzpyregress]~~
-- :pushpin: do [#lzzigtodos]
+- ~~:pushpin: do [#lzpyregress]~~
+- 🚧 :pushpin: do [#lzzigtodos]
 - ~~do [#lzjshygiene]: Please purge `node_modules/` from the git history.~~
 <!-- /agent:queue -->
 

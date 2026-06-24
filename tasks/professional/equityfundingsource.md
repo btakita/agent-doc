@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -132,7 +132,15 @@ Acknowledged the automated IPC proof dogfood note that was appended during queue
 No actionable follow-up items are needed for this note.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:63869248 -->
+
+### Re: IPC Dogfood Note Closeout — gpt-5
+
+Acknowledged the automated IPC proof dogfood note from queue cleanup. The queue is stopped and there is no remaining lead-dialog or deploy work.
+
+No actionable follow-up items are needed for this note.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:1d9a26ba -->
 <!-- /agent:exchange -->
 ###
 <!--

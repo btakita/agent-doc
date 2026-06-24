@@ -85,7 +85,21 @@ Changed paths in the superproject: `src/lazily-kt` gitlink now points at `f8d6a7
 Verification: `make check` passed in `src/lazily-kt`; root `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` passed with exit code 0; `gh run list --workflow CI --limit 1` reported no workflow named `CI` in both the superproject and `lazily-kt`, so there was no latest CI run to inspect.
 
 Preflight warnings: the semantic-completion candidates for review `#h6qb` and backlog `#bcnf` were unrelated to this lazily-kt queue head and were left unchanged. Escalation: no approval prompts were needed. Confidence: high. Existing unrelated dirty files in the superproject were left untouched.
-<!-- agent:boundary:09ae44cf -->
+
+### Re: lazily-js spec conformance — gpt-5
+
+> **Queue prompt:** Ensure lazily-js follows the lazily-spec...except for what + covered in [#bcnf].
+
+Done. I implemented the lazily-spec IPC surface in `src/lazily-js` while leaving the `#bcnf` FFI state-projection package work untouched for its own queued cycle. The JS package now has a real ESM entrypoint plus `.d.ts` declarations for externally tagged `IpcMessage` Snapshot/Delta frames, `NodeState`, `IpcValue`, `ShmBlobRef`, all 7 `DeltaOp` variants, epoch gap handling via `DeltaApplyStatus`, JSON encode/decode helpers, and permission-filtered Snapshot/Delta views.
+
+Changed paths in the submodule commit `1afbce4 Add lazily IPC JavaScript conformance model`: `.gitignore`, `AGENTS.md`, `Makefile`, `package.json`, `src/index.js`, `src/index.d.ts`, `test/ipc.test.js`, and vendored `test/conformance/*.json` fixtures. The submodule commit was pushed to `lazily-hub/lazily-js/main`.
+
+Changed paths in the superproject: `src/lazily-js` gitlink now points at `1afbce4`. The gitlink update was committed as `9a4b4e115 Update lazily-js spec conformance` and pushed to `origin/main`.
+
+Verification: `make check` passed in `src/lazily-js` (`npm run build` plus 15 Node tests); root `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'` passed with exit code 0; `gh run list --workflow CI --limit 1` reported no workflow named `CI` in both the superproject and `lazily-js`, so there was no latest CI run to inspect.
+
+Preflight warnings: the semantic-completion warnings for review `#h6qb` and backlog `#bcnf` were not part of this free-text spec-conformance queue head. Escalation: no approval prompts were needed. Confidence: high. Existing unrelated dirty files in the superproject were left untouched.
+<!-- agent:boundary:35bde115 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,7 +117,7 @@ Preflight warnings: the semantic-completion candidates for review `#h6qb` and ba
 - ~~create a lazily-hub/lazily-kt github project. Make src/lazily-kt/ be a git submodule to the lazily-hub/lazily-kt project.~~
 - ~~create a lazily-hub/lazily-js github project. Make src/lazily-js be a git submodule to the lazily-hub/lazily-js~~
 - ~~Ensure lazily-kt follows the lazily-spec. It seems to be missing much of the spec.~~
-- Ensure lazily-js follows the lazily-spec...except for what + covered in [#bcnf].
+- ~~Ensure lazily-js follows the lazily-spec...except for what + covered in [#bcnf].~~
 - :pushpin: do [#bcnf]
 - do [#t0qn]
 - do [#t0mf]

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -373,7 +373,27 @@ Four unit tests added. All pass. Clippy clean. Built + installed with `transcrib
 ### Re: IPC diagnostic — acknowledged — glm-5.2
 
 The `ipc_proof_insufficient` diagnostic blocks in the exchange are auto-appended dogfood annotations from editor IPC issues during this session. They are not user prompts — no action needed.
-<!-- agent:boundary:b7caadbd -->
+
+### Re: test LinkedIn posts before publishing — DONE — glm-5.2
+
+> **Queue prompt:**
+>
+> :pushpin: Please create a way to test a linked in post before publishing. I don't want more published mistakes...like the truncation which happens more often than not.
+
+
+> **Queue prompt:**
+>
+> Please create a way to test a linked in post before publishing. I don't want more published mistakes like the truncation which happens more often than not.
+
+Both LinkedIn commands now support `--dry-run`:
+
+- `corky linkedin publish <file> --dry-run` — validates auth, uploads images (to verify they work), prints the full body with character count, author, visibility, and image URNs. No post created.
+- `corky linkedin edit <file> --dry-run` — validates body length (3000 char limit), prints the full payload (body text, char count, post ID). No post updated.
+
+Usage: always run with `--dry-run` first to preview the exact payload before any live API call. Prevents truncation, formatting issues, and over-length bodies from reaching LinkedIn.
+
+Already committed in prior cycle (`src/corky` `29309ff`). Queue head consumed.
+<!-- agent:boundary:ff1ee888 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -382,9 +402,6 @@ The `ipc_proof_insufficient` diagnostic blocks in the exchange are auto-appended
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~You truncated the post again. Stop editing the post. Fix the root cause.~~
-- :pushpin: Please create a way to test a linked in post before publishing. I don't want more published mistakes...like the truncation which happens more often than not.
-- ~~:pushpin: do [#lzlinkedincomment]~~
 <!-- /agent:queue -->
 
 ## Backlog

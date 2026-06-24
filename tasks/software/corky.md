@@ -102,7 +102,7 @@ Compacted content:
 **Performance:** test suite is fast (heaviest suite 44 tests / 0.27s; ~280 tests, all green). There are **no benchmarks in-repo** (no `benches/`, no `criterion`), so there's no numeric runtime baseline to report — filed `#ckybench`. Runtime hot spots are the `corky watch` daemon, audio diarization (GPU/Metal), and Gmail/IMAP sync. Tell me which command feels slow and I'll instrument it.
 
 **Corky bugs (queue head):** `agent:backlog` was empty despite the "Open items" prose. Added 4 prioritized items: `#ckygmailthread` (Gmail threading Bug 1+2), `#ckydiarizespan` (diarization span fix — uncommitted working tree), `#ckybench` (benchmarks for the perf report), `#ckyschedrun` (scheduled email sends). **Top of backlog: `#ckygmailthread`** (correctness bug — replies don't thread).
-<!-- agent:boundary:0e89ff52 -->
+<!-- agent:boundary:5284927a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -119,6 +119,7 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#ckystale] [recommended] Refresh corky.md session history: doc is frozen at v0.12-v0.13 prose but corky is v0.29.0 split into 5 workspace crates (corky-core/-google/-mail/-social/-transcribe). Most prose "Open items" are already DONE: corky schedule run (main.rs:261 + watch.rs:122), diarization span cascade (corky-transcribe diarize.rs:394 + engine.rs:826), Gmail threading Bug 1/message_id storage (corky-mail sync/markdown.rs:33,110-174). Remaining: verify Gmail send-side threadId inclusion (Bug 2). After refresh, run a fresh #code-review across the 5 crates to surface CURRENT bugs (no TODO/FIXME found in crates today).
 - [ ] [#ckygmailthread] [recommended] Gmail API threading: (Bug 1) in_reply_to in draft YAML accepts a Gmail thread ID but the In-Reply-To header requires an RFC 2822 Message-ID (<CA...@mail.gmail.com>) — store Message-IDs in conversation markdown during sync OR resolve thread ID->Message-ID via Gmail API when composing replies; (Bug 2) send_via_gmail_api/push_to_drafts_via_gmail_api send only {"raw":...} — Gmail API needs "threadId" in the body to thread replies. Add thread_id field to draft frontmatter + include in API request JSON. Files: src/sync/markdown.rs, src/draft/mod.rs (lines ~371-433).
 - [ ] [#ckydiarizespan] [recommended] Diarization span fix: cascade to smaller chunks (600s->120s->30s) when any speaker block >60% of total audio via max_speaker_span_ratio() in diarize.rs + span check in run_adaptive_diarization() (engine.rs). Working-tree changes exist in src/corky but are UNCOMMITTED/unreleased — commit, test, ship.
 - [ ] [#ckybench] Add criterion benchmarks (no perf instrumentation exists today): cover the watch loop tick, sync incremental pull, and draft composition/HTML conversion (pulldown-cmark). Gives the operator-requested performance report a numeric baseline instead of ad-hoc timing.

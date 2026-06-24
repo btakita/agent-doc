@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -73,7 +73,23 @@ Picked up the queue-backed backlog items and landed both HIGH-priority fixes. Bu
 **Pre-existing (not a regression):** `make benchmark-check` is red on clean HEAD too — `BENCHMARKS.md` lacks p50/p95 latency rows for the `thread_safe_*` contention benchmarks. Filed as `#lzbmcheckdrift`. Untouched by these fixes.
 
 Remaining backlog: `#hses` (low-priority loopback inbox consistency) + the new `#lzbmcheckdrift`.
-<!-- agent:boundary:1a9d2664 -->
+> **Queue prompt:** [#hses]
+> **Queue prompt:** do [#gxzm]
+
+### Re: #hses + #gxzm — gpt-5
+
+Completed both drainable queue items.
+
+`#hses` / `#lzstr0mloopbackinbox` is fixed in lazily-rs commit `b8d4140` and pushed to `origin/main`. `Str0mLoopback` now caps each endpoint inbox at `MAX_INBOX_FRAMES` (1024), sheds oldest-first when saturated, and exposes `Str0mChannel::dropped_inbox_frames()` so tests can assert loss/backpressure. Added regression coverage in `str0m_backend::tests::loopback_inbox_caps_at_capacity_and_counts_drops`.
+
+`#gxzm` / `#lzbmcheckdrift` is fixed in the same commit by regenerating `BENCHMARKS.md` with `make benchmark-update`; `make benchmark-check` now passes with the required thread_safe contention latency evidence present.
+
+Parent gitlink commit `a53e18d2a` is also pushed to `agent-loop` `main`, advancing `src/lazily-rs` to `b8d4140`.
+
+Verification: focused `cargo test loopback_inbox_caps_at_capacity_and_counts_drops --features webrtc-str0m` passed; `make benchmark-check` passed; full `make check` passed. Latest lazily-rs GitHub Actions `CI` run for `b8d4140` (`28131233684`) is still in progress after push; the parent `agent-loop` repo has no workflow named `CI`.
+
+No new lazily-rs bug backlog items from this cycle; after marking `#hses` and `#gxzm` done, this queue should be drained.
+<!-- agent:boundary:84e21612 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -82,18 +98,11 @@ Remaining backlog: `#hses` (low-priority loopback inbox consistency) + the new `
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~What are #next-steps to fix lazily bugs?~~ — auto-struck: answered this cycle (#ftstrike)
-- [#e4tf]
-- [#xdsx]
-- [#hses]
-- do [#gxzm]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#gxzm] #lzbmcheckdrift=[recommended] make benchmark-check red on main: BENCHMARKS.md is missing p50/p95 latency rows for thread_safe_contention / thread_safe_effect_contention / thread_safe_graph_propagation benchmarks. Pre-existing — fails identically on a41aaec, unrelated to the async/ws fixes. Fix: run make benchmark-update to regenerate from the thread_safe contention benches, or relax the check script's required-row set.
-- [ ] [#hses] [recommended] #lzstr0mloopbackinbox=Low-priority consistency: Str0mLoopback inbox (str0m_backend.rs:82,94,204) is also an unbounded push_back. Deterministic in-process test harness (not a network DoS vector), so lower priority than #lzwsinboundunbounded, but apply the same cap for uniform backpressure semantics across all DataChannel backends.
 <!-- /agent:backlog -->
 
 ## Review

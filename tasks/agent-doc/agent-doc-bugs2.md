@@ -127,7 +127,7 @@ Verification:
 - `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success` (`28074608395`).
 
 Commits: none in this cycle; implementation was already present, and `src/agent-doc` is clean.
-<!-- agent:boundary:9f915644 -->
+<!-- agent:boundary:52e8c2bc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -171,7 +171,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [x] [#advr13] Advance original #8bfz: implement single live JB plugin consumer per document using a per-doc owner lease; non-owner windows defer patch apply + saveDocument, with plugin PatchWatcher + binary lease primitive and multi-window proof.
 - [ ] [#advr14] Advance original #qpauseux: finish paused-queue plugin UX with info/action notifications, Resume or restart-supervisor/resume actions, no raw error toast, plugin artifacts, and render/ops proof.
 - [ ] [#advr15] Advance original #jbdisprecycle: convert recycle-boundary Run Agent Doc verification into deterministic proof for exactly one `dispatch_start_proof` with submit and no stranded start_session failure; ops marker `route_dispatch_submit_recycle_settle`.
 - [ ] [#advr16] Advance original #tb4q: complete #qfocsup focused-cycle supervisor clear-and-continue proof with install/recycle if needed, `session-check ui_outcome=deferred_for_supervisor_drain`, `context_reset`, `go_drain_dispatch`, and fresh-agent drain evidence.

@@ -119,7 +119,25 @@ Compacted content:
 3. `#diarize-span-release` — Verify diarization cascade fix is committed and released
 
 **Top of backlog: `#fix-social-tests`**
-<!-- agent:boundary:05518a65 -->
+
+### Re: #fix-social-tests + #diarize-span-release — glm-5.2
+
+> **Queue prompt:** What are #next-steps to fix corky bugs?
+
+**`#wwsp` (fix-social-tests) — DONE.** The test files already had `first_comment: None,` applied in the working tree (7 initializers across `tests/test_social_publish.rs` and `tests/test_social_draft.rs`). Fixed broken indentation in `publish.rs` where the first_comment block had been dedented to column 0. Ran `cargo fmt` to clean up pre-existing formatting drift in `linkedin.rs` and `main.rs`.
+
+**Verification:**
+- `cargo test --workspace` — all pass (0 failed, 0 ignored)
+- `cargo clippy --workspace` — clean (only pre-existing imap-proto warning)
+- `cargo fmt --check` — clean
+
+**Commit:** `76f75f2` on corky main — `fix(social): add first_comment field to test initializers + fix publish.rs indentation`
+
+**`#84xz` (diarize-span-release) — DONE.** The diarization span cascade fix (`max_speaker_span_ratio()` + `CHUNK_CASCADE [600.0, 120.0, 30.0]`) is committed in `f79ba50` and released as part of **v0.29.0**. No further action needed.
+
+**Remaining backlog:**
+1. `#pypi-trusted-publisher` — still blocked externally (PyPI `invalid-publisher`)
+<!-- agent:boundary:a4f53e7d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -130,17 +148,15 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- 🚧 What are #next-steps to fix corky bugs?
-- [#wwsp]
-- [#84xz]
+- ~~What are #next-steps to fix corky bugs?~~
+- ~~[#wwsp]~~
+- ~~[#84xz]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#wwsp] #fix-social-tests — Fix test compilation: 7 errors across tests/test_social_publish.rs (1) and tests/test_social_draft.rs (6). SocialDraftMeta initializers missing first_comment field added in commit 29309ff (linkedin auto-post first comment). Blocks make check entirely. Files: tests/test_social_publish.rs:16, tests/test_social_draft.rs:142,240,271,317,393,423.
 - [/] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi. Repo workflow is configured and pushed in Corky commit feb074e; PyPI run 26195923707 now builds all artifacts but is blocked by PyPI invalid-publisher until the project has a trusted publisher matching repo:btakita/corky:environment:pypi.
-- [ ] [#84xz] #diarize-span-release — Verify diarization span cascade fix (max_speaker_span_ratio + CHUNK_CASCADE 600s→120s→30s in engine.rs) is committed and released. Code is implemented in corky-transcribe but document open-items still mark it as uncommitted working tree changes.
 <!-- /agent:backlog -->
 
 ## Completed / Reaped

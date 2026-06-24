@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -39,6 +39,21 @@ Compacted content:
 ❯ - Archived 10 response topic(s): Shareable lender-pipeline dialog URLs; IPC recovery closeout; Why `btak.div+lender3@gmail.com` is showing Requirements Current; 7 more
 ❯ - Prior summary/context: prior compacted content: EFS: `2415765` `feat(admin): share lender pipeline dialog URLs`; Parent gitlink: `9a5cfc236`...
 ### Re: IPC recovery closeout — gpt-5
+
+> **Queue prompt:**
+>
+> deploy
+
+
+> **Queue prompt:**
+>
+> In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field...which would be Close...then Advance Lender. The up arrow key navigates to the previous actionable item.
+
+
+> **Queue prompt:**
+>
+> In the Lender Pipeline > Requirements Dialog, remove the Message Lender section. The contextual messaging (chat bubble) should open to the message the lender for the card.
+
 
 > **Queue prompt:**
 >
@@ -63,7 +78,7 @@ Affected component: editor IPC / writeback
 ```text
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=37a37991-3c3a-40fa-928c-115be03c9973 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782281871260
 ```
-<!-- agent:boundary:afbc9221 -->
+<!-- agent:boundary:8804a705 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -83,12 +98,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline, all dialogs should have a unique url using pushState. So the links can be shared.~~
-- ~~I just signed up as btak.div+lender3@gmail.com. This user has Requirements Current in the Lender Pipeline. Why are the requirements current? The lender has not completed the signup...adding documents.~~
-- In the Lender Pipeline > Requirements Dialog, remove the Message Lender section. The contextual messaging (chat bubble) should open to the message the lender for the card.
-- In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field...which would be Close...then Advance Lender. The up arrow key navigates to the previous actionable item.
-- In the Requirements Dialog, support the up/down arrow to jump between buttons and fields. This includes alerts. So if the Advance Lender button is present, it should be in focus (support Enter) when the dialog opens. Pressing the down arrow should jump to the next actionable field.
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

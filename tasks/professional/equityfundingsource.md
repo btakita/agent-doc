@@ -425,7 +425,7 @@ No additional code or deployment work was performed in this repair step.
 Cleared the answered pipeline keyboard-navigation and deploy prompts from `agent:queue` after the Stop hook found the component still populated.
 
 No additional code, test, deploy, or repo changes were made in this repair step.
-<!-- agent:boundary:74276154 -->
+<!-- agent:boundary:0002c8a8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -445,8 +445,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- In the pipeline views (Deal + Broker), the arrow keys navigate between the items. Up/Down in the same column, Left/Right move between columns. Pressing up at the first item or empty column selects the +/- toggle. Enter activates the selected item.
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

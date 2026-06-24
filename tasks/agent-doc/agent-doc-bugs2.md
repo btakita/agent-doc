@@ -65,35 +65,23 @@ I appended `#ipcqproof` behind the current lazily follow-ups to cover this recov
 No new monsterrodholders action in this recovery cycle; the earlier audit result still stands: `recover-lost` found git-history-only candidates but no authoritative restore candidate. The follow-up remains `#mrhqrestore`.
 
 Verification: `agent-doc session-check`, recovery preflight state, and `ops.log` diagnostics. No code changed.
-<!-- agent:boundary:67c36eb7 -->
+
+### Re: queue repair — gpt-5
+
+Repaired the queue residue from the interrupted closeout: the answered monsterrodholders free-text head is removed from the active queue, and the still-open lazily follow-up heads are restored as runnable queue items.
+
+Verification: `agent-doc queue consume`, `agent-doc queue sync`, and committed queue repair through `agent-doc write --commit --template --stream`.
+<!-- agent:boundary:e1d50e55 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#71wr]~~
----
-🚧 :pushpin: agent-doc monsterrodholders.md queue was removed without being processed
-```
-• The queue helper is contradictory here: it sees the preset as id-backed, then says there is no matching id-backed
-  head. I’m removing the answered queue row directly and keeping the queue component itself intact.
-
-• Edited tasks/monsterrodholders.md (+0 -1)
-    82  <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-    83 -- We should have the test email addresses in a CSV file. brian.takita+mrh-user-1@gmail.com, brian.takita+mrh-us
-        er-2@gmail.com, brian.takita+mrh-user-3@gmail.com, rberkes+mrh-user-1@gmail.com, rberkes+mrh-user-2@gmail.com,
-        rberkes+mrh-user-3@gmail.com.
-    83  <!-- /agent:queue -->
-
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-• The answered queue row is removed. I’m committing the document cleanup through agent-doc so its snapshot stays
-  aligned, then I’ll rerun the invariant check.
-```
----
-- ~~do [#lzpkgwire]~~
+- do [#lzpkgwire]
 - do [#lzliveproof]
 - do [#mrhqrestore]
+- do [#ipcqproof]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

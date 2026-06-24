@@ -126,7 +126,15 @@ Verified against the v0.29.0 workspace crates and reaped the backlog items that 
 Remaining corky backlog (genuinely open, not bugs): `#ckystale` (refresh the v0.12–v0.13 session history to v0.29 + fresh `#code-review` across the 5 crates) and `#ckybench` (add criterion benchmarks — the perf report has no numeric baseline yet). **Top of corky backlog: `#ckystale`.**
 
 > **Queue prompt:** Add #next-steps to fix corky bugs.
-<!-- agent:boundary:40c1e332 -->
+
+### Re: [#ckystale] — corky.md session history refreshed to v0.29 — glm-5.2
+
+Replaced the obsolete "Open items" prose (every item had shipped) with a "Shipped items (v0.14–v0.29 workspace era)" section that records the current state: corky is v0.29.0, a 5-crate workspace (`corky-core/-google/-mail/-social/-transcribe`, commit `f79ba50`), and each former open item is marked shipped with its evidence path (diarization cascade, attachments, collapsible_if, sync imports, doc upload, schedule run, HTML email, Gmail threading Bug 1+2). Pointed the doc at `agent:backlog` for current open work.
+
+`#ckystale` → done. Remaining corky backlog: `#ckybench` (criterion benchmarks — the perf report still has no numeric baseline).
+
+> **Queue prompt:** [#ckystale]
+<!-- agent:boundary:700506aa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -138,7 +146,7 @@ Please give me a report the performance
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~Add #next-steps to fix corky bugs.~~
-- [#ckystale]
+- ~~[#ckystale]~~
 - ~~[#ckygmailthread]~~
 - ~~[#ckydiarizespan]~~
 - [#ckybench]
@@ -148,7 +156,6 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ckystale] [recommended] Refresh corky.md session history: doc is frozen at v0.12-v0.13 prose but corky is v0.29.0 split into 5 workspace crates (corky-core/-google/-mail/-social/-transcribe). Most prose "Open items" are already DONE: corky schedule run (main.rs:261 + watch.rs:122), diarization span cascade (corky-transcribe diarize.rs:394 + engine.rs:826), Gmail threading Bug 1/message_id storage (corky-mail sync/markdown.rs:33,110-174). Remaining: verify Gmail send-side threadId inclusion (Bug 2). After refresh, run a fresh #code-review across the 5 crates to surface CURRENT bugs (no TODO/FIXME found in crates today).
 - [ ] [#ckybench] Add criterion benchmarks (no perf instrumentation exists today): cover the watch loop tick, sync incremental pull, and draft composition/HTML conversion (pulldown-cmark). Gives the operator-requested performance report a numeric baseline instead of ad-hoc timing.
 <!-- /agent:backlog -->
 

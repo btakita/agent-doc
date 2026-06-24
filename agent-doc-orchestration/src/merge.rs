@@ -546,6 +546,41 @@ User line 2.
     }
 
     #[test]
+    fn crdt_merge_same_free_text_queue_node_extension_no_truncated_duplicate() {
+        // #ftqpartialdup/#hap7 verification: a free-text queue item can be
+        // partially present in the snapshot while the operator continues typing
+        // that same queue node and the agent appends exchange content. The merge
+        // must keep the completed operator line exactly once, not retain a
+        // truncated duplicate sibling beside it.
+        let base = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n- :pushpin: All upload preview dialogs should be full\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:exchange -->\n### Re: topic\nAgent response body.\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n- :pushpin: All upload preview dialogs should be full\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n- :pushpin: All upload preview dialogs should be full screen. deploy\n<!-- /agent:queue -->\n";
+
+        let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+
+        assert!(
+            merged.contains("### Re: topic"),
+            "response present:\n{merged}"
+        );
+        assert!(
+            merged.contains("All upload preview dialogs should be full screen. deploy"),
+            "completed operator queue line present:\n{merged}"
+        );
+        assert_eq!(
+            merged
+                .lines()
+                .filter(|line| line.contains("All upload preview dialogs"))
+                .count(),
+            1,
+            "partial and completed free-text queue lines must not both survive:\n{merged}"
+        );
+    }
+
+    #[test]
     fn crdt_merge_concurrent_same_line() {
         let base = "Line 1\nLine 3\n";
         let ours = "Line 1\nAgent\nLine 3\n";

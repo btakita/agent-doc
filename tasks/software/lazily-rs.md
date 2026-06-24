@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -209,7 +209,7 @@ Implemented the **lazily-zig half** of `#lzshmblobparity`: lazily-zig can now HO
 - superproject gitlink `730e13fef` → committed **locally**; push to `btakita/agent-loop` rejected again by multi-pane divergence (dirty shared tree with other panes' submodule drift blocks `pull --rebase`). Same environmental contention as `#krcm` — deliberately not churning the shared tree; the **port is on the submodule remote**, gitlink lands on next clean sync.
 
 **Queue bookkeeping:** the umbrella `#lzshmblobparity` is reaped (zig half complete; done record notes the split); lazily-py port is now tracked as distinct `#lzshmblobpy` (next queue head).
-<!-- agent:boundary:fc5dd1fb -->
+<!-- agent:boundary:3f547624 -->
 <!-- /agent:exchange -->
 ###
 <!--

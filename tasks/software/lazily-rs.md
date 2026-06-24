@@ -111,7 +111,25 @@ e.g. `val card = JBColor(Color(230,230,230), Color(92,110,158))` mirrors `--colo
 **#mpt7 DONE** — raised dark `--color-card` `52,63,96` → `92,110,158` in `config/blog_site.ts`. Verified ~3:1 vs bg `33,39,55` (was ~1.3:1) while keeping white-text-on-card ~4.3:1 (the two constraints nearly conflict — can't get 3:1 card-vs-bg AND 4.5:1 text from one value, so I picked the balance + rely on borders for delineation). `bun run build` green. Pushed: `briantakita.me` `46da770` → `briantakita.me-dev` `81807da` → `agent-loop` `b73df3598`.
 
 **Operator follow-up (non-blocking):** eyeball-verify the live site in dark mode (post cards, code blocks, nav) — I can't render-check it. If `92,110,158` reads too light/dark anywhere, tweak in `config/blog_site.ts` dark block. The diagram-scoped override (`#lzdarkchart`, `108,128,180`) stays — it gives the diagrams extra pop and is harmless now that the base is lifted.
-<!-- agent:boundary:4202d0ce -->
+
+### Re: JB plugin configurable light/dark colors — implemented + shipped — glm-5.2
+
+> **Queue prompts:** Can we make the JB plugin have a user configuration with the defaults you defined for the light and dark mode colors? · configuration for the light and dark mode colors
+
+**Yes — implemented.** `Settings → Tools → Agent Doc Colors` now exposes the five briantakita.me semantic colors (`fill`, `text-base`, `card`, `border`, `accent`) for **both light and dark**, defaulting to the sitewide palette (dark card `92,110,158` per #lzdarktheme).
+
+**What landed (agent-doc repo, `0a887cfe`, v0.2.179):**
+- `AgentDocColorSettings.kt` — application `PersistentStateComponent` (`agent-doc-colors.xml`) storing 5 colors × light/dark as `0xRRGGBB` ints; accessors return `JBColor(light, dark)` that auto-switch with the IDE LaF. `getInstance()` is null-safe (falls back to defaults) so plain unit tests pass.
+- `AgentDocColorConfigurable.kt` — `SearchableConfigurable` settings page with a color-swatch button per field (Swing `JColorChooser` picker); `isModified`/`apply`/`reset` wire it to the state.
+- `plugin.xml` — registered `<applicationService>` + `<applicationConfigurable parentId="tools">`.
+- `PromptPanel.kt` — surfaces (panel bg = `card`, unfocused border = `border`, focused border = `accent`, "?" foreground = `textBase`) now resolve from settings instead of the old hardcoded `JBColor(Color(245,243,228),…)` pairs.
+
+**Verified:** `./gradlew compileKotlin`, `buildPlugin`, and `test` all green — 218 tests pass incl. 3 new (`AgentDocColorSettingsTest`: palette defaults, fallback, loadState round-trip). Fixing the accessors to be null-safe resolved 2 `PromptPanelTest` NPEs (they exercise `buildPromptControlsRow` outside the platform).
+
+**Install:** `build/distributions/agent-doc-jetbrains-0.2.179.zip` (unsigned — run `./gradlew signPlugin` for a signed zip before publishing). Changes take effect on the next prompt-panel show.
+
+**Git note:** the local agent-doc checkout had 2 stale pre-rebase commits (`a92a781a`, `660e4a58`) the operator had already superseded on remote (`5b7a32ac`, `b0a6f1eb`). Reset to `origin/main` and cherry-picked only the JB commit (unrelated files, clean) rather than resolving conflicts in the queue-consume CLI code — stale commits stay reflog-recoverable.
+<!-- agent:boundary:a429e83b -->
 <!-- /agent:exchange -->
 ###
 <!--

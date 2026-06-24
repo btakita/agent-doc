@@ -111,7 +111,24 @@ The only actionable next-step is already captured as **#lzjshygiene** (validate 
 > **Queue prompt:** What are #next-steps to fix lazily-js bugs?
 
 Note: the remaining planning heads (zig/py/rs `#next-steps`) are likewise already covered by backlog items `#lzzigtodos`, `#lzpyregress`, and `#lzspecdrift`; the substantive work is the `do [#id]` implementation queue.
-<!-- agent:boundary:4b23de5a -->
+
+### Re: do [#lzspecdrift] — protocol.md reconciled + shipped — glm-5.2
+
+Reconciled `src/lazily-spec/protocol.md` to the canonical wire format. Committed lazily-spec (`a58eff8`) + bumped the superproject gitlink (`0b64553f9`). All 6 stale sections rewritten:
+
+- `IpcValue` (`Inline:[u8]` | `SharedBlob`) replaces the base64 `IpcPayload`.
+- `NodeState` (`Payload:[u8]` | `SharedBlob` | `Opaque`) replaces `"resolved"|"dirty"|"unset"`.
+- Snapshot: externally-tagged `{"Snapshot":{epoch,nodes:[{node,type_tag,state}],edges,roots}}` (was `{type,slot_id,...}`).
+- Delta: externally-tagged `{"Delta":{base_epoch,epoch,ops:[...]}}`.
+- DeltaOp table: PascalCase `CellSet|SlotValue|Invalidate|NodeAdd|NodeRemove|EdgeAdd|EdgeRemove` with `node` field (was snake_case + `slot_id`).
+- Invariants + Eager-Signal + Lazy-recon: all `cell_set`/`slot_value`/`invalidate` op refs → PascalCase.
+
+Verified: zero snake_case op refs remain; the 5 JSON blocks I touched all parse (the 6th — WebSocket signaling frames — is an intentional multi-frame sequence). Matches lazily-rs `src/ipc.rs:323-459` + every `conformance/*.json` fixture. Doc-only change; the Lean `check` target is unaffected.
+
+`#lzspecdrift` → done. Remaining implementation queue: `#lzktconf`, `#lzpyregress`, `#lzzigtodos` (+ `#lzjshygiene` conformance slice).
+
+> **Queue prompt:** do [#lzspecdrift]
+<!-- agent:boundary:f653b53d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -125,7 +142,7 @@ Note: the remaining planning heads (zig/py/rs `#next-steps`) are likewise alread
 - ~~What are #next-steps to fix lazily-zig bugs?~~
 - ~~What are #next-steps to fix lazily-py bugs?~~
 - ~~What are #next-steps to fix lazily-rs bugs?~~
-- 🚧 do [#lzspecdrift]
+- ~~do [#lzspecdrift]~~
 - do [#lzktconf]
 - do [#lzpyregress]
 - do [#lzzigtodos]
@@ -135,7 +152,6 @@ Note: the remaining planning heads (zig/py/rs `#next-steps`) are likewise alread
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzspecdrift] [recommended] CROSS-CUTTING (lazily-spec): reconcile src/lazily-spec/protocol.md wire format to the canonical shape actually emitted by lazily-rs src/ipc.rs:323-459 and encoded in every lazily-spec/conformance/*.json fixture — externally-tagged {"Snapshot":{epoch,nodes:[{node,type_tag,state:{Payload:[bytes]|SharedBlob{offset,len,generation,epoch,checksum}|Opaque}}],edges,roots}} and {"Delta":{base_epoch,epoch,ops:[{CellSet|SlotValue|Invalidate|NodeAdd|NodeRemove|EdgeAdd|EdgeRemove}{...}]}} with inline byte arrays. protocol.md is STALE: it documents {type:"snapshot", slot_id, state:"resolved"|"dirty"|"unset", payload:base64, snake_case ops cell_set/slot_value} which NOTHING implements. Any new port authored against protocol.md today is wire-incompatible. Spec-only doc fix; verify lazily-spec mdBook builds. Highest leverage — unblocks/all ports.
 - [ ] [#lzktconf] lazily-kt (queue head): IpcConformanceTest only round-trips the fixture `wire` block; the `assertions` metadata (node_count, edge_count, root_count, op_count, has_all_op_variants, blob_offset/len/epoch, is_sequential) is never validated generically, so fixture drift passes silently. Add a generic assertions validator. Also: no gradlew wrapper checked in (Makefile runs bare `gradle` → CI reproducibility gap); add gradle wrapper. gradle test currently green.
 - [ ] [#lzpyregress] lazily-py: add a deep/cyclic dependency regression test guarding the Signal→Slot RecursionError fix (commit 30907ea — Slot.__call__ no longer touches during computation; reset clears subscribers before notify). Currently 72 tests pass but the recursion path is unguarded against re-introduction. (v0.11.0 publish tracked separately in review #kb9b.)
 - [ ] [#lzzigtodos] lazily-zig: resolve open context.zig TODOs (rename .direct→.literal at context.zig:226 + CannotGetPtrOfDirectMode→LiteralHasNoPtr :273; before_change_subscribers at cell.zig:35; allocator options context.zig:617/621) and add a soak/cyclic test for Slot destroy↔unsubscribeChangeUnlocked ordering after the two recent memory-safety fixes (UAF 1dd8998 capture-ctx-before-destroy; iteration-during-mutation snapshot in emitChangeUnlocked). zig build test currently green.

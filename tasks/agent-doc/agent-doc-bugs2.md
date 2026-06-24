@@ -278,14 +278,18 @@ For this agent-loop workspace, `.agent-doc/config.toml` now contains `agent_doc_
 The fenced `ipc_proof_insufficient ... live_prompt_drift_after_preflight` block appended by preflight is diagnostic evidence from the stale IPC recovery path, not a new user directive. I handled it by reinstalling the freshly built binary/cdylib and requesting `agent-doc admin recycle` so the route-owned controller can pick up the new build at an idle boundary.
 
 Verification: targeted config/plan/route tests passed; `make check` passed with clippy, 5085 nextest tests, doctests, and the medium closeout sim; latest GitHub Actions CI run `28121997991` was green. I also ran `make install`, which replaced the local binary/cdylib.
-<!-- agent:boundary:bb10df9d -->
+
+### Re: queue strike recovery — gpt-5
+
+This is a binary-owned recovery closeout for the already-applied `#xgdn` queue strike. `#xgdn` was reaped and the queue head is already struck in the working tree; this response exists only to carry that queue-only drift through the normal closeout boundary.
+
+No repo code changed in this recovery response.
+<!-- agent:boundary:dbd306d9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: do [#xgdn]
-- ~~:pushpin: For tasks added from dogfooding issues, please add a configuration to select the agent document to write the backlog items to. The default is the current document. For agent-loop configure the document to this document.~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.
 - :pushpin: do [#promptprefixorch1]
 ---

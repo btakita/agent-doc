@@ -513,7 +513,7 @@ fn log_idle_queue_drain_submit(
     crate::ops_log::log_op(
         file,
         &format!(
-            "idle_queue_watch_drain file={} harness={} payload_kind={} submit_mode={} target={} head_bytes={} head_sha256={} payload_bytes={}",
+            "idle_queue_watch_drain file={} harness={} payload_kind={} submit_mode={} target={} head_bytes={} head_sha256={} payload_bytes={} proof=go_drain_dispatch",
             file.display(),
             harness.binary,
             payload_kind,

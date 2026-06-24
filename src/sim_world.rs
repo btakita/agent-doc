@@ -217,6 +217,15 @@ enum SimCommand {
     ///
     /// A go-mode `queue_active: true` head is waiting to drain.
     ActivateGoModeQueueHead,
+    /// `#qfocsup`: a `[focused-cycle]` head is active. The in-session loop must
+    /// yield it, then the supervisor clears and re-dispatches it into a fresh agent.
+    ActivateFocusedCycleQueueHead,
+    /// `#qfocsup`: model session-check emitting the supervisor-drain yield outcome
+    /// for the active focused-cycle head.
+    SessionCheckFocusedCycleDeferredForSupervisorDrain,
+    /// `#qfocsup`: the freshly dispatched agent has drained the active head and
+    /// materialized a response.
+    FreshAgentDrainActiveHead,
     /// A later `cargo install` made the supervisor's launch binary stale.
     MarkSupervisorBinaryStale,
     /// `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`): the editor-IPC write
@@ -741,6 +750,15 @@ struct Coverage {
     /// A go-mode queue head was dispatched by the idle-queue drain decision after
     /// the recycle + clear settled.
     go_drain_dispatches: usize,
+    /// `#qfocsup`: session-check yielded a focused-cycle head to the supervisor
+    /// clear-and-continue path with `ui_outcome=deferred_for_supervisor_drain`.
+    focused_cycle_supervisor_yields: usize,
+    /// `#qfocsup`: the supervisor submitted the context reset required before a
+    /// focused-cycle fresh-agent drain.
+    focused_cycle_context_resets: usize,
+    /// `#qfocsup`: the fresh agent consumed the focused-cycle head and left
+    /// response-materialization evidence.
+    focused_cycle_fresh_agent_drains: usize,
     /// `#qflood2`: the idle-queue drain was held back because the watch's own
     /// `/clear` had not settled yet (the trigger would have been injected into
     /// the in-flight clear and concatenated as `/clear /agent-doc <FILE>`).
@@ -929,6 +947,9 @@ impl Coverage {
         self.supervisor_recycles += other.supervisor_recycles;
         self.supervisor_recycle_failures += other.supervisor_recycle_failures;
         self.go_drain_dispatches += other.go_drain_dispatches;
+        self.focused_cycle_supervisor_yields += other.focused_cycle_supervisor_yields;
+        self.focused_cycle_context_resets += other.focused_cycle_context_resets;
+        self.focused_cycle_fresh_agent_drains += other.focused_cycle_fresh_agent_drains;
         self.drain_settle_skips += other.drain_settle_skips;
         self.drain_dedup_skips += other.drain_dedup_skips;
         self.sync_kill_pane_proofs += other.sync_kill_pane_proofs;
@@ -2897,6 +2918,85 @@ fn opted_out_document_clears_and_drains_without_auto_recycle() {
         world.route.durable.pane_id, pane_before,
         "no recycle → the live pane is preserved (no cold rebind)"
     );
+}
+
+#[test]
+fn focused_cycle_yields_to_supervisor_clear_and_fresh_agent_drain() {
+    // `#qfocsup` / `#tb4q`: deterministic proof for the operator-visible path.
+    // A focused-cycle head is not run by the accreted in-session loop. It yields
+    // with `ui_outcome=deferred_for_supervisor_drain`, the supervisor promotes a
+    // fresh binary if needed, force-clears for a fresh context, dispatches the
+    // head, and the fresh agent consumes it with response-materialization proof.
+    let mut world = SimWorld::new(8_416);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world
+        .apply(SimCommand::ActivateFocusedCycleQueueHead)
+        .unwrap();
+
+    let gen_before = world.route.durable.generation;
+    let pane_before = world.route.durable.pane_id.clone();
+
+    world
+        .apply(SimCommand::SessionCheckFocusedCycleDeferredForSupervisorDrain)
+        .unwrap();
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world.apply(SimCommand::OperatorRecycleMark).unwrap();
+    world
+        .apply(SimCommand::SupervisorContextResetClear)
+        .unwrap();
+
+    for _ in 0..3 {
+        world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+        assert_eq!(
+            world.coverage.go_drain_dispatches, 0,
+            "the drain must wait while the supervisor-owned /clear settles"
+        );
+    }
+
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.supervisor_recycles, 1,
+        "a stale supervisor promotes at the idle boundary before the drain"
+    );
+    assert_eq!(
+        world.route.durable.generation,
+        gen_before + 1,
+        "in-place recycle advances generation"
+    );
+    assert_eq!(
+        world.route.durable.pane_id, pane_before,
+        "in-place recycle preserves the live pane"
+    );
+    assert_eq!(world.coverage.go_drain_dispatches, 1);
+
+    world.apply(SimCommand::FreshAgentDrainActiveHead).unwrap();
+    assert!(world.recycle_clear.queue_active_head.is_none());
+    assert_eq!(world.coverage.focused_cycle_supervisor_yields, 1);
+    assert_eq!(world.coverage.focused_cycle_context_resets, 1);
+    assert_eq!(world.coverage.focused_cycle_fresh_agent_drains, 1);
+
+    let ops_log = world.ops_log.join("\n");
+    let yield_pos = ops_log
+        .find("session_check_supervisor_drain_handoff")
+        .expect("session-check handoff proof");
+    let reset_pos = ops_log
+        .find("idle_queue_watch_context_reset")
+        .expect("context reset proof");
+    let dispatch_pos = ops_log
+        .find("proof=go_drain_dispatch")
+        .expect("go-drain dispatch proof");
+    let fresh_pos = ops_log
+        .find("fresh_agent_drain_evidence")
+        .expect("fresh-agent drain proof");
+    assert!(
+        yield_pos < reset_pos && reset_pos < dispatch_pos && dispatch_pos < fresh_pos,
+        "proof markers must preserve the yield -> clear -> dispatch -> fresh-agent order:\n{ops_log}"
+    );
+    assert!(ops_log.contains("ui_outcome=deferred_for_supervisor_drain"));
+    assert!(ops_log.contains("next_action=yield_to_supervisor_clear_and_continue"));
+    assert!(ops_log.contains("#qfocsup"));
+    assert!(ops_log.contains("response_materialized=true"));
 }
 
 #[test]

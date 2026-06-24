@@ -13,6 +13,7 @@ use crate::start::decisions::{
 };
 
 const CLEAN_SESSION_CONTEXT_RESET_REASON: &str = "active queue head is a [clean-session] item - clearing to give it a fresh agent context (#cleandrainsup)";
+const FOCUSED_CYCLE_CONTEXT_RESET_REASON: &str = "active queue head is a [focused-cycle] item - clearing to continue in a fresh agent context (#qfocsup)";
 
 /// `#fbwire` / `#fullboundary` Phase 2 — bounded timeout for the inter-queue-item
 /// convergence gate. While the prior turn has not proven a quiescent close
@@ -313,6 +314,16 @@ fn log_idle_queue_context_reset_submit(
             reason,
         ),
     );
+}
+
+fn forced_context_reset_reason_for_head(file: &Path, head: &str) -> Option<&'static str> {
+    if crate::queue_continuation::head_requires_focused_cycle(file, head) {
+        Some(FOCUSED_CYCLE_CONTEXT_RESET_REASON)
+    } else if crate::queue_continuation::head_requires_clean_session(file, head) {
+        Some(CLEAN_SESSION_CONTEXT_RESET_REASON)
+    } else {
+        None
+    }
 }
 
 fn record_context_clear_in_flight_marker(
@@ -1899,16 +1910,15 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // requires fresh context. The reset decision still runs through
                 // prompt/turn/route gates below, so a live queue edit or in-flight
                 // route cannot churn clears.
-                let active_head_forces_context_reset = active_head
+                let forced_context_reset_reason = active_head
                     .as_deref()
-                    .map(|head| crate::queue_continuation::head_requires_context_reset(&path, head))
-                    .unwrap_or(false);
+                    .and_then(|head| forced_context_reset_reason_for_head(&path, head));
                 let context_reset_reason = if crate::start::decisions::clean_session_head_forces_context_reset(
-                    active_head_forces_context_reset,
+                    forced_context_reset_reason.is_some(),
                     clear_cooldown_active,
                 ) {
                     context_reset_policy_error_logged = false;
-                    Some(CLEAN_SESSION_CONTEXT_RESET_REASON.to_string())
+                    forced_context_reset_reason.map(str::to_string)
                 } else if harness.binary == "codex" {
                     match crate::codex_hook::codex_queue_context_reset_reason(
                         &path,
@@ -2936,6 +2946,51 @@ mod tests {
             ops_log
                 .contains("between_turn_enqueue deduped=0 kept=/clear,/agent-doc result=delivered")
         );
+    }
+
+    #[test]
+    fn focused_cycle_reset_ops_log_names_qfocsup_and_go_drain_dispatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        std::fs::write(
+            &doc,
+            "## Queue\n\n<!-- agent:queue go -->\n- do [#focus]\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n- [ ] [#focus] [focused-cycle] dedicated proof\n<!-- /agent:backlog -->\n",
+        )
+        .unwrap();
+
+        let head = "do [#focus]";
+        let reason =
+            forced_context_reset_reason_for_head(&doc, head).expect("focused-cycle reason");
+        assert_eq!(reason, FOCUSED_CYCLE_CONTEXT_RESET_REASON);
+
+        let harness = crate::harness::HarnessConfig::codex();
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            "codex",
+            None,
+            None,
+            Some("%25".to_string()),
+        );
+        log_idle_queue_context_reset_submit(&doc, &shared, &harness, "/clear", head, reason);
+        log_idle_queue_drain_submit(
+            &doc,
+            &shared,
+            &harness,
+            "trigger",
+            head,
+            &format!("agent-doc {}", doc.display()),
+        );
+
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("idle_queue_watch_context_reset"));
+        assert!(ops_log.contains("reason=\"active queue head is a [focused-cycle] item"));
+        assert!(ops_log.contains("#qfocsup"));
+        assert!(!ops_log.contains("#cleandrainsup"));
+        assert!(ops_log.contains("idle_queue_watch_drain"));
+        assert!(ops_log.contains("proof=go_drain_dispatch"));
+        assert!(ops_log.contains("head_sha256="));
     }
 
     // ----- `#fbwire` / `#fullboundary` Phase 2: convergence-gated boundary -----

@@ -405,6 +405,28 @@ pub fn clean_session_backlog_ids(content: &str) -> std::collections::HashSet<Str
     ids
 }
 
+/// Active backlog ids (lowercase) carrying `[focused-cycle]` — heads that must be
+/// yielded by the in-session loop but drained by the supervisor after a forced
+/// context reset (`#qfocsup`).
+pub fn focused_cycle_backlog_ids(content: &str) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    let Ok(components) = crate::component::parse(content) else {
+        return ids;
+    };
+    for comp in &components {
+        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
+            continue;
+        }
+        let body = &content[comp.open_end..comp.close_start];
+        for (id, ctx) in crate::pending::active_item_execution_contexts(body) {
+            if ctx.focused_cycle_required {
+                ids.insert(id.to_ascii_lowercase());
+            }
+        }
+    }
+    ids
+}
+
 /// Whether the active queue `head` (an `#id` or raw prompt text) maps to a
 /// `[clean-session]` backlog item (`#cleandrainsup`). The supervisor idle-watch uses
 /// this to force a context `/clear` before dispatching the head, independent of the
@@ -419,6 +441,29 @@ pub fn head_requires_clean_session(file: &Path, head: &str) -> bool {
 /// Pure core of [`head_requires_clean_session`] — testable without a file.
 pub fn head_requires_clean_session_in(content: &str, head: &str) -> bool {
     let ids = clean_session_backlog_ids(content);
+    if ids.is_empty() {
+        return false;
+    }
+    let id = extract_head_id(head)
+        .map(|i| i.to_ascii_lowercase())
+        .unwrap_or_else(|| head.trim().to_ascii_lowercase());
+    ids.contains(&id)
+}
+
+/// Whether the active queue `head` maps to a `[focused-cycle]` backlog item
+/// (`#qfocsup`). Such heads are supervisor-drainable only after a forced context
+/// reset, and the ops log needs the focused-cycle-specific reason instead of the
+/// clean-session reason.
+pub fn head_requires_focused_cycle(file: &Path, head: &str) -> bool {
+    let Ok(content) = std::fs::read_to_string(file) else {
+        return false;
+    };
+    head_requires_focused_cycle_in(&content, head)
+}
+
+/// Pure core of [`head_requires_focused_cycle`] — testable without a file.
+pub fn head_requires_focused_cycle_in(content: &str, head: &str) -> bool {
+    let ids = focused_cycle_backlog_ids(content);
     if ids.is_empty() {
         return false;
     }
@@ -1856,6 +1901,8 @@ mod tests {
         // clean-session-only check stays narrow (focused-cycle excluded).
         assert!(head_requires_clean_session_in(&content, "c"));
         assert!(!head_requires_clean_session_in(&content, "f"));
+        assert!(!head_requires_focused_cycle_in(&content, "c"));
+        assert!(head_requires_focused_cycle_in(&content, "f"));
     }
 
     #[test]

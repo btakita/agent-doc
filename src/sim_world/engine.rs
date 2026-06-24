@@ -467,6 +467,15 @@ impl SimWorld {
             SimCommand::ActivateGoModeQueueHead => {
                 self.recycle_clear.queue_active_head = Some("#govqueuehead".to_string());
             }
+            SimCommand::ActivateFocusedCycleQueueHead => {
+                self.recycle_clear.queue_active_head = Some("do [#qfocsup-focused]".to_string());
+            }
+            SimCommand::SessionCheckFocusedCycleDeferredForSupervisorDrain => {
+                self.session_check_focused_cycle_deferred_for_supervisor_drain()?;
+            }
+            SimCommand::FreshAgentDrainActiveHead => {
+                self.fresh_agent_drain_active_head()?;
+            }
             SimCommand::MarkSupervisorBinaryStale => {
                 self.recycle_clear.binary_stale = true;
             }
@@ -754,6 +763,14 @@ impl SimWorld {
         self.recycle_clear.awaiting_clear_settle = true;
         self.recycle_clear.clear_settle_idle_ticks = 0;
         self.recycle_clear.last_dispatched = None;
+        if let Some(head) = self.recycle_clear.queue_active_head.clone() {
+            self.coverage.focused_cycle_context_resets += 1;
+            self.record_ops_proof(format!(
+                "idle_queue_watch_context_reset head_bytes={} head_sha256={} reason=\"active queue head is a [focused-cycle] item - clearing to continue in a fresh agent context (#qfocsup)\"",
+                head.len(),
+                agent_doc_orchestration::ops_log::content_hash(&head)
+            ));
+        }
     }
 
     /// `#qflood2`: model that the routed trigger is (or is not) already pending in
@@ -1056,10 +1073,46 @@ impl SimWorld {
             }
             self.recycle_clear.last_dispatched = head;
             self.coverage.go_drain_dispatches += 1;
-            self.record_ops_proof(
-                "recycle_session_reclear action=idle_queue_drain result=dispatch",
+            self.record_ops_proof("recycle_session_reclear action=idle_queue_drain result=dispatch proof=go_drain_dispatch");
+        }
+        Ok(())
+    }
+
+    fn session_check_focused_cycle_deferred_for_supervisor_drain(&mut self) -> Result<()> {
+        let head = self
+            .recycle_clear
+            .queue_active_head
+            .clone()
+            .ok_or_else(|| anyhow!("focused-cycle session-check yield requires an active head"))?;
+        self.coverage.focused_cycle_supervisor_yields += 1;
+        self.record_ops_proof(format!(
+            "session_check_supervisor_drain_handoff ui_outcome=deferred_for_supervisor_drain next_action=yield_to_supervisor_clear_and_continue head_bytes={} head_sha256={} proof_marker=#qfocsup",
+            head.len(),
+            agent_doc_orchestration::ops_log::content_hash(&head)
+        ));
+        Ok(())
+    }
+
+    fn fresh_agent_drain_active_head(&mut self) -> Result<()> {
+        let head = self
+            .recycle_clear
+            .queue_active_head
+            .clone()
+            .ok_or_else(|| anyhow!("fresh-agent drain requires an active head"))?;
+        if self.recycle_clear.last_dispatched.as_deref() != Some(head.as_str()) {
+            bail!(
+                "fresh-agent drain requires the active head to be dispatched first; head={head:?} last_dispatched={:?}",
+                self.recycle_clear.last_dispatched
             );
         }
+        self.recycle_clear.queue_active_head = None;
+        self.recycle_clear.last_dispatched = None;
+        self.coverage.focused_cycle_fresh_agent_drains += 1;
+        self.record_ops_proof(format!(
+            "fresh_agent_drain_evidence head_bytes={} head_sha256={} result=consumed response_materialized=true",
+            head.len(),
+            agent_doc_orchestration::ops_log::content_hash(&head)
+        ));
         Ok(())
     }
 

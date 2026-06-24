@@ -131,6 +131,19 @@ fn continuation_guidance_for(file: &Path) -> String {
     crate::queue_continuation::continuation_guidance(pause_reason.as_deref())
 }
 
+fn log_supervisor_drain_handoff(file: &Path, head: &str, outcome_fields: &str) {
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "session_check_supervisor_drain_handoff file={} head_bytes={} head_sha256={} {}",
+            file.display(),
+            head.len(),
+            crate::ops_log::content_hash(head),
+            outcome_fields
+        ),
+    );
+}
+
 /// `session-check` with the optional Codex final-gate.
 ///
 /// Default (`codex_final_gate = false`): keeps exit 0 for a clean document and
@@ -295,12 +308,13 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 let supervisor_head = std::fs::read_to_string(file).ok().and_then(|content| {
                     crate::queue_continuation::live_drainable_continuation_head(file, &content)
                 });
-                if supervisor_head.is_some() {
+                if let Some(supervisor_head) = supervisor_head {
                     let outcome_fields = crate::flow::outcome::UserFacingOutcome::new(
                         crate::flow::outcome::UserFacingOutcomeKind::DeferredForSupervisorDrain,
                     )
                     .expect("static deferred supervisor-drain outcome is valid")
                     .log_fields();
+                    log_supervisor_drain_handoff(file, &supervisor_head, &outcome_fields);
                     println!(
                         "queue_continuation_required=false queue_deferred_heads={} queue_stale_noise_lines={} {}",
                         deferred, noise, outcome_fields
@@ -7555,5 +7569,29 @@ Body\n\
             paused.contains(crate::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE),
             "paused guidance must still preserve the normal no-stall rules: {paused}"
         );
+    }
+
+    #[test]
+    fn supervisor_drain_handoff_log_names_head_and_ui_outcome() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("doc.md");
+        fs::write(&doc, "doc\n").unwrap();
+
+        let outcome_fields = crate::flow::outcome::UserFacingOutcome::new(
+            crate::flow::outcome::UserFacingOutcomeKind::DeferredForSupervisorDrain,
+        )
+        .unwrap()
+        .log_fields();
+        let head = "do [#focus]";
+        log_supervisor_drain_handoff(&doc, head, &outcome_fields);
+
+        let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("session_check_supervisor_drain_handoff"));
+        assert!(ops_log.contains("ui_outcome=deferred_for_supervisor_drain"));
+        assert!(ops_log.contains("next_action=yield_to_supervisor_clear_and_continue"));
+        assert!(ops_log.contains(&format!("head_bytes={}", head.len())));
+        assert!(ops_log.contains("head_sha256="));
     }
 }

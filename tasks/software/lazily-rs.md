@@ -75,7 +75,18 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8c56928442bd4b165543ab0aad264d681b41b8898551d10f196018cd15a37304 content_len=11944 content_hash=46b47fdfe5505fb37c9e63df4167cb923df6b4ffc997ecca9009a15979c29a5e doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782339826601
 ```
-<!-- agent:boundary:b13fe880 -->
+
+### Re: #lzjshygiene node_modules purge — glm-5.2
+
+Verified `node_modules/` is **not tracked** in src/lazily-js — nothing to purge.
+- `git ls-files node_modules` → **0 files**; only 16 files tracked total (8 test, 4 src, package.json, Makefile, .gitignore, AGENTS.md)
+- `.gitignore` already lists `node_modules/`
+- `git log --all -- node_modules` → empty (no commit ever touches it)
+
+The "node_modules committed → bloat" premise in my earlier cross-port response was **wrong** — I read `ls` (working tree) instead of `git ls-files` (tracked). The state you want — no node_modules in history — already exists, so no history rewrite / `git filter-repo` is needed. Corrected #lzjshygiene in place; its remaining actionable work is the conformance-fixture `assertions` validation (parity with #lzktconf).
+
+> **Queue prompt:** - do [#lzjshygiene]: Please purge `node_modules/` from the git history.
+<!-- agent:boundary:9b60c5a2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -86,14 +97,14 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~What are #next-steps to fix lazily-kt bugs?~~
 - 🚧 What are #next-steps to fix lazily-js bugs?
-- 🚧 What are #next-steps to fix lazily-zig bugs?
-- 🚧 What are #next-steps to fix lazily-py bugs?
-- 🚧 What are #next-steps to fix lazily-rs bugs?
+- What are #next-steps to fix lazily-zig bugs?
+- What are #next-steps to fix lazily-py bugs?
+- What are #next-steps to fix lazily-rs bugs?
 - do [#lzspecdrift]
 - do [#lzktconf]
 - do [#lzpyregress]
 - do [#lzzigtodos]
-- do [#lzjshygiene]
+- ~~do [#lzjshygiene]: Please purge `node_modules/` from the git history.~~
 <!-- /agent:queue -->
 
 ## Backlog
@@ -103,7 +114,7 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 - [ ] [#lzktconf] lazily-kt (queue head): IpcConformanceTest only round-trips the fixture `wire` block; the `assertions` metadata (node_count, edge_count, root_count, op_count, has_all_op_variants, blob_offset/len/epoch, is_sequential) is never validated generically, so fixture drift passes silently. Add a generic assertions validator. Also: no gradlew wrapper checked in (Makefile runs bare `gradle` → CI reproducibility gap); add gradle wrapper. gradle test currently green.
 - [ ] [#lzpyregress] lazily-py: add a deep/cyclic dependency regression test guarding the Signal→Slot RecursionError fix (commit 30907ea — Slot.__call__ no longer touches during computation; reset clears subscribers before notify). Currently 72 tests pass but the recursion path is unguarded against re-introduction. (v0.11.0 publish tracked separately in review #kb9b.)
 - [ ] [#lzzigtodos] lazily-zig: resolve open context.zig TODOs (rename .direct→.literal at context.zig:226 + CannotGetPtrOfDirectMode→LiteralHasNoPtr :273; before_change_subscribers at cell.zig:35; allocator options context.zig:617/621) and add a soak/cyclic test for Slot destroy↔unsubscribeChangeUnlocked ordering after the two recent memory-safety fixes (UAF 1dd8998 capture-ctx-before-destroy; iteration-during-mutation snapshot in emitChangeUnlocked). zig build test currently green.
-- [ ] [#lzjshygiene] lazily-js: gitignore node_modules/ (currently committed to the submodule → repo bloat) and validate conformance fixture `assertions` generically (parity with #lzktconf). npm test currently green (27 pass).
+- [ ] [#lzjshygiene] lazily-js: node_modules NOT tracked (verified: git ls-files node_modules -> 0; .gitignore covers it; no commits touch it) — purge UNNEEDED, no history rewrite required. Remaining: validate conformance fixture assertions generically (parity with #lzktconf). npm test green (27 pass).
 <!-- /agent:backlog -->
 
 ## Review

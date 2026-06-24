@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -56,7 +56,22 @@ Verification: focused Bun tests passed with `94 pass / 0 fail`; `make check` pas
 CI/workflows: `gh run list --workflow CI --limit 1` found no `CI` workflow in either EFS or the parent repo. `gh workflow list` returned no EFS workflows and only `Agent Doc` in the parent repo.
 
 Escalation: none. Confidence: high for the shipped code/deploy path; the final live visual check of the admin-only dialog still requires an authenticated browser session.
-<!-- agent:boundary:b48c8b07 -->
+
+### Re: Deploy — gpt-5
+
+> **Queue prompt:**
+> deploy
+
+Done. I redeployed the current EFS Worker through the project deployment path (`make deploy`), which rebuilt the Worker, checked/applied remote D1 migrations, and activated Cloudflare Worker version `35ce9176-4565-4aaa-b064-03bd63065324` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Changed paths: none in `src/equityfundingsource-dev`; the submodule is clean on `main` at `ba39c67` / `origin/main`. The parent repo still has unrelated dirty files, but I did not touch them.
+
+Verification: `make check` passed with `1186 pass / 0 fail`, app build, and Worker build. Pre-deploy and post-deploy D1 checks both reported no migrations to apply. D1 info returned successfully for database `280e1539-b940-4c59-8988-fbed63c12ac0`, and Time Travel reported current bookmark `00000509-00000010-00005094-54e662098a450514cb2e36b3dd1b69a7`. Post-deploy smoke checks returned `200` for `/` and `303` for the admin pipeline deep link, consistent with Cloudflare Access redirect on admin routes.
+
+CI/workflows: `gh run list --workflow CI --limit 1` found no workflow named `CI` in either the EFS submodule or the parent repo.
+
+Escalation: none. Confidence: high for deploy/build/D1/smoke coverage; authenticated visual verification of the admin-only dialog still requires an authenticated browser session.
+<!-- agent:boundary:ac6352c8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -76,8 +91,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6, add an alert with explaining the next actionable step to advance the application with a CTA button.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

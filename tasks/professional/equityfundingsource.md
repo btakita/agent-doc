@@ -96,7 +96,22 @@ Verification:
 Changed paths: none in this deploy cycle.
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:62b37525 -->
+❯ **IPC proof issue dogfood log**
+
+❯ Detected during interrupted-cycle recovery. This note is appended automatically so the session document records editor IPC issues while queue edits are being dogfooded.
+
+❯ Issue class: `ipc_proof_insufficient`
+❯ Affected component: editor IPC / writeback
+
+```text
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=12469303-d0d3-442b-b90f-d519be7b0718 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782284846675
+```
+
+### Re: IPC proof dogfood note — gpt-5
+
+The IPC proof dogfood note is recorded in the session document. No additional EFS repo work is needed for that note; the lender-pipeline fix and deploy are already committed, deployed, and the queue is drained.
+
+<!-- agent:boundary:f0317630 -->
 <!-- /agent:exchange -->
 ###
 <!--

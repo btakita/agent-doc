@@ -120,7 +120,16 @@ A true same-pane recursive `agent-doc <FILE>` call should stay fail-closed. Disp
 The safe state-machine path is already the redirect: `preflight` exposes `owned_pane_self_invocation` with `kind` set to `unresolved_prompt` or `active_queue_head`, and Codex should continue the same owner turn, answer that work in-pane, then persist through `agent-doc finalize` or `agent-doc write --commit`. The Codex Stop hook uses the same model for queue continuations (`#codex-self-reinvoke-prevent`), so queue drain redirects to in-pane closeout instead of re-running `agent-doc <FILE>`.
 
 For the `monsterrodholders.md` case, the recovery is not another nested CLI invocation. Continue via preflight/plan/finalize in the owning pane, or start/route the document from outside that owner pane. Routing to the same pane mid-turn is unsafe; routing from a different pane or from supervisor-owned idle state is safe because the state machine can wait for actor readiness and dispatch once.
-<!-- agent:boundary:083b54e7 -->
+
+### Re: IPC proof issue dogfood log - gpt-5
+
+The IPC proof note was generated while recovering the failed closeout attempt for this session. The first retry was rejected before a valid response was committed, then the visible file and session sidecar snapshot diverged.
+
+Recovery completed in-session: I ran `agent-doc reset --from-current /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`, retried preflight after the editor debounce settled, and preflight retired the wedged write-applied capture, rebuilt snapshot/CRDT state from the current document, and committed the recovery as `59c2f011c`.
+
+No product code change or backlog item is needed for this dogfood note. I am continuing with the active queue item after this closeout.
+
+<!-- agent:boundary:49d92143 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -289,13 +289,13 @@ Verification:
 - `make install-full`
 
 Committed and pushed source change `ef50ed8aa187839567552bcf627659099af383ba` (`fix: file route dispatch proof failures`) to `btakita/agent-doc` `main`. Updated and pushed the parent submodule pointer in `btakita/agent-loop` as `a51932f8d` (`chore: update agent-doc submodule`). GitHub Actions CI for the source push was queued as run `28066398449` when checked.
-<!-- agent:boundary:cf3f1477 -->
+<!-- agent:boundary:18c6f34a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: do [#3ygp]
+- ~~:pushpin: do [#3ygp]~~
 - :pushpin: do [#fbwireverify]: "Operator-gated: needs two live editor/CLI panes the driving session cannot host." Please explain.
 - :pushpin: do [#qnodemerge4verify]: New plugin installed. How can I verify UTF-8 during merge? When does this happen? If this is too difficult, just mark this as done. 日本 😀日本 😀日本 😀日本 😀
 - :pushpin: do [#tb4q]: please check logs

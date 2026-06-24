@@ -298,13 +298,13 @@ Verified with targeted regressions plus `make check` (5091 tests passed, 241 ski
 Committed submodule `941c3b50 fix: mark active agent-doc work` and parent pointer `91601b2a6 agent-doc: mark active work items`.
 
 No new actionable follow-up items were needed.
-<!-- agent:boundary:8911ef84 -->
+<!-- agent:boundary:a73c6291 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- :pushpin: Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.
+- 🚧 :pushpin: Annotate in real-time the current queue item, backlog item, icebox item with 🚧. 🚧 should be prefixed for queue items, and after the `[ ]` or `[/]` or `[x]` for backlog + icebox items. I want to see what is currently in progress during the turn.
 - :pushpin: do [#promptprefixorch1]
 ---
 JB `Run Agent Doc` on monsterrodholders.md

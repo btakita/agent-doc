@@ -355,7 +355,35 @@ Verification this cycle:
 No source changes or new repo commits were needed for this item.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:ede89eb0 -->
+
+### Re: #advr09 — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#advr09]
+
+
+Verified `#jbrundispatch` is already implemented in current `src/agent-doc` and closes this queue item.
+
+Evidence:
+- Dispatch proof failures file deduped session-doc bug items via `file_route_dispatch_bug_report` / `route_dispatch_bug_report_item`.
+- The filed item includes deterministic route evidence: `#jbrunautobug #agent-doc-bug`, failure class, document, stage, pane, actor generation, editor attempt, dispatch proof state, elapsed time, diagnostic path, ops log path/marker, and symptom key.
+- `require_dispatch_only_dispatch_start_proof` distinguishes accepted-only from dispatch-start proof, records route submit blocked/proof failed, logs the issue, and files the bug item.
+- Route submit observations classify successful dispatch-start proof vs accepted-without-proof.
+- Ops report grouping covers route dispatch proven/unproven events for deterministic diagnostics.
+- Related shipped commits: `ef50ed8a`, `0549d935`, `4a9284d0`, `aca970fe`.
+
+Verification:
+- `cargo test -p agent-doc-orchestration route_dispatch_bug_report`: passed 2 tests.
+- `cargo test -p agent-doc-orchestration route_submit_observation_marks`: passed 3 tests.
+- `cargo test -p agent-doc ops_summary_groups_tracked_events_by_file_and_session`: passed.
+- `git -C src/agent-doc diff --check`: clean.
+- Latest CI: `28074608395` completed successfully on 2026-06-24.
+
+No source changes or new repo commits were needed.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:8fce0bb5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -364,7 +392,7 @@ Escalation: none. Confidence: high.
 - ~~:pushpin: do [#advr06]~~
 - ~~:pushpin: do [#advr07]~~
 - ~~:pushpin: do [#advr08]~~
-- :pushpin: do [#advr09]
+- ~~:pushpin: do [#advr09]~~
 - :pushpin: do [#advr10]
 - :pushpin: do [#advr11]
 - :pushpin: do [#advr12]
@@ -404,7 +432,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr09] Advance original #jbrundispatch: replace operator-capture gate with deterministic Run Agent Doc dispatch diagnostics using admin detect, route trace, pane state, dispatch/start proof, and auto-filed route bugs; add regression coverage where possible.
 - [ ] [#advr10] Advance original #editorbufwin: finish editor-buffer-wins P2 by auto-recovering and committing preserved queue additions when replay normalization neutralizes the queue component. Plan: tasks/agent-doc/plan-editor-buffer-wins-queue-merge.md.
 - [ ] [#advr11] Advance original #docdriftgrace: implement component-scoped graceful drift resolution that auto-rebases unrelated changes and surfaces only structural conflicts on in-flight prompt/response. Plan: tasks/agent-doc/plan-graceful-doc-drift-resolution.md.
 - [ ] [#advr12] Advance original #ftqpartialdup: confirm whether #hap7/#gf5n fixes same-node partial free-text queue duplication; if not, add same-node/free-text conflict guard and regression for truncated duplicate queue prompts.

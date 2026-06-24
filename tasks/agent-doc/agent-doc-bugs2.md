@@ -78,7 +78,13 @@ Recovered the stranded closeout first. The prior `response_captured` cycle is no
 I dry-ran the emitted orchestration command. It resolved only the already-recorded verification evidence from the previous response: targeted Rust tests, JetBrains `TerminalUtilTest`, SimWorld protected-prompt coverage, `make check`, and `make install-full`. I did not rerun those as new tasks because they were recovery residue, not a new task list.
 
 Next concrete follow-up is now `#promptprefixorch1`: fix prompt-prefixed recovery/evidence lines being classified as user prompt targets and orchestration work after interrupted closeout recovery. Current actionable backlog still also has `#xgdn` and `#sz4a` for route/dispatch proof failures.
-<!-- agent:boundary:2bf709df -->
+
+### Re: dropped recovery evidence prompts — gpt-5
+
+The prompt-prefixed command and commit lines are recovery evidence from the already-completed route/closeout work, not a new task list. I preserved them in `agent:exchange`, answered them as prior execution evidence, and did not rerun the dry-run orchestration tasks.
+
+This closeout is specifically for `#exchange-prompt-dropped-on-merge`: commit the visible exchange evidence through the binary-owned path so session-check no longer sees those lines as dropped user prompts.
+<!-- agent:boundary:85fa07af -->
 <!-- /agent:exchange -->
 
 ## Queue

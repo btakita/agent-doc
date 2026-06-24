@@ -84,7 +84,7 @@ Next queue head: `#lzstr0mnetinbox` (str0m receive-side unbounded inbox).
 **Fix (lazily-rs `e165720`, pushed):** added `MAX_INBOX_FRAMES` (=1024, symmetric with the send cap) with drop-oldest ring semantics (newest retained) and a `dropped_inbox_frames` counter exposed via `Str0mNet::dropped_inbox_frames()` so sustained saturation is diagnosable (non-zero warrants a Snapshot resync). The str0m SCTP stack still owns wire-level reliability; this is the local memory safety valve. Unit test `inbox_caps_at_max_inbox_frames_and_counts_drops` pushes past the cap and asserts the bound, drop count, and drop-oldest retention. Verified: clippy `--all-targets --all-features -D warnings` clean, rustfmt clean, full `--features webrtc-str0m` suite green (incl. the real two-socket `tests/str0m_net.rs` round trip), release build OK.
 
 Next queue head: `#lzstr0mnetacceptanswer` (str0m discards `accept_answer` result).
-<!-- agent:boundary:757436f4 -->
+<!-- agent:boundary:7d4f5c81 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -106,7 +106,7 @@ Next queue head: `#lzstr0mnetacceptanswer` (str0m discards `accept_answer` resul
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzstr0mnetacceptanswer] str0m_net.rs driver discards rtc.accept_answer result (:391 let _ =); an ICE/DTLS fingerprint/mid mismatch is invisible and wait_open times out with no diagnostic. Propagate apply-time failure to Shared::last_error so the open-failure surfaces a cause.
+- [ ] [#lzstr0mnetacceptanswer] str0m_net.rs driver discards rtc.accept_answer result (:391 let _ =); an ICE/DTLS fingerprint/mid mismatch is invisible and wait_open times out with no diagnostic. Propagate apply-time failure to Shared::last_error so the open-failure surfaces a cause.
 - [ ] [#lzwsunbounded] ws_backend.rs outbound is an unbounded mpsc (:88) and drive abandons queued frames on send error (:117-119 break); producers can keep enqueuing after close. Switch to a bounded channel, surface send failures via WsError, stop producers on close.
 - [ ] [#lzerrfrom] [recommended] Add From<serde_json::Error>/From<postcard::Error> impls for EncodeError/DecodeError ergonomics (open since 2026-06-17). src/ipc.rs.
 - [ ] [#lzsid32] Harden SlotId.0 as-usize casts in thread_safe.rs to usize::try_from for 32-bit safety parity with single-threaded Context (open since 2026-06-17).

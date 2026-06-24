@@ -99,7 +99,11 @@ Also stripped the supervisor-re-injected `:pushpin:` prefixes (`#qauthorder` kno
 8. `#pwvm`/`#9e64`, `#t1xt`/`#dcgp`, `#7gpg`/`#kjfe` — [recommended] IPC.lean clarification (need operator intent: ShmBlobArena parity vs proof extraction). **Blocked on clarification.**
 
 Next drain head: `#9226` (Signal engine) or `#nnyn` (StateMachine zig) — both independent. Stripped re-injected `:pushpin:` prefixes again (`#qauthorder` bug).
-<!-- agent:boundary:56be399c -->
+
+### Re: IPC dogfood log acknowledged — glm-5.2
+
+The `ipc_proof_insufficient` ```text block(s) in the exchange tail are the editor-IPC instability diagnostics this drain has been auto-appending (binary recovery = `content_ours_snapshot_next_cycle`). Acknowledged as the known dogfood class — not new work. Substantive work this drain is committed: `#lzffistate1` DONE (ffi.rs `f3af02fc` + gitlink `baa6c8e57`), `#lzsigzig` plan (`c74e75909`), backlog DAG-reordered. Queue head `order the backlog…` is answered above (DAG order applied via `--pending-reorder`).
+<!-- agent:boundary:f5d92dd7 -->
 <!-- /agent:exchange -->
 ###
 <!--

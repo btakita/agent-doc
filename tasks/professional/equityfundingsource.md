@@ -38,7 +38,22 @@ complete
 Compacted content:
 ❯ - Archived 6 response topic(s): Application Next-Step Alert And Deploy; Deploy; Accept Application Guidance And Deploy; 3 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:12f390b3 -->
+
+### Re: Full Application Property Type Dropdown — gpt-5
+
+> **Queue prompt:**
+> Should https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application > Property Type be a dropdown? It is a free text field in edit.
+
+Yes. Property Type is already a controlled intake value in the borrower full-application form, so the admin Full Application edit surface should use the same controlled dropdown instead of free text.
+
+Implemented in `src/equityfundingsource-dev` commit `90059dc fix(admin): use property type dropdown in full application edit`, pushed to `origin/main`. The parent submodule pointer commit is `53191e4da chore(efs): bump property type dropdown submodule`, also pushed to `origin/main`.
+
+Changed paths: `lib/ui--browser--efs/portal/shared/full_application_detail.tsx`, `tests/admin-full-application-approve-ui.test.ts`, and `prds/67v2-admin-loan-pipeline-kanban.md`. The shared Full Application subject-property editor now renders `Property type` as a select using the borrower intake values: `Single Family Residence`, `Single Family (zoned residential lot/parcel)`, `Commercial & Income Producing`, `Land (zoned commercial/residential)`, and `Other`. If an older stored value does not match those options, the select includes that value as a visible `(current)` option so saving the form does not silently clear it.
+
+Verification: focused test passed (`bun test tests/admin-full-application-approve-ui.test.ts`: `11 pass / 0 fail`). Full EFS check passed (`make check`: raw summary `1189 pass / 0 fail`, app build, and Worker build). The tsift digest wrapper flagged the known logged `error: d1 down` fixture string, but the command exited 0 and the raw Bun summary has zero failures. `git diff --check` was clean. `gh run list --workflow CI --limit 1` found no workflow named `CI` in the EFS submodule.
+
+Deploy was not requested for this queue item. Escalation: none. Confidence: high for the code path, tests, spec note, commit, and push.
+<!-- agent:boundary:f2dc27a9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,7 +73,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Should https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 > Full Application > Property Type be a dropdown? It is a free text field in edit.
 <!-- /agent:queue -->
 
 ## Backlog

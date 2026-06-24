@@ -287,7 +287,20 @@ Commits already pushed:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:cd2da929 -->
+
+### Re: answered duplicate queue head — gpt-5
+
+The already-answered duplicate Requirements dialog arrow-navigation queue head was still at the front after the no-code-change closeout, so I consumed that free-text queue head explicitly with `agent-doc queue consume --count 1`.
+
+No product code changed in this cycle. The shared implementation remains:
+- EFS submodule: `7e89423 fix(admin): add requirements dialog arrow navigation`
+- Parent gitlink: `2c2ec9452 chore: update equityfundingsource submodule`
+
+Next queue head is `deploy`.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:37bfe9e1 -->
 <!-- /agent:exchange -->
 ###
 <!--

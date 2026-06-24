@@ -53,15 +53,15 @@ I ran `agent-doc queue recover-lost /home/brian/work/btakita/agent-loop/src/boos
 Added backlog items in priority order. Top backlog id: `#lzpkgwire`.
 
 Verification: `agent-doc preflight`, `agent-doc plan`, source inspection of Rust/JB/VS Code/lazily wrappers, and `agent-doc queue recover-lost /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md`. No code changed, so I did not run `make check`.
-<!-- agent:boundary:61afd884 -->
+<!-- agent:boundary:abdce112 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#71wr]
+- ~~do [#71wr]~~
 ---
-agent-doc monsterrodholders.md queue was removed without being processed
+🚧 :pushpin: agent-doc monsterrodholders.md queue was removed without being processed
 ```
 • The queue helper is contradictory here: it sees the preset as id-backed, then says there is no matching id-backed
   head. I’m removing the answered queue row directly and keeping the queue component itself intact.
@@ -79,6 +79,9 @@ agent-doc monsterrodholders.md queue was removed without being processed
   aligned, then I’ll rerun the invariant check.
 ```
 ---
+- do [#lzpkgwire]
+- do [#lzliveproof]
+- do [#mrhqrestore]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

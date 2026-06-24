@@ -51,7 +51,13 @@ Changed paths in the superproject: `.gitmodules` and `src/lazily-kt` now point t
 Verification: `make check` passed through `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`; `git submodule status src/lazily-kt` reports the expected commit; `git -C src/lazily-kt status --short --branch` is clean on `main...origin/main`; `gh repo view lazily-hub/lazily-kt` confirms the repo is public with default branch `main`. CI check note: `gh run list --workflow CI --limit 1` reported that this repo has no workflow named `CI`, so there was no latest CI run to inspect.
 
 Escalation: no approval prompts were needed. Confidence: high; unrelated dirty worktree changes were left untouched.
-<!-- agent:boundary:5fa5e429 -->
+
+### Re: queue guard repair — gpt-5
+
+The previous closeout intentionally consumed only the lazily-kt free-text queue head. The `:pushpin: do [#bcnf]` and `:pushpin: do [#pwvm]` rows were not consumed by this cycle; both remain queued for their own later `do #id` cycles.
+
+Changed paths: none in this repair closeout. Verification: session-check repair evidence only; the lazily-kt implementation verification remains the prior passing `make check` and GitHub/submodule checks. Escalation: none. Confidence: high.
+<!-- agent:boundary:027207ba -->
 <!-- /agent:exchange -->
 ###
 <!--

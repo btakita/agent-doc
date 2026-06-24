@@ -19,6 +19,11 @@
                            isLogByDefault="true"/>
         <completion.contributor language="any"
                                 implementationClass="com.github.btakita.agentdoc.SlashCommandCompletionContributor"/>
+        <applicationService serviceImplementation="com.github.btakita.agentdoc.AgentDocColorSettings"/>
+        <applicationConfigurable parentId="tools"
+                                 id="com.github.btakita.agentdoc.colorConfigurable"
+                                 instance="com.github.btakita.agentdoc.AgentDocColorConfigurable"
+                                 displayName="Agent Doc Colors"/>
     </extensions>
 
     <projectListeners>

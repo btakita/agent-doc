@@ -14,11 +14,13 @@ import java.awt.event.KeyEvent
 import javax.swing.*
 import javax.swing.Timer
 
-// Colors for unfocused (muted) and focused (highlighted) states
-private val BG_UNFOCUSED = JBColor(Color(245, 243, 228), Color(50, 48, 35))
-private val BG_FOCUSED = JBColor(Color(255, 252, 235), Color(60, 58, 40))
-private val BORDER_UNFOCUSED = JBColor.border()
-private val BORDER_FOCUSED = JBColor(Color(70, 130, 220), Color(100, 160, 255))
+// Prompt-panel colors, resolved from AgentDocColorSettings (Settings → Tools → Agent Doc Colors).
+// Defaults mirror the briantakita.me sitewide palette. Both focus states use the "card" surface;
+// focus is signaled by the top border switching from the border color to the accent color.
+private fun bgUnfocused() = AgentDocColorSettings.card()
+private fun bgFocused() = AgentDocColorSettings.card()
+private fun borderUnfocused() = AgentDocColorSettings.border()
+private fun borderFocused() = AgentDocColorSettings.accent()
 private const val MAX_QUESTION_LABEL_LEN = 96
 private const val MAX_OPTION_LABEL_LEN = 25
 private const val PANEL_V_PADDING = 6
@@ -105,7 +107,7 @@ internal fun buildPromptControlsRow(
 
     controls.add(Box.createHorizontalStrut(8))
     controls.add(JLabel("?").apply {
-        foreground = JBColor.GRAY
+        foreground = AgentDocColorSettings.textBase()
         font = font.deriveFont(Font.BOLD, buttonFont.size2D - 1f)
         toolTipText = detailTooltipText(totalActive)
     })
@@ -153,10 +155,10 @@ object PromptPanel {
 
         val panel = JPanel(BorderLayout(8, 0)).apply {
             border = BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(2, 0, 0, 0, BORDER_UNFOCUSED),
+                BorderFactory.createMatteBorder(2, 0, 0, 0, borderUnfocused()),
                 BorderFactory.createEmptyBorder(PANEL_V_PADDING, PANEL_H_PADDING, PANEL_V_PADDING, PANEL_H_PADDING)
             )
-            background = BG_UNFOCUSED
+            background = bgUnfocused()
             isOpaque = true
         }
 
@@ -195,18 +197,18 @@ object PromptPanel {
                     previousFocusOwner = opposite
                 }
                 panel.border = BorderFactory.createCompoundBorder(
-                    BorderFactory.createMatteBorder(2, 0, 0, 0, BORDER_FOCUSED),
+                    BorderFactory.createMatteBorder(2, 0, 0, 0, borderFocused()),
                     BorderFactory.createEmptyBorder(PANEL_V_PADDING, PANEL_H_PADDING, PANEL_V_PADDING, PANEL_H_PADDING)
                 )
-                panel.background = BG_FOCUSED
+                panel.background = bgFocused()
                 panel.repaint()
             }
             override fun focusLost(e: FocusEvent?) {
                 panel.border = BorderFactory.createCompoundBorder(
-                    BorderFactory.createMatteBorder(2, 0, 0, 0, BORDER_UNFOCUSED),
+                    BorderFactory.createMatteBorder(2, 0, 0, 0, borderUnfocused()),
                     BorderFactory.createEmptyBorder(PANEL_V_PADDING, PANEL_H_PADDING, PANEL_V_PADDING, PANEL_H_PADDING)
                 )
-                panel.background = BG_UNFOCUSED
+                panel.background = bgUnfocused()
                 panel.repaint()
             }
         })

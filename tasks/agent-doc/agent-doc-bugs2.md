@@ -127,7 +127,34 @@ Verification:
 - `gh run list --workflow CI --limit 1` reported latest `CI` as `completed success` (`28074608395`).
 
 Commits: none in this cycle; implementation was already present, and `src/agent-doc` is clean.
-<!-- agent:boundary:52e8c2bc -->
+
+### Re: #advr14 — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#advr14]
+
+
+Implemented the JetBrains paused-queue plugin UX for `#qpauseux`.
+
+- `Run Agent Doc` now classifies `failed_stage=queue_paused` as `QUEUE_PAUSED`, clears persisted route-failure diagnostics, and renders an `INFORMATION` notification instead of the raw persistent route error path.
+- Deliberate/admin pauses show `Resume queue`, `Show status`, and `Copy details`; stale-supervisor redirect pauses show `Restart Supervisor and resume`.
+- `Resume queue` first reads `agent-doc session status`, parses `actor: generation=<n>`, then runs `agent-doc admin queue resume --observed-generation <n> --json`.
+- The notification/action paths leave `jb_queue_paused_route_notification` and `jb_queue_paused_route_action` markers in `.agent-doc/logs/ops.log` for render/ops proof.
+- Bumped the JetBrains plugin to `0.2.183` and built both artifacts: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.183.zip` and `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.183-signed.zip`.
+
+Coverage added in `TerminalUtilTest`: generic queue-paused classification/message, stale-supervisor action selection, resume command generation guard, receipt parsing, notification labels, and ops-log marker format.
+
+Verification passed:
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
+- `make bump-plugin`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin`
+- `make check`
+- `git -C src/agent-doc diff --check`
+- `gh run list --workflow CI --limit 1` (latest CI success: `28074608395`)
+
+Commits: submodule `157839f3 feat(jetbrains): handle paused queue route UX`; parent `04d2817a6 chore: advance agent-doc submodule`.
+<!-- agent:boundary:14bc2477 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -135,8 +162,8 @@ Commits: none in this cycle; implementation was already present, and `src/agent-
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: do [#advr11]~~
 - ~~:pushpin: do [#advr12]~~
-- :pushpin: do [#advr13]
-- :pushpin: do [#advr14]
+- ~~:pushpin: do [#advr13]~~
+- ~~:pushpin: do [#advr14]~~
 - :pushpin: do [#advr15]
 - :pushpin: do [#advr16]
 - :pushpin: do [#advr17]
@@ -171,7 +198,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#advr14] Advance original #qpauseux: finish paused-queue plugin UX with info/action notifications, Resume or restart-supervisor/resume actions, no raw error toast, plugin artifacts, and render/ops proof.
 - [ ] [#advr15] Advance original #jbdisprecycle: convert recycle-boundary Run Agent Doc verification into deterministic proof for exactly one `dispatch_start_proof` with submit and no stranded start_session failure; ops marker `route_dispatch_submit_recycle_settle`.
 - [ ] [#advr16] Advance original #tb4q: complete #qfocsup focused-cycle supervisor clear-and-continue proof with install/recycle if needed, `session-check ui_outcome=deferred_for_supervisor_drain`, `context_reset`, `go_drain_dispatch`, and fresh-agent drain evidence.
 - [ ] [#advr17] Advance original #fbwireverify: complete #fbwire/#fullboundary acceptance with slow-ACK no inflight pileup and wedged no-ACK bounded timeout + ERROR marker + playback artifact; add deterministic tmux-ci/sim coverage where possible.

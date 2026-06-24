@@ -15,6 +15,7 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import java.awt.datatransfer.StringSelection
 import java.io.File
+import java.time.Instant
 import java.util.concurrent.TimeUnit
 
 object TerminalUtil {
@@ -679,6 +680,32 @@ object TerminalUtil {
 
     fun restartSession(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
         runRestartSupervisorCommand(project, file, force = false, onComplete = onComplete)
+    }
+
+    internal fun recordRestartAgentMenuInvoked(project: Project, file: VirtualFile) {
+        try {
+            val (cwd, relativePath) = resolveProject(project, file)
+            val agentDocDir = File(cwd, ".agent-doc")
+            if (!agentDocDir.isDirectory) {
+                return
+            }
+            val logsDir = File(agentDocDir, "logs")
+            if (!logsDir.isDirectory && !logsDir.mkdirs()) {
+                LOG.warn("[restart-agent] failed to create ops.log directory at ${logsDir.path}")
+                return
+            }
+            val timestamp = Instant.ofEpochSecond(Instant.now().epochSecond).toString()
+            File(logsDir, "ops.log").appendText(
+                buildRestartAgentMenuInvokedOpsLogLine(timestamp, relativePath) + System.lineSeparator(),
+            )
+        } catch (e: Exception) {
+            LOG.warn("[restart-agent] failed to record menu invocation marker: ${e.message}", e)
+        }
+    }
+
+    internal fun buildRestartAgentMenuInvokedOpsLogLine(timestamp: String, relativePath: String): String {
+        val doc = File(relativePath).nameWithoutExtension.ifBlank { "unknown" }
+        return "[$timestamp] restart_agent_menu_invoked file=$relativePath source=jetbrains action=restart_agent doc=$doc"
     }
 
     /**

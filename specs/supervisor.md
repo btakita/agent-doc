@@ -84,6 +84,18 @@ The supervisor is a single process that:
    a fresh restart, and records `agent_restart_performed` before spawning the
    new harness.
 
+JetBrains "Restart Agent" menu invocations must also leave an
+optverify-scannable `.agent-doc/logs/ops.log` marker before dispatching the
+restart command:
+
+```text
+restart_agent_menu_invoked file=<relative-path> source=jetbrains action=restart_agent
+```
+
+That marker proves the menu path was actually invoked; the later
+`agent_restart_performed` marker proves the supervisor boundary restart spawned
+the fresh harness.
+
 Route/startup code must not cold-replace a healthy live authoritative actor
 solely because the document's `agent:` frontmatter changed. A live wrong-harness
 actor is deferred to the boundary restart path; only an unhealthy supervisor or

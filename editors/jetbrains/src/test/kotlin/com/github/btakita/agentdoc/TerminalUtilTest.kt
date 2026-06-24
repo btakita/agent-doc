@@ -45,6 +45,30 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `restart agent action records ops log menu invocation marker before restart`() {
+        val source = Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/RestartAgentAction.kt"
+        ).toFile().readText()
+
+        assertTrue(source.contains("TerminalUtil.recordRestartAgentMenuInvoked(project, file)"))
+        assertTrue(source.indexOf("recordRestartAgentMenuInvoked") < source.indexOf("restartSession(project, file)"))
+    }
+
+    @Test
+    fun `restart agent menu invocation marker is optverify scannable`() {
+        val line = TerminalUtil.buildRestartAgentMenuInvokedOpsLogLine(
+            timestamp = "2026-06-24T12:34:56Z",
+            relativePath = "tasks/agent-doc/agent-doc-bugs2.md",
+        )
+
+        assertEquals(
+            "[2026-06-24T12:34:56Z] restart_agent_menu_invoked file=tasks/agent-doc/agent-doc-bugs2.md source=jetbrains action=restart_agent doc=agent-doc-bugs2",
+            line,
+        )
+        assertTrue(line.contains("restart_agent_menu_invoked"))
+    }
+
+    @Test
     fun `replacing an alive route cancels the stale run`() {
         val registry = TerminalUtil.InFlightRouteRegistry()
         val stale = FakeRouteHandle(alive = true)

@@ -24,6 +24,7 @@ class RestartAgentAction : AnAction() {
         val project = e.project ?: return
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
         log.warn("[restart-agent] Restart Agent invoked for ${file.path}")
+        TerminalUtil.recordRestartAgentMenuInvoked(project, file)
         TerminalUtil.restartSession(project, file)
     }
 

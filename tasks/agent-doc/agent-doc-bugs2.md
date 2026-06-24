@@ -147,7 +147,7 @@ Escalation: none.
 
 Repair closeout: the FFI IPC prompt was already answered in the prior committed section. I consumed that free-text queue head, preserved the remaining `do [#lzstatewire1]` queue item, and left the newly added equityfundingsource route-stall note in the queue for a later cycle.
 
-### Re: reopened closeout state — gpt-5
+### Re: reopened closeout state — gpt-5 (HEAD)
 
 Closed the reopened turn state: the already-answered FFI IPC prompt is struck, `do [#lzstatewire1]` remains the next pinned actionable queue item, and the equityfundingsource route-stall note is preserved behind it for a later cycle. I did not mark `#lzstatewire1` done because no implementation work for that item ran in this repair cycle.
 
@@ -156,7 +156,7 @@ Verification: checked the queue component and working-tree diff.
 Confidence: medium; this was a closeout repair after editor IPC drift, not feature implementation.  
 Escalation: none.
 
-### Re: repair cycle closeout — gpt-5
+### Re: repair cycle closeout — gpt-5 (HEAD)
 
 Closed the repair cycle after queue convergence. The prior FFI IPC question remains answered and struck. I did not execute `#lzstatewire1` in this repair cycle, so it remains open as the pinned next queue item. The equityfundingsource route-stall note remains preserved behind it for a later cycle.
 
@@ -170,8 +170,15 @@ Escalation: used a narrow force-disk write after editor IPC proof failed, preser
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- Look at the FFI IPC and lazily-kt/lazily-js. Will this help keep state consistent between the editor plugin, FFI plugin, and the CPC?
-- do [#lzstatewire1]
+- ~~Look at the FFI IPC and lazily-kt/lazily-js. Will this help keep state consistent between the editor plugin, FFI plugin, and the CPC?~~
+- :pushpin: do [#lzstatewire1]
+---
+JB `Run Agent Doc` on equityfundingsource.md after JB `Clear Session Context` stalls
+```
+resync: pruned 2 stale session(s)
+[route] target tmux session: 0
+Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md into pane %3 for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md because the composer contains protected prompt input (drafted prompt input); clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782321367966-direct_pane_protected_prompt_input-codex-_3-6903dbc74abe.txt
+```
 <!-- /agent:queue -->
 <!--
 - 🧪 test edit for [#qnodemerge4wire]

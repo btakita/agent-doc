@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: codex
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -150,7 +150,29 @@ The deploy queue residue is already satisfied by the preceding cycle. No additio
 Changed paths this cleanup cycle: none in app code. Commands this cleanup cycle: `agent-doc preflight`, `agent-doc plan`, and `agent-doc write --commit --force-disk` recovery/cleanup after repeated editor IPC no-ack failures. Verification/deploy evidence remains the prior cycle: focused tests passed (`12 pass / 0 fail`), `git diff --check` passed, full `make check` passed (`1193 pass / 0 fail`, app build, Worker build), remote D1 migrations reported no pending migrations before and after deploy, public root returned `HTTP 200`, and the protected borrower URL returned the expected unauthenticated `HTTP 303` login redirect preserving the `lead_id`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:35c659be -->
+
+### Re: Esc Hotkey Closes Message Dialogs — glm-5.2
+
+> **Queue prompt:**
+> In the borrower portal, lender portal, broker portal...the message dialog should support the Esc hotkey to close the message dialog.
+
+> **Queue prompt:**
+> deploy
+
+Implemented, pushed, and deployed. Esc now closes the floating `PortalMessages` launcher panel in the borrower, lender (investor), and broker portals, plus the admin lender-pipeline launcher.
+
+What changed: the launcher panel was a plain `role="dialog"` div outside `PortalModal`, so it never received Esc. Exported `modal_close_stack_` from `ui.tsx` and gave the launcher its own Esc `keydown` effect that pushes a close handler onto the same stack `PortalModal` uses — Esc closes the topmost dialog first, so a stacked `PortalModal` (or confirm dialog) closes before the launcher does. This matches the established `#dialog-close-esc` convention exactly.
+
+Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/shared/portal_messages.tsx` (import + Esc effect), `lib/ui--browser--efs/portal/shared/ui.tsx` (exported `modal_close_stack_`), `tests/msg-send-shortcut.test.ts` (source-level guard test), and `prds/portal-messages-component.md` (keyboard note).
+
+Commits: EFS submodule commit `78cbe73 feat(portal): Esc closes message launcher via shared modal stack` was pushed to `origin/main`. Parent repo gitlink commit `89d014c78 chore(efs): bump Esc-close message launcher submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with unrelated work.
+
+Verification: focused `bun test tests/msg-send-shortcut.test.ts tests/portal-table-dialog.test.ts` passed (`29 pass / 0 fail`). `git diff --check` passed. Full `make check` passed (`1194 pass / 0 fail`, app build, Worker build). `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
+
+Deploy: pre-deploy remote D1 migrations reported no migrations to apply. `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `ff8f6712-8dee-40ba-8c5a-72b15097454e`. Post-deploy checks: public root returned `HTTP 200`; borrower portal returned `HTTP 200`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:e961b88f -->
 <!-- /agent:exchange -->
 ###
 <!--

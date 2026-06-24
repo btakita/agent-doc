@@ -102,7 +102,19 @@ Compacted content:
 **Performance:** test suite is fast (heaviest suite 44 tests / 0.27s; ~280 tests, all green). There are **no benchmarks in-repo** (no `benches/`, no `criterion`), so there's no numeric runtime baseline to report — filed `#ckybench`. Runtime hot spots are the `corky watch` daemon, audio diarization (GPU/Metal), and Gmail/IMAP sync. Tell me which command feels slow and I'll instrument it.
 
 **Corky bugs (queue head):** `agent:backlog` was empty despite the "Open items" prose. Added 4 prioritized items: `#ckygmailthread` (Gmail threading Bug 1+2), `#ckydiarizespan` (diarization span fix — uncommitted working tree), `#ckybench` (benchmarks for the perf report), `#ckyschedrun` (scheduled email sends). **Top of backlog: `#ckygmailthread`** (correctness bug — replies don't thread).
-<!-- agent:boundary:5284927a -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/corky.md source=socket_ack_content patch_id=5d96cfbd-5ae9-4578-9df1-1191291303e8 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=12002 candidate_hash=ae4a42ed9d1f3d8dab778278c3d07cf1a273a6660bb3b66f6bc8350278a82d97 content_ours_len=12362 content_ours_hash=ee3c7966174db5823da7842a7892803b2eb991fa135203e1dcfb8a9b3fbb9475 doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782335669784
+```
+<!-- agent:boundary:13e39163 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -114,6 +126,11 @@ Please give me a report the performance
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - 🚧 Add #next-steps to fix corky bugs.
+- [#ckystale]
+- [#ckygmailthread]
+- [#ckydiarizespan]
+- [#ckybench]
+- [#ckyschedrun]
 <!-- /agent:queue -->
 
 ## Backlog

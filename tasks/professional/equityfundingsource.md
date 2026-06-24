@@ -210,7 +210,49 @@ Deploy:
 - Current Version ID: `81c55f56-740c-4d43-8811-8b631a2938e5`
 - Remote D1 check: `bun run cf:d1:migrations:list:remote` reports no migrations to apply.
 - HTTP checks: public root `200`; protected admin dialog URL `303` behind Access.
-<!-- agent:boundary:6469cff5 -->
+
+### Re: Full Application Alert CTA Focus And Deploy — gpt-5
+
+> **Queue prompt:** https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 should have the alert CTA as the focused item when opened. In this case the "Accept and Send to TMO" button in the alert.
+>
+> **Queue prompt:** deploy
+
+Implemented and deployed the focus follow-up for the stacked Full Application dialog.
+
+Changed behavior:
+- The embedded Full Application detail now marks the top alert advance CTA as the dialog initial-focus target.
+- After the async detail payload renders, the embedded view focuses and scrolls the enabled top advance action into view. In the ready-to-accept case, that is `Accept and Send to TMO`.
+- The Activity History `View all` delayed-focus helper now defers when the enabled top advance CTA is present, so it no longer steals initial focus.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/admin/full_applications.tsx`
+- `src/equityfundingsource-dev/tests/admin-full-application-approve-ui.test.ts`
+- `src/equityfundingsource-dev/prds/67v2-admin-loan-pipeline-kanban.md`
+- `src/equityfundingsource-dev` parent gitlink
+
+Commits:
+- EFS submodule: `9848833 fix(admin): focus full application advance CTA` pushed to `origin/main`.
+- Parent repo: `0fe32b06b chore(efs): bump full application focus submodule` committed locally. I did not push parent `main` because it still has unrelated ahead/dirty state outside this task.
+
+Verification:
+- `git diff --check` passed in `src/equityfundingsource-dev`.
+- `bun test tests/admin-full-application-approve-ui.test.ts tests/admin-pipeline.test.ts` passed: 77 pass, 0 fail.
+- `make check` passed: 1192 pass, 0 fail, app build and Worker build completed.
+- `gh run list --workflow CI --limit 1` could not run for both repos because no workflow named `CI` exists.
+
+Deploy:
+- `make deploy` completed successfully.
+- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Current Version ID: `e38e9999-3cbe-455a-8a66-1c89ec29f707`
+- Remote D1 check: `bun run cf:d1:migrations:list:remote` reports no migrations to apply.
+- HTTP checks: public root `200`; protected admin dialog URL `303` behind Access.
+
+Preflight notes:
+- Left the existing legacy gated backlog/review semantic warnings untouched; they were not part of this queue item.
+- Confidence: high from static focus wiring tests, full suite, build, and deployed asset hash `index.browser-2NZ6LM72.js`.
+- Escalation: none.
+
+<!-- agent:boundary:823ea70e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -230,6 +272,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=application&dialog_application_id=6046c03f-2f7d-462b-8b89-d116effc93b6 should have the alert CTA as the focused item when opened. In this case the "Accept and Send to TMO" button in the alert.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

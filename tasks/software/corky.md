@@ -205,7 +205,7 @@ Shipped the **typed watch-loop phase scheduler + circuit breaker** (corky `15cc3
 **Verification:** `make check` → **710 pass / 0 fail** (4 new watch tests: cadence, `every=0` clamp, backoff+recovery, cap). SPEC.md §9.2a added. `make build` + `make install` done.
 
 **Queue drained.** All four corky state machines shipped this run: `#ckypubsm` (social publish crash-safety), `#ckyemailsm` (email status enum), `#ckysyncsm` (sync run-state + durable marker), `#ckywatchsm` (watch phase + backoff). One follow-up remains in the backlog: `#ckysyncsm-resume` (wire the sync resume consumer).
-<!-- agent:boundary:2a2d43c7 -->
+<!-- agent:boundary:275f7aff -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -217,9 +217,10 @@ Please give me a report the performance
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#ckypubsm]~~
-- 🚧 do [#ckyemailsm]
+- ~~do [#ckyemailsm]~~
 - ~~do [#ckysyncsm]~~
 - ~~do [#ckywatchsm]~~
+- 🚧 do [#ckysyncsm-resume]
 <!-- /agent:queue -->
 
 ## Backlog

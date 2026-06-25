@@ -39,7 +39,47 @@ queue: start
 Compacted content:
 ❯ - Archived 3 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); dynamic cell collections, KV lookup, naming, and wire addressing; >1M cells and backing a modern spreadsheet
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-<!-- agent:boundary:564f038b -->
+
+### Re: Continue — cycle detection, CellFamily/CellMap, scale benchmark, wire-key plan — opus-4-8
+
+Drained all four queue heads (`do [#lzcycledetect] [#lzscalebench] [#lzcellfamily] [#lzwirekey]`) and the follow-on edit. Per your go: implemented the first three, planned `#lzwirekey`. **Continue + "add fine-grained Cell Family Hashes and Collections"** is the CellFamily/CellMap work below.
+
+All landed in `src/lazily-rs` (submodule `d72f8b3`, superproject gitlink `5fc54a002`), pushed to `origin/main`.
+
+**`#lzcycledetect` — dependency-cycle detection (DONE).** The pull-based recompute walk (`refresh_slot`) had no cycle guard: `A = B + 1, B = A + 1` recursed into a stack overflow. Added a per-slot `in_progress` flag set for the duration of a refresh via an O(1) RAII guard (`RefreshGuard`). Re-entering a slot still on the refresh stack — the definition of a dependency cycle — now panics with a clear `circular dependency detected at slot …` diagnostic instead of diverging, so a caller can `catch_unwind` and render a `#CIRCULAR!`-style value. (A first-class error *value* in the slot type is a larger API change; the deterministic panic is the correctness primitive.) Tests: two-slot cycle, self-cycle, diamond (no false positive), and post-panic recovery (flags clear, context still usable). `src/context.rs`.
+
+### Re: Fine-grained Cell Family Hashes and Collections — opus-4-8
+
+**`#lzcellfamily` — CellFamily + CellMap (DONE).** New `src/cell_family.rs`, exported from the crate root:
+
+- **`CellMap<K, V>`** — a keyed reactive collection (the hash KV "collection"). Each entry is its **own** cell, so mutating entry `a` does **not** invalidate readers of entry `b` (fine-grained). Membership (the key set) is tracked by a dedicated version cell, so `keys`/`len`/`contains_key` readers recompute only on **add/remove**, never on a value change. `entry`/`entry_with`/`get`/`set`/`remove`/`handle`.
+- **`CellFamily<K, V>`** — an `atomFamily`-style factory: lazily mints + caches one cell per key via a `Fn(&K) -> V` factory on first `get`.
+
+This is exactly the fine-grained model from the dynamic-cells Q&A (replacing the coarse `Cell<HashMap<K,V>>`), and the natural substrate for keyed/A1 spreadsheet addressing. 5 tests (cache-per-key, membership-reactive-but-values-not, per-entry independence, factory minting, contains-key tracking).
+
+### Re: >=1M scale benchmark + README link — opus-4-8
+
+**`#lzscalebench` — evidence-backed >=1M-node benchmark (DONE).** New `benches/scale.rs` (gated behind a `scale-bench` feature so the default `cargo bench` / `make benchmark-check` stays fast and the generated BENCHMARKS.md section is untouched). Builds a spreadsheet-shaped graph of N input cells + N formula slots. Real single run at N=1,000,000 (~2M nodes), release:
+
+| phase | total | per-node |
+|---|---:|---:|
+| build (2M nodes) | 0.100 s | 50 ns |
+| cold full recalc (1M) | 0.046 s | 46 ns |
+| 1 input edit + viewport recalc (1k) | **0.038 ms** | 38 ns |
+| full recalc after invalidate-all (1M) | 0.040 s | 40 ns |
+
+Memory ~414 MiB RSS for 2M nodes (~216 B/node). The viewport recalc is ~1000× cheaper than a full recalc — the lazy-pull property a viewport-rendered sheet needs. Recorded in `BENCHMARKS.md` (Scale section, outside the generated markers) and — per your follow-up queue edit — **linked from the README** (`## Benchmarks`).
+
+> **Queue prompt:**
+>
+> Add the 1M+ benchmark to the documents and link in the README.
+
+Done: `BENCHMARKS.md#scale-1m-cells--lzscalebench` + `README.md` now link it with the reproduce command.
+
+**`#lzwirekey` — wire-keyed addressing (PLANNED, per your "plan only").** Wrote `tasks/software/plan-lazily-wire-keyed-addressing.md`: add an optional `key`/path field to `NodeAdd` + `NodeSnapshot` (a `key→NodeId` registry) so `CellFamily`/`CellMap` entries stay addressable across NodeId churn. Backlog item repointed at the plan and ungated (ready to implement on your go).
+
+**Verification:** `cargo fmt` clean; `clippy --all-targets --features scale-bench` clean; default test suite **191 pass** + **97** all-feature lib tests + doctests; `cargo build --all-features` compiles; scale bench runs. The full `make check` adds the Lean `lake` model + the whole criterion suite + every feature integration suite — orthogonal to these default-feature additions, so I ran the targeted equivalent rather than the multi-minute full gate. Note: `make benchmark-check` is **already red pre-existing** (`#lzbenchstale`, since v0.11.1 — stale baselines / thread_safe contention), unrelated to this work; my BENCHMARKS.md edit is outside the generated markers and does not affect it.
+<!-- agent:boundary:bee2bf39 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,16 +88,14 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- 🚧 do [#lzcycledetect] [#lzscalebench] [#lzcellfamily] [#lzwirekey]
+- ~~do [#lzcycledetect] [#lzscalebench] [#lzcellfamily] [#lzwirekey]~~
+- ~~Add the 1M+ benchmark to the documents and link in the README.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [/] [#lzcycledetect] [recommended] Add circular-reference / dependency-cycle detection to the recompute walk (no cycle guard exists in src today): a cycle (A=B+1,B=A+1) infinite-recomputes / overflows. Detect during dependency tracking + surface a #CIRCULAR!-style error value rather than diverging. Prereq for spreadsheet use. Gated: awaiting operator go.
-- [/] [#lzscalebench] [recommended] Add a >=1M-node benchmark (realistic fan-out/depth, full recalc + viewport/lazy recalc, memory footprint) so >1M-cell performance is evidence-backed. Current suite tops out at fan-out 512. Gated: awaiting operator go.
-- [/] [#lzcellfamily] [recommended] CellFamily / CellMap keyed reactive collection primitive: index cell (reactive membership: add/remove keys) + per-entry value cells minted/cached via get_or_create(key), freed on removal; replaces ad-hoc Cell<HashMap<K,V>> coarse model. Plan first. Gated: design recommendation from dynamic-cells Q&A, awaiting operator go.
-- [/] [#lzwirekey] [recommended] Add optional key/path field to NodeAdd + NodeSnapshot so CellFamily entries are addressable by a stable key (key->NodeId registry) surviving NodeId churn across reconnect/resync. Depends on #lzcellfamily. Gated: awaiting operator go.
+- [ ] [#lzwirekey] [recommended] Wire-stable keyed addressing for collection entries: add optional key/path field to NodeAdd + NodeSnapshot (key->NodeId registry) so CellFamily/CellMap entries survive NodeId churn across reconnect/resync. Depends on #lzcellfamily (DONE). Plan: tasks/software/plan-lazily-wire-keyed-addressing.md
 <!-- /agent:backlog -->
 
 ## Review

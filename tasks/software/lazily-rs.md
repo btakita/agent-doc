@@ -239,7 +239,24 @@ It comes down to whether **stable ids survive the edit**, because the keyed-reco
 **4. This session is the live proof.** Every "File was modified during response generation — CRDT merging… merge successful, no conflicts possible" you've seen is precisely this: your structural edits (and prompt rewrites) landing concurrently with my finalize, merged per-component. The failure cases were not the *edits* but a **stale in-memory CRDT base** (snapshot lagging the live buffer) → the `queue consume … head prompts do not match` races; the fix is rebasing on the current file (`reset --from-current`). So: large edits are fine *given a fresh base and stable ids*; the fragility is stale base + lost identity, not edit size.
 
 **Bottom line:** structural-edit cost scales with the **diff**, not the document, as long as stable ids hold — and the per-cell CRDT substrate (`#lzcellmove` move ops + sequence CRDT for order) keeps a large edit from collapsing into a whole-document replace.
-<!-- agent:boundary:b85873c6 -->
+
+### Re: But it's text — identity isn't inherent — opus-4-8
+
+> **Queue prompt:** What happens if the user makes large structural edits to the document? It's text, so not necessarily stable.
+
+Right — that's the real problem, and it means **identity has to be *manufactured*, not assumed.** Plain markdown has no node ids, so you need two layers:
+
+**1. Anchored skeleton (where you control structure).** agent-doc already does this: `&lt;!-- agent:exchange --&gt;`, `&lt;!-- agent:queue --&gt;`, item-ids, and the `component:occurrence:item-id:index` node_keys are **embedded anchors** that survive text edits because they're in-band markers, not positions. Anything inside that skeleton keeps identity as long as the marker survives. This is why the managed components merge cleanly per-component today.
+
+**2. Free text (no anchors) → identity by *alignment*, plus a sequence CRDT.** For arbitrary prose the user types, there's no id to preserve, so you reconstruct identity:
+- **Text alignment diff** — `Myers` / `patience` / `histogram` diff aligns old↔new lines/blocks; matched runs *carry* identity, unmatched runs are genuine insert/delete. This is best-effort, not exact — a big rewrite legitimately reads as delete+insert, and that's correct.
+- **Content-derived keys** — hash normalized block content so an unchanged paragraph keeps its key across reflow/reorder even with no marker; an edited block gets a new hash but is matched to its predecessor by neighborhood + similarity (edit vs. move detection).
+- **Character/line sequence CRDT** — for *concurrent* text edits, the merge unit drops to characters: an RGA / Yjs-style text CRDT merges the keystrokes, then you **re-parse the merged text** and re-derive the structural tree. So the tree is a *projection* of CRDT-merged text, not the merge unit itself.
+
+**So the answer to your pushback:** you can't key-reconcile what has no key. The design splits by controllability — **anchored** structure gets stable-id keyed reconciliation (cheap, exact); **free** text gets a character/line sequence CRDT + re-parse + alignment-based identity (robust to instability, but a true rewrite *is* a replace and should be). The per-cell merge ambition holds for the anchored layer; the free-text layer's honest floor is "merge the text, re-derive the tree." A large structural edit on unstable text therefore costs: a text-CRDT merge (scales with edited characters) + a re-parse (scales with document) + a keyed reconcile of the anchored skeleton (scales with the diff). The only thing you *can't* promise is preserving per-node lineage through an edit that erased the node's textual identity — there's nothing left to preserve it by.
+
+This is exactly why agent-doc leans on in-band markers: they're the cheapest way to buy stable identity over fundamentally unstable text.
+<!-- agent:boundary:e1945c62 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -250,7 +267,7 @@ It comes down to whether **stable ids survive the edit**, because the keyed-reco
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~Can Cell Families support tree structures?~~
 - 🚧 ~~What tree algorithm would be best for agent-doc document AST + semantic document trees?~~ — auto-struck: answered this cycle (#ftstrike)
-- What happens if the user makes large structural edits to the document? It's text, so not necessarily stable.
+- ~~What happens if the user makes large structural edits to the document? It's text, so not necessarily stable.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

@@ -143,7 +143,29 @@ You queued `release + publish` for all 6 ports. Per your choice I audited readin
 5. **lazily-kt** — defer until publish infra is bootstrapped (separate task).
 
 The 6 `release + publish` heads stay queued. I have **not** auto-drained them — publishing is outward-facing/irreversible and you asked to gate it. Tell me which step to take (I'd recommend #1) and I'll execute that one, pausing at each irreversible publish.
-<!-- agent:boundary:a51f42f6 -->
+
+### Re: release + publish lazily-spec — done (step 1 of the gated batch) — opus-4-8
+
+> **Queue prompt:**
+>
+> release + publish lazily-spec
+
+You chose "Go lazily-spec only." Done.
+
+**What shipped** — `git push origin main` on `src/lazily-spec`: `ebb945d..a58eff8` (the `#lzspecdrift` protocol.md reconciliation). This also **fixed a repo-integrity issue**: the superproject gitlink already referenced `a58eff8`, but that commit was unpushed — so any fresh clone had a dangling submodule pointer. Now resolved.
+
+**Publish** — the push triggered the **mdBook → GitHub Pages** deploy (`Deploy mdBook site to Pages`, run 28141755530, in progress) plus CI (28141755528). The published spec site will reflect the canonical externally-tagged wire format. Superproject gitlink already matched `a58eff8` — no bump needed.
+
+**Verification** — `origin/main..HEAD` is now empty (fully pushed); workflows dispatched. I'm not blocking on the deploy to finish (per the CI-pending rule).
+
+**Re-confirming before the next port, as agreed.** The remaining 5 heads stay **queued + gated** (queue still paused, receipt 98):
+- `release + publish lazily-zig` — cut `v0.1.1` GitHub release (no registry, no 2FA). *Safe next step.*
+- `release + publish lazily-rs` — 0.12.3 bump + tag + GitHub release; crates.io only after `lazily` ownership confirmed.
+- `release + publish lazily-py` (#kb9b) & `lazily-js` — 2FA-gated registry publishes (you drive the passkey/2FA).
+- `release + publish lazily-kt` — needs publish-infra bootstrap (separate task).
+
+Reply `go lazily-zig` (or `go non-2FA` for zig + rs) to continue, or drive the 2FA ports yourself.
+<!-- agent:boundary:a7e66fcd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -152,7 +174,7 @@ The 6 `release + publish` heads stay queued. I have **not** auto-drained them �
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 release + publish lazily-spec
+- ~~release + publish lazily-spec~~
 - release + publish lazily-rs
 - release + publish lazily-ky
 - release + publish lazily-js

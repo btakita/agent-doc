@@ -68,6 +68,40 @@ pub(crate) fn load_authoritative_actor_binding(
         }
         if frontmatter_harness_changed {
             let queue_paused = crate::queue_continuation::document_queue_controller_paused(file);
+            // `#actorswitchdefer` Part B: the route defer asserts "the supervisor
+            // idle-watch will restart the harness at the next idle boundary." That is
+            // only true while `agent_change_restart` is enabled — the idle-watch gates
+            // the restart on `agent_change_restart_decision` (`#agentreloadrestart`),
+            // which returns `None` (never `Restart`) when the knob is off. With the knob
+            // disabled the defer would NEVER self-heal: route must bail EXPLICITLY with
+            // that fact rather than hand the operator a `restart-supervisor` hint that
+            // will not switch harnesses. Reverting `agent:` or re-enabling the knob are
+            // the only recovery paths in that state.
+            let agent_change_restart_enabled =
+                crate::project_controller::agent_change_restart_enabled(file);
+            if !agent_change_restart_enabled {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_authoritative_actor_harness_mismatch_deferred file={} pane={} stored_harness={} expected_harness={} generation={} supervisor_health={} actor_state={} queue_paused={} frontmatter_harness_changed=true agent_change_restart=disabled action=bail_restart_disabled",
+                        file.display(),
+                        record.pane_id,
+                        record.harness,
+                        expected_harness,
+                        record.generation,
+                        supervisor_health_label(runtime.health),
+                        effective_state.as_str(),
+                        queue_paused,
+                    ),
+                );
+                anyhow::bail!(
+                    "authoritative actor record for {} is running harness {}, but frontmatter now resolves to {}; agent_change_restart is disabled; Run Agent Doc will not switch harnesses until it is re-enabled or agent: reverts to {}",
+                    file.display(),
+                    record.harness,
+                    expected_harness,
+                    record.harness,
+                );
+            }
             crate::ops_log::log_op(
                 file,
                 &format!(

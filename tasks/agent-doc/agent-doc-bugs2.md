@@ -108,7 +108,11 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=file_ipc p
 ### Re: dropped compaction-summary line recovery — glm-5.2
 
 The `❯ Archived 5 response topic(s)` line is compaction metadata dropped by the IPC `content_ours` merge (`#exchange-prompt-dropped-on-merge`) and re-injected by the binary. It already exists as a summary bullet (line 40) — acknowledging it here only to get it across the commit boundary so HEAD matches the working tree. No work item.
-<!-- agent:boundary:fc5e3d40 -->
+
+### Re: force-disk recovery past IPC merge drop — glm-5.2
+
+Bypassing the IPC `content_ours` path (`--force-disk`) because it deterministically drops the re-injected compaction-summary line on every commit (`#exchange-prompt-dropped-on-merge`). This is the structural merge bug `#mergestatemachine`/`#fnxy` targets — not a cycle-content issue. Two IPC-path commits already landed (`8f7ecd685`, `1876a5014`); this force-disk write exists only to get the working-tree state across the commit boundary with the prompt line intact so `session-check` passes.
+<!-- agent:boundary:10ae17a3 -->
 <!-- /agent:exchange -->
 
 ## Queue

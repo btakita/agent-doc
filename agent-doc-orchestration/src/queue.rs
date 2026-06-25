@@ -1827,7 +1827,7 @@ fn free_text_dedup_key(entry: &QueueEntry) -> Option<(u8, String)> {
 /// Whitespace-collapsed, lowercased dedup key for a multiline free-text queue
 /// pin so verbatim re-emits (differing only in insignificant whitespace) key
 /// identically (`#rt83qflood`).
-fn normalize_multiline_dedup_text(text: &str) -> String {
+pub(crate) fn normalize_multiline_dedup_text(text: &str) -> String {
     text.split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")

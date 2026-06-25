@@ -121,6 +121,7 @@ pub mod queue_cmd;
 pub mod queue_command;
 pub mod queue_continuation;
 pub mod queue_edit_owner;
+pub mod queue_item_state_machine;
 pub mod queue_journal;
 pub mod queue_preemption;
 pub mod realtime_model;

@@ -314,7 +314,7 @@ Fixed and shipped (corky `372627b` on `origin/main`).
 - Commit `372627b` — pushed.
 
 Next queue head: `#ckyunicodeslug`.
-<!-- agent:boundary:9dfa003b -->
+<!-- agent:boundary:fbcb5235 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -334,7 +334,7 @@ Please give me a report the performance
 - ~~[#ckytok401]~~
 - ~~[#ckypeoplesync]~~
 - ~~[#ckyconfigunwrap]~~
-- [#ckyatomicwrite]
+- 🚧 [#ckyatomicwrite]
 - [#ckyunicodeslug]
 - [#ckymime]
 - What are #next-steps to fix corky bugs?
@@ -345,7 +345,7 @@ Please give me a report the performance
 
 <!-- agent:backlog -->
 - [ ] [#ckythreadmerge] [P2 correctness] threading provider-switch merge: IMAP threads keyed by subject (thread_key_from_subject) and Gmail-API threads keyed by Gmail threadId never merge when the same conversation is synced from both providers, producing duplicate thread files. Design a unified thread-identity reconciliation (e.g. index by Message-ID/References across providers, or map Gmail threadId<->subject-key). Architectural — needs its own focused cycle. Split from #ckythread. crates/corky-mail/src/sync/{imap_sync.rs,gmail_api_sync.rs}, markdown.rs
-- [ ] [#ckyatomicwrite] [P2 durability] conversation markdown written via plain fs::write (truncate+write, half-written on crash loses all prior merged messages since re-parse returns None and starts fresh); file_store atomic rename is missing sync_all before rename so not power-loss durable. Reuse NamedTempFile persist + sync_all. crates/corky-mail/src/sync/imap_sync.rs:193,224; crates/corky-core/src/file_store.rs:47-63
+- [ ] 🚧 [#ckyatomicwrite] [P2 durability] conversation markdown written via plain fs::write (truncate+write, half-written on crash loses all prior merged messages since re-parse returns None and starts fresh); file_store atomic rename is missing sync_all before rename so not power-loss durable. Reuse NamedTempFile persist + sync_all. crates/corky-mail/src/sync/imap_sync.rs:193,224; crates/corky-core/src/file_store.rs:47-63
 - [ ] [#ckyunicodeslug] [P2] slug regex strips all non-ASCII so CJK/Cyrillic/emoji subjects collapse to untitled, untitled-2,... opaque filenames distinguished only by counter. Use regex Unicode classes or transliterate. crates/corky-core/src/util.rs:5,12-31
 - [ ] [#ckymime] [P2] corky draft send MIME issues: raw filename in Content-Disposition (header-injection/malformed MIME), whole attachment buffered in RAM (~1.8GB peak for 500MB), inline images: YAML silently dropped (only draft push handles images+CID), In-Reply-To not normalized to angle-bracket RFC 5322 form. crates/corky-mail/src/draft/send.rs:70-98,186-237
 <!-- /agent:backlog -->

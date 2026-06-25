@@ -39,7 +39,32 @@ done
 Compacted content:
 - Archived 7 response topic(s): #jbrestartbusy; queue resume + flood-pin dedup; live verify (yours, no gate); 4 more
 - Prior summary/context: prior compacted content: Archived 11 response topic(s): JB Run Agent Doc on equityfundingsource.md; IPC proof dogfood...
-<!-- agent:boundary:5d27143e -->
+
+### Re: bounded session-startup wait + isolating why the session hangs — opus-4.8
+
+**Root cause of the hang (isolated).** Both startup paths matter, and only one was actually unbounded:
+
+- `route.rs` (already bounded) — `wait_for_agent_ready` polls `while start.elapsed() < timeout` and, on the `fresh_route_start_missing` branch, records a `startup_miss` and fails closed. That side was never the hang.
+- `start.rs` auto-trigger thread (the real culprit) — after the harness child was spawned, the thread waited for a dispatch-ready prompt. On the 30s `AUTO_TRIGGER_TIMEOUT` it logged a **provisional** `no_prompt_after_30s` timeout and then **kept polling the child forever** (`monitor.note_no_prompt` only flipped a flag; the loop never returned). A harness that never becomes dispatch-ready — hung TUI, auth wall, stuck network — therefore left the session silently hanging with no recoverable signal. That is the "session hangs" you hit.
+
+**Fix shipped (`#startupdeadline`, agent-doc `6b6451ce`, pointer `219ebb247`).** The 30s deadline is now **hard**:
+
+- New `auto_trigger_no_prompt_action` returns `FailClosed` exactly once when the monitor's deadline expires; the thread then calls `record_session_startup_miss` and `return`s instead of looping.
+- `record_session_startup_miss` writes a `startup_miss` marker against the owned pane (`StartupMissOrigin::FreshStart`) and prints the actionable line you asked for:
+  `[agent-doc] session did not become dispatch-ready in 30s (no_prompt) for <harness>; recorded startup-miss and failing closed instead of hanging. Run 'agent-doc start <FILE>' to retry.`
+- The same fail-closed path now also covers the two other startup waits that previously only logged and bailed: `clear_cooldown` and managed `capability_proof`. So no startup branch can hang silently.
+- The stale module-doc ("logs a provisional timeout but keeps watching until the child exits") is rewritten to describe the hard deadline.
+
+**Verification.** `make check` → **5101 passed, 241 skipped**; `cargo clippy -D warnings` clean; `cargo build --release` green. New unit eval `auto_trigger_no_prompt_continues_before_deadline_then_fails_closed` pins continue-before-deadline → fail-closed-once → caller-returns.
+
+**Pre-existing red I had to clear to push.** The suite was already red on HEAD — commit `9444a398` bumped the root package + `agent-doc-orchestration` to `0.34.48` but left `agent-doc-core` / `agent-doc-markdown-ast` / `agent-doc-sqlite` and the root dep pins at `0.34.46`. Cargo's caret resolution masked it in builds, but `test_manifest_uses_publishable_dependency_contract` does exact-version equality. I completed the already-landed 0.34.48 bump across those manifests + `Cargo.lock` (no tag/publish — pure reconciliation).
+
+**Closeout.** Committed + pushed to `origin/main` (agent-doc `6b6451ce`; superproject pointer `219ebb247`). The supervisor auto-installs + recycles the new binary at its idle boundary, so I did not manually install mid-session against the live supervisor. CI run `28140216452` is in progress — recorded as pending; proceeding on local evidence per the test-bearing-turn rule.
+
+**Dogfood note:** this very closeout hit the IPC class you're tracking — `finalize --stream` got a 6s socket ack timeout, fell back to file-IPC, then `no_ack` (`recovery=retry_without_disk_write`) because the editor never applied the queued patch (no live-buffer sidecar for this doc; supervisor reports fresh). Recovered via the explicit `finalize --force-disk` escape hatch.
+
+Live dogfood of the hang→`startup_miss` behavior in a real editor/pane needs a human eyeball, so I filed it as `[operator-verify]` **#nsfz** rather than gating the ship.
+<!-- agent:boundary:887eec8d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -65,6 +90,38 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 ---
 - Still getting JB `File Cache Conflict` dialogs.
 - Opencode responses are reverse ordering numeric lists.
+---
+:round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
+```
+resync: pruned 2 stale session(s)
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 
+Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+---
+---
+:round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
+```
+resync: pruned 2 stale session(s)
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 
+Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+---
 ---
 equityfundingsource.md turn has an IPC issue:
 `### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc`
@@ -96,10 +153,8 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 - do [#4pdp]
 - do [#0bmv]
 - do [#actorswitchdefer]
-- do [#capproofbg]
-- do [#rt83qflood]
 - "Add a bounded `session_startup` wait in `route.rs`/`start.rs` with a hard deadline; on expiry, fail closed with `startup_miss` + an actionable error ("session did not become dispatch-ready in Ns") rather than hanging.": Can you retry or isolate why the session hangs so we can further dogfood these sort of errors?
-- :pushpin: do [#jbrunhang]
+- ~~:pushpin: do [#jbrunhang]~~
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
@@ -132,38 +187,8 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
----
-:round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
-```
-resync: pruned 2 stale session(s)
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 
-Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
----
----
-:round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
-```
-resync: pruned 2 stale session(s)
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 
-Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
----
+- do [#capproofbg]
+- do [#rt83qflood]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -190,6 +215,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
 - [ ] [#rt83qflood] #rt83/#qflood phantom-pin flood dedup: queue convergence leaves duplicate binary-injected :round_pushpin:/:pushpin: actor-switch pins after a stale-CRDT/supervisor re-emit, flooding the queue with ~7 near-identical copies. Add deterministic dedup that collapses repeated phantom pins (the operator-authored line is position-locked under #queue-operator-pin-position-lock, but binary-injected phantom copies must converge to one) so restarting/resyncing a stale supervisor cannot reflood the queue.
 - [ ] [#capproofbg] Make the JB Run Agent Doc capacity proof non-blocking: dispatch immediately and run the capacity proof in the background, surfacing failure asynchronously instead of stalling every dispatch.
 - [ ] [#npe1] #codefencestrip=Template patch parser strips trailing code fences at the exchange boundary

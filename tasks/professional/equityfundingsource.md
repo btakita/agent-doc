@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -282,7 +282,22 @@ Folded into the per-user chat plan rather than a standalone build — it's the s
 Every admin page declares its associated user(s) (a borrower's loan page → that borrower; a lender's account page → that lender) or a user type when no single user applies (a pipeline board → lender/borrower scope). Opening chat from a page pre-selects that user/type, so the admin lands in the right thread without re-choosing. Glue over #deal-chat-users1–3 (pipeline dialog tabbed chat) + the unified admin inbox (#msg-unify2).
 
 Nothing to build yet — #deal-chat-users1–4 all wait on the two open questions in the plan (group reply routing; fold-in timing vs #msg-unify3/4 read-cutover soak). Not deployed — planning cycle.
-<!-- agent:boundary:5b6e6092 -->
+
+### Re: realtime "connection failed" on rapid user switching — fixed — glm-5.2
+
+> **Queue prompt:**
+>
+> I'm seeing "Realtime connection failed. Refresh the page to reconnect." when rapidly switching between users in a search. Please diagnose and harden the realtime connection websocket(s).
+
+
+> **Queue prompt:** "Realtime connection failed. Refresh the page to reconnect." when rapidly switching between users in a search — diagnose and harden the realtime websocket(s).
+
+**Diagnosis:** the per-session messages WebSocket (`admin/messages.tsx`) re-runs its effect when `session.id` changes. Cleanup calls `ws.close()` on the still-**CONNECTING** socket, and closing a connecting WebSocket fires its `error` event — so each rapid switch surfaced a false "Realtime connection failed." The `close` handler was already guarded with `ws_ref.current === ws`, but `error` and `open` were not.
+
+**Fix (`85f7d30`):** guard the `error` and `open` handlers the same way. Cleanup nulls `ws_ref` *before* closing, so a stale/closing socket can neither set nor clear the error — only the still-active socket's genuine failure is surfaced. No false positive on rapid switching.
+
+Verified: `make check` → **1216 pass / 0 fail**, worker bundle clean. Committed `85f7d30`, pushed (`ecfb2e7..85f7d30`). Not deployed — preset `#spec-test-commit-push`. Deeper hardening (auto-reconnect with backoff for a genuine drop of the active session) is intentionally out of scope — the reported bug was the false positive, and the shared `use_admin_events_` socket already auto-reconnects on drop.
+<!-- agent:boundary:ba31ce97 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -302,11 +317,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~:pushpin: https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan > Loan Detail should remove the "Borrower Chat" card. Use the chat should open the borrower (btak.dev+borrower@gmail.com) instead.~~
-- ~~:pushpin: All dialog states in the Deal Pipeline and Lender Pipeline should have users associated with them. These users will be the focus of the chat. A single user will have a single message thread. Multiple users will have separate tabs in the chat dialog with the user type (Lender, Borrower, Broker). Another tab should be the group chat, where all users are emailed the messages. A borrower/broker + lender should not see each others' email addresses for any Borrower/Broker + Lender combo should be emailed with BCC.~~
-- ~~All pages should have user(s) or a user type associated with it. Which will select the user(s) or user type in the chat dialog.~~
-- I'm seeing "Realtime connection failed. Refresh the page to reconnect." when rapidly switching between users in a search. Please diagnose and harden the realtime connection websocket(s).
-- ~~deploy~~
 <!-- /agent:queue -->
 
 ## Backlog

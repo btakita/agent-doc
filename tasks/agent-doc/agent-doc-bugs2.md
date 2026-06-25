@@ -161,7 +161,19 @@ Read your queue edit: marked the prior response `(HEAD)`, moved `[#actorswitchde
 **Semantic-completion warnings are follow-ons, not duplicates** — `#n529b` is the consumer-wiring phase after `#n529` shipped the mirror substrate; `#cgfx` is SM route-convergence after `#qdedupsync`'s dedup fix; `#kj5f`'s review remainder is the operator-verify half after `#6b5h`. None are auto-strikable; leaving all three.
 
 **Recommendation:** pick one focused item for a fresh cycle (my suggestion: `#npe1` `#codefencestrip` — a concrete in-scope agent-doc parser bug, fully agent-completable; or `#0bmv` plan-consolidation), or restart the session to let convergence drop the duplicate queue churn first. I'm stopping here rather than force-draining a churned session (16 cycles / 30 min, accretion=warn) through cross-repo and focused-cycle heads.
-<!-- agent:boundary:1f195f5a -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=c4187291-eec1-4c6e-8ed3-501a67296999 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=32972 candidate_hash=7585bc7359e0df199d2bb9f9f79c2a51b75ba77c7485ad5bbfe950c20ef77fca content_ours_len=34893 content_ours_hash=fa17ef3e81a4a04fc86d566453b98ead5f103efbb10b84fcf67b69397b8e9c3d doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782370732724
+```
+<!-- agent:boundary:17dd9162 -->
 <!-- /agent:exchange -->
 
 ## Queue

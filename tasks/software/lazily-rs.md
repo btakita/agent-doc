@@ -98,7 +98,24 @@ Commits:
 - parent repo gitlink: `9a2a86c8f` (`lazily-rs: bump MessagePack IPC codec`), pushed to `origin/main`.
 
 Latest `lazily-rs` GitHub Actions CI run for `24b6a0b` was still `in_progress` when checked after the push (`28199211718`). Local verification is green; CI should be checked again before treating remote validation as complete.
-<!-- agent:boundary:ede3b8f9 -->
+
+### Re: codec package boundaries — gpt-5
+
+> **Queue prompt:**
+> Should we create separate packages for each codec across all languages or keep it in the core packages?
+
+Keep codec support in each language's core package for now. Do not create `lazily-json`, `lazily-msgpack`, `lazily-postcard`, etc. as separate public packages yet.
+
+Recommended shape:
+- Every core package must include JSON because it is the canonical/debug/conformance codec.
+- MessagePack should live in the core package as the preferred production cross-language binary codec, but it can be feature/dependency gated where the ecosystem supports that (`ipc-msgpack` in Rust, optional peer/dependency or subpath import in JS if needed).
+- Postcard should remain Rust-local or same-schema-local support, not a cross-language package boundary.
+- Public APIs should expose one stable codec selection surface, such as `Codec.Json`, `Codec.MessagePack`, and `Codec.Postcard` where supported, instead of forcing users to compose separate package stacks.
+
+Separate packages become worth it only if a codec brings a large runtime, native build step, transport stack, or ecosystem-specific dependency burden. That points to future Cap'n Proto/gRPC-style experiments, not the current JSON/MessagePack/postcard set.
+
+The agentic and developer ergonomics reason is straightforward: separate per-codec packages multiply install matrices, examples, conformance fixtures, and version skew across languages. The core package can still keep optional binary dependencies lightweight while preserving one obvious install path and one canonical fixture story.
+<!-- agent:boundary:80af96a1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -107,7 +124,9 @@ Latest `lazily-rs` GitHub Actions CI run for `24b6a0b` was still `in_progress` w
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- 🚧 do [#lzmsgpack]
+- ~~do [#lzmsgpack]~~
+- ~~Should we create separate packages for each codec across all languages or keep it in the core packages?~~
+- Should we create separate packages for Cell CRDT or keep it in the core packages?
 <!-- /agent:queue -->
 
 ## Backlog

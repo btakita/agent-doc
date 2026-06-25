@@ -145,8 +145,7 @@ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md
 **Remaining work** is `#actorswitchdefer` Part B (already queued, `[focused-cycle]`): deterministic SimWorld proof that the deferred restart actually fires at the boundary, the paused/stuck regression asserting the recovery hint shows and the deferred restart is never silently dropped, plus an explicit route bail when `agent_change_restart` is disabled. That needs restart-flow SimWorld infra + `make tmux-ci`, so it belongs in a fresh focused cycle on a healthy supervisor — implementing it on this stale-CRDT session would just re-corrupt the write.
 
 **I'm stopping after this and recommending the supervisor restart above** — the in-session loop can't fix its own parent; the operator restart is the unblock.
-
-<!-- agent:boundary:3c075c33 -->
+<!-- agent:boundary:0906e7a1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -235,7 +234,6 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 - :pushpin: ~~I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: Still getting JB `File Cache Conflict` dialogs.
 - :pushpin: Opencode responses are reverse ordering numeric lists.
-- :pushpin: [#actorswitchdefer]
 - :pushpin: do [#npe1]
 - :pushpin: do [#p2j4]
 - :pushpin: do [#4pdp]
@@ -283,7 +281,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - :pushpin: do [#cgfx]
 - ~~do [#nsq2]~~
 - ~~:pushpin: do [#t4x1]~~
-- Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.
+- :pushpin: Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

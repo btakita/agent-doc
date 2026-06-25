@@ -109,7 +109,19 @@ Drained the queue head `#kj5f` (`#mergestatemachine3`, the merge-control state-m
 **Remaining on `#kj5f` (operator-gated, not agent-completable this session):** the JB + VSCode **thin reporters** that emit attach/detach/ownership facts through the SM (via `#lazilystatesync`), plus the **live editor-attached/detached repro**. Both need a live editor and the plugin install that's currently paused (per your "stop cutting releases until the CRDT merge corruption is fixed" directive), so they can't be verified from a CLI session. I attempted to retag `#kj5f` `[operator-verify]` to reflect this, but the queue-consume reconciliation is wedged on a stale-snapshot drift (the prior cycle's struck explicit-id head is in the snapshot but not the live queue) — I left the backlog untouched rather than fight it against the live supervisor.
 
 **Closeout note:** this session's editor IPC remains degraded — every write mangles the working tree post-commit (recovered via `git checkout HEAD --`), and the queue-edit path is wedged on snapshot drift. The code is safe on `origin/main`. Stopping here rather than auto-looping into more degraded-IPC churn; the supervisor can reconcile the snapshot at its idle boundary.
-<!-- agent:boundary:393d2a55 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=17d49729-8f3d-4c19-9863-eae235a8abc7 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=25858 candidate_hash=e57fc4f2504133c72064e14aa2419ad96b6a8d0f149898cb8c70d7d36ff48115 content_ours_len=27489 content_ours_hash=15d4e896e9e30ebaafb13017d7cb10fcd12f478ca0d466076a544d465e8ea7cc doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782369643340
+```
+<!-- agent:boundary:76c4a714 -->
 <!-- /agent:exchange -->
 
 ## Queue

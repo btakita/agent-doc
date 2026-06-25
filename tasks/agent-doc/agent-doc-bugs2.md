@@ -32,6 +32,8 @@ done
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+- **lazily-kt (conformance pin):** new `StateGraphMirror` + wire shapes
+- **JB plugin 0.2.189 → 0.2.190:** `AgentDocLib.agent_doc_state_subscribe`
 ### Session Summary
 
 ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260625-041022.md`*
@@ -39,7 +41,7 @@ done
 Compacted content:
 ❯ - Archived 6 response topic(s): state machines for queue activity + plugin/binary merge control; #56ta lazily-spec wire-shape + interrupted-cycle recovery + semantic triage; IPC proof diagnostic (interrupted-cycle recovery); 3 more
 ❯ - Prior summary/context: prior compacted content: Archived 5 response topic(s): bounded session-startup wait + isolating why the session hangs...
-<!-- agent:boundary:3c086b1b -->
+<!-- agent:boundary:053d9b13 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -47,18 +49,9 @@ Compacted content:
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: [#56ta]~~
 - ~~:pushpin: [#vm7g]~~
-- 🚧 :pushpin: [#n529]
-- do [#fnxy]
-- do [#t4x1]
-- :pushpin: [#r5at]
-- :pushpin: [#6n5j]
-- :pushpin: [#vwj7]
-- :pushpin: [#cgfx]
-- :pushpin: [#brtc]
-- :pushpin: [#gghx]
-- :pushpin: [#8g9w]
-- :pushpin: [#6mjw]
-- :pushpin: [#spy9]
+- ~~🚧 :pushpin: [#n529]~~
+- :pushpin: do [#fnxy]
+- :pushpin: do [#t4x1]
 ---
 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
@@ -91,6 +84,15 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
+- :pushpin: [#r5at]
+- :pushpin: [#6n5j]
+- :pushpin: [#vwj7]
+- :pushpin: [#cgfx]
+- :pushpin: [#brtc]
+- :pushpin: [#gghx]
+- :pushpin: [#8g9w]
+- :pushpin: [#6mjw]
+- :pushpin: [#spy9]
 ---
 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
 ```
@@ -214,6 +216,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#n529b] #lazilystatesync3b Wire MirrorProjectionSummary into EditorCommandStateMachine / dispatch-ready / busy consumers (PromptPoller, RunAgentDocAttemptLedger) so they read StateProjectionBridge.mirrorSummaryForFile instead of the cold projectionSummaryForFile pull, then dogfood live in JB. Mirror substrate shipped in 0.2.190 (#n529). Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
+- [ ] [#ekv8] #n529b #lazilystatesync3b Wire the reactive MirrorProjectionSummary into the EditorCommandStateMachine / dispatch-ready / busy consumers (PromptPoller, RunAgentDocAttemptLedger) so they read StateProjectionBridge.mirrorSummaryForFile instead of the cold projectionSummaryForFile pull, then dogfood live in JB. Mirror substrate shipped in 0.2.190 (#n529). Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#gww8] #lazilyspecpin=Pin agent-doc state type_tag vocabulary (8 node kinds) + conformance snapshot/delta pair in lazily-spec as schemas/agent-doc-state.json (versioned) so kt/js/rs import one canonical vocabulary. Design pinned in tasks/agent-doc/plan-lazily-plugin-state-sync.md (Wire-shape definition section). Sibling-repo (src/lazily-spec) cycle per scope-discipline.
 - [ ] [#vwj7] #queuestatemachine1 Define queue-item identity + lifecycle-state model (Authored→Mirrored→InProgress→Answered→Struck→Reaped) + pure transition fn with exhaustive (state×event) tests. Replaces ad-hoc dedup passes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
 - [ ] [#cgfx] #queuestatemachine2 Route convergence through the SM; reduce dedup passes to transition guards; property test idempotence (re-emit=no-op) over #rt83qflood/#qdedupsync/#qauthorder duplication shapes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
@@ -221,7 +225,6 @@ What are #next-steps to fix bugs?
 - [ ] [#fnxy] #mergestatemachine1 Define FFI write-ownership SM (Detached→Attached→EditorOwnsBuffer→BinaryWriteRequested→IpcAckProven→Committed) + editor-heartbeat liveness probe distinguishing live-editor from stale listener (#6b5h). Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#t4x1] #mergestatemachine2 Gate try_ipc/commit/disk-write on the ownership SM; route Detached/stale writes to controller-host disk path so CLI-only/no-editor never wedges on no_ack. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#kj5f] #mergestatemachine3 JB+VSCode report attach/detach/ownership through SM (thin reporters via #lazilystatesync); SimWorld + live repro for File Cache Conflict + #6b5h wedge. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
-- [ ] [#n529] #lazilystatesync3 JB plugin: replace StateProjectionBridge manual JSON render with a lazily-kt mirror graph applying FFI deltas; EditorCommandStateMachine becomes a derived lazily-kt cell. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#r5at] #lazilystatesync4 VSCode plugin: lazily-js mirror graph applying FFI state deltas. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#6n5j] #lazilystatesync5 Parity+tests: lazily-spec cross-editor conformance (extend EditorCommandStateMachineTest to reactive path) + FFI round-trip proving kt/js mirror converges to rs authoritative graph. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#gghx] #waitmachine1 Wait-machinery state machine core: add agent-doc-orchestration/src/wait_machine.rs with a pure WaitState/tick transition + single GLOBAL_HANG_CEILING (10s) + typed ReinstallPause exemption. Plan: tasks/agent-doc/plan-wait-machinery-state-machine.md

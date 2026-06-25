@@ -240,7 +240,15 @@ All four feature branches merged into their mains and verified green. No push (l
 - `#kj5f`, `#nsfz` — `[operator-verify]` items that need a live editor/pane; cannot be agent-completed.
 
 **Superproject note:** the submodule pointers now differ from what the superproject records (`src/agent-doc` 66ac6c64→ff4a8ac1, `src/lazily-spec` advanced). Commit the superproject pointer bump to make the merge durable against a submodule re-checkout.
-<!-- agent:boundary:028ef55e -->
+
+### Re: do #crdtauth5 then bump + build — opus-4-8
+
+**#crdtauth5 done + merged.** Live multi-editor delta fan-out over IPC: an additive supervisor IPC message family (`ReplicaRegister`/`ReplicaDeregister`/`ReplicaUpdate`/`ReplicaAwareness`) routed through the per-document `crdt_relay_host` hub (`#xdocsuper1/3` isolation), authority-gated so the Detached/headless control-plane path is byte-for-byte unchanged. Proven end-to-end over a **real socket with the production handler**: a yrs update from replica A is integrated into canonical and fanned out to replica B, then the commit barrier captures a consistent cut holding the fanned-out op. JB seam wired+tested (`CrdtReplicaForwarder` → FFI replica ABI, thin). Merged to `main` `3b454d14`; `make check` 5241 passed, `./gradlew test` green, release green.
+
+**Bump + build done:** JB plugin `0.2.191 → 0.2.192` (`make bump-plugin`, both signed+unsigned zips built, committed `62297394`); release binary/cdylib rebuilt on merged main.
+
+**Filed `#crdtauth6`** for the remaining operator-gated live hookup: the thin JB `DocumentListener` + a Kotlin Unix-socket `ReplicaTransport` client, plus the deferred VS Code koffi replica seam. The Rust fan-out + Kotlin seam are merged and tested; what remains is pure plumbing around the tested seam + the live two-editor repro.
+<!-- agent:boundary:7babbf4e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -369,7 +377,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#crdtauth5] [focused-cycle] crdtauth4 cutover Part 3 — live multi-editor delta fan-out: add an IPC message family for editor register/deregister + yrs deltas (current IpcMethod enum is control-plane only: Restart/Inject/State/Pid/Stop/Clear), forward yrs updates from JB/VSCode plugins (today they forward markdown patch files via the FFI replica ABI, not yrs updates), and have the supervisor host loop pump deltas through the per-document RelayHub registry (crdt_relay_host). Commit-barrier + disk-demotion already wired on branch crdtauth1-authority-sm. Plan: tasks/agent-doc/plan-crdt-authority-model.md
+- [ ] [#crdtauth6] [operator-verify] crdtauth5 live hookup: thin JB DocumentListener calling CrdtReplicaForwarder.forwardLocalDelta + a Kotlin Unix-socket ReplicaTransport client (writes NDJSON register/deregister/update, delivers inbound update_b64 to applyRemoteUpdate); plus the deferred VS Code koffi replica seam (editors/vscode/src/native.ts out-param marshaling). Rust fan-out + Kotlin seam already merged + tested. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#r5at] #lazilystatesync4 VSCode plugin: lazily-js mirror graph applying FFI state deltas. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#6n5j] #lazilystatesync5 Parity+tests: lazily-spec cross-editor conformance (extend EditorCommandStateMachineTest to reactive path) + FFI round-trip proving kt/js mirror converges to rs authoritative graph. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#gghx] #waitmachine1 Wait-machinery state machine core: add agent-doc-orchestration/src/wait_machine.rs with a pure WaitState/tick transition + single GLOBAL_HANG_CEILING (10s) + typed ReinstallPause exemption. Plan: tasks/agent-doc/plan-wait-machinery-state-machine.md

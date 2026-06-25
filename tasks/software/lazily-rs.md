@@ -98,7 +98,30 @@ Cross-cutting `#bagt` arena conformance is wired in all three host ports (spec f
 - `#h6qb`/`#lzwebrtcnet-e2e` — live two-host/NAT WebRTC validation through the deployed signaling Worker
 
 **Top backlog id: `#gcp4` (`#lzasyncdispose2`).**
-<!-- agent:boundary:ce5242e8 -->
+
+### Re: do #gcp4 — implement #lzasyncdispose2 async dispose-recycle guard — opus-4-8
+
+Drained `do #gcp4`. Implemented and shipped the lazily-rs `#lzasyncdispose2` hardening.
+
+**Root cause** — `AsyncContext::dispose_async_effect` recycled a `SlotId` into `free_ids` with no generation guard, so a `flush_async_effects`-spawned re-run still in-flight across its `.await` could re-lock *after* dispose and write `cleanup`/edges/`in_flight` into whatever node a later `alloc_id` reused at that id. `dispose`'s `abort()` is cooperative and loses the race once the run is past its last await point — and `get_async`/`get_cell` also register dependency edges **live** during the run, keyed by the effect id, a second aliasing vector.
+
+**Fix** (src/async_context.rs):
+- Added a per-index `generations: Vec<u64>` parallel to `nodes`, bumped in `dispose_async_effect` **before** the id is recycled.
+- The spawned re-run captures `effect_gen` at spawn and re-checks it before every write keyed by `effect_id`: the start cleanup-drain, the dependency/cleanup writeback, and the `in_flight` store-back.
+- `AsyncComputeContext` now carries `_node_gen` and skips live `register_dependency` writes once the generation diverges.
+- On a generation mismatch, the in-flight run runs **its own** cleanup so side effects are undone rather than leaked into the aliased node.
+- Slot compute path was already revision-guarded and slot ids never recycle, so only the effect path needed it; the slot `AsyncComputeContext` carries its generation too for uniformity.
+
+**Tests** — two new deterministic regression tests (a timing test would only hit the `abort()` path and never reach the guarded code):
+- `dispose_bumps_generation_then_id_recycles_fresh` — validates the bump + LIFO recycle premise.
+- `stale_generation_context_does_not_alias_recycled_effect` — replays a stale-generation context against a recycled id and asserts no aliasing edge/dependent is written.
+
+**Verification** — `make check` fully green (fmt, clippy, build, all feature suites incl. Loom + Lean + webrtc + doctests, benchmark-check). async_context module: 42 + 23 passed. No spec change needed — internal async-correctness hardening, no wire/protocol change.
+
+**Shipped** — lazily-rs `255437d` (pushed to `lazily-hub/lazily-rs`); superproject gitlink bumped + pushed (`788597955`). No install step — lazily-rs is a library crate; `make check` covers the build.
+
+The lazily 6-port bug backlog is now fully drained.
+<!-- agent:boundary:58ba3706 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,7 +132,7 @@ Cross-cutting `#bagt` arena conformance is wired in all three host ports (spec f
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~What are #next-steps to fix lazily-rs, lazily-kt, lazily-js, lazily-spec, lazily-zig, lazily-py bugs?~~
 - ~~do [#gcp4]~~
-- release + publish lazily-spec
+- 🚧 release + publish lazily-spec
 - release + publish lazily-rs
 - release + publish lazily-ky
 - release + publish lazily-js

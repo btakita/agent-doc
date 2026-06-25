@@ -202,7 +202,19 @@ Post-restart recovery + first focused-cycle phase of the head epic.
 **Not yet wired into convergence** — that's `#cgfx` (`#queuestatemachine2`: route the ad-hoc dedup passes through the SM as transition guards), then `#brtc` (`#queuestatemachine3`: SimWorld re-emit-storm proof). No behavior change is live yet, so no install/recycle needed — consistent with the standing "stop cutting releases" hold.
 
 **Scope note:** no release ceremony (version/tag/publish/install) per your hold; the code is committed to the submodule and the superproject pointer follows.
-<!-- agent:boundary:74fec4e0 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=cfe7ba2e-76ac-4f19-9b1c-2444aa16342e invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=39503 candidate_hash=f47771a6389421305566b126673c4e85ae51ef3923ac7a6e481773ccc1a74828 content_ours_len=40939 content_ours_hash=4a4c228371911738d6d81e670f95873ee29cc844142c638e2298768d030ee911 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782373362302
+```
+<!-- agent:boundary:913cb969 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -233,7 +245,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 ~~~
 - 🚧 :pushpin: [#brtc]
 ---
-Please fix the cross document supervisor contamination. This was from the session that started off running corky.md, but somehow 
+Please fix the cross document supervisor contamination. This was from the session that started off running corky.md, but somehow run agent-doc-bugs2.md.
 ```
 ● Three agent-doc panes exist; the doc is owned by %73 but I'm now on %69 (the harness relaunched my agent into a new
   pane — %73 is the stale prior owner). The binary itself says to claim. The fix is already safely committed, so

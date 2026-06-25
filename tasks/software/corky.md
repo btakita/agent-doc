@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Session History
@@ -289,7 +289,7 @@ Why it can't close this turn:
 To unblock: (1) confirm you want a v0.29.0 crates.io release and I'll prep the ordered publish + changelog, and (2) complete the pypi.org trusted-publisher setup. Note: the earlier semantic-match flag (`#tagpath-queue-priority-publish-align`) was a false positive — that's the tagpath release, unrelated to corky.
 
 Tooling note: this cycle hit a stale IPC listener (the `startup-miss` opencode pane buffer kept overwriting the working tree via CRDT convergence, causing `#queue-user-edit-overwrite` guards). I used `--force-disk` to land a clean commit. If you see more drift, killing the stale pane or running `agent-doc admin recycle` should clear it.
-<!-- agent:boundary:294e0838 -->
+<!-- agent:boundary:217b4fee -->
 <!-- /agent:exchange -->
 ###
 <!--

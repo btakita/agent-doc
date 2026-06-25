@@ -129,7 +129,16 @@ Commits: EFS `d33680e` (identity short-circuit removal + field merge) and `48948
 Deploy: no schema change (reuses existing tables); remote D1 migrations had nothing to apply. `make deploy` completed. Worker URL `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID `4597b4b6-34a4-4faf-a2e1-08df5e1f1d34`. Post-deploy: public root `HTTP 200`. A new/resumed application for this borrower at step=0 will now prefill DOB (and other blank borrower fields) from the most recent prior application.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:36ca172a -->
+
+### Re: Deploy closeout — glm-5.2
+
+> **Queue prompt:**
+> deploy
+
+Deploy was completed and documented in the DOB prefill response above (Worker Version `4597b4b6-34a4-4faf-a2e1-08df5e1f1d34`, public root `HTTP 200`). Striking the answered `deploy` head to clear the closeout residue.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:35cc38ae -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -149,9 +158,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?step=0 for btak.dev+borrower3@gmail.com~~
-  still does not capture already filled out borrower data (e.g. "Date of Birth"). Have we captured this borrower's data?
-- 🚧 deploy
+- ~~https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?step=0 for btak.dev+borrower3@gmail.com — still does not capture already filled out borrower data (e.g. "Date of Birth"). Have we captured this borrower's data?~~
+- ~~deploy~~
 <!-- /agent:queue -->
 
 ## Backlog

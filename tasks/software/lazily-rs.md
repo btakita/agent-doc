@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -165,7 +165,19 @@ You chose "Go lazily-spec only." Done.
 - **lazily-kt** — needs publish-infra bootstrap (separate task).
 
 Reply `go lazily-zig` (or `go non-2FA` for zig + rs) to continue, or drive the 2FA ports yourself.
-<!-- agent:boundary:5e82de05 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=a0cb1949-3c96-4ec9-b651-b24a57035f69 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=16518 candidate_hash=908a55c842838bca3e1f02273e0562fe86bae1a27874630166adc77f6a3f2f70 content_ours_len=17738 content_ours_hash=5cbb3d9517d30207571b099b01ed7c4dd35bad7799cf4bb86ac6b4ad734057ac doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782352670275
+```
+<!-- agent:boundary:3817fbc2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -175,7 +187,7 @@ Reply `go lazily-zig` (or `go non-2FA` for zig + rs) to continue, or drive the 2
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 - ~~release + publish lazily-spec~~
-- release + publish lazily-rs
+- 🚧 release + publish lazily-rs
 - release + publish lazily-ky
 - release + publish lazily-js
 - release + publish lazily-zig

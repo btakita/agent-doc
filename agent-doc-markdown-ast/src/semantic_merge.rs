@@ -2245,6 +2245,99 @@ Prior answer.
     }
 
     #[test]
+    fn exchange_response_ordered_list_preserves_order() {
+        // #4pdp / #ocreverselist: an OpenCode-shaped child response whose new
+        // `### Re:` turn contains an ordered (numeric) markdown list must keep the
+        // list items in authored order (1, 2, 3) after the semantic merge. The
+        // OpenCode harness has no IDE-plugin IPC and no streaming, so its response
+        // round-trips through the disk-write CRDT/semantic merge path; an ordering
+        // inversion there surfaces as reverse-ordered lists in the document.
+        let base = "\
+<!-- agent:exchange -->
+### Re: prior — opus-4-8
+
+Prior answer.
+<!-- /agent:exchange -->
+";
+        let ours = "\
+<!-- agent:exchange -->
+### Re: prior — opus-4-8
+
+Prior answer.
+
+### Re: new turn — opus-4-8
+
+Steps:
+
+1. First step.
+2. Second step.
+3. Third step.
+<!-- /agent:exchange -->
+";
+        // Operator (theirs): exchange untouched.
+        let theirs = base;
+        let m = semantic_merge(base, ours, theirs);
+
+        let s1 = m
+            .merged_doc
+            .find("1. First step.")
+            .expect("ordered item 1 missing");
+        let s2 = m
+            .merged_doc
+            .find("2. Second step.")
+            .expect("ordered item 2 missing");
+        let s3 = m
+            .merged_doc
+            .find("3. Third step.")
+            .expect("ordered item 3 missing");
+        assert!(
+            s1 < s2 && s2 < s3,
+            "ordered list reversed in merged exchange (s1={s1} s2={s2} s3={s3}):\n{}",
+            m.merged_doc
+        );
+    }
+
+    #[test]
+    fn exchange_bare_ordered_list_without_heading_preserves_order() {
+        // #4pdp / #ocreverselist: an OpenCode response that is a bare ordered list
+        // (no `### Re:` heading) falls through the heading-turn path into the
+        // bullet-item merge, because `strip_bullet` treats `N. ` as a list item.
+        // The item-merge must keep the agent-added items in authored order (1,2,3),
+        // not reversed.
+        let base = "\
+<!-- agent:exchange -->
+<!-- /agent:exchange -->
+";
+        let ours = "\
+<!-- agent:exchange -->
+1. First step.
+2. Second step.
+3. Third step.
+<!-- /agent:exchange -->
+";
+        let theirs = base;
+        let m = semantic_merge(base, ours, theirs);
+
+        let s1 = m
+            .merged_doc
+            .find("First step.")
+            .expect("ordered item 1 missing");
+        let s2 = m
+            .merged_doc
+            .find("Second step.")
+            .expect("ordered item 2 missing");
+        let s3 = m
+            .merged_doc
+            .find("Third step.")
+            .expect("ordered item 3 missing");
+        assert!(
+            s1 < s2 && s2 < s3,
+            "bare ordered list reversed in bullet-path merge (s1={s1} s2={s2} s3={s3}):\n{}",
+            m.merged_doc
+        );
+    }
+
+    #[test]
     fn qdup_one_changed_node_leaves_siblings_byte_identical() {
         // #hap7 / #qdup test 3 (per-node isolation): an agent edit to ONE queue
         // node must leave every sibling node's serialized line byte-identical — a

@@ -356,7 +356,32 @@ Fixed and shipped (corky `6c4c831` on `origin/main`). The slug regex `[^a-z0-9]+
 - Commit `6c4c831` — pushed.
 
 Next (final) queue head: `#ckymime`.
-<!-- agent:boundary:6acb0a9e -->
+
+### Re: #ckymime — draft-send MIME issues — opus-4-8
+
+> **Queue prompt:**
+>
+> [#ckymime]
+
+
+Fixed and shipped the two concrete correctness/security bugs (corky `15c0498` on `origin/main`); split the two feature-sized items into their own backlog.
+
+**Fixed:**
+1. **Filename header injection** — the attachment filename was interpolated raw into the `Content-Type name="…"` / `Content-Disposition filename="…"` quoted-strings, so a `"` or CR/LF could break the MIME structure or inject headers. Now `sanitize_mime_filename` drops control chars and backslash-escapes `"`/`\`.
+2. **Malformed In-Reply-To** — `In-Reply-To`/`References` used the raw value; a bare id (no angle brackets) is malformed per RFC 5322. Now `normalize_message_id` wraps it as `<id>`.
+
+**Split out → new backlog items:**
+- `#ckymimeinline` [P3] — inline `images:` CID support in `draft send` (only `draft push` handles it today; needs `multipart/related`).
+- `#ckymimestream` [P3] — large attachments buffer the whole file + base64 in RAM (~1.8GB for 500MB); needs Gmail resumable upload + streamed encoding.
+
+**Verification (`#spec-test-build-install-commit-push`):**
+- Tests: new `sanitize_mime_filename` + `normalize_message_id` unit tests (injection, escaping, angle-bracket forms) — `cargo test -p corky-mail` → 227 passed; full `make check` green.
+- Build + install (GPU/CUDA): `make install` → `corky 0.29.0` in `~/.cargo/bin`.
+- Spec: SPEC.md §5.5.1 updated.
+- Commit `15c0498` — pushed.
+
+That clears the last `#id` queue head — `#ckyorphan` through `#ckymime`, **12 corky bugs fixed and pushed** this drain. The only remaining queue items are the two free-text `What are #next-steps to fix corky bugs?` prompts (now answered by the priority-ordered backlog: `#ckymimeinline`, `#ckymimestream`, plus the earlier `#ckythreadmerge`, `#ckybench`/`#ckystale` follow-ups).
+<!-- agent:boundary:061271de -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -378,7 +403,7 @@ Please give me a report the performance
 - ~~[#ckyconfigunwrap]~~
 - ~~[#ckyatomicwrite]~~
 - ~~[#ckyunicodeslug]~~
-- 🚧 [#ckymime]
+- ~~[#ckymime]~~
 - What are #next-steps to fix corky bugs?
 - What are #next-steps to fix corky bugs?
 <!-- /agent:queue -->
@@ -386,8 +411,9 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#ckymimeinline] [P3] corky draft send silently drops inline images: YAML (only draft push handles images+CID via multipart/related). Add CID inline-image support to send build_mime_message (multipart/related wrapping the text part + image parts with Content-ID), reusing draft push image-resolution logic. crates/corky-mail/src/draft/send.rs, mod.rs (push image handling). Split from #ckymime.
+- [ ] [#ckymimestream] [P3] corky draft send buffers the whole attachment in RAM then base64-encodes it (~1.8GB peak for a 500MB file). Use the Gmail API resumable/multipart upload endpoint for large attachments and stream the base64 encoding instead of building one giant String. crates/corky-mail/src/draft/send.rs:build_mime_message + send_via_gmail_api. Split from #ckymime.
 - [ ] [#ckythreadmerge] [P2 correctness] threading provider-switch merge: IMAP threads keyed by subject (thread_key_from_subject) and Gmail-API threads keyed by Gmail threadId never merge when the same conversation is synced from both providers, producing duplicate thread files. Design a unified thread-identity reconciliation (e.g. index by Message-ID/References across providers, or map Gmail threadId<->subject-key). Architectural — needs its own focused cycle. Split from #ckythread. crates/corky-mail/src/sync/{imap_sync.rs,gmail_api_sync.rs}, markdown.rs
-- [ ] 🚧 [#ckymime] [P2] corky draft send MIME issues: raw filename in Content-Disposition (header-injection/malformed MIME), whole attachment buffered in RAM (~1.8GB peak for 500MB), inline images: YAML silently dropped (only draft push handles images+CID), In-Reply-To not normalized to angle-bracket RFC 5322 form. crates/corky-mail/src/draft/send.rs:70-98,186-237
 <!-- /agent:backlog -->
 
 ## Review

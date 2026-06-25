@@ -260,7 +260,19 @@ Fixed and shipped (corky `ec67c22` on `origin/main`). A Google-revoked but clock
 - Commit `ec67c22` (16 files) — pushed.
 
 Next queue head: `#ckypeoplesync`.
-<!-- agent:boundary:37919626 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/software/corky.md source=socket_ack_content patch_id=5c6299b8-f438-419e-bb54-92f8b396f875 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=21771 candidate_hash=6c35b974c2f5922ee37076cda785deb8222fd05a98a7afba815014a6fdc1d5ef content_ours_len=22249 content_ours_hash=9af6b869ba2576cdd9a55217e64d56aa4fd3858af37870e9cb103aeeed3dc958 doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782352942891
+```
+<!-- agent:boundary:080abc0a -->
 <!-- /agent:exchange -->
 ###
 <!--

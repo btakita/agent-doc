@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -380,7 +380,42 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=socket_ack_content patch_id=e53afaeb-c9b3-42a3-8bda-6eaaafa04d51 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=36184 candidate_hash=b6e234070283d79a568251fd180560ef4dc4242e351a2e27d32971ca3141d90c content_ours_len=36207 content_ours_hash=9d93933a97b4ec9bdf4d62a5d49706f74e022992fa29cadf10e9dbf78607f999 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782360628042
 ```
-<!-- agent:boundary:21eefb35 -->
+
+### Re: CRDT (YRS/YJS) as FFI/IPC/Network protocol — layered verdict — glm-5.2
+
+> **Queue prompt:**
+>
+> Would it be beneficial to make lazily use CRDT (YRS/YJS) as the FFI/IPC/Network protocol?
+
+**Short answer: no for FFI and IPC; yes-for-the-distributed-plane — but CRDT is already the plan there, and YRS/YJS specifically is the wrong shape.** The question collapses three layers that lazily keeps deliberately separate; conflating them would regress the guarantee each layer exists to provide.
+
+#### The three planes today (grounded in code)
+
+| Plane | Code | Semantics |
+|-------|------|-----------|
+| **IPC mirror** | `ipc.rs`, `ffi.rs`, spec §IPC | `IpcMessage = Snapshot \| Delta`, strict sequential `epoch == base_epoch+1`, fail-closed resync on gap. **Single producer → N read-only observers.** Value-mirror only — no compute closures cross the wire (`ipc.rs:1-10`, protocol.md §Cross-language). |
+| **Distributed CRDT** | `distributed.rs` (permission boundary only), spec §Distributed | **Specced, unimplemented.** HLC-keyed LWW/MV/PN registers, per-peer causal stamps, post-merge PartialEq + memo suppression (`distributed.rs:1-9`, protocol.md:326-345). |
+| **Effect authority** | spec §Distributed "single-writer effect authority" | Irreversible actions (email, charge, webhook) stay single-writer / at-most-once. **Explicitly NOT CRDT-merged** (protocol.md:343-345). |
+
+#### Per-layer verdict
+
+**FFI — no.** `ffi.rs` owns no graph state; it ferries canonical JSON/postcard `IpcMessage` bytes across the C ABI. YJS's document model (Y.Array/Map/Text) is the wrong unit — `NodeAdd`/`EdgeAdd`/`Invalidate`/`SlotValue` aren't YJS mutations — and would drag a wasm/JS dependency into every port (py/zig/kt). FFI stays an opaque byte channel.
+
+**IPC (Snapshot/Delta) — no, don't replace.** It is a deliberately strict **single-producer mirror** with strong ordering. CRDT (YJS) brings multi-writer convergence + merge: *more* machinery than one-producer/N-mirror needs, and *weaker* where lazily currently guarantees strict epoch order (CRDT gives eventual convergence + concurrent-write semantics). Adopting YJS turns every observer into a writer and dissolves the producer's epoch authority. `Delta` should instead **bridge** to a CRDT merge layer at the distributed boundary.
+
+**Network/distributed — CRDT is the right tool and already on the roadmap (§Distributed).** The live decision is *purpose-built vs YRS/YJS*. Recommendation: **purpose-built**, because:
+- lazily's replication unit is a **lazy reactive graph** (nodes + edges + invalidation frontier), not a collaborative text/array document. YJS primitives fight that shape (Y.Map-per-cell loses edge semantics and the lazy `Invalidate` marker).
+- **Laziness is antithetical to eager CRDT materialization.** `Invalidate` = "intentionally unknown pending recompute"; YJS eagerly merges concrete state with no native dirty/unknown slot. The lazy + memo-equality-suppression invariants (the product's core, proven in the Lean model) must live in *your* merge layer regardless — so YJS buys you a transport, not the semantics.
+- **Effect authority** stays single-writer either way; YJS has no notion of it.
+
+#### The one place YRS genuinely helps
+
+YRS's **binary anti-entropy / sync protocol** (stateless sync, efficient binary updates, GC'd tombstones) is a credible *transport* for the distributed plane. That's "borrow YRS's sync engine," not "make CRDT the FFI/IPC/Network protocol" — an optimization to evaluate *after* the purpose-built HLC cell plane exists. The spec's already-defined HLC + LWW/MV/PN scheme **is** a CRDT — just one shaped like lazily, not like a text editor.
+
+#### Recommendation
+
+Keep FFI opaque, keep Snapshot/Delta as the single-producer mirror, implement §Distributed as a purpose-built HLC cell plane (optionally borrowing YRS sync later). Filed as `#lzcrdtplane` (top of backlog). Note: the queue preset `#spec-test-build-install-commit-push` does **not** apply to a "would it be beneficial?" question — this is a recommendation, not an authorized rewrite; a full protocol swap ripples across all 6 ports and is gated on the plan.
+<!-- agent:boundary:24e77c59 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -389,12 +424,12 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/l
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- 🚧 Would it be beneficial to make lazily use CRDT (YRS/YJS) as the FFI/IPC/Network protocol?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzcrdtplane] [recommended] Implement the distributed CRDT cell plane (spec §Distributed). Decision: purpose-built HLC + LWW/MV/PN registers (matches lazily's lazy reactive graph + memo-equality invariants); do NOT adopt YRS/YJS document model (wrong replication unit). Keep IPC Snapshot/Delta as the single-producer mirror; CRDT merge lives only at the multi-writer distributed boundary. Optional later: borrow YRS binary anti-entropy sync engine as transport. Plan first: tasks/software/plan-lazily-distributed-crdt-plane.md.
 <!-- /agent:backlog -->
 
 ## Review

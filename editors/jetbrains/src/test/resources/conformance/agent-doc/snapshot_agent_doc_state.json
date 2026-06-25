@@ -1,0 +1,53 @@
+{
+  "description": "agent-doc state projection snapshot: baseline + closeout.cycle (preflight_started) + queue.head (selected), with derivation edges head->cycle and cycle->baseline. Uses only schemas/agent-doc-state.json type_tags; payloads are serde_json(struct) bytes per `payload = base64(serde_json(struct))`.",
+  "protocol_version": 1,
+  "schema_version": "1.0.0",
+  "kind": "Snapshot",
+  "assertions": {
+    "epoch": 3,
+    "node_count": 3,
+    "edge_count": 2,
+    "root_count": 1,
+    "type_tags": [
+      "agent_doc.document.baseline",
+      "agent_doc.closeout.cycle",
+      "agent_doc.queue.head"
+    ],
+    "all_type_tags_in_vocabulary": true,
+    "cycle_phase": "preflight_started",
+    "queue_head_phase": "selected"
+  },
+  "wire": {
+    "Snapshot": {
+      "epoch": 3,
+      "nodes": [
+        {
+          "node": 101,
+          "type_tag": "agent_doc.document.baseline",
+          "state": {
+            "Payload": [123, 34, 99, 121, 99, 108, 101, 95, 105, 100, 34, 58, 34, 99, 121, 99, 45, 55, 34, 44, 34, 98, 97, 115, 101, 108, 105, 110, 101, 95, 104, 97, 115, 104, 34, 58, 34, 97, 49, 98, 50, 99, 51, 34, 44, 34, 98, 97, 115, 101, 108, 105, 110, 101, 95, 112, 97, 116, 104, 34, 58, 34, 112, 108, 97, 110, 46, 109, 100, 34, 125]
+          }
+        },
+        {
+          "node": 102,
+          "type_tag": "agent_doc.closeout.cycle",
+          "state": {
+            "Payload": [123, 34, 99, 121, 99, 108, 101, 95, 105, 100, 34, 58, 34, 99, 121, 99, 45, 55, 34, 44, 34, 112, 104, 97, 115, 101, 34, 58, 34, 112, 114, 101, 102, 108, 105, 103, 104, 116, 95, 115, 116, 97, 114, 116, 101, 100, 34, 44, 34, 115, 101, 115, 115, 105, 111, 110, 95, 99, 104, 101, 99, 107, 95, 112, 97, 115, 115, 101, 100, 34, 58, 102, 97, 108, 115, 101, 125]
+          }
+        },
+        {
+          "node": 103,
+          "type_tag": "agent_doc.queue.head",
+          "state": {
+            "Payload": [123, 34, 112, 104, 97, 115, 101, 34, 58, 34, 115, 101, 108, 101, 99, 116, 101, 100, 34, 44, 34, 98, 97, 99, 107, 108, 111, 103, 95, 105, 100, 34, 58, 34, 35, 103, 119, 119, 56, 34, 44, 34, 100, 114, 97, 105, 110, 97, 98, 108, 101, 34, 58, 116, 114, 117, 101, 125]
+          }
+        }
+      ],
+      "edges": [
+        { "dependent": 103, "dependency": 102 },
+        { "dependent": 102, "dependency": 101 }
+      ],
+      "roots": [101]
+    }
+  }
+}

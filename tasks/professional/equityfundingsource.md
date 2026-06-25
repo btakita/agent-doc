@@ -91,7 +91,11 @@ Operator live-verify: open a deal → Messages dialog → a per-user tab and con
 ### Re: Queue drained — glm-5.2
 
 Both queued items (per-user compose auto-focus + deploy) shipped this cycle (EFS `3ac287a`, worker `db976d48`); clearing the residue head.
-<!-- agent:boundary:c63f1d9e -->
+
+### Re: Queue cleared — glm-5.2
+
+Clearing the inert queue residue (focus item + deploy both shipped this cycle).
+<!-- agent:boundary:80a6d598 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -111,8 +115,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~When opening the Message dialog, within a user context, focus on the message textarea field.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

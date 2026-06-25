@@ -376,7 +376,7 @@ This is the `#qeditdup` / `#qftloss` class — both `[operator-verify]`, **code-
 **Supervisor health:** the recorded `queue_pause_reason` (per-finalize `live_prompt_drift` + post-commit worktree corruption) is **stale** — recent ops.log cycles are clean: `postcommit_worktree_check match=true`, `write_authority transport=write_queue`, `supervisor_host_gate hosting=in-process`, `drift_recheck=false`. The route-owned supervisor (pid 2967818) runs the current binary (0.34.48 = source). The pause only suppresses the idle-watch; it didn't block this drain.
 
 **Remaining queue heads are all `[operator-verify]`** — `#qftloss`, `#qeditdup`, `#crdtauth6`, `#nsfz` (and the gated review `#kj5f` / `#mergestatemachine3`) are code-complete and waiting solely on your live-editor / plugin-install eyeball. No agent-drainable work remains after this item, so the in-session loop stops here rather than churning. Check the logs as you test and file any live failures.
-<!-- agent:boundary:4c51e298 -->
+<!-- agent:boundary:efc28f25 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -385,6 +385,8 @@ This is the `#qeditdup` / `#qftloss` class — both `[operator-verify]`, **code-
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - On a fresh lazily-rs.md tmux pane, `● State is racing between runs (live supervisor/editor writing concurrently). Let me look at the actual document to
   understand what's being asked rather than chase the shifting sidecar state.`
+- Use lazily-rs recent addition of Cell Families for reactive document structures. Can we represent a tree st
+- When I make a free text item in a queue, my text is duplicated.
 - ~~I deleted some items from the queue but they came back. It seems that operator edits are not propagating to the CRDT authority models.~~ — auto-struck: answered this cycle (#ftstrike)
 ---
 🚧 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.

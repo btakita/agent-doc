@@ -167,7 +167,7 @@ So an interrupted push never silently discards the previous contents. I chose sn
 - Commit `5e7ba56` — pushed.
 
 Next queue head: `#ckywatchpanic` (P1 watch daemon dies on tick panic).
-<!-- agent:boundary:724e08f7 -->
+<!-- agent:boundary:3a7ae8c7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -180,8 +180,8 @@ Please give me a report the performance
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#ckyorphan]~~
 - ~~[#ckypanic]~~
-- 🚧 [#ckysheets]
-- [#ckywatchpanic]
+- ~~[#ckysheets]~~
+- 🚧 [#ckywatchpanic]
 - [#ckydedup]
 - [#ckythread]
 - [#ckytok401]

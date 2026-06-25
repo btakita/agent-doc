@@ -61,6 +61,12 @@ thin mirror consumer.
   serializers. 32 gradle tests green, including the defining property: *cold
   snapshot of full state* converges identically to *partial cold + delta*.
 - **JB plugin 0.2.189 → 0.2.190:** `AgentDocLib.agent_doc_state_subscribe`
+- **`ownership_probe`** — the liveness classifier composing the existing `plugin_owner` lease (pid liveness, not heartbeat freshness, matching the shipped fail-safe): live pid → `EditorBufferObserved`; dead pid → `EditorDetached`; no lease → `HeartbeatStale` (the `#6b5h` stale-listener demote to `Detached`).
+- **`disk_write_permitted(phase)`** — the safety gate: disk writes permitted only in `Detached` (no editor) or `IpcAckProven` (editor applied + ACK). This is the invariant that eliminates both `File Cache Conflict` and the `#6b5h` no_ack wedge.
+- **Transition table** — exhaustive `transition_merge_ownership` (7 events × 6 states); in-flight writes are never disturbed by attach/detach churn, `Committed` is reachable only from a proven-safe phase (`Detached` direct-disk or `IpcAckProven`), and `BinaryWriteRequested` is editor-path only.
+- The one process-global piece — the FFI `STATE_LEDGER` (`ffi.rs:1701`) — is a shared `Vec<StateEvent>`, but **every read partitions by `document_hash`** (`state_backbone.rs:298-348,371-380`; `state_wire.rs:588-626`), and wire `slot_id` is FNV-hashed over `document_hash ‖ type_tag ‖ entity_key` (`state_wire.rs:90`), so document A's events cannot address document B's slots. Editor mirrors are per-document too (JB `StateProjectionBridge.kt:25,105`; VSCode `native.ts:611`).
+- Each machine owns a private `ctx` field (`cycle_state_machine.rs:45`; `state_backbone.rs:1064,1140,1243,1377,1484`; `merge_control_state_machine.rs:88`) and is instantiated only ephemerally inside `transition()` — never held as long-lived per-document state.
+- `ThreadSafeContext::new()` mints a fresh isolated `Arc<ThreadSafeInner>` graph (`lazily-rs/src/thread_safe.rs:1464,1519`); the only `static` in all of lazily-rs is an ID counter (`async_context.rs:48`), not a graph.
   JNA binding; plugin-local `StateGraphMirror.kt` (Gson, Kotlin 1.9) pinned to
   the lazily-kt tests via `#lzpkgwire`; `StateProjectionBridge.subscribeMirrorForFile`
   advances the mirror and `mirrorSummaryForFile` derives `MirrorProjectionSummary`
@@ -101,6 +107,13 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
+> **Queue prompt:**
+>
+> :pushpin: do [#fnxy]
+>
+> :pushpin: do [#fnxy]
+
+
 ```text
 **IPC proof issue dogfood log**
 Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
@@ -110,7 +123,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=05a50802c4ec76199164014dc39faf3c110c3ce588b2b27623ecb7d07014d8cc content_len=21783 content_hash=6774359487524b8e2822e9646d5660975e8c7f4539a544f4c759b173469c6c1f doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782362390987
 ```
-<!-- agent:boundary:ca847cf1 -->
+<!-- agent:boundary:499f1ab9 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -119,8 +132,19 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/
 - ~~:pushpin: [#56ta]~~
 - ~~:pushpin: [#vm7g]~~
 - ~~:pushpin: [#n529]~~
-- 🚧 :pushpin: do [#fnxy]
+- ~~🚧 :pushpin: do [#fnxy]~~
+- :pushpin: do [#gww8]
+- :pushpin: do [#n529b]
 - :pushpin: do [#t4x1]
+- [#kj5f]
+- Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.
+- :pushpin: [#vwj7]
+- :pushpin: [#cgfx]
+- :pushpin: [#brtc]
+- :pushpin: [#gghx]
+- :pushpin: [#8g9w]
+- :pushpin: [#6mjw]
+- :pushpin: [#spy9]
 ---
 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
@@ -137,31 +161,8 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
----
-:round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
-```
-resync: pruned 2 stale session(s)
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 
-Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
----
 - :pushpin: [#r5at]
 - :pushpin: [#6n5j]
-- :pushpin: [#vwj7]
-- :pushpin: [#cgfx]
-- :pushpin: [#brtc]
-- :pushpin: [#gghx]
-- :pushpin: [#8g9w]
-- :pushpin: [#6mjw]
-- :pushpin: [#spy9]
 ---
 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
 ```
@@ -258,9 +259,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - do [#cgfx]
 - do [#brtc]
 - do [#kj5f]
-- do [#gww8]
-- do [#n529b]
-- :pushpin: do [#fnxy]
+- ~~:pushpin: do [#fnxy]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -287,12 +286,12 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#nsq2] #jbmirrorevict Investigate JB StateProjectionBridge singleton mirrors map (ConcurrentHashMap keyed by SHA-256 of canonical path) not evicting on document close — reused/moved/symlinked paths surface stale projection state, the likely real cause of the 'sessions working on other open documents' symptom (lazily-rs contexts are already per-document). Audit eviction-on-close + documentHash reuse. [recommended]
 - [ ] [#n529b] #lazilystatesync3b Wire MirrorProjectionSummary into EditorCommandStateMachine / dispatch-ready / busy consumers (PromptPoller, RunAgentDocAttemptLedger) so they read StateProjectionBridge.mirrorSummaryForFile instead of the cold projectionSummaryForFile pull, then dogfood live in JB. Mirror substrate shipped in 0.2.190 (#n529). Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#gww8] #lazilyspecpin=Pin agent-doc state type_tag vocabulary (8 node kinds) + conformance snapshot/delta pair in lazily-spec as schemas/agent-doc-state.json (versioned) so kt/js/rs import one canonical vocabulary. Design pinned in tasks/agent-doc/plan-lazily-plugin-state-sync.md (Wire-shape definition section). Sibling-repo (src/lazily-spec) cycle per scope-discipline.
 - [ ] [#vwj7] #queuestatemachine1 Define queue-item identity + lifecycle-state model (Authored→Mirrored→InProgress→Answered→Struck→Reaped) + pure transition fn with exhaustive (state×event) tests. Replaces ad-hoc dedup passes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
 - [ ] [#cgfx] #queuestatemachine2 Route convergence through the SM; reduce dedup passes to transition guards; property test idempotence (re-emit=no-op) over #rt83qflood/#qdedupsync/#qauthorder duplication shapes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
 - [ ] [#brtc] #queuestatemachine3 SimWorld: stale-CRDT/supervisor re-emit storm converges to one item per identity; operator position-lock survives. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
-- [ ] 🚧 [#fnxy] #mergestatemachine1 Define FFI write-ownership SM (Detached→Attached→EditorOwnsBuffer→BinaryWriteRequested→IpcAckProven→Committed) + editor-heartbeat liveness probe distinguishing live-editor from stale listener (#6b5h). Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#t4x1] #mergestatemachine2 Gate try_ipc/commit/disk-write on the ownership SM; route Detached/stale writes to controller-host disk path so CLI-only/no-editor never wedges on no_ack. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#kj5f] #mergestatemachine3 JB+VSCode report attach/detach/ownership through SM (thin reporters via #lazilystatesync); SimWorld + live repro for File Cache Conflict + #6b5h wedge. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#r5at] #lazilystatesync4 VSCode plugin: lazily-js mirror graph applying FFI state deltas. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md

@@ -309,7 +309,21 @@ Implemented Phase 2 **`#lzkeyrecon`** (lazily-rs `1944749`, lazily-spec `48badbd
 **Verification:** `cargo fmt` clean; `clippy --all-targets --all-features -D warnings` clean; **209** default / **418** all-features pass (7 new: LIS basic, pure-reorder-minimal, insert/remove/update combined, full-reversal minimality, apply-converges-and-spares-stable-cell, apply-handles-inserts/removes/updates, doctest); `cargo build --release` clean. SPEC.md + lazily-spec `cell-model.md` gained reconciliation conformance.
 
 **Closeout:** `#lzkeyrecon` → done. Queue continues to `do [#lzseqcrdt]` (move-aware sequence CRDT for sibling order).
-<!-- agent:boundary:8b39164c -->
+
+### Re: do [#lzseqcrdt] — move-aware sequence CRDT — opus-4-8
+
+Implemented Phase 3 **`#lzseqcrdt`** (lazily-rs `b637de4`, lazily-spec `72b0af9`, superproject `e1c4f788b`, all pushed). New `src/seq_crdt.rs` (gated behind `distributed`, exported as `SeqCrdt`/`Position`), built on the existing HLC + `LwwRegister`.
+
+**`SeqCrdt<Id, V>`** is a coordinator-free, mergeable ordered sequence — the sibling-order layer beneath keyed reconciliation:
+- **Fractional-index positions** — each element holds an orderable byte key (`key_between` mints a key strictly between two neighbours, peer-tiebroken). Concurrent inserts into the **same gap** on different replicas both survive and converge to one deterministic order (verified: peer-1 and peer-2 each `insert_back` after a shared root → both merges yield identical 3-element order).
+- **Move-awareness (the requirement)** — a move is a **single LWW position reassignment** (`move_between`/`move_after`/`move_before`), not delete+reinsert. So a reorder keeps identity + value, and two concurrent moves of the same element **converge to the later stamp with no duplication** (verified — the RGA delete+reinsert failure mode is avoided).
+- **Independent registers** — value, position, tombstone are separate LWW registers, so a concurrent **move + value-edit** of one element don't conflict (both apply — verified). Remove is an LWW tombstone (converges; verified commutative `A⊕B == B⊕A`).
+- **`merge`** is per-element LWW + adoption of unknown elements (commutative/associative/idempotent), advancing the local HLC past observed stamps. Keeps the IPC Snapshot/Delta single-producer mirror unchanged; the CRDT lives only at the multi-writer boundary (pairs with `#lzcrdtplane`).
+
+**Verification:** `cargo fmt` clean; `clippy --all-targets --all-features -D warnings` clean; **425** all-features tests pass (7 new: fractional-key strict order over 50 subdivisions, insert front/back, move-no-duplication, concurrent-insert convergence, concurrent-move-later-wins, move-vs-value no-conflict, tombstone commutativity); `cargo build --release` clean. SPEC.md (§Distributed) + lazily-spec `cell-model.md` gained sequence-order conformance.
+
+**Closeout:** `#lzseqcrdt` → done. Queue continues to `do [#lzstableid]` (manufactured identity for markdown text).
+<!-- agent:boundary:44ee9dd4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -329,7 +343,6 @@ Implemented Phase 2 **`#lzkeyrecon`** (lazily-rs `1944749`, lazily-spec `48badbd
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzseqcrdt] [recommended] Phase 3 — move-aware sequence CRDT for sibling order under concurrency: fractional indexing or RGA/Fugue, move-aware (one move op, not delete+reinsert that duplicates on merge). Sits above per-cell value merge in crdt.rs. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 3). Pairs with #lzcrdtplane multi-writer boundary.
 - [ ] [#lzstableid] [recommended] Phase 4 — manufactured identity for markdown text: honor in-band anchors/item-ids (agent-doc has these) + content-derived block-hash keys (survive reflow/reorder) + alignment diff (Myers/patience/histogram) for edit-vs-move detection on free prose. Gives reconciliation keys to match on. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 4).
 - [ ] [#lzsemtree] [recommended] Phase 5 — memoized semantic-tree computed layer: derive unresolved-prompts / drainable-heads / section-summaries as memoized computeds over the relevant subtree (recompute only on that subtree change; lazy, glitch-free). Demonstrates the lazy-pull win on a real agent-doc query. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 5).
 - [ ] [#lztextcrdt] [recommended] Phase 6 (heaviest, last) — free-text char/line sequence CRDT (RGA / Yjs text) + re-parse: merge keystrokes on anchorless prose, then re-parse merged text and re-derive the tree (tree = projection of merged text). Honest floor: a true rewrite IS a replace. Least urgent — managed components already merge per-component. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 6).

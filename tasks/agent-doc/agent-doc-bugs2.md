@@ -327,7 +327,7 @@ Captured the design thread (asked in chat) here, and landed the first rungs.
 - **Does lazily get two comm modes (direct + CRDT)?** Two cell kinds, not two reactivity engines: local/direct (single writer) vs replicated/CRDT (multi-writer ingress merge on root cells only). Downstream propagation is always the same direct mechanism. Cell = CRDT merge unit delivers the per-cell merge intent (`#qcellmerge1`).
 
 This is a focused multi-phase cutover (supervisor/FFI-critical) — not for this contamination-victim session. Plan has the phased path.
-<!-- agent:boundary:d76ba389 -->
+<!-- agent:boundary:3df86ad3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -504,6 +504,12 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lazilycrdtspec] [focused-cycle] lazily-spec: specify two cell kinds — local/direct (single-writer) vs replicated/CRDT (multi-writer, ingress merge on root cells only); CRDT cell semantics + cell-as-merge-unit. Foundation for the CRDT-authority model. Sibling-repo (src/lazily-spec) cycle. Plan: tasks/agent-doc/plan-crdt-authority-model.md
+- [ ] [#lazilycrdtrs] [focused-cycle] lazily-rs: implement the replicated/CRDT-backed cell kind per #lazilycrdtspec — CRDT-valued root cells, remote-op ingress merge feeding the reactive graph, direct downstream propagation unchanged. Sibling-repo (src/lazily-rs) cycle. Plan: tasks/agent-doc/plan-crdt-authority-model.md
+- [ ] [#crdtauth1] [focused-cycle] agent-doc authority state machine: Detached (git-authoritative, ephemeral CRDT) to EditorAttached (multi-replica) keyed on plugin attach/detach, riding the hosting-epoch backbone; extends #mergestatemachine. Plus state-vector sync protocol replacing whole-.yrs snapshot merge_by_component. Plan: tasks/agent-doc/plan-crdt-authority-model.md
+- [ ] [#crdtauth2] [focused-cycle] Editor-as-replica binding (FFI-first): cdylib is the CRDT node hosting a per-editor yrs replica; thin IntelliJ/VSCode bindings forward Document deltas + apply remote updates (cursor/undo preserving); plugin read/write-through FFI (completes #dsqa). Wire agent-doc shared roots (document/queue/hosting) to lazily replicated cells (per-cell merge #qcellmerge1); upgrade #lazilystatesync to bidirectional. Plan: tasks/agent-doc/plan-crdt-authority-model.md
+- [ ] [#crdtauth3] [focused-cycle] State-vector commit barrier: replace finalize patch-ack with flush-all-live-editors-to-SV then snapshot then commit; root-fix for the no_ack / ipc_proof_insufficient / postcommit-worktree-corruption class. Plan: tasks/agent-doc/plan-crdt-authority-model.md
+- [ ] [#crdtauth4] [focused-cycle] Multiple-editor relay + awareness + disk demotion: supervisor broadcast hub for N replicas (unique client-ids, ephemeral awareness channel, commit is a consistent cut of live replicas); .yrs demoted to write-through recovery projection, FFI nodes persist replicas locally. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#xdocsuper] [focused-cycle] Cross-document supervisor contamination: one route-owned supervisor (per pane) reused across documents (corky.md→agent-doc-bugs2.md) carries prior doc's stale in-memory CRDT/queue/lease into the new doc → the live_prompt_drift / postcommit-worktree / answered-head-residue churn. Add a document-switch state-reset guard + SimWorld. Plan: tasks/agent-doc/plan-cross-document-supervisor-contamination.md
 - [ ] [#n529b] #lazilystatesync3b Wire MirrorProjectionSummary into EditorCommandStateMachine / dispatch-ready / busy consumers (PromptPoller, RunAgentDocAttemptLedger) so they read StateProjectionBridge.mirrorSummaryForFile instead of the cold projectionSummaryForFile pull, then dogfood live in JB. Mirror substrate shipped in 0.2.190 (#n529). Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#gww8] #lazilyspecpin=Pin agent-doc state type_tag vocabulary (8 node kinds) + conformance snapshot/delta pair in lazily-spec as schemas/agent-doc-state.json (versioned) so kt/js/rs import one canonical vocabulary. Design pinned in tasks/agent-doc/plan-lazily-plugin-state-sync.md (Wire-shape definition section). Sibling-repo (src/lazily-spec) cycle per scope-discipline.

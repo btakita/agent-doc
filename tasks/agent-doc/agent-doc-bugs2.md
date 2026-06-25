@@ -225,7 +225,22 @@ All four code-complete, tested, and committed on isolated worktree branches (non
 **#n529b — `#lazilystatesync3b`** (`ed80b48d` on `n529b-statesync`; gradle 250 passed): the JB plugin's single cold-pull read consumer (`TerminalUtil.kt:570`, route-thread closeout) now reads `StateProjectionBridge.reactiveSummaryForFile` (subscribes the per-document lazily-kt mirror, derives from tracked cells reflecting FFI deltas) instead of the cold `projectionSummaryForFile`. The other named consumers (`EditorCommandStateMachine`, `PromptPoller`, `RunAgentDocAttemptLedger`) don't read the projection at all — nothing to migrate. Cold pull kept only as a cold-start fallback + `latestTransportPatchId` backfill (the wire delta encodes patch id as `slot_id`, not a payload field). **Operator-gated tail:** the "dogfood live in JB" step needs a live IntelliJ editor — confirm the `[state-projection]` log reflects deltas reactively (readiness flips to `dispatch_proven` after a proven dispatch).
 
 **#gww8 — `#lazilyspecpin`** (`8fa584dc` on `gww8-specpin`, sibling repo `src/lazily-spec`): pinned the 8 agent-doc state `type_tag` node kinds (derived from `state_backbone.rs` `*Projection`/`*Phase` enums — baseline / queue / queue.head / closeout.cycle / transport.patch / supervisor.owner / route / proof.marker) into a versioned `schemas/agent-doc-state.json` (Draft 2020-12, `schema_version 1.0.0`) + a conformance snapshot/delta pair under `conformance/agent-doc/`, matching existing lazily-spec schema conventions. No JSON-Schema harness in-repo; validated via Draft-2020-12 `check_schema` + fixture phase-membership checks + Lean `make check` no-regression.
-<!-- agent:boundary:7bfc7238 -->
+
+### Re: merge the worktrees into main + mark items done — opus-4-8
+
+All four feature branches merged into their mains and verified green. No push (local merge only, per standing convention).
+
+- **agent-doc `main` → `ff4a8ac1`** — three `--no-ff` merges: CRDT authority model Phases 1–6 + live cutover wiring (`crdtauth1-authority-sm`), queue convergence via lifecycle SM + re-emit-storm SimWorld (`qsm-cgfx-brtc`), JB reactive mirror (`n529b-statesync`). **`make check` exit 0 — 5237 tests passed, 241 skipped** on the merged tree (no semantic merge breakage despite all three touching `sim_world.rs`/convergence).
+- **lazily-spec `main` → `a1e1cad`** — `gww8-specpin` (agent-doc-state schema + conformance pair).
+
+**Marked done:** resolved the now-merged review items `#crdtauth1`, `#crdtauth1sv`, `#crdtauth2`, `#crdtauth3` → archived to done. Already-done this session: `#crdtauth4`, `#xdocsuper`, `#cgfx`, `#brtc`, `#n529b`, `#gww8`.
+
+**Still open (honestly NOT done — left in place):**
+- `#crdtauth5` (live multi-editor delta fan-out / new IPC message family + plugin yrs-delta protocol) — never implemented (its subagent run was cancelled); the relay is wired with commit-barrier + disk-demotion but does not yet fan out deltas end-to-end.
+- `#kj5f`, `#nsfz` — `[operator-verify]` items that need a live editor/pane; cannot be agent-completed.
+
+**Superproject note:** the submodule pointers now differ from what the superproject records (`src/agent-doc` 66ac6c64→ff4a8ac1, `src/lazily-spec` advanced). Commit the superproject pointer bump to make the merge durable against a submodule re-checkout.
+<!-- agent:boundary:028ef55e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -373,10 +388,6 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
-- [/] [#crdtauth3] 2 [focused-cycle] State-vector commit barrier: replace finalize patch-ack with flush-all-live-editors-to-SV then snapshot then commit; root-fix for the no_ack / ipc_proof_insufficient / postcommit-worktree-corruption class. Plan: tasks/agent-doc/plan-crdt-authority-model.md
-- [/] [#crdtauth2] [focused-cycle] Editor-as-replica binding (FFI-first): cdylib is the CRDT node hosting a per-editor yrs replica; thin IntelliJ/VSCode bindings forward Document deltas + apply remote updates (cursor/undo preserving); plugin read/write-through FFI (completes #dsqa). Wire agent-doc shared roots (document/queue/hosting) to lazily replicated cells (per-cell merge #qcellmerge1); upgrade #lazilystatesync to bidirectional. Plan: tasks/agent-doc/plan-crdt-authority-model.md
-- [/] [#crdtauth1sv] [focused-cycle] agent-doc state-vector sync protocol (deferred half of #crdtauth1): replace whole-.yrs snapshot merge_by_component with incremental per-replica StateVector / update exchange in the FFI node ↔ supervisor channel, gated on CrdtAuthority::MultiReplica. Builds on the authority SM (branch crdtauth1-authority-sm, 1b2a6e94). Plan: tasks/agent-doc/plan-crdt-authority-model.md
-- [/] [#crdtauth1] [focused-cycle] agent-doc authority state machine: Detached (git-authoritative, ephemeral CRDT) to EditorAttached (multi-replica) keyed on plugin attach/detach, riding the hosting-epoch backbone; extends #mergestatemachine. Plus state-vector sync protocol replacing whole-.yrs snapshot merge_by_component. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [/] [#kj5f] [operator-verify] #mergestatemachine3 remaining: JB+VSCode thin reporters emit attach/detach/ownership facts through the merge-ownership SM (via #lazilystatesync) + live editor-attached/detached repro for File Cache Conflict + #6b5h wedge. DONE: SM core Phases 1-2 + deterministic scenario repros for both wedge classes (agent-doc 34d7023d). Remaining needs the operator-paused plugin install + a live editor to verify. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 <!-- /agent:review -->
 

@@ -62,7 +62,11 @@ Compacted content:
 > **Queue prompt:** A message says `Admin sent application feedback for [56b22a22-80a7-46a9-ad69-5ab78d5449f9](efs-app-feedback:56b22a22-80a7-46a9-ad69-5ab78d5449f9).`. Why does the message contain a markdown link? What is `efs-app-feedback:56b22a22-80a7-46a9-ad69-5ab78d5449f9` and how do we link to it?
 
 Queue closeout: this investigation was answered and fixed earlier this cycle — the `efs-app-feedback:<application_id>` is an internal deep-link URI scheme rewritten by the portal to the application's `#feedback` section; the two fixes shipped in EFS `7eee8f4` (UnifiedMessageThread now renders the link as a clickable anchor; the label falls back to "loan application" instead of the raw UUID). Striking the residue head.
-<!-- agent:boundary:1324ff21 -->
+
+### Re: Queue residue cleared — glm-5.2
+
+The application-feedback investigation is answered and fixed (EFS `7eee8f4`); clearing the lingering queue head (#qheadresidue).
+<!-- agent:boundary:7c1260e7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -82,7 +86,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 A message says `Admin sent application feedback for [56b22a22-80a7-46a9-ad69-5ab78d5449f9](efs-app-feedback:56b22a22-80a7-46a9-ad69-5ab78d5449f9).`. Why does the message contain a markdown link? What is efs-app-feedback:56b22a22-80a7-46a9-ad69-5ab78d5449f9 and how do we link to it?
 <!-- /agent:queue -->
 
 ## Backlog

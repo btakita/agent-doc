@@ -255,7 +255,7 @@ Its only invariant is *"never commandeer another **document's** pane"* (SPEC §8
 **Fix (added as `#xdocsuper0`, plan updated):** before `AcceptStale` (and on the route reclaim path), check `supervisor_lease_is_fresh_or_alive` for the document — if a fresh lease is held by a live supervisor, `Reject` (or require `--force`) even when the prior pane/session looks stale. That closes the two-supervisors-one-document window at the source. Plan: `tasks/agent-doc/plan-cross-document-supervisor-contamination.md`.
 
 This is still a `[focused-cycle]` fix on `project_controller`/`route`/`claim` + SimWorld, and must not be implemented from this contaminated session — but you now have the precise answer: a present-but-unconsulted supervisor lease.
-<!-- agent:boundary:3937ee98 -->
+<!-- agent:boundary:92c8f362 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -285,7 +285,9 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 ```
 ~~~
 - 🚧 :pushpin: [#brtc]
+- [#xdocsuper0]
 - :pushpin: do [#xdocsuper]
+- :pushpin: do [#cgfx]
 ---
 Please fix the cross document supervisor contamination. This was from the session that started off running corky.md, but somehow run agent-doc-bugs2.md. This may have started when we added the IPC state machine between the FFI Plugin and the JB Plugin. How was the supervisor even allowed to claim a document that another supervisor claimed?
 ```
@@ -397,7 +399,6 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - :pushpin: do [#6mjw]
 - :pushpin: do [#spy9]
 - ~~:pushpin: do [#vwj7]~~
-- :pushpin: do [#cgfx]
 - ~~do [#nsq2]~~
 - ~~:pushpin: do [#t4x1]~~
 - :pushpin: Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.
@@ -433,7 +434,7 @@ What are #next-steps to fix bugs?
 - [ ] [#n529b] #lazilystatesync3b Wire MirrorProjectionSummary into EditorCommandStateMachine / dispatch-ready / busy consumers (PromptPoller, RunAgentDocAttemptLedger) so they read StateProjectionBridge.mirrorSummaryForFile instead of the cold projectionSummaryForFile pull, then dogfood live in JB. Mirror substrate shipped in 0.2.190 (#n529). Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#gww8] #lazilyspecpin=Pin agent-doc state type_tag vocabulary (8 node kinds) + conformance snapshot/delta pair in lazily-spec as schemas/agent-doc-state.json (versioned) so kt/js/rs import one canonical vocabulary. Design pinned in tasks/agent-doc/plan-lazily-plugin-state-sync.md (Wire-shape definition section). Sibling-repo (src/lazily-spec) cycle per scope-discipline.
 - [ ] [#cgfx] #queuestatemachine2 Route convergence through the SM; reduce dedup passes to transition guards; property test idempotence (re-emit=no-op) over #rt83qflood/#qdedupsync/#qauthorder duplication shapes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
-- [ ] [#brtc] #queuestatemachine3 SimWorld: stale-CRDT/supervisor re-emit storm converges to one item per identity; operator position-lock survives. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
+- [ ] 🚧 [#brtc] #queuestatemachine3 SimWorld: stale-CRDT/supervisor re-emit storm converges to one item per identity; operator position-lock survives. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
 - [ ] [#r5at] #lazilystatesync4 VSCode plugin: lazily-js mirror graph applying FFI state deltas. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#6n5j] #lazilystatesync5 Parity+tests: lazily-spec cross-editor conformance (extend EditorCommandStateMachineTest to reactive path) + FFI round-trip proving kt/js mirror converges to rs authoritative graph. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#gghx] #waitmachine1 Wait-machinery state machine core: add agent-doc-orchestration/src/wait_machine.rs with a pure WaitState/tick transition + single GLOBAL_HANG_CEILING (10s) + typed ReinstallPause exemption. Plan: tasks/agent-doc/plan-wait-machinery-state-machine.md

@@ -226,7 +226,7 @@ You re-activated the queue and marked lazily-rs `🚧` — taken as the go. **la
 *(The unrelated dirty AGENTS.md/CLAUDE.md code-nav blocks were stashed during publish so the package exactly matched the tag, then restored.)*
 
 **Remaining ports** (queue still listed, none marked): **lazily-zig** (v0.1.1 GitHub release — safe), **lazily-kt** (no publish infra), **lazily-js** (npm @lazily/js — 2FA), **lazily-py** (#kb9b PyPI — 2FA). Mark the next one `🚧` (like you did here) or say `go lazily-zig` and I'll take it.
-<!-- agent:boundary:8e74a6c8 -->
+<!-- agent:boundary:40781c05 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -238,7 +238,7 @@ You re-activated the queue and marked lazily-rs `🚧` — taken as the go. **la
 - ~~release + publish lazily-spec~~
 - ~~release + publish lazily-rs~~
 - ~~release + publish lazily-ky~~
-- release + publish lazily-js
+- 🚧 release + publish lazily-js
 - release + publish lazily-zig
 - release + publish lazily-py
 <!-- /agent:queue -->

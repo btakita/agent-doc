@@ -65,7 +65,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=389b42c4-39d7-4783-8d43-fd6f1dace5d6 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=26507 candidate_hash=7c80b60cd19df366ffdf926683a956b6744bdea9722b78e71b4fb1a98feb4ff9 content_ours_len=27760 content_ours_hash=e301451aceffd5dddeb58965306908b021966ef1f37a9ca040b0072aacfe96d7 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782364110435
 ```
-<!-- agent:boundary:d63e33df -->
+<!-- agent:boundary:8f583868 -->
 <!-- /agent:exchange -->
 
 ## Queue

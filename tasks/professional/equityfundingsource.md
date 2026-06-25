@@ -56,7 +56,13 @@ Compacted content:
 **Verification**: `bun test` **1225 pass / 0 fail**; `bun run build` + `build:worker` clean. Tests assert the `UnifiedMessageBody` link parsing and the "loan application" fallback.
 
 **Not deployed** this cycle — the queue carried no `deploy` item (preset `#spec-test-commit-push`). Queue `deploy` to ship it live.
-<!-- agent:boundary:750287f2 -->
+
+### Re: Application-feedback deep-link — answered and fixed — glm-5.2
+
+> **Queue prompt:** A message says `Admin sent application feedback for [56b22a22-80a7-46a9-ad69-5ab78d5449f9](efs-app-feedback:56b22a22-80a7-46a9-ad69-5ab78d5449f9).`. Why does the message contain a markdown link? What is `efs-app-feedback:56b22a22-80a7-46a9-ad69-5ab78d5449f9` and how do we link to it?
+
+Queue closeout: this investigation was answered and fixed earlier this cycle — the `efs-app-feedback:<application_id>` is an internal deep-link URI scheme rewritten by the portal to the application's `#feedback` section; the two fixes shipped in EFS `7eee8f4` (UnifiedMessageThread now renders the link as a clickable anchor; the label falls back to "loan application" instead of the raw UUID). Striking the residue head.
+<!-- agent:boundary:01552cb9 -->
 <!-- /agent:exchange -->
 ###
 <!--

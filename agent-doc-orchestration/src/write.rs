@@ -2268,6 +2268,10 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
         CommitMode::None => Ok(()),
         CommitMode::BestEffort => {
             if crate::git::is_in_git_repo(file) {
+                // `#crdtauth4` — authority-gated commit barrier (plan phase 4).
+                // No-op under `GitAuthoritative` (Detached); under `MultiReplica`
+                // flushes live editor replicas to a consistent cut before commit.
+                let _barrier_ready = crate::crdt_relay_host::commit_barrier_for_file(file);
                 if let Err(e) = crate::git::commit(file) {
                     eprintln!("[commit] warning: {}", e);
                 }

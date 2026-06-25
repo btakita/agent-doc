@@ -93,6 +93,19 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
     let mut timer = CloseoutTimer::start(file);
     let rc = crate::graph::RunContext::new(file.to_path_buf());
 
+    // `#crdtauth4` — authority-gated state-vector commit barrier (plan phase 4).
+    // Under `CrdtAuthority::MultiReplica` (a live editor is attached) flush every
+    // currently-live editor replica into the canonical replica on a consistent cut
+    // BEFORE the snapshot is committed, so the committed state provably holds every
+    // live editor's last ops — the durable fix for the `no_ack` /
+    // `ipc_proof_insufficient` / post-commit-worktree-corruption class. It is a
+    // checkpoint, never a global lock: a slow / disconnected editor is excluded
+    // from the cut and contributes on reconnect, so finalize cannot wedge.
+    // Under `CrdtAuthority::GitAuthoritative` (Detached / headless — most traffic)
+    // this is a trivial no-op that touches no hub and leaves the commit path
+    // byte-for-byte unchanged.
+    let _barrier_ready = crate::crdt_relay_host::commit_barrier_for_file(file);
+
     let mut did_commit = crate::git::commit(file)?;
     rc.invalidate_head_content();
     timer.mark("git_commit");

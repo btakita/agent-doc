@@ -6335,3 +6335,720 @@ mod hosting_sim {
         assert_eq!(run(), run());
     }
 }
+
+/// Deterministic SimWorld for the CRDT-authority state machine (`#crdtauth1`).
+///
+/// Models the additive authority layer
+/// (`agent_doc_orchestration::crdt_authority`) riding the EXISTING per-document
+/// hosting-epoch backbone (`state_backbone::EventLedger`). The authority follows
+/// the live editor: a document with a proven live editor-IPC transport is
+/// `MultiReplica` (durable-projection semantics); a headless / detached / stale
+/// document is `GitAuthoritative` (ephemeral CRDT). Per-document isolation is
+/// derived from the same backbone projection that `#xdocsuper1/3` isolates, so a
+/// stale-overlay replay for one document cannot flip another's authority — no live
+/// editor / tmux required.
+mod crdt_authority_sim {
+    use agent_doc_orchestration::crdt_authority::{authority_for_document, CrdtAuthority};
+    use agent_doc_orchestration::state_backbone::{
+        ActorLifecycleEvent, EventLedger, StateEvent, StateFact, StateOwner,
+    };
+
+    /// A single route-owned supervisor pane hosting documents in-process over an
+    /// event-sourced backbone, exercising the authority transitions. `attach` and
+    /// `detach` are the authority transitions; both ride the hosting-epoch
+    /// substrate that the supervisor host loop drives.
+    struct AuthoritySimWorld {
+        ledger: EventLedger,
+        pane_session: String,
+        lease_epoch: u64,
+        editor_generation: u64,
+        next_event: u64,
+    }
+
+    impl AuthoritySimWorld {
+        fn new(pane_session: &str) -> Self {
+            Self {
+                ledger: EventLedger::new(),
+                pane_session: pane_session.to_string(),
+                lease_epoch: 1,
+                editor_generation: 0,
+                next_event: 0,
+            }
+        }
+
+        fn event_id(&mut self, label: &str) -> String {
+            self.next_event += 1;
+            format!("{label}-{}", self.next_event)
+        }
+
+        /// The supervisor begins hosting (or switches to) `document_hash` — the
+        /// hosting-epoch transition every handoff runs first.
+        fn host(&mut self, document_hash: &str) {
+            let id = self.event_id("host");
+            let pane_session = self.pane_session.clone();
+            let lease_epoch = self.lease_epoch;
+            self.ledger.append(StateEvent::new(
+                id,
+                StateFact::SupervisorHosting {
+                    document_hash: document_hash.to_string(),
+                    pane_session,
+                    lease_epoch,
+                },
+            ));
+        }
+
+        /// Editor `attach`: a live editor-IPC bridge replica registers for the
+        /// document (advances the editor generation). This is the
+        /// Detached → MultiReplica authority transition.
+        fn attach_editor(&mut self, document_hash: &str) {
+            self.editor_generation += 1;
+            let generation = self.editor_generation;
+            let id = self.event_id("attach");
+            self.ledger.append(StateEvent::new(
+                id,
+                StateFact::OwnerGenerationChanged {
+                    document_hash: document_hash.to_string(),
+                    owner: StateOwner::EditorIpcBridge,
+                    generation,
+                },
+            ));
+        }
+
+        /// The live editor queues + ACKs a patch under the current generation
+        /// (normal multi-replica coordination, proving the editor replica is the
+        /// live medium).
+        fn editor_synced_patch(&mut self, document_hash: &str, patch_id: &str) {
+            let generation = self.editor_generation;
+            let queued = self.event_id("queued");
+            self.ledger.append(StateEvent::new(
+                queued,
+                StateFact::EditorPatchQueued {
+                    document_hash: document_hash.to_string(),
+                    patch_id: patch_id.to_string(),
+                    actor_generation: generation,
+                },
+            ));
+            let acked = self.event_id("acked");
+            self.ledger.append(StateEvent::new(
+                acked,
+                StateFact::EditorAckObserved {
+                    document_hash: document_hash.to_string(),
+                    patch_id: patch_id.to_string(),
+                    actor_generation: generation,
+                },
+            ));
+        }
+
+        /// Editor `detach` via a stale-listener / dead-pid demote: the supervisor
+        /// abandons the editor replica for this turn and falls back to a disk
+        /// write (the terminal force-disk fallback). This is the
+        /// MultiReplica → GitAuthoritative authority transition, mirroring the
+        /// `disk_write_permitted_for_file` Detached fallback.
+        fn editor_force_disk_fallback(&mut self, document_hash: &str, patch_id: &str, reason: &str) {
+            let generation = self.editor_generation;
+            // The fallback needs an existing patch to terminalize.
+            let queued = self.event_id("fb-queued");
+            self.ledger.append(StateEvent::new(
+                queued,
+                StateFact::EditorPatchQueued {
+                    document_hash: document_hash.to_string(),
+                    patch_id: patch_id.to_string(),
+                    actor_generation: generation,
+                },
+            ));
+            let fb = self.event_id("fb");
+            self.ledger.append(StateEvent::new(
+                fb,
+                StateFact::ForceDiskFallbackRecorded {
+                    document_hash: document_hash.to_string(),
+                    patch_id: patch_id.to_string(),
+                    actor_generation: generation,
+                    reason: reason.to_string(),
+                },
+            ));
+        }
+
+        /// Record a benign supervisor lifecycle fact for the document (used to
+        /// give a document a projection without an editor transport).
+        fn supervisor_alive(&mut self, document_hash: &str) {
+            let id = self.event_id("sup");
+            self.ledger.append(StateEvent::new(
+                id,
+                StateFact::ActorLifecycleObserved {
+                    document_hash: document_hash.to_string(),
+                    owner: StateOwner::Supervisor,
+                    generation: 0,
+                    event: ActorLifecycleEvent::ReadyObserved,
+                },
+            ));
+        }
+
+        fn authority(&self, document_hash: &str) -> CrdtAuthority {
+            authority_for_document(&self.ledger, document_hash)
+        }
+    }
+
+    #[test]
+    fn attach_routes_to_multi_replica_detach_routes_to_git_authoritative() {
+        // Coverage 1: attach → MultiReplica; detach → GitAuthoritative (ephemeral).
+        let mut world = AuthoritySimWorld::new("%73:auth");
+        world.host("doc-a");
+
+        // Headless before any editor attaches: git-authoritative + ephemeral.
+        world.supervisor_alive("doc-a");
+        let headless = world.authority("doc-a");
+        assert_eq!(headless, CrdtAuthority::GitAuthoritative);
+        assert!(
+            headless.crdt_is_ephemeral(),
+            "a headless document rebuilds an ephemeral CRDT from git"
+        );
+
+        // attach → MultiReplica (durable projection).
+        world.attach_editor("doc-a");
+        world.editor_synced_patch("doc-a", "p1");
+        let attached = world.authority("doc-a");
+        assert_eq!(attached, CrdtAuthority::MultiReplica);
+        assert!(
+            attached.disk_is_durable_projection(),
+            "with a live editor, disk is a boundary-checkpointed durable projection"
+        );
+        assert!(!attached.crdt_is_ephemeral());
+
+        // detach (force-disk fallback) → GitAuthoritative (ephemeral) again.
+        world.editor_force_disk_fallback("doc-a", "p2", "no_ack");
+        let detached = world.authority("doc-a");
+        assert_eq!(detached, CrdtAuthority::GitAuthoritative);
+        assert!(
+            detached.crdt_is_ephemeral(),
+            "after the editor replica is abandoned the CRDT is ephemeral again"
+        );
+    }
+
+    #[test]
+    fn stale_listener_dead_pid_demote_routes_to_git_authoritative() {
+        // Coverage 2: a stale listener / dead pid demote routes to
+        // GitAuthoritative, mirroring the `disk_write_permitted_for_file`
+        // Detached fallback. We model the demote as the terminal force-disk
+        // fallback the supervisor records when no live editor sits behind the
+        // listener.
+        let mut world = AuthoritySimWorld::new("%73:auth");
+        world.host("doc-a");
+        world.attach_editor("doc-a");
+        assert_eq!(world.authority("doc-a"), CrdtAuthority::MultiReplica);
+
+        // The listener turns out stale (no live editor): the supervisor falls
+        // back to disk. Authority must demote to git-authoritative so the write
+        // routes to the controller-host disk path instead of wedging on no_ack.
+        world.editor_force_disk_fallback("doc-a", "p1", "stale_listener_no_ack");
+        let demoted = world.authority("doc-a");
+        assert_eq!(
+            demoted,
+            CrdtAuthority::GitAuthoritative,
+            "a stale listener / dead pid demote routes to git-authoritative"
+        );
+        assert!(demoted.crdt_is_ephemeral());
+    }
+
+    #[test]
+    fn per_document_isolation_overlay_replay_for_doc_a_does_not_change_doc_b() {
+        // Coverage 3: per-document isolation. A hosting-epoch / overlay replay for
+        // doc A must not change doc B's authority. Authority derives from each
+        // document's own projection, so a stale doc-A replay can never reach
+        // doc-B's projection (facts are keyed by document_hash; #xdocsuper1/3
+        // already isolates the overlay).
+        let mut world = AuthoritySimWorld::new("%73:auth");
+
+        // doc-a is multi-replica (live editor); doc-b is headless.
+        world.host("doc-a");
+        world.attach_editor("doc-a");
+        world.editor_synced_patch("doc-a", "a1");
+        assert_eq!(world.authority("doc-a"), CrdtAuthority::MultiReplica);
+
+        world.host("doc-b");
+        world.supervisor_alive("doc-b");
+        assert_eq!(
+            world.authority("doc-b"),
+            CrdtAuthority::GitAuthoritative,
+            "doc-b has no editor — it is git-authoritative"
+        );
+
+        // A stale-overlay replay for doc-a (its old hosting epoch re-emits an
+        // already-applied editor patch) must not flip doc-b's authority.
+        world.editor_synced_patch("doc-a", "a1-replay");
+        assert_eq!(
+            world.authority("doc-b"),
+            CrdtAuthority::GitAuthoritative,
+            "a doc-a overlay replay must NOT flip doc-b to multi-replica"
+        );
+
+        // Symmetric direction: doc-a stays multi-replica; doc-b's headlessness did
+        // not bleed into it.
+        assert_eq!(world.authority("doc-a"), CrdtAuthority::MultiReplica);
+
+        // And re-hosting doc-b (a hosting-epoch bump) on the same pane does not
+        // change doc-a's authority either.
+        world.host("doc-b");
+        assert_eq!(world.authority("doc-a"), CrdtAuthority::MultiReplica);
+    }
+
+    #[test]
+    fn git_authoritative_is_ephemeral_multi_replica_is_durable_projection() {
+        // Coverage 4: GitAuthoritative ⇒ ephemeral CRDT (no durable-authority
+        // assumption); MultiReplica ⇒ durable-projection semantics. Asserted as a
+        // total invariant over both reachable authority states.
+        let git = CrdtAuthority::GitAuthoritative;
+        assert!(git.crdt_is_ephemeral());
+        assert!(!git.disk_is_durable_projection());
+        assert!(!git.editor_attached());
+
+        let multi = CrdtAuthority::MultiReplica;
+        assert!(!multi.crdt_is_ephemeral());
+        assert!(multi.disk_is_durable_projection());
+        assert!(multi.editor_attached());
+
+        // The two predicates partition the authority states (mutually exclusive,
+        // exhaustive) — no third durability mode.
+        for authority in [CrdtAuthority::GitAuthoritative, CrdtAuthority::MultiReplica] {
+            assert_ne!(
+                authority.crdt_is_ephemeral(),
+                authority.disk_is_durable_projection(),
+                "exactly one durability mode holds per authority state"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_document_is_git_authoritative_failsafe() {
+        // A document the supervisor has never hosted with an editor is headless
+        // until proven otherwise — fail-safe to the cheapest, zero-stale state.
+        let world = AuthoritySimWorld::new("%73:auth");
+        assert_eq!(
+            world.authority("never-seen"),
+            CrdtAuthority::GitAuthoritative
+        );
+    }
+
+    #[test]
+    fn deterministic_replay_is_stable_across_runs() {
+        // SimWorld determinism: byte-identical authority decisions on every run
+        // (no live tmux, no wall-clock, no RNG).
+        fn run() -> String {
+            let mut world = AuthoritySimWorld::new("%5:session-x");
+            world.host("doc-a");
+            world.attach_editor("doc-a");
+            world.editor_synced_patch("doc-a", "p1");
+            world.host("doc-b");
+            world.supervisor_alive("doc-b");
+            format!(
+                "a={:?} b={:?}",
+                world.authority("doc-a"),
+                world.authority("doc-b")
+            )
+        }
+        assert_eq!(run(), run());
+    }
+}
+
+/// Deterministic SimWorld for the multi-editor relay hub + awareness
+/// (`#crdtauth4`, plan phase 5) and disk demotion (plan phase 6).
+///
+/// Models a single supervisor-hosted canonical replica with N editor replicas
+/// registered through the star-topology relay
+/// (`agent_doc_orchestration::crdt_relay::RelayHub`). Fan-out packets can be held
+/// in flight and delivered out of order to model propagation lag — no live editor
+/// / tmux / socket required. Convergence, the live-cut commit barrier, offline →
+/// reconnect catch-up, and unique-client-id enforcement are all asserted
+/// deterministically.
+mod crdt_relay_sim {
+    use agent_doc_orchestration::crdt_authority::CrdtAuthority;
+    use agent_doc_orchestration::crdt_relay::{AwarenessState, RelayHub, mint_client_id};
+
+    /// A supervisor pane hosting one document over the relay hub, plus an in-flight
+    /// packet queue modeling the editor↔supervisor network. Delivery order is
+    /// caller-controlled so lag / reordering is deterministic.
+    struct RelaySimWorld {
+        hub: RelayHub,
+        /// Pending fan-out deliveries: `(target_client_id, update_bytes)`.
+        inflight: Vec<(u64, Vec<u8>)>,
+    }
+
+    impl RelaySimWorld {
+        fn new(canonical_id: u64) -> Self {
+            Self {
+                hub: RelayHub::new(canonical_id),
+                inflight: Vec::new(),
+            }
+        }
+
+        /// Attach an editor identified by a stable string identity: mint its
+        /// stable client-id and register it. Returns the minted id.
+        fn attach(&mut self, identity: &str) -> u64 {
+            let id = mint_client_id(identity);
+            self.hub
+                .register(id)
+                .unwrap_or_else(|e| panic!("attach {identity}: {e}"));
+            id
+        }
+
+        /// An editor edit that relays + broadcasts immediately (the normal live path).
+        fn edit_now(&mut self, id: u64, offset: u32, delete_len: u32, insert: &str) {
+            self.hub.apply_local(id, offset, delete_len, insert).unwrap();
+        }
+
+        /// An editor edit relayed to the hub but whose fan-out packets to peers are
+        /// held in flight (supervisor→peer lag).
+        fn edit_lagged(&mut self, id: u64, offset: u32, delete_len: u32, insert: &str) {
+            self.hub.local_edit(id, offset, delete_len, insert).unwrap();
+            let packet = self.hub.relay_capture(id).unwrap();
+            for target in packet.targets {
+                self.inflight.push((target, packet.update.clone()));
+            }
+        }
+
+        /// An editor edit applied to its OWN replica only — NOT relayed to the hub
+        /// (an un-propagated op; the editor→supervisor direction is in flight).
+        fn edit_local_only(&mut self, id: u64, offset: u32, delete_len: u32, insert: &str) {
+            self.hub.local_edit(id, offset, delete_len, insert).unwrap();
+        }
+
+        /// Deliver all in-flight packets in REVERSE submission order (out of order).
+        fn deliver_reversed(&mut self) {
+            let mut pending = std::mem::take(&mut self.inflight);
+            pending.reverse();
+            for (target, update) in pending {
+                self.hub.deliver(target, &update).unwrap();
+            }
+        }
+
+        fn append_len(&self, id: u64) -> u32 {
+            self.hub
+                .member_text(id)
+                .unwrap_or_default()
+                .chars()
+                .count() as u32
+        }
+    }
+
+    #[test]
+    fn multi_replica_fan_out_reaches_all_other_editors() {
+        // Coverage: an update from one replica reaches every other live replica.
+        let mut world = RelaySimWorld::new(1);
+        let a = world.attach("intellij:a");
+        let b = world.attach("vscode:b");
+        let c = world.attach("intellij:c");
+
+        world.edit_now(a, 0, 0, "shared");
+        assert_eq!(world.hub.canonical_text(), "shared");
+        for id in [a, b, c] {
+            assert_eq!(
+                world.hub.member_text(id).unwrap(),
+                "shared",
+                "fan-out reached replica {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn convergence_under_lag_out_of_order_delivery() {
+        // Coverage: delayed / out-of-order fan-out still converges (yrs causal
+        // buffering at the hub-delivery layer).
+        let mut world = RelaySimWorld::new(1);
+        let a = world.attach("editor:a");
+        let b = world.attach("editor:b");
+
+        // Two dependent edits from `a`, packets held in flight.
+        world.edit_lagged(a, 0, 0, "first");
+        let len = world.append_len(a);
+        world.edit_lagged(a, len, 0, " second");
+
+        // `b` has not seen either yet (lagged).
+        assert_ne!(world.hub.member_text(b).unwrap(), world.hub.canonical_text());
+
+        // Deliver REVERSED (the dependent op before its dependency) — converges.
+        world.deliver_reversed();
+        assert_eq!(
+            world.hub.member_text(b).unwrap(),
+            world.hub.canonical_text(),
+            "out-of-order delivery self-heals once causal deps arrive"
+        );
+        assert!(world.hub.member_text(b).unwrap().contains("first second"));
+    }
+
+    #[test]
+    fn commit_barrier_consistent_cut_with_three_replicas_no_deadlock() {
+        // Coverage: the commit barrier with N=3 replicas captures all LIVE
+        // editors' ops; a disconnected editor does not deadlock the barrier and
+        // contributes its ops at next sync.
+        let mut world = RelaySimWorld::new(1);
+        let a = world.attach("editor:a");
+        let b = world.attach("editor:b");
+        let c = world.attach("editor:c");
+
+        // Each editor types locally WITHOUT relaying (un-propagated ops — the
+        // canonical replica does not hold them yet).
+        world.edit_local_only(a, 0, 0, "AAA");
+        world.edit_local_only(b, 0, 0, "BBB");
+        world.edit_local_only(c, 0, 0, "CCC");
+        // Editor c disconnects with its op un-flushed (slow / offline editor).
+        world.hub.disconnect(c);
+
+        // The barrier captures the two LIVE editors and does NOT block on c.
+        assert!(
+            world
+                .hub
+                .commit_barrier_under_authority(CrdtAuthority::MultiReplica)
+                .unwrap(),
+            "barrier completes a consistent cut of the live replicas"
+        );
+        let cut = world.hub.canonical_text();
+        assert!(cut.contains("AAA") && cut.contains("BBB"));
+        assert!(
+            !cut.contains("CCC"),
+            "the disconnected editor's op is NOT in this checkpoint"
+        );
+
+        // c contributes its op at the next checkpoint after reconnect — no loss.
+        world.hub.reconnect(c).unwrap();
+        assert!(world.hub.commit_barrier().unwrap());
+        assert!(world.hub.canonical_text().contains("CCC"));
+    }
+
+    #[test]
+    fn offline_then_reconnect_converges_no_data_loss() {
+        // Coverage: a replica that missed updates while offline converges on
+        // reconnect via state-vector catch-up; its offline local edits survive.
+        let mut world = RelaySimWorld::new(1);
+        let a = world.attach("editor:a");
+        let b = world.attach("editor:b");
+
+        world.hub.disconnect(b);
+        // `a` edits while `b` is offline (b misses the broadcast).
+        world.edit_now(a, 0, 0, "online-edit ");
+        // `b` edits locally while offline (its own replica only).
+        world.edit_local_only(b, 0, 0, "offline-edit ");
+
+        world.hub.reconnect(b).unwrap();
+        let tb = world.hub.member_text(b).unwrap();
+        assert!(tb.contains("online-edit"), "missed update caught up");
+        assert!(tb.contains("offline-edit"), "offline local edit preserved");
+        assert_eq!(
+            tb,
+            world.hub.canonical_text(),
+            "reconnected replica converged with canonical"
+        );
+    }
+
+    #[test]
+    fn duplicate_client_id_is_rejected() {
+        // Coverage: a client-id collision is a hard error (corruption per the
+        // unique-stable-client-id rule).
+        let mut world = RelaySimWorld::new(1);
+        let _a = world.attach("editor:a");
+        // The SAME identity mints the SAME id → registering twice collides.
+        let dup = mint_client_id("editor:a");
+        assert!(
+            world.hub.register(dup).is_err(),
+            "re-registering an existing client-id must be rejected"
+        );
+        // Colliding with the canonical id is also rejected.
+        assert!(world.hub.register(1).is_err());
+    }
+
+    #[test]
+    fn awareness_is_ephemeral_and_not_part_of_the_document() {
+        // Coverage: presence is a separate ephemeral channel; it never touches the
+        // document text and is expired on deregister.
+        let mut world = RelaySimWorld::new(1);
+        let a = world.attach("editor:a");
+        let b = world.attach("editor:b");
+        world.edit_now(a, 0, 0, "doc");
+
+        world.hub.set_awareness(
+            a,
+            AwarenessState {
+                cursor: Some(3),
+                user: Some("alice".into()),
+                ..Default::default()
+            },
+        );
+        world.hub.set_awareness(
+            b,
+            AwarenessState {
+                cursor: Some(0),
+                ..Default::default()
+            },
+        );
+        assert_eq!(world.hub.awareness_snapshot().len(), 2);
+        // Awareness did not alter the document text.
+        assert_eq!(world.hub.canonical_text(), "doc");
+
+        // Deregister expires presence (never persisted, never committed).
+        world.hub.deregister(b);
+        let snap = world.hub.awareness_snapshot();
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].0, a);
+    }
+
+    #[test]
+    fn disk_projection_recovers_canonical_and_in_memory_wins() {
+        // Coverage (phase 6): the disk projection is a recovery input; a restart
+        // rebuilds the canonical replica from it, and a stale projection never
+        // regresses a live replica (in-memory wins).
+        let mut world = RelaySimWorld::new(1);
+        let a = world.attach("editor:a");
+        world.edit_now(a, 0, 0, "v1");
+        let projection = world.hub.projection_bytes();
+
+        // Restart: rebuild canonical from the recovery projection.
+        let recovered = RelayHub::recover_from_projection(1, &projection).unwrap();
+        assert_eq!(recovered.canonical_text(), "v1");
+
+        // Live session advances; reconciling the STALE projection is a no-op.
+        let len = world.hub.canonical_text().chars().count() as u32;
+        world.edit_now(a, len, 0, " v2");
+        let changed = world.hub.reconcile_disk_projection(&projection).unwrap();
+        assert!(!changed);
+        assert_eq!(world.hub.canonical_text(), "v1 v2", "in-memory replica wins");
+    }
+
+    #[test]
+    fn deterministic_replay_is_stable_across_runs() {
+        // SimWorld determinism: byte-identical relay outcomes every run (stable
+        // minted ids, no wall-clock, no RNG).
+        fn run() -> String {
+            let mut world = RelaySimWorld::new(1);
+            let a = world.attach("editor:a");
+            let b = world.attach("editor:b");
+            let c = world.attach("editor:c");
+            world.edit_now(a, 0, 0, "x");
+            world.edit_lagged(b, 0, 0, "y");
+            world.edit_lagged(c, 0, 0, "z");
+            world.deliver_reversed();
+            world.hub.commit_barrier().unwrap();
+            format!(
+                "ids={a},{b},{c} canon={} a={} b={} c={}",
+                world.hub.canonical_text(),
+                world.hub.member_text(a).unwrap(),
+                world.hub.member_text(b).unwrap(),
+                world.hub.member_text(c).unwrap(),
+            )
+        }
+        assert_eq!(run(), run());
+    }
+}
+
+/// Deterministic SimWorld for the LIVE relay-host cutover (`#crdtauth4`).
+///
+/// Where `crdt_relay_sim` above exercises the standalone `RelayHub` API directly,
+/// this module drives the wiring the live finalize / disk paths actually call:
+/// `agent_doc_orchestration::crdt_relay_host` — the per-document hub registry, the
+/// authority-gated finalize commit barrier (`commit_barrier_for_file_with_authority`),
+/// and the authority-gated disk-demotion reconcile. It proves the LIVE seams (a)
+/// gate on `CrdtAuthority::EditorAttached` vs `Detached`, (b) never allocate / touch
+/// a hub on the Detached path (so headless traffic is byte-for-byte unchanged), and
+/// (c) flush live replicas to a consistent cut for the EditorAttached path — all
+/// keyed per-document through a real tracked path, no live editor / tmux / socket.
+mod crdt_relay_host_sim {
+    use agent_doc_orchestration::crdt_authority::CrdtAuthority;
+    use agent_doc_orchestration::crdt_relay::mint_client_id;
+    use agent_doc_orchestration::crdt_relay_host::{
+        commit_barrier_for_file_with_authority, recover_hub_from_disk, with_hub,
+    };
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    /// A throwaway tracked document under its own temp project root, so the live
+    /// `crdt_relay_host` registry keys per-document via `snapshot::doc_hash`.
+    fn temp_doc(name: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let path = dir.path().join(name);
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, "# {name}\n\nbody").unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn live_finalize_barrier_flushes_editor_attached_but_noops_detached() {
+        // EDITOR-ATTACHED doc: a live editor types a local op that has NOT been
+        // relayed; the LIVE finalize barrier flushes it into the committed cut.
+        let (_attached_dir, attached) = temp_doc("live-attached.md");
+        let editor = mint_client_id("intellij:live-finalize");
+        with_hub(&attached, |hub| {
+            hub.register(editor).unwrap();
+            hub.local_edit(editor, 0, 0, "keystroke").unwrap();
+            assert!(!hub.canonical_text().contains("keystroke"), "not relayed yet");
+        })
+        .unwrap();
+        assert!(commit_barrier_for_file_with_authority(
+            &attached,
+            CrdtAuthority::MultiReplica
+        ));
+        with_hub(&attached, |hub| {
+            assert!(
+                hub.canonical_text().contains("keystroke"),
+                "the live finalize barrier flushed the editor's op into the cut"
+            );
+        })
+        .unwrap();
+
+        // DETACHED doc (a SEPARATE document): the live barrier is a trivial no-op
+        // that allocates no hub — per-document isolation + headless path unchanged.
+        let (_detached_dir, detached) = temp_doc("live-detached.md");
+        let hash = agent_doc_orchestration::snapshot::doc_hash(&detached).unwrap();
+        assert!(commit_barrier_for_file_with_authority(
+            &detached,
+            CrdtAuthority::GitAuthoritative
+        ));
+        // The Detached path never touched a hub for its own document.
+        let touched = with_hub(&detached, |hub| hub.live_count()).unwrap();
+        assert_eq!(
+            touched, 0,
+            "the Detached commit barrier allocates no live replicas (hub {hash} stays empty)"
+        );
+    }
+
+    #[test]
+    fn live_barrier_does_not_block_on_disconnected_editor() {
+        // A disconnected editor must not deadlock the live finalize barrier.
+        let (_dir, doc) = temp_doc("live-disconnect.md");
+        let live = mint_client_id("vscode:live");
+        let slow = mint_client_id("intellij:slow");
+        with_hub(&doc, |hub| {
+            hub.register(live).unwrap();
+            hub.register(slow).unwrap();
+            hub.local_edit(live, 0, 0, "LIVE").unwrap();
+            hub.local_edit(slow, 0, 0, "SLOW").unwrap();
+            hub.disconnect(slow);
+        })
+        .unwrap();
+        assert!(commit_barrier_for_file_with_authority(
+            &doc,
+            CrdtAuthority::MultiReplica
+        ));
+        with_hub(&doc, |hub| {
+            let cut = hub.canonical_text();
+            assert!(cut.contains("LIVE"));
+            assert!(!cut.contains("SLOW"), "disconnected op excluded, no deadlock");
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn live_supervisor_restart_recovers_canonical_from_disk_projection() {
+        // Supervisor restart: the live recovery path rebuilds the per-document
+        // canonical replica from the last disk recovery projection.
+        let (_dir, doc) = temp_doc("live-recover.md");
+        let mut prior = agent_doc_orchestration::crdt_relay::RelayHub::new(1);
+        let ed = mint_client_id("intellij:prior-restart");
+        prior.register(ed).unwrap();
+        prior.apply_local(ed, 0, 0, "survives-restart").unwrap();
+        let projection = prior.projection_bytes();
+
+        recover_hub_from_disk(&doc, &projection).unwrap();
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), "survives-restart");
+        })
+        .unwrap();
+    }
+}

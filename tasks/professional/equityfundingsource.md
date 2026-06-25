@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -65,6 +65,11 @@ Shipped in the prior entry (submodule `f8b111d`, pushed to `equityfundingsource-
 
 ### Re: deploy — opus-4-8
 
+> **Queue prompt:**
+>
+> ~~Opening https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan should focus on the first actionable item...in this case the "Review Interested Lenders" button. How can we make this focus logic generalized so it works for all dialogs?~~ — auto-struck: answered this cycle (#ftstrike)
+
+
 > **Queue prompt:** deploy
 
 **Deployed** (`make deploy`) from EFS submodule HEAD `f8b111d` (the generalized async dialog-focus fix, already pushed to `equityfundingsource-dev` main).
@@ -75,7 +80,7 @@ Shipped in the prior entry (submodule `f8b111d`, pushed to `equityfundingsource-
 - **Smoke check** → `https://equityfundingsource.brian-takita.workers.dev/` returns **HTTP 200**.
 
 Live now: the shared `use_dialog_action_navigation_` MutationObserver focus upgrade — every dialog (deal dialog included) focuses its real first action once async content mounts. Striking this head; the queue is now drained.
-<!-- agent:boundary:a424c9d9 -->
+<!-- agent:boundary:3a0fe0b5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -95,8 +100,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 ~~Opening https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan should focus on the first actionable item...in this case the "Review Interested Lenders" button. How can we make this focus logic generalized so it works for all dialogs?~~ — auto-struck: answered this cycle (#ftstrike)
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

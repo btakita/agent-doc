@@ -244,7 +244,23 @@ Fixed and shipped the two concrete reply-threading bugs (corky `6894c88` on `ori
 - Commit `6894c88` — pushed.
 
 Next queue head: `#ckytok401`.
-<!-- agent:boundary:aeb9e183 -->
+
+### Re: #ckytok401 — P1 401 never invalidates cached token — opus-4-8
+
+Fixed and shipped (corky `ec67c22` on `origin/main`). A Google-revoked but clock-valid token trapped the user: only `draft send` cleared its token on a 401, so a 401 from Calendar/Docs/Sheets/Drive/Tasks/Chat left the dead token cached and every retry failed until a manual `tokens.json` delete.
+
+**Fix:**
+- Added `TokenStore::remove_by_access_token` + the `clear_access_token(token)` free fn (corky-core `token_store`) — invalidates a token **by its value**, so the low-level HTTP helpers (which hold only the token string, not the account key) can drop it.
+- Wired it into **all 19** `401` sites: `cal/{list,check,delete,create}`, `tasks/{add,list,done}`, `doc/{sheets,gdocs,drive,upload}`, `social/chat` — clear before bailing, so the next call re-authenticates. Re-exported `clear_access_token` via `gmail_auth` and `cal::auth`.
+
+**Verification (`#spec-test-build-install-commit-push`):**
+- Tests: new `token_store` unit test (clears matching entry by value, keeps others, no-op when absent) — `cargo test` → 130 passed across touched crates; full `make check` green.
+- Build + install (GPU/CUDA): `make install` → `corky 0.29.0` in `~/.cargo/bin`.
+- Spec: SPEC.md §5.3.1 documents the cross-surface 401 invalidation.
+- Commit `ec67c22` (16 files) — pushed.
+
+Next queue head: `#ckypeoplesync`.
+<!-- agent:boundary:5d7439ee -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -275,7 +291,6 @@ Please give me a report the performance
 
 <!-- agent:backlog -->
 - [ ] [#ckythreadmerge] [P2 correctness] threading provider-switch merge: IMAP threads keyed by subject (thread_key_from_subject) and Gmail-API threads keyed by Gmail threadId never merge when the same conversation is synced from both providers, producing duplicate thread files. Design a unified thread-identity reconciliation (e.g. index by Message-ID/References across providers, or map Gmail threadId<->subject-key). Architectural — needs its own focused cycle. Split from #ckythread. crates/corky-mail/src/sync/{imap_sync.rs,gmail_api_sync.rs}, markdown.rs
-- [ ] [#ckytok401] [P1] 401 from Google APIs never invalidates the cached token, so a Google-revoked but clock-valid token traps the user until manual tokens.json delete; only draft send clears its send token. Drop token on 401 across cal/doc/tasks/chat. crates/corky-google/src/{cal,doc,tasks}/*.rs, crates/corky-social/src/social/chat.rs
 - [ ] [#ckypeoplesync] [P1 lost-update] .people-sync-state.json bypasses the locked atomic store (file_store::save_json_with_lock used by tokens.json and .sync-state.json); concurrent corky contact push clobbers resourceName updates and re-creates Google contacts as duplicates. Route load/save_sync_state through save_json_with_lock. crates/corky-mail/src/contact/push.rs:263-280,565,637
 - [ ] [#ckyconfigunwrap] [P1 panic] as_table_mut().unwrap() panics on a hand-edited .corky.toml that uses a scalar where a table is expected; Command::new(git).output() panic! if git binary missing. Replace with ok_or_else anyhow. crates/corky-core/src/config/{topic.rs:76,contact.rs:71}, crates/corky-social/src/social/auth.rs:373-391, crates/corky-mail/src/mailbox/{sync,reset}.rs
 - [ ] [#ckyatomicwrite] [P2 durability] conversation markdown written via plain fs::write (truncate+write, half-written on crash loses all prior merged messages since re-parse returns None and starts fresh); file_store atomic rename is missing sync_all before rename so not power-loss durable. Reuse NamedTempFile persist + sync_all. crates/corky-mail/src/sync/imap_sync.rs:193,224; crates/corky-core/src/file_store.rs:47-63

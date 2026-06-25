@@ -185,7 +185,7 @@ Root-caused and fixed the churn in the **binary** (agent-doc `cadc400c`, submodu
 **To go live:** the fix is committed but the **running** supervisor is still on the old binary (0.34.48). It picks up `cadc400c` via the supervisor boundary auto-install, or immediately on `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md`. I deliberately did **not** `cargo install` mid-session (that makes the finalize client newer than the live supervisor → the exact drift), and did **not** cut a release (your standing "stop cutting releases" hold). The queue stays **paused** until the new binary is live — resuming on the old binary would just churn again. After restart: resume the queue and it will drain the `🚧` residue cleanly on the first pass.
 
 **Scope note:** this fixes the specific churn loop (answered-head residue). The separate IPC `live_prompt_drift` / stale-CRDT issue (the parent route-owned supervisor) is the operator-restart / supervisor-in-process concern, not this strike pass.
-<!-- agent:boundary:3ee21545 -->
+<!-- agent:boundary:0ad393ab -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -198,8 +198,8 @@ Root-caused and fixed the churn in the **binary** (agent-doc `cadc400c`, submodu
 - ~~:pushpin: do [#fnxy]~~
 - ~~:pushpin: do [#t4x1]~~
 - ~~:pushpin: [#kj5f]~~
----
-🚧 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to opencode...any agent change has this issue. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change. This also caused IPC drift...as seen in a recent monsterrodholders.md session.
+~~~done
+:pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to opencode...any agent change has this issue. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change. This also caused IPC drift...as seen in a recent monsterrodholders.md session.
 ```
 resync: pruned 2 stale session(s)
 [route] target tmux session: 0
@@ -213,8 +213,8 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 [route] target tmux session: 
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
----
-- :pushpin: [#brtc]
+~~~
+- 🚧 :pushpin: [#brtc]
 - :pushpin: do [#gww8]
 - :pushpin: do [#n529b]
 - ~~~~When adding a backlog item, the agent sometimes assigns an explicit id. But agent-doc ignores the explicit id and assigns a new id. The agent's explicit id should be used instead. So instead of `[#kj5f] #mergestatemachine3` the id should be `[#mergestatemachine3]`.~~ — auto-struck: answered this cycle (#ftstrike)~~

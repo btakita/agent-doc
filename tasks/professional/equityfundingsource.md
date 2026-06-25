@@ -71,7 +71,21 @@ cd src/equityfundingsource-dev/app/equityfundingsource
 bun ./bin/cf-wrangler.ts d1 migrations apply equityfundingsource --remote -c ../../wrangler.toml
 ```
 Queued as an `[operator-verify]` backlog item.
-<!-- agent:boundary:8fb43669 -->
+
+### Re: do [#bxtd] — apply the dead-table drop — opus-4-8
+
+> **Queue prompt:** do [#bxtd]
+
+Done — applied `migrations/0110_drop_dead_tables.sql` to prod D1.
+
+- **Pre-check:** confirmed all 6 target tables still present.
+- **Applied:** `wrangler d1 migrations apply --remote` ran `0110` (7 commands, 6.81ms, status ✅).
+- **Verified:** 0 of the 6 target tables remain; total table count **85 → 79**.
+- **Dropped:** `applications`, `borrower_loan_applications`, `borrower_loan_application_documents`, `contacts`, `loan_payment_transactions`, `uploaded_documents` (all were empty — zero data loss).
+- **Committed** the migration in the EFS submodule (`03ac6cf`).
+
+`#bxtd` closed.
+<!-- agent:boundary:98b6727e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -96,7 +110,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#bxtd] [operator-verify] Apply migrations/0110_drop_dead_tables.sql to prod D1 (drops 6 empty legacy tables: applications, borrower_loan_applications, borrower_loan_application_documents, contacts, loan_payment_transactions, uploaded_documents). Irreversible prod DDL — confirm, then: bun ./bin/cf-wrangler.ts d1 migrations apply equityfundingsource --remote -c ../../wrangler.toml
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 

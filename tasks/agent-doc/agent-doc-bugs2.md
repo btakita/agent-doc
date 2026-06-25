@@ -82,7 +82,19 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack
 Wired into both the add path (`op_add_at_with_outcome`) and explicit-id collision enforcement (`explicit_custom_id`). Added 4 unit tests; `make check` green (5132 passed, clippy clean); CI latest run green.
 
 **Note:** this only affects *future* adds. The existing `[#kj5f] #mergestatemachine3` backlog head keeps its hash — I'm not renaming it live (the IPC supervisor would race a manual id rewrite). It'll be picked up as `[#mergestatemachine3]` next time an agent re-adds that item. The new binary goes live via the supervisor's boundary auto-install — no manual `cargo install` this session (avoids finalize-client/supervisor drift).
-<!-- agent:boundary:67c62711 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=f7da83e9-290b-4dd4-b8c3-4cb9fdd9fd58 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=22228 candidate_hash=be0e40bd37ff08e494f8eaf87a5c4de55487b5889d715c7e3c859936c50ef042 content_ours_len=23893 content_ours_hash=cd84d474abb1a63c87edb953185e197cce4d5cff3f9bbbdbb977acc9ea67424b doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782368592491
+```
+<!-- agent:boundary:bb036a73 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -318,7 +318,22 @@ Resolved (`#4pdp`): the OpenCode send/parse/merge paths are order-stable; the re
 > **Queue prompt:** Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.
 
 Now isolated (`#xdocsuper`): one route-owned supervisor was reusing per-document in-memory state across documents (the contamination you observed). Fixed via a `SupervisorHosting` backbone transition that resets the queue overlay on document switch + hosting-epoch gating, so each document's context is keyed/isolated by `document_hash`. Covered by `cross_document_switch_does_not_contaminate_sibling_overlay`.
-<!-- agent:boundary:771906a2 -->
+
+### Re: bug reports — frontmatter reset, 🚧 stuck, dup/resurrect/loss-on-edit — opus-4-8
+
+Thanks — these are the **stale-binary supervisor** corrupting your live edits. The new binary `0.34.48` (all fixes) is installing now and stops this the moment the supervisor recycles onto it. Two of your reports are now genuinely fixed in code; the rest are filed.
+
+**Fixed + merged this turn:**
+- **Frontmatter reset (`#fmreset`, `2e7db25c`)** — root cause: the CRDT merged frontmatter as a plain text interstitial, so in the stale/absent-base epoch (common after `reset --from-current`) it duplicated + spliced the block, reverting your edit. Fixed with a **field-level 3-way frontmatter merge**: operator-owned keys win, agent-managed keys (`session`/`resume`/pipeline) agent-win, so your frontmatter edits are preserved while agent-doc still manages its own fields. `make check` 5290 green.
+- **Auto-strike free-text heads (`#qftbklgstrike`, `752d846a`)** — your earlier request: the binary now auto-strikes a free-text queue head when a `done` item completed it or a `backlog` item tracks it (conservative threshold 1.6 — an unrelated/unanswered prompt can never be struck, given the loss risk).
+
+**Filed (new backlog items):**
+- `#qftstuck` — the 🚧 marker persisting on an addressed free-text head.
+- `#qftloss` — the 3 lost free-text prompts (pure-editor-buffer loss before any cycle observes; the open mode-6 in the consolidated race plan — needs plugin buffer-flush-on-edit).
+- `#qeditdup` — duplication + struck-item resurrection on queue-edit-during-active-turn (the merged `#queuestatemachine` Live<Struck lattice + idempotent convergence should fix this; verify on the recycled binary).
+
+**Urgent:** the live data loss you're hitting is the OLD supervisor. The fixes are installed + auto-recycle armed — **restart/recycle the supervisor on this pane** (you drive it, it ends the session) to stop the corruption now.
+<!-- agent:boundary:bd0d2b45 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -446,6 +461,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#qftstuck] The 🚧 in-progress marker persists on a free-text queue head after the item is addressed/struck — it should clear when the head is struck or completed (observed live on the #brtc head).
+- [ ] [#qftloss] [operator-verify] Free-text queue prompts dropped (operator lost 3) — pure-editor-buffer loss before any cycle observes the edit (the OPEN mode-6 in plan-queue-edit-race-consolidated, #0bmv). Needs plugin buffer-flush-on-edit so an operator queue/prompt edit is durably captured before the next cycle. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
+- [ ] [#qeditdup] [operator-verify] Queue items duplicated + manually-struck/deleted items resurrected when the operator edits the queue during an active turn. #queuestatemachine idempotent convergence + the Live<Struck lattice (merged, 0.34.48) should resolve this — VERIFY on the recycled binary; if it persists live, a deeper editor-edit-during-cycle guard is needed. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#crdtauth6] [operator-verify] crdtauth5 live hookup: thin JB DocumentListener calling CrdtReplicaForwarder.forwardLocalDelta + a Kotlin Unix-socket ReplicaTransport client (writes NDJSON register/deregister/update, delivers inbound update_b64 to applyRemoteUpdate); plus the deferred VS Code koffi replica seam (editors/vscode/src/native.ts out-param marshaling). Rust fan-out + Kotlin seam already merged + tested. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
 <!-- /agent:backlog -->

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -138,7 +138,19 @@ Escalation: none. Confidence: high.
 Deploy was completed and documented in the DOB prefill response above (Worker Version `4597b4b6-34a4-4faf-a2e1-08df5e1f1d34`, public root `HTTP 200`). Striking the answered `deploy` head to clear the closeout residue.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:35cc38ae -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=ca5b06f9-838b-4b60-9ce2-00519736fbb1 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782344406484
+```
+<!-- agent:boundary:a5b39788 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -158,8 +170,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?step=0 for btak.dev+borrower3@gmail.com — still does not capture already filled out borrower data (e.g. "Date of Birth"). Have we captured this borrower's data?~~
-- ~~deploy~~
 <!-- /agent:queue -->
 
 ## Backlog

@@ -280,7 +280,30 @@ Stateful logic today:
 **Explicit state machines (typed `enum State` + transitions):** real win. Modeling the draft/social publish lifecycle and sync phases as typed enums (instead of `String` statuses + ad-hoc checks) catches invalid transitions at compile time and makes guards like `s8b_social_published_skipped` (double-publish) and sync token/refetch phases provably correct. Localized refactor, not a framework.
 
 **Recommendation:** don't adopt lazily-rs/reactive graphs for corky's current shape. Do introduce `enum`-based state machines for publish + sync lifecycles (focused P3 hardening). Revisit reactive only if corky grows a long-lived observer graph (e.g., a TUI over watch state).
-<!-- agent:boundary:4043f75c -->
+
+### Re: lazily-rs overhead vs non-reactive graph — glm-5.2
+
+> **Queue prompt:**
+>
+> From a code + architecture perspective, would lazily-rs add much overhead vs a non-reactive graph?
+
+**Runtime overhead: small at corky's scale. Architectural overhead: the real cost — and where reactive loses here.**
+
+Reactive graph (lazily-rs style) adds at runtime:
+- A dependency/subscription graph resident for the scope's lifetime (heap-allocated nodes, often trait-object dispatch).
+- A propagation scheduler — on any input change it dirty-marks + topo-propagates through dependents.
+- Per-update bookkeeping even when no downstream value truly needs to recompute.
+
+corky is batchy and low-frequency (a few state transitions per watch tick), so the absolute CPU/mem cost is negligible. A non-reactive graph (typed `enum State` + `match`, or a plain adjacency walk) is direct calls — zero framework, zero allocations, no scheduler.
+
+**Architecture/code overhead is where it hurts for corky:**
+- **Indirection** — control flow becomes "wire deps, let the framework propagate," harder to trace than an explicit `match`; errors surface at propagation time, not the call site.
+- **Framework coupling + supply-chain** — a reactive crate becomes load-bearing across modules.
+- **Model mismatch** — reactive earns its keep when many *derived* values must stay consistent with changing inputs (UIs, spreadsheets, live dashboards). corky's transitions are small, mostly-linear lifecycles (publish: ready→publishing→published; sync: fetch→merge→write) with no fan-out of derived signals. Wiring them reactive pays the indirection without reaping propagation benefits.
+- **Testing** — explicit state machines unit-test trivially (`assert transition(S, E) == S'`); reactive graphs need a live engine + scope to exercise.
+
+**Bottom line:** lazily-rs adds little *runtime* overhead at corky's scale but real *architectural* overhead (indirection, coupling, model mismatch) for no gain over a plain typed-state-machine. Revisit only if corky grows a genuine derived-signal graph (e.g., a TUI watch dashboard) — then propagation earns its keep.
+<!-- agent:boundary:6633094d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -291,7 +314,7 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- From a code + architecture perspective, would lazily-rs add much overhead vs a non-reactive graph?
+- 🚧 From a code + architecture perspective, would lazily-rs add much overhead vs a non-reactive graph?
 <!-- /agent:queue -->
 
 ## Backlog

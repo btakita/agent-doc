@@ -272,7 +272,28 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/corky.md source=socket_ack_content patch_id=5c6299b8-f438-419e-bb54-92f8b396f875 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=21771 candidate_hash=6c35b974c2f5922ee37076cda785deb8222fd05a98a7afba815014a6fdc1d5ef content_ours_len=22249 content_ours_hash=9af6b869ba2576cdd9a55217e64d56aa4fd3858af37870e9cb103aeeed3dc958 doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782352942891
 ```
-<!-- agent:boundary:080abc0a -->
+
+### Re: #ckypeoplesync — P1 lost-update on people-sync-state — opus-4-8
+
+> **Queue prompt:**
+>
+> [#ckypeoplesync]
+
+
+Fixed and shipped (corky `6d4e643` on `origin/main`). `.people-sync-state.json` (the local name→Google `resourceName` map) was read/written with plain `fs::read`/`fs::write`, bypassing the locked atomic store used by `tokens.json` and `.sync-state.json`. Two concurrent `corky contact push` runs raced — the second load→save clobbered the first writer's freshly-stored `resourceName`s, so those contacts were re-created as **duplicates** on the next push.
+
+**Fix:**
+- `load_sync_state` → `file_store::load_json_or_default`.
+- `save_sync_state` → `save_json_with_lock`, with a `merge_sync_state` that **overlays** our mappings onto the current on-disk state (union merge — `contact push` only adds/updates mappings, never removes), so a concurrent writer's entries survive.
+
+**Verification (`#spec-test-build-install-commit-push`):**
+- Tests: new `merge_sync_state` unit test (concurrent-writer entry preserved, our update wins) — `cargo test -p corky-mail` → 225 passed; full `make check` green.
+- Build + install (GPU/CUDA): `make install` → `corky 0.29.0` in `~/.cargo/bin`.
+- Spec: SPEC.md §8 + AGENTS.md updated.
+- Commit `6d4e643` — pushed.
+
+Next queue head: `#ckyconfigunwrap`.
+<!-- agent:boundary:be961acc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -290,7 +311,7 @@ Please give me a report the performance
 - ~~[#ckydedup]~~
 - ~~[#ckythread]~~
 - ~~[#ckytok401]~~
-- 🚧 [#ckypeoplesync]
+- ~~[#ckypeoplesync]~~
 - [#ckyconfigunwrap]
 - [#ckyatomicwrite]
 - [#ckyunicodeslug]
@@ -303,7 +324,6 @@ Please give me a report the performance
 
 <!-- agent:backlog -->
 - [ ] [#ckythreadmerge] [P2 correctness] threading provider-switch merge: IMAP threads keyed by subject (thread_key_from_subject) and Gmail-API threads keyed by Gmail threadId never merge when the same conversation is synced from both providers, producing duplicate thread files. Design a unified thread-identity reconciliation (e.g. index by Message-ID/References across providers, or map Gmail threadId<->subject-key). Architectural — needs its own focused cycle. Split from #ckythread. crates/corky-mail/src/sync/{imap_sync.rs,gmail_api_sync.rs}, markdown.rs
-- [ ] [#ckypeoplesync] [P1 lost-update] .people-sync-state.json bypasses the locked atomic store (file_store::save_json_with_lock used by tokens.json and .sync-state.json); concurrent corky contact push clobbers resourceName updates and re-creates Google contacts as duplicates. Route load/save_sync_state through save_json_with_lock. crates/corky-mail/src/contact/push.rs:263-280,565,637
 - [ ] [#ckyconfigunwrap] [P1 panic] as_table_mut().unwrap() panics on a hand-edited .corky.toml that uses a scalar where a table is expected; Command::new(git).output() panic! if git binary missing. Replace with ok_or_else anyhow. crates/corky-core/src/config/{topic.rs:76,contact.rs:71}, crates/corky-social/src/social/auth.rs:373-391, crates/corky-mail/src/mailbox/{sync,reset}.rs
 - [ ] [#ckyatomicwrite] [P2 durability] conversation markdown written via plain fs::write (truncate+write, half-written on crash loses all prior merged messages since re-parse returns None and starts fresh); file_store atomic rename is missing sync_all before rename so not power-loss durable. Reuse NamedTempFile persist + sync_all. crates/corky-mail/src/sync/imap_sync.rs:193,224; crates/corky-core/src/file_store.rs:47-63
 - [ ] [#ckyunicodeslug] [P2] slug regex strips all non-ASCII so CJK/Cyrillic/emoji subjects collapse to untitled, untitled-2,... opaque filenames distinguished only by counter. Use regex Unicode classes or transliterate. crates/corky-core/src/util.rs:5,12-31

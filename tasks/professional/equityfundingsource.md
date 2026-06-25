@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -180,7 +180,23 @@ Drained the four Full Application layout heads (deployed in Version `02130b3c`).
 Verify: tests updated; `bun run test` → 1225 pass / 0 fail; `build` + `build:worker` clean. Pushed `28bd4b1`, deployed Version `02130b3c-108b-44ab-9531-c381b416e6e6`. No CI workflow in the EFS repo.
 
 **Left queued (next iteration):** "The Messages dialog should not have a vertical scrollbar … textarea + Send fixed at the bottom, messages independently scrollable" + `deploy`. This is a multi-surface dialog scroll/layout change (per-user / group / messages / contact tabs) whose correctness needs live visual verification, so it deserves a focused pass rather than a build-green-only change in this degraded-IPC session.
-<!-- agent:boundary:4e6acdd8 -->
+
+### Re: Admin Messages dialog — independent thread scroll, pinned compose — opus-4-8
+
+> **Queue prompt:**
+>
+> The Messages dialog should not have a vertical scrollbar for the messages + textarea + Send button. The text area + Send button should be fixed at the bottom of the dialog viewport. The messages should have an independent vertical scrollbar.
+
+Done — implemented + deployed (you chose implement+deploy via the prompt-choice). The dialog body was one scrolling block (thread + textarea + Send scrolled together). It is now a non-scrolling flex column so the compose bar stays pinned at the dialog's bottom and only the message thread scrolls.
+
+- `lib/ui--server--efs/portal.ts`: `.admin-messages-panel>.modal-body` is now `overflow:hidden` + `display:flex;flex-direction:column` (no whole-body scroll); added `.admin-messages-tab-scroll` for the messages/contact tabs.
+- `lib/ui--browser--efs/portal/admin/messages_unified.tsx`: `AdminMessagesUser` + `AdminMessagesGroup` are flex columns — the `UnifiedMessageThread` sits in its own `flex:1; overflow-y:auto` scroller and the compose footer is `flex:none` (pinned).
+- `lib/ui--browser--efs/portal/admin/messages.tsx`: the messages + contact tabs render inside the `admin-messages-tab-scroll` container so they scroll within the non-scrolling body.
+
+Verify: added `#msg-dialog-scroll` regression test; `bun run test` → 1226 pass / 0 fail; `build` + `build:worker` clean. Pushed `cc3e1db`, deployed Version `352fe989-e969-456c-8ffa-794ea32f9196`.
+
+**Please eyeball it** (this is a layout change I can't visually verify from here): open a deal → Messages, check the per-user, group, messages, and contact tabs — the compose box should stay pinned at the bottom while the thread scrolls on its own.
+<!-- agent:boundary:2f7c1a08 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -200,13 +216,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~From https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Full Application, remove "Feedback Report" card. Admins will use the Messaging feature to send emails to borrowers.~~
-- ~~Admin > Data Pipeline + Page: Remove the Step #: prefix from the Full Application dialog.~~
-- ~~Move the Declarations card to the left side of the Full Application dialog.~~
-- ~~Make the Declarations + Review & Sign cards collapsible and default to collapsed.~~
-- ~~Remove the dropdown in the Documents card. Show each document type with the upload inline.~~
-- The Messages dialog should not have a vertical scrollbar for the messages + textarea + Send button. The text area + Send button should be fixed at the bottom of the dialog viewport. The messages should have an independent vertical scrollbar.
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

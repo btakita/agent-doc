@@ -221,7 +221,30 @@ Fixed and shipped (corky `e14f2ae` on `origin/main`). Messages were deduplicated
 - Commit `e14f2ae` — pushed.
 
 Note: IMAP messages currently carry `message_id: None` (the separate `#ckythread` item fixes that), so they use the normalized-fallback key today; Gmail-API messages already benefit from Message-ID dedup. Next queue head: `#ckythread`.
-<!-- agent:boundary:8494463e -->
+
+### Re: #ckythread — P1 threading gaps — opus-4-8
+
+> **Queue prompt:**
+>
+> [#ckythread]
+
+
+Fixed and shipped the two concrete reply-threading bugs (corky `6894c88` on `origin/main`); split the architectural third into `#ckythreadmerge`.
+
+**Fixed:**
+1. **IMAP Message-ID never written** — the IMAP sync path hardcoded `message_id: None` (`imap_sync.rs`), so `**Message-ID**` metadata was missing and IMAP-account replies couldn't thread. Now extracted from the parsed headers like Subject/From/Date.
+2. **Silent reply un-threading** — `corky draft send` didn't validate that a reply had **both** `in_reply_to` (RFC 2822 → `In-Reply-To` header) and `thread_id` (Gmail `threadId`). Added `reply_threading_warning`: warns when only one is set (`in_reply_to`-only → Gmail starts a new thread; `thread_id`-only → `In-Reply-To` missing for non-Gmail clients).
+
+**Split out → `#ckythreadmerge` (new backlog item):** merging IMAP subject-keyed threads with Gmail threadId-keyed threads on a provider switch is an architectural thread-identity reconciliation that deserves its own focused cycle, not a rushed bolt-on.
+
+**Verification (`#spec-test-build-install-commit-push`):**
+- Tests: new `reply_threading_warning` unit test (both/neither/partial/whitespace) — `cargo test -p corky-mail` → 224 passed; full `make check` green.
+- Build + install (GPU/CUDA): `make install` → `corky 0.29.0` in `~/.cargo/bin`.
+- Spec: SPEC.md §3.1/§3.2 updated.
+- Commit `6894c88` — pushed.
+
+Next queue head: `#ckytok401`.
+<!-- agent:boundary:123ddbe8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -237,7 +260,7 @@ Please give me a report the performance
 - ~~[#ckysheets]~~
 - ~~[#ckywatchpanic]~~
 - ~~[#ckydedup]~~
-- 🚧 [#ckythread]
+- ~~[#ckythread]~~
 - [#ckytok401]
 - [#ckypeoplesync]
 - [#ckyconfigunwrap]
@@ -251,7 +274,7 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ckythread] [P1 correctness] threading gaps: IMAP path hardcodes message_id None (imap_sync.rs:542-552, breaks reply threading for IMAP accounts since **Message-ID** metadata is never written); no validation that in_reply_to AND thread_id are both set (draft/send.rs:91-104, reply silently un-threads); IMAP subject-key vs Gmail threadId-key never merge on provider switch.
+- [ ] [#ckythreadmerge] [P2 correctness] threading provider-switch merge: IMAP threads keyed by subject (thread_key_from_subject) and Gmail-API threads keyed by Gmail threadId never merge when the same conversation is synced from both providers, producing duplicate thread files. Design a unified thread-identity reconciliation (e.g. index by Message-ID/References across providers, or map Gmail threadId<->subject-key). Architectural — needs its own focused cycle. Split from #ckythread. crates/corky-mail/src/sync/{imap_sync.rs,gmail_api_sync.rs}, markdown.rs
 - [ ] [#ckytok401] [P1] 401 from Google APIs never invalidates the cached token, so a Google-revoked but clock-valid token traps the user until manual tokens.json delete; only draft send clears its send token. Drop token on 401 across cal/doc/tasks/chat. crates/corky-google/src/{cal,doc,tasks}/*.rs, crates/corky-social/src/social/chat.rs
 - [ ] [#ckypeoplesync] [P1 lost-update] .people-sync-state.json bypasses the locked atomic store (file_store::save_json_with_lock used by tokens.json and .sync-state.json); concurrent corky contact push clobbers resourceName updates and re-creates Google contacts as duplicates. Route load/save_sync_state through save_json_with_lock. crates/corky-mail/src/contact/push.rs:263-280,565,637
 - [ ] [#ckyconfigunwrap] [P1 panic] as_table_mut().unwrap() panics on a hand-edited .corky.toml that uses a scalar where a table is expected; Command::new(git).output() panic! if git binary missing. Replace with ok_or_else anyhow. crates/corky-core/src/config/{topic.rs:76,contact.rs:71}, crates/corky-social/src/social/auth.rs:373-391, crates/corky-mail/src/mailbox/{sync,reset}.rs

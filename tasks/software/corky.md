@@ -144,7 +144,23 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/corky.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=929d6505cca8c761944be9926df20685ae6dfe0753453741c1b7e71767d2d3c6 content_len=28479 content_hash=956742e7a1360a06969351a17379b2ff4266904fa460a0d4602be3c6b075d867 doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782367673222
 ```
-<!-- agent:boundary:2038af10 -->
+
+### Re: do [#ckypubsm] — opus-4-8
+
+> **Queue prompt:** do [#ckypubsm]
+
+Shipped the **social publish state machine** (corky `7ee6692`, pushed to `btakita/corky` main).
+
+**What changed**
+- `DraftStatus` extended to `{ Draft, Ready, Publishing, Published, Failed }` with a typed `transition(PublishEvent)` plus `can_publish(ready)` (centralizes the old PB1 `if`-guards) and `is_terminal()`.
+- **Crash safety / de-dup:** `publish()` now persists a `Publishing` marker + `publish_started_at` **before** the platform API call, then checkpoints `post_id` while still `Publishing`. A crash between create and the terminal write reconciles by `post_id` on retry instead of double-posting; a `Publishing` draft with **no** `post_id` refuses auto-retry and asks the operator to verify on-platform. API failure → `Failed`.
+- `schedule.rs` skips terminal drafts via `is_terminal()` (was a bare `== Published`), so a `Failed` scheduled post no longer loops.
+- New `publish_started_at` frontmatter field.
+
+**Verification:** `make check` → **683 pass / 0 fail** (6 new `DraftStatus` state-machine unit tests + 36 social integration tests green); `corky audit-docs` clean for this change (16 pre-existing mtime-staleness notes unrelated). SPEC.md §12.3/§12.6/§16 updated. `make build` + `make install` done — `corky 0.29.0` live in `~/.cargo/bin`.
+
+Next queue head: `do [#ckyemailsm]` (email draft status enum).
+<!-- agent:boundary:dd27b8a0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -164,7 +180,6 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ckypubsm] P2 — Social publish state machine: PublishState{Draft,Ready,Publishing,Published,Failed}+transition() centralizing PB1 guards (publish.rs:26-42); persist crash-safe Publishing marker BEFORE the API call so a mid-publish crash reconciles by post_id instead of double-posting. Plan: tasks/software/corky-state-machines.md
 - [ ] [#ckyemailsm] P2 — Email draft status enum (EmailDraftStatus Draft/Scheduled/Sent/Failed) replacing the stringly-typed 'scheduled' compares (schedule.rs:146) + legacy **Status** regex (schedule.rs:178-189); terminal Sent/Failed so scheduler skips them. Plan: tasks/software/corky-state-machines.md
 - [ ] [#ckysyncsm] P3 — Sync run-state machine (SyncRunState Idle/Fetching/Merging/Writing/Done/Error) persisted as sidecar so a crashed watch tick / corky sync refetch resumes instead of re-fetching; design-first. Plan: tasks/software/corky-state-machines.md
 - [ ] [#ckywatchsm] P3 — Watch phase enum (WatchPhase)+typed tick schedule replacing loose cycles_since_* counters (watch.rs:320-325)+backoff/circuit-breaker for repeated phase failures (polish). Plan: tasks/software/corky-state-machines.md

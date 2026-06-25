@@ -126,7 +126,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/corky.md source=socket_ack_content patch_id=e79e28c7-55bf-4557-9143-488d98c5a0d7 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=12168 candidate_hash=21bf3bfbd509108ec59e33bfab7758d34334e4a7003a90ebf7e9f877b0fef77f content_ours_len=12573 content_ours_hash=7d74f5df35a669b8fed1739354259b41220827a20be0d71414862f207eb11e84 doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782349411341
 ```
-<!-- agent:boundary:600285f0 -->
+<!-- agent:boundary:dfce9ba1 -->
 <!-- /agent:exchange -->
 ###
 <!--

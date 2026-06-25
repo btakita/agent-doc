@@ -1609,29 +1609,13 @@ fn spawn_auto_trigger_thread(
                     }
                 }
                 if current_child_prompt_visible(&shared, &harness) {
-                    if shared.capability_proof_gate() == CapabilityProofGate::Pending {
-                        if monitor.note_no_prompt(Instant::now()) {
-                            shared
-                                .auto_trigger_outcome
-                                .store(AutoTriggerOutcome::Timeout as u8, Ordering::Relaxed);
-                            log_event(
-                                &mut session_log,
-                                &format!(
-                                    "auto_trigger_timeout harness={} reason=capability_proof_pending_after_30s",
-                                    harness.binary
-                                ),
-                            );
-                            record_session_startup_miss(
-                                &path,
-                                &shared,
-                                &harness,
-                                &mut session_log,
-                                "capability_proof",
-                            );
-                            return;
-                        }
-                        continue;
-                    }
+                    // `#capproofbg`: do NOT stall the auto-trigger waiting for the
+                    // managed-capability proof to finish. Dispatch proceeds as soon
+                    // as the child prompt is visible; the proof runs in the
+                    // background and only a proven FAILURE (surfaced async via the
+                    // session log + tmux `display-message`) gates subsequent
+                    // dispatch through `auto_trigger_inject_command` →
+                    // `capability_dispatch_blocker`.
                     let trigger_cmd = harness.trigger_command(&file);
                     match auto_trigger_inject_command(&shared, &stop, &trigger_cmd) {
                         AutoTriggerOutcome::Sent => {
@@ -2564,11 +2548,15 @@ impl SupervisorShared {
 
     fn capability_dispatch_blocker(&self) -> Option<String> {
         match self.capability_proof_gate() {
-            CapabilityProofGate::NotRequired | CapabilityProofGate::Proven => None,
-            CapabilityProofGate::Pending => Some(
-                "managed Codex capability proof is still pending; prompt dispatch is gated until network/SSH/write-root proof succeeds"
-                    .to_string(),
-            ),
+            // `#capproofbg`: a *pending* managed-capability proof no longer blocks
+            // dispatch. Dispatch proceeds immediately while the proof runs in the
+            // background; a later proof FAILURE flips the gate to `Failed` and is
+            // surfaced asynchronously (session log + tmux `display-message`) instead
+            // of stalling every dispatch until the probe completes. Only a proven
+            // failure gates subsequent dispatch.
+            CapabilityProofGate::NotRequired
+            | CapabilityProofGate::Proven
+            | CapabilityProofGate::Pending => None,
             CapabilityProofGate::Failed => {
                 let detail = self
                     .capability_proof_error
@@ -4122,6 +4110,13 @@ Done.
         assert!(
             shared.capability_dispatch_blocker().is_none(),
             "Proven gate must not block dispatch"
+        );
+        // `#capproofbg`: a *pending* proof is non-blocking — dispatch proceeds
+        // immediately while the proof runs in the background.
+        shared.set_capability_proof_gate(CapabilityProofGate::Pending, None);
+        assert!(
+            shared.capability_dispatch_blocker().is_none(),
+            "Pending gate must NOT block dispatch (#capproofbg non-blocking proof)"
         );
         shared.set_capability_proof_gate(
             CapabilityProofGate::Failed,

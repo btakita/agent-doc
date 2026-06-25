@@ -190,7 +190,17 @@ Phase 5 + Phase 6 of the CRDT authority model (`tasks/agent-doc/plan-crdt-author
 **Proven by SimWorld** (`src/sim_world.rs::crdt_relay_sim`, 8 scenarios + 10 module unit tests + 2 FFI round-trip tests, all green): multi-replica fan-out; convergence under out-of-order/lagged delivery; 3-replica commit-barrier consistent cut with a disconnected editor (no deadlock, no loss); offline→reconnect no-loss; duplicate-client-id rejection; awareness ephemerality; disk-projection recovery with in-memory-wins; deterministic replay. `make check` exit 0 (clippy `-D warnings` clean); `cargo build --release` green.
 
 **Remaining (gated — fresh clean supervisor session, per the plan; NOT this doc):** wire `RelayHub` into the live `finalize`/supervisor-IPC write path + the `.yrs` load call-sites (deliberately left as a documented contract here to avoid disturbing the live supervisor), merge the branch to `main`, then the operator's live multi-editor repro (the only operator-gated step). Gating `#crdtauth4` accordingly.
-<!-- agent:boundary:4a798156 -->
+
+### Re: do [#xdocsuper] — Cross-document supervisor contamination — opus-4-8
+
+Already implemented and on `main` — all four rungs landed this session (the structural root-cause fix for the `live_prompt_drift` / `postcommit-worktree` / answered-head-residue churn this very doc keeps hitting). No new code needed; closing it out.
+
+- **`#xdocsuper0`** (`2f704263`) — claim consults the document supervisor lease before `AcceptStale`, closing the two-supervisors-one-document window.
+- **`#xdocsuper1/3`** (`66ac6c64`, `state_backbone.rs`) — modeled as a backbone transition (the design-note recommendation): new `StateFact::SupervisorHosting { document_hash, pane_session, lease_epoch }`; a pane-session change / higher lease-epoch is a switch that **resets the queue overlay to empty**, and queue facts are **hosting-epoch gated** so a stale sibling-document overlay is rejected by construction — the same dup-impossibility guarantee `queue_item_state_machine` gives. The queue domain was the only document-scoped domain lacking a generation/epoch gate, which is why it (and only it) leaked across hostings.
+- **`#xdocsuper2`** — SimWorld + unit coverage: `route_owned_supervisor_switch_reads_target_without_source_overlay`, `contamination_regression_no_answered_head_reinjection_after_switch` (sim_world.rs), plus `supervisor_hosting_switch_resets_stale_queue_overlay`, `cross_document_switch_does_not_contaminate_sibling_overlay`, `re_emit_same_hosting_is_idempotent`, `stale_actor_reports_are_rejected_by_generation` (state_backbone.rs).
+
+Note: the live churn on THIS session persists only because its route-owned supervisor is an already-running OLD binary predating `66ac6c64` — it self-heals on an operator `session restart-supervisor` (recycle onto the fresh binary), not by more code.
+<!-- agent:boundary:0ff9a567 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -204,7 +214,7 @@ Phase 5 + Phase 6 of the CRDT authority model (`tasks/agent-doc/plan-crdt-author
 - ~~:pushpin: do [#crdtauth3]~~
 - 🚧 :pushpin: [#brtc]
 - ~~:pushpin: do [#crdtauth4]~~
-- :pushpin: do [#xdocsuper]
+- ~~:pushpin: do [#xdocsuper]~~
 - :pushpin: Fix the root cause of the CRDT churn.
 - :pushpin: do [#cgfx]
 - :pushpin: do [#gww8]
@@ -319,7 +329,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#xdocsuper] [focused-cycle] Cross-document supervisor contamination: one route-owned supervisor (per pane) reused across documents (corky.md→agent-doc-bugs2.md) carries prior doc's stale in-memory CRDT/queue/lease into the new doc → the live_prompt_drift / postcommit-worktree / answered-head-residue churn. Add a document-switch state-reset guard + SimWorld. Plan: tasks/agent-doc/plan-cross-document-supervisor-contamination.md
 - [ ] [#n529b] #lazilystatesync3b Wire MirrorProjectionSummary into EditorCommandStateMachine / dispatch-ready / busy consumers (PromptPoller, RunAgentDocAttemptLedger) so they read StateProjectionBridge.mirrorSummaryForFile instead of the cold projectionSummaryForFile pull, then dogfood live in JB. Mirror substrate shipped in 0.2.190 (#n529). Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#gww8] #lazilyspecpin=Pin agent-doc state type_tag vocabulary (8 node kinds) + conformance snapshot/delta pair in lazily-spec as schemas/agent-doc-state.json (versioned) so kt/js/rs import one canonical vocabulary. Design pinned in tasks/agent-doc/plan-lazily-plugin-state-sync.md (Wire-shape definition section). Sibling-repo (src/lazily-spec) cycle per scope-discipline.
 - [ ] [#cgfx] #queuestatemachine2 Route convergence through the SM; reduce dedup passes to transition guards; property test idempotence (re-emit=no-op) over #rt83qflood/#qdedupsync/#qauthorder duplication shapes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md

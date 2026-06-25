@@ -173,7 +173,24 @@ Authority seam (`crdt_authority.rs`): `commit_barrier_under_authority` runs flus
 **Gated `#crdtauth3`** — barrier primitive + authority gate code-complete + verified; the remaining work is **rewiring finalize's patch-ack onto this barrier** (the live write-path change — the riskiest rung, deliberately deferred) plus the same operator merge→main + install + supervisor restart.
 
 > **Queue prompt:** do [#crdtauth3]
-<!-- agent:boundary:d6874394 -->
+
+### Re: do [#crdtauth4] — Multi-editor relay + awareness + disk demotion — opus-4-8
+
+Phase 5 + Phase 6 of the CRDT authority model (`tasks/agent-doc/plan-crdt-authority-model.md`) are **implemented, SimWorld-proven, and committed** — done in the isolated worktree `src/agent-doc-crdtauth1-wt` (branch `crdtauth1-authority-sm`, commit `8b087ea6`, 5 ahead of `main`), NOT on the live submodule, so the contamination-victim supervisor on this doc was never disturbed (the plan mandates a fresh clean session for the live cutover).
+
+**Phase 5 — multi-editor relay + awareness** (`agent-doc-orchestration/src/crdt_relay.rs`, new):
+- `RelayHub` — star topology: supervisor hosts the canonical `ReplicaState`; editor replicas `register`/`deregister`/`disconnect`/`reconnect`. Local updates fan out to every *other* live replica via the existing state-vector `diff(their_sv)`/`apply_update` machinery (no whole-doc snapshots).
+- Unique stable client-ids enforced (`mint_client_id`, 53-bit yrs-safe; `validate_unique`); a collision is a hard error (= corruption per the plan).
+- Ephemeral **awareness** channel (`AwarenessChannel`/`AwarenessState`) — cursor/presence keyed by client-id, explicitly **not** part of the document CRDT, not persisted, not committed; expires on deregister.
+- **Commit barrier = consistent cut of currently-live replicas** (`commit_barrier`/`commit_barrier_under_authority`, authority-gated) — flushes live editors to their SVs; does **not** deadlock on a disconnected/slow editor (offline replicas contribute at next sync).
+- Offline → reconnect convergence via SV catch-up (no data loss).
+
+**Phase 6 — disk demotion**: `.yrs` is now contractually a **write-through recovery projection only**, never authority — in-memory replica wins over a stale disk projection (`reconcile_disk_projection`, `DISK_IS_RECOVERY_PROJECTION_ONLY`, documented on the `snapshot.rs` load path). New FFI `agent_doc_replica_persist`/`agent_doc_replica_recover` give each editor's FFI node crash-safe local persistence (atomic temp+rename).
+
+**Proven by SimWorld** (`src/sim_world.rs::crdt_relay_sim`, 8 scenarios + 10 module unit tests + 2 FFI round-trip tests, all green): multi-replica fan-out; convergence under out-of-order/lagged delivery; 3-replica commit-barrier consistent cut with a disconnected editor (no deadlock, no loss); offline→reconnect no-loss; duplicate-client-id rejection; awareness ephemerality; disk-projection recovery with in-memory-wins; deterministic replay. `make check` exit 0 (clippy `-D warnings` clean); `cargo build --release` green.
+
+**Remaining (gated — fresh clean supervisor session, per the plan; NOT this doc):** wire `RelayHub` into the live `finalize`/supervisor-IPC write path + the `.yrs` load call-sites (deliberately left as a documented contract here to avoid disturbing the live supervisor), merge the branch to `main`, then the operator's live multi-editor repro (the only operator-gated step). Gating `#crdtauth4` accordingly.
+<!-- agent:boundary:da3a6028 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -185,7 +202,7 @@ Authority seam (`crdt_authority.rs`): `commit_barrier_under_authority` runs flus
 - ~~:pushpin: do [#crdtauth1]~~
 - ~~:pushpin: do [#crdtauth2]~~
 - ~~:pushpin: do [#crdtauth3]~~
-- :pushpin: [#brtc]
+- 🚧 :pushpin: [#brtc]
 - :pushpin: do [#crdtauth4]
 - :pushpin: do [#xdocsuper]
 - :pushpin: Fix the root cause of the CRDT churn.

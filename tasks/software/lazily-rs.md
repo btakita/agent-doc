@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 3d9ff8e4-bafd-4e1f-b48d-550d3c976904
-agent: opencode
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -34,94 +34,12 @@ queue: start
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260625-000604.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260625-004850.md`*
 
 Compacted content:
-- Archived 9 response topic(s): lazily bug-fix next-steps (cross-port); IPC proof diagnostic (interrupted-cycle recovery); #lzjshygiene node_modules purge; 6 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-- `SPEC.md`: documented the two new methods + the before/after ordering in Invalidation Semantics.
-- `src/lazily/cell.zig`: added `before_change_subscribers` field + init/deinit; reordered `set()` to fire before-callbacks before `self.value = new_value`; added the two methods; added test `before_change fires before commit` proving the callback observes the OLD value (snapshot == 1 while new == 2) and that no-op sets + unsubscribe behave correctly.
-- **Symmetric API** — `subscribeBeforeChange` / `unsubscribeBeforeChange`, dedup'd via the same `SubscriberKey` mechanism as `subscribe`.
-- **Ordering** — `before_change_subscribers` fire **under the context lock, before the commit** (consistent with `emitChangeUnlocked`, which also runs locked). `change_subscribers` continue to fire after the commit (unlocked). Contract: before-change callbacks must not re-enter `Context`/`Cell` methods that take `ctx.mutex`; `Cell.get` is safe.
-- **Callback signature** — reused `ChangeCallback(T) = *const fn(*Cell(T)) void` for symmetry. At fire-time `Cell.get()` is lock-free and still returns the **outgoing** value, which is the useful "before" semantic; no new signature needed.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-> **Queue prompt:**
->
-> [#lzzigbeforechange]
-
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=31e1b437-a8b5-4279-b97c-65172e935912 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=22835 candidate_hash=2a854597debb4b045132a7d6d9d7f416f9ea27ab1a6e54ef2865efb28cb39932 content_ours_len=23524 content_ours_hash=6b228fd843fc3a80cc5a101216ebc615379249389ddb38b78d372802761939ce doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782344790899
-```
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=e3f729bc-b6bd-46c0-9ce5-05a0f94739a2 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=9716 candidate_hash=a7ba3c0258301ad98ff54b2c70c65599aa38745156d15c75ba66369a8c86fdcc content_ours_len=10959 content_ours_hash=ec30f5adf99524b8f0c382f4f5815235e25d681c1b35253bb5835f2bc0352474 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782346762310
-```
-
-### Re: #lzzigbeforechange — implement before_change_subscribers — glm-5.2
-
-Drained queue head `#lzzigbeforechange`. The `semantic_completion_match` warning claiming this was already resolved by `#lzzigtodos` was a **false positive**: `#lzzigtodos`'s done entry *mentioned* `before_change_subscribers at cell.zig:35` in its scope text, but `cell.zig:35` still carried `// TODO: Add before_change_subscribers` — never actually implemented. Verified the TODO was live, then implemented it.
-
-**Design** (resolves the open API questions in the backlog item):
-- **Callback signature** — reused `ChangeCallback(T) = *const fn(*Cell(T)) void` for symmetry. At fire-time `Cell.get()` is lock-free and still returns the **outgoing** value (the useful "before" semantic); no new signature needed.
-- **Ordering** — `before_change_subscribers` fire **under the context lock, before the commit** (consistent with `emitChangeUnlocked`, which also runs locked). `change_subscribers` still fire after the commit (unlocked). Contract: before-change callbacks must not re-enter `Context`/`Cell` methods that take `ctx.mutex`; `Cell.get` is safe.
-- **Symmetric API** — `subscribeBeforeChange` / `unsubscribeBeforeChange`, dedup'd via the same `SubscriberKey` mechanism.
-
-**Changes** (`src/lazily-zig`):
-- `src/lazily/cell.zig` — added `before_change_subscribers` field + init/deinit; reordered `set()` to fire before-callbacks before `self.value = new_value`; added the two methods; added test `before_change fires before commit` proving the callback observes the OLD value (snapshot == 1 while new == 2) and that no-op sets + unsubscribe behave correctly.
-- `SPEC.md` — documented the two new methods + the before/after ordering in Invalidation Semantics.
-
-**Verify**: `zig build test` green (default `thread_safe=true`), new test included.
-
-**Commit+push** (preset `#spec-test-build-install-commit-push`): submodule `lazily-hub/lazily-zig` `db18dea..1a2c81d` on `main`; superproject gitlink bump `fb95c4866`.
-
-Heads-up on the remaining two queue heads — both `semantic_completion_match` warnings are likewise suspect: `#lzzigalloc` also "split from #lzzigtodos" and the `context.zig:615/619` allocator TODOs are still live (not done), and `#lzjshygiene` is lazily-js (different language from its `#lzktconf` match). Each will be re-verified before acting when those heads drain.
-
-(Closeout note: the editor-IPC listener for this pane was wedged on a stale `ack_content_sidecar` — `ipc_proof_insufficient` / `ack_mismatch` — deadlocking the normal `finalize` CRDT path and refusing direct disk writes while "active". Used `write --commit --force-disk` to cross the commit boundary so the cycle could close; the controller reports `fresh`, so this is a sidecar divergence, not a stale binary.)
-
-### Re: #lzzigalloc — selectable allocator modes via init_context_with_mode — glm-5.2
-
-> **Queue prompt:**
->
-> [#lzzigalloc]
-
-
-Drained queue head `#lzzigalloc`. As with `#lzzigbeforechange`, the `semantic_completion_match` to `#lzzigtodos` was a **false positive**: `#lzzigtodos` overclaimed — the `context.zig:615/619` allocator TODOs were still live. Verified, then implemented.
-
-**Design** (resolves the backlog's "init flag vs builder, deinit ownership, link_libc interaction" questions):
-- **Ownership via a post-deinit hook.** `Context.deinit` ends with `self.allocator.destroy(self)` — i.e. it frees the Context struct through its own allocator. A stateful allocator's state therefore can't live inside the Context it backs (use-after-free on the final `destroy`). Solution: a generic optional `post_deinit_fn` / `post_deinit_state` on `Context`, captured to locals before the `destroy(self)` and invoked *after* it. Native callers leave it null (unchanged behavior); only the FFI installer sets both.
-- **AllocatorHandle (ffi.zig).** Stateful modes (`debug`, `arena`) are hosted in an `AllocatorHandle` allocated by a stateless **bootstrap** allocator (`c` if `link_libc`, else `page`), so the state outlives the Context. `destroyFromHook` matches the `fn(*anyopaque) void` hook signature.
-- **init_context_with_mode(mode).** Stateless modes (`c`/`page`/`wasm`/`smp`) resolve directly to an allocator with no state to own (comptime-guarded so libc/wasm-only allocators are never referenced on targets lacking them). Stateful modes create a handle, init the Context with its allocator, and install the hook. `SmpAllocator` is a global singleton (`std.heap.smp_allocator`) → treated as stateless.
-
-**Changes** (`src/lazily-zig`, `1a2c81d..41d773a` on `main`):
-- `src/lazily/context.zig` — `post_deinit_fn`/`post_deinit_state` fields + hook call in `deinit`; `initContextWithMode` export (`init_context_with_mode`); `statelessAllocatorFor` helper; resolved the `initContext` allocator TODOs (now cross-reference `init_context_with_mode`).
-- `src/lazily/ffi.zig` — `bootstrapAllocator()`, `AllocatorHandle` (create/allocator/destroy/destroyFromHook), `initStateForMode`; dropped the unused `smp` arm from `AllocatorState` (singleton, no state).
-- `SPEC.md` — new "Allocator modes" FFI subsection documenting all six modes + the hook ownership model.
-
-**Verify**: `zig build test` green for both `thread_safe=true` and `thread_safe=false`. Added tests: `post-deinit hook fires after free` (proves the hook runs after `destroy(self)`), `initContextWithMode: stateless page-backed context`, `initContextWithMode: arena-backed context soak` (50 iterations through the handle init/use/deinit path).
-
-**Commit+push** (preset `#spec-test-build-install-commit-push`): submodule `1a2c81d..41d773a`; superproject gitlink bump `fff41c251`.
-
-Soundness note: the deinit ordering is correct by construction (hook is the last statement in `deinit`). Caveat: `arena` mode bulk-frees on `arena.deinit()`, so the arena soak test primarily guards crashes/hook-firing rather than per-allocation UAF; the `debug` mode's per-allocation tracking is the leak/UAF backstop for real workloads. No stateful allocator state is stored inside the Context, so the recent cell/slot UAF class (capture-ctx-before-destroy) is not reintroduced.
-
-Next head `#lzjshygiene` (lazily-js conformance fixtures) — its `semantic_completion_match` to `#lzktconf` (lazily-kt) is cross-language and weak; will verify the lazily-js side before acting.
-<!-- agent:boundary:7bb089dd -->
+- Archived 4 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); IPC proof diagnostic (interrupted-cycle recovery); #lzzigbeforechange; 1 more
+- Prior summary/context: prior compacted content: Archived 9 response topic(s): lazily bug-fix next-steps (cross-port); IPC proof diagnostic (...
+<!-- agent:boundary:29ca69b3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -132,7 +50,7 @@ Next head `#lzjshygiene` (lazily-js conformance fixtures) — its `semantic_comp
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~[#lzzigbeforechange]~~
 - ~~[#lzzigalloc]~~
-- [#lzjshygiene]
+- 🚧 [#lzjshygiene]
 <!-- /agent:queue -->
 
 ## Backlog

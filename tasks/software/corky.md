@@ -253,7 +253,24 @@ Large-attachment memory (`#ckymimestream`, `9e3f1c4`): `corky draft send` previo
 **Suite health:** 711 pass / 0 fail / 0 ignored (workspace with `transcribe` feature; 237 in corky-mail). `make check` (clippy `-D warnings` + test) green; `draft_mime` bench repaired (`#ckybenchbreak`) and green under `--all-targets`.
 
 No follow-ups — nothing for the backlog.
-<!-- agent:boundary:d291ce64 -->
+
+### Re: do [#5jax] release + publish — operator-gated — glm-5.2
+
+> **Queue prompt:** do [#5jax]
+
+`#5jax release + publish` is **externally blocked**, not autonomous agent work, so I'm gating it (`[/]`) rather than executing. Corky publish state (corky `39f266a`, v0.29.0):
+
+| channel | last published | unpublished since |
+|---|---|---|
+| crates.io | v0.28.2 | v0.29.0 — 9 commits ahead (crate-split refinement, `#ckymimestream`, `#ckymimeinline`, `#ckythreadmerge`, the 4 state machines, `#ckybenchbreak`) |
+| PyPI | — | blocked: PyPI trusted-publisher not configured (run 26195923707 `invalid-publisher`) — already in review as `#pypi-trusted-publisher` |
+
+Why I can't close it this turn:
+- **crates.io**: `cargo publish` is irreversible and needs your API token + an explicit go/no-go (workspace publish order is corky-core → -google → -mail → -social → bin; v0.29.0 carries breaking changes). Not something to fire autonomously.
+- **PyPI**: blocked on PyPI-side trusted-publisher config (`repo:btakita/corky:environment:pypi`) — external approval, outside this session's reach.
+
+Gating `#5jax` → review as the umbrella over the PyPI item. To unblock: (1) confirm you want a v0.29.0 crates.io release and I'll prep the ordered publish + changelog, and (2) complete the pypi.org trusted-publisher setup. The prior queue head's semantic-match flag (`#tagpath-queue-priority-publish-align`) was a false positive — that's the tagpath release, unrelated to corky.
+<!-- agent:boundary:512a15c7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -269,12 +286,12 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#5jax] release + publish
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#5jax] release + publish
 - [/] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi. Repo workflow is configured and pushed in Corky commit feb074e; PyPI run 26195923707 now builds all artifacts but is blocked by PyPI invalid-publisher until the project has a trusted publisher matching repo:btakita/corky:environment:pypi.
 <!-- /agent:review -->
 

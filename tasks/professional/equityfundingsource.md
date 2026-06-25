@@ -50,7 +50,23 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=48b3d190-6779-423a-9811-139cda04fea6 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782369337187
 ```
-<!-- agent:boundary:665feb84 -->
+
+### Re: Available Deal cards show interested-lender count — opus-4-8
+
+> **Queue prompt:** https://equityfundingsource.brian-takita.workers.dev/admin/pipeline > Available Deal cards should show the number of interested lenders.
+
+Done. Available Deal pipeline cards now show how many lenders have expressed interest, mirroring the deal dialog's Interested Lenders tab count.
+
+- **Server** (`app/equityfundingsource/lib/admin/loan_management/index.ts`): new `deal_interest_counts_by_loan_R_` reader counts `lender_deal_interests` rows per deal (grouped by loan); `admin_pipeline_columns_` passes the count onto each card.
+- **Card model** (`app/equityfundingsource/lib/admin/repo.ts`): `pipeline_card_T` / `loan_pipeline_card_input_T` / `loan_pipeline_card_` carry `interested_lender_count` (defaults to 0).
+- **UI** (`lib/ui--browser--efs/portal/admin/pipeline.tsx`): new `PipelineInterestedLendersBadge` renders in the Available Deals lane (`column_id === 'application-received'`) — a blue **"N interested"** badge when lenders are present, and a muted **"No interested lenders"** badge when there are none. Wired into all three card render sites alongside the compliance badges.
+
+Coverage: added unit assertions in `tests/admin-pipeline.test.ts` for the count passthrough and the 0-default. Full suite green (`bun run check` -> 1217 pass / 0 fail) plus build + worker bundle.
+
+> **Queue prompt:** deploy
+
+Committed (`47e7949`, pushed to `origin/main`) and deployed to Cloudflare Workers: remote D1 migrations applied, worker uploaded — `https://equityfundingsource.brian-takita.workers.dev`, Version ID `db46084f-d881-4b51-90d6-a6d35c55f55c`.
+<!-- agent:boundary:a659ab7b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,7 +86,10 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 https://equityfundingsource.brian-takita.workers.dev/admin/pipeline > Available Deal cards should show the number of interested lenders.
+- ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline > Available Deal cards should show the number of interested lenders.~~
+- When opening the Messages dialog on user context, the user search in the Messages dialog should not be rendered. Only show the conversation(s) with the users related to the user context.
+- Remove the All Messages tab in the Messages dialog.
+- Add an All tab in Messages dialog > Messages tab...a sibling to Borrowers|Lenders|Brokers. This tab effectively replaces the removed All Messages tab.
 - deploy
 <!-- /agent:queue -->
 

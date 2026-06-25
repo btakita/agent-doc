@@ -34,128 +34,29 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260625-004903.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260625-015638.md`*
 
 Compacted content:
-- Archived 7 response topic(s): #jbrestartbusy; queue resume + flood-pin dedup; live verify (yours, no gate); 4 more
-- Prior summary/context: prior compacted content: Archived 11 response topic(s): JB Run Agent Doc on equityfundingsource.md; IPC proof dogfood...
-
-### Re: bounded session-startup wait + isolating why the session hangs — opus-4.8
-
-> **Queue prompt:**
->
-> "Add a bounded `session_startup` wait in `route.rs`/`start.rs` with a hard deadline; on expiry, fail closed with `startup_miss` + an actionable error ("session did not become dispatch-ready in Ns") rather than hanging.": Can you retry or isolate why the session hangs so we can further dogfood these sort of errors?
-
-
-**Root cause of the hang (isolated).** Both startup paths matter, and only one was actually unbounded:
-
-- `route.rs` (already bounded) — `wait_for_agent_ready` polls `while start.elapsed() < timeout` and, on the `fresh_route_start_missing` branch, records a `startup_miss` and fails closed. That side was never the hang.
-- `start.rs` auto-trigger thread (the real culprit) — after the harness child was spawned, the thread waited for a dispatch-ready prompt. On the 30s `AUTO_TRIGGER_TIMEOUT` it logged a **provisional** `no_prompt_after_30s` timeout and then **kept polling the child forever** (`monitor.note_no_prompt` only flipped a flag; the loop never returned). A harness that never becomes dispatch-ready — hung TUI, auth wall, stuck network — therefore left the session silently hanging with no recoverable signal. That is the "session hangs" you hit.
-
-**Fix shipped (`#startupdeadline`, agent-doc `6b6451ce`, pointer `219ebb247`).** The 30s deadline is now **hard**:
-
-- New `auto_trigger_no_prompt_action` returns `FailClosed` exactly once when the monitor's deadline expires; the thread then calls `record_session_startup_miss` and `return`s instead of looping.
-- `record_session_startup_miss` writes a `startup_miss` marker against the owned pane (`StartupMissOrigin::FreshStart`) and prints the actionable line you asked for:
-  `[agent-doc] session did not become dispatch-ready in 30s (no_prompt) for <harness>; recorded startup-miss and failing closed instead of hanging. Run 'agent-doc start <FILE>' to retry.`
-- The same fail-closed path now also covers the two other startup waits that previously only logged and bailed: `clear_cooldown` and managed `capability_proof`. So no startup branch can hang silently.
-- The stale module-doc ("logs a provisional timeout but keeps watching until the child exits") is rewritten to describe the hard deadline.
-
-**Verification.** `make check` → **5101 passed, 241 skipped**; `cargo clippy -D warnings` clean; `cargo build --release` green. New unit eval `auto_trigger_no_prompt_continues_before_deadline_then_fails_closed` pins continue-before-deadline → fail-closed-once → caller-returns.
-
-**Pre-existing red I had to clear to push.** The suite was already red on HEAD — commit `9444a398` bumped the root package + `agent-doc-orchestration` to `0.34.48` but left `agent-doc-core` / `agent-doc-markdown-ast` / `agent-doc-sqlite` and the root dep pins at `0.34.46`. Cargo's caret resolution masked it in builds, but `test_manifest_uses_publishable_dependency_contract` does exact-version equality. I completed the already-landed 0.34.48 bump across those manifests + `Cargo.lock` (no tag/publish — pure reconciliation).
-
-**Closeout.** Committed + pushed to `origin/main` (agent-doc `6b6451ce`; superproject pointer `219ebb247`). The supervisor auto-installs + recycles the new binary at its idle boundary, so I did not manually install mid-session against the live supervisor. CI run `28140216452` is in progress — recorded as pending; proceeding on local evidence per the test-bearing-turn rule.
-
-**Dogfood note:** this very closeout hit the IPC class you're tracking — `finalize --stream` got a 6s socket ack timeout, fell back to file-IPC, then `no_ack` (`recovery=retry_without_disk_write`) because the editor never applied the queued patch (no live-buffer sidecar for this doc; supervisor reports fresh). Recovered via the explicit `finalize --force-disk` escape hatch.
-
-Live dogfood of the hang→`startup_miss` behavior in a real editor/pane needs a human eyeball, so I filed it as `[operator-verify]` **#nsfz** rather than gating the ship.
-
-### Re: state machine for the wait machinery + Lean no-hang proof — opus-4.8
-
-> **Queue prompt:**
->
-> Can we have a state machine for the wait machinery? And prove that we will never hang with tests & formal logic (i.e. Lean)? We should never hang for more than 10s. I know there is a dogfood reinstall that we pause for, which is the only exception.
-
-
-Yes — and it's the right next step, because the wait machinery is currently *not* one thing. I inventoried every blocking wait and they're scattered ad-hoc loops with inconsistent budgets, several of which already violate your 10s ceiling:
-
-| Site | Budget today |
-|------|------|
-| `start.rs` `AUTO_TRIGGER_TIMEOUT` (the `#startupdeadline` deadline I just shipped) | **30s** |
-| `route/startup.rs` `wait_for_agent_ready` (fresh-route ready) | **30s** |
-| `route.rs` busy-reroute / shell waits | 20s, 15s, 10s, 8s, 5s, 3s, 2s |
-| IPC socket ack (finalize) | 6s socket + 2s file |
-
-So today's worst case is ~30s, not 10s. That's exactly the gap a single state machine closes.
-
-**Design (filed as a plan, not done inline — this is a deep supervisor-critical refactor):** `tasks/agent-doc/plan-wait-machinery-state-machine.md`.
-
-- A new `WaitMachine` with a **pure** `tick(state, signal, elapsed) → state` transition (no I/O — clock/PTY/socket reads live in a thin driver). States: `AwaitingShell`, `AwaitingDispatchReady`, `AwaitingClearCooldown`, `AwaitingCapabilityProof`, `AwaitingIpcAck`, `ReinstallPause`, `FailedClosed`, `Ready`.
-- **One** `GLOBAL_HANG_CEILING = 10s` enforced in one place. Any non-exempt state hitting its `max_dwell` returns `FailedClosed` — never "keep polling" (generalizing the `#startupdeadline` fix to *every* wait).
-- `ReinstallPause` is the **one typed exemption** you called out (the dogfood reinstall/recycle pause) — the only state allowed past 10s, and even it is bounded by a separate explicit `REINSTALL_BUDGET` and logged distinctly so a pause is never misread as a hang.
-
-**Proving it never hangs (both kinds you asked for):**
-1. *Tests* — per-state continue-before-deadline → fail-closed-once unit tests, plus an exhaustive `(state × signal)` property test asserting `Σ dwell ≤ 10s` on every exempt-free path, plus SimWorld coverage for the live hang classes.
-2. *Lean* — `formal/wait_machine/` encodes `WaitState` as an inductive type and `tick` as a `Step` relation mirroring the Rust 1:1, then proves `no_hang : ∀ p, Reachable p → ExemptFree p → dwell p ≤ 10s`, with a second lemma that `ReinstallPause` is the sole state that can exceed it. The honest caveat: Lean proves the *model*; a Rust↔Lean `tick`/`Step` mismatch would make it vacuous, so the plan pins a parity test enumerating the Rust transition table against the Lean one (Rust `tick` is the source of truth).
-
-Queued as four dependency-ordered phases — **#waitmachine1** (core), **#waitmachine2** (migrate call sites + lower the 30s budgets to the 10s ceiling), **#waitmachine3** (deterministic bound proof), **#waitmachine4** (Lean). Each phase is its own focused cycle per the deep-refactor pacing rule; #waitmachine2 is where your "never >10s" constraint actually lands.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=file_ipc patch_id=c33e70a3-1965-4729-a7cb-c0a94ab663b1 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0.json doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782349156751
-```
-
-### Re: JB Run-Agent-Doc harness-switch defer (codex→opencode) — opus-4.8
-
-> **Queue prompt:**
->
-> :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change. (`route_authoritative_actor_harness_mismatch_deferred ... deferring to boundary agent restart instead of replacing live pane`)
-
-This is tracked as **#actorswitchdefer** with a full root-cause in `tasks/agent-doc/plan-actor-switch-defer-recovery.md`. Summary:
-
-- **Not a regression — an intended dead-end.** The route bail is the `#agentreloadrestart` kill-guard: `mismatched_authoritative_actor_can_be_replaced` returns `false` for a *healthy, non-closed* old-harness (codex) authority, so route refuses to cold-replace the live pane and defers the switch to the supervisor idle-watch boundary restart. The deferred restart **dead-ends** when the supervisor is paused/stale, the pane never reaches a `prompt_visible && !turn_active` boundary, or `agent_change_restart` is disabled — which is why you had to kill+restart manually.
-- **Part A shipped** (`6c7455a8`): the defer bail is now operator-actionable — it surfaces supervisor health / queue-paused / pane-not-ready state and the `agent-doc session restart-supervisor <FILE>` (`--force`) single-shot recovery instead of a silent dead-end.
-- **This cycle:** I reconciled the spec contradiction I found — `SPEC.md:141` claimed an explicit harness switch always "falls back to the normal create/rebind path," which **contradicted** the shipped defer/kill-guard. It now correctly states: non-live old actor → cold-rebind; live authority → defer to boundary restart (`agent_restart_performed old=codex new=opencode`) + the `session restart-supervisor` recovery. Committed + pushed (agent-doc `d2312da7`, pointer `7b9bb0c3c`); `make check` 5101 passed.
-
-**Reactive auto-pickup (your actual ask) — remaining Part B, routed to a focused cycle.** The mechanism to make the deferred restart *fire reliably* + prove it needs **new SimWorld restart-flow infrastructure** (there is currently no `harness_change_detected` / `agent_restart_performed` SimWorld test to extend) plus a route-side explicit bail when `agent_change_restart` is disabled. Its own plan mandates a focused cycle with `make tmux-ci` (the unrunnable two-pane leg). This `/loop` is already several heavy deliverables deep with active IPC recovery-churn, so per the deep-supervisor-refactor rule I tagged **#actorswitchdefer `[focused-cycle]`** rather than author live-supervisor-critical test infra mid-churn. It stays an actionable backlog item (not a review gate), draining in a fresh focused cycle.
-
-**Today's workaround:** after switching `agent:`, run `agent-doc session restart-supervisor tasks/professional/equityfundingsource.md` (add `--force` if the codex pane is busy/stuck) — that re-resolves the harness and brings up opencode without the manual kill+restart.
-
-### Re: lazily-kt / lazily-js plugin state-sync + #rt83qflood flood fix — opus-4.8
-
-> **Queue prompt:**
->
-> What are #next-steps to use lazily-ky and lazily-js to sync the plugin state machines and state graphs from the FFI plugin?
-
-**First — I fixed the flood that's been blocking this whole session (`#rt83qflood`, shipped).** Root cause found: `dedup_free_text_heads` collapses binary-injected free-text queue pins beyond their snapshot-authored count, but `free_text_dedup_key` **early-returned `None` for multiline prompts** — and the JB actor-switch pins are multiline (operator line + fenced route-error body), so they were never deduped and re-flooded every preflight (the 5–7 `:round_pushpin:`/`:pushpin:` copies that kept triggering `#qheadresidue` interrupts). Now multiline pins are keyed on whitespace-collapsed lowercased text (pin stripped), so verbatim phantom re-emits collapse to the authored count while distinct pins and intentional duplicates survive. `make check` **5103 passed**; committed + pushed (agent-doc `3d99f53e`, pointer `1edb88bf7`). `do [#rt83qflood]` → **done**.
-
-**Now your question (`#next-steps`).** I traced the pieces: `lazily` is the reactive-primitives family (`Context`/`Slots`/`Cells` + auto dependency tracking) with a language-agnostic wire protocol (`lazily-spec`) and per-language impls (`lazily-rs`/`-kt`/`-js`). The FFI already exposes `agent_doc_state_projection(doc_hash) → JSON` (`ffi.rs:1726`), and `StateProjectionBridge.kt` is explicitly "a thin editor-side bridge for the Rust-owned state backbone." **The gap:** the plugins consume that projection as a *pull/render JSON snapshot* — there's no reactive subscription, so the editor state machine/graph re-renders on observed events instead of auto-syncing from FFI state. Closing that with the lazily family is exactly the ask.
-
-**Target:** FFI (lazily-rs) owns the authoritative reactive state graph; each plugin holds a *mirror* lazily graph that applies FFI-emitted deltas, so `EditorCommandStateMachine` derives from tracked cells instead of manual re-render. Plan filed: `tasks/agent-doc/plan-lazily-plugin-state-sync.md`. Backlog (priority order):
-
-1. **#lazilystatesync1** — define the `lazily-spec` wire shape for the state projection (machine nodes + graph edges + generation) so FFI emits *deltas*, versioned so kt/js/rs stay in lockstep.
-2. **#lazilystatesync2** — back `agent_doc_state_projection` with a `lazily-rs` `Context`/`Cells` graph + add `agent_doc_state_subscribe` delta export (keep the snapshot as cold-read).
-3. **#lazilystatesync3** — JB: `lazily-kt` mirror graph applying FFI deltas; `EditorCommandStateMachine` becomes a derived cell.
-4. **#lazilystatesync4** — VSCode: `lazily-js` mirror.
-5. **#lazilystatesync5** — parity + tests (lazily-spec conformance + FFI round-trip proving kt/js mirror converges to the rs authoritative graph).
-
-**Top of backlog:** `#lazilystatesync1`. Note the `lazily-*` sibling repos stay confirmed/queued for their own sessions per scope-discipline — steps 1–2 anchor in this repo's FFI + lazily-spec/rs, 3–4 in the editor plugins. Each step is its own focused cycle.
-<!-- agent:boundary:c72bc4ed -->
+- Archived 5 response topic(s): bounded session-startup wait + isolating why the session hangs; state machine for the wait machinery + Lean no-hang proof; IPC proof diagnostic (interrupted-cycle recovery); 2 more
+- Prior summary/context: prior compacted content: Archived 7 response topic(s): #jbrestartbusy; queue resume + flood-pin dedup; live verify (y...
+<!-- agent:boundary:7f4bc29e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~What are #next-steps to use lazily-ky and lazily-js to sync the plugin state machines and state graphs from the FFI plugin?~~
+- 🚧 :pushpin: [#56ta]
+- :pushpin: [#vm7g]
+- :pushpin: [#n529]
+- :pushpin: [#r5at]
+- :pushpin: [#6n5j]
+- :pushpin: [#gghx]
+- :pushpin: [#8g9w]
+- :pushpin: [#6mjw]
+- :pushpin: [#spy9]
+- [#nsfz]
 ---
-🚧 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
+:round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
 resync: pruned 2 stale session(s)
 [route] target tmux session: 0
@@ -229,20 +130,11 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 ```
 ---
 - ~~:round_pushpin: do [#rt83qflood]~~
-- [#vm7g]
-- [#n529]
-- [#r5at]
-- [#6n5j]
 - I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?
 - I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?
-- [#gghx]
 - Still getting JB `File Cache Conflict` dialogs.
 - Opencode responses are reverse ordering numeric lists.
-- [#8g9w]
-- [#6mjw]
-- [#spy9]
 - [#actorswitchdefer]
-- [#56ta]
 - do [#npe1]
 - do [#p2j4]
 - do [#4pdp]

@@ -110,7 +110,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=05a50802c4ec76199164014dc39faf3c110c3ce588b2b27623ecb7d07014d8cc content_len=21783 content_hash=6774359487524b8e2822e9646d5660975e8c7f4539a544f4c759b173469c6c1f doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782362390987
 ```
-<!-- agent:boundary:e1646f68 -->
+<!-- agent:boundary:ca847cf1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -292,7 +292,7 @@ What are #next-steps to fix bugs?
 - [ ] [#vwj7] #queuestatemachine1 Define queue-item identity + lifecycle-state model (Authored→Mirrored→InProgress→Answered→Struck→Reaped) + pure transition fn with exhaustive (state×event) tests. Replaces ad-hoc dedup passes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
 - [ ] [#cgfx] #queuestatemachine2 Route convergence through the SM; reduce dedup passes to transition guards; property test idempotence (re-emit=no-op) over #rt83qflood/#qdedupsync/#qauthorder duplication shapes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
 - [ ] [#brtc] #queuestatemachine3 SimWorld: stale-CRDT/supervisor re-emit storm converges to one item per identity; operator position-lock survives. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
-- [ ] [#fnxy] #mergestatemachine1 Define FFI write-ownership SM (Detached→Attached→EditorOwnsBuffer→BinaryWriteRequested→IpcAckProven→Committed) + editor-heartbeat liveness probe distinguishing live-editor from stale listener (#6b5h). Plan: tasks/agent-doc/plan-merge-control-state-machine.md
+- [ ] 🚧 [#fnxy] #mergestatemachine1 Define FFI write-ownership SM (Detached→Attached→EditorOwnsBuffer→BinaryWriteRequested→IpcAckProven→Committed) + editor-heartbeat liveness probe distinguishing live-editor from stale listener (#6b5h). Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#t4x1] #mergestatemachine2 Gate try_ipc/commit/disk-write on the ownership SM; route Detached/stale writes to controller-host disk path so CLI-only/no-editor never wedges on no_ack. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#kj5f] #mergestatemachine3 JB+VSCode report attach/detach/ownership through SM (thin reporters via #lazilystatesync); SimWorld + live repro for File Cache Conflict + #6b5h wedge. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#r5at] #lazilystatesync4 VSCode plugin: lazily-js mirror graph applying FFI state deltas. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md

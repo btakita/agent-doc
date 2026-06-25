@@ -111,7 +111,23 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=file_ipc patch_id=c33e70a3-1965-4729-a7cb-c0a94ab663b1 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0.json doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782349156751
 ```
-<!-- agent:boundary:4ced9fb1 -->
+
+### Re: JB Run-Agent-Doc harness-switch defer (codex→opencode) — opus-4.8
+
+> **Queue prompt:**
+>
+> :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change. (`route_authoritative_actor_harness_mismatch_deferred ... deferring to boundary agent restart instead of replacing live pane`)
+
+This is tracked as **#actorswitchdefer** with a full root-cause in `tasks/agent-doc/plan-actor-switch-defer-recovery.md`. Summary:
+
+- **Not a regression — an intended dead-end.** The route bail is the `#agentreloadrestart` kill-guard: `mismatched_authoritative_actor_can_be_replaced` returns `false` for a *healthy, non-closed* old-harness (codex) authority, so route refuses to cold-replace the live pane and defers the switch to the supervisor idle-watch boundary restart. The deferred restart **dead-ends** when the supervisor is paused/stale, the pane never reaches a `prompt_visible && !turn_active` boundary, or `agent_change_restart` is disabled — which is why you had to kill+restart manually.
+- **Part A shipped** (`6c7455a8`): the defer bail is now operator-actionable — it surfaces supervisor health / queue-paused / pane-not-ready state and the `agent-doc session restart-supervisor <FILE>` (`--force`) single-shot recovery instead of a silent dead-end.
+- **This cycle:** I reconciled the spec contradiction I found — `SPEC.md:141` claimed an explicit harness switch always "falls back to the normal create/rebind path," which **contradicted** the shipped defer/kill-guard. It now correctly states: non-live old actor → cold-rebind; live authority → defer to boundary restart (`agent_restart_performed old=codex new=opencode`) + the `session restart-supervisor` recovery. Committed + pushed (agent-doc `d2312da7`, pointer `7b9bb0c3c`); `make check` 5101 passed.
+
+**Reactive auto-pickup (your actual ask) — remaining Part B, routed to a focused cycle.** The mechanism to make the deferred restart *fire reliably* + prove it needs **new SimWorld restart-flow infrastructure** (there is currently no `harness_change_detected` / `agent_restart_performed` SimWorld test to extend) plus a route-side explicit bail when `agent_change_restart` is disabled. Its own plan mandates a focused cycle with `make tmux-ci` (the unrunnable two-pane leg). This `/loop` is already several heavy deliverables deep with active IPC recovery-churn, so per the deep-supervisor-refactor rule I tagged **#actorswitchdefer `[focused-cycle]`** rather than author live-supervisor-critical test infra mid-churn. It stays an actionable backlog item (not a review gate), draining in a fresh focused cycle.
+
+**Today's workaround:** after switching `agent:`, run `agent-doc session restart-supervisor tasks/professional/equityfundingsource.md` (add `--force` if the codex pane is busy/stuck) — that re-resolves the harness and brings up opencode without the manual kill+restart.
+<!-- agent:boundary:5ad4d726 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -278,7 +294,7 @@ What are #next-steps to fix bugs?
 - [ ] [#p2j4] #jbcfdiag=JB File Cache Conflict: investigate remaining write-path triggering the JB VFS dialog beyond IPC-first writes
 - [ ] [#4pdp] #ocreverselist=OpenCode reverse-ordered numeric list rendering investigation
 - [ ] [#0bmv] #qeditrace=Consolidate queue-edit-during-active-turn race plans (plan-qdurcrash + plan-supervisor-direct-queue-edit-race)
-- [ ] [#actorswitchdefer] Part B: SimWorld proof idle-watch fires restart when deferred + reconcile SPEC.md:141 defer contract. Part A shipped (6c7455a8).
+- [ ] [#actorswitchdefer] [focused-cycle] Part B: NEW SimWorld restart-flow tests (codex→opencode: assert route defers + idle-watch emits harness_change_detected→agent_restart_triggered→agent_restart_performed; paused/stuck regression asserts defer-bail recovery suffix + no silent drop) + route-side agent_change_restart-disabled explicit bail. Part A shipped (6c7455a8); SPEC.md:141 defer contract reconciled (d2312da7). Needs make tmux-ci + new restart-flow SimWorld infra. Plan: tasks/agent-doc/plan-actor-switch-defer-recovery.md
 <!-- /agent:backlog -->
 
 ## Review

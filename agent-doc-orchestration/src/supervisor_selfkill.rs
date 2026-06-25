@@ -227,6 +227,15 @@ fn pid_is_self_or_ancestor(pid: u32) -> bool {
     }
 }
 
+/// Public wrapper around [`pid_is_self_or_ancestor`] for the dead-supervisor
+/// cold-start safety gate (`#supdead-coldstart-fallback`): a recovery command
+/// must not cold-start / replace the supervisor that is this caller's own pane or
+/// ancestor (that would tear down the caller).
+#[cfg(unix)]
+pub fn pid_is_self_or_ancestor_pub(pid: u32) -> bool {
+    pid_is_self_or_ancestor(pid)
+}
+
 #[cfg(unix)]
 fn process_is_alive(pid: u32) -> bool {
     let ret = unsafe { libc::kill(pid as libc::pid_t, 0) };

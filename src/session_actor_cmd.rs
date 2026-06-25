@@ -396,6 +396,37 @@ pub fn restart(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
         guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Restart)?;
     }
     prepare_restart_live_busy_pane(&ctx, &tmux, force)?;
+    // `#supdead-coldstart-fallback`: if the supervisor PROCESS is dead (stale
+    // socket / no listener — ECONNREFUSED), an in-place restart IPC cannot reach
+    // it. Cold-start a fresh supervisor (controller-mediated, via the route path)
+    // instead of surfacing a raw `Connection refused (os error 111)`; if a safe
+    // cold-start is not possible from this caller, hand back actionable guidance.
+    match classify_dead_supervisor_recovery(&ctx) {
+        DeadSupervisorRecovery::InPlaceLive => {}
+        DeadSupervisorRecovery::ColdStart => {
+            agent_doc_orchestration::ops_log::log_op(
+                &ctx.canonical_file,
+                &format!(
+                    "session_restart_dead_supervisor_cold_start file={} stage={} socket={}",
+                    ctx.canonical_file.display(),
+                    authorization.accepted_stage,
+                    ctx.supervisor_socket.display()
+                ),
+            );
+            return cold_start_supervisor_for(&ctx);
+        }
+        DeadSupervisorRecovery::Guidance(message) => {
+            agent_doc_orchestration::ops_log::log_op(
+                &ctx.canonical_file,
+                &format!(
+                    "session_restart_dead_supervisor_guidance file={} socket={}",
+                    ctx.canonical_file.display(),
+                    ctx.supervisor_socket.display()
+                ),
+            );
+            anyhow::bail!("{message}");
+        }
+    }
     ensure_supervisor_socket(&ctx)?;
     let response = agent_doc_orchestration::supervisor::ipc::send_command(
         &ctx.supervisor_socket,
@@ -2880,6 +2911,174 @@ fn ensure_supervisor_socket(ctx: &SessionContext) -> Result<()> {
     Ok(())
 }
 
+/// `#supdead-coldstart-fallback`: the recovery decision for a dead supervisor.
+///
+/// `session restart-supervisor` and (the supervisor-socket leg of) `admin recycle`
+/// connect to the supervisor socket to deliver an in-place restart/recycle. When
+/// the supervisor PROCESS is dead and only a stale socket file remains, that
+/// connect fails with a raw `Connection refused (os error 111)` and the command
+/// gives up. Those commands restart a *live* supervisor but cannot bootstrap a
+/// *dead* one. On the dead case we want to reap the stale socket and cold-start a
+/// fresh supervisor through the existing route path — unless cold-starting from
+/// this caller's context would be unsafe, in which case we hand back actionable
+/// guidance instead of a bare ECONNREFUSED.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DeadSupervisorRecovery {
+    /// The supervisor is live — take the normal in-place restart/recycle path.
+    InPlaceLive,
+    /// The supervisor is dead — reap the stale socket and cold-start a fresh one
+    /// via the route path.
+    ColdStart,
+    /// The supervisor is dead but a safe cold-start cannot be performed from this
+    /// caller (the caller is the dead supervisor's own pane/ancestor, or no
+    /// route/controller context is reachable). Surface this actionable message.
+    Guidance(String),
+}
+
+/// Inputs to [`decide_dead_supervisor_recovery`], kept as a plain struct so the
+/// decision is a pure, unit-testable function with no process/socket I/O.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DeadSupervisorRecoveryInputs {
+    /// Socket liveness as probed by `supervisor::ipc::probe_socket`.
+    socket_dead: bool,
+    /// A live route-owned supervisor PID was found for this doc AND it is this
+    /// caller's own process / ancestor. When the socket is dead this is normally
+    /// `false` (the process is gone), but a transient stale-socket-with-live-proc
+    /// race must still refuse a self-targeting cold-start.
+    caller_is_own_ancestor: bool,
+    /// Whether a cold-start can resolve a tmux target session from this context.
+    /// `false` when the caller is not inside tmux and no session override exists,
+    /// so spawning a route-owned pane is impossible.
+    can_resolve_tmux_target: bool,
+}
+
+fn decide_dead_supervisor_recovery(
+    file: &Path,
+    socket: &Path,
+    inputs: &DeadSupervisorRecoveryInputs,
+) -> DeadSupervisorRecovery {
+    if !inputs.socket_dead {
+        return DeadSupervisorRecovery::InPlaceLive;
+    }
+    if inputs.caller_is_own_ancestor {
+        return DeadSupervisorRecovery::Guidance(format!(
+            "supervisor for {} is dead (stale socket {}), not just unreachable, but its process is this session's own pane/ancestor — refusing an unsafe in-process cold-start. Cold-start a fresh supervisor by running `Run Agent Doc` on the document (or `agent-doc start --route-owned {}`) from a DIFFERENT pane, or restart this pane.",
+            file.display(),
+            socket.display(),
+            file.display()
+        ));
+    }
+    if !inputs.can_resolve_tmux_target {
+        return DeadSupervisorRecovery::Guidance(format!(
+            "supervisor for {} is dead (stale socket {}), not just unreachable — but no tmux target session is reachable from here to cold-start a replacement. Cold-start a fresh supervisor by running `Run Agent Doc` on the document (or `agent-doc start --route-owned {}`) from inside the editor's tmux session.",
+            file.display(),
+            socket.display(),
+            file.display()
+        ));
+    }
+    DeadSupervisorRecovery::ColdStart
+}
+
+/// Probe the supervisor socket + caller context and classify the dead-supervisor
+/// recovery decision for `ctx`. Wraps [`decide_dead_supervisor_recovery`] with the
+/// real socket/process/tmux I/O.
+fn classify_dead_supervisor_recovery(ctx: &SessionContext) -> DeadSupervisorRecovery {
+    let socket_dead = matches!(
+        agent_doc_orchestration::supervisor::ipc::probe_socket(&ctx.supervisor_socket),
+        agent_doc_orchestration::supervisor::ipc::SocketLiveness::Dead
+    );
+    let caller_is_own_ancestor = caller_is_supervisor_ancestor(&ctx.canonical_file);
+    // A cold-start spawns a route-owned pane via `resolve_target_session`, which
+    // needs either a live tmux session the caller is inside (`in_tmux`) or a
+    // configured project tmux session to target.
+    let can_resolve_tmux_target = agent_doc_orchestration::sessions::in_tmux()
+        || agent_doc_orchestration::project_config_io::project_tmux_session().is_some();
+    decide_dead_supervisor_recovery(
+        &ctx.canonical_file,
+        &ctx.supervisor_socket,
+        &DeadSupervisorRecoveryInputs {
+            socket_dead,
+            caller_is_own_ancestor,
+            can_resolve_tmux_target,
+        },
+    )
+}
+
+/// Best-effort: is a live route-owned supervisor for `file` this caller's own
+/// ancestor? Reuses the same self/ancestor guard `admin kill-supervisor` uses so
+/// the cold-start fallback never commandeers/replaces the caller's own pane.
+fn caller_is_supervisor_ancestor(file: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        if let Some(pid) =
+            agent_doc_orchestration::supervisor_selfkill::supervisor_pid_for_doc(file)
+        {
+            return agent_doc_orchestration::supervisor_selfkill::pid_is_self_or_ancestor_pub(pid);
+        }
+        false
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = file;
+        false
+    }
+}
+
+/// Cold-start a fresh route-owned supervisor for `ctx` after reaping a stale
+/// dead socket. Reuses the existing `route::startup::auto_start` cold-start path
+/// (the same one `sync`/route use), so the fresh supervisor comes up on the
+/// installed binary, controller-mediated.
+fn cold_start_supervisor_for(ctx: &SessionContext) -> Result<()> {
+    // Reap the stale socket so the fresh supervisor can bind cleanly.
+    if ctx.supervisor_socket.exists() {
+        match std::fs::remove_file(&ctx.supervisor_socket) {
+            Ok(()) => agent_doc_orchestration::ops_log::log_op(
+                &ctx.canonical_file,
+                &format!(
+                    "supervisor_cold_start_reaped_stale_socket file={} socket={}",
+                    ctx.canonical_file.display(),
+                    ctx.supervisor_socket.display()
+                ),
+            ),
+            Err(err) => {
+                eprintln!(
+                    "[restart-supervisor] warning: failed to reap stale socket {}: {err}",
+                    ctx.supervisor_socket.display()
+                );
+            }
+        }
+    }
+    let tmux = Tmux::default_server();
+    let file_str = ctx.canonical_file.to_string_lossy().to_string();
+    let pane_id = agent_doc_orchestration::route::auto_start(
+        &tmux,
+        &ctx.canonical_file,
+        &ctx.session_id,
+        &file_str,
+        None,
+    )
+    .with_context(|| {
+        format!(
+            "failed to cold-start a fresh supervisor for {} after a dead supervisor socket",
+            ctx.canonical_file.display()
+        )
+    })?;
+    agent_doc_orchestration::ops_log::log_op(
+        &ctx.canonical_file,
+        &format!(
+            "supervisor_cold_start_fallback file={} pane={} reason=dead_supervisor_socket",
+            ctx.canonical_file.display(),
+            pane_id
+        ),
+    );
+    println!(
+        "Cold-started a fresh supervisor for {} in pane {} (the previous supervisor process was dead — only a stale socket remained).",
+        ctx.canonical_file.display(),
+        pane_id
+    );
+    Ok(())
+}
+
 fn session_log_path(base_dir: &Path, session_id: &str) -> PathBuf {
     base_dir
         .join(".agent-doc/logs")
@@ -3577,6 +3776,101 @@ mod tests {
             supervisor_lease: None,
             dispatch_attempts: Vec::new(),
             projection_diagnostics: Vec::new(),
+        }
+    }
+
+    // --- `#supdead-coldstart-fallback` dead-supervisor recovery decision ---
+
+    fn dead_inputs() -> DeadSupervisorRecoveryInputs {
+        DeadSupervisorRecoveryInputs {
+            socket_dead: true,
+            caller_is_own_ancestor: false,
+            can_resolve_tmux_target: true,
+        }
+    }
+
+    #[test]
+    fn live_supervisor_takes_in_place_path() {
+        let file = Path::new("/tmp/doc.md");
+        let sock = Path::new("/tmp/x.sock");
+        let inputs = DeadSupervisorRecoveryInputs {
+            socket_dead: false,
+            ..dead_inputs()
+        };
+        assert_eq!(
+            decide_dead_supervisor_recovery(file, sock, &inputs),
+            DeadSupervisorRecovery::InPlaceLive
+        );
+    }
+
+    #[test]
+    fn dead_supervisor_cold_starts_when_safe() {
+        let file = Path::new("/tmp/doc.md");
+        let sock = Path::new("/tmp/x.sock");
+        assert_eq!(
+            decide_dead_supervisor_recovery(file, sock, &dead_inputs()),
+            DeadSupervisorRecovery::ColdStart
+        );
+    }
+
+    #[test]
+    fn dead_supervisor_own_ancestor_returns_guidance_not_forced_spawn() {
+        let file = Path::new("/tmp/doc.md");
+        let sock = Path::new("/tmp/x.sock");
+        let inputs = DeadSupervisorRecoveryInputs {
+            caller_is_own_ancestor: true,
+            ..dead_inputs()
+        };
+        match decide_dead_supervisor_recovery(file, sock, &inputs) {
+            DeadSupervisorRecovery::Guidance(msg) => {
+                assert!(msg.contains("own pane/ancestor"), "msg: {msg}");
+                assert!(msg.contains("dead"), "msg: {msg}");
+                assert!(
+                    !msg.contains("os error 111") && !msg.contains("Connection refused"),
+                    "guidance must not surface raw ECONNREFUSED: {msg}"
+                );
+            }
+            other => panic!("expected Guidance, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dead_supervisor_no_tmux_target_returns_guidance() {
+        let file = Path::new("/tmp/doc.md");
+        let sock = Path::new("/tmp/x.sock");
+        let inputs = DeadSupervisorRecoveryInputs {
+            can_resolve_tmux_target: false,
+            ..dead_inputs()
+        };
+        match decide_dead_supervisor_recovery(file, sock, &inputs) {
+            DeadSupervisorRecovery::Guidance(msg) => {
+                assert!(msg.contains("no tmux target session"), "msg: {msg}");
+                assert!(
+                    !msg.contains("os error 111"),
+                    "guidance must not surface raw ECONNREFUSED: {msg}"
+                );
+            }
+            other => panic!("expected Guidance, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn own_ancestor_gate_precedes_tmux_target_gate() {
+        // When BOTH the caller-is-ancestor risk and the no-tmux condition hold,
+        // the safety refusal (own-ancestor) must win over the tmux guidance so we
+        // never imply a forced spawn is the remedy.
+        let file = Path::new("/tmp/doc.md");
+        let sock = Path::new("/tmp/x.sock");
+        let inputs = DeadSupervisorRecoveryInputs {
+            caller_is_own_ancestor: true,
+            can_resolve_tmux_target: false,
+            ..dead_inputs()
+        };
+        match decide_dead_supervisor_recovery(file, sock, &inputs) {
+            DeadSupervisorRecovery::Guidance(msg) => {
+                assert!(msg.contains("own pane/ancestor"), "msg: {msg}")
+            }
+            other => panic!("expected own-ancestor Guidance, got {other:?}"),
         }
     }
 

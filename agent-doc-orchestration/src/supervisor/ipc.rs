@@ -434,6 +434,63 @@ fn try_connect(sock: &Path) -> Result<interprocess::local_socket::Stream> {
     Ok(stream)
 }
 
+/// Liveness classification of a supervisor socket, used by recovery commands
+/// (`session restart-supervisor`, `admin recycle`) to distinguish a fully-DEAD
+/// supervisor (only a stale socket file remains, or no file at all — no listener
+/// to accept a connection) from a LIVE supervisor (`connect()` succeeds) so the
+/// dead case can cold-start a fresh supervisor instead of surfacing a raw
+/// `Connection refused (os error 111)` (#supdead-coldstart-fallback).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SocketLiveness {
+    /// `connect()` succeeded — a supervisor is listening (it may still be busy /
+    /// slow to ack, but the process is alive). In-place restart/recycle applies.
+    Live,
+    /// No listener: the socket file is missing, or it exists but `connect()` was
+    /// actively refused (`ECONNREFUSED` — a stale socket left by a dead process).
+    /// This is the cold-start case.
+    Dead,
+}
+
+/// Returns whether a connect error is the dead-supervisor signature
+/// (`ECONNREFUSED` — the kernel actively refused because no process is listening
+/// on the AF_UNIX socket path). Any other connect failure (permission, name
+/// resolution) is treated as NOT-dead so we never cold-start over an ambiguous
+/// error.
+fn connect_error_is_econnrefused(err: &anyhow::Error) -> bool {
+    for cause in err.chain() {
+        if let Some(io) = cause.downcast_ref::<std::io::Error>()
+            && io.kind() == std::io::ErrorKind::ConnectionRefused
+        {
+            return true;
+        }
+        // interprocess wraps the OS error; fall back to the os-error code in the
+        // rendered chain when the concrete io::Error is not directly downcastable.
+        if cause.to_string().contains("os error 111") {
+            return true;
+        }
+    }
+    false
+}
+
+/// Probe a supervisor socket and classify it as [`SocketLiveness::Live`] or
+/// [`SocketLiveness::Dead`]. A missing socket file is `Dead`; an existing file
+/// that refuses the connection (`ECONNREFUSED`) is `Dead`; a successful connect
+/// is `Live`. Any other connect error is conservatively reported as `Live` (we
+/// do not have positive proof the process is gone) so the caller falls back to
+/// the existing in-place path rather than risking a duplicate cold-start.
+pub fn probe_socket(sock: &Path) -> SocketLiveness {
+    if !sock.exists() {
+        return SocketLiveness::Dead;
+    }
+    match try_connect(sock) {
+        Ok(_) => SocketLiveness::Live,
+        Err(err) if connect_error_is_econnrefused(&err) => SocketLiveness::Dead,
+        // Ambiguous error (e.g. permission): do not assert death — keep the
+        // in-place path so we never cold-start over a live-but-unreachable peer.
+        Err(_) => SocketLiveness::Live,
+    }
+}
+
 /// Send a command to a supervisor and read the response.
 ///
 /// Connects to the socket, sends the command as NDJSON, and reads one
@@ -575,6 +632,55 @@ mod tests {
         assert_eq!(resp.data.unwrap()["mode"], "fresh");
 
         ipc.stop();
+    }
+
+    // --- `#supdead-coldstart-fallback` socket liveness probe ---
+
+    #[test]
+    fn probe_socket_reports_live_for_listening_supervisor() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let mut ipc = start_echo_handler(root, "test-probe-live");
+        std::thread::sleep(Duration::from_millis(50));
+
+        let sock = socket_path(root, "test-probe-live");
+        assert_eq!(probe_socket(&sock), SocketLiveness::Live);
+
+        ipc.stop();
+    }
+
+    #[test]
+    fn probe_socket_reports_dead_for_missing_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("nonexistent.sock");
+        assert_eq!(probe_socket(&sock), SocketLiveness::Dead);
+    }
+
+    #[test]
+    fn probe_socket_reports_dead_for_stale_socket_no_listener() {
+        // A stale socket file with no listening process is the exact
+        // dead-supervisor signature: the file exists but `connect()` is refused.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/supervisor")).unwrap();
+        let sock = socket_path(root, "test-probe-stale");
+
+        // Bind+drop a listener to materialize a real socket file, then ensure no
+        // process is listening on it (drop closes the listener but on some
+        // platforms leaves the path); fall back to creating a plain file so the
+        // path exists with no listener either way.
+        {
+            let mut ipc = start_echo_handler(root, "test-probe-stale");
+            std::thread::sleep(Duration::from_millis(30));
+            ipc.stop();
+        }
+        if !sock.exists() {
+            std::fs::write(&sock, b"").unwrap();
+        }
+        assert!(sock.exists(), "stale socket path should exist for the probe");
+        assert_eq!(probe_socket(&sock), SocketLiveness::Dead);
     }
 
     #[test]

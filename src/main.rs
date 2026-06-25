@@ -3257,8 +3257,14 @@ fn main() -> anyhow::Result<()> {
                             root.display()
                         );
                     } else {
+                        // `#supdead-coldstart-fallback`: a no-op recycle here often
+                        // means the operator is actually trying to revive a DEAD
+                        // supervisor. `admin recycle` only re-execs a *live*
+                        // controller onto the fresh binary; it cannot cold-start a
+                        // dead supervisor. Point at the cold-start remedy instead of
+                        // a bare "nothing to recycle".
                         println!(
-                            "[admin] recycle: no running controller for {} (nothing to recycle)",
+                            "[admin] recycle: no running controller for {} (nothing to recycle). If a supervisor is DEAD (stale socket), `admin recycle` cannot revive it — cold-start a fresh one with `agent-doc session restart-supervisor <FILE>` (JB \"Recycle Supervisor\") or `Run Agent Doc` on the document.",
                             root.display()
                         );
                     }

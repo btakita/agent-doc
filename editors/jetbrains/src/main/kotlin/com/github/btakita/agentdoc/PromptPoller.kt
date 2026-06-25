@@ -159,9 +159,25 @@ class PromptPoller(private val project: Project) : Disposable {
                     if (!tracked.file.isValid) continue
                     val doc = fdm.getDocument(tracked.file) ?: continue
                     if (fdm.isDocumentUnsaved(doc)) {
-                        tracked.file.refresh(false, false)
-                        val currentStamp = tracked.file.modificationStamp
-                        if (currentStamp != tracked.lastKnownModStamp) {
+                        // #p2j4 / #jbcfdiag — this branch only runs for an UNSAVED buffer,
+                        // and it runs on the 1.5s poll timer regardless of any agent
+                        // activity. A bare content-bearing `VirtualFile.refresh(false,
+                        // false)` here arms IntelliJ's memory↔disk "File Cache Conflict"
+                        // dialog whenever the on-disk bytes diverged from the unsaved
+                        // buffer (e.g. after an agent commit wrote the working tree) — it
+                        // was the dominant behind-editor trigger because it fires every
+                        // poll cycle, not just during an apply. Since
+                        // shouldRefreshVfsBeforeApplyUtil(unsaved) is always false here,
+                        // skip the refresh entirely and detect disk divergence by
+                        // comparing the document against the VFS-cached disk bytes
+                        // (mergeOrReload also reads disk this way). The BulkFileListener
+                        // delivers real external writes via VFileContentChangeEvent, so we
+                        // do not need a forced refresh to learn about divergence.
+                        if (shouldRefreshVfsBeforeApplyUtil(/* documentUnsaved = */ true)) {
+                            tracked.file.refresh(false, false)
+                        }
+                        val diskContent = String(tracked.file.contentsToByteArray(), Charsets.UTF_8)
+                        if (doc.text != diskContent) {
                             mergeOrReload(tracked)
                             tracked.lastKnownModStamp = tracked.file.modificationStamp
                         }
@@ -182,17 +198,40 @@ class PromptPoller(private val project: Project) : Disposable {
      * Refresh all tracked VirtualFiles — merge or reload if changed on disk.
      */
     private fun refreshTrackedFiles() {
+        val fdm = FileDocumentManager.getInstance()
         for ((_, tracked) in trackedFiles) {
             val file = tracked.file
             if (!file.isValid) continue
 
-            file.refresh(false, false)
-            val currentStamp = file.modificationStamp
-            if (currentStamp != tracked.lastKnownModStamp) {
-                tracked.lastKnownModStamp = currentStamp
-                ApplicationManager.getApplication().invokeLater {
-                    if (file.isValid) {
-                        mergeOrReload(tracked)
+            // #p2j4 / #jbcfdiag — only run a content-bearing VFS refresh when the
+            // buffer is clean (saved). Refreshing an UNSAVED buffer whose disk bytes
+            // diverged is what arms IntelliJ's "File Cache Conflict" dialog behind the
+            // editor, and this runs on the 1.5s poll timer. For an unsaved buffer we
+            // detect disk divergence by content comparison instead (mergeOrReload reads
+            // disk the same way), and the BulkFileListener already delivers real
+            // external writes. See shouldRefreshVfsBeforeApplyUtil.
+            val doc = fdm.getDocument(file)
+            val documentUnsaved = doc != null && fdm.isDocumentUnsaved(doc)
+            if (shouldRefreshVfsBeforeApplyUtil(documentUnsaved)) {
+                file.refresh(false, false)
+                val currentStamp = file.modificationStamp
+                if (currentStamp != tracked.lastKnownModStamp) {
+                    tracked.lastKnownModStamp = currentStamp
+                    ApplicationManager.getApplication().invokeLater {
+                        if (file.isValid) {
+                            mergeOrReload(tracked)
+                        }
+                    }
+                }
+            } else if (doc != null) {
+                // Unsaved buffer: skip the refresh; compare against VFS-cached disk
+                // bytes and merge if they diverged.
+                val diskContent = String(file.contentsToByteArray(), Charsets.UTF_8)
+                if (doc.text != diskContent) {
+                    ApplicationManager.getApplication().invokeLater {
+                        if (file.isValid) {
+                            mergeOrReload(tracked)
+                        }
                     }
                 }
             }

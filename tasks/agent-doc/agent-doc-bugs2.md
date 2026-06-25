@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: opencode
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -65,10 +65,28 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=389b42c4-39d7-4783-8d43-fd6f1dace5d6 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=26507 candidate_hash=7c80b60cd19df366ffdf926683a956b6744bdea9722b78e71b4fb1a98feb4ff9 content_ours_len=27760 content_ours_hash=e301451aceffd5dddeb58965306908b021966ef1f37a9ca040b0072aacfe96d7 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782364110435
 ```
-<!-- agent:boundary:8f583868 -->
+
+### Re: explicit id should be used when adding a backlog item — opus-4-8
+
+> **Queue prompt:** When adding a backlog item, the agent sometimes assigns an explicit id. But agent-doc ignores the explicit id and assigns a new id. The agent's explicit id should be used instead. So instead of `[#kj5f] #mergestatemachine3` the id should be `[#mergestatemachine3]`.
+
+**Fixed, tested, committed + pushed** (`#qexplicitid`, agent-doc `9fd0addc`; submodule pointer `7cf02962e`). Harness switched `opencode → claude` this cycle; preflight resolved it cleanly (no `harness_mismatch`), so Claude is now driving the drain.
+
+**What was wrong:** a leading bare `#tag` in `--pending-add` text was never promoted to the item id — only bracketed `[#tag]` / `id=tag` prefixes were. So `#mergestatemachine3 JB+VSCode report…` got a generated hash (`#kj5f`) with the tag left dangling in the text. The fix (`leading_bare_tag_id` in `agent-doc-core/src/pending.rs`) promotes a clean leading `#tag` followed by whitespace + more text:
+
+- `#mergestatemachine3 JB+VSCode report…` → `[#mergestatemachine3] JB+VSCode report…` ✅
+- `#lazilyspecpin=Pin …` → keeps an auto hash (trailing `=` disqualifies — compound topic labels are not id requests)
+- bare `#tag` alone on a line → left untouched (a reference, not an id request)
+- collision with an existing id → rejected (`inline tag id already exists`)
+
+Wired into both the add path (`op_add_at_with_outcome`) and explicit-id collision enforcement (`explicit_custom_id`). Added 4 unit tests; `make check` green (5132 passed, clippy clean); CI latest run green.
+
+**Note:** this only affects *future* adds. The existing `[#kj5f] #mergestatemachine3` backlog head keeps its hash — I'm not renaming it live (the IPC supervisor would race a manual id rewrite). It'll be picked up as `[#mergestatemachine3]` next time an agent re-adds that item. The new binary goes live via the supervisor's boundary auto-install — no manual `cargo install` this session (avoids finalize-client/supervisor drift).
+<!-- agent:boundary:67c62711 -->
 <!-- /agent:exchange -->
 
 ## Queue
+
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: [#56ta]~~
@@ -80,7 +98,7 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack
 - :pushpin: [#brtc]
 - :pushpin: do [#gww8]
 - :pushpin: do [#n529b]
-- When adding a backlog item, the agent sometimes assigns an explicit id. But agent-doc ignores the explicit id and assigns a new id. The agent's explicit id should be used instead. So instead of `[#kj5f] #mergestatemachine3` the id should be `[#mergestatemachine3]`.
+- ~~When adding a backlog item, the agent sometimes assigns an explicit id. But agent-doc ignores the explicit id and assigns a new id. The agent's explicit id should be used instead. So instead of `[#kj5f] #mergestatemachine3` the id should be `[#mergestatemachine3]`.~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: [#vwj7]
 - :pushpin: [#cgfx]
 - :pushpin: [#gghx]

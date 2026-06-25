@@ -148,7 +148,7 @@ Fixed and shipped (corky `bddfab0` on `origin/main`). Two display paths sliced s
 - Commit `bddfab0` — pushed.
 
 Next queue head: `#ckysheets` (P0 sheets-push two-call data loss).
-<!-- agent:boundary:f0f996dd -->
+<!-- agent:boundary:8248a742 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -161,7 +161,7 @@ Please give me a report the performance
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#ckyorphan]~~
 - ~~[#ckypanic]~~
-- [#ckysheets]
+- 🚧 [#ckysheets]
 - [#ckywatchpanic]
 - [#ckydedup]
 - [#ckythread]
@@ -178,7 +178,7 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ckysheets] [P0 data-loss] corky sheets push clears tab THEN writes in two HTTP calls; failure between them leaves tab empty with no backup. Use batchUpdate updateCells (atomic at API level) or buffer old values for rollback. crates/corky-google/src/doc/sheets.rs:148-174
+- [ ] 🚧 [#ckysheets] [P0 data-loss] corky sheets push clears tab THEN writes in two HTTP calls; failure between them leaves tab empty with no backup. Use batchUpdate updateCells (atomic at API level) or buffer old values for rollback. crates/corky-google/src/doc/sheets.rs:148-174
 - [ ] [#ckywatchpanic] [P1] corky watch dies on any tick panic: spawn_blocking(...).await? under panic=abort (Cargo.toml:89) propagates JoinError and aborts the daemon, contradicting the never-crashes-loop contract in watch.rs doc comments. Wrap each tick in catch_unwind and log instead of ?. src/watch.rs:309-312
 - [ ] [#ckydedup] [P1 correctness] dedup key (raw_from, raw_date) drops distinct same-second messages and leaks duplicates across providers (date string varies by TZ/format, From varies by display-name). Normalize address + parse date to UTC seconds + include message_id. crates/corky-mail/src/sync/imap_sync.rs:184-197
 - [ ] [#ckythread] [P1 correctness] threading gaps: IMAP path hardcodes message_id None (imap_sync.rs:542-552, breaks reply threading for IMAP accounts since **Message-ID** metadata is never written); no validation that in_reply_to AND thread_id are both set (draft/send.rs:91-104, reply silently un-threads); IMAP subject-key vs Gmail threadId-key never merge on provider switch.

@@ -39,7 +39,7 @@ queue: start
 Compacted content:
 - Archived 9 response topic(s): lazily bug-fix next-steps (cross-port); IPC proof diagnostic (interrupted-cycle recovery); #lzjshygiene node_modules purge; 6 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-<!-- agent:boundary:a57b7600 -->
+<!-- agent:boundary:562c1d22 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,7 +48,7 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- [#lzzigbeforechange]
+- 🚧 [#lzzigbeforechange]
 - [#lzzigalloc]
 - [#lzjshygiene]
 <!-- /agent:queue -->
@@ -56,7 +56,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzzigbeforechange] lazily-zig: implement before_change_subscribers (cell.zig:35 TODO). Add a pre-change notification path to Cell/Slot mirroring change_subscribers but firing BEFORE a value is committed; needs API design (callback signature ChangeCallback vs a before-variant, ordering vs emitChange, unsubscribe symmetry). Split from #lzzigtodos.
+- [ ] 🚧 [#lzzigbeforechange] lazily-zig: implement before_change_subscribers (cell.zig:35 TODO). Add a pre-change notification path to Cell/Slot mirroring change_subscribers but firing BEFORE a value is committed; needs API design (callback signature ChangeCallback vs a before-variant, ordering vs emitChange, unsubscribe symmetry). Split from #lzzigtodos.
 - [ ] [#lzzigalloc] lazily-zig: add allocator options to Context init (context.zig:615/619 TODOs) — option to use std.heap.c_allocator and/or std.heap.ArenaAllocator instead of the caller-supplied allocator. Needs API design (init flag vs builder, deinit ownership, interaction with build_options.link_libc). Split from #lzzigtodos.
 - [ ] [#lzjshygiene] lazily-js: node_modules NOT tracked (verified: git ls-files node_modules -> 0; .gitignore covers it; no commits touch it) — purge UNNEEDED, no history rewrite required. Remaining: validate conformance fixture assertions generically (parity with #lzktconf). npm test green (27 pass).
 <!-- /agent:backlog -->

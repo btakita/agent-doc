@@ -71,7 +71,7 @@ By criterion:
 **Next step filed:** `#lzmsgpack` is now the top backlog item. Scope: add negotiated `json|msgpack|postcard` codec support, route WebRTC/FFI through that abstraction, add cross-language conformance vectors, and benchmark JSON vs MessagePack vs postcard before changing any default. This was a design/selection cycle only; I did not edit protocol code or run the build suite.
 
 **Top backlog id: `#lzmsgpack`.**
-<!-- agent:boundary:58a4402d -->
+<!-- agent:boundary:54a068a9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -86,7 +86,7 @@ By criterion:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzmsgpack] [recommended] Implement negotiated MessagePack for lazily-ipc: add a codec enum/capability handshake (json|msgpack|postcard), add rmp-serde encode/decode for IpcMessage, route WebRtcSink/WebRtcSource and FFI helpers through the codec abstraction instead of hard-coded serde_json, add cross-language canonical fixtures/round trips, and benchmark JSON vs MessagePack vs postcard before changing any default. Keep JSON canonical/debug fallback; keep postcard Rust-local.
+- [ ] [#lzmsgpack] [recommended] Implement negotiated MessagePack for lazily-ipc: add a codec enum/capability handshake (json|msgpack|postcard), add rmp-serde encode/decode for IpcMessage, route WebRtcSink/WebRtcSource and FFI helpers through the codec abstraction instead of hard-coded serde_json, add cross-language canonical fixtures/round trips, and benchmark JSON vs MessagePack vs postcard before changing any default. Keep JSON canonical/debug fallback; keep postcard Rust-local.
 <!-- /agent:backlog -->
 
 ## Review

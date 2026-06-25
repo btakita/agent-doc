@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: claude
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -53,7 +53,31 @@ Compacted content:
 **2. Plugin/binary merge-control state machine (`#mergestatemachine`).** The `File Cache Conflict` dialogs and the `no_ack` / `retry_without_disk_write` / force-disk churn (nearly every closeout this session) are one bug: a **write race** between the binary's disk write and the editor/FFI plugin's buffer ownership, with no authoritative "does a live editor own this buffer right now?" state. Fix: an FFI-owned write-ownership SM — `Detached → Attached → EditorOwnsBuffer → BinaryWriteRequested → IpcAckProven → Committed` — where a disk write is **gated on a proven ownership transition** (write only when `Detached` or after `IpcAckProven`, never while the editor owns the buffer → no File Cache Conflict). A heartbeat probe distinguishes `EditorOwnsBuffer` from a stale listener (`#6b5h`) so a CLI-only session routes to the controller-host disk path instead of wedging on `no_ack`. The IPC-ack wait is bounded by `#waitmachine`'s `AwaitingIpcAck` ≤10s state — the two machines compose. Plan: `tasks/agent-doc/plan-merge-control-state-machine.md` (#mergestatemachine1–3).
 
 **These three converge.** `#waitmachine` (bounded waits, no hangs), `#queuestatemachine` (no dup queue items), `#mergestatemachine` (no merge races) — plus `#lazilystatesync` (plugins as thin reactive reporters) — are one **shared state-machine backbone**, ideally on the lazily-rs reactive `Cells` substrate. That's the systemic answer to the churn you've watched this session: stop patching duplication/race/hang shapes one at a time; represent each subsystem's state explicitly so the bad transitions don't exist. Filed 6 phase items (#queuestatemachine1–3, #mergestatemachine1–3).
-<!-- agent:boundary:546ec136 -->
+
+### Re: #56ta lazily-spec wire-shape + interrupted-cycle recovery + semantic triage — glm-5.2
+
+**Recovery (interrupted cycle).** The prior cycle's patchback (boundary `e8a0f33b`) + the `claude→opencode` harness switch + queue bookkeeping were visible in the doc but never git-committed. `agent-doc write --commit` refused (cycle already marked committed internally) and `repair` saw no orphan, so the recovery crossed the git boundary via `agent-doc commit` (`b852cf6bf` → `cdd26574e`); preflight then completed cleanly through step 4. No response body was fabricated — the existing patchback was reconciled as-is. The recurring `#postcommit-ipc-worktree-corruption` warning persists (CRDT-mode editor listener re-touches the working tree post-commit) — exactly the `#mergestatemachine` write-ownership race.
+
+**#56ta (lazilystatesync1) — wire shape defined + pinned.** The backbone is further along than the plan implied: `state_backbone.rs` already runs all 7 domains (Document/Queue/Closeout/Transport/Supervisor/Route/Proof) as `lazily::ThreadSafeStateMachine`s with idempotent `seen_event_ids` replay + per-`StateOwner` `generation` stale-rejection. So #56ta reduces to *mapping* that graph onto lazily-spec's existing `snapshot.json`/`delta.json` envelope, not building it. Pinned the full design in `plan-lazily-plugin-state-sync.md` ("Wire-shape definition"): type_tag vocabulary (8 node kinds), derivation edges, `epoch = accepted-event-count`, and the `agent_doc_state_subscribe` delta-derivation rules. Delta application is deterministic + idempotent because the projection is a pure fold of deduped events — the property `#queuestatemachine`/`#qdedupsync` need.
+
+**Only remaining step is out-of-repo:** pin the type_tag table as `lazily-spec/schemas/agent-doc-state.json` + a conformance snapshot/delta pair. Per the plan's scope-discipline (sibling `lazily-*` changes go in their own session), I did **not** commit inside `src/lazily-spec` from here — filed `#lazilyspecpin`. The in-repo FFI delta export is already tracked as `#vm7g`.
+
+**Semantic-completion triage — false positives, no items marked done.** The 3 warnings confuse *point fixes* with the *structural SM refactor*: `#6b5h` shipped the CLI `no_ack` wedge repro and `#qdedupsync` shipped a `render(parse(x))` dedup fix — symptom patches. `#fnxy`/`#kj5f`/`#cgfx` are the systemic refactors (explicit SMs, transition guards, idempotence property tests) that have **not** been built. Left open.
+
+Plan-doc edit is doc-only (no code/tests/build/instruction surface) → no `make check` this cycle.
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=file_ipc patch_id=9ab691b5-9b11-4928-a7e2-31fbf89e9264 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0.json doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782353889911
+```
+<!-- agent:boundary:3dc716d2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -64,6 +88,9 @@ Compacted content:
 - :pushpin: [#n529]
 - :pushpin: [#r5at]
 - :pushpin: [#6n5j]
+- [#vwj7]
+- [#cgfx]
+- [#brtc]
 - :pushpin: [#gghx]
 - :pushpin: [#8g9w]
 - :pushpin: [#6mjw]
@@ -224,6 +251,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#gww8] #lazilyspecpin=Pin agent-doc state type_tag vocabulary (8 node kinds) + conformance snapshot/delta pair in lazily-spec as schemas/agent-doc-state.json (versioned) so kt/js/rs import one canonical vocabulary. Design pinned in tasks/agent-doc/plan-lazily-plugin-state-sync.md (Wire-shape definition section). Sibling-repo (src/lazily-spec) cycle per scope-discipline.
 - [ ] [#vwj7] #queuestatemachine1 Define queue-item identity + lifecycle-state model (Authored→Mirrored→InProgress→Answered→Struck→Reaped) + pure transition fn with exhaustive (state×event) tests. Replaces ad-hoc dedup passes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
 - [ ] [#cgfx] #queuestatemachine2 Route convergence through the SM; reduce dedup passes to transition guards; property test idempotence (re-emit=no-op) over #rt83qflood/#qdedupsync/#qauthorder duplication shapes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
 - [ ] [#brtc] #queuestatemachine3 SimWorld: stale-CRDT/supervisor re-emit storm converges to one item per identity; operator position-lock survives. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md

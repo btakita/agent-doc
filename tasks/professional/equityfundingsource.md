@@ -87,7 +87,11 @@ Deployed to production from `3ac287a`.
 - **Post-deploy smoke**: `GET /` → 200.
 
 Operator live-verify: open a deal → Messages dialog → a per-user tab and confirm the compose textarea takes focus automatically.
-<!-- agent:boundary:4d54b66c -->
+
+### Re: Queue drained — glm-5.2
+
+Both queued items (per-user compose auto-focus + deploy) shipped this cycle (EFS `3ac287a`, worker `db976d48`); clearing the residue head.
+<!-- agent:boundary:c63f1d9e -->
 <!-- /agent:exchange -->
 ###
 <!--

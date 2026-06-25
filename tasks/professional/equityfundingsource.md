@@ -50,7 +50,30 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=58908d81-a732-4589-8343-6c07e5e6b498 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782376798544
 ```
-<!-- agent:boundary:4c9c7ba3 -->
+
+### Re: Full Application layout — dense Address/Employment/Income + Review & Sign completion status — opus-4-8
+
+Drained all three queue heads (EFS `5b62fa6`, deployed Version `cfb313d3`).
+
+> **Queue prompt:** Optimize the layout of …/admin/pipeline?…&dialog=application&dialog_application_id=5cfa7c7b-… > Full Application: Personal, Address, Employment, Income
+
+> **Queue prompt:** Optimize the layout of Review & Sign. Add a green checkmark if the borrower completed and a red x if not.
+
+> **Queue prompt:** deploy
+
+**Personal, Address, Employment, Income → dense.** Personal already rendered dense (responsive multi-column field grid). The three list sections — **Addresses, Employment, Income** — were one-field-per-row stacks. `EditableListSectionCard` + `RecordList` now take a `dense` flag that lays each record's read-only fields out in a responsive `.full-app-record-grid` (`repeat(auto-fit,minmax(140px,1fr))`, label-above-value), so all the data shows multiple-per-row with far less vertical scrolling. The edit forms are untouched. Shared component, so the borrower application-status view gets the same compact layout.
+
+**Review & Sign → completion status.** The card header now carries an **always-visible green-check (`check_circle`) / red-x (`cancel`) mark** for whether the borrower completed Review & Sign — visible even while the card is collapsed, so an admin sees completion at a glance. Inside, the three completion gates render dense with their own per-gate marks:
+- **E-sign consent** — green check if consented, red x if not (was a read-only checkbox).
+- **Signed** — green check + signed date, or red x + "Not signed".
+- **Submitted** — green check + submitted date, or red x + "Not submitted".
+
+Overall "completed" = e-sign consent **and** signed **and** submitted. Printed name / EFS status / TMO application stay as plain fields, now in the same responsive grid.
+
+**Verify + deploy.** Added a `#full-app-review-sign-status` regression test and updated the boolean-checkbox test for the E-sign → completion-mark change. `bun test` → **1228 pass / 0 fail**; `bun run build` + `build:worker` clean. Pushed `5b62fa6`, deployed Version `cfb313d3-a40a-4d05-aec6-246e689458bc`. Post-deploy smoke `GET /` → 200. No CI workflow in the EFS repo, so the local suite + build are the evidence.
+
+Reload the `dialog=application` → **Open Full Application** path to see the denser Address/Employment/Income cards and the Review & Sign green-check/red-x status.
+<!-- agent:boundary:57a00c2a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -71,7 +94,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - 🚧 Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Full Application: Personal, Address, Employment, Income
-- Optimize the layout of Review & Sign. Add a green checkmark if the borrower completed and a red x if not.
+- ~~Optimize the layout of Review & Sign. Add a green checkmark if the borrower completed and a red x if not.~~ — auto-struck: answered this cycle (#ftstrike)
 - deploy
 <!-- /agent:queue -->
 

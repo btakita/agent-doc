@@ -64,7 +64,7 @@ Done. Available Deal pipeline cards now show how many lenders have expressed int
 Coverage: added unit assertions in `tests/admin-pipeline.test.ts` for the count passthrough and the 0-default. Full suite green (`bun run check` -> 1217 pass / 0 fail) plus build + worker bundle.
 
 Committed (`47e7949`, pushed to `origin/main`) and deployed this pipeline change to Cloudflare Workers (remote D1 migrations applied) — `https://equityfundingsource.brian-takita.workers.dev`, Version ID `db46084f-d881-4b51-90d6-a6d35c55f55c`. (The trailing `deploy` queue head stays active as the campaign-final deploy after the newly-queued Messages-dialog tasks.)
-<!-- agent:boundary:2bb6f831 -->
+<!-- agent:boundary:2241bf03 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,7 +85,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline > Available Deal cards should show the number of interested lenders.~~
-- When opening the Messages dialog on user context, the user search in the Messages dialog should not be rendered. Only show the conversation(s) with the users related to the user context.
+- 🚧 When opening the Messages dialog on user context, the user search in the Messages dialog should not be rendered. Only show the conversation(s) with the users related to the user context.
 - Remove the All Messages tab in the Messages dialog.
 - Add an All tab in Messages dialog > Messages tab...a sibling to Borrowers|Lenders|Brokers. This tab effectively replaces the removed All Messages tab.
 - deploy

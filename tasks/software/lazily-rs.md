@@ -155,7 +155,7 @@ A spreadsheet is input cells (`Cell`) + formula cells (`computed`/`signal`, memo
 Plus the measurement gap above: a **≥1M-node benchmark** (realistic fan-out/depth, full + viewport recalc) so the scale claim is evidence-backed. → filed `#lzscalebench`.
 
 **Bottom line:** capacity and core recalc semantics are genuinely there, and the lazy + glitch-free + memoized model is a strong fit — better than most reactive libs for this. To call it a production spreadsheet backend you need (1) cycle detection, (2) keyed A1 addressing (already filed), and (3) a 1M-scale benchmark plus a parallel-recalc story. New follow-ups are filed gated (`[recommended]`, awaiting your go).
-<!-- agent:boundary:0f401503 -->
+<!-- agent:boundary:7fc22ce1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -174,6 +174,8 @@ Plus the measurement gap above: a **≥1M-node benchmark** (realistic fan-out/de
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [/] [#lzcycledetect] [recommended] Add circular-reference / dependency-cycle detection to the recompute walk (no cycle guard exists in src today): a cycle (A=B+1,B=A+1) infinite-recomputes / overflows. Detect during dependency tracking + surface a #CIRCULAR!-style error value rather than diverging. Prereq for spreadsheet use. Gated: awaiting operator go.
+- [/] [#lzscalebench] [recommended] Add a >=1M-node benchmark (realistic fan-out/depth, full recalc + viewport/lazy recalc, memory footprint) so >1M-cell performance is evidence-backed. Current suite tops out at fan-out 512. Gated: awaiting operator go.
 - [/] [#lzcellfamily] [recommended] CellFamily / CellMap keyed reactive collection primitive: index cell (reactive membership: add/remove keys) + per-entry value cells minted/cached via get_or_create(key), freed on removal; replaces ad-hoc Cell<HashMap<K,V>> coarse model. Plan first. Gated: design recommendation from dynamic-cells Q&A, awaiting operator go.
 - [/] [#lzwirekey] [recommended] Add optional key/path field to NodeAdd + NodeSnapshot so CellFamily entries are addressable by a stable key (key->NodeId registry) surviving NodeId churn across reconnect/resync. Depends on #lzcellfamily. Gated: awaiting operator go.
 <!-- /agent:backlog -->

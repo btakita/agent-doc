@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: opencode
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -34,66 +34,12 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260624-232840.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260625-004903.md`*
 
 Compacted content:
-- Archived 11 response topic(s): JB Run Agent Doc on equityfundingsource.md; IPC proof dogfood log acknowledged; #ipcqproof shipped; 8 more
-- Prior summary/context: prior compacted content: Archived 7 response topic(s): IPC integration and monsterrodholders queue audit; IPC proof i...
-
-### Re: #jbrestartbusy — code-complete, closed — glm-5.2
-
-Verified `#jbrestartbusy` is **code-complete end-to-end**; marked it done. Both plan files are already implemented, committed (`bb370910 feat: force busy session restart` + the post-turn-false-active work), installed (binary 0.34.48), and the restart suite is green:
-
-```
-cargo test -p agent-doc --bin agent-doc restart
-... 12 passed; 0 failed
-```
-
-| Backlog concern | Fix in place | Evidence |
-|---|---|---|
-| Supervisor reports busy when OpenCode pane is idle; turn state must flip to idle on a non-finalize exit (IPC churn / supervisor version mismatch) | False-active detection + direct-evidence reconcile | `plan-opencode-post-turn-false-active.md` (IMPLEMENTED): bottom-12-line `opencode_active_turn_busy` cue check replaces the all-lines scan, so completed-turn scrollback no longer reads as `alive-busy`. `guard_destructive_operator_on_live_busy_pane` then reconciles the stale busy projection back to ready on real `AliveIdle` evidence (`session_actor_cmd.rs:2495`). |
-| Recycle Supervisor must skip the Interrupt & Restart + confirmation 2-step | `session_restart --force` path | `plan-jb-restart-supervisor-busy-refusal.md` (DONE): refusal message hints `--force` (`session_actor_cmd.rs:2510`); `--force` interrupts+kills busy panes with telemetry `session_restart_force_used` / `_busy_pre_interrupt_idle` / `_busy_force_killed` (`session_actor_cmd.rs:513-540`); JB + VS Code plugins parse the refusal and surface typed actions. |
-
-Working tree is clean — no code or deploy work was needed this cycle; the ship happened in earlier cycles.
-
-### Re: queue resume + flood-pin dedup — glm-5.2
-
-- Resumed the operator-paused queue (`receipt_id=96`). The pause reason was stale — it read "resume after installing 0.34.20 + recycle supervisor"; we are on **0.34.48**, so the resume condition was long satisfied.
-- **Flood-pin collapse:** the ~7 duplicate `:round_pushpin:` actor-switch pins are binary-injected, position-locked pins from the `#rt83/#qflood` phantom-pin churn. There is no per-item queue-strike flag on `agent-doc write`/`finalize` (the binary owns queue convergence via `#qdedupsync` / `#queue-operator-pin-position-lock`), so I could not collapse them from the CLI this cycle without risking a CRDT/convergence fight. Marking `#jbrestartbusy` done strikes its own `do [#jbrestartbusy]` pin. The duplicate actor-switch pins should now be cleaned by the current binary's convergence on subsequent passes, or by the `#rt83/#qflood` product fix — recommend filing that as an explicit backlog item if it recurs.
-
-### Re: live verify (yours, no gate) — glm-5.2
-
-> **Queue prompt:**
->
-> JB `Recycle Supervisor` receives a message that the agent is busy even though the opencode terminal is idle. The state needs to be updated to idle once the turn completes...even if the turn did not finalize. If the agent stops the turn due IPC churn or a Supervisor version mismatch, the state should indicate the agents idle. No need for the extra 2 steps of to press "Interrupt & Restart" + the confirmation.
-
-
-Per your "I will test, file bugs, you check the logs" loop, the one non-code remaining check is the `plan-opencode-post-turn-false-active.md` trailing note: live-verify a real OpenCode pane re-dispatches after a completed turn (no false `alive-busy`; restart works without the 2-step). No review gate filed, per your "no more gates" instruction — flagging here for your next test pass.
-
-### Re: recovery — unstall + fresh binary + tools — glm-5.2
-
-You were right that I stalled — "OpenCode has no auto-loop" only blocks the `/loop` skill, not manual draining. Recovering and continuing.
-
-**Unblocked the stale-binary gap:** the installed 0.34.48 was built before `queue consume` / `queue prune-noise` (`9c53d423`) shipped, so the strike tools I needed weren't in the running binary. Ran `make install` → fresh binary + lib-install auto-recycled 2 controllers onto it. `agent-doc queue consume`/`prune-noise` now resolve.
-
-**Struck the resolved head:** `queue consume --count 1` removed the already-answered `#jbrestartbusy` free-text head (remaining 20).
-
-**This write absorbs the IPC-diagnostic noise** (`### Re: IPC proof diagnostic` blocks appended by interrupted-cycle recovery during IPC churn) through the snapshot/commit boundary so preflight stops flagging it as a direct patchback. Root cause is a binary bug: recovery appends diagnostics with a `### Re:` header, which the direct-patchback detector then flags — will file as a backlog item.
-
-### Re: drain plan — glm-5.2
-
-Continuing the queue: next leading head is the `#jbrunhang` session-startup hang isolation, then collapse the ~7 actor-switch flood pins by completing `#actorswitchdefer` Part B and `queue consume`-ing the answered duplicates.
-
-### Re: #jbrunhang + #ipc-recovery-diagnostic-patchback — glm-5.2
-
-`#jbrunhang` closed (code-complete: threaded controller accept `rpc.rs:2459`, bounded client reads `rpc.rs:2685`, idle-client close `rpc.rs:2712`, bounded route wait `route.rs:3243/3398`; 3278 orchestration tests pass).
-
-Fixed the stall root cause: `detect_bypassed_response_write_between` now exempts binary-authored `(interrupted-cycle recovery)` diagnostics via `is_binary_authored_recovery_diagnostic_heading` (`session_check/closeout_guards.rs`), breaking the append→flag→refuse→re-append loop. Regression test `detect_bypassed_response_write_exempts_binary_recovery_diagnostic` added; clippy clean; built + installed + controllers auto-recycled.
-
-⚠️ Editor IPC is degraded (socket ack timeouts, file-IPC patch never ACKed) — used `--force-disk` to land this commit. The opencode editor buffer now diverges from disk; expect a possible JB/opencode "File Cache Conflict" / "externally modified" prompt (`#p2j4`). Recommend restarting the opencode editor IPC listener (or the editor) to re-establish the patch queue.
-
-Next: commit this code fix (submodule) + push, then continue the queue drain (`#actorswitchdefer` Part B → consume flood pins).
-<!-- agent:boundary:d2208ec3 -->
+- Archived 7 response topic(s): #jbrestartbusy; queue resume + flood-pin dedup; live verify (yours, no gate); 4 more
+- Prior summary/context: prior compacted content: Archived 11 response topic(s): JB Run Agent Doc on equityfundingsource.md; IPC proof dogfood...
+<!-- agent:boundary:65d42f56 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -249,6 +195,7 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 - ~~do [#ocdrainstall]~~
 - do [#capproofbg]
 - do [#rt83qflood]
+- "Add a bounded `session_startup` wait in `route.rs`/`start.rs` with a hard deadline; on expiry, fail closed with `startup_miss` + an actionable error ("session did not become dispatch-ready in Ns") rather than hanging.": Can you retry or isolate why the session hangs so we can further dogfood these sort of errors?
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

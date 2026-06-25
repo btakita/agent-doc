@@ -178,7 +178,16 @@ Deployed to production from `3f07d4f`.
 - **Post-deploy smoke**: `GET /` → 200.
 
 Operator live-verify (cannot be agent-done): open a deal with multiple participants → Messages dialog → confirm a per-user tab now shows the same card style as the Group tab and its compose posts only to that user; open a single-participant (borrower-only) deal and confirm there is no Group tab.
-<!-- agent:boundary:11547bff -->
+
+### Re: Queue drained — Messages-dialog items already shipped — glm-5.2
+
+Closeout only — no new work. The three queued items were completed in the prior cycle and the leftover heads (including `deploy`) were residue that is now struck/cleared:
+
+- Per-user tab → group-tab styling parity, and Group tab hidden for single participants: shipped in EFS `3f07d4f`.
+- Deploy: live as worker Version `29467e06-5d02-4fb7-a4e4-fb68c8be7a1d` (frontend-only, no migrations).
+
+Operator live-verify still stands: a multi-participant deal's per-user tab should match the Group tab's card style and post only to that user; a single-participant deal should show no Group tab.
+<!-- agent:boundary:83751da2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -199,8 +208,8 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~In the admin Messages dialog, the individual user message tab should have the same styling as the group tab.~~
-- ~~In the admin Messages dialog, if there is only 1 user, do not render the Group tab.~~ — auto-struck: answered this cycle (#ftstrike)
-- deploy
+- 🚧 ~~In the admin Messages dialog, if there is only 1 user, do not render the Group tab.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~deploy~~
 <!-- /agent:queue -->
 
 ## Backlog

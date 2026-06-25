@@ -78,6 +78,43 @@ pub struct SemanticCompletionMatch {
     pub matched_done_text: String,
 }
 
+/// Which corpus a free-text queue head matched against for the
+/// `#qftbklgstrike` auto-strike: a completed `agent:done` item (`Done`) or an
+/// active `agent:backlog` item (`Backlog`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueStrikeMatchKind {
+    /// The head is already complete — a matching item exists in `agent:done`.
+    Done,
+    /// The head is tracked — a matching active item exists in `agent:backlog`.
+    Backlog,
+}
+
+/// A free-text `agent:queue` head that the deterministic semantic scorer matched
+/// to either a completed (`agent:done`) or active-backlog (`agent:backlog`)
+/// tracked-work item above the conservative auto-strike threshold
+/// (`#qftbklgstrike`). Reuses the same lexical [`rank_events`] scorer that backs
+/// [`semantic_completion_matches`]; the only difference is the candidate corpus
+/// (done + active backlog instead of done only) and a `matched_kind`
+/// discriminator so the convergence strike can name the right reason.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QueueStrikeMatch {
+    pub score: f64,
+    pub matched_kind: QueueStrikeMatchKind,
+    /// Zero-based queue entry index of the matched free-text head (the
+    /// `source_ref` suffix from [`collect_completion_candidates`]). Informational
+    /// only — convergence matches on normalized head text, not this index, since
+    /// earlier maintenance phases can shift entry positions.
+    pub candidate_index: usize,
+    /// The FULL (untruncated) free-text head prose. Convergence keys the strike
+    /// on this text, so it must not be display-truncated.
+    pub candidate_text: String,
+    pub matched_ref: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_id: Option<String>,
+    pub matched_text: String,
+}
+
 #[derive(Debug, Clone)]
 struct SessionEvents {
     events: Vec<MemoryEvent>,
@@ -297,6 +334,146 @@ pub fn format_semantic_completion_warning(candidate: &SemanticCompletionMatch) -
         candidate.candidate_text,
         candidate.matched_done_text
     )
+}
+
+/// Conservative auto-strike threshold for `#qftbklgstrike`.
+///
+/// The [`rank_events`] scorer awards `+1.0` when the queue head is a full
+/// substring of the matched tracked-work item, plus the token-overlap fraction
+/// (`0.0..=1.0`), plus `+0.05` for the tracked-work surface. A genuine
+/// near-restatement of a done/backlog item therefore lands at ~1.7–1.9 (the
+/// range the existing `semantic_completion_match` *warning* fires in the wild),
+/// while an unrelated operator prompt that merely shares a stray common word
+/// scores only its small overlap fraction (well under `1.0`, since it does not
+/// contain the item as a substring).
+///
+/// We set the strike threshold at `1.6` — strictly **above** the `0.8` floor the
+/// warning path uses and high enough that the `+1.0` substring-contains bonus is
+/// effectively required (a head can only clear `1.6` without that bonus by
+/// matching essentially every token, which is itself a restatement). This is the
+/// false-strike safety margin: an unanswered operator prompt that is not a near
+/// restatement of a tracked item can never reach `1.6`, so it is never silently
+/// buried. Raising the corpus to include active backlog does not lower this bar —
+/// both corpora are scored by the identical deterministic scorer against the same
+/// threshold.
+pub const QUEUE_STRIKE_THRESHOLD: f64 = 1.6;
+
+/// Deterministically score every LIVE free-text `agent:queue` head against BOTH
+/// the completed `agent:done` archive (case **a**: already complete) AND the
+/// active `agent:backlog` items (case **b**: tracked by a backlog item), and
+/// return the best match per head that clears `threshold` (`#qftbklgstrike`).
+///
+/// This is the auto-strike sibling of [`semantic_completion_matches`] (which only
+/// scores against done and only emits a *warning*). Both reuse the same
+/// [`rank_events`] lexical scorer, so the behavior stays deterministic (no LLM).
+/// Id-backed heads are skipped here (they have their own done-strike path); only
+/// free-text heads (no `#id`) are candidates.
+pub fn semantic_queue_strike_matches(
+    file: &Path,
+    db: Option<&Path>,
+    threshold: f64,
+    limit: usize,
+) -> Result<Vec<QueueStrikeMatch>> {
+    let candidates: Vec<CompletionCandidate> = collect_completion_candidates(file)?
+        .into_iter()
+        .filter(|c| c.source == "queue" && c.item_id.is_none())
+        .collect();
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let db_path = resolve_memory_db_path(file, db)?;
+    let session = collect_session_events(file)?;
+    let mut events = read_memory_events(&db_path, MAX_EVENT_READ_LIMIT)?;
+    events.extend(session.events.clone());
+    let events = dedupe_events(events);
+
+    // Two disjoint corpora, both scored by the identical deterministic scorer.
+    let done_events: Vec<MemoryEvent> = events
+        .iter()
+        .filter(|e| is_done_tracked_work_event(e))
+        .cloned()
+        .collect();
+    let backlog_events: Vec<MemoryEvent> = events
+        .iter()
+        .filter(|e| is_active_backlog_work_event(e))
+        .cloned()
+        .collect();
+    if done_events.is_empty() && backlog_events.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut matches = Vec::new();
+    for candidate in candidates {
+        let candidate_index = candidate
+            .source_ref
+            .rsplit_once(':')
+            .and_then(|(_, idx)| idx.parse::<usize>().ok());
+        let Some(candidate_index) = candidate_index else {
+            continue;
+        };
+        // Score against both corpora; keep the single best match across both,
+        // preferring a completed (done) match on a tie since "already complete"
+        // is the stronger statement than "tracked".
+        let best_done = rank_events(&candidate.text, &done_events).into_iter().next();
+        let best_backlog = rank_events(&candidate.text, &backlog_events)
+            .into_iter()
+            .next();
+        let chosen = match (best_done, best_backlog) {
+            (Some(d), Some(b)) => {
+                if d.score >= b.score {
+                    Some((QueueStrikeMatchKind::Done, d))
+                } else {
+                    Some((QueueStrikeMatchKind::Backlog, b))
+                }
+            }
+            (Some(d), None) => Some((QueueStrikeMatchKind::Done, d)),
+            (None, Some(b)) => Some((QueueStrikeMatchKind::Backlog, b)),
+            (None, None) => None,
+        };
+        let Some((matched_kind, result)) = chosen else {
+            continue;
+        };
+        if result.score < threshold {
+            continue;
+        }
+        matches.push(QueueStrikeMatch {
+            score: result.score,
+            matched_kind,
+            candidate_index,
+            candidate_text: candidate.text.clone(),
+            matched_ref: result.source_ref,
+            matched_id: result.item_id,
+            matched_text: result.text,
+        });
+    }
+
+    matches.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.candidate_index.cmp(&b.candidate_index))
+    });
+    matches.truncate(limit.max(1));
+    Ok(matches)
+}
+
+/// An active (non-done) tracked-work event sourced from an `agent:backlog`
+/// component. Review/icebox surfaces are intentionally excluded so only items the
+/// operator is actively tracking in the backlog count as "addresses it".
+fn is_active_backlog_work_event(event: &MemoryEvent) -> bool {
+    event
+        .metadata
+        .get("agent_doc_surface")
+        .is_some_and(|surface| surface == "tracked_work")
+        && event
+            .metadata
+            .get("state")
+            .is_none_or(|state| state != "done")
+        && event
+            .metadata
+            .get("component")
+            .is_some_and(|component| component::is_backlog_component(component))
 }
 
 fn collect_completion_candidates(file: &Path) -> Result<Vec<CompletionCandidate>> {
@@ -946,6 +1123,136 @@ Shipped cache repair.
         assert!(first.score >= 0.8, "{first:?}");
         assert!(
             format_semantic_completion_warning(first).contains("semantic completion candidate")
+        );
+    }
+
+    #[test]
+    fn queue_strike_matches_done_archive_above_threshold() {
+        // #qftbklgstrike case (a): a free-text queue head that restates a
+        // completed `agent:done` archive item matches with kind=Done above the
+        // conservative strike threshold.
+        let tmp = tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("tasks.done.md"),
+            "- 2026-06-07 [#cachefix] Repair cache duplication on save\n",
+        )
+        .unwrap();
+        let doc = write_doc(
+            tmp.path(),
+            r#"
+<!-- agent:queue auto -->
+- Repair cache duplication on save
+<!-- /agent:queue -->
+
+<!-- agent:done archive=tasks.done.md -->
+<!-- /agent:done -->
+"#,
+        );
+        let db = tmp.path().join(".tsift/memory.db");
+        let matches =
+            semantic_queue_strike_matches(&doc, Some(&db), QUEUE_STRIKE_THRESHOLD, 5).unwrap();
+        let first = matches.first().expect("expected a done strike match");
+        assert_eq!(first.matched_kind, QueueStrikeMatchKind::Done);
+        assert_eq!(first.matched_id.as_deref(), Some("cachefix"));
+        assert!(
+            first.score >= QUEUE_STRIKE_THRESHOLD,
+            "score {} must clear threshold {QUEUE_STRIKE_THRESHOLD}: {first:?}",
+            first.score
+        );
+    }
+
+    #[test]
+    fn queue_strike_matches_active_backlog_above_threshold() {
+        // #qftbklgstrike case (b): a free-text queue head that restates an active
+        // `agent:backlog` item matches with kind=Backlog above threshold.
+        let tmp = tempdir().unwrap();
+        let doc = write_doc(
+            tmp.path(),
+            r#"
+<!-- agent:queue auto -->
+- Opencode responses are reverse ordering numeric lists
+<!-- /agent:queue -->
+
+<!-- agent:backlog -->
+- [ ] [#revlist] Opencode responses are reverse ordering numeric lists
+<!-- /agent:backlog -->
+"#,
+        );
+        let db = tmp.path().join(".tsift/memory.db");
+        let matches =
+            semantic_queue_strike_matches(&doc, Some(&db), QUEUE_STRIKE_THRESHOLD, 5).unwrap();
+        let first = matches.first().expect("expected a backlog strike match");
+        assert_eq!(first.matched_kind, QueueStrikeMatchKind::Backlog);
+        assert_eq!(first.matched_id.as_deref(), Some("revlist"));
+        assert!(
+            first.score >= QUEUE_STRIKE_THRESHOLD,
+            "score {} must clear threshold: {first:?}",
+            first.score
+        );
+    }
+
+    #[test]
+    fn queue_strike_does_not_match_unrelated_operator_prompt() {
+        // #qftbklgstrike false-strike safety: an unrelated operator prompt that
+        // is NOT a restatement of any done/backlog item never reaches the
+        // conservative threshold, so it is never returned for a strike.
+        let tmp = tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("tasks.done.md"),
+            "- 2026-06-07 [#cachefix] Repair cache duplication on save\n",
+        )
+        .unwrap();
+        let doc = write_doc(
+            tmp.path(),
+            r#"
+<!-- agent:queue auto -->
+- Please add a dark mode toggle to the settings panel
+<!-- /agent:queue -->
+
+<!-- agent:backlog -->
+- [ ] [#revlist] Opencode responses are reverse ordering numeric lists
+<!-- /agent:backlog -->
+
+<!-- agent:done archive=tasks.done.md -->
+<!-- /agent:done -->
+"#,
+        );
+        let db = tmp.path().join(".tsift/memory.db");
+        let matches =
+            semantic_queue_strike_matches(&doc, Some(&db), QUEUE_STRIKE_THRESHOLD, 5).unwrap();
+        assert!(
+            matches.is_empty(),
+            "unrelated operator prompt must NOT be struck: {matches:?}"
+        );
+    }
+
+    #[test]
+    fn queue_strike_skips_id_backed_heads() {
+        // #qftbklgstrike: id-backed heads have their own done-strike path and must
+        // never be returned by the free-text strike scorer.
+        let tmp = tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("tasks.done.md"),
+            "- 2026-06-07 [#cachefix] Repair cache duplication on save\n",
+        )
+        .unwrap();
+        let doc = write_doc(
+            tmp.path(),
+            r#"
+<!-- agent:queue auto -->
+- do [#cachefix] Repair cache duplication on save
+<!-- /agent:queue -->
+
+<!-- agent:done archive=tasks.done.md -->
+<!-- /agent:done -->
+"#,
+        );
+        let db = tmp.path().join(".tsift/memory.db");
+        let matches =
+            semantic_queue_strike_matches(&doc, Some(&db), QUEUE_STRIKE_THRESHOLD, 5).unwrap();
+        assert!(
+            matches.is_empty(),
+            "id-backed head must be skipped by the free-text strike scorer: {matches:?}"
         );
     }
 

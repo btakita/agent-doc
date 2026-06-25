@@ -1894,6 +1894,148 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         }
     }
 
+    // `#qftbklgstrike`: convergence auto-strike of a LIVE free-text queue head
+    // when it is already complete (a matching `agent:done` item exists) OR a
+    // backlog item already addresses it (a matching active `agent:backlog` item
+    // exists). This complements the `#qheadresidue` strike above (which needs a
+    // committed `agent:exchange` ANSWER): here the head may never have been
+    // answered, but the deterministic semantic scorer
+    // (`semantic_queue_strike_matches`, the strike sibling of the existing
+    // `semantic_completion_match` warning) proves the work is captured elsewhere,
+    // so the operator prompt is redundant and lingering only churns the queue.
+    //
+    // SAFETY: only `QueueEntry::Prompt` heads that are free-text (no `#id` — id
+    // heads have their own done-strike) are eligible, the match must clear the
+    // conservative `QUEUE_STRIKE_THRESHOLD` (set above the `+1.0`
+    // substring-contains bonus so an unrelated operator prompt can never reach
+    // it), and a committed-snapshot gate (mirroring the `#qheadresidue` gate)
+    // restricts the strike to heads already present in the committed queue so an
+    // in-flight operator edit convergence just added is never struck. The strike
+    // is annotation-only: the head is converted to a `Completed` entry whose text
+    // names the matched id + reason, never deleted — preserving the operator's
+    // prompt verbatim inside the strikethrough for auditability.
+    {
+        let gate_norm = |text: &str| -> String {
+            crate::queue::strip_priority_markers(text)
+                .to_lowercase()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let committed_free_text: std::collections::HashSet<String> = snapshot_queue_entries
+            .iter()
+            .filter_map(|e| match e {
+                crate::queue::QueueEntry::Prompt(p) => Some(gate_norm(&p.text)),
+                _ => None,
+            })
+            .collect();
+        match crate::memory_cmd::semantic_queue_strike_matches(
+            file,
+            None,
+            crate::memory_cmd::QUEUE_STRIKE_THRESHOLD,
+            16,
+        ) {
+            Ok(strike_matches) if !strike_matches.is_empty() => {
+                // Match by normalized head text rather than parse index: earlier
+                // maintenance phases may have mutated `entries_after` so its
+                // indices need not align with the on-disk parse order
+                // `semantic_queue_strike_matches` scored. Normalized text is the
+                // stable free-text head identity (same key the `#qauthorder`
+                // dedup uses).
+                let mut by_norm: std::collections::HashMap<String, crate::memory_cmd::QueueStrikeMatch> =
+                    std::collections::HashMap::new();
+                for m in strike_matches {
+                    by_norm.entry(gate_norm(&m.candidate_text)).or_insert(m);
+                }
+                let mut struck: Vec<(crate::memory_cmd::QueueStrikeMatch, String)> = Vec::new();
+                let new_entries: Vec<crate::queue::QueueEntry> = activation
+                    .entries_after
+                    .iter()
+                    .map(|entry| match entry {
+                        crate::queue::QueueEntry::Prompt(p)
+                            if crate::write::queue_prompt_text_is_free_text(
+                                &current_content,
+                                &p.text,
+                            ) && committed_free_text.contains(&gate_norm(&p.text)) =>
+                        {
+                            match by_norm.get(&gate_norm(&p.text)) {
+                                Some(m) => {
+                                    let id = m.matched_id.as_deref().unwrap_or("?");
+                                    let reason = match m.matched_kind {
+                                        crate::memory_cmd::QueueStrikeMatchKind::Done => {
+                                            format!("auto-struck: completed by #{id} (#qftbklgstrike)")
+                                        }
+                                        crate::memory_cmd::QueueStrikeMatchKind::Backlog => {
+                                            format!(
+                                                "auto-struck: tracked by backlog #{id} (#qftbklgstrike)"
+                                            )
+                                        }
+                                    };
+                                    // Bake the reason INSIDE the strikethrough so the
+                                    // rendered `- ~~<original> — <reason>~~` round-trips
+                                    // through `parse_completed_inline` as a stable
+                                    // `Completed` entry (a trailing suffix outside the
+                                    // `~~` would re-parse as a live Prompt and churn).
+                                    let annotated = format!("{} — {}", p.text.trim_end(), reason);
+                                    struck.push((m.clone(), annotated.clone()));
+                                    crate::queue::QueueEntry::Completed(crate::queue::QueuePrompt {
+                                        text: annotated,
+                                        multiline: p.multiline,
+                                    })
+                                }
+                                None => entry.clone(),
+                            }
+                        }
+                        _ => entry.clone(),
+                    })
+                    .collect();
+                if !struck.is_empty() {
+                    let new_body = crate::queue::render(&new_entries);
+                    current_content = {
+                        let comps = crate::component::parse(&current_content)?;
+                        let q = comps.iter().find(|c| c.name == "queue").context(
+                            "queue maintenance: queue component vanished before backlog/done strike",
+                        )?;
+                        q.replace_content(&current_content, &new_body)
+                    };
+                    activation.entries_after = new_entries;
+                    mutated = true;
+                    for (m, _annotated) in &struck {
+                        let kind = match m.matched_kind {
+                            crate::memory_cmd::QueueStrikeMatchKind::Done => "done",
+                            crate::memory_cmd::QueueStrikeMatchKind::Backlog => "backlog",
+                        };
+                        let display: String = m.candidate_text.chars().take(120).collect();
+                        eprintln!(
+                            "[preflight] queue: auto-struck free-text head matched={kind} #{} ({:.3}) (#qftbklgstrike): {:?}",
+                            m.matched_id.as_deref().unwrap_or("?"),
+                            m.score,
+                            display,
+                        );
+                    }
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "preflight_freetext_backlog_done_strike file={} struck={}",
+                            file.display(),
+                            struck.len(),
+                        ),
+                    );
+                    if crate::queue::prompts(&activation.entries_after).is_empty() {
+                        activation.active = false;
+                        activation.trigger = None;
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(err) => {
+                eprintln!(
+                    "[preflight] queue: backlog/done strike retrieval unavailable (#qftbklgstrike): {err}"
+                );
+            }
+        }
+    }
+
     // Phase 3: halt detection — stop fences and item modification
     if activation.active {
         // Stop fence at head → halt the queue
@@ -5868,6 +6010,239 @@ mod tests {
         assert!(
             !updated.contains("auto-struck"),
             "no head should be struck when the exchange answers none of them:\n{updated}"
+        );
+    }
+
+    /// Test helper: read the queue entries from the on-disk document.
+    fn read_queue_entries(doc: &Path) -> Vec<crate::queue::QueueEntry> {
+        let updated = std::fs::read_to_string(doc).unwrap();
+        let queue_body = crate::component::parse(&updated)
+            .unwrap()
+            .iter()
+            .find(|c| c.name == "queue")
+            .map(|q| updated[q.open_end..q.close_start].to_string())
+            .unwrap();
+        crate::queue::parse(&queue_body).unwrap()
+    }
+
+    #[test]
+    fn run_queue_maintenance_strikes_free_text_head_completed_by_done_item() {
+        // #qftbklgstrike case (a): a LIVE free-text queue head (never answered in
+        // the exchange) that restates a completed `agent:done` item is struck in
+        // place, annotated "completed by #<id>".
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join("tasks.done.md"),
+            "- 2026-06-07 [#jbcache] Fix JB File Cache Conflict dialogs on every save\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: unrelated — opus-4-8\n\nAn answer about a different topic.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- Fix JB File Cache Conflict dialogs on every save\n",
+            "- do [#stillopen]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#stillopen] unrelated open work item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=tasks.done.md -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        // A second active id-backed head keeps the queue from fully draining, so
+        // the struck residue stays in the body (the drain-clear that wipes a
+        // fully-emptied queue is existing convergence behavior, not part of this
+        // strike). The free-text head is now Completed + annotated.
+        let entries = read_queue_entries(&doc);
+        let completed: Vec<&str> = entries
+            .iter()
+            .filter_map(|e| match e {
+                crate::queue::QueueEntry::Completed(p) => Some(p.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        let active: Vec<String> = crate::queue::prompts(&entries)
+            .iter()
+            .map(|p| p.text.clone())
+            .collect();
+        assert!(
+            !active
+                .iter()
+                .any(|t| t.contains("Fix JB File Cache Conflict dialogs")),
+            "struck head must no longer be an active Prompt:\nactive={active:?}"
+        );
+        assert!(
+            completed.iter().any(|t| {
+                t.contains("Fix JB File Cache Conflict dialogs")
+                    && t.contains("auto-struck: completed by #jbcache (#qftbklgstrike)")
+            }),
+            "head must be struck + annotated 'completed by #jbcache':\ncompleted={completed:?}"
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_strikes_free_text_head_tracked_by_backlog_item() {
+        // #qftbklgstrike case (b): a LIVE free-text queue head that restates an
+        // active `agent:backlog` item is struck in place, annotated "tracked by
+        // backlog #<id>".
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: unrelated — opus-4-8\n\nAn answer about a different topic.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- Opencode responses are reverse ordering numeric lists\n",
+            "- do [#stillopen]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#revlist] Opencode responses are reverse ordering numeric lists\n",
+            "- [ ] [#stillopen] unrelated open work item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let entries = read_queue_entries(&doc);
+        let completed: Vec<&str> = entries
+            .iter()
+            .filter_map(|e| match e {
+                crate::queue::QueueEntry::Completed(p) => Some(p.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            completed.iter().any(|t| {
+                t.contains("Opencode responses are reverse ordering numeric lists")
+                    && t.contains("auto-struck: tracked by backlog #revlist (#qftbklgstrike)")
+            }),
+            "head must be struck + annotated 'tracked by backlog #revlist':\ncompleted={completed:?}"
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_does_not_strike_unrelated_operator_prompt() {
+        // #qftbklgstrike false-strike safety: an unrelated operator prompt that is
+        // NOT a restatement of any done/backlog item stays an active Prompt and is
+        // never annotated/struck, even with done + backlog items present.
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join("tasks.done.md"),
+            "- 2026-06-07 [#jbcache] Fix JB File Cache Conflict dialogs on every save\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: unrelated — opus-4-8\n\nAn answer about a different topic.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- Please add a dark mode toggle to the settings panel\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#revlist] Opencode responses are reverse ordering numeric lists\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=tasks.done.md -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let entries = read_queue_entries(&doc);
+        let active: Vec<String> = crate::queue::prompts(&entries)
+            .iter()
+            .map(|p| p.text.clone())
+            .collect();
+        assert!(
+            active
+                .iter()
+                .any(|t| t.contains("Please add a dark mode toggle")),
+            "unrelated operator prompt must stay active (NEVER silently buried):\n{active:?}"
+        );
+        assert!(
+            !updated.contains("#qftbklgstrike"),
+            "no #qftbklgstrike annotation should appear for an unrelated prompt:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_qftbklgstrike_leaves_id_backed_heads_untouched() {
+        // #qftbklgstrike: id-backed heads have their own done-strike path; the
+        // free-text strike must not annotate them with the #qftbklgstrike marker.
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join("tasks.done.md"),
+            "- 2026-06-07 [#jbcache] Fix JB File Cache Conflict dialogs on every save\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: unrelated — opus-4-8\n\nAn answer.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- do [#open1] still-open work\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#open1] still-open work\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=tasks.done.md -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !updated.contains("#qftbklgstrike"),
+            "id-backed head must not be touched by the #qftbklgstrike free-text path:\n{updated}"
+        );
+        let entries = read_queue_entries(&doc);
+        let active: Vec<String> = crate::queue::prompts(&entries)
+            .iter()
+            .map(|p| p.text.clone())
+            .collect();
+        assert!(
+            active.iter().any(|t| t.contains("do [#open1]")),
+            "unanswered id-backed head must remain active:\n{active:?}"
         );
     }
 }

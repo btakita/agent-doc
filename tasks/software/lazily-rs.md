@@ -380,7 +380,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=socket_ack_content patch_id=e53afaeb-c9b3-42a3-8bda-6eaaafa04d51 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=36184 candidate_hash=b6e234070283d79a568251fd180560ef4dc4242e351a2e27d32971ca3141d90c content_ours_len=36207 content_ours_hash=9d93933a97b4ec9bdf4d62a5d49706f74e022992fa29cadf10e9dbf78607f999 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782360628042
 ```
-<!-- agent:boundary:df256871 -->
+<!-- agent:boundary:21eefb35 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -389,7 +389,7 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/l
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~What are #next-steps to fix lazily bugs?~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 Would it be beneficial to make lazily use CRDT (YRS/YJS) as the FFI/IPC/Network protocol?
 <!-- /agent:queue -->
 
 ## Backlog

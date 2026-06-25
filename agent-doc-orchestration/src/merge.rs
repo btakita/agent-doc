@@ -76,13 +76,88 @@ pub fn merge_contents_crdt(
     // concurrent operator edit to one queue item can no longer duplicate or
     // corrupt an adjacent component/item. `merge_by_component` falls back to the
     // whole-doc `merge` internally on structural divergence or inline-mode docs.
-    let merged =
-        crate::crdt::merge_by_component(base_state, ours, theirs).context("CRDT merge failed")?;
+    //
+    // `#fmreset`: the leading YAML frontmatter region is reconciled field-wise
+    // (operator-authoritative) instead of as a text blob, so an operator's
+    // frontmatter edit is never reverted to the snapshot/base value.
+    let merged = merge_frontmatter_aware(base_state, ours, theirs)?;
     // Build fresh CRDT state from the merged result
     let doc = crate::crdt::CrdtDoc::from_text(&merged);
     let state = doc.encode_state();
     eprintln!("[write] CRDT merge successful — no conflicts possible.");
     Ok((merged, state))
+}
+
+/// Frontmatter-aware per-component CRDT merge (`#fmreset`).
+///
+/// Wraps [`crate::crdt::merge_by_component`] so the leading YAML frontmatter
+/// region is reconciled FIELD-WISE (operator-authoritative) via
+/// [`crate::frontmatter::merge_frontmatter_3way`] instead of as a text blob.
+///
+/// The whole-document text CRDT merges frontmatter as the leading interstitial
+/// node, which (in the absent/stale-base epoch) can duplicate keys or splice the
+/// frontmatter into the body — silently reverting or corrupting an operator's
+/// hand-edit (`queue:`, `claude_model:`, `prompt_presets:`, custom keys, …). The
+/// field-wise merge keeps an operator edit to an operator-owned key, keeps an
+/// agent managed-key write (session/resume/pipeline), and merges a concurrent
+/// operator-edit + agent-write key-by-key without either being lost.
+///
+/// Engages only when the agent and operator sides actually disagree on the
+/// frontmatter block (`ours_fm != theirs_fm`); otherwise the call is byte-for-byte
+/// equivalent to the plain `merge_by_component` path, so unchanged-frontmatter
+/// cycles keep their exact behavior (and frontmatter is never reformatted unless
+/// it genuinely changed). The body is still reconciled by the per-component merge.
+fn merge_frontmatter_aware(
+    base_state: Option<&[u8]>,
+    ours: &str,
+    theirs: &str,
+) -> Result<String> {
+    use crate::frontmatter as fm;
+
+    let (ours_fm, ours_body) = fm::split_frontmatter_parts(ours);
+    let (theirs_fm, theirs_body) = fm::split_frontmatter_parts(theirs);
+
+    // No operator/agent frontmatter divergence → exact legacy behavior.
+    if ours_fm == theirs_fm {
+        return crate::crdt::merge_by_component(base_state, ours, theirs)
+            .context("CRDT merge failed");
+    }
+
+    // Resolve the base frontmatter + body from the decoded base state (if any).
+    let base_text = match base_state {
+        Some(bytes) => crate::crdt::CrdtDoc::decode_state(bytes)
+            .map(|d| d.to_text())
+            .ok(),
+        None => None,
+    };
+    let (base_fm, base_body) = match base_text.as_deref() {
+        Some(t) => {
+            let (f, b) = fm::split_frontmatter_parts(t);
+            (f.map(str::to_string), Some(b.to_string()))
+        }
+        None => (None, None),
+    };
+
+    let Some(merged_fm) =
+        fm::merge_frontmatter_3way(base_fm.as_deref(), ours_fm, theirs_fm)
+    else {
+        // No side actually had frontmatter (shouldn't happen here) — fall back.
+        return crate::crdt::merge_by_component(base_state, ours, theirs)
+            .context("CRDT merge failed");
+    };
+
+    // Merge the bodies independently against a body-only base state. The
+    // per-component merge only uses base_state to recover the base TEXT, so a
+    // freshly-encoded body-only state is equivalent to the original minus the
+    // frontmatter region.
+    let body_base_state = base_body
+        .as_deref()
+        .map(|b| crate::crdt::CrdtDoc::from_text(b).encode_state());
+    let merged_body =
+        crate::crdt::merge_by_component(body_base_state.as_deref(), ours_body, theirs_body)
+            .context("CRDT merge failed (body)")?;
+
+    Ok(format!("{merged_fm}{merged_body}"))
 }
 
 /// Op-capture–aware CRDT merge (`#qnodemerge4wire` part 3).
@@ -161,8 +236,7 @@ pub fn merge_contents_crdt_with_ops(
         // side can no longer duplicate structure across components/items
         // (#hap7/#qcellmerge1). The op-replay branch above stays whole-doc because
         // captured ops carry whole-document byte offsets.
-        None => crate::crdt::merge_by_component(base_state, ours, theirs)
-            .context("CRDT merge failed")?,
+        None => merge_frontmatter_aware(base_state, ours, theirs)?,
     };
 
     // Consume the sidecar — the ops belonged to this base epoch (used or stale).
@@ -538,6 +612,149 @@ User line 2.
         assert!(
             !merged.contains("[#abcd] do the thing"),
             "merge must not revert to the snapshot-side old id:\n{merged}"
+        );
+    }
+
+    #[test]
+    fn fmreset_repro_operator_frontmatter_value_edit_preserved() {
+        // #fmreset repro: the operator hand-edits a frontmatter value on disk
+        // (claude_model: sonnet → opus) while the agent side (snapshot) still
+        // carries the OLD value. The convergence merge must KEEP the operator's
+        // edited value, never revert it to the snapshot/base value.
+        let base = "---\nagent_doc_format: template\nclaude_model: sonnet\n---\n\n# Title\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        let ours = base; // agent/snapshot side unchanged — still the old model
+        let theirs = "---\nagent_doc_format: template\nclaude_model: opus\n---\n\n# Title\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+
+        let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        assert!(
+            merged.contains("claude_model: opus"),
+            "operator's edited frontmatter value must survive the merge:\n{merged}"
+        );
+        assert!(
+            !merged.contains("claude_model: sonnet"),
+            "merge must not revert to the snapshot-side old frontmatter value:\n{merged}"
+        );
+    }
+
+    #[test]
+    fn fmreset_repro_operator_frontmatter_value_edit_preserved_no_base_state() {
+        // #fmreset repro (stale/None base epoch): same operator edit but the CRDT
+        // base state is absent (first merge after a reset). The frontmatter value
+        // change must still resolve to the operator's value, with no duplicate key.
+        let ours = "---\nagent_doc_format: template\nclaude_model: sonnet\n---\n\n# Title\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        let theirs = "---\nagent_doc_format: template\nclaude_model: opus\n---\n\n# Title\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+
+        let (merged, _state) = merge_contents_crdt(None, ours, theirs).unwrap();
+        assert!(
+            merged.contains("claude_model: opus"),
+            "operator's edited frontmatter value must survive the no-base merge:\n{merged}"
+        );
+        assert_eq!(
+            merged.matches("claude_model:").count(),
+            1,
+            "frontmatter key must not be duplicated by the merge:\n{merged}"
+        );
+        assert!(
+            !merged.contains("sonnet"),
+            "merge must not retain the snapshot-side old frontmatter value:\n{merged}"
+        );
+    }
+
+    #[test]
+    fn fmreset_repro_operator_fm_edit_while_agent_appends_response() {
+        // #fmreset realistic finalize: the agent appends a `### Re:` response to
+        // exchange (ours = snapshot baseline + response, OLD frontmatter) while the
+        // operator concurrently edits frontmatter on disk (theirs = OLD body +
+        // NEW frontmatter). The merge must keep BOTH the agent response AND the
+        // operator's frontmatter edit.
+        let base = "---\nagent_doc_format: template\nclaude_model: sonnet\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        let ours = "---\nagent_doc_format: template\nclaude_model: sonnet\n---\n\n<!-- agent:exchange -->\n### Re: topic\nAgent response body.\n<!-- /agent:exchange -->\n";
+        let theirs = "---\nagent_doc_format: template\nclaude_model: opus\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+
+        let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        assert!(
+            merged.contains("### Re: topic"),
+            "agent response must survive:\n{merged}"
+        );
+        assert!(
+            merged.contains("claude_model: opus"),
+            "operator frontmatter edit must survive:\n{merged}"
+        );
+        assert!(
+            !merged.contains("claude_model: sonnet"),
+            "merge must not revert frontmatter to snapshot value:\n{merged}"
+        );
+    }
+
+    #[test]
+    fn fmreset_repro_operator_multiline_preset_edit_preserved() {
+        // #fmreset: operator edits a multi-line `prompt_presets` value. The merge
+        // must keep the operator's edited preset body.
+        let base = "---\nagent_doc_format: template\nprompt_presets:\n  \"#1\": |\n    old line\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        let ours = base;
+        let theirs = "---\nagent_doc_format: template\nprompt_presets:\n  \"#1\": |\n    new line\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+
+        let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        assert!(
+            merged.contains("new line"),
+            "operator's edited preset must survive:\n{merged}"
+        );
+        assert!(
+            !merged.contains("old line"),
+            "merge must not revert preset to snapshot value:\n{merged}"
+        );
+    }
+
+    #[test]
+    fn fmreset_repro_agent_managed_resume_write_still_applies() {
+        // #fmreset guard: when the AGENT updates a managed key (resume) and the
+        // operator did NOT touch frontmatter, the agent's write must still apply.
+        let base = "---\nagent_doc_session: sid\nclaude_model: sonnet\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        let ours = "---\nagent_doc_session: sid\nresume: conv-123\nclaude_model: sonnet\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        let theirs = base; // operator untouched
+        let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        assert!(
+            merged.contains("resume: conv-123"),
+            "agent-managed resume write must apply:\n{merged}"
+        );
+    }
+
+    #[test]
+    fn fmreset_repro_concurrent_operator_and_agent_field_merge() {
+        // #fmreset field-wise: operator edits an operator-owned key (claude_model)
+        // AND the agent writes a managed key (resume) in the SAME cycle. Both must
+        // survive — neither overwrites the other.
+        let base = "---\nagent_doc_session: sid\nclaude_model: sonnet\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        let ours = "---\nagent_doc_session: sid\nresume: conv-123\nclaude_model: sonnet\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        let theirs = "---\nagent_doc_session: sid\nclaude_model: opus\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        assert!(
+            merged.contains("resume: conv-123"),
+            "agent-managed resume write must apply:\n{merged}"
+        );
+        assert!(
+            merged.contains("claude_model: opus") && !merged.contains("claude_model: sonnet"),
+            "operator frontmatter edit must win for operator-owned key:\n{merged}"
+        );
+    }
+
+    #[test]
+    fn fmreset_repro_operator_unknown_key_preserved() {
+        // #fmreset: operator adds an arbitrary YAML key not modeled by the typed
+        // Frontmatter struct. It must survive the merge (no struct round-trip drop).
+        let base = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        let ours = base;
+        let theirs = "---\nagent_doc_format: template\nmy_custom_key: hello\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        assert!(
+            merged.contains("my_custom_key: hello"),
+            "operator's custom frontmatter key must survive:\n{merged}"
         );
     }
 

@@ -144,7 +144,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/corky.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=929d6505cca8c761944be9926df20685ae6dfe0753453741c1b7e71767d2d3c6 content_len=28479 content_hash=956742e7a1360a06969351a17379b2ff4266904fa460a0d4602be3c6b075d867 doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782367673222
 ```
-<!-- agent:boundary:1294af98 -->
+<!-- agent:boundary:2038af10 -->
 <!-- /agent:exchange -->
 ###
 <!--

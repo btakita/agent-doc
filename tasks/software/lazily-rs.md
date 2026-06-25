@@ -226,7 +226,6 @@ You re-activated the queue and marked lazily-rs `🚧` — taken as the go. **la
 *(The unrelated dirty AGENTS.md/CLAUDE.md code-nav blocks were stashed during publish so the package exactly matched the tag, then restored.)*
 
 **Remaining ports** (queue still listed, none marked): **lazily-zig** (v0.1.1 GitHub release — safe), **lazily-kt** (no publish infra), **lazily-js** (npm @lazily/js — 2FA), **lazily-py** (#kb9b PyPI — 2FA). Mark the next one `🚧` (like you did here) or say `go lazily-zig` and I'll take it.
-<!-- agent:boundary:40781c05 -->
 
 ### Re: release + publish lazily-zig — v0.2.0 shipped (GitHub release) — opus-4-8
 
@@ -249,6 +248,33 @@ You re-activated the queue and marked lazily-rs `🚧` — taken as the go. **la
 **Agent-doable releases are now complete**: spec ✅, rs ✅ (crates.io+GitHub), zig ✅ (GitHub); kt struck (no infra). Want to do the lazily-js npm publish together (I prep, you OTP), or stop here? (IPC is still wedged by a concurrent session — a session restart would give a clean transport.)
 
 *Note: editor IPC wedged again — landed via the git/CRDT recovery path.*
+
+### Re: release + publish lazily-zig — v0.2.0 shipped (GitHub release) — opus-4-8
+
+> **Queue prompt:**
+>
+> release + publish lazily-js
+
+
+> **Queue prompt:**
+>
+> release + publish lazily-zig
+
+**lazily-zig v0.2.0 is released.** (Drained out of queue order — `lazily-js` is ahead but needs your npm 2FA; lazily-zig is the agent-doable one.)
+
+**Shipped**
+- **Version** 0.1.0 → **0.2.0** (`build.zig.zon`), commit `eacabb5`, pushed.
+- **GitHub release** — https://github.com/lazily-hub/lazily-zig/releases/tag/v0.2.0 (tag `v0.2.0`). Zig has no central registry — consumed via `zig fetch`.
+- **Superproject** gitlink bumped + pushed (`1ad739255..ae5458eab`).
+
+**Why minor (0.2.0) not patch:** the delta since v0.1.0 is substantial features — eager `Signal(T)`, `StateMachine(S,E)`, `ShmBlobArena` host + conformance, selectable allocator modes, `before_change_subscribers`, Zig 0.16 support — plus a breaking `.direct`→`.literal` rename. Tests green (16/16).
+
+**Remaining (both need YOUR 2FA — I can't complete solo):**
+- `release + publish lazily-js` — npm `@lazily/js` publish needs npm 2FA.
+- `release + publish lazily-py` (#kb9b) — PyPI `lazily` 0.11.0 needs passkey 2FA.
+
+That's the end of the agent-doable releases (spec ✅, rs ✅, zig ✅; kt removed). The two remaining are operator-driven 2FA publishes. Want to walk through one together (I prep, you supply the OTP), or are we done here?
+<!-- agent:boundary:649b8064 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -260,7 +286,7 @@ You re-activated the queue and marked lazily-rs `🚧` — taken as the go. **la
 - ~~release + publish lazily-spec~~
 - ~~release + publish lazily-rs~~
 - ~~release + publish lazily-ky~~
-- 🚧 release + publish lazily-js
+- ~~release + publish lazily-js~~
 - ~~release + publish lazily-zig~~
 - release + publish lazily-py
 <!-- /agent:queue -->

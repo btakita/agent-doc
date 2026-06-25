@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -34,33 +34,24 @@ queue: stop
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260625-004850.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260625-010217.md`*
 
 Compacted content:
-- Archived 4 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); IPC proof diagnostic (interrupted-cycle recovery); #lzzigbeforechange; 1 more
-- Prior summary/context: prior compacted content: Archived 9 response topic(s): lazily bug-fix next-steps (cross-port); IPC proof diagnostic (...
+❯ - Archived 1 response topic(s): #lzjshygiene
+❯ - Prior summary/context: prior compacted content: Archived 4 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); IPC proof d...
 
-### Re: #lzjshygiene — generic conformance fixture assertion validation (lazily-js) — opus-4-8
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
-> **Queue prompt:**
->
-> [#lzjshygiene]
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
 
-
-Drained the queue head `#lzjshygiene`. The work was already implemented locally (uncommitted in `src/lazily-js/test/ipc.test.js`); I verified, completed parity, and shipped it.
-
-**What it does** — `assertFixtureAssertions(message, fixture)` cross-checks **every** `assertions` metadata field on each conformance fixture against the parsed snapshot/delta message, so the `wire` block and the `assertions` block can no longer drift silently. This is the JS parity of lazily-kt `#lzktconf`:
-- Snapshot keys: `epoch`, `node_count`, `edge_count`, `root_count`, `first_node_type_tag`, `first_node_state_kind`, `has_opaque_node`, `opaque_node_id`, `blob_{offset,len,epoch}`.
-- Delta keys: `base_epoch`, `epoch`, `is_sequential`, `op_count`, `has_all_op_variants`, `resync_after_epoch_10`, `first_op_kind`, `first_op_payload_kind`.
-- **Unknown assertion keys throw** — new fixture metadata can never be silently ignored.
-- Wired into the `all fixtures round trip` loop + a dedicated drift-detection test (mutated `node_count` and an unknown key both fail loudly).
-
-**Verification** — `npm run build` (node --check) green; `npm test` green at **28 pass** (was 27; +1 drift test). Parity confirmed with lazily-kt: both cover the same 6 IPC JSON fixtures. `arena_blob.json` (LZSH arena format, not IPC JSON wire) is intentionally excluded in both ports.
-
-**Shipped** — lazily-js `6d38122` (pushed to `lazily-hub/lazily-js`), superproject gitlink bumped + pushed. Preset `#spec-test-build-install-commit-push`: no spec change needed (assertions already live in the fixtures); no install step for a pure-JS workspace package.
-
-**Observations (not blocking):** `package-lock.json` is untracked but not git-ignored in lazily-js — a real but separate gap from this task; left uncommitted to keep this commit scoped. A `stale_install` warning fired on agent-doc itself (built binary predates source commit `59c2f74f`) — that's an agent-doc dev concern, out of scope for this lazily session.
-<!-- agent:boundary:6bc520ea -->
+ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=a0d06514-4d61-4e39-80e9-51dfe63333e3 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=7422 candidate_hash=d5fe277899e37743258c3a872b7d0fa7d24d01ecd077fe15d3d722c8bd515709 content_ours_len=8946 content_ours_hash=c211c34309f039199ecaa80c915df0a4fdb44a7bd4ce4f6087179515c017e6d3 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782348633215
+```
+<!-- agent:boundary:5de9838e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,6 +60,7 @@ Drained the queue head `#lzjshygiene`. The work was already implemented locally 
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 What are #next-steps to fix lazily-rs, lazily-kt, lazily-js, lazily-spec, lazily-zig, lazily-py bugs?
 <!-- /agent:queue -->
 
 ## Backlog

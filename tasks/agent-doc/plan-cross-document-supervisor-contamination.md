@@ -96,6 +96,148 @@ on a degraded route-owned supervisor) — run it from a fresh session/pane on a
 clean supervisor. Same rationale as `#agentreloadrestart` Phase 1b
 (`feedback_deep_supervisor_refactor_fresh_focused_cycle`).
 
+## Design note: would a reactive state machine help? (`#xdocsuper3` re-scope)
+
+Operator question (2026-06-25): *"Would a reactive state machine help to manage
+the supervisor document bindings?"* Short answer: **yes for the document-switch
+/ hosting problem; no (over-engineering) for the claim guard.** Critically, the
+reactive substrate **already exists** — this is an extension, not greenfield.
+
+### The reactive substrate is already built (`state_backbone.rs`)
+
+`agent-doc-orchestration/src/state_backbone.rs` is already an **event-sourced,
+per-`document_hash`, epoch'd, idempotent** reactive projection. Its `StateEvent`
+variants span the full lifecycle (`PreflightStarted`, `ResponseCaptured`,
+`WriteApplied`, `CommitObserved`, `SessionCheckPassed`, `OwnerGenerationChanged`,
+`AgentRestartPerformed`, `RoutePaneObserved`, `RouteReadinessObserved`,
+`DispatchProofObserved`, …), `document_epoch(document_hash)` advances per
+document, and a re-emit is idempotent (does not bump the epoch). So "model the
+binding as state" lands in a backbone that already exists — the pane→document
+host binding is the missing event variant, not a new subsystem.
+
+This is distinct from the **pure-transition** SMs
+(`queue_item_state_machine`, `merge_control_state_machine`, `cycle_state_machine`),
+which are pure `max`/join decision functions that make a bad *transition* a
+no-op. The backbone is the reactive/event-sourced layer those SMs sit atop.
+
+### Three sub-problems, two tools
+
+- **`#xdocsuper0` — claim guard. NOT an SM.** The hole is a missing predicate:
+  `claim.rs::cross_session_decision` never consults
+  `supervisor_lease_is_fresh_or_alive` (the lease already lives in SQLite via
+  `state_store.rs::load_supervisor_lease_from_db`). A pure guard on
+  `AcceptStale` closes the two-supervisors-one-document window. Framing this as
+  a reactive SM over-engineers a one-line check. **Do this first** — highest
+  leverage, lowest risk, no new infra.
+
+- **`#xdocsuper1` — document-switch reset. This is where an SM pays off.** The
+  illegal state is "hosting DocB while still holding DocA's stale in-memory
+  overlay (CRDT / queue projection / drain lease / cycle journal)." Modeling the
+  hosting lifecycle explicitly (`Detached → Hosting(doc) → SwitchDetected →
+  Resetting → Hosting(doc')`) makes the illegal state *unreachable by
+  construction* — the same structural-impossibility guarantee
+  `queue_item_state_machine` gives for duplicate queue items.
+
+- **`#xdocsuper3` — fold the binding into the backbone. Re-scope from
+  "optional" to "the implementation vehicle for `#xdocsuper1`."** Express the
+  reset **as a backbone transition** — e.g. a `SupervisorHosting {
+  document_hash, pane_session, lease_epoch }` / `DocumentSwitched` event feeding
+  the projection — **not** as ad-hoc reset code in the supervisor host loop.
+  Otherwise `#xdocsuper1` becomes another implicit-reset path that can be
+  bypassed under IPC degradation: the same class of bug it is fixing. The
+  backbone's epoch already advances on `OwnerGenerationChanged`; a document
+  switch is the same kind of epoch advance that makes a stale-overlay replay a
+  no-op. **Recommendation: implement `#xdocsuper1` *inside* `#xdocsuper3`.**
+
+### Necessary but not sufficient (honest tradeoff)
+
+An event-sourced SM only holds if emitting the switch event + reload is the
+**first** step on every document handoff, enforced **structurally** — the
+projection's `Hosting` state must be constructable only from a fresh switch
+event paired with an on-disk reload, not an optional reconciliation pass. The
+lesson from `#queuestatemachine`: convergence must **drive** to the lawful
+state, not **patch** after the fact. A skipped emit under IPC drift reintroduces
+the hole, so the SM is necessary but the structurally-enforced ordering is what
+actually closes it.
+
+### Recommendation
+
+Keep `#xdocsuper0` as the standalone guard (ship first). Fold `#xdocsuper1` into
+`#xdocsuper3` as a backbone transition. This matches the operator's "represent X
+as a state machine so the bad state is impossible" theme across
+`#queuestatemachine` / `#mergestatemachine` / `#waitmachine`, and reuses the
+backbone that already models every other document-scoped lifecycle fact.
+
+## Implementation findings (xdocsuper1/3)
+
+Investigated the live code in the `xdocsuper-statereset` worktree before coding.
+
+### Where the stale per-document in-memory state lives + is replayed
+
+- The supervisor-in-process model holds per-document state in the **process-global,
+  append-only `EventLedger`** (`agent-doc-orchestration/src/state_backbone.rs:258-349`),
+  surfaced through the FFI singleton `STATE_LEDGER`
+  (`src/ffi.rs:1701-1710`). Plugins/supervisor report facts via
+  `agent_doc_record_state_event` (`src/ffi.rs:1771`) and read the
+  per-document projection via `agent_doc_state_projection` (`src/ffi.rs:1726`) /
+  `agent_doc_state_subscribe` (`src/ffi.rs:1846`).
+- The per-document overlay is `DocumentStateProjection`
+  (`state_backbone.rs:384`), rebuilt **on demand** from the ledger by
+  `EventLedger::project_document(document_hash)`
+  (`state_backbone.rs:307-324`). It is keyed by `document_hash` in
+  `StateBackboneProjection.documents` (`state_backbone.rs:353`).
+- The **answered-head residue** lives in `QueueProjection`
+  (`state_backbone.rs:770-816`): `active_head`, `heads`, and especially
+  `completed_heads` (`state_backbone.rs:776`, accumulated in `apply_completed`
+  at `:804-815`). Replay point: every call to `project_document` re-applies
+  **all** accepted queue facts for the document with **no generation/epoch gate**
+  (contrast the transport/route/supervisor facts, which ARE generation-gated via
+  `current_generation_matches` at `state_backbone.rs:691`). So a stale queue
+  overlay (answered heads from a prior hosting of the same or a sibling document)
+  is faithfully replayed into the fresh cycle's projection.
+- **The structural gap:** there is no `pane_session → currently-hosted document`
+  binding in the backbone and no event that marks a host/switch. So the projection
+  cannot tell "this queue overlay belongs to a hosting that is now over." The
+  authoritative-actor layer (`route/authoritative_actor.rs`) has a robust
+  *harness*-mismatch guard (`route_authoritative_actor_harness_mismatch_{stale,
+  deferred}`) but **no document-identity / hosting-epoch guard**, and it does not
+  feed the backbone.
+
+### Discrepancy vs the plan's hypothesis
+
+The plan describes the stale state as "CRDT overlay, queue model, drain lease,
+cycle journal" held as mutable supervisor fields keyed by path. In this codebase
+that state is **already event-sourced** into the single `EventLedger`/projection
+substrate rather than spread across ad-hoc mutable supervisor fields — so the fix
+is not "drop a cached struct on switch" but "make the backbone projection
+**epoch-gate the queue domain on the hosting binding**", exactly the
+`#xdocsuper3`-inside-`#xdocsuper1` direction the design note recommends. The
+queue domain was the one document-scoped domain with no generation/epoch gate,
+which is why it (and only it) leaks across hostings.
+
+### Fix shape (implemented)
+
+1. New `StateFact::SupervisorHosting { document_hash, pane_session, lease_epoch }`
+   (Supervisor domain). The projection tracks, per document, the
+   `(pane_session, hosting_epoch)` currently hosting it.
+2. A host event is a **switch/fresh-host** when the pane_session changes for the
+   document, or the same pane re-hosts at a higher `lease_epoch`. On a
+   switch/fresh-host the projection **resets the queue overlay to empty** (drops
+   `active_head`/`heads`/`completed_heads`) — making a stale-overlay replay a
+   no-op *by construction*, the same guarantee `queue_item_state_machine` gives
+   for duplicate queue items.
+3. Queue facts are now **hosting-epoch gated**: a queue fact produced under an
+   older hosting epoch than the document's current hosting is rejected
+   (recorded in `rejected_stale_events`, mirroring the generation gate). This is
+   what makes the ordering structurally enforced — the `Hosting` queue state is
+   only constructable from facts at the current hosting epoch, so a skipped reset
+   cannot reintroduce the hole: the stale facts are rejected even if the reset
+   event is replayed/reordered, because they carry the old epoch.
+4. The reset is the FIRST thing applied on a host transition (handled inside the
+   single `apply` reducer, before any later queue fact for the new hosting can be
+   accepted), and the FFI `agent_doc_record_state_event` path that the live
+   supervisor uses appends the `SupervisorHosting` fact through the same reducer.
+
 ## Relationship to other work
 
 The structural sibling of `#queuestatemachine` (per-item dup-impossibility),

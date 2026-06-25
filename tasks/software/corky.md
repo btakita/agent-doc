@@ -179,7 +179,28 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/corky.md source=socket_ack_content patch_id=103180a9-f5fe-418e-9696-d4bad052c171 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=16016 candidate_hash=c028248700880b79c7d1886d7af3af2c2a0f5c2f039996534555ed6fd8c45e36 content_ours_len=15869 content_ours_hash=b9d785dddaf2f661963541f3163c9705f93d940ac0aaaf85c299c913c1ec9cd2 doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782350975165
 ```
-<!-- agent:boundary:9fb03d5f -->
+
+### Re: #ckywatchpanic — P1 watch daemon dies on tick panic — opus-4-8
+
+> **Queue prompt:**
+>
+> [#ckywatchpanic]
+
+
+Fixed and shipped (corky `24baa0c` on `origin/main`). `corky watch` ran each loop tick via `spawn_blocking(...).await?`; a panicking tick surfaced as a `JoinError` that `?` propagated out of the loop — and because `[profile.release]` set `panic = "abort"`, a tick panic aborted the **whole process** before tokio could even catch it. Both paths break the "never crashes the watch loop" contract documented in `watch.rs`.
+
+**Fix (two parts — `catch_unwind` alone is a no-op under `panic = "abort"`):**
+- Switch the release profile to **`panic = "unwind"`** so a tick panic becomes a catchable `JoinError` instead of an immediate abort.
+- Add `run_tick(label, f)` — runs the tick on the blocking pool and, on a panic (or cancellation), logs a warning and returns so the loop continues. All four ticks (sync, schedule, auto-upgrade, filter-drift) now route through it.
+
+**Verification (`#spec-test-build-install-commit-push`):**
+- Tests: new `#[tokio::test]` proving a panicking tick is swallowed — `cargo test -p corky --lib` → 22 passed; full `make check` (GPU clippy `-D warnings` + workspace) green.
+- Build + install (GPU/CUDA): `make install` → `corky 0.29.0` in `~/.cargo/bin` (now built with unwind tables).
+- Spec: SPEC.md §9.2 documents the panic isolation + unwind requirement.
+- Commit `24baa0c` — pushed.
+
+Note: switching `panic = abort → unwind` slightly enlarges the release binary (unwind tables); that's the necessary cost of the never-crash contract. Next queue head: `#ckydedup` (P1 dedup key drops distinct same-second messages).
+<!-- agent:boundary:0204b245 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -193,7 +214,7 @@ Please give me a report the performance
 - ~~[#ckyorphan]~~
 - ~~[#ckypanic]~~
 - ~~[#ckysheets]~~
-- 🚧 [#ckywatchpanic]
+- ~~[#ckywatchpanic]~~
 - [#ckydedup]
 - [#ckythread]
 - [#ckytok401]
@@ -209,7 +230,6 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ckywatchpanic] [P1] corky watch dies on any tick panic: spawn_blocking(...).await? under panic=abort (Cargo.toml:89) propagates JoinError and aborts the daemon, contradicting the never-crashes-loop contract in watch.rs doc comments. Wrap each tick in catch_unwind and log instead of ?. src/watch.rs:309-312
 - [ ] [#ckydedup] [P1 correctness] dedup key (raw_from, raw_date) drops distinct same-second messages and leaks duplicates across providers (date string varies by TZ/format, From varies by display-name). Normalize address + parse date to UTC seconds + include message_id. crates/corky-mail/src/sync/imap_sync.rs:184-197
 - [ ] [#ckythread] [P1 correctness] threading gaps: IMAP path hardcodes message_id None (imap_sync.rs:542-552, breaks reply threading for IMAP accounts since **Message-ID** metadata is never written); no validation that in_reply_to AND thread_id are both set (draft/send.rs:91-104, reply silently un-threads); IMAP subject-key vs Gmail threadId-key never merge on provider switch.
 - [ ] [#ckytok401] [P1] 401 from Google APIs never invalidates the cached token, so a Google-revoked but clock-valid token traps the user until manual tokens.json delete; only draft send clears its send token. Drop token on 401 across cal/doc/tasks/chat. crates/corky-google/src/{cal,doc,tasks}/*.rs, crates/corky-social/src/social/chat.rs

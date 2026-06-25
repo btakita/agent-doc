@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -111,7 +111,23 @@ Drained both queue heads.
 
 Reload the `dialog=application` → **Open Full Application** path to see it fill the screen.
 
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=d3db89be-fac6-4f71-bd5b-4b333cc1fdb7 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782402762643
+```
 ### Re: Full Application cleanup (remove Feedback Report card + Step prefixes) + deploy — opus-4-8
+
+> **Queue prompt:**
+>
+> From https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Full Application, remove "Feedback Report" card. Admins will use the Messaging feature to send emails to borrowers.
+
 
 Drained all three queue heads.
 
@@ -132,7 +148,39 @@ Drained all three queue heads.
 **Removed the "Step #:" prefix.** Section titles read "Step 1 - Personal", "Step 4 - Subject Property", etc. I stripped the `Step N - ` prefix from every section card title **and** the advancement-requirement section labels in the shared `full_application_detail.tsx`, so the dialog now shows clean names (Personal, Addresses, Employment, Income, Assets, Liabilities, Real estate owned, Subject Property, Declarations, Review & Sign). Display-only strings; `section_key` is unchanged. Shared component, so the borrower application-status view gets the same cleaner headers.
 
 **Verify + deploy.** Tests updated to lock in both changes; `bun run test` → 1225 pass / 0 fail; `build` + `build:worker` clean. Pushed to `origin/main` (commit `fa27562`), then `deploy:worker` → live (Version `9889de6b-5293-4703-868f-2a7dd7b80a43`). No CI workflow in the EFS repo, so local suite + build are the evidence.
-<!-- agent:boundary:54af4338 -->
+
+### Re: Full Application dialog layout — Declarations moved + collapsible cards + inline document uploads — opus-4-8
+
+Drained the four Full Application layout heads (deployed in Version `02130b3c`). The Messages-dialog scroll head + the trailing `deploy` are left active — see the note at the end.
+
+> **Queue prompt:**
+>
+> Admin > Data Pipeline + Page: Remove the Step #: prefix from the Full Application dialog.
+
+> **Queue prompt:**
+>
+> Move the Declarations card to the left side of the Full Application dialog.
+
+> **Queue prompt:**
+>
+> Make the Declarations + Review & Sign cards collapsible and default to collapsed.
+
+> **Queue prompt:**
+>
+> Remove the dropdown in the Documents card. Show each document type with the upload inline.
+
+**Step #: prefix** — stripped `Step N - ` from every section card title **and** the advancement-requirement section labels in the shared `full_application_detail.tsx` (covers both the dialog and the standalone page). Display-only; `section_key` unchanged. (Committed earlier as `fa27562`.)
+
+**Declarations moved left** — the Declarations card now renders in the left column of the Full Application detail (after Real estate owned) instead of the right column.
+
+**Collapsible Declarations + Review & Sign** — new `CollapseToggle` (chevron header). `EditableObjectSectionCard` gained `collapsible`/`default_collapsed` props (used by Declarations); Review & Sign was extracted into a `ReviewSignCard`. Both default to collapsed.
+
+**Documents card — no dropdown** — the admin Full Application used the `table` upload variant (a document-type `<select>` + single drop zone). Switched it to the `per_type` variant, which already renders **each** document type with its own inline drop zone and status — no dropdown. Removed the now-dead `FullApplicationDocumentsTableUpload` + unused `PortalSelect` import.
+
+Verify: tests updated; `bun run test` → 1225 pass / 0 fail; `build` + `build:worker` clean. Pushed `28bd4b1`, deployed Version `02130b3c-108b-44ab-9531-c381b416e6e6`. No CI workflow in the EFS repo.
+
+**Left queued (next iteration):** "The Messages dialog should not have a vertical scrollbar … textarea + Send fixed at the bottom, messages independently scrollable" + `deploy`. This is a multi-surface dialog scroll/layout change (per-user / group / messages / contact tabs) whose correctness needs live visual verification, so it deserves a focused pass rather than a build-green-only change in this degraded-IPC session.
+<!-- agent:boundary:4e6acdd8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -152,7 +200,12 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 From https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Full Application, remove "Feedback Report" card. Admins will use the Messaging feature to send emails to borrowers.
+- ~~From https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Full Application, remove "Feedback Report" card. Admins will use the Messaging feature to send emails to borrowers.~~
+- ~~Admin > Data Pipeline + Page: Remove the Step #: prefix from the Full Application dialog.~~
+- ~~Move the Declarations card to the left side of the Full Application dialog.~~
+- ~~Make the Declarations + Review & Sign cards collapsible and default to collapsed.~~
+- ~~Remove the dropdown in the Documents card. Show each document type with the upload inline.~~
+- The Messages dialog should not have a vertical scrollbar for the messages + textarea + Send button. The text area + Send button should be fixed at the bottom of the dialog viewport. The messages should have an independent vertical scrollbar.
 - deploy
 <!-- /agent:queue -->
 

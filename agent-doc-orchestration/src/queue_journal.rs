@@ -105,7 +105,57 @@ fn read_journal(path: &Path) -> Vec<QueueJournalEntry> {
 /// Called from preflight queue maintenance so an operator queue add is captured
 /// to a crash-durable store on the first cycle that observes it.
 pub fn record(file: &Path, content: &str) -> Result<()> {
-    let prompts = queue_prompts(content);
+    append_prompts(file, queue_prompts(content))
+}
+
+/// Journal operator queue prompts from the live editor buffer (`#qftloss`
+/// mode-6).
+///
+/// Mode-6 is the gap *before* the first cycle observes an operator queue add:
+/// `record` only ever sees on-disk content (it runs during preflight queue
+/// maintenance), so an operator queue edit that lives **only** in the editor
+/// buffer — never flushed to disk, never observed by any cycle — is invisible to
+/// the disk-backed `#qdurcrash` journal. If a concurrent commit / convergence /
+/// `git checkout HEAD` recovery overwrites that unsaved buffer (or the buffer is
+/// killed) before a cycle reads it, the operator's free-text prompt is lost.
+///
+/// The JB / VS Code plugins already report the operator's full editor buffer to
+/// `.agent-doc/live-buffer/<hash>` on every keystroke (debounced) via
+/// [`crate::debounce::document_changed_with_content`]. This reads that durable
+/// editor-buffer sidecar and journals any operator queue prompt it contains that
+/// is not already journaled, so the prompt enters the **same** `#qdurcrash`
+/// journal substrate and is replayed by [`replay_missing`] on the next cycle /
+/// restart — closing the pre-first-observation gap binary-side without changing
+/// the IPC-first write path or the convergence/merge.
+///
+/// Best-effort and additive: a missing/unreadable sidecar is a no-op, and a
+/// prompt already present in the journal is never double-recorded.
+pub fn record_live_buffer(file: &Path) -> Result<()> {
+    let Some(file_str) = file.to_str() else {
+        return Ok(());
+    };
+    // Each open editor reports its own sidecar; journal the prompts from every
+    // one so a multi-editor session never drops one editor's pending add.
+    let mut prompts: Vec<crate::queue::QueuePrompt> = Vec::new();
+    for snapshot in crate::debounce::live_buffer_snapshots(file_str) {
+        let Some(buffer) = snapshot.content.as_deref() else {
+            // len/hash-only sidecar: we cannot recover the prompt text from a
+            // digest, so there is nothing to journal from it.
+            continue;
+        };
+        for prompt in queue_prompts(buffer) {
+            if !prompts.iter().any(|p| p.text == prompt.text) {
+                prompts.push(prompt);
+            }
+        }
+    }
+    append_prompts(file, prompts)
+}
+
+/// Shared append path for [`record`] and [`record_live_buffer`]: durably append
+/// every prompt not already journaled. Best-effort (logs + degrades to a no-op on
+/// any resolution/IO failure).
+fn append_prompts(file: &Path, prompts: Vec<crate::queue::QueuePrompt>) -> Result<()> {
     if prompts.is_empty() {
         return Ok(());
     }
@@ -398,5 +448,114 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = doc(dir.path(), &["- do [#alpha]"]);
         assert!(replay_missing(&path, &content_of(&path)).is_empty());
+    }
+
+    /// Build the same template-mode doc body `doc()` writes, returned as a string
+    /// (not written to disk) — used to model the operator's live editor buffer.
+    fn doc_body(queue_lines: &[&str]) -> String {
+        let mut body = String::from(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n## Queue\n\n<!-- agent:queue auto -->\n",
+        );
+        for line in queue_lines {
+            body.push_str(line);
+            body.push('\n');
+        }
+        body.push_str("<!-- /agent:queue -->\n");
+        body
+    }
+
+    /// `#qftloss` mode-6: an operator free-text queue prompt that lives ONLY in
+    /// the live editor buffer — never flushed to disk, never observed by any cycle
+    /// — must survive a concurrent commit/convergence/recovery that overwrites the
+    /// unsaved buffer with the (older) on-disk content.
+    ///
+    /// Scenario:
+    ///   1. The doc on disk has a clean queue (`#alpha`).
+    ///   2. The operator types a free-text prompt into the editor; the plugin
+    ///      reports the full buffer to `.agent-doc/live-buffer/<hash>` (this is the
+    ///      already-shipped buffer-flush-on-edit). The add is NOT on disk and no
+    ///      cycle has observed it.
+    ///   3. `record_live_buffer` (run at startup / early preflight) journals the
+    ///      editor-buffer prompt into the `#qdurcrash` substrate.
+    ///   4. A concurrent commit/recovery overwrites the editor buffer — the only
+    ///      copy of the add — leaving disk == the pre-add content.
+    ///   5. On the next cycle, `replay_missing` + `merge_missing_into_content`
+    ///      re-insert the operator's free-text prompt instead of dropping it.
+    #[test]
+    fn live_buffer_only_operator_add_survives_concurrent_clobber() {
+        let dir = tempfile::tempdir().unwrap();
+        // Disk: clean queue, no operator add yet. (Step 1.)
+        let path = doc(dir.path(), &["- do [#alpha]"]);
+        let file_str = path.to_string_lossy().to_string();
+
+        // No journal entry exists for the operator's free-text prompt yet: the
+        // disk-backed `record` cannot see an unflushed editor-buffer edit.
+        record(&path, &content_of(&path)).unwrap();
+        assert!(
+            replay_missing(&path, &content_of(&path)).is_empty(),
+            "precondition: nothing journaled for the editor-only add yet"
+        );
+
+        // Step 2: operator types a free-text prompt; the plugin reports the full
+        // editor buffer (disk queue + the new operator line) to the live-buffer
+        // sidecar. The add never reaches disk.
+        let editor_buffer = doc_body(&["- do [#alpha]", "- investigate the prod outage"]);
+        crate::debounce::document_changed_with_content(&file_str, &editor_buffer);
+
+        // Step 3: capture the editor-buffer add into the durable journal.
+        record_live_buffer(&path).unwrap();
+
+        // Step 4: a concurrent commit/convergence/`git checkout HEAD` recovery
+        // overwrites the unsaved editor buffer — disk is still the pre-add content
+        // (the operator's only copy of the prompt is now gone from live state).
+        let reloaded = content_of(&path);
+        assert!(
+            !reloaded.contains("investigate the prod outage"),
+            "disk must NOT contain the editor-only add (it was clobbered)"
+        );
+
+        // Step 5: the next cycle replays the journaled operator prompt.
+        let missing = replay_missing(&path, &reloaded);
+        assert_eq!(
+            missing.len(),
+            1,
+            "the editor-only operator add must be recoverable from the journal: {missing:?}"
+        );
+        assert_eq!(missing[0].text, "investigate the prod outage");
+
+        let merged = merge_missing_into_content(&missing, &reloaded)
+            .unwrap()
+            .expect("the recovered editor-only add must produce merged content");
+        assert!(
+            merged.contains("- investigate the prod outage"),
+            "operator free-text prompt must be re-inserted, not dropped:\n{merged}"
+        );
+        assert!(
+            merged.contains("- do [#alpha]"),
+            "the survivor must be preserved:\n{merged}"
+        );
+    }
+
+    /// `#qftloss`: a live-buffer add that was subsequently consumed/struck on disk
+    /// must NOT be resurrected (the operator already worked or cancelled it).
+    #[test]
+    fn live_buffer_record_does_not_resurrect_a_struck_add() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = doc(dir.path(), &["- do [#alpha]"]);
+        let file_str = path.to_string_lossy().to_string();
+
+        // Operator's editor buffer held a free-text add; journal it from the buffer.
+        let editor_buffer = doc_body(&["- do [#alpha]", "- review the migration plan"]);
+        crate::debounce::document_changed_with_content(&file_str, &editor_buffer);
+        record_live_buffer(&path).unwrap();
+
+        // The add was later worked and struck on disk — replay must treat it as
+        // present (consumed), never resurrect it.
+        let struck = doc(dir.path(), &["- do [#alpha]", "- ~~review the migration plan~~"]);
+        let missing = replay_missing(&struck, &content_of(&struck));
+        assert!(
+            missing.is_empty(),
+            "a struck/consumed editor-buffer add must not be resurrected: {missing:?}"
+        );
     }
 }

@@ -207,6 +207,19 @@ pub fn run_with_reap_policy(
     // Additive + conservative: only re-adds missing prompts, never removes, and a
     // journal hiccup degrades to a no-op.
     let updated_content = {
+        // `#qftloss` mode-6: before replaying the journal, capture any operator
+        // queue prompt that lives ONLY in the live editor buffer (reported by the
+        // plugin to `.agent-doc/live-buffer/<hash>` but never flushed to disk /
+        // observed by a cycle). Journaling it here folds the pre-first-observation
+        // edit into the existing `#qdurcrash` substrate so the very next
+        // `replay_missing` below re-inserts it instead of dropping it when the
+        // reloaded document predates the add.
+        if let Err(err) = crate::queue_journal::record_live_buffer(file) {
+            eprintln!(
+                "[agent-doc] queue_journal: live-buffer record failed for {} ({err:#}) — continuing",
+                file.display()
+            );
+        }
         let missing = crate::queue_journal::replay_missing(file, &updated_content);
         match crate::queue_journal::merge_missing_into_content(&missing, &updated_content) {
             Ok(Some(merged)) => {

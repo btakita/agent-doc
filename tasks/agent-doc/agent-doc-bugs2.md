@@ -69,7 +69,32 @@ Compacted content:
 **Dogfood note:** this very closeout hit the IPC class you're tracking — `finalize --stream` got a 6s socket ack timeout, fell back to file-IPC, then `no_ack` (`recovery=retry_without_disk_write`) because the editor never applied the queued patch (no live-buffer sidecar for this doc; supervisor reports fresh). Recovered via the explicit `finalize --force-disk` escape hatch.
 
 Live dogfood of the hang→`startup_miss` behavior in a real editor/pane needs a human eyeball, so I filed it as `[operator-verify]` **#nsfz** rather than gating the ship.
-<!-- agent:boundary:8950ab6d -->
+
+### Re: state machine for the wait machinery + Lean no-hang proof — opus-4.8
+
+Yes — and it's the right next step, because the wait machinery is currently *not* one thing. I inventoried every blocking wait and they're scattered ad-hoc loops with inconsistent budgets, several of which already violate your 10s ceiling:
+
+| Site | Budget today |
+|------|------|
+| `start.rs` `AUTO_TRIGGER_TIMEOUT` (the `#startupdeadline` deadline I just shipped) | **30s** |
+| `route/startup.rs` `wait_for_agent_ready` (fresh-route ready) | **30s** |
+| `route.rs` busy-reroute / shell waits | 20s, 15s, 10s, 8s, 5s, 3s, 2s |
+| IPC socket ack (finalize) | 6s socket + 2s file |
+
+So today's worst case is ~30s, not 10s. That's exactly the gap a single state machine closes.
+
+**Design (filed as a plan, not done inline — this is a deep supervisor-critical refactor):** `tasks/agent-doc/plan-wait-machinery-state-machine.md`.
+
+- A new `WaitMachine` with a **pure** `tick(state, signal, elapsed) → state` transition (no I/O — clock/PTY/socket reads live in a thin driver). States: `AwaitingShell`, `AwaitingDispatchReady`, `AwaitingClearCooldown`, `AwaitingCapabilityProof`, `AwaitingIpcAck`, `ReinstallPause`, `FailedClosed`, `Ready`.
+- **One** `GLOBAL_HANG_CEILING = 10s` enforced in one place. Any non-exempt state hitting its `max_dwell` returns `FailedClosed` — never "keep polling" (generalizing the `#startupdeadline` fix to *every* wait).
+- `ReinstallPause` is the **one typed exemption** you called out (the dogfood reinstall/recycle pause) — the only state allowed past 10s, and even it is bounded by a separate explicit `REINSTALL_BUDGET` and logged distinctly so a pause is never misread as a hang.
+
+**Proving it never hangs (both kinds you asked for):**
+1. *Tests* — per-state continue-before-deadline → fail-closed-once unit tests, plus an exhaustive `(state × signal)` property test asserting `Σ dwell ≤ 10s` on every exempt-free path, plus SimWorld coverage for the live hang classes.
+2. *Lean* — `formal/wait_machine/` encodes `WaitState` as an inductive type and `tick` as a `Step` relation mirroring the Rust 1:1, then proves `no_hang : ∀ p, Reachable p → ExemptFree p → dwell p ≤ 10s`, with a second lemma that `ReinstallPause` is the sole state that can exceed it. The honest caveat: Lean proves the *model*; a Rust↔Lean `tick`/`Step` mismatch would make it vacuous, so the plan pins a parity test enumerating the Rust transition table against the Lean one (Rust `tick` is the source of truth).
+
+Queued as four dependency-ordered phases — **#waitmachine1** (core), **#waitmachine2** (migrate call sites + lower the 30s budgets to the 10s ceiling), **#waitmachine3** (deterministic bound proof), **#waitmachine4** (Lean). Each phase is its own focused cycle per the deep-refactor pacing rule; #waitmachine2 is where your "never >10s" constraint actually lands.
+<!-- agent:boundary:104aec6c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -222,6 +247,10 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#gghx] #waitmachine1 Wait-machinery state machine core: add agent-doc-orchestration/src/wait_machine.rs with a pure WaitState/tick transition + single GLOBAL_HANG_CEILING (10s) + typed ReinstallPause exemption. Plan: tasks/agent-doc/plan-wait-machinery-state-machine.md
+- [ ] [#8g9w] #waitmachine2 Migrate scattered waits (start.rs AutoTriggerMonitor 30s, route/startup.rs wait_for_agent_ready 30s, route.rs busy/shell waits, IPC ack) onto WaitMachine and lower budgets to the 10s ceiling (operator: never hang >10s). Plan: tasks/agent-doc/plan-wait-machinery-state-machine.md
+- [ ] [#6mjw] #waitmachine3 Deterministic bound proof: per-state transition tests + exhaustive (state×signal) property test asserting Σdwell≤10s on every exempt-free path + SimWorld hang-class coverage. Plan: tasks/agent-doc/plan-wait-machinery-state-machine.md
+- [ ] [#spy9] #waitmachine4 Lean model: formal/wait_machine/ encoding WaitState/Step mirroring Rust tick, theorem no_hang (exempt-free ⇒ dwell≤10s) + reinstall-pause sole-exemption lemma + Rust↔Lean parity test. Plan: tasks/agent-doc/plan-wait-machinery-state-machine.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
 - [ ] [#rt83qflood] #rt83/#qflood phantom-pin flood dedup: queue convergence leaves duplicate binary-injected :round_pushpin:/:pushpin: actor-switch pins after a stale-CRDT/supervisor re-emit, flooding the queue with ~7 near-identical copies. Add deterministic dedup that collapses repeated phantom pins (the operator-authored line is position-locked under #queue-operator-pin-position-lock, but binary-injected phantom copies must converge to one) so restarting/resyncing a stale supervisor cannot reflood the queue.
 - [ ] [#capproofbg] Make the JB Run Agent Doc capacity proof non-blocking: dispatch immediately and run the capacity proof in the background, surfacing failure asynchronously instead of stalling every dispatch.

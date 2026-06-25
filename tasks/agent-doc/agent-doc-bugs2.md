@@ -202,7 +202,7 @@ Post-restart recovery + first focused-cycle phase of the head epic.
 **Not yet wired into convergence** — that's `#cgfx` (`#queuestatemachine2`: route the ad-hoc dedup passes through the SM as transition guards), then `#brtc` (`#queuestatemachine3`: SimWorld re-emit-storm proof). No behavior change is live yet, so no install/recycle needed — consistent with the standing "stop cutting releases" hold.
 
 **Scope note:** no release ceremony (version/tag/publish/install) per your hold; the code is committed to the submodule and the superproject pointer follows.
-<!-- agent:boundary:55f134df -->
+<!-- agent:boundary:74fec4e0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -232,6 +232,14 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 ```
 ~~~
 - 🚧 :pushpin: [#brtc]
+---
+Please fix the cross document supervisor contamination. This was from the session that started off running corky.md, but somehow 
+```
+● Three agent-doc panes exist; the doc is owned by %73 but I'm now on %69 (the harness relaunched my agent into a new
+  pane — %73 is the stale prior owner). The binary itself says to claim. The fix is already safely committed, so
+  reclaiming for the current pane to land the doc response is low-risk. Let me claim and finalize.
+```
+---
 - :pushpin: do [#gww8]
 - :pushpin: do [#n529b]
 - ~~~~When adding a backlog item, the agent sometimes assigns an explicit id. But agent-doc ignores the explicit id and assigns a new id. The agent's explicit id should be used instead. So instead of `[#kj5f] #mergestatemachine3` the id should be `[#mergestatemachine3]`.~~ — auto-struck: answered this cycle (#ftstrike)~~

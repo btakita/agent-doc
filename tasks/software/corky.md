@@ -126,7 +126,29 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/corky.md source=socket_ack_content patch_id=e79e28c7-55bf-4557-9143-488d98c5a0d7 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=12168 candidate_hash=21bf3bfbd509108ec59e33bfab7758d34334e4a7003a90ebf7e9f877b0fef77f content_ours_len=12573 content_ours_hash=7d74f5df35a669b8fed1739354259b41220827a20be0d71414862f207eb11e84 doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782349411341
 ```
-<!-- agent:boundary:1843b2d6 -->
+
+### Re: #ckypanic — P0 UTF-8 byte-slice panic — opus-4-8
+
+> **Queue prompt:**
+>
+> [#ckypanic]
+
+
+Fixed and shipped (corky `bddfab0` on `origin/main`). Two display paths sliced strings by **byte** index and panicked on realistic input:
+
+- **`draft push` body preview** — `&body[..80]` (`corky-mail/src/draft/mod.rs:712`) panics when byte 80 lands inside a multi-byte char (CJK/emoji replies).
+- **`corky tasks list`** — `&due[..10]` (`corky-google/src/tasks/list.rs:40`) panics on a `due` field shorter than 10 bytes (or non-ASCII).
+
+**Fix:** added `corky_core::util::truncate_chars(s, max)` — takes the first `max` Unicode scalar values via `chars().take()`, never splitting a UTF-8 boundary and never panicking on short input — and routed both sites through it. The body preview now counts chars for its `>80` ellipsis guard; the tasks due keeps its `YYYY-MM-DD` prefix.
+
+**Verification (`#spec-test-build-install-commit-push`):**
+- Tests: new unit tests (ASCII, CJK `你好世界…`, emoji `👍🏽`, short/RFC3339 `due`) — `cargo test -p corky-core truncate_chars` → 2 passed; full `make check` (GPU clippy `-D warnings` + workspace tests) green.
+- Build + install (GPU/CUDA per local policy): `make release` (.bin symlink) + `make install` → `corky 0.29.0` in `~/.cargo/bin`. (Also restores a GPU binary after the prior `#ckyorphan` cycle's CPU-only `cargo install`.)
+- Spec: SPEC.md §5.5 (draft push preview) + §16 (tasks list `due`) document both formats.
+- Commit `bddfab0` — pushed.
+
+Next queue head: `#ckysheets` (P0 sheets-push two-call data loss).
+<!-- agent:boundary:f0f996dd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -138,7 +160,7 @@ Please give me a report the performance
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#ckyorphan]~~
-- 🚧 [#ckypanic]
+- ~~[#ckypanic]~~
 - [#ckysheets]
 - [#ckywatchpanic]
 - [#ckydedup]
@@ -156,7 +178,6 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ckypanic] [P0 crash] UTF-8 byte-slice panics on realistic input: draft body preview &body[..80] (crates/corky-mail/src/draft/mod.rs:712-713, CJK/emoji replies) and tasks due &due[..10] (crates/corky-google/src/tasks/list.rs:40, short due string). One-line char-boundary-safe truncation (chars().take() or get(..n)).
 - [ ] [#ckysheets] [P0 data-loss] corky sheets push clears tab THEN writes in two HTTP calls; failure between them leaves tab empty with no backup. Use batchUpdate updateCells (atomic at API level) or buffer old values for rollback. crates/corky-google/src/doc/sheets.rs:148-174
 - [ ] [#ckywatchpanic] [P1] corky watch dies on any tick panic: spawn_blocking(...).await? under panic=abort (Cargo.toml:89) propagates JoinError and aborts the daemon, contradicting the never-crashes-loop contract in watch.rs doc comments. Wrap each tick in catch_unwind and log instead of ?. src/watch.rs:309-312
 - [ ] [#ckydedup] [P1 correctness] dedup key (raw_from, raw_date) drops distinct same-second messages and leaks duplicates across providers (date string varies by TZ/format, From varies by display-name). Normalize address + parse date to UTC seconds + include message_id. crates/corky-mail/src/sync/imap_sync.rs:184-197

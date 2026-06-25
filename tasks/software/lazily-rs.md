@@ -178,7 +178,7 @@ So: insert/delete are atomic today; atomic ordered *move* is the gap, now backlo
 > **Queue prompt:** Add Google Sheets cell count benchmark to README. Why are there 2 cells per formula?
 
 Added the Google Sheets scale to the README Benchmarks section: at the full **10,000,000-cell** Sheets cap, lazily builds in ~0.7 s, cold-recomputes in ~0.5 s, viewport edit ~11 µs (with the Excel 17.18B-grid sparse-model note). On **"2 cells per formula"** — it's actually **2 cells per row**, not per formula: the bench models a column `=A_i + A_{i-1}`, so each row is **one input cell `A_i` + one formula cell** ⇒ `N` rows = `2N` cells, matching how a real sheet mixes value and formula cells. Each formula *depends on* 2 inputs but is itself a single cell. So "10M cells" = 5M inputs + 5M formulas. Clarified inline in the README.
-<!-- agent:boundary:63195f23 -->
+<!-- agent:boundary:4ad1adcc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -191,19 +191,19 @@ Added the Google Sheets scale to the README Benchmarks section: at the full **10
 - ~~How many cells does Google Sheets & MS Excel support? Add benchmarks for those numbers.~~
 - 🚧 Are we currently support Hash + Collection Cell Famlies? If yes, update lazily-spec and release + publish lazily-rs.
 - ~~Do Cell Families handle insertions and deletions? Is move atomic and optimized? Can position changes be atomic as well?~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~:pushpin: do [#lzcellmove]~~
 - ~~Add Google Sheets cell count benchmark to README. Why are there 2 cells per formula?~~ — auto-struck: answered this cycle (#ftstrike)
-- do [#lzcellmove]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcellmove] [recommended] CellMap/CellFamily atomic + optimized move/reorder: add an ordered reposition (move a key to a new index) that PRESERVES the entry cell (same SlotId + dependents, no re-mint) and bumps membership ONCE — vs naive remove+insert (2 membership bumps + lost cell identity/dependents). Likely a CellList<V> ordered variant or CellMap::move_to(key,index). Insert (entry/entry_with) and delete (remove) are already atomic (single membership bump); ordered MOVE is the only gap. Answers the #lzcellfamily move-atomicity question.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzcellmove] [recommended] [operator-go] CellMap/CellFamily atomic + optimized move/reorder: reorder a key in place (same entry cell + dependents, single membership bump) vs naive remove+insert. Likely CellList<V> or CellMap::move_to(key,index). Insert/delete already atomic; ordered MOVE is the gap. Surfaced by the move-atomicity question — awaiting operator go to implement.
 - [/] [#lzwirekey] [recommended] [operator-go] Wire-stable keyed addressing for collection entries: add optional key/path field to NodeAdd + NodeSnapshot (key->NodeId registry) so CellFamily/CellMap entries survive NodeId churn. Depends on #lzcellfamily (DONE). PLAN COMPLETE: tasks/software/plan-lazily-wire-keyed-addressing.md — implementation gated on operator go (you scoped this plan-only).
 - [/] [#lzcrdtplane] [recommended] Implement the distributed CRDT cell plane (spec §Distributed). Decision: purpose-built HLC + LWW/MV/PN registers (matches lazily's lazy reactive graph + memo-equality invariants); do NOT adopt YRS/YJS document model (wrong replication unit). Keep IPC Snapshot/Delta as the single-producer mirror; CRDT merge lives only at the multi-writer distributed boundary. Optional later: borrow YRS binary anti-entropy sync engine as transport. Plan first: tasks/software/plan-lazily-distributed-crdt-plane.md.
 - [/] [#lilazilysmpost] [/] [operator-drive] lazily state-machine LinkedIn post PUBLISHED WITH IMAGE: https://www.linkedin.com/feed/update/urn:li:share:7475622100263923712 (mail/social/20260624-142530-linkedin.md @ mail bf4ab26). CyclePhase diagram rendered from blog post SVG (light theme colors) + uploaded via LinkedIn digitalmediaAsset API. Old text-only post (urn:li:share:7475617202893639680) deleted + replaced. Remaining operator follow-up: post first comment (link + GitHub source) via corky linkedin comment.

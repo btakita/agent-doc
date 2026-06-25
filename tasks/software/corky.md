@@ -121,7 +121,33 @@ Nothing reaped.
 No new items added — the prior #code-review sweep already surfaced these; every other #cky* finding shipped on origin/main (6894c88 thread, 6c4c831 slug, 63cbb52 durability, 15c0498 mime). Remaining open work: the three splits above plus the operator-gated #pypi-trusted-publisher in review.
 
 Note: the local checkout at `~/work/btakita/corky` is stale at v0.13.1 (monolithic `src/`) with 3 uncommitted modifications (`filter/check.rs`, `filter/gmail_auth.rs`, `watch.rs`); the v0.29.0 workspace lives on origin/main. A fresh #code-review should run against an updated checkout.
-<!-- agent:boundary:d067b52e -->
+
+### Re: #ckythreadmerge — glm-5.2
+
+> **Queue prompt:**
+>
+> `#spec-test-build-install-commit-push` — `[#ckythreadmerge]` (P2 correctness, split from #ckythread)
+
+**Shipped: cross-provider thread merge via Message-ID bridge** — corky `535594f` → `origin/main` (`15c0498..535594f`).
+
+The same conversation synced from IMAP (subject-keyed) and Gmail API (`threadId`-keyed) forked into two files. Reconciled by keying the merge on the globally unique `Message-ID`:
+
+- **`Thread.aliases`** — a file "claims" key `K` when `Thread ID == K` or `aliases` contains `K`. New `**Thread Aliases**:` line (serialize + parse); `parse_thread_identity` / `claims_key` helpers complete the half-staged foundation (it parsed `aliases` but dropped it on construction — fixed).
+- **`merge_message_to_file`** resolves the existing file by the provider key (alias-aware), then falls back to a **Message-ID lookup** so the same message from two providers lands in one file; the incoming key is recorded as an alias. Alias recording runs *before* the dedup short-circuit, so it persists even when the bridged message is a duplicate.
+- **`find_thread_file`** (sync) and **`find_thread_file_by_id`** (refetch) are alias-aware, so a merged thread resolves by any claimed key.
+
+Files: `crates/corky-mail/src/sync/{types,markdown,imap_sync,mod}.rs`, `tests/test_sync.rs`, `SPEC.md` (§3.1 + new §4.5; renumbered Label Routing→§4.6, Manifest→§4.7).
+
+**Spec + tests.** +3 integration tests (`test_cross_provider_merge_by_message_id`, `test_alias_lookup_merges_followup_by_key`, `test_no_merge_without_message_id`) + 4 markdown unit tests (`claims_key`, `parse_thread_identity`, aliases round-trip). `test_sync` 30/30, markdown unit 10/10, `cargo clippy -p corky-mail --tests` clean.
+
+**Build + install.** `make build` (transcribe-cuda) green; `make install` → `corky 0.29.0` from this tree at `~/.cargo/bin/corky`.
+
+**Verification notes.** CI run `28146555728` (CI workflow) in_progress at closeout — proceeding on local evidence per the in-progress rule. The 6 `test_doctor` failures are **pre-existing/environmental** (they read `~/work/btakita/mail/.corky.toml`, which lacks gmail-api/LinkedIn/YouTube setup); confirmed identical on a stashed baseline (5 passed / 6 failed both with and without my changes — they touch no sync code). `Cargo.lock` churn (agent-kit source/checksum + an unused `instruction-files` patch) is unrelated and was left **unstaged**.
+
+**Limitation (documented §4.5):** a message with no `Message-ID` cannot bridge, so two distinct keys for it still yield two files (pre-fix behavior); replies unique to one provider attach via the alias once the parent files are merged.
+
+Queue advances to **#ckymimestream** (draft-send buffers whole attachment in RAM — stream base64 / use Gmail resumable upload).
+<!-- agent:boundary:1e1baf2f -->
 <!-- /agent:exchange -->
 ###
 <!--

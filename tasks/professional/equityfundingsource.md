@@ -38,7 +38,35 @@ complete
 Compacted content:
 ❯ - Archived 6 response topic(s): Prefill New Applications From Prior Borrower Data And Deploy; Message Dialog Open Flash Jank And Deploy; IPC proof diagnostic (interrupted-cycle recovery); 3 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:5ed1e846 -->
+
+### Re: Can we remove the dead tables? — opus-4-8
+
+Yes — I found **6 dead tables** in prod D1, all safe to drop. I cross-referenced the live prod schema (85 tables) against migrations and current source.
+
+A table is "dead" if it has **0 rows in prod**, **0 references in current source** (excluding the gitignored `dist/` build artifact and migrations), and is **created by no migration in this repo** (i.e. it predates the migration system or was superseded by a rename):
+
+| Dead table | Prod rows | Superseded by |
+|---|---|---|
+| `applications` | 0 | `full_applications` / `application_leads` (0036 was explicitly named to dodge this legacy table) |
+| `borrower_loan_applications` | 0 | pre-migration legacy |
+| `borrower_loan_application_documents` | 0 | pre-migration legacy |
+| `contacts` | 0 | `contact_messages` |
+| `loan_payment_transactions` | 0 | `loan_payments` |
+| `uploaded_documents` | 0 | `documents` / `other_documents` |
+
+**Two zero-reference tables I deliberately kept:**
+- `d1_migrations` — Cloudflare/wrangler's own migration tracker. Never drop.
+- `document_sync_logs` — created by migration `0066` for the pending Dropbox sync feature (`#dropbox-sync-contract`); unwired yet, not dead.
+
+**Deliverable:** I wrote `migrations/0110_drop_dead_tables.sql` (`DROP TABLE IF EXISTS` for all six). It is **not yet applied** — this is irreversible prod DDL, so I'm holding for your go before running it remotely. All six are empty, so there is no data loss, but I won't mutate prod schema without confirmation.
+
+To apply once you confirm:
+```
+cd src/equityfundingsource-dev/app/equityfundingsource
+bun ./bin/cf-wrangler.ts d1 migrations apply equityfundingsource --remote -c ../../wrangler.toml
+```
+Queued as an `[operator-verify]` backlog item.
+<!-- agent:boundary:1e90b2f1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -64,6 +92,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#bxtd] [operator-verify] Apply migrations/0110_drop_dead_tables.sql to prod D1 (drops 6 empty legacy tables: applications, borrower_loan_applications, borrower_loan_application_documents, contacts, loan_payment_transactions, uploaded_documents). Irreversible prod DDL — confirm, then: bun ./bin/cf-wrangler.ts d1 migrations apply equityfundingsource --remote -c ../../wrangler.toml
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 

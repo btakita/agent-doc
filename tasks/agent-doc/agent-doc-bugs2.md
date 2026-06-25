@@ -69,14 +69,14 @@ Compacted content:
 **Dogfood note:** this very closeout hit the IPC class you're tracking — `finalize --stream` got a 6s socket ack timeout, fell back to file-IPC, then `no_ack` (`recovery=retry_without_disk_write`) because the editor never applied the queued patch (no live-buffer sidecar for this doc; supervisor reports fresh). Recovered via the explicit `finalize --force-disk` escape hatch.
 
 Live dogfood of the hang→`startup_miss` behavior in a real editor/pane needs a human eyeball, so I filed it as `[operator-verify]` **#nsfz** rather than gating the ship.
-<!-- agent:boundary:a592c551 -->
+<!-- agent:boundary:8950ab6d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~"Add a bounded `session_startup` wait in `route.rs`/`start.rs` with a hard deadline; on expiry, fail closed with `startup_miss` + an actionable error ("session did not become dispatch-ready in Ns") rather than hanging.": Can you retry or isolate why the session hangs so we can further dogfood these sort of errors?~~
-- Can we have a state machine for the wait machinery? And prove that we will never hang with tests & formal logic (i.e. Lean)? We should never hang for more than 10s. I know there is a dogfood reinstall that we pause for, which is the only exception.
+- 🚧 Can we have a state machine for the wait machinery? And prove that we will never hang with tests & formal logic (i.e. Lean)? We should never hang for more than 10s. I know there is a dogfood reinstall that we pause for, which is the only exception.
 - What are #next-steps to use lazily-ky and lazily-js to sync the plugin state machines and state graphs from the FFI plugin?
 ---
 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
@@ -195,6 +195,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 ---
 - do [#capproofbg]
 - do [#rt83qflood]
+- do [#nsfz]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

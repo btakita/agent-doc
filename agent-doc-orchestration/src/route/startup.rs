@@ -10,6 +10,15 @@ use super::*;
 /// not-yet-submit-ready composer.
 const AUTO_START_DISPATCH_READY_REVERIFY_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Fresh-route agent dispatch-ready wait budget (`#waitmachine2`). Historically
+/// 30s; routed through the unified wait-machinery ceiling so the operator's
+/// "never hang > 10s" bound is enforced in one place: the 30s request is clamped
+/// to [`crate::wait_machine::GLOBAL_HANG_CEILING`] (10s). The underlying
+/// `wait_for_agent_ready` poll loop keeps its existing fast-fail-on-dead-pane and
+/// blocker-streak semantics; only the ceiling changes.
+const FRESH_ROUTE_AGENT_READY_TIMEOUT: Duration =
+    crate::wait_machine::clamp_to_ceiling(Duration::from_secs(30));
+
 /// Auto-start a new agent session in tmux using the default session name.
 /// Public so `sync.rs` can call it for unresolved files.
 ///
@@ -470,7 +479,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
     } else {
         eprintln!("[route] Waiting for {} to initialize...", harness.binary);
         let ready =
-            wait_for_agent_ready(tmux, &new_pane, std::time::Duration::from_secs(30), harness);
+            wait_for_agent_ready(tmux, &new_pane, FRESH_ROUTE_AGENT_READY_TIMEOUT, harness);
         // Fresh-start recovery can clear the early geometry-only binding while
         // the harness is still booting. Re-validate the registration before we
         // dispatch, but keep the deliberately created fresh pane authoritative

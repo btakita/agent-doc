@@ -244,7 +244,12 @@ const FAILED_RESUME_WINDOW: Duration = Duration::from_secs(15 * 60);
 const FAILED_RESUME_THRESHOLD: usize = 2;
 const AUTO_TRIGGER_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const AUTO_TRIGGER_POLL_INTERVAL: Duration = Duration::from_millis(500);
-const AUTO_TRIGGER_TIMEOUT: Duration = Duration::from_secs(30);
+/// Auto-trigger no-prompt dispatch-ready deadline (`#startupdeadline` /
+/// `#waitmachine2`). Routed through the unified wait-machinery ceiling so the
+/// operator's "never hang > 10s" bound is enforced in one place: the historical
+/// 30s request is clamped to [`crate::wait_machine::GLOBAL_HANG_CEILING`] (10s).
+const AUTO_TRIGGER_TIMEOUT: Duration =
+    crate::wait_machine::clamp_to_ceiling(Duration::from_secs(30));
 /// Consecutive idle-over-busy polls the idle-queue watch must observe before it
 /// reconciles a stale-busy actor back to ready (`#stale-busy-after-auto-inject-no-clear`).
 /// At `AUTO_TRIGGER_POLL_INTERVAL` (500ms) this is ~2s of proven idle pane

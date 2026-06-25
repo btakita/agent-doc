@@ -1,0 +1,9 @@
+name = "waitMachine"
+defaultTargets = ["WaitMachine"]
+
+# Self-contained: no Mathlib / external deps, so it builds offline against the
+# pinned toolchain's core Lean. Mirrors the Rust `wait_machine::tick` (the source
+# of truth) and proves the `no_hang` bound + reinstall-pause sole-exemption lemma.
+
+[[lean_lib]]
+name = "WaitMachine"

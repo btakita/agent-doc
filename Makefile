@@ -1,4 +1,4 @@
-.PHONY: build build-release release test sim-medium tmux-ci clippy check precommit timings install install-full install-hooks clean init-python wheel publish publish-crate publish-pypi bump-plugin
+.PHONY: build build-release release test sim-medium tmux-ci clippy check precommit timings install install-full install-hooks clean init-python wheel publish publish-crate publish-pypi bump-plugin lean
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -99,8 +99,24 @@ plugin-version-check:
 		fi; \
 	fi
 
-# clippy + test + deterministic medium simulator corpus + version sync
-check: clippy test sim-medium version-sync
+# Build + machine-check the Lean formal models under formal/ (the wait-machinery
+# `no_hang` bound proof, `#waitmachine4`). Skips gracefully when the Lean
+# toolchain (lake) is not installed, so non-Lean environments / CI without elan
+# are not blocked; when lake IS present the proofs must build clean.
+lean:
+	@if command -v lake >/dev/null 2>&1; then \
+		for proj in formal/*/; do \
+			if [ -f "$$proj/lakefile.toml" ] || [ -f "$$proj/lakefile.lean" ]; then \
+				echo "[lean] building $$proj"; \
+				( cd "$$proj" && lake build ) || exit 1; \
+			fi; \
+		done; \
+	else \
+		echo "[lean] lake not found on PATH — skipping formal proof build (install elan/lean to verify formal/ proofs)"; \
+	fi
+
+# clippy + test + deterministic medium simulator corpus + version sync + Lean proofs
+check: clippy test sim-medium version-sync lean
 
 # Pre-commit: clippy + test + audit-docs + plugin version check
 precommit: check plugin-version-check

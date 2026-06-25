@@ -14,3 +14,9 @@ tmp/
 target/
 .bin/
 .cargo/
+
+# Lean / Lake build artifacts (formal/ proof projects)
+.lake/
+*.olean
+*.ilean
+formal/**/lake-manifest.json

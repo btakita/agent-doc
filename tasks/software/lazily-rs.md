@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -355,7 +355,29 @@ Includes a concrete agent-doc-shaped test: a per-subtree **unresolved-prompt cou
 **Verification:** `cargo fmt` clean; `clippy --all-targets --all-features -D warnings` clean (factored the fold into a `FoldFn` type alias); **222** default tests pass (5 new + doctest); `cargo build --release` clean. SPEC.md + lazily-spec `cell-model.md` gained semantic-tree conformance.
 
 **Closeout:** `#lzsemtree` → done. Queue continues to `do [#lztextcrdt]` — the final phase (free-text char/line CRDT + re-parse).
-<!-- agent:boundary:7464c17d -->
+
+### Re: do [#lztextcrdt] — free-text char CRDT + re-parse (roadmap complete) — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#lztextcrdt]
+
+
+Implemented Phase 6 **`#lztextcrdt`**, the final phase (lazily-rs `f449eca`, lazily-spec `b20961c`, superproject `bf9c8c7d3`, all pushed). New `src/text_crdt.rs`, exported as `TextCrdt`/`OpId`/`parse_blocks`.
+
+For anchorless prose under **concurrent** edits the merge unit drops to **characters**:
+- **`TextCrdt`** — a Fugue/RGA-style tree CRDT. Each inserted char is an element with a unique `OpId` + a **left origin** (the char it was typed after). The sequence is the in-order traversal of the origin tree (same-origin siblings by `OpId` descending); deletes are tombstones. So `order` is a **pure function of the element set** → `merge` (union of elements, tombstones sticky) is commutative/associative/idempotent and concurrent same-point inserts converge deterministically with **both preserved** (all verified: convergence, idempotence+commutativity, concurrent insert/delete).
+- **Re-parse** — `parse_blocks` splits merged text into blocks; fed through `assign_stable_keys` (`#lzstableid`) + `reconcile` (`#lzkeyrecon`), the structural tree becomes a **projection of CRDT-merged text**. Verified end-to-end: two replicas concurrently append + edit prose, merge the *text*, re-parse to 3 paragraphs, and the unchanged paragraph **keeps its key** (identity through the merge).
+- **Honest floor** — a true rewrite *is* a replace; no character identity survives it. The anchored layer keeps per-node lineage, the free-text layer guarantees "merge the text, re-derive the tree."
+
+**Verification:** `cargo fmt` clean; `clippy --all-targets --all-features -D warnings` clean; **229** default tests pass (6 new + doctest); `cargo build --release` clean. SPEC.md + lazily-spec `cell-model.md` gained free-text-CRDT conformance.
+
+### Roadmap complete — agent-doc reactive substrate (7/7)
+
+All seven phases of `tasks/software/plan-lazily-agent-doc-reactive-substrate.md` are shipped: **`#lzcellmove`** (atomic move) → **`#lzordtree`** (ordered keyed tree) → **`#lzkeyrecon`** (keyed reconciliation, the per-cell-merge enabler) → **`#lzseqcrdt`** (move-aware sequence CRDT) → **`#lzstableid`** (manufactured identity) → **`#lzsemtree`** (memoized semantics) → **`#lztextcrdt`** (free-text CRDT). Together they are the substrate for a reactive, **per-cell-mergeable** agent-doc document — replacing whole-document `crdt::merge` with minimal per-item ops. ~5,000 lines across 6 new modules + 41 new tests, all green; spec + lazily-spec updated each phase.
+
+**Closeout:** `#lztextcrdt` → done. Queue drained.
+<!-- agent:boundary:d210518e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -364,18 +386,11 @@ Includes a concrete agent-doc-shaped test: a per-subtree **unresolved-prompt cou
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- 🚧 do [#lzordtree]
-- do [#lzkeyrecon]
-- do [#lzseqcrdt]
-- do [#lzstableid]
-- do [#lzsemtree]
-- do [#lztextcrdt]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lztextcrdt] [recommended] Phase 6 (heaviest, last) — free-text char/line sequence CRDT (RGA / Yjs text) + re-parse: merge keystrokes on anchorless prose, then re-parse merged text and re-derive the tree (tree = projection of merged text). Honest floor: a true rewrite IS a replace. Least urgent — managed components already merge per-component. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 6).
 <!-- /agent:backlog -->
 
 ## Review

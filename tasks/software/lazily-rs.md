@@ -274,7 +274,34 @@ You re-activated the queue and marked lazily-rs `🚧` — taken as the go. **la
 - `release + publish lazily-py` (#kb9b) — PyPI `lazily` 0.11.0 needs passkey 2FA.
 
 That's the end of the agent-doable releases (spec ✅, rs ✅, zig ✅; kt removed). The two remaining are operator-driven 2FA publishes. Want to walk through one together (I prep, you supply the OTP), or are we done here?
-<!-- agent:boundary:aabc2feb -->
+
+### Re: release + publish lazily-py — deferred to operator (#kb9b) — opus-4-8
+
+> **Queue prompt:**
+>
+> release + publish lazily-py
+
+lazily-py is the last queue head, and it's **fully operator-gated** — I can't drain it solo:
+1. **Pre-publish live-test confirm** (#kb9b testing gate) — a human "it works in a live session" confirmation I can't give for you.
+2. **PyPI passkey 2FA** — the actual `twine upload` needs your browser/passkey.
+
+The artifacts are already prepared (per #kb9b: `lazily-0.11.0-{whl,tar.gz}` built, `twine check` passed, fresh-venv round-trip verified; commit `30907ea` + superproject gitlink `eb93a75ac` pushed). Live PyPI is 0.10.2.
+
+**This head duplicates the existing Review item `#kb9b`**, which already tracks it as operator-drive. So I'm **striking it from the queue** (not re-queuing duplicate work) — it lives in Review for you to drive:
+```
+src/lazily-py: tag v0.11.0 + push → gh release create v0.11.0 --generate-notes → python -m twine upload dist/*
+```
+
+## 🏁 Release campaign complete (agent-doable scope)
+
+- **lazily-spec** ✅ pushed + mdBook Pages
+- **lazily-rs** ✅ v0.12.3 — crates.io + GitHub
+- **lazily-zig** ✅ v0.2.0 — GitHub release
+- **lazily-kt** ⊘ no publish infra (separate bootstrap task)
+- **lazily-js / lazily-py** → your 2FA (py tracked in #kb9b)
+
+Queue now fully drained. Two operator follow-ups remain: the lazily-py PyPI publish (#kb9b) and — please — **restart this session** to clear the wedged editor IPC (a concurrent codex session has been contending the supervisor socket all along; I've been recovering every response via the git/CRDT path).
+<!-- agent:boundary:daa29939 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -288,7 +315,7 @@ That's the end of the agent-doable releases (spec ✅, rs ✅, zig ✅; kt remov
 - ~~release + publish lazily-ky~~
 - ~~release + publish lazily-js~~
 - ~~release + publish lazily-zig~~
-- 🚧 release + publish lazily-py
+- ~~release + publish lazily-py~~
 <!-- /agent:queue -->
 
 ## Backlog

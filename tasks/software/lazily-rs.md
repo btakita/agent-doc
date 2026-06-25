@@ -121,7 +121,29 @@ Drained `do #gcp4`. Implemented and shipped the lazily-rs `#lzasyncdispose2` har
 **Shipped** — lazily-rs `255437d` (pushed to `lazily-hub/lazily-rs`); superproject gitlink bumped + pushed (`788597955`). No install step — lazily-rs is a library crate; `make check` covers the build.
 
 The lazily 6-port bug backlog is now fully drained.
-<!-- agent:boundary:58ba3706 -->
+
+### Re: release + publish (6 ports) — readiness audit before any publish — opus-4-8
+
+You queued `release + publish` for all 6 ports. Per your choice I audited readiness first (read-only) — **nothing is published below.** Key finding: "release + publish" is **not turnkey** for these ports — most lack publish automation, two registry names need ownership confirmation, and lazily-spec isn't even pushed.
+
+| Port | Package / target | Push state | Readiness |
+|------|------------------|------------|-----------|
+| **lazily-spec** | mdBook → GitHub Pages (`mdbook.yml`) | **UNPUSHED** — `a58eff8` (#lzspecdrift) | The superproject gitlink references an **unpushed** commit. Pushing it fixes that AND triggers the Pages deploy. Lowest-risk first action. |
+| **lazily-rs** | crate `lazily` | pushed (`255437d`) | HEAD is **past** the `v0.12.2` tag (my #lzasyncdispose2 fix is unreleased). **No release workflow** exists; crates.io ownership of `lazily` could not be confirmed unauthenticated (API blocked). Needs: version bump (→0.12.3), `VERSIONS`/changelog, tag + GitHub release, and a decision on crates.io (manual `cargo publish` or new workflow). |
+| **lazily-zig** | GitHub release (Zig has no registry) | pushed (`41d773a`) | HEAD is past `v0.1.0` (zigtodos/alloc/before_change fixes). Could cut a `v0.1.1` GitHub release. No 2FA. |
+| **lazily-py** | PyPI `lazily` (ours — **live 0.10.2**) | pushed (`c255482`) | 0.11.0 artifacts prepared but **unpublished**; **2FA-gated** (PyPI passkey). This is the existing review item **#kb9b**. |
+| **lazily-js** | npm `@lazily/js` (scoped) | pushed (`6d38122`) | v0.1.0; no release workflow. Needs **npm 2FA** + `@lazily` scope ownership check before first publish. |
+| **lazily-kt** | Maven Central? **none** | pushed (`1500bea`) | No project version, no tag, no publish infra. **Not release-ready** — Maven Central needs full bootstrap (group id, signing, Sonatype). |
+
+**Recommended sequencing (each still needs your go before I run it):**
+1. **lazily-spec** — `git push` `a58eff8` (fixes the dangling gitlink + deploys the mdBook site). Agent-doable, low-risk. *Start here.*
+2. **lazily-zig** — cut `v0.1.1` GitHub release. No registry, no 2FA.
+3. **lazily-rs** — bump 0.12.3 + tag + GitHub release; crates.io publish only after confirming `lazily` ownership.
+4. **lazily-py (#kb9b)** & **lazily-js** — registry publishes that need interactive 2FA → operator-driven.
+5. **lazily-kt** — defer until publish infra is bootstrapped (separate task).
+
+The 6 `release + publish` heads stay queued. I have **not** auto-drained them — publishing is outward-facing/irreversible and you asked to gate it. Tell me which step to take (I'd recommend #1) and I'll execute that one, pausing at each irreversible publish.
+<!-- agent:boundary:a51f42f6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -130,8 +152,6 @@ The lazily 6-port bug backlog is now fully drained.
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~What are #next-steps to fix lazily-rs, lazily-kt, lazily-js, lazily-spec, lazily-zig, lazily-py bugs?~~
-- ~~do [#gcp4]~~
 - 🚧 release + publish lazily-spec
 - release + publish lazily-rs
 - release + publish lazily-ky

@@ -155,7 +155,25 @@ FFI-first rung of editor-as-replica binding, same isolated worktree branch `crdt
 **Gated `#crdtauth2`** — the FFI transport surface is code-complete + verified, but the remaining halves are downstream: the thin IntelliJ/VSCode **plugin bindings** (.kt/.ts, cursor/undo-preserving), wiring agent-doc shared roots to **lazily replicated cells** (`#qcellmerge1`), and bidirectional **`#lazilystatesync`**. Authority gating already lands via `crdt_authority::sync_under_authority` (`#crdtauth1sv`). Also blocked on the same operator merge→main + install + supervisor restart.
 
 > **Queue prompt:** do [#crdtauth2]
-<!-- agent:boundary:5645c9de -->
+
+### Re: #crdtauth3 — state-vector commit barrier (root-fix for the no_ack / corruption class) — opus-4-8
+
+Built on the same branch `crdtauth1-authority-sm` (commit `2689bcc4`; stack is now crdtauth1 → crdtauth1sv → crdtauth2 → crdtauth3) — no install/recycle/push.
+
+**This is the structural root fix for the exact bug class that's been corrupting *this* session's writes** (`no_ack` / `ipc_proof_insufficient` / post-commit-worktree-corruption). It replaces the fragile finalize **patch-ack** ("did a queued patch round-trip?") with a **state-vector ack** ("is the canonical replica synced through SV=N for every live editor?").
+
+`agent-doc-core/src/crdt_sync.rs`:
+- `commit_barrier_ready(canonical, editors)` — is `canonical` a **consistent cut** (has it integrated every live editor's ops up to that editor's SV)? Checked non-destructively. No live editors ⇒ trivially ready (headless path).
+- `flush_to_commit_barrier(canonical, editors)` — **flush all live editors to SV=N**, then confirm the barrier; after `Ok(true)` a snapshot of `canonical` is the consistent cut `finalize` should commit, so un-propagated keystrokes can never be lost at the commit instant.
+
+Authority seam (`crdt_authority.rs`): `commit_barrier_under_authority` runs flush+barrier under `MultiReplica`; under `GitAuthoritative` there are no live replicas to flush, so it's trivially satisfied.
+
+**Verified:** 3 barrier unit tests (blocks-until-flushed, trivially-ready-headless, reopens-on-new-op) + 1 authority-gate test; full **`make check` green**; release build OK.
+
+**Gated `#crdtauth3`** — barrier primitive + authority gate code-complete + verified; the remaining work is **rewiring finalize's patch-ack onto this barrier** (the live write-path change — the riskiest rung, deliberately deferred) plus the same operator merge→main + install + supervisor restart.
+
+> **Queue prompt:** do [#crdtauth3]
+<!-- agent:boundary:d6874394 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -166,7 +184,7 @@ FFI-first rung of editor-as-replica binding, same isolated worktree branch `crdt
 - ~~:pushpin: do [#lazilycrdtrs]~~
 - ~~:pushpin: do [#crdtauth1]~~
 - ~~:pushpin: do [#crdtauth2]~~
-- :pushpin: do [#crdtauth3]
+- ~~:pushpin: do [#crdtauth3]~~
 - :pushpin: [#brtc]
 - :pushpin: do [#crdtauth4]
 - :pushpin: do [#xdocsuper]
@@ -284,7 +302,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#crdtauth3] 2 [focused-cycle] State-vector commit barrier: replace finalize patch-ack with flush-all-live-editors-to-SV then snapshot then commit; root-fix for the no_ack / ipc_proof_insufficient / postcommit-worktree-corruption class. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#crdtauth4] [focused-cycle] Multiple-editor relay + awareness + disk demotion: supervisor broadcast hub for N replicas (unique client-ids, ephemeral awareness channel, commit is a consistent cut of live replicas); .yrs demoted to write-through recovery projection, FFI nodes persist replicas locally. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#xdocsuper] [focused-cycle] Cross-document supervisor contamination: one route-owned supervisor (per pane) reused across documents (corky.md→agent-doc-bugs2.md) carries prior doc's stale in-memory CRDT/queue/lease into the new doc → the live_prompt_drift / postcommit-worktree / answered-head-residue churn. Add a document-switch state-reset guard + SimWorld. Plan: tasks/agent-doc/plan-cross-document-supervisor-contamination.md
 - [ ] [#n529b] #lazilystatesync3b Wire MirrorProjectionSummary into EditorCommandStateMachine / dispatch-ready / busy consumers (PromptPoller, RunAgentDocAttemptLedger) so they read StateProjectionBridge.mirrorSummaryForFile instead of the cold projectionSummaryForFile pull, then dogfood live in JB. Mirror substrate shipped in 0.2.190 (#n529). Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
@@ -309,6 +326,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#crdtauth3] 2 [focused-cycle] State-vector commit barrier: replace finalize patch-ack with flush-all-live-editors-to-SV then snapshot then commit; root-fix for the no_ack / ipc_proof_insufficient / postcommit-worktree-corruption class. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [/] [#crdtauth2] [focused-cycle] Editor-as-replica binding (FFI-first): cdylib is the CRDT node hosting a per-editor yrs replica; thin IntelliJ/VSCode bindings forward Document deltas + apply remote updates (cursor/undo preserving); plugin read/write-through FFI (completes #dsqa). Wire agent-doc shared roots (document/queue/hosting) to lazily replicated cells (per-cell merge #qcellmerge1); upgrade #lazilystatesync to bidirectional. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [/] [#crdtauth1sv] [focused-cycle] agent-doc state-vector sync protocol (deferred half of #crdtauth1): replace whole-.yrs snapshot merge_by_component with incremental per-replica StateVector / update exchange in the FFI node ↔ supervisor channel, gated on CrdtAuthority::MultiReplica. Builds on the authority SM (branch crdtauth1-authority-sm, 1b2a6e94). Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [/] [#crdtauth1] [focused-cycle] agent-doc authority state machine: Detached (git-authoritative, ephemeral CRDT) to EditorAttached (multi-replica) keyed on plugin attach/detach, riding the hosting-epoch backbone; extends #mergestatemachine. Plus state-vector sync protocol replacing whole-.yrs snapshot merge_by_component. Plan: tasks/agent-doc/plan-crdt-authority-model.md

@@ -153,7 +153,7 @@ So lazily comfortably backs a **full-capacity Google Sheets workbook**: sub-seco
 **Excel (17.18B grid) — sparse, not dense.** 17.18B is grid *capacity*, not populated cells. Building it densely would need ~7 TB at ~216 B/node — infeasible and unrepresentative. lazily's storage is a **sparse arena** (`Vec<Option<Node>>` + free-list) that only allocates cells you create, so the real limit is *populated* cells vs RAM (~216 B/node), not the grid. With the flat per-cell cost (the `scale` group held ~constant per-cell from 1M→10M), capacity ≈ available RAM ÷ ~216 B — this host could hold ~10⁸–10⁹ populated cells, far beyond any realistically-populated Excel sheet.
 
 Net: lazily handles Google Sheets' entire 10M-cell capacity with measured numbers, and Excel's grid is a non-issue because only populated cells cost anything. The default `scale` group (N=1M) stays in `make benchmark-check`; the 10M Sheets run is reproducible via `LAZILY_SCALE_N=5000000`.
-<!-- agent:boundary:f0c56981 -->
+<!-- agent:boundary:e2336259 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -165,11 +165,15 @@ Net: lazily handles Google Sheets' entire 10M-cell capacity with measured number
 - ~~Update the README with the benchmark table with my machine specs. Mention the lazy reactive win with viewport_recalc.~~
 - ~~How many cells does Google Sheets & MS Excel support? Add benchmarks for those numbers.~~
 - 🚧 Are we currently support Hash + Collection Cell Famlies? If yes, update lazily-spec and release + publish lazily-rs.
+- Do Cell Families handle insertions and deletions? Is move atomic and optimized? Can position changes be atomic as well?
+- Add Google Sheets cell count benchmark to README. Why are there 2 cells per formula?
+- do [#lzcellmove]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzcellmove] [recommended] CellMap/CellFamily atomic + optimized move/reorder: add an ordered reposition (move a key to a new index) that PRESERVES the entry cell (same SlotId + dependents, no re-mint) and bumps membership ONCE — vs naive remove+insert (2 membership bumps + lost cell identity/dependents). Likely a CellList<V> ordered variant or CellMap::move_to(key,index). Insert (entry/entry_with) and delete (remove) are already atomic (single membership bump); ordered MOVE is the only gap. Answers the #lzcellfamily move-atomicity question.
 <!-- /agent:backlog -->
 
 ## Review

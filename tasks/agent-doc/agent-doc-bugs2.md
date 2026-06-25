@@ -298,7 +298,7 @@ Goal drive complete and **deployed**. The fixed binary `agent-doc 0.34.48` + cdy
 **Backlog + queue synced to the drained state** — all agent-doable items reaped to `agent:done`; the only remaining work is `[operator-verify]` live-eyeballs that need a live editor/pane: `#crdtauth6` (live 2-editor relay hookup), `#nsfz` (startup-deadline live), `#kj5f` (merge-SM live editor).
 
 **Remaining operator step:** restart/recycle the supervisors still on the old binary (the 2 skipped + this pane's parent, driven last since it ends the session). After restart, the stale-binary churn that affected this session is gone and the operator-verify items can be checked live.
-<!-- agent:boundary:212e7857 -->
+<!-- agent:boundary:de2c738b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -310,14 +310,13 @@ Goal drive complete and **deployed**. The fixed binary `agent-doc 0.34.48` + cdy
 - ~~:pushpin: do [#crdtauth1]~~
 - ~~:pushpin: do [#crdtauth2]~~
 - ~~:pushpin: do [#crdtauth3]~~
-- 🚧 :pushpin: [#brtc]
+- ~~:pushpin: [#brtc]~~
 - ~~:pushpin: do [#crdtauth4]~~
 - ~~:pushpin: do [#xdocsuper]~~
-- :pushpin: Fix the root cause of the CRDT churn.
-- :pushpin: do [#cgfx]
-- :pushpin: do [#gww8]
-- :pushpin: do [#n529b]
-- :pushpin: [#cgfx]
+- 🚧 :pushpin: Fix the root cause of the CRDT churn.
+- ~~:pushpin: do [#cgfx]~~
+- ~~:pushpin: do [#gww8]~~
+- ~~:pushpin: do [#n529b]~~
 - ~~:pushpin: [#gghx]~~
 - ~~:pushpin: [#8g9w]~~
 - ~~:pushpin: [#6mjw]~~
@@ -366,7 +365,6 @@ Affected component: editor IPC / writeback
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8c56928442bd4b165543ab0aad264d681b41b8898551d10f196018cd15a37304 content_len=11944 content_hash=46b47fdfe5505fb37c9e63df4167cb923df6b4ffc997ecca9009a15979c29a5e doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782339826601
 ```
 ---
-- :pushpin: [#nsfz]
 - :pushpin: Still getting JB `File Cache Conflict` dialogs.
 - :pushpin: Opencode responses are reverse ordering numeric lists.
 - ~~:pushpin: do [#npe1]~~
@@ -401,6 +399,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - :pushpin: ~~I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: ~~I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~do [#crdtauth1sv]~~
+- do [#crdtauth6]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

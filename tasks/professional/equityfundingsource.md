@@ -85,7 +85,20 @@ Done — applied `migrations/0110_drop_dead_tables.sql` to prod D1.
 - **Committed** the migration in the EFS submodule (`03ac6cf`).
 
 `#bxtd` closed.
-<!-- agent:boundary:98b6727e -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:** deploy
+
+Deployed the EFS Worker with the `#bxtd` dead-table drop now live.
+
+- **Verified green:** `make check` — 1208 pass / 0 fail, worker bundle clean.
+- **`make deploy`:** built the worker, applied remote D1 migrations (`0110` already applied — idempotent no-op), uploaded + activated the new Worker version `3aea91b1-a314-4e46-87cc-ca733f50e500`.
+- **Pushed** the migration commit to origin (`7f27671` on `origin/main`, after a rebase onto an upstream merge).
+- **Smoke check:** `https://equityfundingsource.brian-takita.workers.dev/` → HTTP 200 (0.24s).
+
+Production is on the new version with the 6 dead tables dropped.
+<!-- agent:boundary:65807d3f -->
 <!-- /agent:exchange -->
 ###
 <!--

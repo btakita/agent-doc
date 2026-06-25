@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: opencode
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -272,7 +272,17 @@ This is still a `[focused-cycle]` fix on `project_controller`/`route`/`claim` + 
 **Necessary but not sufficient:** the switch-event + on-disk reload must be the structurally-enforced *first* step of every document handoff (the `Hosting` projection state constructable only from a fresh switch event paired with reload, not an optional reconciliation pass) — a skipped emit under IPC drift reopens the hole. The `#queuestatemachine` lesson applies: convergence must *drive* to the lawful state, not patch after the fact.
 
 Full detail persisted in `tasks/agent-doc/plan-cross-document-supervisor-contamination.md` ("Design note: would a reactive state machine help?"). Not implementing inline — `#xdocsuper` is `[focused-cycle]` and per its own plan must run from a fresh, non-contaminated session.
-<!-- agent:boundary:88561d5c -->
+
+### Re: switched agent → claude — opus-4-8
+
+Picked up as Claude Code on pane `%77`. `admin inspect` confirms `pane=%77 state=ready queue_control=paused freshness=controller:fresh,supervisor:fresh` — the **stale parent-supervisor CRDT** condition that paused this queue belonged to the prior opencode-driven session. Flipping frontmatter `agent: opencode → claude` and re-invoking `/agent-doc` from this Claude pane gave a **fresh route-owned supervisor**, so the immediate contamination (one pane hosting `corky.md → agent-doc-bugs2.md`) is cleared for this pane. (The preflight sweep still skipped `corky.md` as `foreign-owned by pane %75` — correct fail-closed behavior, not a reclaim.)
+
+**The structural fix is filed, not done here — on purpose.** `tasks/agent-doc/plan-cross-document-supervisor-contamination.md` (`#xdocsuper` / `#xdocsuper0–3`) is committed (`e52ccae8f`). Root cause: `claim.rs::cross_session_decision` is **pane/session-keyed and never consults the document `supervisor_lease`**, so `AcceptStale` auto-grants a reclaim across the relaunch window → two supervisors each believe they own one document. Fix order: `#xdocsuper0` (claim consults `supervisor_lease_is_fresh_or_alive` — a one-line guard, ship first), then `#xdocsuper1` folded into `#xdocsuper3` as a `state_backbone.rs` document-switch transition so a stale-overlay replay is unreachable by construction. The plan deliberately gates this to a **fresh, non-victim session/pane on a clean supervisor** (same rationale as `#agentreloadrestart` Phase 1b) — implementing supervisor-in-process-critical changes inside this contamination-victim session is exactly the trap the plan warns against, so I am not draining it inline.
+
+The design question you raised this cycle — *"Would a reactive state machine help to manage the supervisor document bindings?"* — is already answered in the plan's **Design note** (yes for the document-switch/hosting half via the existing `state_backbone.rs`; no/over-engineering for the claim guard) and was auto-struck (`#ftstrike`).
+
+Queue note: 32 mirrored heads remain but they are dominated by supervisor-in-process-critical / focused-cycle items (`#brtc` `#queuestatemachine3`, `#xdocsuper*`, the merge/lazily state-sync work) whose own plans gate them to fresh focused cycles. Not looping those inline from a just-recovered supervisor.
+<!-- agent:boundary:01980ed8 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -326,7 +326,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=file_ipc patch_id=18b16d61-065e-4747-90eb-5b29cab5f76c invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400.json doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782353796773
 ```
-<!-- agent:boundary:0dedd68c -->
+<!-- agent:boundary:44f19097 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -335,6 +335,7 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=file_ipc patch_id
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- [#lzbenchstale]
 - 🚧 What are #next-steps to fix lazily bugs?
 <!-- /agent:queue -->
 

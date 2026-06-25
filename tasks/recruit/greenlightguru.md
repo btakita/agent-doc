@@ -189,8 +189,28 @@ This is the part most candidates can't claim. ESG investing lives under **disclo
 
 It's finance-regulated, not medical-device-regulated — no ISO 13485 / 21 CFR 820 exposure. But frame it as transfer, not equivalence: *the regulatory vocabulary differs; the discipline (transparent rules, constraint-driven workflows, auditable scoring) is identical and already shipped.*
 
-**Bottom line:** Censible is a genuine asset for this role — lead with the rule-engine/constraint-solver and the "auditable scoring in a regulated domain" framing, and treat the medtech-domain gap as a few weeks of vocabulary, not a capability gap. Want me to fold this into the GG-specific resume cut alongside the EFS / tsift / agent-doc angles?
-<!-- agent:boundary:09738b34 -->
+❯ **Bottom line:** Censible is a genuine asset for this role — lead with the rule-engine/constraint-solver and the "auditable scoring in a regulated domain" framing, and treat the medtech-domain gap as a few weeks of vocabulary, not a capability gap. Want me to fold this into the GG-specific resume cut alongside the EFS / tsift / agent-doc angles?
+❯ Will my real-time experience help me succeed at Greenlight Guru? Are the skills transferrable?
+### Re: Does your real-time experience transfer? — opus-4-8
+
+Honest answer up front: **real-time is a real strength here, but it's a *supporting* one, not the headline.** A QMS is fundamentally transactional SaaS — document control, workflow, audit trails — not a hard-real-time/low-latency product like Presence AI. So don't lead a GG pitch with "real-time streaming." That said, three specific slices of your real-time work transfer directly and create genuine value:
+
+#### Where it genuinely transfers
+
+1. **Concurrency + state synchronization + conflict resolution — your strongest real-time-adjacent asset.** Real-time multi-user systems force you to solve concurrent state mutation, ordering, and consistency. That's exactly what **collaborative controlled-document editing** needs: multiple contributors editing the same design record, approval routing with concurrent reviewers, no lost updates. Your **agent-doc CRDT work is literally conflict-free concurrent editing** — name it specifically; it's the cleanest bridge from "real-time" to "QMS."
+2. **Streaming / low-latency LLM integration → responsive AI UX.** Their AI Chat and AI Search (generated summaries above results) live or die on feeling fast. Your real-time multimodal pipeline experience — streaming inference, latency budgets, backpressure, graceful degradation — is exactly what makes those features responsive instead of janky. The JD's explicit LLM/generative-AI requirement is where this lands.
+3. **Latency discipline + observability under load.** Real-time engineers instrument everything — p99 latency, backpressure, failure modes. The JD calls out **"monitors, alerts, performance benchmarks"** and **"diagnosing performance issues in legacy code"** directly. That instinct is baked into anyone who's shipped real-time, and it's a daily-contribution differentiator on a maturing platform.
+
+#### Where it doesn't (say this, don't hide it)
+
+The core platform isn't streaming or sub-100ms; most of the surface is request/response CRUD over a compliance-grade data model. So real-time is a *transferable engineering discipline* here, not a literal product-skill match. Treat it as a strong secondary, behind your headline angles (traceability graphs ≈ tsift, auditable AI, rule-engine/state-machine work).
+
+#### How to position it (one line)
+
+> *"My real-time work gave me concurrency, state-synchronization, and latency discipline — which I'd apply to collaborative document editing (conflict-free co-authoring) and to making your AI features genuinely responsive — even though the core QMS isn't a streaming product."*
+
+**Bottom line:** transferable, yes — lead with the **CRDT/concurrency** and **streaming-AI-UX** slices, frame the rest as engineering discipline, and keep it behind the auditable-AI / traceability-graph angles that are your sharpest fits. Want me to assemble all of these (architecture, Censible, real-time) into a single prioritized "why me for GG" narrative for the resume top / cover note?
+<!-- agent:boundary:1fb2a6fe -->
 <!-- /agent:exchange -->
 
 ## Queue

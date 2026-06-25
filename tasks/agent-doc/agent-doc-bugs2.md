@@ -173,7 +173,19 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=c4187291-eec1-4c6e-8ed3-501a67296999 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=32972 candidate_hash=7585bc7359e0df199d2bb9f9f79c2a51b75ba77c7485ad5bbfe950c20ef77fca content_ours_len=34893 content_ours_hash=fa17ef3e81a4a04fc86d566453b98ead5f103efbb10b84fcf67b69397b8e9c3d doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782370732724
 ```
-<!-- agent:boundary:17dd9162 -->
+
+### Re: fixed the queue-churn root cause (#qheadresidue) — opus-4-8
+
+Root-caused and fixed the churn in the **binary** (agent-doc `cadc400c`, submodule pointer `ed91730cb`), so every user benefits — not a per-session workaround.
+
+**Root cause.** The per-cycle `#ftstrike` (`strike_answered_free_text_queue_heads`) only matches **this cycle's** `response_body`. A free-text queue head answered in a **prior** cycle — its `> **Queue prompt:**` echo is in committed `agent:exchange`, but the current response doesn't re-quote it — was **never struck**. It stayed active as "completed residue" that `check_free_text_queue_head_provenance` INTERRUPTs on *every* closeout, while go-mode `backlog→queue` convergence kept re-adding it. That's the loop you saw: the `🚧 JB Run Agent Doc` head reappearing each preflight, 9 no-op closeouts in 30 min. session-check *detected* it ("exchange history contains a `Queue prompt` echo proving they were already answered") but only INTERRUPTed — detection without remediation.
+
+**Fix.** Added a preflight maintenance catch-up pass (`agent-doc-orchestration/src/preflight/maintenance.rs`) — the free-text analogue of the existing id-backed `strike_done_queue_head_prompts`. It strikes any active free-text head already answered **anywhere in committed exchange**, reusing the **same** `free_text_head_answered_by_response` predicate the session-check residue guard uses. So the preflight strike set and the session-check INTERRUPT set are now symmetric: anything that would have INTERRUPTed closeout is struck *before* session-check runs, and the queue advances instead of churning. Two deterministic tests (strikes prior-cycle-answered head; leaves an unanswered head active). `make check` green (5137 passed), release build green.
+
+**To go live:** the fix is committed but the **running** supervisor is still on the old binary (0.34.48). It picks up `cadc400c` via the supervisor boundary auto-install, or immediately on `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md`. I deliberately did **not** `cargo install` mid-session (that makes the finalize client newer than the live supervisor → the exact drift), and did **not** cut a release (your standing "stop cutting releases" hold). The queue stays **paused** until the new binary is live — resuming on the old binary would just churn again. After restart: resume the queue and it will drain the `🚧` residue cleanly on the first pass.
+
+**Scope note:** this fixes the specific churn loop (answered-head residue). The separate IPC `live_prompt_drift` / stale-CRDT issue (the parent route-owned supervisor) is the operator-restart / supervisor-in-process concern, not this strike pass.
+<!-- agent:boundary:3ee21545 -->
 <!-- /agent:exchange -->
 
 ## Queue

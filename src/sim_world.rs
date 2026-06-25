@@ -6335,3 +6335,316 @@ mod hosting_sim {
         assert_eq!(run(), run());
     }
 }
+
+/// Deterministic SimWorld for the CRDT-authority state machine (`#crdtauth1`).
+///
+/// Models the additive authority layer
+/// (`agent_doc_orchestration::crdt_authority`) riding the EXISTING per-document
+/// hosting-epoch backbone (`state_backbone::EventLedger`). The authority follows
+/// the live editor: a document with a proven live editor-IPC transport is
+/// `MultiReplica` (durable-projection semantics); a headless / detached / stale
+/// document is `GitAuthoritative` (ephemeral CRDT). Per-document isolation is
+/// derived from the same backbone projection that `#xdocsuper1/3` isolates, so a
+/// stale-overlay replay for one document cannot flip another's authority — no live
+/// editor / tmux required.
+mod crdt_authority_sim {
+    use agent_doc_orchestration::crdt_authority::{authority_for_document, CrdtAuthority};
+    use agent_doc_orchestration::state_backbone::{
+        ActorLifecycleEvent, EventLedger, StateEvent, StateFact, StateOwner,
+    };
+
+    /// A single route-owned supervisor pane hosting documents in-process over an
+    /// event-sourced backbone, exercising the authority transitions. `attach` and
+    /// `detach` are the authority transitions; both ride the hosting-epoch
+    /// substrate that the supervisor host loop drives.
+    struct AuthoritySimWorld {
+        ledger: EventLedger,
+        pane_session: String,
+        lease_epoch: u64,
+        editor_generation: u64,
+        next_event: u64,
+    }
+
+    impl AuthoritySimWorld {
+        fn new(pane_session: &str) -> Self {
+            Self {
+                ledger: EventLedger::new(),
+                pane_session: pane_session.to_string(),
+                lease_epoch: 1,
+                editor_generation: 0,
+                next_event: 0,
+            }
+        }
+
+        fn event_id(&mut self, label: &str) -> String {
+            self.next_event += 1;
+            format!("{label}-{}", self.next_event)
+        }
+
+        /// The supervisor begins hosting (or switches to) `document_hash` — the
+        /// hosting-epoch transition every handoff runs first.
+        fn host(&mut self, document_hash: &str) {
+            let id = self.event_id("host");
+            let pane_session = self.pane_session.clone();
+            let lease_epoch = self.lease_epoch;
+            self.ledger.append(StateEvent::new(
+                id,
+                StateFact::SupervisorHosting {
+                    document_hash: document_hash.to_string(),
+                    pane_session,
+                    lease_epoch,
+                },
+            ));
+        }
+
+        /// Editor `attach`: a live editor-IPC bridge replica registers for the
+        /// document (advances the editor generation). This is the
+        /// Detached → MultiReplica authority transition.
+        fn attach_editor(&mut self, document_hash: &str) {
+            self.editor_generation += 1;
+            let generation = self.editor_generation;
+            let id = self.event_id("attach");
+            self.ledger.append(StateEvent::new(
+                id,
+                StateFact::OwnerGenerationChanged {
+                    document_hash: document_hash.to_string(),
+                    owner: StateOwner::EditorIpcBridge,
+                    generation,
+                },
+            ));
+        }
+
+        /// The live editor queues + ACKs a patch under the current generation
+        /// (normal multi-replica coordination, proving the editor replica is the
+        /// live medium).
+        fn editor_synced_patch(&mut self, document_hash: &str, patch_id: &str) {
+            let generation = self.editor_generation;
+            let queued = self.event_id("queued");
+            self.ledger.append(StateEvent::new(
+                queued,
+                StateFact::EditorPatchQueued {
+                    document_hash: document_hash.to_string(),
+                    patch_id: patch_id.to_string(),
+                    actor_generation: generation,
+                },
+            ));
+            let acked = self.event_id("acked");
+            self.ledger.append(StateEvent::new(
+                acked,
+                StateFact::EditorAckObserved {
+                    document_hash: document_hash.to_string(),
+                    patch_id: patch_id.to_string(),
+                    actor_generation: generation,
+                },
+            ));
+        }
+
+        /// Editor `detach` via a stale-listener / dead-pid demote: the supervisor
+        /// abandons the editor replica for this turn and falls back to a disk
+        /// write (the terminal force-disk fallback). This is the
+        /// MultiReplica → GitAuthoritative authority transition, mirroring the
+        /// `disk_write_permitted_for_file` Detached fallback.
+        fn editor_force_disk_fallback(&mut self, document_hash: &str, patch_id: &str, reason: &str) {
+            let generation = self.editor_generation;
+            // The fallback needs an existing patch to terminalize.
+            let queued = self.event_id("fb-queued");
+            self.ledger.append(StateEvent::new(
+                queued,
+                StateFact::EditorPatchQueued {
+                    document_hash: document_hash.to_string(),
+                    patch_id: patch_id.to_string(),
+                    actor_generation: generation,
+                },
+            ));
+            let fb = self.event_id("fb");
+            self.ledger.append(StateEvent::new(
+                fb,
+                StateFact::ForceDiskFallbackRecorded {
+                    document_hash: document_hash.to_string(),
+                    patch_id: patch_id.to_string(),
+                    actor_generation: generation,
+                    reason: reason.to_string(),
+                },
+            ));
+        }
+
+        /// Record a benign supervisor lifecycle fact for the document (used to
+        /// give a document a projection without an editor transport).
+        fn supervisor_alive(&mut self, document_hash: &str) {
+            let id = self.event_id("sup");
+            self.ledger.append(StateEvent::new(
+                id,
+                StateFact::ActorLifecycleObserved {
+                    document_hash: document_hash.to_string(),
+                    owner: StateOwner::Supervisor,
+                    generation: 0,
+                    event: ActorLifecycleEvent::ReadyObserved,
+                },
+            ));
+        }
+
+        fn authority(&self, document_hash: &str) -> CrdtAuthority {
+            authority_for_document(&self.ledger, document_hash)
+        }
+    }
+
+    #[test]
+    fn attach_routes_to_multi_replica_detach_routes_to_git_authoritative() {
+        // Coverage 1: attach → MultiReplica; detach → GitAuthoritative (ephemeral).
+        let mut world = AuthoritySimWorld::new("%73:auth");
+        world.host("doc-a");
+
+        // Headless before any editor attaches: git-authoritative + ephemeral.
+        world.supervisor_alive("doc-a");
+        let headless = world.authority("doc-a");
+        assert_eq!(headless, CrdtAuthority::GitAuthoritative);
+        assert!(
+            headless.crdt_is_ephemeral(),
+            "a headless document rebuilds an ephemeral CRDT from git"
+        );
+
+        // attach → MultiReplica (durable projection).
+        world.attach_editor("doc-a");
+        world.editor_synced_patch("doc-a", "p1");
+        let attached = world.authority("doc-a");
+        assert_eq!(attached, CrdtAuthority::MultiReplica);
+        assert!(
+            attached.disk_is_durable_projection(),
+            "with a live editor, disk is a boundary-checkpointed durable projection"
+        );
+        assert!(!attached.crdt_is_ephemeral());
+
+        // detach (force-disk fallback) → GitAuthoritative (ephemeral) again.
+        world.editor_force_disk_fallback("doc-a", "p2", "no_ack");
+        let detached = world.authority("doc-a");
+        assert_eq!(detached, CrdtAuthority::GitAuthoritative);
+        assert!(
+            detached.crdt_is_ephemeral(),
+            "after the editor replica is abandoned the CRDT is ephemeral again"
+        );
+    }
+
+    #[test]
+    fn stale_listener_dead_pid_demote_routes_to_git_authoritative() {
+        // Coverage 2: a stale listener / dead pid demote routes to
+        // GitAuthoritative, mirroring the `disk_write_permitted_for_file`
+        // Detached fallback. We model the demote as the terminal force-disk
+        // fallback the supervisor records when no live editor sits behind the
+        // listener.
+        let mut world = AuthoritySimWorld::new("%73:auth");
+        world.host("doc-a");
+        world.attach_editor("doc-a");
+        assert_eq!(world.authority("doc-a"), CrdtAuthority::MultiReplica);
+
+        // The listener turns out stale (no live editor): the supervisor falls
+        // back to disk. Authority must demote to git-authoritative so the write
+        // routes to the controller-host disk path instead of wedging on no_ack.
+        world.editor_force_disk_fallback("doc-a", "p1", "stale_listener_no_ack");
+        let demoted = world.authority("doc-a");
+        assert_eq!(
+            demoted,
+            CrdtAuthority::GitAuthoritative,
+            "a stale listener / dead pid demote routes to git-authoritative"
+        );
+        assert!(demoted.crdt_is_ephemeral());
+    }
+
+    #[test]
+    fn per_document_isolation_overlay_replay_for_doc_a_does_not_change_doc_b() {
+        // Coverage 3: per-document isolation. A hosting-epoch / overlay replay for
+        // doc A must not change doc B's authority. Authority derives from each
+        // document's own projection, so a stale doc-A replay can never reach
+        // doc-B's projection (facts are keyed by document_hash; #xdocsuper1/3
+        // already isolates the overlay).
+        let mut world = AuthoritySimWorld::new("%73:auth");
+
+        // doc-a is multi-replica (live editor); doc-b is headless.
+        world.host("doc-a");
+        world.attach_editor("doc-a");
+        world.editor_synced_patch("doc-a", "a1");
+        assert_eq!(world.authority("doc-a"), CrdtAuthority::MultiReplica);
+
+        world.host("doc-b");
+        world.supervisor_alive("doc-b");
+        assert_eq!(
+            world.authority("doc-b"),
+            CrdtAuthority::GitAuthoritative,
+            "doc-b has no editor — it is git-authoritative"
+        );
+
+        // A stale-overlay replay for doc-a (its old hosting epoch re-emits an
+        // already-applied editor patch) must not flip doc-b's authority.
+        world.editor_synced_patch("doc-a", "a1-replay");
+        assert_eq!(
+            world.authority("doc-b"),
+            CrdtAuthority::GitAuthoritative,
+            "a doc-a overlay replay must NOT flip doc-b to multi-replica"
+        );
+
+        // Symmetric direction: doc-a stays multi-replica; doc-b's headlessness did
+        // not bleed into it.
+        assert_eq!(world.authority("doc-a"), CrdtAuthority::MultiReplica);
+
+        // And re-hosting doc-b (a hosting-epoch bump) on the same pane does not
+        // change doc-a's authority either.
+        world.host("doc-b");
+        assert_eq!(world.authority("doc-a"), CrdtAuthority::MultiReplica);
+    }
+
+    #[test]
+    fn git_authoritative_is_ephemeral_multi_replica_is_durable_projection() {
+        // Coverage 4: GitAuthoritative ⇒ ephemeral CRDT (no durable-authority
+        // assumption); MultiReplica ⇒ durable-projection semantics. Asserted as a
+        // total invariant over both reachable authority states.
+        let git = CrdtAuthority::GitAuthoritative;
+        assert!(git.crdt_is_ephemeral());
+        assert!(!git.disk_is_durable_projection());
+        assert!(!git.editor_attached());
+
+        let multi = CrdtAuthority::MultiReplica;
+        assert!(!multi.crdt_is_ephemeral());
+        assert!(multi.disk_is_durable_projection());
+        assert!(multi.editor_attached());
+
+        // The two predicates partition the authority states (mutually exclusive,
+        // exhaustive) — no third durability mode.
+        for authority in [CrdtAuthority::GitAuthoritative, CrdtAuthority::MultiReplica] {
+            assert_ne!(
+                authority.crdt_is_ephemeral(),
+                authority.disk_is_durable_projection(),
+                "exactly one durability mode holds per authority state"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_document_is_git_authoritative_failsafe() {
+        // A document the supervisor has never hosted with an editor is headless
+        // until proven otherwise — fail-safe to the cheapest, zero-stale state.
+        let world = AuthoritySimWorld::new("%73:auth");
+        assert_eq!(
+            world.authority("never-seen"),
+            CrdtAuthority::GitAuthoritative
+        );
+    }
+
+    #[test]
+    fn deterministic_replay_is_stable_across_runs() {
+        // SimWorld determinism: byte-identical authority decisions on every run
+        // (no live tmux, no wall-clock, no RNG).
+        fn run() -> String {
+            let mut world = AuthoritySimWorld::new("%5:session-x");
+            world.host("doc-a");
+            world.attach_editor("doc-a");
+            world.editor_synced_patch("doc-a", "p1");
+            world.host("doc-b");
+            world.supervisor_alive("doc-b");
+            format!(
+                "a={:?} b={:?}",
+                world.authority("doc-a"),
+                world.authority("doc-b")
+            )
+        }
+        assert_eq!(run(), run());
+    }
+}

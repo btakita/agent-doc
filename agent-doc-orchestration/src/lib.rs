@@ -141,6 +141,7 @@ pub mod session_actor;
 pub mod session_check;
 pub mod sessions;
 pub mod snapshot;
+pub mod crdt_authority;
 pub mod merge_control_state_machine;
 pub mod start;
 pub mod startup_miss;

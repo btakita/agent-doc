@@ -1858,7 +1858,19 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                         && committed_free_text.contains(&gate_norm(&p.text)) =>
                 {
                     struck_count += 1;
-                    crate::queue::QueueEntry::Completed(p.clone())
+                    // #qftstuck: a struck head is no longer in progress — drop the
+                    // cosmetic `🚧` marker so it does not linger inside the
+                    // strikethrough (`set_first_prompt_in_progress` re-applies it to
+                    // the genuinely-active next head).
+                    let cleaned = crate::queue::strip_in_progress_marker(&p.text);
+                    if cleaned == p.text {
+                        crate::queue::QueueEntry::Completed(p.clone())
+                    } else {
+                        crate::queue::QueueEntry::Completed(crate::queue::QueuePrompt {
+                            text: cleaned,
+                            multiline: p.multiline,
+                        })
+                    }
                 }
                 other => other.clone(),
             })
@@ -1976,7 +1988,14 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                                     // through `parse_completed_inline` as a stable
                                     // `Completed` entry (a trailing suffix outside the
                                     // `~~` would re-parse as a live Prompt and churn).
-                                    let annotated = format!("{} — {}", p.text.trim_end(), reason);
+                                    // #qftstuck: drop the cosmetic `🚧` in-progress
+                                    // marker before baking — a struck head is no longer
+                                    // in progress, so the marker must not linger inside
+                                    // the strikethrough (and `set_first_prompt_in_progress`
+                                    // re-applies it to the genuinely-active next head).
+                                    let head_clean =
+                                        crate::queue::strip_in_progress_marker(p.text.trim_end());
+                                    let annotated = format!("{head_clean} — {reason}");
                                     struck.push((m.clone(), annotated.clone()));
                                     crate::queue::QueueEntry::Completed(crate::queue::QueuePrompt {
                                         text: annotated,
@@ -6090,6 +6109,91 @@ mod tests {
                     && t.contains("auto-struck: completed by #jbcache (#qftbklgstrike)")
             }),
             "head must be struck + annotated 'completed by #jbcache':\ncompleted={completed:?}"
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_clears_in_progress_marker_when_free_text_head_struck() {
+        // #qftstuck: an in-progress (🚧-marked) free-text queue head that is then
+        // struck by the #qftbklgstrike backlog/done convergence must NOT keep the
+        // 🚧 marker baked inside the strikethrough, and the marker must not be
+        // stranded on an unrelated head either. The genuinely-active next head
+        // (`do [#stillopen]`) DOES keep 🚧 (it is now the in-progress head).
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join("tasks.done.md"),
+            "- 2026-06-07 [#jbcache] Fix JB File Cache Conflict dialogs on every save\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: unrelated — opus-4-8\n\nAn answer about a different topic.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- 🚧 Fix JB File Cache Conflict dialogs on every save\n",
+            "- do [#stillopen]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#stillopen] unrelated open work item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=tasks.done.md -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let entries = read_queue_entries(&doc);
+        let completed: Vec<&str> = entries
+            .iter()
+            .filter_map(|e| match e {
+                crate::queue::QueueEntry::Completed(p) => Some(p.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        let active: Vec<String> = crate::queue::prompts(&entries)
+            .iter()
+            .map(|p| p.text.clone())
+            .collect();
+        // The struck head retains its prose + annotation but NOT the 🚧 marker.
+        assert!(
+            completed.iter().any(|t| {
+                t.contains("Fix JB File Cache Conflict dialogs")
+                    && t.contains("auto-struck: completed by #jbcache (#qftbklgstrike)")
+                    && !t.contains(crate::queue::IN_PROGRESS_MARKER)
+            }),
+            "struck head must be annotated with NO 🚧 marker:\ncompleted={completed:?}"
+        );
+        // The 🚧 marker is not stranded on any struck/completed entry.
+        assert!(
+            !completed
+                .iter()
+                .any(|t| t.contains(crate::queue::IN_PROGRESS_MARKER)),
+            "no completed entry may carry 🚧:\ncompleted={completed:?}"
+        );
+        // The newly-promoted active head is the in-progress head now.
+        assert!(
+            active
+                .iter()
+                .filter(|t| t.contains(crate::queue::IN_PROGRESS_MARKER))
+                .count()
+                == 1,
+            "exactly one active head should carry 🚧 (the new in-progress head):\nactive={active:?}"
+        );
+        assert!(
+            active
+                .iter()
+                .any(|t| t.contains("[#stillopen]")
+                    && t.contains(crate::queue::IN_PROGRESS_MARKER)),
+            "the genuinely-active next head should be the 🚧 in-progress head:\nactive={active:?}"
         );
     }
 

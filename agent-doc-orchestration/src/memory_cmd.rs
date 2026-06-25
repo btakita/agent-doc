@@ -520,11 +520,18 @@ fn collect_completion_candidates(file: &Path) -> Result<Vec<CompletionCandidate>
                 if queue_prompt_target_id(&prompt.text).is_some() || prompt.text.trim().is_empty() {
                     continue;
                 }
+                // #qftstuck: the cosmetic `🚧` in-progress marker is not part of
+                // the head's prose identity. Strip it so the deterministic strike
+                // scorer (and the downstream `gate_norm` identity match in
+                // `run_queue_maintenance`) sees the same clean prose whether or not
+                // the head is currently the in-progress head — otherwise an
+                // in-progress head can never be matched/struck and the marker
+                // lingers on a now-redundant head forever.
                 candidates.push(CompletionCandidate {
                     source: "queue".to_string(),
                     source_ref: format!("{session_ref}#queue:{index}"),
                     item_id: None,
-                    text: prompt.text.trim().to_string(),
+                    text: crate::queue::strip_in_progress_marker(prompt.text.trim()),
                 });
             }
         }

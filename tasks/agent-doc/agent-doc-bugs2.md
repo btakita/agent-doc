@@ -51,8 +51,8 @@ Compacted content:
 10 `StateProjectionBridgeTest` tests green incl. new eviction coverage (`evictForFile clears owner-generation counters and restarts fresh`). Plugin **0.2.190 → 0.2.191** (structural: new methods). Signed zip built at `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.191-signed.zip`.
 
 **Operator action:** uninstall → restart → install → restart (structural class change — JB caches bytecode on reinstall).
-❯ - Archived 9 response topic(s): #n529 JB reactive state mirror via FFI deltas; cycle closeout (IPC wedge recovery); IPC proof diagnostic (interrupted-cycle recovery); 6 more
-❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
+- Archived 9 response topic(s): #n529 JB reactive state mirror via FFI deltas; cycle closeout (IPC wedge recovery); IPC proof diagnostic (interrupted-cycle recovery); 6 more
+- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
@@ -65,7 +65,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=389b42c4-39d7-4783-8d43-fd6f1dace5d6 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=26507 candidate_hash=7c80b60cd19df366ffdf926683a956b6744bdea9722b78e71b4fb1a98feb4ff9 content_ours_len=27760 content_ours_hash=e301451aceffd5dddeb58965306908b021966ef1f37a9ca040b0072aacfe96d7 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782364110435
 ```
-<!-- agent:boundary:e720d873 -->
+<!-- agent:boundary:d63e33df -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -80,7 +80,7 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack
 - :pushpin: [#brtc]
 - :pushpin: do [#gww8]
 - :pushpin: do [#n529b]
-- Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.
+- When adding a backlog item, the agent sometimes assigns an explicit id. But agent-doc ignores the explicit id and assigns a new id. The agent's explicit id should be used instead. So instead of `[#kj5f] #mergestatemachine3` the id should be `[#mergestatemachine3]`.
 - :pushpin: [#vwj7]
 - :pushpin: [#cgfx]
 - :pushpin: [#gghx]
@@ -199,8 +199,9 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - :pushpin: do [#spy9]
 - :pushpin: do [#vwj7]
 - :pushpin: do [#cgfx]
-- do [#nsq2]
+- ~~do [#nsq2]~~
 - ~~:pushpin: do [#t4x1]~~
+- Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

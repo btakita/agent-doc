@@ -147,7 +147,30 @@ Files: `crates/corky-mail/src/sync/{types,markdown,imap_sync,mod}.rs`, `tests/te
 **Limitation (documented §4.5):** a message with no `Message-ID` cannot bridge, so two distinct keys for it still yield two files (pre-fix behavior); replies unique to one provider attach via the alias once the parent files are merged.
 
 Queue advances to **#ckymimestream** (draft-send buffers whole attachment in RAM — stream base64 / use Gmail resumable upload).
-<!-- agent:boundary:565ddb7c -->
+
+### Re: #ckymimestream — glm-5.2
+
+> **Queue prompt:**
+>
+> `#spec-test-build-install-commit-push` — `[#ckymimestream]` (P3, split from #ckymime)
+
+**Shipped: streaming large-attachment base64** — corky `9e3f1c4` → `origin/main` (`535594f..9e3f1c4`).
+
+`corky draft send` read each attachment fully, base64-encoded it into a `String`, accumulated it into the MIME string, then base64url-encoded the whole MIME again for the JSON `raw` field — peaking at ~1.8 GB for a 500 MB file. Now it streams:
+
+- **`build_mime_to_writer`** writes attachments in 57-byte (→ 76-char) chunks straight to a writer (byte-identical to the old in-memory builder), so neither the raw bytes nor their full base64 string sit in RAM.
+- For combined attachments ≥ 5 MB, the MIME is spooled to a temp file and the Gmail `{"raw":"…"}` body is streamed through a base64url encoder (`Base64UrlReader` + `StreamingRawBody`); the whole-message payload is never materialized as one string. Below the threshold the simple in-memory JSON path is unchanged.
+
+Files: `crates/corky-mail/src/draft/send.rs`, `SPEC.md` §5.5.1.
+
+**Tests.** +4 (`base64url`-streamer parity across 0/1/2/57/4096/8192-byte inputs; JSON-body framing with/without `threadId`; streamed attachment round-trips to the original bytes with ≤76-char lines). `corky-mail` lib 235/235, `test_sync` 30/30, clippy clean.
+
+**Build + install.** `make build` (transcribe-cuda) green; `make install` → `corky 0.29.0`.
+
+**Design note.** The backlog suggested the Gmail resumable/multipart media-upload endpoint; I kept the proven `messages.send` + `raw` endpoint and streamed the base64url body instead — identical wire format, fully unit-testable offline (live send can't be exercised here without OAuth). Peak RAM for a 500 MB attachment drops from ~1.8 GB to roughly the streaming buffers (spool on disk, not RAM).
+
+Queue advances to **#ckymimeinline** (draft send drops inline CID images — reuse draft push `multipart/related` logic in `build_mime_message`).
+<!-- agent:boundary:97c7bf16 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -167,7 +190,6 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#ckymimestream] [P3] corky draft send buffers the whole attachment in RAM then base64-encodes it (~1.8GB peak for a 500MB file). Use the Gmail API resumable/multipart upload endpoint for large attachments and stream the base64 encoding instead of building one giant String. crates/corky-mail/src/draft/send.rs:build_mime_message + send_via_gmail_api. Split from #ckymime.
 - [ ] [#ckymimeinline] [P3] corky draft send silently drops inline images: YAML (only draft push handles images+CID via multipart/related). Add CID inline-image support to send build_mime_message (multipart/related wrapping the text part + image parts with Content-ID), reusing draft push image-resolution logic. crates/corky-mail/src/draft/send.rs, mod.rs (push image handling). Split from #ckymime.
 <!-- /agent:backlog -->
 

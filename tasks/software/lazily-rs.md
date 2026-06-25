@@ -94,7 +94,7 @@ Drained queue head `#lzzigbeforechange`. The `semantic_completion_match` warning
 Heads-up on the remaining two queue heads — both `semantic_completion_match` warnings are likewise suspect: `#lzzigalloc` also "split from #lzzigtodos" and the `context.zig:615/619` allocator TODOs are still live (not done), and `#lzjshygiene` is lazily-js (different language from its `#lzktconf` match). Each will be re-verified before acting when those heads drain.
 
 (Closeout note: the editor-IPC listener for this pane was wedged on a stale `ack_content_sidecar` — `ipc_proof_insufficient` / `ack_mismatch` — deadlocking the normal `finalize` CRDT path and refusing direct disk writes while "active". Used `write --commit --force-disk` to cross the commit boundary so the cycle could close; the controller reports `fresh`, so this is a sidecar divergence, not a stale binary.)
-<!-- agent:boundary:fe2128d0 -->
+<!-- agent:boundary:5bb3468c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,8 +103,8 @@ Heads-up on the remaining two queue heads — both `semantic_completion_match` w
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~🚧 [#lzzigbeforechange]~~
-- [#lzzigalloc]
+- ~~[#lzzigbeforechange]~~
+- 🚧 [#lzzigalloc]
 - [#lzjshygiene]
 <!-- /agent:queue -->
 

@@ -51,7 +51,79 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=socket_ack_content patch_id=84811985-9a21-4969-b1dd-1a293aaf5112 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=16555 candidate_hash=ea9552c00116b1ca2cdc9eaef04a0fc4b26f3a717286fce76a11e3aef2e3e35a content_ours_len=17247 content_ours_hash=3aa251488b978be981ebd1e7a356080c1c56aaef23a5820b255343a3697d2622 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782420471185
 ```
-<!-- agent:boundary:f8f5ba5d -->
+
+### Re: dynamic cell collections, KV lookup, naming, and wire addressing — opus-4-8
+
+> **Queue prompt:**
+>
+> Can lazily support dynamic collections of cells and a KV lookup for cells? Can the agent-doc document structure be represented as dynamically created cells?
+
+> **Queue prompt:**
+>
+> What would be a good name for what I call dynamic cells? Dynamic cell doesn't seem like it's the best term.
+
+> **Queue prompt:**
+>
+> Can there be efficient addressing for dynamic cell structures for the message channels...rather than sending the entire cell structure over the wire when a change is made to a single dynamic child cell?
+
+These three are one design cluster. Short answer: **the runtime and wire protocol already support dynamic, per-node cell creation/teardown and delta-granular addressing today; what's missing is a first-class _keyed collection primitive_ and a _stable key → NodeId_ surface.** Details below.
+
+#### 1. Dynamic collections + KV lookup — yes at the graph level, not yet as a primitive
+
+What already exists:
+
+- **Dynamic node lifecycle.** `Context::alloc_id` mints `SlotId(u64)` with a free-list, so cells/slots are created and freed at runtime. The wire protocol already expresses this incrementally: `DeltaOp::{NodeAdd, NodeRemove, EdgeAdd, EdgeRemove}` (PROTOCOL.md §Delta). A graph whose shape changes over time is a first-class concept, not bolted on.
+- **Stable wire identity decoupled from allocation.** `NodeId` is "a stable wire identifier … decoupled from language-internal allocation IDs" (PROTOCOL.md §NodeId). That is the hook a collection needs.
+
+What does **not** exist yet: a *collection container* primitive whose **membership (the set of keys) is itself reactive**, and **keyed (string/path) addressing** — `cell.rs` is just `CellHandle<T>` over a `SlotId`; nodes are addressed by opaque `u64`, never by a key. There is no `CellMap`/family API and no `get_or_create(key)`.
+
+Two ways to model a collection **today** with existing primitives:
+
+| Model | Shape | Reactivity / wire cost |
+|---|---|---|
+| **Coarse** | `ctx.cell(HashMap<K,V>)` — one node holds the whole map | Any single-entry change is a `set_cell` of the *entire* map → whole-map payload on the wire, no per-entry dependency tracking. Exactly what Q3 wants to avoid. |
+| **Fine-grained** | an *index cell* `Cell<HashMap<K, CellHandle<V>>>` (tracks membership: add/remove keys) **+ one child `Cell<V>` per entry** | A reader depending on one entry does not invalidate when siblings change; membership changes invalidate only index readers. Each entry is its own node → per-entry deltas. This *is* the dynamic collection you are describing. |
+
+The ergonomic gap is the bookkeeping in the fine-grained row: a primitive that owns the index cell, mints/caches a child cell per key on demand, frees it on removal, and exposes keyed lookup.
+
+**agent-doc mapping — yes, and it is a natural fit.** agent-doc *already* assigns stable, keyed node identities: `exchange:1:ft-e4627c00:0`, `queue:3:ft-821ae3e8:0`, `review:5:lzcrdtplane:0`. Those `component:occurrence:item-id` strings are exactly the KV keys a lazily collection would use. So:
+
+- document → root collection;
+- each component (`exchange`, `queue`, `backlog`, `review`, …) → a child collection keyed by item-id;
+- each item → a value cell;
+- the node_key is the **stable wire key**; lazily's `NodeId` is the **volatile internal handle**.
+
+This is also the exact granularity the per-cell CRDT merge wants — the whole-document `crdt::merge` that splices content across cells (the bug that just mangled this very response) is the coarse-vs-fine problem in this table, one component up.
+
+#### 2. Naming — lead with **CellFamily** + **entry**; container is **CellMap/Collection**
+
+"Dynamic cell" conflates three things that each deserve a name. Prior art lines up cleanly: Recoil/Jotai **`atomFamily`** (a parameterized factory that lazily instantiates and caches one atom per key — the closest established term for your "dynamic cell"); SolidJS **stores** (fine-grained keyed proxies); MobX **`observable.map`** (eager reactive keyed container).
+
+Recommendation, aligned with lazily's `Slot → Cell → Signal → Effect` vocabulary:
+
+| Concept | Name | Why |
+|---|---|---|
+| Factory keyed by param that mints/caches cells on demand (`family.get(ctx, key)`) | **`CellFamily`** | Established (`atomFamily`), reads well, names the *mechanism* you call "dynamic cells." |
+| Reactive keyed container whose membership is observable | **`CellMap`** (KV) / **`CellList`** (ordered) / generically **`Collection`** | Names the *container*. |
+| The individual runtime-created child | **entry** (or **member**) cell | Replaces "dynamic cell" for the *thing*. |
+
+So: "dynamic cells" → a **`CellFamily`** producing **entries** held in a **`CellMap`/`Collection`**. Ship `CellFamily` + `entry` as the primary terms; use `CellMap` when membership itself must be observable.
+
+#### 3. Efficient addressing over the channel — already delta-granular per node; the gap is keyed addressing
+
+The transport already sends *only the changed child*, **provided each child is its own node** (the fine-grained model in §1, not the coarse single-map cell):
+
+- A single entry value change is **one** `CellSet`/`SlotValue` delta op addressed by that entry's `NodeId` — not the whole structure.
+- The **coalesced frontier** invariant guarantees each changed node appears at most once per delta; the `PartialEq` cell guard + memo-equality suppression drop no-op writes; `SharedBlob` moves large payloads by reference.
+- Structural change (add/remove a keyed child) is already incremental via `NodeAdd`/`NodeRemove` + `EdgeAdd`/`EdgeRemove`. Nested structures are the per-node model applied recursively — each nested cell is its own node, so you can delta a deep child without re-sending ancestors.
+
+The genuine gaps for a *keyed dynamic collection*:
+
+1. **Stable keyed addressing on the wire.** `NodeId` is opaque `u64` with no `key → NodeId` registry in the protocol. A peer that wants "subscribe to entry `foo`" must map the key to a NodeId out-of-band. Fix: add an optional `key: string` (or path) to `NodeAdd` / `NodeSnapshot` so collection entries are addressable by stable key, surviving NodeId churn across reconnects/resyncs.
+2. **Sub-path addressing for nested collections** falls out of (1) once entries carry keys/paths — no new transport machinery, just the key table.
+
+**Net across all three:** the dynamic-shape graph and per-node delta addressing are already designed and shipped. To turn that into ergonomic "dynamic cell collections with KV lookup," the two additions are (a) a `CellFamily`/`CellMap` core primitive, and (b) an optional `key`/path field on `NodeAdd`/`NodeSnapshot`. Filed as `[recommended]` backlog items (plan-first, not implemented this cycle — design recommendations awaiting your go).
+<!-- agent:boundary:ab24deac -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -60,9 +132,10 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/l
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- 🚧 Can lazily support dynamic collections of cells and a KV lookup for cells? Can the agent-doc document structure be represented as dynamically created cells?
-- What would be a good name for what I call dynamic cells? Dynamic cell doesn't seem like it's the best term.
-- Can there be efficient addressing for dynamic cell structures for the message channels...rather than sending the entire cell structure over the wire when a change is made to a single dynamic child cell?
+- ~~Can lazily support dynamic collections of cells and a KV lookup for cells? Can the agent-doc document structure be represented as dynamically created cells?~~
+- ~~What would be a good name for what I call dynamic cells? Dynamic cell doesn't seem like it's the best term.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Can there be efficient addressing for dynamic cell structures for the message channels...rather than sending the entire cell structure over the wire when a change is made to a single dynamic child cell?~~ — auto-struck: answered this cycle (#ftstrike)
+- Can lazily realistically support >1000000 cells. Can lazily be used to back a modern spreadsheet application?
 <!-- /agent:queue -->
 
 ## Backlog

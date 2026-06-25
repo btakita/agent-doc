@@ -41,7 +41,48 @@ done
 Compacted content:
 ❯ - Archived 6 response topic(s): state machines for queue activity + plugin/binary merge control; #56ta lazily-spec wire-shape + interrupted-cycle recovery + semantic triage; IPC proof diagnostic (interrupted-cycle recovery); 3 more
 ❯ - Prior summary/context: prior compacted content: Archived 5 response topic(s): bounded session-startup wait + isolating why the session hangs...
-<!-- agent:boundary:053d9b13 -->
+
+### Re: #n529 JB reactive state mirror via FFI deltas — glm-5-2
+
+**`#n529` (lazilystatesync3) — shipped + tested.** The JB plugin now holds a
+per-document lazily-spec mirror graph that applies `agent_doc_state_subscribe`
+snapshot/delta messages, so editor UI reads tracked cells reactively instead of
+re-parsing the full projection JSON on every observed event. The binary stays
+the authoritative graph (`#lazilystatesync2` already shipped); the plugin is a
+thin mirror consumer.
+
+**What landed (two repos):**
+
+- **lazily-kt (conformance pin):** new `StateGraphMirror` + wire shapes
+  (`WireSnapshot`/`WireDelta`/`WireDeltaOp`/`WireSubscribe`) matching
+  `state_wire.rs` 1:1; `LazilyFFI.agent_doc_state_subscribe` + a
+  `StateProjectionClient.refreshMirror()` delta path. Added the missing
+  `kotlin("plugin.serialization")` so the `@Serializable` shapes generate
+  serializers. 32 gradle tests green, including the defining property: *cold
+  snapshot of full state* converges identically to *partial cold + delta*.
+- **JB plugin 0.2.189 → 0.2.190:** `AgentDocLib.agent_doc_state_subscribe`
+  JNA binding; plugin-local `StateGraphMirror.kt` (Gson, Kotlin 1.9) pinned to
+  the lazily-kt tests via `#lzpkgwire`; `StateProjectionBridge.subscribeMirrorForFile`
+  advances the mirror and `mirrorSummaryForFile` derives `MirrorProjectionSummary`
+  (routeReadiness / routePaneId / transportPhase / proofMarkers) from tracked
+  cells. Legacy `projectionSummary(json)` kept as cold-read fallback. 9 plugin
+  tests green (6 new mirror conformance tests).
+
+**Known gap → `#n529b`:** the reactive summary is *available* but not yet read by
+the dispatch-ready / busy consumers (`PromptPoller`, `RunAgentDocAttemptLedger`
+still pull the cold path). That ECSM consumption + live dogfood is the next
+focused phase — no gate on `#n529`, the substrate is shipped and builds clean.
+
+**Operator action — JB plugin install:** rebuild ready at
+`src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.190-signed.zip`.
+Since `NativeLib.kt` gained a JNA symbol, please **uninstall → restart →
+install → restart** (structural class change). No Rust binary change needed —
+`agent_doc_state_subscribe` FFI already exists.
+
+**Process note:** the prior `finalize` wedged on editor-IPC `no_ack` (`#6b5h` —
+no live JB editor acknowledging in this OpenCode session) and leaked two orphan
+fragment lines at the exchange top; recovering via `write --force-disk --commit`.
+<!-- agent:boundary:16e8121c -->
 <!-- /agent:exchange -->
 
 ## Queue

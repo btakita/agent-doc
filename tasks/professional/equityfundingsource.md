@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,271 +33,33 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-004722.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-052247.md`*
 
 Compacted content:
-❯ - Archived 6 response topic(s): Prefill New Applications From Prior Borrower Data And Deploy; Message Dialog Open Flash Jank And Deploy; IPC proof diagnostic (interrupted-cycle recovery); 3 more
+❯ - Archived 15 response topic(s): Can we remove the dead tables?; do [#bxtd]; deploy; 12 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
-### Re: Can we remove the dead tables? — opus-4-8
+### Re: realtime still flashing + deploy — glm-5.2
 
 > **Queue prompt:**
 >
-> Can we remove the dead tables?
+> I'm still seeing "Realtime connection failed. Refresh the page to reconnect." flash when rapidly switching between users in a search — diagnose and harden the realtime websocket(s).
 
 
-Yes — I found **6 dead tables** in prod D1, all safe to drop. I cross-referenced the live prod schema (85 tables) against migrations and current source.
-
-A table is "dead" if it has **0 rows in prod**, **0 references in current source** (excluding the gitignored `dist/` build artifact and migrations), and is **created by no migration in this repo** (i.e. it predates the migration system or was superseded by a rename):
-
-| Dead table | Prod rows | Superseded by |
-|---|---|---|
-| `applications` | 0 | `full_applications` / `application_leads` (0036 was explicitly named to dodge this legacy table) |
-| `borrower_loan_applications` | 0 | pre-migration legacy |
-| `borrower_loan_application_documents` | 0 | pre-migration legacy |
-| `contacts` | 0 | `contact_messages` |
-| `loan_payment_transactions` | 0 | `loan_payments` |
-| `uploaded_documents` | 0 | `documents` / `other_documents` |
-
-**Two zero-reference tables I deliberately kept:**
-- `d1_migrations` — Cloudflare/wrangler's own migration tracker. Never drop.
-- `document_sync_logs` — created by migration `0066` for the pending Dropbox sync feature (`#dropbox-sync-contract`); unwired yet, not dead.
-
-**Deliverable:** I wrote `migrations/0110_drop_dead_tables.sql` (`DROP TABLE IF EXISTS` for all six). It is **not yet applied** — this is irreversible prod DDL, so I'm holding for your go before running it remotely. All six are empty, so there is no data loss, but I won't mutate prod schema without confirmation.
-
-To apply once you confirm:
-```
-cd src/equityfundingsource-dev/app/equityfundingsource
-bun ./bin/cf-wrangler.ts d1 migrations apply equityfundingsource --remote -c ../../wrangler.toml
-```
-Queued as an `[operator-verify]` backlog item.
-
-### Re: do [#bxtd] — apply the dead-table drop — opus-4-8
-
-> **Queue prompt:** do [#bxtd]
-
-Done — applied `migrations/0110_drop_dead_tables.sql` to prod D1.
-
-- **Pre-check:** confirmed all 6 target tables still present.
-- **Applied:** `wrangler d1 migrations apply --remote` ran `0110` (7 commands, 6.81ms, status ✅).
-- **Verified:** 0 of the 6 target tables remain; total table count **85 → 79**.
-- **Dropped:** `applications`, `borrower_loan_applications`, `borrower_loan_application_documents`, `contacts`, `loan_payment_transactions`, `uploaded_documents` (all were empty — zero data loss).
-- **Committed** the migration in the EFS submodule (`03ac6cf`).
-
-`#bxtd` closed.
-
-### Re: deploy — opus-4-8
-
+> **Queue prompt:** Still seeing "Realtime connection failed" flash on rapid user switching.
 > **Queue prompt:** deploy
 
-Deployed the EFS Worker with the `#bxtd` dead-table drop now live.
+You were right — the first fix was incomplete. There were **two** sources of that error and I'd only guarded one:
 
-- **Verified green:** `make check` — 1208 pass / 0 fail, worker bundle clean.
-- **`make deploy`:** built the worker, applied remote D1 migrations (`0110` already applied — idempotent no-op), uploaded + activated the new Worker version `3aea91b1-a314-4e46-87cc-ca733f50e500`.
-- **Pushed** the migration commit to origin (`7f27671` on `origin/main`, after a rebase onto an upstream merge).
-- **Smoke check:** `https://equityfundingsource.brian-takita.workers.dev/` → HTTP 200 (0.24s).
+- `admin/messages.tsx` (fixed in `85f7d30`) ✓
+- `borrower/messages.tsx` — the **shared PortalMessages** component — had the *same* unguarded WebSocket `error`/`open` handlers (`close` was already guarded). Rapid session switching closed a still-CONNECTING socket → its `error` fired → the false message flashed. Now guarded with `ws_ref.current === ws` the same way (`3800f6a`). The realtime-hardening test now covers **both** components.
 
-Production is on the new version with the 6 dead tables dropped.
+Also: the first fix was **pushed but not deployed**, so production still had the old code — compounding the "still seeing it."
 
-### Re: don't prefill property info in a New Loan Application — opus-4-8
+**Deployed** (`make deploy`) — Worker version `f26311d4-513a-4c1c-8272-6887ab7fe90d`, smoke check **HTTP 200**. Ships live: the realtime fix (both sources), the post-apply Messages nudge, the deal-dialog first-action focus, and the Loan-Detail "Message borrower" button. `make check` → **1216 pass / 0 fail**.
 
-> **Queue prompt:**
->
-> [#dfed93b-tests]
-
-
-> **Queue prompt:**
->
-> do [#dfed93b-tests]
-
-
-> **Queue prompt:** In a New Loan Application, do not prefill any property info https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?step=4. Each property is different.
-
-Done — step 4 (subject property + loan request) now always starts blank. Committed + pushed as `0b83c5d` (`#noproppfill`).
-
-**What was prefilling it.** Only one path ever filled step 4: `lead_prefill.ts:subject_property_prefill_`, which runs when an application originates from a **lead** — the public `/apply` prequal handoff and admin borrower invites. A borrower starting a fresh application from their dashboard (no lead) already got a blank step 4, and the prior-application `borrower_prefill` never copies property.
-
-**Change (you chose "all of step 4").** `application_lead_prefill_apply_` no longer copies the subject-property section at all. The lead now carries forward **only the borrower's personal identity** (name, phone, email). No longer copied from the lead: property address, city, state, ZIP, value, occupancy, **and** loan amount + loan purpose. Each application's step 4 is entered fresh. The lead row still stores its original data (nothing is lost); it's just not pre-populated into the form.
-
-- Removed `subject_property_prefill_` + its now-unused helpers (`fill_number_`, `loan_purpose_`, `occupancy_`) and the two subject-property imports.
-- Updated `borrower-lead-to-tmo-flow.test.ts` to assert the lead prefill **never** touches subject property / loan amount.
-- Updated `prds/efs-full-application-intake-spec.md` §3 to document the exclusion.
-- `borrower-lead-to-tmo-flow.test.ts`: 6 pass / 0 fail; worker bundle builds clean.
-
-**Heads-up — `make check` is red from a separate, pre-existing cause (not this change).** 7 tests fail on `origin/main`, all from the operator commit `dfed93b` *"fix(admin): streamline document upload workflows"* (by Brian Dev), which refactored the admin/lender document-upload components but left their source-assertion tests behind (import shapes, CSS values, dropped fixtures, modal stacking). They live in a different subsystem and fail identically with my change stashed; my change is green in isolation. I did **not** guess-fix them — reconciling an active UI refactor's tests is outside this property-prefill directive and risks conflicting with your in-flight work. Tracked as backlog `#dfed93b-tests`. Note `dfed93b` is on origin but **not yet deployed** (the prior deploy shipped a pre-rebase tree). This turn's preset was `#spec-test-commit-push`, so I committed + pushed but did not deploy.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=07d9d272-138c-4efd-8de2-1a372b571843 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782352171030
-```
-
-### Re: Borrower/Broker/Lender/Admin form errors each on their own line — glm-5.2
-
-> **Queue prompt:**
->
-> Borrower, Broker, Lender, Admin form errors should each have their own line...not "Missing required values: property type, A. Will you occupy the property as your primary residence?, B. Family or business relationship with the seller? (purchase), C. Borrowing undisclosed money for this transaction?, D1. Applying for another mortgage on/before closing (not disclosed)?, D2. Applying for new credit on/before closing (not disclosed)?, E. Will the property have a priority lien (e.g. PACE)?, F. Co-signer or guarantor on undisclosed debt?, G. Outstanding judgments against you?, H. Delinquent or in default on federal debt?, I. Party to a lawsuit with potential financial liability?, J. Conveyed title in lieu of foreclosure in the past 7 years?, K. Pre-foreclosure / short sale in the past 7 years?, L. Property foreclosed in the past 7 years?, M. Declared bankruptcy within the past 7 years?."
-
-
-Shipped — each missing/invalid field now renders on its own `• <field>` line instead of one comma-joined run-on. Commit `269942a` (pushed to equityfundingsource-dev origin; parent bump `ae9a54637`).
-
-- `full_application.tsx` (`validation_message_`) + `borrower/applications/routes.ts` (`validation_error_`): join with `\n` + `• ` prefix per value, client/server in lock-step.
-- `shared/form_error.tsx` + `shared/toast.tsx`: `white-space:pre-line` so newlines render as line breaks.
-- `prds/efs-full-application-intake-spec.md`: documented the per-line format.
-- `tests/apply4-validation-errors-per-line.test.ts`: 4 source-assertion tests (all pass).
-
-Verification: 4 new tests pass; app build + worker build green. `make check`'s 7 failures are the pre-existing `dfed93b` admin/lender document-upload refactor (different subsystem, fail identically on origin/main). Not deployed — `deploy` stays queued (preset was #spec-test-commit-push).
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=dd141d8b-5c3c-4a0e-8ff4-08950f0285c0 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782359060477
-```
-
-### Re: reconcile dfed93b tests, then deploy — glm-5.2
-
-> **Queue prompt:** deploy (operator chose: reconcile tests, then deploy)
-
-`make check` was red — same 7 stale source-assertion tests from Brian Dev's `dfed93b` admin/lender document-upload refactor (submit-button-busy, admin-application-lead-detail, advance-lender-documents, investor-documents, admin-investor-pipeline ×2, investor-portal-e2e). My `#noproppfill` / form-errors work is green in isolation; these asserted on the pre-refactor component shapes.
-
-**Reconciled all 7 to the committed dfed93b components** (tests only — no source changed):
-- submit-button-busy: dropped deal_documents/lender_documents from the aria-busy list — uploads are now immediate-on-selection via FileDropZone, so those components no longer carry Preact submit buttons.
-- admin-application-lead-detail / advance-lender-documents: `AdminDocumentUploadField` now uses `align-items:stretch` + a FileDropZone label toggle (old `min-height:72px` / icon save-button gone); the import is multi-name now, so a regex asserts `AdminDocumentUploadField` comes from that module.
-- investor-documents: published/public cards now delegate to a shared `PreviewDocumentCard` that renders `DocumentFileLink`.
-- admin-investor-pipeline: lender-documents table column widths/gap updated to the new layout; multi-name import → regex.
-- investor-portal-e2e: deal_documents uses `DealDocumentUpload` with labeled Title/Description inputs + FileDropZone (the `IcUpload` icon is gone).
-
-**Verification:** `make check` → **1212 pass / 0 fail** (was 1205/7). Committed `b57f570`, pushed to origin (`269942a..b57f570`).
-
-**Deployed.** `make deploy` built the worker, applied remote D1 migrations (idempotent — 0110 already applied), uploaded + activated version `d1f62058-b80b-4833-84de-2fd6d2691241`. Smoke check: `https://equityfundingsource.brian-takita.workers.dev/` → **HTTP 200** (0.16s).
-
-Production is now live with the dead-table drop (#bxtd), no subject-property prefill (#noproppfill), per-line form errors, and the dfed93b document-upload refactor — all on a green suite. `#dfed93b-tests` resolved; `deploy` drained.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=816d9a07-1aa0-4d17-ab8a-6a0d6b6ba330 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782361375634
-```
-
-### Re: post-apply flash → Messages chat — glm-5.2
-
-> **Queue prompt:** After a borrower applies for a new deal, The flash message should also mention to use the message chat contact EFS staff about any questions.
-
-Done — all three post-apply surfaces now point the borrower to the Messages chat:
-
-- **Dashboard success toast** (`borrower/dashboard.tsx`): "Use Messages to chat with EFS staff about your application." appended to the submitted message.
-- **Dashboard flash banner** (`borrower/dashboard.tsx`): same nudge, with a direct `<a href="/borrowers/messages">Messages</a>` link (gold on the navy banner).
-- **In-wizard SuccessAlert** (`borrower/full_application.tsx`): same line added to the post-sign confirmation.
-
-`Messages` is the existing borrower chat at `/borrowers/messages` — the same thread the dashboard already surfaces for unread admin messages. Spec + tests updated: `prds/efs-full-application-intake-spec.md` documents the nudge; `tests/borrower-dashboard.test.ts` asserts the Messages text and the `/borrowers/messages` link, plus the SuccessAlert mention.
-
-**Verification:** `make check` → **1213 pass / 0 fail**. Committed `9c31d76`, pushed to origin (`b57f570..9c31d76`). Not deployed — preset `#spec-test-commit-push`.
-
-### Re: deal dialog → focus first Available-Deals action — glm-5.2
-
-> **Queue prompt:**
->
-> Admin Deal Pipeline: https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-b
-
-
-> **Queue prompt:** Admin Deal Pipeline deal dialog (deal_tab=loan) should focus on the first actionable item when opened — the "Review Interested Lenders" button in the flash message.
-
-Done — opening a deal dialog now focuses that deal's next-step action.
-
-The deal-advance-guidance card (`#deal-advance-guidance`, shown on the Loan tab when `tmo_loan_status === 'Application Received'`) now marks its first action button with `data-dialog-initial-focus="true"`, in priority: **Approve accreditation → Move to Loan Estimate → Review Interested Lenders**. For the deal you linked (Available Deal, no lender selected yet), that resolves to the **Review Interested Lenders** button.
-
-No new focus plumbing was needed — the shared `use_dialog_action_navigation_` hook already wired on `PipelineCardModal` (which wraps `<AdminDealDetail>`) focuses `[data-dialog-initial-focus="true"]` on open, including direct-URL restores (`?dialog=deal&dialog_deal_id=…`). Just the marker.
-
-Spec + test updated: `prds/67v2-admin-loan-pipeline-kanban.md` records the priority; `tests/admin-pipeline.test.ts` asserts the guidance card carries the focus marker. `make check` → **1214 pass / 0 fail**. Committed `1565e73`, pushed (`9c31d76..1565e73`). Not deployed — preset `#spec-test-commit-push`.
-
-### Re: Loan Detail → open borrower chat by user — glm-5.2
-
-> **Queue prompt:**
->
-> :pushpin: https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan > Loan Detail should remove the "Borrower Chat" card. Use the chat should open the borrower (btak.dev+borrower@gmail.com) instead.
-
-
-> **Queue prompt:** Loan Detail should remove the "Borrower Chat" card; opening chat should open the borrower (e.g. btak.dev+borrower@gmail.com) instead.
-
-Done — the Loan tab no longer embeds an inline "Borrower chat" card.
-
-- Removed the inline `AdminConversationTabs title="Borrower chat"` from the Loan tab.
-- Added a **"Message borrower"** button that dispatches `ADMIN_MESSAGES_OPEN_EVENT` with `{ role: 'borrower', query: deal.borrower_email }`, opening the admin messages modal on that deal's borrower (e.g. btak.dev+borrower@gmail.com).
-- Surfaced `borrower_email` on `AdminDealRow` — the deal query already returned it from the loan; the frontend interface just wasn't exposing it. No backend change needed.
-
-The interests-tab "Borrower communication" thread is unchanged. This is the first step toward the broader per-user chat model (remaining queue items: dialogs→associated users, group chat w/ BCC, page→user association).
-
-Spec + test updated: `prds/67v2-admin-loan-pipeline-kanban.md` gets a `#deal-loan-open-borrower` entry; `tests/admin-pipeline.test.ts` asserts the button + event + `borrower_email`. `make check` → **1215 pass / 0 fail**, worker bundle clean. Committed `6552fd3`, pushed (`1565e73..6552fd3`). Not deployed — preset `#spec-test-commit-push`.
-
-### Re: per-user tabbed chat model — plan (no impl this cycle) — glm-5.2
-
-> **Queue prompt:**
->
-> :pushpin: All dialog states in the Deal Pipeline and Lender Pipeline should have users associated with them. These users will be the focus of the chat. A single user will have a single message thread. Multiple users will have separate tabs in the chat dialog with the user type (Lender, Borrower, Broker). Another tab should be the group chat, where all users are emailed the messages. A borrower/broker + lender should not see each others' email addresses for any Borrower/Broker + Lender combo should be emailed with BCC.
-
-
-> **Queue prompt:** All dialog states in the Deal/Lender Pipeline should have associated users; single user → single thread; multiple users → typed tabs (Lender/Borrower/Broker) + a group tab with BCC.
-
-This is a design-level feature (per-user threading + tabbed multi-user chat + BCC group email), so this cycle writes the spec rather than a rushed half-implementation. Plan committed as `prds/dialog-user-chat-model.md` (`7790d70`, pushed).
-
-It builds on the unified `messages` model already approved (#msg-unify) — `party_user_id` / `party` / `scope` already give per-user threads; the borrower + lender cutovers (#msg-unify3/4) are dual-write shipped, read-cutover pending soak. The tabbed chat reads the unified table for new rows and falls back to the legacy adapters for pre-cutover history.
-
-**Plan:** each Deal/Lender card dialog returns its **associated users** (borrower + interested lenders; lender + their borrowers/brokers). Single user → one thread. Multiple users → typed tabs (`Borrower — <name>`, `Lender — <name>`, `Broker — <name>`) + a **Group** tab. A Group post writes one `messages` row per recipient (coherent threads + email reply routing) and sends one BCC'd email per recipient — a borrower/broker + lender combo never sees the other's address. Phased: **#deal-chat-users1** associated-users data · **2** tabbed UI · **3** group fan-out + BCC.
-
-**Two open questions for you** (in the PRD) before phases 2–3:
-1. Group reply routing — does a reply land back in the Group tab or the sender's tab? (Propose: reply-to-group → Group; reply-to-sender → their tab.)
-2. Fold the existing interests-tab "Borrower communication" + lender threads into the tabbed view now, or wait until #msg-unify3/4 read-cutover soaks?
-
-Backlog item `#deal-chat-users` added with the phase breakdown. Not deployed — planning cycle.
-
-### Re: page → user/type association — folded into the chat plan — glm-5.2
-
-> **Queue prompt:**
->
-> All pages should have user(s) or a user type associated with it. Which will select the user(s) or user type in the chat dialog.
-
-
-> **Queue prompt:** All pages should have user(s) or a user type associated with it; which selects the user(s)/user type in the chat dialog.
-
-Folded into the per-user chat plan rather than a standalone build — it's the site-wide extension of the same model. Added phase **#deal-chat-users4** + a "Page → user/type association" section to `prds/dialog-user-chat-model.md` (`ecfb2e7`, pushed).
-
-Every admin page declares its associated user(s) (a borrower's loan page → that borrower; a lender's account page → that lender) or a user type when no single user applies (a pipeline board → lender/borrower scope). Opening chat from a page pre-selects that user/type, so the admin lands in the right thread without re-choosing. Glue over #deal-chat-users1–3 (pipeline dialog tabbed chat) + the unified admin inbox (#msg-unify2).
-
-Nothing to build yet — #deal-chat-users1–4 all wait on the two open questions in the plan (group reply routing; fold-in timing vs #msg-unify3/4 read-cutover soak). Not deployed — planning cycle.
-
-### Re: realtime "connection failed" on rapid user switching — fixed — glm-5.2
-
-> **Queue prompt:**
->
-> I'm seeing "Realtime connection failed. Refresh the page to reconnect." when rapidly switching between users in a search. Please diagnose and harden the realtime connection websocket(s).
-
-
-> **Queue prompt:** "Realtime connection failed. Refresh the page to reconnect." when rapidly switching between users in a search — diagnose and harden the realtime websocket(s).
-
-**Diagnosis:** the per-session messages WebSocket (`admin/messages.tsx`) re-runs its effect when `session.id` changes. Cleanup calls `ws.close()` on the still-**CONNECTING** socket, and closing a connecting WebSocket fires its `error` event — so each rapid switch surfaced a false "Realtime connection failed." The `close` handler was already guarded with `ws_ref.current === ws`, but `error` and `open` were not.
-
-**Fix (`85f7d30`):** guard the `error` and `open` handlers the same way. Cleanup nulls `ws_ref` *before* closing, so a stale/closing socket can neither set nor clear the error — only the still-active socket's genuine failure is surfaced. No false positive on rapid switching.
-
-Verified: `make check` → **1216 pass / 0 fail**, worker bundle clean. Committed `85f7d30`, pushed (`ecfb2e7..85f7d30`). Not deployed — preset `#spec-test-commit-push`. Deeper hardening (auto-reconnect with backoff for a genuine drop of the active session) is intentionally out of scope — the reported bug was the false positive, and the shared `use_admin_events_` socket already auto-reconnects on drop.
-<!-- agent:boundary:ba31ce97 -->
+Both queue heads drained.
+<!-- agent:boundary:5e2d54d8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -317,6 +79,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~I'm still seeing "Realtime connection failed. Refresh the page to reconnect." flash when rapidly switching between users in a search — diagnose and harden the realtime websocket(s).~~
+- deploy
+- I'm still seeing "Realtime connection failed. Refresh the page to reconnect." flash when rapidly switching between users in a search — diagnose and harden the realtime websocket(s).
 <!-- /agent:queue -->
 
 ## Backlog

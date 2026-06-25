@@ -63,17 +63,35 @@ Working tree is clean — no code or deploy work was needed this cycle; the ship
 
 ### Re: live verify (yours, no gate) — glm-5.2
 
+> **Queue prompt:**
+>
+> JB `Recycle Supervisor` receives a message that the agent is busy even though the opencode terminal is idle. The state needs to be updated to idle once the turn completes...even if the turn did not finalize. If the agent stops the turn due IPC churn or a Supervisor version mismatch, the state should indicate the agents idle. No need for the extra 2 steps of to press "Interrupt & Restart" + the confirmation.
+
+
 Per your "I will test, file bugs, you check the logs" loop, the one non-code remaining check is the `plan-opencode-post-turn-false-active.md` trailing note: live-verify a real OpenCode pane re-dispatches after a completed turn (no false `alive-busy`; restart works without the 2-step). No review gate filed, per your "no more gates" instruction — flagging here for your next test pass.
-<!-- agent:boundary:26a93c67 -->
+<!-- agent:boundary:9f0e53bd -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 JB `Recycle Supervisor` receives a message that the agent is busy even though the opencode terminal is idle. The state needs to be updated to idle once the turn completes...even if the turn did not finalize. If the agent stops the turn due IPC churn or a Supervisor version mismatch, the state should indicate the agents idle. No need for the extra 2 steps of to press "Interrupt & Restart" + the confirmation.
+- ~~JB `Recycle Supervisor` receives a message that the agent is busy even though the opencode terminal is idle. The state needs to be updated to idle once the turn completes...even if the turn did not finalize. If the agent stops the turn due IPC churn or a Supervisor version mismatch, the state should indicate the agents idle. No need for the extra 2 steps of to press "Interrupt & Restart" + the confirmation.~~
 - "Add a bounded `session_startup` wait in `route.rs`/`start.rs` with a hard deadline; on expiry, fail closed with `startup_miss` + an actionable error ("session did not become dispatch-ready in Ns") rather than hanging.": Can you retry or isolate why the session hangs so we can further dogfood these sort of errors?
 - :pushpin: do [#jbrunhang]
-- ~~:pushpin: do [#jbrestartbusy]~~
+❯ ---
+❯ equityfundingsource.md turn has an IPC issue:
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=ca5b06f9-838b-4b60-9ce2-00519736fbb1 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782344406484
+```
+---
 ---
 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
@@ -122,8 +140,6 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
-- ~~If I run JB `Run Agent Doc` on a session not open, the next JB `Run Agent Doc` hangs. The first JB `Run Agent Doc` should immediately fail.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~The Capacity Proof should not block the JB `Run Agent Doc` dispatch. Dispatch should occur immediately while the Capacity Proof runs in the background.~~ — auto-struck: answered this cycle (#ftstrike)
 - Still getting JB `File Cache Conflict` dialogs.
 - Opencode responses are reverse ordering numeric lists.
 ---
@@ -209,6 +225,7 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 - do [#actorswitchdefer]
 - ~~do [#ocdrainstall]~~
 - do [#capproofbg]
+- do [#rt83qflood]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

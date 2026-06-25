@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -39,7 +39,28 @@ queue: start
 Compacted content:
 - Archived 4 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); IPC proof diagnostic (interrupted-cycle recovery); #lzzigbeforechange; 1 more
 - Prior summary/context: prior compacted content: Archived 9 response topic(s): lazily bug-fix next-steps (cross-port); IPC proof diagnostic (...
-<!-- agent:boundary:29ca69b3 -->
+
+### Re: #lzjshygiene — generic conformance fixture assertion validation (lazily-js) — opus-4-8
+
+> **Queue prompt:**
+>
+> [#lzjshygiene]
+
+
+Drained the queue head `#lzjshygiene`. The work was already implemented locally (uncommitted in `src/lazily-js/test/ipc.test.js`); I verified, completed parity, and shipped it.
+
+**What it does** — `assertFixtureAssertions(message, fixture)` cross-checks **every** `assertions` metadata field on each conformance fixture against the parsed snapshot/delta message, so the `wire` block and the `assertions` block can no longer drift silently. This is the JS parity of lazily-kt `#lzktconf`:
+- Snapshot keys: `epoch`, `node_count`, `edge_count`, `root_count`, `first_node_type_tag`, `first_node_state_kind`, `has_opaque_node`, `opaque_node_id`, `blob_{offset,len,epoch}`.
+- Delta keys: `base_epoch`, `epoch`, `is_sequential`, `op_count`, `has_all_op_variants`, `resync_after_epoch_10`, `first_op_kind`, `first_op_payload_kind`.
+- **Unknown assertion keys throw** — new fixture metadata can never be silently ignored.
+- Wired into the `all fixtures round trip` loop + a dedicated drift-detection test (mutated `node_count` and an unknown key both fail loudly).
+
+**Verification** — `npm run build` (node --check) green; `npm test` green at **28 pass** (was 27; +1 drift test). Parity confirmed with lazily-kt: both cover the same 6 IPC JSON fixtures. `arena_blob.json` (LZSH arena format, not IPC JSON wire) is intentionally excluded in both ports.
+
+**Shipped** — lazily-js `6d38122` (pushed to `lazily-hub/lazily-js`), superproject gitlink bumped + pushed. Preset `#spec-test-build-install-commit-push`: no spec change needed (assertions already live in the fixtures); no install step for a pure-JS workspace package.
+
+**Observations (not blocking):** `package-lock.json` is untracked but not git-ignored in lazily-js — a real but separate gap from this task; left uncommitted to keep this commit scoped. A `stale_install` warning fired on agent-doc itself (built binary predates source commit `59c2f74f`) — that's an agent-doc dev concern, out of scope for this lazily session.
+<!-- agent:boundary:6bc520ea -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,15 +69,11 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~[#lzzigbeforechange]~~
-- ~~[#lzzigalloc]~~
-- 🚧 [#lzjshygiene]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzjshygiene] lazily-js: node_modules NOT tracked (verified: git ls-files node_modules -> 0; .gitignore covers it; no commits touch it) — purge UNNEEDED, no history rewrite required. Remaining: validate conformance fixture assertions generically (parity with #lzktconf). npm test green (27 pass).
 <!-- /agent:backlog -->
 
 ## Review

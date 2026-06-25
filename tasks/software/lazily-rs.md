@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -159,13 +159,13 @@ You chose "Go lazily-spec only." Done.
 **Verification** — `origin/main..HEAD` is now empty (fully pushed); workflows dispatched. I'm not blocking on the deploy to finish (per the CI-pending rule).
 
 **Re-confirming before the next port, as agreed.** The remaining 5 heads stay **queued + gated** (queue still paused, receipt 98):
-- `release + publish lazily-zig` — cut `v0.1.1` GitHub release (no registry, no 2FA). *Safe next step.*
-- `release + publish lazily-rs` — 0.12.3 bump + tag + GitHub release; crates.io only after `lazily` ownership confirmed.
-- `release + publish lazily-py` (#kb9b) & `lazily-js` — 2FA-gated registry publishes (you drive the passkey/2FA).
-- `release + publish lazily-kt` — needs publish-infra bootstrap (separate task).
+- **lazily-zig** — cut a `v0.1.1` GitHub release (no registry, no 2FA). *Safe next step.*
+- **lazily-rs** — 0.12.3 bump + tag + GitHub release; crates.io only after `lazily` ownership confirmed.
+- **lazily-py** (#kb9b) & **lazily-js** — 2FA-gated registry publishes (you drive the passkey/2FA).
+- **lazily-kt** — needs publish-infra bootstrap (separate task).
 
 Reply `go lazily-zig` (or `go non-2FA` for zig + rs) to continue, or drive the 2FA ports yourself.
-<!-- agent:boundary:a7e66fcd -->
+<!-- agent:boundary:e6b261eb -->
 <!-- /agent:exchange -->
 ###
 <!--

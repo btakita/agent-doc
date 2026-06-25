@@ -53,7 +53,7 @@ Compacted content:
 **2. Plugin/binary merge-control state machine (`#mergestatemachine`).** The `File Cache Conflict` dialogs and the `no_ack` / `retry_without_disk_write` / force-disk churn (nearly every closeout this session) are one bug: a **write race** between the binary's disk write and the editor/FFI plugin's buffer ownership, with no authoritative "does a live editor own this buffer right now?" state. Fix: an FFI-owned write-ownership SM — `Detached → Attached → EditorOwnsBuffer → BinaryWriteRequested → IpcAckProven → Committed` — where a disk write is **gated on a proven ownership transition** (write only when `Detached` or after `IpcAckProven`, never while the editor owns the buffer → no File Cache Conflict). A heartbeat probe distinguishes `EditorOwnsBuffer` from a stale listener (`#6b5h`) so a CLI-only session routes to the controller-host disk path instead of wedging on `no_ack`. The IPC-ack wait is bounded by `#waitmachine`'s `AwaitingIpcAck` ≤10s state — the two machines compose. Plan: `tasks/agent-doc/plan-merge-control-state-machine.md` (#mergestatemachine1–3).
 
 **These three converge.** `#waitmachine` (bounded waits, no hangs), `#queuestatemachine` (no dup queue items), `#mergestatemachine` (no merge races) — plus `#lazilystatesync` (plugins as thin reactive reporters) — are one **shared state-machine backbone**, ideally on the lazily-rs reactive `Cells` substrate. That's the systemic answer to the churn you've watched this session: stop patching duplication/race/hang shapes one at a time; represent each subsystem's state explicitly so the bad transitions don't exist. Filed 6 phase items (#queuestatemachine1–3, #mergestatemachine1–3).
-<!-- agent:boundary:1ed363ff -->
+<!-- agent:boundary:9616f52a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -68,7 +68,6 @@ Compacted content:
 - :pushpin: [#8g9w]
 - :pushpin: [#6mjw]
 - :pushpin: [#spy9]
-- [#nsfz]
 ---
 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
@@ -143,6 +142,7 @@ Affected component: editor IPC / writeback
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8c56928442bd4b165543ab0aad264d681b41b8898551d10f196018cd15a37304 content_len=11944 content_hash=46b47fdfe5505fb37c9e63df4167cb923df6b4ffc997ecca9009a15979c29a5e doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782339826601
 ```
 ---
+- [#nsfz]
 - ~~:round_pushpin: do [#rt83qflood]~~
 - ~~I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?~~ — auto-struck: answered this cycle (#ftstrike)
@@ -192,6 +192,12 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - do [#8g9w]
 - do [#6mjw]
 - do [#spy9]
+- do [#vwj7]
+- do [#cgfx]
+- do [#brtc]
+- do [#fnxy]
+- do [#t4x1]
+- do [#kj5f]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -224,7 +230,7 @@ What are #next-steps to fix bugs?
 - [ ] [#fnxy] #mergestatemachine1 Define FFI write-ownership SM (Detached→Attached→EditorOwnsBuffer→BinaryWriteRequested→IpcAckProven→Committed) + editor-heartbeat liveness probe distinguishing live-editor from stale listener (#6b5h). Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#t4x1] #mergestatemachine2 Gate try_ipc/commit/disk-write on the ownership SM; route Detached/stale writes to controller-host disk path so CLI-only/no-editor never wedges on no_ack. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#kj5f] #mergestatemachine3 JB+VSCode report attach/detach/ownership through SM (thin reporters via #lazilystatesync); SimWorld + live repro for File Cache Conflict + #6b5h wedge. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
-- [ ] [#56ta] #lazilystatesync1 Define lazily-spec wire shape for agent-doc state projection (state-machine nodes + state-graph edges + generation) so FFI emits deltas not just snapshots. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
+- [ ] 🚧 [#56ta] #lazilystatesync1 Define lazily-spec wire shape for agent-doc state projection (state-machine nodes + state-graph edges + generation) so FFI emits deltas not just snapshots. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#vm7g] #lazilystatesync2 Back agent_doc_state_projection with a lazily-rs Context/Cells graph + add agent_doc_state_subscribe delta export (lazily-spec format); keep full-snapshot cold read. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#n529] #lazilystatesync3 JB plugin: replace StateProjectionBridge manual JSON render with a lazily-kt mirror graph applying FFI deltas; EditorCommandStateMachine becomes a derived lazily-kt cell. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#r5at] #lazilystatesync4 VSCode plugin: lazily-js mirror graph applying FFI state deltas. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md

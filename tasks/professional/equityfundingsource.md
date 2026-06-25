@@ -83,6 +83,11 @@ Live now: the shared `use_dialog_action_navigation_` MutationObserver focus upgr
 
 ### Re: deal loan-tab "Review Interested Lenders" with zero interests — opus-4-8
 
+> **Queue prompt:**
+>
+> In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan, "Review Interested Lenders" button is show to advance the deal to the next stage. But there are no Interested Lenders. Please add count of interested lenders. If there are no interested lenders, add messaging that there are no interested lenders without the button.
+
+
 > **Queue prompt:** In .../admin/pipeline?dialog=deal&deal_tab=loan, "Review Interested Lenders" button is shown to advance the deal, but there are no Interested Lenders. Add count of interested lenders; if none, show messaging that there are none without the button.
 
 Fixed in `DealAdvanceGuidance` (`lib/ui--browser--efs/portal/admin/deal_detail.tsx`), the Available Deals advance-guidance card:
@@ -96,7 +101,7 @@ Verification: full suite green (`bun run check` -> 1217 pass / 0 fail) plus buil
 > **Queue prompt:** deploy
 
 Committed (`8f4fc69`, pushed to `origin/main`) and deployed to Cloudflare Workers: remote D1 migrations applied, worker uploaded — `https://equityfundingsource.brian-takita.workers.dev`, Version ID `b6e130d7-73dc-4a87-ae33-7e3e2d7c4feb`.
-<!-- agent:boundary:34c1aac9 -->
+<!-- agent:boundary:6aa9c796 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,8 +121,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan, "Review Interested Lenders" button is show to advance the deal to the next stage. But there are no Interested Lenders. Please add count of interested lenders. If there are no interested lenders, add messaging that there are no interested lenders without the button.
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

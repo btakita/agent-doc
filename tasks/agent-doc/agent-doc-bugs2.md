@@ -214,7 +214,26 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=cfe7ba2e-76ac-4f19-9b1c-2444aa16342e invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=39503 candidate_hash=f47771a6389421305566b126673c4e85ae51ef3923ac7a6e481773ccc1a74828 content_ours_len=40939 content_ours_hash=4a4c228371911738d6d81e670f95873ee29cc844142c638e2298768d030ee911 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782373362302
 ```
-<!-- agent:boundary:082fc8a7 -->
+
+### Re: cross-document supervisor contamination — root cause + plan (#xdocsuper) — opus-4-8
+
+> **Queue prompt:** Please fix the cross document supervisor contamination. This was from the session that started off running corky.md, but somehow run agent-doc-bugs2.md.
+
+Root-caused it. This is the structural source of the stale-CRDT churn we've been hand-recovering all session — not a separate bug.
+
+**What happened (live repro, this session):** one Claude Code pane (`%73`, session `b26b9957`) ran `/agent-doc` on `equityfundingsource.md` → `corky.md` → `agent-doc-bugs2.md` in sequence. The route-owned supervisor started for the first document persisted as the pane's parent and was reused for each later document.
+
+**Root cause:** the authoritative actor record is keyed per *file* and has a solid **harness**-mismatch guard (`route_authoritative_actor_harness_mismatch_*` — the codex→opencode defer you see in the queue), but there is **no document-identity guard**. Under the 08b supervisor-in-process model, `start --route-owned` is **one supervisor process per pane** hosting cycles in-process. When the pane switches documents, that single supervisor keeps serving the new document while still holding the **prior document's per-document in-memory state** (CRDT overlay, queue projection, drain lease, cycle journal). Replaying corky.md's stale overlay against agent-doc-bugs2.md is exactly what produces `live_prompt_drift_after_preflight`, post-commit `postcommit_worktree_check match=false`, and answered-head residue re-injection. Every `reset --from-current` / `git checkout HEAD` we run is treating the symptom.
+
+**Fix (filed as `#xdocsuper`, `[focused-cycle]`, plan `tasks/agent-doc/plan-cross-document-supervisor-contamination.md`):**
+1. `#xdocsuper1` — when a route-owned supervisor is handed a document whose path-hash differs from the one it last hosted on that pane, drop its stale per-document in-memory state and reload from disk before the first cycle (treat a document switch like a fresh `reset --from-current` for the incoming doc). Mirror the existing harness-mismatch guard.
+2. `#xdocsuper2` — SimWorld: supervisor hosts doc A then is handed doc B; assert B reads B's on-disk state with no A overlay and A is untouched; contamination regression on `live_prompt_drift`.
+3. `#xdocsuper3` *(optional)* — model the pane→document host binding in the state backbone so a switch is an explicit transition, the same direction as `#queuestatemachine`/`#mergestatemachine`/`#waitmachine`.
+
+**Why not inline now:** this is supervisor-in-process-critical (`project_controller`, `route`, `supervisor`) and needs new SimWorld infra — and it must not be implemented in a session that is *itself* a contamination victim (this degraded route-owned supervisor). Run `#xdocsuper` from a **fresh session/pane on a clean supervisor**. Restarting this pane's supervisor (or starting agent-doc-bugs2.md in its own pane) also clears the immediate contamination.
+
+**Also landed this turn:** `#vwj7` (`#queuestatemachine1`) — the per-item queue lifecycle state machine — is done (submodule `ee79b797`, `make check` green); `#cgfx`/`#brtc` remain as the wire-in + SimWorld phases.
+<!-- agent:boundary:2855b6bd -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -245,7 +264,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 ~~~
 - 🚧 :pushpin: [#brtc]
 ---
-Please fix the cross document supervisor contamination. This was from the session that started off running corky.md, but somehow run agent-doc-bugs2.md.
+Please fix the cross document supervisor contamination. This was from the session that started off running corky.md, but somehow run agent-doc-bugs2.md. This may have started when we added the IPC state machine between the FFI Plugin and the JB Plugin.
 ```
 ● Three agent-doc panes exist; the doc is owned by %73 but I'm now on %69 (the harness relaunched my agent into a new
   pane — %73 is the stale prior owner). The binary itself says to claim. The fix is already safely committed, so
@@ -359,6 +378,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - ~~do [#nsq2]~~
 - ~~:pushpin: do [#t4x1]~~
 - :pushpin: Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.
+- do [#xdocsuper]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

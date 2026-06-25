@@ -227,6 +227,28 @@ You re-activated the queue and marked lazily-rs `🚧` — taken as the go. **la
 
 **Remaining ports** (queue still listed, none marked): **lazily-zig** (v0.1.1 GitHub release — safe), **lazily-kt** (no publish infra), **lazily-js** (npm @lazily/js — 2FA), **lazily-py** (#kb9b PyPI — 2FA). Mark the next one `🚧` (like you did here) or say `go lazily-zig` and I'll take it.
 <!-- agent:boundary:40781c05 -->
+
+### Re: release + publish lazily-zig — v0.2.0 shipped (GitHub release) — opus-4-8
+
+> **Queue prompt:**
+>
+> release + publish lazily-zig
+
+**lazily-zig v0.2.0 is released.** You marked `lazily-js` `🚧`, but that one needs **your npm 2FA** — I can't publish `@lazily/js` solo. So I drained the agent-doable port instead (lazily-zig); the `🚧 lazily-js` head stays pending your OTP.
+
+**lazily-zig shipped**
+- **Version** 0.1.0 → **0.2.0** (`build.zig.zon`), commit `eacabb5`, pushed.
+- **GitHub release** — https://github.com/lazily-hub/lazily-zig/releases/tag/v0.2.0 (tag `v0.2.0`). Zig has no central registry — consumed via `zig fetch`.
+- **Superproject** gitlink bumped + pushed (`1ad739255..ae5458eab`).
+- **Minor (not patch)**: substantial features since v0.1.0 — eager `Signal(T)`, `StateMachine(S,E)`, `ShmBlobArena` host + conformance, allocator modes, `before_change_subscribers`, Zig 0.16 support — plus a breaking `.direct`→`.literal` rename. Tests 16/16 green.
+
+**The two remaining heads both need YOUR 2FA (I can't complete them solo):**
+- `🚧 lazily-js` — npm `@lazily/js`. I can prep + run `npm publish`; you supply the OTP at the prompt.
+- `lazily-py` (#kb9b) — PyPI `lazily` 0.11.0 (live is 0.10.2); passkey 2FA.
+
+**Agent-doable releases are now complete**: spec ✅, rs ✅ (crates.io+GitHub), zig ✅ (GitHub); kt struck (no infra). Want to do the lazily-js npm publish together (I prep, you OTP), or stop here? (IPC is still wedged by a concurrent session — a session restart would give a clean transport.)
+
+*Note: editor IPC wedged again — landed via the git/CRDT recovery path.*
 <!-- /agent:exchange -->
 ###
 <!--
@@ -239,7 +261,7 @@ You re-activated the queue and marked lazily-rs `🚧` — taken as the go. **la
 - ~~release + publish lazily-rs~~
 - ~~release + publish lazily-ky~~
 - 🚧 release + publish lazily-js
-- release + publish lazily-zig
+- ~~release + publish lazily-zig~~
 - release + publish lazily-py
 <!-- /agent:queue -->
 

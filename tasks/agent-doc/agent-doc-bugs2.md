@@ -39,30 +39,34 @@ done
 Compacted content:
 ❯ - Archived 19 response topic(s): #nsq2 JB mirror eviction on close; IPC proof diagnostic (interrupted-cycle recovery); explicit id should be used when adding a backlog item; 16 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-<!-- agent:boundary:cdc94e31 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=dc72f9c1-c985-413c-b01b-022503c0e251 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=60065 candidate_hash=385c34aa55dd9c1bff89fd36664ffff7994ce817f7492d00ee5f6a1ccf7657fc content_ours_len=60563 content_ours_hash=900e71be19da58a63aacd1b5e188513f274cbcd0aa6ba895be0afe2bc2a35d4d doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782383824251
+```
+<!-- agent:boundary:43b548c6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
----
-🚧 :round_pushpin: Please fix the cross document supervisor contamination. This was from the session that started off running corky.md, but somehow run agent-doc-bugs2.md. This may have started when we added the IPC state machine between the FFI Plugin and the JB Plugin. How was the supervisor even allowed to claim a document that another supervisor claimed?
-```
-● Three agent-doc panes exist; the doc is owned by %73 but I'm now on %69 (the harness relaunched my agent into a new
-  pane — %73 is the stale prior owner). The binary itself says to claim. The fix is already safely committed, so
-  reclaiming for the current pane to land the doc response is low-risk. Let me claim and finalize.
-```
----
-- do [#lazilycrdtspec]
-- do [#lazilycrdtrs]
-- do [#crdtauth1]
-- do [#crdtauth2]
-- do [#crdtauth3]
+- 🚧 :pushpin: do [#lazilycrdtspec]
+- :pushpin: do [#lazilycrdtrs]
+- :pushpin: do [#crdtauth1]
+- :pushpin: do [#crdtauth2]
+- :pushpin: do [#crdtauth3]
 - :pushpin: [#brtc]
-- do [#crdtauth4]
+- :pushpin: do [#crdtauth4]
 - :pushpin: do [#xdocsuper]
-- Fix the root cause of the CRDT churn.
+- :pushpin: Fix the root cause of the CRDT churn.
 - :pushpin: do [#cgfx]
 - :pushpin: do [#gww8]
 - :pushpin: do [#n529b]
@@ -146,7 +150,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - :pushpin: do [#6mjw]
 - :pushpin: do [#spy9]
 - :pushpin: Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.
-- ~~Would a reactive state machine help to manage the supervisor document bindings?~~ — auto-struck: answered this cycle (#ftstrike)
+- :pushpin: ~~Would a reactive state machine help to manage the supervisor document bindings?~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: ~~I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: ~~I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->

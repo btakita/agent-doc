@@ -155,6 +155,10 @@ pub mod supervisor;
 pub mod supervisor_selfkill;
 pub mod sync;
 pub mod turn_scope_store;
+/// Unified bounded wait-machinery state machine (`#waitmachine`): one global
+/// 10s hang ceiling, a pure `tick` transition, and a single typed reinstall-pause
+/// exemption. See `wait_machine.rs`.
+pub mod wait_machine;
 pub mod watch;
 pub mod watch_authority;
 pub mod write;

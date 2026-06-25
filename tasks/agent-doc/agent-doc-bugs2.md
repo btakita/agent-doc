@@ -39,28 +39,28 @@ done
 Compacted content:
 ❯ - Archived 19 response topic(s): #nsq2 JB mirror eviction on close; IPC proof diagnostic (interrupted-cycle recovery); explicit id should be used when adding a backlog item; 16 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-<!-- agent:boundary:ccddb724 -->
+<!-- agent:boundary:cdc94e31 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#lazilycrdtspec]
-- do [#lazilycrdtrs]
-- do [#crdtauth1]
-- do [#crdtauth2]
-- do [#crdtauth3]
-- do [#crdtauth4]
-- :pushpin: [#brtc]
 ---
-:round_pushpin: Please fix the cross document supervisor contamination. This was from the session that started off running corky.md, but somehow run agent-doc-bugs2.md. This may have started when we added the IPC state machine between the FFI Plugin and the JB Plugin. How was the supervisor even allowed to claim a document that another supervisor claimed?
+🚧 :round_pushpin: Please fix the cross document supervisor contamination. This was from the session that started off running corky.md, but somehow run agent-doc-bugs2.md. This may have started when we added the IPC state machine between the FFI Plugin and the JB Plugin. How was the supervisor even allowed to claim a document that another supervisor claimed?
 ```
 ● Three agent-doc panes exist; the doc is owned by %73 but I'm now on %69 (the harness relaunched my agent into a new
   pane — %73 is the stale prior owner). The binary itself says to claim. The fix is already safely committed, so
   reclaiming for the current pane to land the doc response is low-risk. Let me claim and finalize.
 ```
 ---
+- do [#lazilycrdtspec]
+- do [#lazilycrdtrs]
+- do [#crdtauth1]
+- do [#crdtauth2]
+- do [#crdtauth3]
+- :pushpin: [#brtc]
+- do [#crdtauth4]
 - :pushpin: do [#xdocsuper]
 - Fix the root cause of the CRDT churn.
 - :pushpin: do [#cgfx]

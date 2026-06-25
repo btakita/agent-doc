@@ -91,15 +91,21 @@ Drained the focused-cycle item. The prior cycle re-scoped the framing; this cycl
 **Verified:** `distributed.json` valid JSON; `make check` (Lean formal model) green; `mdbook build` renders `cell-model.html`.
 
 This is the foundation rung for the CRDT-authority model (`plan-crdt-authority-model.md`); the implementation siblings `#lazilycrdtrs` / `#crdtauth1–4` build on it in their own focused cycles.
-<!-- agent:boundary:375934a2 -->
+
+### Re: #lazilycrdtspec queue head — striking (already drained) — opus-4-8
+
+> **Queue prompt:** do [#lazilycrdtspec]: Make CRDT the first of several multi-write mechanisms.
+
+Striking this head — the item was drained in the previous response this session: spec authored in `src/lazily-spec` (commit `6e86dea`, gitlink `e6f5feea7`, response committed `05edfe484`), `#lazilycrdtspec` backlog item reaped `[x]`. The `cell-model.md` chapter specifies single-writer vs multi-write cells with a pluggable `merge:<mechanism>` attribute, `crdt` first. No further work on this id.
+<!-- agent:boundary:fe9c8391 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 :pushpin: do [#lazilycrdtspec]: Make CRDT the first of several multi-write mechanisms.
-- :pushpin: do [#lazilycrdtrs]
+- ~~:pushpin: do [#lazilycrdtspec]: Make CRDT the first of several multi-write mechanisms.~~
+- 🚧 :pushpin: do [#lazilycrdtrs]
 - :pushpin: do [#crdtauth1]
 - :pushpin: do [#crdtauth2]
 - :pushpin: do [#crdtauth3]

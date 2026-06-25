@@ -102,7 +102,7 @@ The cheap-routine cases (`viewport_recalc`, `full_recalc`) run on a persistent w
 > **Queue prompt:** Fix the benchmark.
 
 Note: the queue head `do [#lzwirekey]` is **not** drained — you scoped `#lzwirekey` to *plan only*, and the plan (`tasks/software/plan-lazily-wire-keyed-addressing.md`) is written. The queue is operator-paused; nothing else here is agent-drainable without your go.
-<!-- agent:boundary:8aa02be2 -->
+<!-- agent:boundary:2a5d0edd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -112,18 +112,19 @@ Note: the queue head `do [#lzwirekey]` is **not** drained — you scoped `#lzwir
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#lzcycledetect] [#lzscalebench] [#lzcellfamily] [#lzwirekey]~~
-- ~~Add the 1M+ benchmark to the documents and link in the README.~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 ~~Add the 1M+ benchmark to the documents and link in the README.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do [#lzwirekey]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzwirekey] [recommended] Wire-stable keyed addressing for collection entries: add optional key/path field to NodeAdd + NodeSnapshot (key->NodeId registry) so CellFamily/CellMap entries survive NodeId churn across reconnect/resync. Depends on #lzcellfamily (DONE). Plan: tasks/software/plan-lazily-wire-keyed-addressing.md
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzwirekey] [recommended] [operator-go] Wire-stable keyed addressing for collection entries: add optional key/path field to NodeAdd + NodeSnapshot (key->NodeId registry) so CellFamily/CellMap entries survive NodeId churn. Depends on #lzcellfamily (DONE). PLAN COMPLETE: tasks/software/plan-lazily-wire-keyed-addressing.md — implementation gated on operator go (you scoped this plan-only).
 - [/] [#lzcrdtplane] [recommended] Implement the distributed CRDT cell plane (spec §Distributed). Decision: purpose-built HLC + LWW/MV/PN registers (matches lazily's lazy reactive graph + memo-equality invariants); do NOT adopt YRS/YJS document model (wrong replication unit). Keep IPC Snapshot/Delta as the single-producer mirror; CRDT merge lives only at the multi-writer distributed boundary. Optional later: borrow YRS binary anti-entropy sync engine as transport. Plan first: tasks/software/plan-lazily-distributed-crdt-plane.md.
 - [/] [#lilazilysmpost] [/] [operator-drive] lazily state-machine LinkedIn post PUBLISHED WITH IMAGE: https://www.linkedin.com/feed/update/urn:li:share:7475622100263923712 (mail/social/20260624-142530-linkedin.md @ mail bf4ab26). CyclePhase diagram rendered from blog post SVG (light theme colors) + uploaded via LinkedIn digitalmediaAsset API. Old text-only post (urn:li:share:7475617202893639680) deleted + replaced. Remaining operator follow-up: post first comment (link + GitHub source) via corky linkedin comment.
 - [/] [#kabc] #lipostlazilyarch=[operator-drive] Main LinkedIn post is published and repaired: Corky edit updated mail/social/20260616-lazily-architecture-linkedin.md / https://www.linkedin.com/feed/update/urn:li:share:7472666756810190848 with the full body after the public post truncated at "The core is small: three primitives". Local metadata is committed in mail commit 07a9ea1 and superproject gitlink e7e0b08c1. Remaining operator follow-up: post the first comment from mail/drafts/linkedin/2026-06-16-lazily-architecture.md via `corky linkedin comment <published-file> <comment-body>` if still desired.

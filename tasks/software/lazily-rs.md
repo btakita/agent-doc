@@ -39,7 +39,7 @@ queue: start
 Compacted content:
 ❯ - Archived 3 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); dynamic cell collections, KV lookup, naming, and wire addressing; >1M cells and backing a modern spreadsheet
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-<!-- agent:boundary:6ffeaecf -->
+<!-- agent:boundary:564f038b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,7 +48,7 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#lzcycledetect] [#lzscalebench] [#lzcellfamily] [#lzwirekey]
+- 🚧 do [#lzcycledetect] [#lzscalebench] [#lzcellfamily] [#lzwirekey]
 <!-- /agent:queue -->
 
 ## Backlog
@@ -73,6 +73,7 @@ Compacted content:
 ## Icebox
 
 <!-- agent:icebox -->
+- [ ] [#ppce] Write a blog post + linkedin teaser about the 1M+ Cell Family performance.
 - [ ] [#lzsidecarlock] [recommended] agent-doc-repo: close the lost-update window among concurrent cycle_state writers. Deadlock analysis DONE (tasks/agent-doc/plan-cycle-state-flock.md): NO production mutator calls another (only test code) -> non-reentrant flock is safe. Design: bounded try_lock_exclusive (~5s, fs2) + RAII guard on a dedicated .json.lock sibling (state file is atomically renamed each save -> cannot lock it directly); add `let _lock = acquire_state_lock(file)?;` to each of the ~24 public mutators in cycle_state.rs. cycle_phase_rank (:1273) guards only monotonic phase, not the ~30 non-phase fields. Hardening (not live-fire). Split from #lzsidecaratomic (DONE in agent-doc 647af082 + installed).
 - [ ] [#pw26] #lzmapspike=[recommended] Spike: lazily-rs as a host-side reactive derivation + Snapshot/Delta UI-sync cache for MAP holons (evomimic/map-holons, Holochain). Model committed holons as reactive graph nodes; derived holon views/relationships as memoized computeds that recompute only on upstream change; stream lazily-ipc Snapshot/Delta to the TS UI / DAHN graph visualizers. Native host/ layer only (AsyncContext needs tokio; zomes are wasm32/short-lived/single-threaded so in-zome use is limited to single-threaded Context). Do NOT use lazily distributed/signaling — Holochain DHT owns P2P/persistence/validation/consensus. Gate on MAP host-layer actually recomputing derived holon state.
 <!-- /agent:icebox -->

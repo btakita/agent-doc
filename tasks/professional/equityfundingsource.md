@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -99,7 +99,24 @@ Deployed to production from `a0ed0e4`. Interactive per-user conversation tabs + 
 Operator live-verify (cannot be agent-done): open a deal → **Message borrower** → on a per-user tab, send a message and confirm it posts to that user's thread; on the **group** tab, type a message and **Send to group**, confirm it reaches every participant.
 
 One follow-up I left out by design: broadcast currently delivers to each participant's portal chat + realtime notify but does **not** send the per-recipient notification email the single-send path does (that template is borrower-specific; emailing all participants via it could mis-template lender mail). Say the word if you want broadcast email parity and I'll add a role-aware notify.
-<!-- agent:boundary:b1a32467 -->
+
+### Re: Group emails go to each individual, never the whole group — opus-4-8
+
+> **Queue prompt:** Outgoing group emails must be to each individual. Never to the entire group.
+
+Done — committed + pushed to EFS `origin/main` (`bd5412f`).
+
+First I audited every `email_send_` call site: the whole codebase already sends individually — every group notification (lending groups, broker, investor interest, etc.) loops `to: [oneAddress]` per person; there is **no** path that puts multiple recipients in one `To`/`Cc`. So the policy already held everywhere except my new broadcast, which (as I flagged) sent to portal chat only with no email.
+
+So I wired the group broadcast to the same individual pattern:
+- Each participant is notified **individually** in the per-recipient loop via `notify_party_of_admin_message_`, which sends `to: [party.email]` — one email per person, plus their in-app notification and a realtime push.
+- `broadcast_party_of_role_` maps the recipient's role to the message-thread party; non-messageable roles (e.g. admin) skip the email.
+- A group "Send to group" therefore produces **N individual emails**, never one email addressed to the group.
+
+**Verification**: full `bun test` **1225 pass / 0 fail**; `bun run build` + `build:worker` clean. Added a backend test asserting the per-recipient individual notify and that `notify_party_of_admin_message_` addresses a single party (`to: [party.email]`).
+
+**Not deployed** this cycle — the queue preset here is `#spec-test-commit-push` (no deploy), and this turns on real outbound email to participants. Queue `deploy` when you want the individual-email broadcast live on `equityfundingsource.brian-takita.workers.dev`.
+<!-- agent:boundary:6edab1e8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -119,9 +136,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~The admin user Message tab should be an entire conversation tab, where the admin can write a message and send it to the user. If there are a group of users, create a tab for each user.~~
-- Outgoing group emails must be to each individual. Never to the entire group.
-- 🚧 deploy
 <!-- /agent:queue -->
 
 ## Backlog

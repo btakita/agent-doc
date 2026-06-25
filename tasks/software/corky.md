@@ -280,7 +280,7 @@ Stateful logic today:
 **Explicit state machines (typed `enum State` + transitions):** real win. Modeling the draft/social publish lifecycle and sync phases as typed enums (instead of `String` statuses + ad-hoc checks) catches invalid transitions at compile time and makes guards like `s8b_social_published_skipped` (double-publish) and sync token/refetch phases provably correct. Localized refactor, not a framework.
 
 **Recommendation:** don't adopt lazily-rs/reactive graphs for corky's current shape. Do introduce `enum`-based state machines for publish + sync lifecycles (focused P3 hardening). Revisit reactive only if corky grows a long-lived observer graph (e.g., a TUI over watch state).
-<!-- agent:boundary:6b821227 -->
+<!-- agent:boundary:4043f75c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -291,6 +291,7 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- From a code + architecture perspective, would lazily-rs add much overhead vs a non-reactive graph?
 <!-- /agent:queue -->
 
 ## Backlog

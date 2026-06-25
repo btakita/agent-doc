@@ -199,6 +199,91 @@ class StateProjectionBridgeTest {
         assertTrue(mirror.nodeCount == 0)
     }
 
+    // --- Consumer reactive-read tests (`#n529b` / `#lazilystatesync3b`) --------
+    // The route summary consumer (TerminalUtil finally block) now reads the
+    // reactive mirror via reactiveSummaryForFile instead of the cold pull. With
+    // FFI unavailable in unit tests, subscribeMirrorForFile is a no-op, so a
+    // mirror seeded directly stands in for "FFI deltas already applied".
+
+    @Test
+    fun `reactiveSummaryForFile derives from the seeded mirror not the cold pull`() {
+        val path = "/tmp/agent-doc-n529b-reactive-read-${System.nanoTime()}.md"
+        try {
+            // Seed the per-document mirror as if FFI deltas had advanced it.
+            val applied = StateProjectionBridge.seedMirrorMessageForTest(
+                path,
+                snapshotJson(
+                    epoch = 5,
+                    routePayload = b64("""{"readiness":"dispatch_proven","pane_id":"%3"}"""),
+                    transportPatches = listOf(60L to b64("""{"phase":"acked","actor_generation":2}""")),
+                    proofMarkers = listOf(70L),
+                ),
+            )
+            assertTrue(applied)
+
+            // The consumer read derives every field from the reactive mirror.
+            val summary = StateProjectionBridge.reactiveSummaryForFile(path)
+            assertNotNull(summary)
+            assertEquals("dispatch_proven", summary!!.routeReadiness)
+            assertEquals("%3", summary.routePaneId)
+            assertEquals("acked", summary.latestTransportPhase)
+            assertEquals(1, summary.proofMarkers)
+            // FFI unavailable in tests → no cold-pull transport-id backfill.
+            assertNull(summary.latestTransportPatchId)
+        } finally {
+            StateProjectionBridge.evictForFile(path)
+        }
+    }
+
+    @Test
+    fun `reactiveSummaryForFile reflects a subsequently applied delta`() {
+        val path = "/tmp/agent-doc-n529b-reactive-delta-${System.nanoTime()}.md"
+        try {
+            StateProjectionBridge.seedMirrorMessageForTest(
+                path,
+                snapshotJson(epoch = 1, routePayload = b64("""{"readiness":"idle","pane_id":"%3"}""")),
+            )
+            assertEquals("idle", StateProjectionBridge.reactiveSummaryForFile(path)?.routeReadiness)
+
+            // A later FFI delta flips the route readiness; the consumer read must
+            // observe the new cell value reactively (no full re-render).
+            StateProjectionBridge.seedMirrorMessageForTest(
+                path,
+                deltaJson(
+                    baseEpoch = 1,
+                    epoch = 2,
+                    opsJson = """{"op":"cell_set","slot_id":11,"payload":"${b64("""{"readiness":"dispatch_proven","pane_id":"%3"}""")}"}""",
+                ),
+            )
+            assertEquals("dispatch_proven", StateProjectionBridge.reactiveSummaryForFile(path)?.routeReadiness)
+            assertEquals(2L, StateProjectionBridge.mirrorEpochForFile(path))
+        } finally {
+            StateProjectionBridge.evictForFile(path)
+        }
+    }
+
+    @Test
+    fun `reactiveSummaryForFile prefers the reactive mirror over the cold pull`() {
+        // Seed the mirror with a route readiness that no cold projection would
+        // invent for a throwaway path. The consumer read must surface the mirror's
+        // tracked-cell value, proving it derives from the reactive mirror (not the
+        // cold projectionSummaryForFile pull) on the happy path. This holds whether
+        // or not the FFI library happens to be loadable in the test JVM.
+        val path = "/tmp/agent-doc-n529b-reactive-prefer-${System.nanoTime()}.md"
+        try {
+            StateProjectionBridge.seedMirrorMessageForTest(
+                path,
+                snapshotJson(epoch = 9, routePayload = b64("""{"readiness":"dispatch_proven","pane_id":"%9"}""")),
+            )
+            val summary = StateProjectionBridge.reactiveSummaryForFile(path)
+            assertNotNull(summary)
+            assertEquals("dispatch_proven", summary!!.routeReadiness)
+            assertEquals("%9", summary.routePaneId)
+        } finally {
+            StateProjectionBridge.evictForFile(path)
+        }
+    }
+
     @Test
     fun `evictForFile clears owner-generation counters and restarts fresh`() {
         // #jbmirrorevict / #nsq2: the mirrors + generations maps must not leak

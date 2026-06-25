@@ -307,7 +307,27 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=2c8c737a-6fa9-49be-928a-ffe3887f5a01 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=56211 candidate_hash=bbaac8be5354e309c0c866f96d5d59d9a86fc12043f5e091939e7c385b86d5b2 content_ours_len=57223 content_ours_hash=23ecb80397c703520e8f9b23fd4741da4859c0e92fa62b29627882cb5111e5ca doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782377777241
 ```
-<!-- agent:boundary:dba14feb -->
+
+### Re: CRDT authority model — editor-as-replica, lazily⨉CRDT (#crdtauthority) — opus-4-8
+
+Captured the design thread (asked in chat) here, and landed the first rungs.
+
+**Shipped to agent-doc submodule `main` (superproject pointer `66ac6c64`, committed `b20434d`):**
+- `#xdocsuper0` (`2f704263`) — claim guard consults the document supervisor lease; closes "two supervisors own one document."
+- `#queuestatemachine2`/`#qheadresidue` (`2a00da6e`) — CRDT queue convergence routed through a per-item `Live < Struck` lifecycle join, so a stale persisted `.yrs` can no longer resurrect a struck/answered head (the live residue root cause). 5163 tests green.
+- `#xdocsuper1`/`#xdocsuper3` (`66ac6c64`) — per-document hosting-epoch backbone transition; becomes load-bearing under the model below.
+
+**Design conclusions (full spec: `tasks/agent-doc/plan-crdt-authority-model.md`):**
+
+- **Is the disk `.yrs` projection necessary?** Yes for durability/crash-recovery, no as a source of truth. The stale-CRDT class is two authorities (git doc + persisted CRDT) diverging. The controller holds no in-memory CRDT today — it is disk-only.
+- **Real-time / Option A vs B?** One model in two states, gated by editor attach/detach (= `#mergestatemachine`): Detached (no editor) → git authoritative, CRDT ephemeral; EditorAttached → live multi-replica CRDT, git/disk are projections checkpointed at boundaries.
+- **The editor buffer (a third source)?** Do not merge it — make it a CRDT replica and sync it. Local-first apply; state-vector sync; commutativity + causal buffering absorb propagation lag (lag = transient visual divergence, never loss/conflict; no OT transform). The one hard point is the commit boundary → a state-vector ack barrier ("editor synced through SV=N"), which is what today's fragile `finalize` patch-ack / `no_ack` / `ipc_proof_insufficient` failures are groping at.
+- **Multiple editors?** N replicas, star topology via the supervisor hub; unique stable client-ids; ephemeral awareness channel for cursors; commit = consistent cut of live replicas (do not block on a disconnected one).
+- **FFI plugin as CRDT node?** Yes — the FFI cdylib is the node (one yrs impl in Rust, shared by binary + cdylib); one node per editor process; Kotlin/TS plugins stay thin bindings. Do not reimplement a CRDT per plugin.
+- **Does lazily get two comm modes (direct + CRDT)?** Two cell kinds, not two reactivity engines: local/direct (single writer) vs replicated/CRDT (multi-writer ingress merge on root cells only). Downstream propagation is always the same direct mechanism. Cell = CRDT merge unit delivers the per-cell merge intent (`#qcellmerge1`).
+
+This is a focused multi-phase cutover (supervisor/FFI-critical) — not for this contamination-victim session. Plan has the phased path.
+<!-- agent:boundary:d76ba389 -->
 <!-- /agent:exchange -->
 
 ## Queue

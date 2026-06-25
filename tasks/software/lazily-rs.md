@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 3d9ff8e4-bafd-4e1f-b48d-550d3c976904
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -32,427 +32,46 @@ queue: stop
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
+❯ - **Minimal latency / efficiency:** MessagePack wins for all-port production use. Cap'n Proto can beat it in a native-only, schema-first benchmark, but not enough to justify the migration cost before we exhaust the cheaper codec swap. For huge values, the real answer remains `SharedBlob`, not a fancier envelope.
+❯ - **Developer ergonomics:** MessagePack is the smallest change from the current serde types. Cap'n Proto and gRPC require IDL/codegen and generated-type ownership across every port.
+❯ - **Agentic ergonomics:** JSON stays the canonical inspectable form. MessagePack is acceptable if every binary frame can be losslessly rendered to canonical JSON and fixtures remain JSON-first. Cap'n Proto/protobuf are much more opaque to agents unless the schema/toolchain is always loaded.
+❯ - **Transport fit:** MessagePack and JSON are byte payloads that fit FFI, IPC, WebSocket, and WebRTC data channels. gRPC is a transport/API stack and should not be nested inside WebRTC or C ABI buffers.
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260625-010217.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260625-202238.md`*
 
 Compacted content:
-❯ - Archived 1 response topic(s): #lzjshygiene
-❯ - Prior summary/context: prior compacted content: Archived 4 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); IPC proof d...
+❯ - Archived 17 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); #next-steps; do #gcp4; 14 more
+❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
 
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=a0d06514-4d61-4e39-80e9-51dfe63333e3 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=7422 candidate_hash=d5fe277899e37743258c3a872b7d0fa7d24d01ecd077fe15d3d722c8bd515709 content_ours_len=8946 content_ours_hash=c211c34309f039199ecaa80c915df0a4fdb44a7bd4ce4f6087179515c017e6d3 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782348633215
-```
-
-### Re: #next-steps — lazily bug-fix status across 6 ports — opus-4-8
+### Re: protocol codec comparison — gpt-5
 
 > **Queue prompt:**
 >
-> do [#gcp4]
+> Compare CapnProto, gRPC, Msgpack, vs our current JSON protocol. Which would be the best to support all our use cases with minimal latency, maximum efficiency, developer ergonomics, agentic ergonomics?
 
+**Recommendation: keep the current `Snapshot`/`Delta` protocol semantics, keep JSON as the canonical/debug codec, and add MessagePack as the negotiated production cross-language codec.** Do not replace the protocol with gRPC or Cap'n Proto. Keep postcard as a Rust/same-schema fast path, but do not make it the cross-language default.
 
-> **Queue prompt:**
->
-> What are #next-steps to fix lazily-rs, lazily-kt, lazily-js, lazily-spec, lazily-zig, lazily-py bugs?
+The important distinction is that lazily already has the right protocol shape: `IpcMessage = Snapshot | Delta`, strict epochs, permission filtering, shared-blob refs, and transport-neutral frames. The weak part is the default envelope codec. Today `PROTOCOL.md` says JSON is default and postcard is optional; `src/ipc.rs` already has `encode_json`/`decode_json` and `encode_binary`/`decode_binary`, while `src/webrtc_transport.rs` still hard-codes `serde_json` in the WebRTC sink/source. That means the next useful move is a codec abstraction, not a new RPC architecture.
 
-**Short answer: the bug-fix campaign is essentially complete.** Every item filed in `tasks/software/lazily-rs.done.md` this cycle (all dated 2026-06-24) is fixed and pushed, and all six ports verify green this turn. The single genuinely-open correctness follow-up is now the top backlog item.
+| Option | Verdict |
+|---|---|
+| **Current JSON** | Best for canonical fixtures, debugging, browser inspection, and agentic ergonomics. Worst for bytes/CPU, especially because byte payloads become integer arrays unless they are `SharedBlob`s. Keep it as the normative text form and fallback. |
+| **MessagePack** | Best all-around production codec. It preserves the existing serde data model, works across Rust/Python/JS/Zig/Kotlin with much less schema ceremony, rides WebSocket/WebRTC/FFI byte frames directly, and can round-trip to the same canonical JSON fixtures for agents and tests. |
+| **Cap'n Proto** | Strong native-only latency story, especially for schema-first zero-copy structures, but it forces an IDL/codegen workflow and does not buy much for lazily's current envelope because large values already use shared blobs and payload bytes are opaque. It is too much schema machinery for all six ports right now. |
+| **gRPC / protobuf** | Good for service APIs, not for this core frame protocol. It brings HTTP/2/service semantics, browser grpc-web caveats, and a transport model that does not fit WebRTC data channels, FFI byte buffers, or local IPC. It could be a future admin/control API, not the graph-state wire. |
 
-**Top of backlog: `#gcp4` (`#lzasyncdispose2`)** — lazily-rs async dispose-recycle aliasing hardening (`[recommended]`).
+By criterion:
 
-#### Verified fixed + pushed (do not re-file)
+- **Minimal latency / efficiency:** MessagePack wins for all-port production use. Cap'n Proto can beat it in a native-only, schema-first benchmark, but not enough to justify the migration cost before we exhaust the cheaper codec swap. For huge values, the real answer remains `SharedBlob`, not a fancier envelope.
+- **Developer ergonomics:** MessagePack is the smallest change from the current serde types. Cap'n Proto and gRPC require IDL/codegen and generated-type ownership across every port.
+- **Agentic ergonomics:** JSON stays the canonical inspectable form. MessagePack is acceptable if every binary frame can be losslessly rendered to canonical JSON and fixtures remain JSON-first. Cap'n Proto/protobuf are much more opaque to agents unless the schema/toolchain is always loaded.
+- **Transport fit:** MessagePack and JSON are byte payloads that fit FFI, IPC, WebSocket, and WebRTC data channels. gRPC is a transport/API stack and should not be nested inside WebRTC or C ABI buffers.
 
-| Port | Items confirmed shipped |
-|------|-------------------------|
-| **lazily-rs** | `#lzasyncrerunabort` (5b1ac88), `#lzwsinboundunbounded` (279eb74), `#lzwsunbounded` (a41aaec), `#lzstr0mnetacceptanswer` (7a28283), `#lzstr0mnetinbox` (e165720), `#lzasynceffdup` (090e104), `#lzstr0mloopbackinbox` (b8d4140), `#lzerrfrom` (From impls at ipc.rs:691–745), `#lzsid32` (now usize::try_from), `#gxzm` benchmark-check (green) |
-| **lazily-spec** | `#lzspecdrift` (a58eff8 — protocol.md source reconciled to canonical externally-tagged wire) |
-| **lazily-zig** | `#lzzigtodos` (db18dea), `#lzzigbeforechange` (1a2c81d), `#lzzigalloc` (41d773a), `#lzsigzig3` (suite green on Zig 0.17-dev) |
-| **lazily-py** | `#lzpyregress` (c255482), `#lzshmblobpy` (4a57eb2), `#lzshmblobconf` (26ef43e) |
-| **lazily-kt** | `#lzktconf` assertions validator + gradle wrapper (1500bea) |
-| **lazily-js** | `#lzjshygiene` (6d38122), `#tnbd` ffi-napi→koffi migration (7017b9d) |
+**Next step filed:** `#lzmsgpack` is now the top backlog item. Scope: add negotiated `json|msgpack|postcard` codec support, route WebRTC/FFI through that abstraction, add cross-language conformance vectors, and benchmark JSON vs MessagePack vs postcard before changing any default. This was a design/selection cycle only; I did not edit protocol code or run the build suite.
 
-Cross-cutting `#bagt` arena conformance is wired in all three host ports (spec fixture + lazily-rs tests/conformance.rs + lazily-zig ipc.zig). All submodule gitlinks are in sync — no pending bumps.
-
-#### Green this turn
-
-- **lazily-rs** lib tests: 12 passed; `make benchmark-check`: green
-- **lazily-py** pytest: 77 passed
-- **lazily-js** node test: 28 pass / 0 fail
-- **lazily-zig** `zig build test`: 16/16 steps
-- **lazily-kt**: gradle test green per last commit; **lazily-spec**: protocol.md canonical
-
-#### The one open code item — `#gcp4` / `#lzasyncdispose2` (top of backlog)
-
-`AsyncContext::dispose_async_effect` recycles the `SlotId` into `free_ids` (LIFO) with **no generation guard** (async_context.rs:1050). A `flush_async_effects`-spawned re-run task in-flight across its `.await` (async_context.rs:1225) can re-lock *after* dispose and write cleanup/edges into whatever node now holds the recycled id (aliasing). Dispose does `take()+abort()` the node's `in_flight` (:1029/:1054), but `abort()` is cooperative — the id is recycled before the task observes the abort. Fix: generation-tag `SlotId`s (or await the abort) and generation-check before storing cleanup/edges; add an async stress test (dispose during a pending re-run). `[recommended]` hardening — no current red test reproduces it.
-
-#### Operator-gated (already tracked in Review, not backlog)
-
-- `#kb9b` — publish lazily-py v0.11.0 (PyPI token + passkey 2FA)
-- `#h6qb`/`#lzwebrtcnet-e2e` — live two-host/NAT WebRTC validation through the deployed signaling Worker
-
-**Top backlog id: `#gcp4` (`#lzasyncdispose2`).**
-
-### Re: do #gcp4 — implement #lzasyncdispose2 async dispose-recycle guard — opus-4-8
-
-Drained `do #gcp4`. Implemented and shipped the lazily-rs `#lzasyncdispose2` hardening.
-
-**Root cause** — `AsyncContext::dispose_async_effect` recycled a `SlotId` into `free_ids` with no generation guard, so a `flush_async_effects`-spawned re-run still in-flight across its `.await` could re-lock *after* dispose and write `cleanup`/edges/`in_flight` into whatever node a later `alloc_id` reused at that id. `dispose`'s `abort()` is cooperative and loses the race once the run is past its last await point — and `get_async`/`get_cell` also register dependency edges **live** during the run, keyed by the effect id, a second aliasing vector.
-
-**Fix** (src/async_context.rs):
-- Added a per-index `generations: Vec<u64>` parallel to `nodes`, bumped in `dispose_async_effect` **before** the id is recycled.
-- The spawned re-run captures `effect_gen` at spawn and re-checks it before every write keyed by `effect_id`: the start cleanup-drain, the dependency/cleanup writeback, and the `in_flight` store-back.
-- `AsyncComputeContext` now carries `_node_gen` and skips live `register_dependency` writes once the generation diverges.
-- On a generation mismatch, the in-flight run runs **its own** cleanup so side effects are undone rather than leaked into the aliased node.
-- Slot compute path was already revision-guarded and slot ids never recycle, so only the effect path needed it; the slot `AsyncComputeContext` carries its generation too for uniformity.
-
-**Tests** — two new deterministic regression tests (a timing test would only hit the `abort()` path and never reach the guarded code):
-- `dispose_bumps_generation_then_id_recycles_fresh` — validates the bump + LIFO recycle premise.
-- `stale_generation_context_does_not_alias_recycled_effect` — replays a stale-generation context against a recycled id and asserts no aliasing edge/dependent is written.
-
-**Verification** — `make check` fully green (fmt, clippy, build, all feature suites incl. Loom + Lean + webrtc + doctests, benchmark-check). async_context module: 42 + 23 passed. No spec change needed — internal async-correctness hardening, no wire/protocol change.
-
-**Shipped** — lazily-rs `255437d` (pushed to `lazily-hub/lazily-rs`); superproject gitlink bumped + pushed (`788597955`). No install step — lazily-rs is a library crate; `make check` covers the build.
-
-The lazily 6-port bug backlog is now fully drained.
-
-### Re: release + publish (6 ports) — readiness audit before any publish — opus-4-8
-
-You queued `release + publish` for all 6 ports. Per your choice I audited readiness first (read-only) — **nothing is published below.** Key finding: "release + publish" is **not turnkey** for these ports — most lack publish automation, two registry names need ownership confirmation, and lazily-spec isn't even pushed.
-
-| Port | Package / target | Push state | Readiness |
-|------|------------------|------------|-----------|
-| **lazily-spec** | mdBook → GitHub Pages (`mdbook.yml`) | **UNPUSHED** — `a58eff8` (#lzspecdrift) | The superproject gitlink references an **unpushed** commit. Pushing it fixes that AND triggers the Pages deploy. Lowest-risk first action. |
-| **lazily-rs** | crate `lazily` | pushed (`255437d`) | HEAD is **past** the `v0.12.2` tag (my #lzasyncdispose2 fix is unreleased). **No release workflow** exists; crates.io ownership of `lazily` could not be confirmed unauthenticated (API blocked). Needs: version bump (→0.12.3), `VERSIONS`/changelog, tag + GitHub release, and a decision on crates.io (manual `cargo publish` or new workflow). |
-| **lazily-zig** | GitHub release (Zig has no registry) | pushed (`41d773a`) | HEAD is past `v0.1.0` (zigtodos/alloc/before_change fixes). Could cut a `v0.1.1` GitHub release. No 2FA. |
-| **lazily-py** | PyPI `lazily` (ours — **live 0.10.2**) | pushed (`c255482`) | 0.11.0 artifacts prepared but **unpublished**; **2FA-gated** (PyPI passkey). This is the existing review item **#kb9b**. |
-| **lazily-js** | npm `@lazily/js` (scoped) | pushed (`6d38122`) | v0.1.0; no release workflow. Needs **npm 2FA** + `@lazily` scope ownership check before first publish. |
-| **lazily-kt** | Maven Central? **none** | pushed (`1500bea`) | No project version, no tag, no publish infra. **Not release-ready** — Maven Central needs full bootstrap (group id, signing, Sonatype). |
-
-**Recommended sequencing (each still needs your go before I run it):**
-1. **lazily-spec** — `git push` `a58eff8` (fixes the dangling gitlink + deploys the mdBook site). Agent-doable, low-risk. *Start here.*
-2. **lazily-zig** — cut `v0.1.1` GitHub release. No registry, no 2FA.
-3. **lazily-rs** — bump 0.12.3 + tag + GitHub release; crates.io publish only after confirming `lazily` ownership.
-4. **lazily-py (#kb9b)** & **lazily-js** — registry publishes that need interactive 2FA → operator-driven.
-5. **lazily-kt** — defer until publish infra is bootstrapped (separate task).
-
-The 6 `release + publish` heads stay queued. I have **not** auto-drained them — publishing is outward-facing/irreversible and you asked to gate it. Tell me which step to take (I'd recommend #1) and I'll execute that one, pausing at each irreversible publish.
-
-### Re: release + publish lazily-spec — done (step 1 of the gated batch) — opus-4-8
-
-> **Queue prompt:**
->
-> release + publish lazily-spec
-
-You chose "Go lazily-spec only." Done.
-
-**What shipped** — `git push origin main` on `src/lazily-spec`: `ebb945d..a58eff8` (the `#lzspecdrift` protocol.md reconciliation). This also **fixed a repo-integrity issue**: the superproject gitlink already referenced `a58eff8`, but that commit was unpushed — so any fresh clone had a dangling submodule pointer. Now resolved.
-
-**Publish** — the push triggered the **mdBook → GitHub Pages** deploy (`Deploy mdBook site to Pages`, run 28141755530, in progress) plus CI (28141755528). The published spec site will reflect the canonical externally-tagged wire format. Superproject gitlink already matched `a58eff8` — no bump needed.
-
-**Verification** — `origin/main..HEAD` is now empty (fully pushed); workflows dispatched. I'm not blocking on the deploy to finish (per the CI-pending rule).
-
-**Re-confirming before the next port, as agreed.** The remaining 5 heads stay **queued + gated** (queue still paused, receipt 98):
-- **lazily-zig** — cut a `v0.1.1` GitHub release (no registry, no 2FA). *Safe next step.*
-- **lazily-rs** — 0.12.3 bump + tag + GitHub release; crates.io only after `lazily` ownership confirmed.
-- **lazily-py** (#kb9b) & **lazily-js** — 2FA-gated registry publishes (you drive the passkey/2FA).
-- **lazily-kt** — needs publish-infra bootstrap (separate task).
-
-Reply `go lazily-zig` (or `go non-2FA` for zig + rs) to continue, or drive the 2FA ports yourself.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=a0cb1949-3c96-4ec9-b651-b24a57035f69 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=16518 candidate_hash=908a55c842838bca3e1f02273e0562fe86bae1a27874630166adc77f6a3f2f70 content_ours_len=17738 content_ours_hash=5cbb3d9517d30207571b099b01ed7c4dd35bad7799cf4bb86ac6b4ad734057ac doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782352670275
-```
-
-### Re: release + publish lazily-rs — v0.12.3 shipped (crates.io + GitHub) — opus-4-8
-
-> **Queue prompt:**
->
-> release + publish lazily-rs
-
-You re-activated the queue and marked lazily-rs `🚧` — taken as the go. **lazily-rs v0.12.3 is fully released and published.**
-
-**Confirmed crate ownership** — `cargo owner --list lazily` → `btakita (Brian Takita)`, so the crates.io publish was ours to make (resolving the audit's open ownership question).
-
-**Shipped**
-- **Version** 0.12.2 → **0.12.3** (Cargo.toml + Cargo.lock), commit `c3426a8`, pushed to `lazily-hub/lazily-rs`.
-- **crates.io** — `lazily v0.12.3` **published** → https://crates.io/crates/lazily/0.12.3
-- **GitHub release** — https://github.com/lazily-hub/lazily-rs/releases/tag/v0.12.3 (tag `v0.12.3`)
-- **Superproject** gitlink bumped + pushed (`788597955..1ad739255`).
-
-**Contents** (everything since v0.12.2): the #lzasyncdispose2 generation guard plus the async/ws hardening batch — re-run abort, pending-effect dedupe, bounded WsDataChannel/Str0mNet/loopback queues with drop counters, accept_answer failure surfacing, From impls, 32-bit SlotId hardening. `cargo publish` verify-packaged 82 files clean.
-
-**Remaining ports** (queue listed, none marked): **lazily-zig** (v0.1.1 GitHub release — safe), **lazily-kt** (no publish infra), **lazily-js** (npm @lazily/js — 2FA), **lazily-py** (#kb9b PyPI — 2FA). Mark the next one `🚧` or say `go lazily-zig`.
-
-*Note: editor IPC is wedged this turn (a concurrent session is contending the supervisor socket), so this response was landed via the git/CRDT recovery path.*
-
-### Re: release + publish lazily-rs — v0.12.3 shipped (crates.io + GitHub) — opus-4-8
-
-> **Queue prompt:**
->
-> release + publish lazily-ky
-
-
-> **Queue prompt:**
->
-> release + publish lazily-rs
-
-You re-activated the queue and marked lazily-rs `🚧` — taken as the go. **lazily-rs v0.12.3 is fully released and published.**
-
-**Confirmed crate ownership** — `cargo owner --list lazily` → `btakita (Brian Takita)`, so the crates.io publish was ours to make (resolving the audit's open ownership question).
-
-**Shipped**
-- **Version** 0.12.2 → **0.12.3** (Cargo.toml + Cargo.lock), commit `c3426a8`, pushed to `lazily-hub/lazily-rs`.
-- **crates.io** — `lazily v0.12.3` **published** → https://crates.io/crates/lazily/0.12.3
-- **GitHub release** — https://github.com/lazily-hub/lazily-rs/releases/tag/v0.12.3 (tag `v0.12.3`)
-- **Superproject** gitlink bumped + pushed (`788597955..1ad739255`).
-
-**Contents** (everything since v0.12.2): the #lzasyncdispose2 generation guard plus the full async/ws hardening batch — re-run abort, pending-effect dedupe, bounded WsDataChannel/Str0mNet/loopback queues with drop counters, accept_answer failure surfacing, From impls, 32-bit SlotId hardening. `make check` was green at the code state; `cargo publish` verify-packaged 82 files clean.
-
-*(The unrelated dirty AGENTS.md/CLAUDE.md code-nav blocks were stashed during publish so the package exactly matched the tag, then restored.)*
-
-**Remaining ports** (queue still listed, none marked): **lazily-zig** (v0.1.1 GitHub release — safe), **lazily-kt** (no publish infra), **lazily-js** (npm @lazily/js — 2FA), **lazily-py** (#kb9b PyPI — 2FA). Mark the next one `🚧` (like you did here) or say `go lazily-zig` and I'll take it.
-
-### Re: release + publish lazily-zig — v0.2.0 shipped (GitHub release) — opus-4-8
-
-> **Queue prompt:**
->
-> release + publish lazily-zig
-
-**lazily-zig v0.2.0 is released.** You marked `lazily-js` `🚧`, but that one needs **your npm 2FA** — I can't publish `@lazily/js` solo. So I drained the agent-doable port instead (lazily-zig); the `🚧 lazily-js` head stays pending your OTP.
-
-**lazily-zig shipped**
-- **Version** 0.1.0 → **0.2.0** (`build.zig.zon`), commit `eacabb5`, pushed.
-- **GitHub release** — https://github.com/lazily-hub/lazily-zig/releases/tag/v0.2.0 (tag `v0.2.0`). Zig has no central registry — consumed via `zig fetch`.
-- **Superproject** gitlink bumped + pushed (`1ad739255..ae5458eab`).
-- **Minor (not patch)**: substantial features since v0.1.0 — eager `Signal(T)`, `StateMachine(S,E)`, `ShmBlobArena` host + conformance, allocator modes, `before_change_subscribers`, Zig 0.16 support — plus a breaking `.direct`→`.literal` rename. Tests 16/16 green.
-
-**The two remaining heads both need YOUR 2FA (I can't complete them solo):**
-- `🚧 lazily-js` — npm `@lazily/js`. I can prep + run `npm publish`; you supply the OTP at the prompt.
-- `lazily-py` (#kb9b) — PyPI `lazily` 0.11.0 (live is 0.10.2); passkey 2FA.
-
-**Agent-doable releases are now complete**: spec ✅, rs ✅ (crates.io+GitHub), zig ✅ (GitHub); kt struck (no infra). Want to do the lazily-js npm publish together (I prep, you OTP), or stop here? (IPC is still wedged by a concurrent session — a session restart would give a clean transport.)
-
-*Note: editor IPC wedged again — landed via the git/CRDT recovery path.*
-
-### Re: release + publish lazily-zig — v0.2.0 shipped (GitHub release) — opus-4-8
-
-> **Queue prompt:**
->
-> release + publish lazily-js
-
-
-> **Queue prompt:**
->
-> release + publish lazily-zig
-
-**lazily-zig v0.2.0 is released.** (Drained out of queue order — `lazily-js` is ahead but needs your npm 2FA; lazily-zig is the agent-doable one.)
-
-**Shipped**
-- **Version** 0.1.0 → **0.2.0** (`build.zig.zon`), commit `eacabb5`, pushed.
-- **GitHub release** — https://github.com/lazily-hub/lazily-zig/releases/tag/v0.2.0 (tag `v0.2.0`). Zig has no central registry — consumed via `zig fetch`.
-- **Superproject** gitlink bumped + pushed (`1ad739255..ae5458eab`).
-
-**Why minor (0.2.0) not patch:** the delta since v0.1.0 is substantial features — eager `Signal(T)`, `StateMachine(S,E)`, `ShmBlobArena` host + conformance, selectable allocator modes, `before_change_subscribers`, Zig 0.16 support — plus a breaking `.direct`→`.literal` rename. Tests green (16/16).
-
-**Remaining (both need YOUR 2FA — I can't complete solo):**
-- `release + publish lazily-js` — npm `@lazily/js` publish needs npm 2FA.
-- `release + publish lazily-py` (#kb9b) — PyPI `lazily` 0.11.0 needs passkey 2FA.
-
-That's the end of the agent-doable releases (spec ✅, rs ✅, zig ✅; kt removed). The two remaining are operator-driven 2FA publishes. Want to walk through one together (I prep, you supply the OTP), or are we done here?
-
-### Re: release + publish lazily-py — deferred to operator (#kb9b) — opus-4-8
-
-> **Queue prompt:**
->
-> release + publish lazily-py
-
-lazily-py is the last queue head, and it's **fully operator-gated** — I can't drain it solo:
-1. **Pre-publish live-test confirm** (#kb9b testing gate) — a human "it works in a live session" confirmation I can't give for you.
-2. **PyPI passkey 2FA** — the actual `twine upload` needs your browser/passkey.
-
-The artifacts are already prepared (per #kb9b: `lazily-0.11.0-{whl,tar.gz}` built, `twine check` passed, fresh-venv round-trip verified; commit `30907ea` + superproject gitlink `eb93a75ac` pushed). Live PyPI is 0.10.2.
-
-**This head duplicates the existing Review item `#kb9b`**, which already tracks it as operator-drive. So I'm **striking it from the queue** (not re-queuing duplicate work) — it lives in Review for you to drive:
-```
-src/lazily-py: tag v0.11.0 + push → gh release create v0.11.0 --generate-notes → python -m twine upload dist/*
-```
-
-## 🏁 Release campaign complete (agent-doable scope)
-
-- **lazily-spec** ✅ pushed + mdBook Pages
-- **lazily-rs** ✅ v0.12.3 — crates.io + GitHub
-- **lazily-zig** ✅ v0.2.0 — GitHub release
-- **lazily-kt** ⊘ no publish infra (separate bootstrap task)
-- **lazily-js / lazily-py** → your 2FA (py tracked in #kb9b)
-- **lazily-js** ⏳ the only one left — npm `@lazily/js` needs your npm 2FA (no API-token path configured like PyPI had). If you add an npm automation token to passage, I can publish it the same way.
-- **#xccx** Holons integration — blocked on Steve's answers.
-- **#h6qb** WebRTC live two-host e2e — `[operator-drive]`. The preflight `semantic_completion_match` warning (may be resolved by `#lzwebrtcwire`) is a **false positive**: `#lzwebrtcwire` was only the localhost wiring slice; `#h6qb` needs live two-host/NAT through the deployed `#yxjw` Worker. Operator runbook already exists (`tasks/software/runbook-lazily-webrtc-live-e2e.md`).
-- **lazily-js npm publish** — your 2FA (the only agent-blocked release).
-- **lazily-js** — still `0.1.0`, **no tag**, npm `@lazily/js` **not published** (registry dist-tags empty). The one remaining release; needs your npm 2FA (or an automation token in passage, like the PyPI path).
-- **lazily-zig v0.2.0** + **lazily-spec** (Pages) — tagged/pushed.
-- **lazily-py 0.11.0** — PyPI **confirmed live** (`pypi.org/pypi/lazily/json` → 0.11.0), tag `v0.11.0`. → review **#kb9b reaped** (it was still `[/]` describing pre-publish state).
-- **lazily-rs 0.12.3** — `Cargo.toml=0.12.3`, tag `v0.12.3` present. The `#lzstr0mpolldrive` send_to liveness fix is in source (`src/lazily-rs/src/str0m_net.rs:495` carries the `// was let _ = socket.send_to(...)` comment; `:508` now `match`es the `Result`). crates.io didn't answer curl from here (API blocked, same as the prior session observed) — registry publish claimed but not re-verified by me this turn.
-- **lazily-kt** ⊘ no publish infra (separate bootstrap task)
-- **lazily-spec** ✅ Pages • **lazily-rs** ✅ v0.12.3 crates.io+GitHub • **lazily-zig** ✅ v0.2.0 GitHub • **lazily-py** ✅ v0.11.0 PyPI+GitHub
-- No superproject gitlink bump (tag points at the already-committed `c255482`).
-- **GitHub release** — https://github.com/lazily-hub/lazily-py/releases/tag/v0.11.0 (tag `v0.11.0`).
-- **PyPI** — `lazily 0.11.0` **published** → https://pypi.org/project/lazily/0.11.0/ (was 0.10.2). Uploaded via the `btak/PYPI_PUBLISH_TOKEN` API token (token auth bypasses interactive 2FA; secret never printed).
-
-Queue now fully drained. Two operator follow-ups remain: the lazily-py PyPI publish (#kb9b) and — please — **restart this session** to clear the wedged editor IPC (a concurrent codex session has been contending the supervisor socket all along; I've been recovering every response via the git/CRDT path).
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/software/lazily-rs.md source=file_ipc patch_id=18b16d61-065e-4747-90eb-5b29cab5f76c invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400.json doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782353796773
-```
-
-### Re: #next-steps — lazily bug-fix status; top of backlog = #lzbenchstale — glm-5.2
-
-**Short answer: the lazily *runtime* bug backlog is drained.** Every correctness fix from the 2026-06-24 sweep shipped and is released in 0.12.3. I verified source, tags, and registry publishes this turn rather than trusting the prior (IPC-recovery-path) narrative. The one genuinely open code-side item is a benchmark/CI gap — now top of backlog (filed as `#lzbenchstale` because the binary auto-reaps `#lzbenchbudget`, which already exists in the done archive despite the check being red).
-
-#### Verified this turn (read-only)
-- **lazily-rs 0.12.3** — `Cargo.toml=0.12.3`, tag `v0.12.3` present. The `#lzstr0mpolldrive` send_to liveness fix is in source (`src/lazily-rs/src/str0m_net.rs:495` carries the `// was let _ = socket.send_to(...)` comment; `:508` now `match`es the `Result`). crates.io didn't answer curl from here (API blocked, same as the prior session observed) — registry publish claimed but not re-verified by me this turn.
-- **lazily-py 0.11.0** — PyPI **confirmed live** (`pypi.org/pypi/lazily/json` → 0.11.0), tag `v0.11.0`. → review **#kb9b reaped** (it was still `[/]` describing pre-publish state).
-- **lazily-zig v0.2.0** + **lazily-spec** (Pages) — tagged/pushed.
-- **lazily-js** — still `0.1.0`, **no tag**, npm `@lazily/js` **not published** (registry dist-tags empty). The one remaining release; needs your npm 2FA (or an automation token in passage, like the PyPI path).
-
-#### Top of backlog — `#lzbenchstale` (red benchmark-check; supersedes archived #lzbenchbudget)
-`make benchmark-check` is **RED right now** (verified in `src/lazily-rs`: `BENCHMARKS.md benchmark results are stale; run update-benchmark-results.py`) — this contradicts the prior session's "#gxzm benchmark-check (green)" note. `#gxzm` (#lzbmcheckdrift, missing p50/p95 rows) and `#lzbenchbudget` (thread_safe_contention lock-acquisition overages: set_cell_invalidation 78>32, lock_acquisitions 908>700) are distinct failure modes; the check is stale again.
-
-I did **not** blindly run `make benchmark-update`: the archived `#lzbenchbudget` itself flags this as either (a) stale baselines → regenerate, or (b) a **real contention regression** from `8665e29` (SlotId casts) + `38b18e4` (eager Signal on ThreadSafeContext). That decision needs an isolated-worktree A/B, not a paper-over. Say `do #lzbenchstale` and I'll run the A/B first, then refresh baselines or file the regression.
-
-#### Remaining follow-ups (none are code bugs)
-- **lazily-js npm publish** — your 2FA (the only agent-blocked release).
-- **#h6qb** WebRTC live two-host e2e — `[operator-drive]`. The preflight `semantic_completion_match` warning (may be resolved by `#lzwebrtcwire`) is a **false positive**: `#lzwebrtcwire` was only the localhost wiring slice; `#h6qb` needs live two-host/NAT through the deployed `#yxjw` Worker. Operator runbook already exists (`tasks/software/runbook-lazily-webrtc-live-e2e.md`).
-- **#xccx** Holons integration — blocked on Steve's answers.
-
-**Top backlog id: `#lzbenchstale`.**
-
-### Re: do #lzbenchstale — benchmark-check RED root cause + fix — glm-5.2
-
-> **Queue prompt:**
->
-> What are #next-steps to fix lazily bugs?
-
-Drained `#lzbenchstale`. **`make benchmark-check` is green again.** Root cause was a stale generated section from the 0.12.3 version bump, **not** a contention regression.
-
-**Root cause** — the `#lzasyncdispose2` release bumped `Cargo.toml` 0.12.2→0.12.3, but `BENCHMARKS.md`'s generated section header embeds the package version (`Generated for package lazily version X`). The `--check` path rebuilds that section from the on-disk Criterion + profile artifacts and the *current* `Cargo.toml` version, so the version-line drift made it "stale". The profile CSV and `BENCHMARKS.md` shared the same mtime (17:33:21) — same generation batch; only the version string moved.
-
-**Not a regression** — the backlog item hypothesized a real contention regression from `8665e29` (SlotId casts) + `38b18e4` (eager Signal on ThreadSafeContext). Ruled out: (1) the check reported only "stale", *not* "instrumentation regression budget failure" or "required latency evidence failure" — every deterministic lock-acquisition budget (per-profile totals + per-site) **passes**; (2) both suspect commits are pre-existing at v0.11.1 and already accounted for in the calibrated `REGRESSION_BUDGETS`; (3) lock-acquisition *counts* are stable across the regenerate (only single-run `lock_wait`/`lock_hold` *timings* in the attribution table shifted, as expected for a "single local profile run" snapshot). An A/B worktree test was therefore unnecessary — the on-disk results already include those commits and produced the published numbers.
-
-**Fix** (src/lazily-rs) — regenerated `BENCHMARKS.md` via the runbook-sanctioned `python3 scripts/update-benchmark-results.py --no-run` (reuses the valid existing Criterion estimates; refreshes the instrumentation-profile snapshot + version). This is case (a) of the backlog item's fork (stale baselines → regenerate).
-
-**Verification** — `make check` **fully green**: fmt, clippy, build, all feature suites (lib 32, spec_compliance 107×2, integration 13×2, signal 19×2, state_machine 11×2, thread_safe variants, Loom, FFI, IPC 11×2, conformance 10×2, distributed, webrtc 4×2, websocket, signaling handshake, doctests), Lean formal model, **and** `benchmark-check` (exit 0). GitHub Actions CI run `28146185018` dispatched and in-progress at closeout (not blocking — local suite is green).
-
-**Shipped** — lazily-rs `26be677` (pushed to `lazily-hub/lazily-rs`, `c3426a8..26be677`); superproject gitlink bumped + pushed (`ae5458eab..f85c838ec`). Only `BENCHMARKS.md` committed — the dirty `AGENTS.md`/`CLAUDE.md` are unrelated tsift code-nav v0.1.70→v0.1.73 drift, left unstaged.
-
-**#next-steps status** — the agent-drainable bug backlog is now empty. `#lzbenchstale` was the last open code item; it was the top-of-backlog and is now done. Remaining work is all operator-gated: `#h6qb` (WebRTC live two-host e2e), `#xccx` (Holons integration, blocked on Steve), `#kabc`/`#lilazilysmpost` (LinkedIn follow-up comments), and the lazily-js npm publish (needs npm 2FA). No agent-drainable `#next-steps` remain.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=socket_ack_content patch_id=e53afaeb-c9b3-42a3-8bda-6eaaafa04d51 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=36184 candidate_hash=b6e234070283d79a568251fd180560ef4dc4242e351a2e27d32971ca3141d90c content_ours_len=36207 content_ours_hash=9d93933a97b4ec9bdf4d62a5d49706f74e022992fa29cadf10e9dbf78607f999 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782360628042
-```
-
-### Re: CRDT (YRS/YJS) as FFI/IPC/Network protocol — layered verdict — glm-5.2
-
-> **Queue prompt:**
->
-> Would it be beneficial to make lazily use CRDT (YRS/YJS) as the FFI/IPC/Network protocol?
-
-**Short answer: no for FFI and IPC; yes-for-the-distributed-plane — but CRDT is already the plan there, and YRS/YJS specifically is the wrong shape.** The question collapses three layers that lazily keeps deliberately separate; conflating them would regress the guarantee each layer exists to provide.
-
-#### The three planes today (grounded in code)
-
-| Plane | Code | Semantics |
-|-------|------|-----------|
-| **IPC mirror** | `ipc.rs`, `ffi.rs`, spec §IPC | `IpcMessage = Snapshot \| Delta`, strict sequential `epoch == base_epoch+1`, fail-closed resync on gap. **Single producer → N read-only observers.** Value-mirror only — no compute closures cross the wire (`ipc.rs:1-10`, protocol.md §Cross-language). |
-| **Distributed CRDT** | `distributed.rs` (permission boundary only), spec §Distributed | **Specced, unimplemented.** HLC-keyed LWW/MV/PN registers, per-peer causal stamps, post-merge PartialEq + memo suppression (`distributed.rs:1-9`, protocol.md:326-345). |
-| **Effect authority** | spec §Distributed "single-writer effect authority" | Irreversible actions (email, charge, webhook) stay single-writer / at-most-once. **Explicitly NOT CRDT-merged** (protocol.md:343-345). |
-
-#### Per-layer verdict
-
-**FFI — no.** `ffi.rs` owns no graph state; it ferries canonical JSON/postcard `IpcMessage` bytes across the C ABI. YJS's document model (Y.Array/Map/Text) is the wrong unit — `NodeAdd`/`EdgeAdd`/`Invalidate`/`SlotValue` aren't YJS mutations — and would drag a wasm/JS dependency into every port (py/zig/kt). FFI stays an opaque byte channel.
-
-**IPC (Snapshot/Delta) — no, don't replace.** It is a deliberately strict **single-producer mirror** with strong ordering. CRDT (YJS) brings multi-writer convergence + merge: *more* machinery than one-producer/N-mirror needs, and *weaker* where lazily currently guarantees strict epoch order (CRDT gives eventual convergence + concurrent-write semantics). Adopting YJS turns every observer into a writer and dissolves the producer's epoch authority. `Delta` should instead **bridge** to a CRDT merge layer at the distributed boundary.
-
-**Network/distributed — CRDT is the right tool and already on the roadmap (§Distributed).** The live decision is *purpose-built vs YRS/YJS*. Recommendation: **purpose-built**, because:
-- lazily's replication unit is a **lazy reactive graph** (nodes + edges + invalidation frontier), not a collaborative text/array document. YJS primitives fight that shape (Y.Map-per-cell loses edge semantics and the lazy `Invalidate` marker).
-- **Laziness is antithetical to eager CRDT materialization.** `Invalidate` = "intentionally unknown pending recompute"; YJS eagerly merges concrete state with no native dirty/unknown slot. The lazy + memo-equality-suppression invariants (the product's core, proven in the Lean model) must live in *your* merge layer regardless — so YJS buys you a transport, not the semantics.
-- **Effect authority** stays single-writer either way; YJS has no notion of it.
-
-#### The one place YRS genuinely helps
-
-YRS's **binary anti-entropy / sync protocol** (stateless sync, efficient binary updates, GC'd tombstones) is a credible *transport* for the distributed plane. That's "borrow YRS's sync engine," not "make CRDT the FFI/IPC/Network protocol" — an optimization to evaluate *after* the purpose-built HLC cell plane exists. The spec's already-defined HLC + LWW/MV/PN scheme **is** a CRDT — just one shaped like lazily, not like a text editor.
-
-#### Recommendation
-
-Keep FFI opaque, keep Snapshot/Delta as the single-producer mirror, implement §Distributed as a purpose-built HLC cell plane (optionally borrowing YRS sync later). Filed as `#lzcrdtplane` (top of backlog). Note: the queue preset `#spec-test-build-install-commit-push` does **not** apply to a "would it be beneficial?" question — this is a recommendation, not an authorized rewrite; a full protocol swap ripples across all 6 ports and is gated on the plan.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=eee09c11-e341-4856-9074-7e0186e31be6 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=37547 candidate_hash=f34a3dfc37201a839782389db916c7232e3f30253a99fdd9972162e6e23e1747 content_ours_len=40472 content_ours_hash=9ddb3cec6ff8cd6937e83ee736e73bde74f33b90ba7c77002d95c96223d41f38 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782382884404
-```
-
-### Re: Are the lazily-rs CRDT cells complete? — opus-4-8
-
-> **Queue prompt:** CRDT cells were implemented in lazily-rs. Please evaluate if this is complete.
-
-**Verdict: complete as a Phase-1 merge-mechanism core, but NOT yet end-to-end distributed.** The `merge: crdt` mechanism (`src/crdt.rs`, commit `e235f98`) is spec-complete and correct against `lazily-spec/cell-model.md`; the 7 unit tests pass (`cargo test --lib crdt --features distributed` → 7 passed). What's missing is everything that lets two *real* replicas converge over a wire — which the spec scopes as later phases, not part of the crdt mechanism itself.
-
-**What IS done (spec-complete, Phase 1):**
-- `MergeMechanism` enum — `Crdt` implemented; `Lww`/`Ot`/`Lease`/`Custom` reserved and **fail-closed** in `resolve()` (explicit rejection, never aliased to crdt — exactly what the spec mandates for capability negotiation).
-- `Hlc`/`HlcStamp` — hybrid logical clock, deterministic (caller-supplied wall time), total-ordered `(wall, logical, peer)`.
-- Three registers, all commutative/associative/idempotent: `LwwRegister`, `MvRegister` (version-vector multi-value), `PnCounter` (per-peer max).
-- `ReplicatedCell<C>` — multi-write ROOT cell; remote-op ingress merge folds remote state then pushes the converged value via `Context::set_cell`; PartialEq guard applied **after** merge so an equal/losing merge invalidates nothing. Two-replica order-independent convergence is tested.
-
-The spec itself positions this as the first of N mechanisms — *"`crdt` is the first mechanism this spec defines and the only one with a normative wire schema today"* — so "the crdt cell kind is complete" is a true and bounded statement.
-
-**What is NOT done (deferred; required for *usable* distributed cells):**
-1. **No wire/IPC transport** — `ipc.rs` has zero CRDT hooks. The registers carry `serde` derives but nothing serializes HLC/register state into `IpcValue`/Delta ops. `ReplicatedCell::merge_remote(&ctx, remote)` requires you to hand it an already-acquired remote replica; there is no path for a remote peer's delta to actually reach it. **Today, two hosts cannot replicate a crdt cell.** [spec-required, later phase]
-2. **No single-writer effect authority** — the spec mandates gating irreversible effects behind a designated writer / quorum for at-most-once semantics. Unimplemented. [spec-required, later phase]
-3. **No peer/replica identity wiring** — `Hlc::new(peer)` must be instantiated by hand; no session bootstrap, peer registry, or `#yxjw`-signaling integration.
-4. **No Context factory ergonomics** — `ReplicatedCell` is public but isolated behind `distributed`; there's no `ctx.replicated_cell(...)`, so a consumer wires it manually.
-5. **MvRegister version vectors grow unbounded** — no GC/tombstones (not spec-mentioned; an impl concern for long-lived replicas).
-
-**Bottom line:** if "complete" means *the crdt merge mechanism and its convergence proofs* — yes, done and green. If "complete" means *crdt cells you can actually run across two machines* — no; the transport binding (#1) and effect authority (#2) are the real next phases, and they're sizeable enough to deserve their own focused cycle(s) rather than auto-draining off this go-queue.
-
-Want me to file `#1` (IPC/wire transport for `ReplicatedCell`) and `#2` (single-writer effect authority) as backlog items, or open a phase plan for the distributed wiring? I left them out of the queue to avoid auto-implementing speculative scope without your go.
-<!-- agent:boundary:0260cdb4 -->
+**Top backlog id: `#lzmsgpack`.**
+<!-- agent:boundary:9815f843 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -466,6 +85,7 @@ Want me to file `#1` (IPC/wire transport for `ReplicatedCell`) and `#2` (single-
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzmsgpack] [recommended] Implement negotiated MessagePack for lazily-ipc: add a codec enum/capability handshake (json|msgpack|postcard), add rmp-serde encode/decode for IpcMessage, route WebRtcSink/WebRtcSource and FFI helpers through the codec abstraction instead of hard-coded serde_json, add cross-language canonical fixtures/round trips, and benchmark JSON vs MessagePack vs postcard before changing any default. Keep JSON canonical/debug fallback; keep postcard Rust-local.
 <!-- /agent:backlog -->
 
 ## Review

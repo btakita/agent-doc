@@ -39,7 +39,21 @@ done
 Compacted content:
 - Archived 5 response topic(s): bounded session-startup wait + isolating why the session hangs; state machine for the wait machinery + Lean no-hang proof; IPC proof diagnostic (interrupted-cycle recovery); 2 more
 - Prior summary/context: prior compacted content: Archived 7 response topic(s): #jbrestartbusy; queue resume + flood-pin dedup; live verify (y...
-<!-- agent:boundary:7f4bc29e -->
+
+### Re: state machines for queue activity + plugin/binary merge control — opus-4.8
+
+> **Queue prompt:**
+>
+> I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen? — and — I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?
+
+**Yes to both — and these are the same diagnosis as the symptoms I've been firefighting all session.** The point-fixes (`#rt83qflood` multiline dedup, force-disk recovery) are band-aids; the duplicate-injection and the disk-write races are structural, and an explicit state machine per subsystem makes each failure class *impossible* rather than patched-after-the-fact.
+
+**1. Queue-activity state machine (`#queuestatemachine`).** Today queue convergence is a *pile of ad-hoc dedup passes* — `dedup_free_text_heads`, `dedup_pin_variant_do_heads`, `dedup_bare_id_reference_heads`, `sync_backlog_into_queue`, `annotate_manual_queue_additions` — each patching one duplication shape after it appears (which is exactly why `#rt83qflood` had to *add* a multiline-pin pass this session). There's no invariant that "an item with identity X exists in exactly one lawful state." Fix: model each item by durable head identity through an explicit lifecycle — `Authored → Mirrored → InProgress → Answered → Struck → Reaped`. Convergence becomes "drive each identity to its lawful state," not "append then dedup," so a stale-CRDT / supervisor re-emit is a **no-op transition** and can't create a visible duplicate. Plan: `tasks/agent-doc/plan-queue-activity-state-machine.md` (#queuestatemachine1–3).
+
+**2. Plugin/binary merge-control state machine (`#mergestatemachine`).** The `File Cache Conflict` dialogs and the `no_ack` / `retry_without_disk_write` / force-disk churn (nearly every closeout this session) are one bug: a **write race** between the binary's disk write and the editor/FFI plugin's buffer ownership, with no authoritative "does a live editor own this buffer right now?" state. Fix: an FFI-owned write-ownership SM — `Detached → Attached → EditorOwnsBuffer → BinaryWriteRequested → IpcAckProven → Committed` — where a disk write is **gated on a proven ownership transition** (write only when `Detached` or after `IpcAckProven`, never while the editor owns the buffer → no File Cache Conflict). A heartbeat probe distinguishes `EditorOwnsBuffer` from a stale listener (`#6b5h`) so a CLI-only session routes to the controller-host disk path instead of wedging on `no_ack`. The IPC-ack wait is bounded by `#waitmachine`'s `AwaitingIpcAck` ≤10s state — the two machines compose. Plan: `tasks/agent-doc/plan-merge-control-state-machine.md` (#mergestatemachine1–3).
+
+**These three converge.** `#waitmachine` (bounded waits, no hangs), `#queuestatemachine` (no dup queue items), `#mergestatemachine` (no merge races) — plus `#lazilystatesync` (plugins as thin reactive reporters) — are one **shared state-machine backbone**, ideally on the lazily-rs reactive `Cells` substrate. That's the systemic answer to the churn you've watched this session: stop patching duplication/race/hang shapes one at a time; represent each subsystem's state explicitly so the bad transitions don't exist. Filed 6 phase items (#queuestatemachine1–3, #mergestatemachine1–3).
+<!-- agent:boundary:1ed363ff -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -130,8 +144,8 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 ```
 ---
 - ~~:round_pushpin: do [#rt83qflood]~~
-- I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?
-- I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?
+- ~~I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?~~ — auto-struck: answered this cycle (#ftstrike)
 - Still getting JB `File Cache Conflict` dialogs.
 - Opencode responses are reverse ordering numeric lists.
 - [#actorswitchdefer]
@@ -204,6 +218,12 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#vwj7] #queuestatemachine1 Define queue-item identity + lifecycle-state model (Authored→Mirrored→InProgress→Answered→Struck→Reaped) + pure transition fn with exhaustive (state×event) tests. Replaces ad-hoc dedup passes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
+- [ ] [#cgfx] #queuestatemachine2 Route convergence through the SM; reduce dedup passes to transition guards; property test idempotence (re-emit=no-op) over #rt83qflood/#qdedupsync/#qauthorder duplication shapes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
+- [ ] [#brtc] #queuestatemachine3 SimWorld: stale-CRDT/supervisor re-emit storm converges to one item per identity; operator position-lock survives. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
+- [ ] [#fnxy] #mergestatemachine1 Define FFI write-ownership SM (Detached→Attached→EditorOwnsBuffer→BinaryWriteRequested→IpcAckProven→Committed) + editor-heartbeat liveness probe distinguishing live-editor from stale listener (#6b5h). Plan: tasks/agent-doc/plan-merge-control-state-machine.md
+- [ ] [#t4x1] #mergestatemachine2 Gate try_ipc/commit/disk-write on the ownership SM; route Detached/stale writes to controller-host disk path so CLI-only/no-editor never wedges on no_ack. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
+- [ ] [#kj5f] #mergestatemachine3 JB+VSCode report attach/detach/ownership through SM (thin reporters via #lazilystatesync); SimWorld + live repro for File Cache Conflict + #6b5h wedge. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#56ta] #lazilystatesync1 Define lazily-spec wire shape for agent-doc state projection (state-machine nodes + state-graph edges + generation) so FFI emits deltas not just snapshots. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#vm7g] #lazilystatesync2 Back agent_doc_state_projection with a lazily-rs Context/Cells graph + add agent_doc_state_subscribe delta export (lazily-spec format); keep full-snapshot cold read. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#n529] #lazilystatesync3 JB plugin: replace StateProjectionBridge manual JSON render with a lazily-kt mirror graph applying FFI deltas; EditorCommandStateMachine becomes a derived lazily-kt cell. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md

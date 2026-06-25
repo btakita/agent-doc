@@ -99,7 +99,7 @@ So today's worst case is ~30s, not 10s. That's exactly the gap a single state ma
 2. *Lean* — `formal/wait_machine/` encodes `WaitState` as an inductive type and `tick` as a `Step` relation mirroring the Rust 1:1, then proves `no_hang : ∀ p, Reachable p → ExemptFree p → dwell p ≤ 10s`, with a second lemma that `ReinstallPause` is the sole state that can exceed it. The honest caveat: Lean proves the *model*; a Rust↔Lean `tick`/`Step` mismatch would make it vacuous, so the plan pins a parity test enumerating the Rust transition table against the Lean one (Rust `tick` is the source of truth).
 
 Queued as four dependency-ordered phases — **#waitmachine1** (core), **#waitmachine2** (migrate call sites + lower the 30s budgets to the 10s ceiling), **#waitmachine3** (deterministic bound proof), **#waitmachine4** (Lean). Each phase is its own focused cycle per the deep-refactor pacing rule; #waitmachine2 is where your "never >10s" constraint actually lands.
-<!-- agent:boundary:2c9fba81 -->
+<!-- agent:boundary:4dac327e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -189,7 +189,6 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 - do [#4pdp]
 - do [#0bmv]
 - do [#actorswitchdefer]
-- "Add a bounded `session_startup` wait in `route.rs`/`start.rs` with a hard deadline; on expiry, fail closed with `startup_miss` + an actionable error ("session did not become dispatch-ready in Ns") rather than hanging.": Can you retry or isolate why the session hangs so we can further dogfood these sort of errors?
 - ~~:pushpin: do [#jbrunhang]~~
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.

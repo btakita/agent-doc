@@ -381,7 +381,7 @@ Fixed and shipped the two concrete correctness/security bugs (corky `15c0498` on
 - Commit `15c0498` — pushed.
 
 That clears the last `#id` queue head — `#ckyorphan` through `#ckymime`, **12 corky bugs fixed and pushed** this drain. The only remaining queue items are the two free-text `What are #next-steps to fix corky bugs?` prompts (now answered by the priority-ordered backlog: `#ckymimeinline`, `#ckymimestream`, plus the earlier `#ckythreadmerge`, `#ckybench`/`#ckystale` follow-ups).
-<!-- agent:boundary:061271de -->
+<!-- agent:boundary:84353efa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -404,7 +404,7 @@ Please give me a report the performance
 - ~~[#ckyatomicwrite]~~
 - ~~[#ckyunicodeslug]~~
 - ~~[#ckymime]~~
-- What are #next-steps to fix corky bugs?
+- 🚧 What are #next-steps to fix corky bugs?
 - What are #next-steps to fix corky bugs?
 <!-- /agent:queue -->
 

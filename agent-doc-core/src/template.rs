@@ -1915,6 +1915,91 @@ All green.
         assert!(patches.is_empty());
         assert_eq!(unmatched, "Just a plain response with no patch blocks.");
     }
+    // --- #npe1 / #codefencestrip reproduction: trailing code fence at exchange boundary ---
+    fn npe1_doc(prompt: &str) -> String {
+        format!(
+            "# Session\n\n<!-- agent:exchange -->\n{prompt}\n<!-- /agent:exchange -->\n"
+        )
+    }
+
+    fn npe1_round_trip(response_body: &str, prompt: &str) -> String {
+        let dir = setup_project();
+        let doc_path = dir.path().join("plan.md");
+        let doc = npe1_doc(prompt);
+        std::fs::write(&doc_path, &doc).unwrap();
+        let response = format!(
+            "<!-- patch:exchange -->\n{response_body}\n<!-- /patch:exchange -->\n"
+        );
+        let (patches, unmatched) = parse_patches(&response).unwrap();
+        let applied = apply_patches_via_path(&doc, &patches, &unmatched, &doc_path).unwrap();
+        // Boundary repositioning is the IPC write-path step; exercise it too.
+        reposition_boundary_to_end_clean_with_summary(&applied, Some("plan"))
+    }
+
+    #[test]
+    fn npe1_trailing_code_fence_survives_round_trip() {
+        let prompt = "❯ show me the snippet";
+        let response = "### Re: show me the snippet\n\nHere is the code:\n\n```rust\nfn main() {}\n```";
+        let result = npe1_round_trip(response, prompt);
+        let fences = result.matches("```").count();
+        assert_eq!(
+            fences, 2,
+            "expected opening + closing fence to survive; got {fences} fences in:\n{result}"
+        );
+        assert!(
+            result.contains("fn main() {}"),
+            "code body lost:\n{result}"
+        );
+        assert!(
+            result.contains("```rust\nfn main() {}\n```"),
+            "fenced block mangled:\n{result}"
+        );
+    }
+
+    #[test]
+    fn npe1_second_cycle_preserves_prior_fence() {
+        // First cycle: response ends in a fence; boundary lands under it.
+        let doc1 = npe1_round_trip("### Re: q\n\n```rust\nfn main() {}\n```", "❯ q");
+        assert_eq!(doc1.matches("```").count(), 2, "cycle1:\n{doc1}");
+        // Second cycle: a follow-up prompt + new response arrives (as the editor
+        // would inject the prompt under the live boundary).
+        let dir = setup_project();
+        let doc_path = dir.path().join("plan.md");
+        let doc2_input = doc1.replace(
+            "<!-- /agent:exchange -->",
+            "❯ second q\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc_path, &doc2_input).unwrap();
+        let response =
+            "<!-- patch:exchange -->\n### Re: second q\n\nplain text\n<!-- /patch:exchange -->\n";
+        let (patches, unmatched) = parse_patches(response).unwrap();
+        let applied = apply_patches_via_path(&doc2_input, &patches, &unmatched, &doc_path).unwrap();
+        let result = reposition_boundary_to_end_clean_with_summary(&applied, Some("plan"));
+        assert_eq!(
+            result.matches("```").count(),
+            2,
+            "prior fence lost in cycle2:\n{result}"
+        );
+        assert!(result.contains("```rust\nfn main() {}\n```"), "cycle2:\n{result}");
+    }
+
+    #[test]
+    fn npe1_adjacent_fence_cases_survive_round_trip() {
+        let cases = [
+            ("only-fence", "### Re: q\n```\nplain\n```"),
+            ("fence+trailing-nl", "### Re: q\n\n```rust\nfn main() {}\n```\n"),
+            ("indented-fence", "### Re: q\n\n- item:\n  ```rust\n  fn main() {}\n  ```"),
+            ("multi-fence", "### Re: q\n\n```a\none\n```\n\nthen\n\n```b\ntwo\n```"),
+            ("no-heading-fence", "Here:\n\n```rust\nfn main() {}\n```"),
+        ];
+        for (name, response) in cases {
+            let result = npe1_round_trip(response, "❯ q");
+            let expected = response.matches("```").count();
+            let got = result.matches("```").count();
+            assert_eq!(got, expected, "case {name}: fence count changed:\n{result}");
+        }
+    }
+
     #[test]
     fn apply_patches_replace() {
         let dir = setup_project();

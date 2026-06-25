@@ -122,6 +122,158 @@ another block
         assertTrue(secondBlock.contains("another block"))
     }
 
+    // --- #npe1 / #codefencestrip: trailing code fence at the exchange boundary ---
+
+    @Test
+    fun `npe1 trailing fence in response survives reposition`() {
+        // Response ends in a fenced code block; the boundary marker lands directly
+        // under the closing fence, with an unresolved follow-up prompt below.
+        val doc = """
+<!-- agent:exchange patch=append -->
+### Re: show me the snippet
+Here is the code:
+```rust
+fn main() {}
+```
+<!-- agent:boundary:abc12345 -->
+follow up question?
+<!-- /agent:exchange -->
+""".trimStart()
+
+        val result = repositionBoundaryToEndUtil(doc, "exchange")
+        assertNotNull(result)
+        // The closing fence must survive.
+        assertEquals(2, Regex("```").findAll(result!!).count())
+        assertTrue("code body lost:\n$result", result.contains("fn main() {}"))
+        assertTrue("closing fence lost:\n$result", result.contains("```rust\nfn main() {}\n```"))
+        // Boundary repositioned after the follow-up prompt.
+        assertTrue(result.contains("follow up question?\n<!-- agent:boundary:"))
+    }
+
+    @Test
+    fun `npe1 odd prior fence does not desync trailing fence`() {
+        // A prior user prompt references a single lone fence delimiter (odd count),
+        // which desyncs the naive open/close pairing so the real trailing response
+        // fence is mis-paired and the boundary close-tag detection drifts.
+        val doc = """
+<!-- agent:exchange patch=append -->
+❯ here is one fence delimiter: ```
+<!-- agent:boundary:old11111 -->
+### Re: answer
+done. here is code:
+```rust
+fn main() {}
+```
+<!-- /agent:exchange -->
+""".trimStart()
+
+        val result = repositionBoundaryToEndUtil(doc, "exchange")
+        assertNotNull(result)
+        assertTrue("code body lost:\n$result", result!!.contains("fn main() {}"))
+        assertTrue("closing fence lost:\n$result", result.contains("```rust\nfn main() {}\n```"))
+        assertTrue("close tag corrupted:\n$result", result.endsWith("<!-- /agent:exchange -->\n"))
+        assertEquals(1, Regex("""<!-- agent:boundary:[a-z0-9-]+ -->""").findAll(result).count())
+    }
+
+    @Test
+    fun `npe1 tilde fence in response survives reposition`() {
+        val doc = """
+<!-- agent:exchange patch=append -->
+### Re: q
+~~~rust
+fn main() {}
+~~~
+<!-- agent:boundary:abc12345 -->
+next?
+<!-- /agent:exchange -->
+""".trimStart()
+
+        val result = repositionBoundaryToEndUtil(doc, "exchange")
+        assertNotNull(result)
+        assertTrue("tilde fence lost:\n$result", result!!.contains("~~~rust\nfn main() {}\n~~~"))
+        assertTrue(result.contains("next?\n<!-- agent:boundary:"))
+    }
+
+    @Test
+    fun `npe1 findCodeBlockRanges pairs tilde fences and backtick fences independently`() {
+        val doc = """
+~~~
+backtick ``` inside tilde block stays content
+~~~
+after
+```rust
+fn main() {}
+```
+""".trimStart()
+        val ranges = findCodeBlockRangesUtil(doc)
+        // Exactly two real blocks: the ~~~ block and the ``` block.
+        assertEquals(2, ranges.size)
+        assertTrue(doc.substring(ranges[0].first, ranges[0].second).contains("inside tilde block"))
+        assertTrue(doc.substring(ranges[1].first, ranges[1].second).contains("fn main()"))
+    }
+
+    @Test
+    fun `npe1 findCodeBlockRanges treats unterminated fence as running to end`() {
+        val doc = """
+prose
+```rust
+fn main() {}
+""".trimStart()
+        val ranges = findCodeBlockRangesUtil(doc)
+        assertEquals(1, ranges.size)
+        assertEquals(doc.length, ranges[0].second)
+    }
+
+    @Test
+    fun `npe1 tilde block before backtick response desyncs pairing`() {
+        // A ~~~ block in the user region is invisible to the ```-only regex, so the
+        // ``` pairing should still be even. But a backtick fence *inside* the ~~~
+        // block (as content) is counted by the regex, making the ``` count ODD —
+        // every subsequent ``` pairs wrong and the trailing response fence's close
+        // is mis-detected.
+        val doc = """
+<!-- agent:exchange -->
+❯ example:
+~~~
+here is a ``` inside a tilde block
+~~~
+<!-- agent:boundary:old11111 -->
+### Re: answer
+```rust
+fn main() {}
+```
+<!-- /agent:exchange -->
+""".trimStart()
+
+        val result = repositionBoundaryToEndUtil(doc, "exchange")
+        assertNotNull(result)
+        assertTrue("rust body lost:\n$result", result!!.contains("fn main() {}"))
+        assertTrue("trailing fence lost:\n$result", result.contains("```rust\nfn main() {}\n```"))
+        assertTrue("close tag corrupted:\n$result", result.endsWith("<!-- /agent:exchange -->\n"))
+    }
+
+    @Test
+    fun `npe1 findCodeBlockRanges handles fence with info string close`() {
+        // Closing fence has no info string; an odd lone fence earlier must not
+        // swallow the close tag region.
+        val doc = """
+prose ```
+<!-- agent:exchange -->
+```rust
+fn main() {}
+```
+<!-- /agent:exchange -->
+""".trimStart()
+        val ranges = findCodeBlockRangesUtil(doc)
+        // The real fenced rust block must be detected as a code range, and the
+        // close tag must NOT fall inside any range.
+        val closeIdx = doc.indexOf("<!-- /agent:exchange -->")
+        assertTrue(
+            "close tag swallowed by a code range: ranges=$ranges",
+            ranges.none { closeIdx >= it.first && closeIdx < it.second },
+        )
+    }
+
     @Test
     fun `returns null for nonexistent component`() {
         val doc = """

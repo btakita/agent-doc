@@ -2339,24 +2339,69 @@ internal fun componentPatchModeOverrideUtil(op: String?): String? =
     }
 
 internal fun findCodeBlockRangesUtil(doc: String): List<Pair<Int, Int>> {
+    // Mirror the Rust `component::find_code_ranges` fence handling (#npe1 /
+    // #codefencestrip): a real fenced code block is delimited by a matching
+    // fence *character* (``` or ~~~) and *length* (>= the opener's run length).
+    // The previous naive "every ``` line toggles a block, ~~~ ignored" pairing
+    // desynced whenever the fence count went odd (a lone ``` in prose, a
+    // backtick run inside a ~~~ block, or a ~~~-only block), which could let a
+    // mis-paired range swallow the boundary / `<!-- /agent:exchange -->` region
+    // and strip a trailing code fence at the exchange boundary.
     val ranges = mutableListOf<Pair<Int, Int>>()
-    val fencePattern = Regex("""^[ \t]*```""", RegexOption.MULTILINE)
-    var insideFence = false
+    var inFence = false
+    var fenceChar = ' '
+    var fenceLen = 0
     var fenceStart = 0
+    var offset = 0
 
-    for (match in fencePattern.findAll(doc)) {
-        if (!insideFence) {
-            fenceStart = match.range.first
-            insideFence = true
-        } else {
-            val lineEnd = doc.indexOf('\n', match.range.last + 1)
-            val blockEnd = if (lineEnd >= 0) lineEnd + 1 else doc.length
-            ranges.add(Pair(fenceStart, blockEnd))
-            insideFence = false
+    for (segment in splitInclusiveNewline(doc)) {
+        val lineStart = offset
+        offset += segment.length
+        val lineEnd = offset
+        val trimmed = segment.trimEnd('\n', '\r').trimStart()
+        val first = trimmed.firstOrNull()
+        val runLen = if (first == null) 0 else trimmed.takeWhile { it == first }.length
+        val opensOrCloses = (first == '`' || first == '~') && runLen >= 3
+
+        if (!inFence) {
+            if (opensOrCloses) {
+                inFence = true
+                fenceChar = first!!
+                fenceLen = runLen
+                fenceStart = lineStart
+            }
+        } else if (first == fenceChar && runLen >= fenceLen && trimmed.drop(runLen).trim().isEmpty()) {
+            // Closing fence: include the full closing-fence line in the range.
+            inFence = false
+            ranges.add(Pair(fenceStart, lineEnd))
         }
     }
 
+    // An unterminated fence runs to end of document (matches CommonMark: the
+    // rest of the input is code).
+    if (inFence) {
+        ranges.add(Pair(fenceStart, doc.length))
+    }
+
     return ranges
+}
+
+/** Split `doc` into line segments that each retain their trailing newline. */
+private fun splitInclusiveNewline(doc: String): List<String> {
+    val segments = mutableListOf<String>()
+    var start = 0
+    var i = 0
+    while (i < doc.length) {
+        if (doc[i] == '\n') {
+            segments.add(doc.substring(start, i + 1))
+            start = i + 1
+        }
+        i++
+    }
+    if (start < doc.length) {
+        segments.add(doc.substring(start))
+    }
+    return segments
 }
 
 internal fun repositionBoundaryToEndUtil(

@@ -148,7 +148,26 @@ Fixed and shipped (corky `bddfab0` on `origin/main`). Two display paths sliced s
 - Commit `bddfab0` — pushed.
 
 Next queue head: `#ckysheets` (P0 sheets-push two-call data loss).
-<!-- agent:boundary:8248a742 -->
+
+### Re: #ckysheets — P0 sheets-push two-call data loss — opus-4-8
+
+Fixed and shipped (corky `5e7ba56` on `origin/main`). `corky sheets push` cleared the target tab and then wrote new values in **two separate HTTP calls** (`crates/corky-google/src/doc/sheets.rs`); a failure between them (network drop, 401, quota) left the tab empty with no backup.
+
+**Fix — snapshot + rollback** in `push_tab`:
+- Snapshot the existing rows (`fetch_rows`) **before** clearing.
+- Snapshot read fails → abort before clearing, tab untouched (no data loss).
+- Value write fails after the clear → save the snapshot to a local `<CSV>.bak` file **and** attempt to restore it to the tab, then error with recovery instructions.
+
+So an interrupted push never silently discards the previous contents. I chose snapshot+rollback over an atomic `batchUpdate`/`updateCells` because it preserves the exact `valueInputOption=USER_ENTERED` parse semantics (numbers/dates/formulas) the current write relies on — an `updateCells` grid would have to re-implement type coercion.
+
+**Verification (`#spec-test-build-install-commit-push`):**
+- Tests: new `backup_csv_path` unit test (sibling/nested/extension-less paths) — `cargo test -p corky-google` → 60 passed; full `make check` (GPU clippy `-D warnings` + workspace) green.
+- Build + install (GPU/CUDA): `make install` → `corky 0.29.0` in `~/.cargo/bin`.
+- Spec: SPEC.md §14.2.8 documents the rollback behavior + the new snapshot read.
+- Commit `5e7ba56` — pushed.
+
+Next queue head: `#ckywatchpanic` (P1 watch daemon dies on tick panic).
+<!-- agent:boundary:724e08f7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -178,7 +197,6 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] 🚧 [#ckysheets] [P0 data-loss] corky sheets push clears tab THEN writes in two HTTP calls; failure between them leaves tab empty with no backup. Use batchUpdate updateCells (atomic at API level) or buffer old values for rollback. crates/corky-google/src/doc/sheets.rs:148-174
 - [ ] [#ckywatchpanic] [P1] corky watch dies on any tick panic: spawn_blocking(...).await? under panic=abort (Cargo.toml:89) propagates JoinError and aborts the daemon, contradicting the never-crashes-loop contract in watch.rs doc comments. Wrap each tick in catch_unwind and log instead of ?. src/watch.rs:309-312
 - [ ] [#ckydedup] [P1 correctness] dedup key (raw_from, raw_date) drops distinct same-second messages and leaks duplicates across providers (date string varies by TZ/format, From varies by display-name). Normalize address + parse date to UTC seconds + include message_id. crates/corky-mail/src/sync/imap_sync.rs:184-197
 - [ ] [#ckythread] [P1 correctness] threading gaps: IMAP path hardcodes message_id None (imap_sync.rs:542-552, breaks reply threading for IMAP accounts since **Message-ID** metadata is never written); no validation that in_reply_to AND thread_id are both set (draft/send.rs:91-104, reply silently un-threads); IMAP subject-key vs Gmail threadId-key never merge on provider switch.

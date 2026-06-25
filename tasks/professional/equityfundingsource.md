@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -190,7 +190,19 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=44779e11-ecb0-4de9-896b-195336c9ce79 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782420593164
 ```
-<!-- agent:boundary:0ab758d9 -->
+
+### Re: "Limited Time Only" vertical centering — scope check — opus-4-8
+
+> **Queue prompt:** "Limited Time Only ..." in ![img_38.png](img_38.png) should be vertically centered between the "Shop The Sale!" and footer ribbon.
+
+This looks **misdirected into the EFS session doc.** `img_38.png` is an e-commerce sale banner — "SHOP THE SALE!", "LIMITED TIME ONLY - ENDS JULY 4", "SAVE 20% ORDERS OVER $200 / SAVE 15% ORDERS UNDER $200". That's a shop/WooCommerce promo, not Equity Funding Source (a loan-funding admin app). Confirmed: no `Shop The Sale` / `Limited Time Only` / `orders over $200` strings exist anywhere in `src/equityfundingsource-dev`. So there's no EFS code this applies to, and I won't guess-edit a different project's repo from the EFS document (scope discipline).
+
+**Please confirm the target so I can act:**
+- If this is **monsterrodholders** (or another WooCommerce/WordPress site), point me at the page/template/email and I'll do it there — note that's a live WordPress site managed via wp-cli/SSH, not a local repo, so I'd want the explicit target (theme block, email template, or page builder section).
+- If it really is EFS, tell me which page/route renders this banner (I couldn't find one).
+
+**The fix itself, once targeted:** the `LIMITED TIME ONLY - ENDS JULY 4` line should be vertically centered in the gap between the red `SHOP THE SALE!` button and the footer ribbon — typically by making that band a flex container with `align-items: center` (and equal top/bottom padding), or removing an asymmetric top margin on the text so it sits mid-band rather than hugging the button. Happy to apply it the moment you confirm where.
+<!-- agent:boundary:1d17ba69 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -210,7 +222,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 "Limited Time Only ..." in ![img_38.png](img_38.png) should be vertically centered between the "Shop The Sale!" and footer ribbon.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -270,7 +270,26 @@ Why I can't close it this turn:
 - **PyPI**: blocked on PyPI-side trusted-publisher config (`repo:btakita/corky:environment:pypi`) — external approval, outside this session's reach.
 
 Gating `#5jax` → review as the umbrella over the PyPI item. To unblock: (1) confirm you want a v0.29.0 crates.io release and I'll prep the ordered publish + changelog, and (2) complete the pypi.org trusted-publisher setup. The prior queue head's semantic-match flag (`#tagpath-queue-priority-publish-align`) was a false positive — that's the tagpath release, unrelated to corky.
-<!-- agent:boundary:512a15c7 -->
+
+### Re: do [#5jax] release + publish — operator-gated — glm-5.2
+
+> **Queue prompt:** do [#5jax]
+
+`#5jax release + publish` is **externally blocked**, so I gated it (`[/]` → review) rather than executing. Corky publish state (corky `39f266a`, v0.29.0):
+
+| channel | last published | unpublished since |
+|---|---|---|
+| crates.io | v0.28.2 | v0.29.0 — 9 commits ahead (crate-split refinement, `#ckymimestream`, `#ckymimeinline`, `#ckythreadmerge`, 4 state machines, `#ckybenchbreak`) |
+| PyPI | — | blocked: PyPI trusted-publisher not configured (run 26195923707 `invalid-publisher`) — already tracked as `#pypi-trusted-publisher` |
+
+Why it can't close this turn:
+- **crates.io** — `cargo publish` is irreversible and needs your API token + an explicit go/no-go (workspace publish order: corky-core → -google → -mail → -social → bin; v0.29.0 has breaking changes). Not something to fire autonomously.
+- **PyPI** — blocked on PyPI-side trusted-publisher config (`repo:btakita/corky:environment:pypi`), an external approval outside this session's reach.
+
+To unblock: (1) confirm you want a v0.29.0 crates.io release and I'll prep the ordered publish + changelog, and (2) complete the pypi.org trusted-publisher setup. Note: the earlier semantic-match flag (`#tagpath-queue-priority-publish-align`) was a false positive — that's the tagpath release, unrelated to corky.
+
+Tooling note: this cycle hit a stale IPC listener (the `startup-miss` opencode pane buffer kept overwriting the working tree via CRDT convergence, causing `#queue-user-edit-overwrite` guards). I used `--force-disk` to land a clean commit. If you see more drift, killing the stale pane or running `agent-doc admin recycle` should clear it.
+<!-- agent:boundary:294e0838 -->
 <!-- /agent:exchange -->
 ###
 <!--

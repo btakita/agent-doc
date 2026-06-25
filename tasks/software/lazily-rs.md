@@ -199,7 +199,25 @@ Added the Google Sheets scale to the README Benchmarks section: at the full **10
 - **Data-cycle prevention.** `#lzcycledetect` guards the *reactive dependency* graph (a computed reading itself), not your *data* tree — nothing stops you storing a child id that points back at an ancestor; that invariant is the app's to enforce.
 
 So: trees work well as nested/keyed cell collections with fine-grained reactivity today; the missing ergonomics are ordered children and atomic subtree move (both `#lzcellmove`). If you want a first-class `CellTree` / ordered `CellList` primitive, say the word and I'll plan it.
-<!-- agent:boundary:d161a549 -->
+
+### Re: Best tree algorithm for agent-doc AST + semantic trees — opus-4-8
+
+> **Queue prompt:** What tree algorithm would be best for agent-doc document AST + semantic documenttrees?
+
+agent-doc's document is a **shallow, ordered, stably-keyed tree**: root → components (`exchange`, `queue`, `backlog`, `review`, `status`, `done`…) in document order → items in order, each with a stable id (your `component:occurrence:item-id:index` node_key). Edits are localized (per-item add/edit/strike/reorder) and the goal is **per-cell CRDT merge**, not whole-document merge. That shape points to one design:
+
+**1. Structure — ordered keyed tree with stable ids + structural sharing.** Each node = `(kind, stable_id, value_cell, ordered children)`. Children are an **ordered** keyed collection (`CellList`/ordered `CellMap`), not a hash map, because sibling order is meaningful. Stable ids (your item-ids) mean a node survives reorder/edit. Cheap `Rc` clone = structural sharing between revisions. This is idiom 2 from the previous answer (nested cell collections) + ordered children.
+
+**2. Diff — keyed reconciliation per level (the core algorithm).** When a revision lands, diff each level by **stable key, not position**: a keyed children diff (React-style), and for sequences with moves the **LIS-based keyed move-minimization** Vue 3 / Inferno use (longest-increasing-subsequence over matched keys ⇒ fewest moves). Keying by stable id is precisely what yields a **minimal `{insert, remove, move, update}` op set per item** instead of a whole-subtree replace — i.e. it is the enabling step for per-cell CRDT merge. (Ties directly to the project's per-cell-merge intent.)
+
+**3. Sibling order under concurrency — a sequence CRDT.** For mergeable ordering of children (concurrent inserts/reorders without a coordinator), give each child a CRDT position: **fractional indexing** (simplest) or **RGA/Fugue**, ideally a **move-aware** list CRDT (cf. Kleppmann's "moving elements in list CRDTs") so a reorder is one move op, not delete+reinsert that duplicates under concurrency. This is the per-level order layer above the per-cell value merge.
+
+**4. Move must be atomic.** Reconciliation *emits* move ops; representing a move as remove+insert loses the node's cell identity, dependents, and CRDT lineage. So **atomic ordered move (`#lzcellmove`)** is the keystone primitive for this — another reason it matters.
+
+**5. Two layers: AST (input cells) + semantic tree (computeds).** The syntactic AST is input/value cells; the *semantic* tree (e.g. "unresolved prompts", "drainable heads", "section summaries") is **memoized `computed` nodes over the relevant subtree**, recomputing only when that subtree's cells change — lazy + glitch-free, the lazily win. Don't materialize semantics eagerly; derive them.
+
+**Net recommendation:** ordered keyed tree (stable ids, per-node value cells, `CellList` children) + **keyed reconciliation with LIS move-minimization** for diffs + a **move-aware sequence CRDT** (fractional-index/RGA) for sibling order + **atomic move (`#lzcellmove`)**. Cell Families supply the fine-grained reactivity; keyed reconciliation supplies minimal per-item ops; the sequence CRDT supplies mergeable order — together that *is* the per-cell CRDT-merge substrate agent-doc wants. If you want this written up as a plan (mapping it onto agent-doc's components + the existing node_key scheme), say so and I'll draft it.
+<!-- agent:boundary:0eac3a01 -->
 <!-- /agent:exchange -->
 ###
 <!--

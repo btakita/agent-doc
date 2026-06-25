@@ -69,7 +69,21 @@ Working tree is clean — no code or deploy work was needed this cycle; the ship
 
 
 Per your "I will test, file bugs, you check the logs" loop, the one non-code remaining check is the `plan-opencode-post-turn-false-active.md` trailing note: live-verify a real OpenCode pane re-dispatches after a completed turn (no false `alive-busy`; restart works without the 2-step). No review gate filed, per your "no more gates" instruction — flagging here for your next test pass.
-<!-- agent:boundary:9f0e53bd -->
+
+### Re: recovery — unstall + fresh binary + tools — glm-5.2
+
+You were right that I stalled — "OpenCode has no auto-loop" only blocks the `/loop` skill, not manual draining. Recovering and continuing.
+
+**Unblocked the stale-binary gap:** the installed 0.34.48 was built before `queue consume` / `queue prune-noise` (`9c53d423`) shipped, so the strike tools I needed weren't in the running binary. Ran `make install` → fresh binary + lib-install auto-recycled 2 controllers onto it. `agent-doc queue consume`/`prune-noise` now resolve.
+
+**Struck the resolved head:** `queue consume --count 1` removed the already-answered `#jbrestartbusy` free-text head (remaining 20).
+
+**This write absorbs the IPC-diagnostic noise** (`### Re: IPC proof diagnostic` blocks appended by interrupted-cycle recovery during IPC churn) through the snapshot/commit boundary so preflight stops flagging it as a direct patchback. Root cause is a binary bug: recovery appends diagnostics with a `### Re:` header, which the direct-patchback detector then flags — will file as a backlog item.
+
+### Re: drain plan — glm-5.2
+
+Continuing the queue: next leading head is the `#jbrunhang` session-startup hang isolation, then collapse the ~7 actor-switch flood pins by completing `#actorswitchdefer` Part B and `queue consume`-ing the answered duplicates.
+<!-- agent:boundary:781d6000 -->
 <!-- /agent:exchange -->
 
 ## Queue

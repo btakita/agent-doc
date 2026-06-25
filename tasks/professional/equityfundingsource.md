@@ -196,7 +196,23 @@ Done — implemented + deployed (you chose implement+deploy via the prompt-choic
 Verify: added `#msg-dialog-scroll` regression test; `bun run test` → 1226 pass / 0 fail; `build` + `build:worker` clean. Pushed `cc3e1db`, deployed Version `352fe989-e969-456c-8ffa-794ea32f9196`.
 
 **Please eyeball it** (this is a layout change I can't visually verify from here): open a deal → Messages, check the per-user, group, messages, and contact tabs — the compose box should stay pinned at the bottom while the thread scrolls on its own.
-<!-- agent:boundary:2f7c1a08 -->
+
+### Re: Collapse Personal + Subject Property cards + deploy — opus-4-8
+
+Drained both heads.
+
+> **Queue prompt:**
+>
+> Please collapse the Full Application fields of "Personal" + "Subject Property" to reduce scrolling to view all data.
+
+> **Queue prompt:**
+>
+> deploy
+
+**Collapsed by default.** The **Personal** and **Subject Property** cards in the Full Application detail are now collapsible and **default to collapsed** (chevron header to expand), so the dialog opens compact and you scroll far less to see all sections — matching the Declarations + Review & Sign behavior added earlier. `Personal` reuses the `EditableObjectSectionCard` `collapsible`/`default_collapsed` props; I added the same `collapsible`/`default_collapsed` support to `SubjectPropertyCard`. Shared component, so the borrower application-status view gets the same compact default. `lib/ui--browser--efs/portal/shared/full_application_detail.tsx`.
+
+**Verify + deploy.** Added a `#full-app-collapsible-cards` regression test; `bun run test` → 1227 pass / 0 fail; `build` + `build:worker` clean. Pushed `0222de8`, deployed Version `be8be001-3491-4799-b471-718cff488ff1`. No CI workflow in the EFS repo.
+<!-- agent:boundary:e85d9695 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -216,6 +232,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- 🚧 Please collapse the https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 fields of "Personal" + "Subject Property" to reduce scrolling to view all data.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

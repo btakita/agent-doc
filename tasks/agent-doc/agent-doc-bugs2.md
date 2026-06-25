@@ -357,7 +357,26 @@ So all three of your reports are now addressed in code (frontmatter-reset `#fmre
 ### Re: file #supdead-simworld — opus-4-8
 
 Filed `#supdead-simworld` in the backlog: extend the route SimWorld model with a Dead/stale-socket supervisor state + connect-liveness, and drive the `#supdead-coldstart-fallback` lifecycle end-to-end (dead → cold-start-when-safe vs own-ancestor guidance). It's the deferred test-infra follow-up to the now-merged `#supdead-coldstart-fallback` (which ships with pure-decision + real-socket probe unit tests). Agent-doable in a worktree whenever you want it drained.
-<!-- agent:boundary:eafc4fb8 -->
+
+### Re: drain — #supdead-simworld done; remaining heads are operator-verify — opus-4-8
+
+Drained the one genuinely agent-doable queue head this cycle and confirmed the rest are live-editor-gated.
+
+**`#supdead-simworld` — DONE.** Extended the route SimWorld model with a dead/stale-socket supervisor state and drove the `#supdead-coldstart-fallback` recovery path end-to-end deterministically:
+- Added `SupervisorLifecycle::Dead` (process gone, stale socket lingers — distinct from `Closed`, which reaps its socket) + a `SupervisorSocket` connect-liveness enum (`Live` / `StaleRefused` / `Absent`) mapping onto the production `SocketLiveness`, with a `present_but_not_accepting()` assertion surface.
+- Transitions: `abandon_supervisor_to_dead_socket()` (crash/abandon → `Dead`+`StaleRefused`, drops lease/pending dispatch) and `recover_dead_supervisor(...)`, which **drives the real `decide_dead_supervisor_recovery`** (now `pub(crate)`) rather than re-implementing it — so the SimWorld scenarios exercise production decision code.
+- 3 deterministic scenarios covering the full matrix: safe caller + reachable tmux → reap-then-cold-start to `Ready`; own-ancestor caller → `Guidance`, stays `Dead`, **no raw ECONNREFUSED**; no-tmux-target → actionable `Guidance`, stale socket still present-but-not-accepting.
+- Worktree branch `supdead-simworld` @ `91e16ae8`, `make check` green (623 passed / 7 ignored). Merged → agent-doc `main` `80ba799a`; superproject submodule pointer bumped `92abf4f37`. No install/recycle/push (live supervisor undisturbed; release-pause respected — and it's test-only/inert-visibility, so no runtime install is needed for correctness).
+
+**Leading free-text heads:**
+> **Queue prompt:** I deleted some items from the queue but they came back. It seems that operator edits are not propagating to the CRDT authority models.
+
+This is the `#qeditdup` / `#qftloss` class — both `[operator-verify]`, **code-complete on main** (`#queuestatemachine` idempotent convergence + the Live<Struck lattice merged in 0.34.48; free-text edits journaled to the `#qdurcrash` store before convergence). They need a live-IDE eyeball on the *recycled* binary, which I can't perform. The 🚧 head (`On a fresh lazily-rs.md tmux pane, ● State is racing…`) is a captured prior-agent console fragment, not an operator prompt — stray queue noise to be cleared, not answered.
+
+**Supervisor health:** the recorded `queue_pause_reason` (per-finalize `live_prompt_drift` + post-commit worktree corruption) is **stale** — recent ops.log cycles are clean: `postcommit_worktree_check match=true`, `write_authority transport=write_queue`, `supervisor_host_gate hosting=in-process`, `drift_recheck=false`. The route-owned supervisor (pid 2967818) runs the current binary (0.34.48 = source). The pause only suppresses the idle-watch; it didn't block this drain.
+
+**Remaining queue heads are all `[operator-verify]`** — `#qftloss`, `#qeditdup`, `#crdtauth6`, `#nsfz` (and the gated review `#kj5f` / `#mergestatemachine3`) are code-complete and waiting solely on your live-editor / plugin-install eyeball. No agent-drainable work remains after this item, so the in-session loop stops here rather than churning. Check the logs as you test and file any live failures.
+<!-- agent:boundary:3dd71a70 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -366,7 +385,7 @@ Filed `#supdead-simworld` in the backlog: extend the route SimWorld model with a
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - On a fresh lazily-rs.md tmux pane, `● State is racing between runs (live supervisor/editor writing concurrently). Let me look at the actual document to
   understand what's being asked rather than chase the shifting sidecar state.`
-- I deleted some items from the queue but they came back. It seems that operator edits are not propagating to the CRDT authority models.
+- ~~I deleted some items from the queue but they came back. It seems that operator edits are not propagating to the CRDT authority models.~~ — auto-struck: answered this cycle (#ftstrike)
 ---
 🚧 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
 ```

@@ -348,7 +348,27 @@ I did **not** blindly run `make benchmark-update`: the archived `#lzbenchbudget`
 - **#xccx** Holons integration — blocked on Steve's answers.
 
 **Top backlog id: `#lzbenchstale`.**
-<!-- agent:boundary:cba898b9 -->
+
+### Re: do #lzbenchstale — benchmark-check RED root cause + fix — glm-5.2
+
+> **Queue prompt:**
+>
+> What are #next-steps to fix lazily bugs?
+
+Drained `#lzbenchstale`. **`make benchmark-check` is green again.** Root cause was a stale generated section from the 0.12.3 version bump, **not** a contention regression.
+
+**Root cause** — the `#lzasyncdispose2` release bumped `Cargo.toml` 0.12.2→0.12.3, but `BENCHMARKS.md`'s generated section header embeds the package version (`Generated for package lazily version X`). The `--check` path rebuilds that section from the on-disk Criterion + profile artifacts and the *current* `Cargo.toml` version, so the version-line drift made it "stale". The profile CSV and `BENCHMARKS.md` shared the same mtime (17:33:21) — same generation batch; only the version string moved.
+
+**Not a regression** — the backlog item hypothesized a real contention regression from `8665e29` (SlotId casts) + `38b18e4` (eager Signal on ThreadSafeContext). Ruled out: (1) the check reported only "stale", *not* "instrumentation regression budget failure" or "required latency evidence failure" — every deterministic lock-acquisition budget (per-profile totals + per-site) **passes**; (2) both suspect commits are pre-existing at v0.11.1 and already accounted for in the calibrated `REGRESSION_BUDGETS`; (3) lock-acquisition *counts* are stable across the regenerate (only single-run `lock_wait`/`lock_hold` *timings* in the attribution table shifted, as expected for a "single local profile run" snapshot). An A/B worktree test was therefore unnecessary — the on-disk results already include those commits and produced the published numbers.
+
+**Fix** (src/lazily-rs) — regenerated `BENCHMARKS.md` via the runbook-sanctioned `python3 scripts/update-benchmark-results.py --no-run` (reuses the valid existing Criterion estimates; refreshes the instrumentation-profile snapshot + version). This is case (a) of the backlog item's fork (stale baselines → regenerate).
+
+**Verification** — `make check` **fully green**: fmt, clippy, build, all feature suites (lib 32, spec_compliance 107×2, integration 13×2, signal 19×2, state_machine 11×2, thread_safe variants, Loom, FFI, IPC 11×2, conformance 10×2, distributed, webrtc 4×2, websocket, signaling handshake, doctests), Lean formal model, **and** `benchmark-check` (exit 0). GitHub Actions CI run `28146185018` dispatched and in-progress at closeout (not blocking — local suite is green).
+
+**Shipped** — lazily-rs `26be677` (pushed to `lazily-hub/lazily-rs`, `c3426a8..26be677`); superproject gitlink bumped + pushed (`ae5458eab..f85c838ec`). Only `BENCHMARKS.md` committed — the dirty `AGENTS.md`/`CLAUDE.md` are unrelated tsift code-nav v0.1.70→v0.1.73 drift, left unstaged.
+
+**#next-steps status** — the agent-drainable bug backlog is now empty. `#lzbenchstale` was the last open code item; it was the top-of-backlog and is now done. Remaining work is all operator-gated: `#h6qb` (WebRTC live two-host e2e), `#xccx` (Holons integration, blocked on Steve), `#kabc`/`#lilazilysmpost` (LinkedIn follow-up comments), and the lazily-js npm publish (needs npm 2FA). No agent-drainable `#next-steps` remain.
+<!-- agent:boundary:c6f77e2d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -358,13 +378,12 @@ I did **not** blindly run `make benchmark-update`: the archived `#lzbenchbudget`
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - 🚧 [#lzbenchstale]
-- What are #next-steps to fix lazily bugs?
+- ~~What are #next-steps to fix lazily bugs?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzbenchstale] [recommended] make benchmark-check is RED (verified 2026-06-24 in src/lazily-rs: "BENCHMARKS.md benchmark results are stale; run update-benchmark-results.py") — supersedes the archived #lzbenchbudget, which the binary auto-reaps if re-queued. Contradicts the prior session "#gxzm green" note. #gxzm (#lzbmcheckdrift, missing p50/p95 rows) and #lzbenchbudget (thread_safe_contention lock-acquisition overages: set_cell_invalidation 78>32, lock_acquisitions 908>700, other 345>160) are distinct modes; the check is stale again. Do NOT blindly run make benchmark-update — this is either (a) stale baselines -> regenerate, or (b) a REAL contention regression from 8665e29 (SlotId casts) + 38b18e4 (eager Signal on ThreadSafeContext). Run an isolated-worktree A/B first, then refresh baselines OR file the regression. Pre-existing at v0.11.1; unrelated to the 0.12.3 str0m content.
 <!-- /agent:backlog -->
 
 ## Review

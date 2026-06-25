@@ -95,7 +95,19 @@ I confirmed the design with you first (it wasn't derivable from code — the dia
 **Verification**: full `bun test` **1223 pass / 0 fail**; `bun run build` + `build:worker` clean. Updated 4 existing source-assertion tests for the rename/restructure and added 6 new tests under `#msg-user-context-tabs`. (EFS repo has no CI workflow; local suite is the gate.)
 
 Next queue head is **deploy** — I'll take that on the next drain.
-<!-- agent:boundary:08b36ead -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=e9d60d77-ad79-4030-be5e-5f0f4040fe3f invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782372613863
+```
+<!-- agent:boundary:a780ea91 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -117,7 +129,7 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline > Available Deal cards should show the number of interested lenders.~~
 - ~~When opening the Messages dialog on user context, render a specific tab for each user in the user context. Also render another tab for the user group. These tabs are dedicated to the user(s). Remove the existing All Messages tab. Rename Messages tab to All Messages. Add an All tab in Messages dialog > Messages tab...a sibling to Borrowers|Lenders|Brokers. This tab effectively replaces the replaced All Messages tab.~~
-- :pushpin: deploy
+- 🚧 :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

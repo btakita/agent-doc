@@ -185,7 +185,24 @@ Root-caused and fixed the churn in the **binary** (agent-doc `cadc400c`, submodu
 **To go live:** the fix is committed but the **running** supervisor is still on the old binary (0.34.48). It picks up `cadc400c` via the supervisor boundary auto-install, or immediately on `agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md`. I deliberately did **not** `cargo install` mid-session (that makes the finalize client newer than the live supervisor → the exact drift), and did **not** cut a release (your standing "stop cutting releases" hold). The queue stays **paused** until the new binary is live — resuming on the old binary would just churn again. After restart: resume the queue and it will drain the `🚧` residue cleanly on the first pass.
 
 **Scope note:** this fixes the specific churn loop (answered-head residue). The separate IPC `live_prompt_drift` / stale-CRDT issue (the parent route-owned supervisor) is the operator-restart / supervisor-in-process concern, not this strike pass.
-<!-- agent:boundary:0ad393ab -->
+
+### Re: queue-activity state machine — head epic, Phase 1 (#vwj7) — opus-4-8
+
+Post-restart recovery + first focused-cycle phase of the head epic.
+
+**Recovery first.** Preflight tripped the layout guard (`snapshot ≠ HEAD without an open cycle`, 9-char drift). The drift was pure queue-lifecycle churn the supervisor had written (boundary-marker bump, `~~~done` wrap on the actor-switch free-text head, `🚧` on `#brtc`) — no user prose. Cleared it the safe way (`git stash` the file → `reset --from-current --preserve-session` → `stash pop`) so snapshot re-aligned to HEAD and the markers committed as a normal converged diff. `recovered: true, committed: true`.
+
+**#vwj7 — `#queuestatemachine1` done.** Implemented `agent-doc-orchestration/src/queue_item_state_machine.rs` (submodule `ee79b797`): a pure per-item lifecycle model that makes duplicate-injection *structurally impossible* instead of patched after the fact.
+
+- **States** `Authored < Mirrored < InProgress < Answered < Struck < Reaped` form a total order; `transition_queue_item` is the **join** `max(current, event.target())`.
+- **The guarantee:** a stale-CRDT / supervisor re-emit of an `OperatorAuthored` / `BacklogMirrored` event for an identity already at `InProgress`/`Answered`/`Struck` is a **no-op** — it can't resurrect the item as a fresh head, so the exact churn we just hand-recovered (`#actorswitchdefer` / `#n529b` residue re-injection) cannot form a visible duplicate. This is the model `#brtc`'s SimWorld will exercise.
+- **Identity** reuses `extract_head_id` (so `:pushpin: do [#gww8]`, `do [#gww8]`, `[#gww8]` collapse to one identity) and the free-text dedup normalizer.
+- **9 exhaustive tests** prove totality, monotonicity, idempotence, join semantics, re-emit-storm convergence, and identity collapse. `make check` green (5146 tests).
+
+**Not yet wired into convergence** — that's `#cgfx` (`#queuestatemachine2`: route the ad-hoc dedup passes through the SM as transition guards), then `#brtc` (`#queuestatemachine3`: SimWorld re-emit-storm proof). No behavior change is live yet, so no install/recycle needed — consistent with the standing "stop cutting releases" hold.
+
+**Scope note:** no release ceremony (version/tag/publish/install) per your hold; the code is committed to the submodule and the superproject pointer follows.
+<!-- agent:boundary:3fc0e730 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -82,7 +82,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 A message says `Admin sent application feedback for [56b22a22-80a7-46a9-ad69-5ab78d5449f9](efs-app-feedback:56b22a22-80a7-46a9-ad69-5ab78d5449f9).`. Why does the message contain a markdown link? What is efs-app-feedback:56b22a22-80a7-46a9-ad69-5ab78d5449f9 and how do we link to it?
 <!-- /agent:queue -->
 
 ## Backlog

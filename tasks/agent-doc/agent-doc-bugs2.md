@@ -345,13 +345,23 @@ Both of the new queue bugs are fixed and merged (main `729038fc`, `make check` 5
 **#qeditdup** stays `[operator-verify]` — the merged `#queuestatemachine` idempotent convergence + `Live<Struck` lattice should already prevent the duplication/resurrection; verify on the recycled binary.
 
 So all three of your reports are now addressed in code (frontmatter-reset `#fmreset` + 🚧-stuck `#qftstuck` fully fixed; free-text-loss `#qftloss` code-complete; dup/resurrect `#qeditdup` fixed-pending-verify). The live data loss stops once the supervisor recycles onto the installed binary.
-<!-- agent:boundary:e8ea734f -->
+
+### Re: file+fix the cold-start-fallback gap — opus-4-8
+
+**`#supdead-coldstart-fallback` filed + fixed + merged** (commit `8a4f2abc`, merged to main `47bdacb2`; `make check` 5301 green). **Not installed** — holding off on `make install` per your note until the supervisor is back, so this won't re-trigger the recycle storm.
+
+**The fix:** `session restart-supervisor` (and the recovery family) previously called `connect()` on the supervisor socket and surfaced a raw `Connection refused (111)` when the process was dead. Now `supervisor::ipc::probe_socket` classifies liveness — missing socket or `ECONNREFUSED` → `Dead`; any *ambiguous* error → treated as `Live` (never cold-start over an unproven-dead peer). On a dead supervisor it reaps the stale socket and **cold-starts a fresh one via the existing `route::auto_start` controller path** (so it comes up on the installed binary) — *except* when the caller is the dead supervisor's own pane/ancestor (exactly this session's case), where forcing an in-process spawn would tear down the caller; that path returns **actionable guidance** ("supervisor is dead, not just unreachable — cold-start via `Run Agent Doc` from a DIFFERENT pane, or restart the pane") instead of the bare connection error. Live-supervisor in-place restart is unchanged. Deferred: a dead-socket SimWorld lifecycle (the route model doesn't yet model socket connect-liveness) — covered by pure-decision + real-socket probe unit tests instead.
+
+**Your current dead supervisor still needs the manual cold-start** (this fix isn't installed, and even installed, the own-ancestor case routes you to the same remedy): **`Run Agent Doc` on this doc from a different pane, or restart this tmux pane** — it cold-starts a fresh supervisor on `0.34.48`. All work is committed to git; nothing is lost.
+<!-- agent:boundary:6c1bca15 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- On a fresh lazily-rs.md tmux pane, `● State is racing between runs (live supervisor/editor writing concurrently). Let me look at the actual document to
+  understand what's being asked rather than chase the shifting sidecar state.`
 - I deleted some items from the queue but they came back. It seems that operator edits are not propagating to the CRDT authority models.
 ---
 🚧 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
@@ -395,12 +405,6 @@ Affected component: editor IPC / writeback
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8c56928442bd4b165543ab0aad264d681b41b8898551d10f196018cd15a37304 content_len=11944 content_hash=46b47fdfe5505fb37c9e63df4167cb923df6b4ffc997ecca9009a15979c29a5e doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782339826601
 ```
 ---
-- ~~:pushpin: Still getting JB `File Cache Conflict` dialogs.~~
-- ~~:pushpin: Opencode responses are reverse ordering numeric lists.~~
-- ~~:pushpin: do [#npe1]~~
-- ~~:pushpin: do [#p2j4]~~
-- ~~:pushpin: do [#4pdp]~~
-- ~~:pushpin: do [#0bmv]~~
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```

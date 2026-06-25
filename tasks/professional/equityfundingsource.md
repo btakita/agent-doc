@@ -110,7 +110,25 @@ Striking the two answered heads (full responses in the section above): the Full 
 > **Queue prompt:** Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Full Application: Personal, Address, Employment, Income
 
 > **Queue prompt:** In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097, what is the Proposed Loan Amount vs the Loan Amount?
-<!-- agent:boundary:e8449e02 -->
+
+### Re: Deal loan-tab layout (Borrower Info + Application) + deploy — opus-4-8
+
+> **Queue prompt:** Optimize the layout of …/admin/pipeline?…&dialog=deal&dialog_deal_id=4d2b9382-…&deal_tab=loan: Borrower Info + Application
+
+Delivered and **live** (EFS `1c4fb1c`, Version `b9966711-fcc7-4773-b217-9ee443114ed7`). The bottleneck on that loan tab was the **Application** card: ~11 fields stacked one-per-row, towering beside the short 4-field **Borrower Info** card and leaving a tall dead-space column. I applied the same density pattern you approved last cycle for the Full Application dialog (`.full-app-record-grid`):
+
+- **Application card** now flows its short scalar fields (Loan Number, Loan/Application Status, Ref #, Proposed Loan Amount, Loan Purpose, Occupancy, Property Value, Submitted, Last Updated) **multiple-per-row** in a responsive `repeat(auto-fit,minmax(190px,1fr))` grid, **label-above-value** instead of one tall right-aligned row each. On a wide card that's ~2 columns, roughly **halving the card height** so it no longer dwarfs Borrower Info.
+- **Property Address** moved to a **full-width row at the bottom** of the card (it carries a longer value + the address-verification pill, so it spans every column rather than cramping a 190px cell).
+- **Borrower Info** is intentionally left as the compact contact stack (Name/Email/Phone/Mailing Address with right-aligned copy buttons) — those values are long (emails, addresses) and read worse two-up, and it's already the dense form from the `#67v2` work.
+
+This is `lib/ui--browser--efs/portal/admin/loan_detail.tsx`, the **shared** component, so the admin loan page and the deal-dialog loan tab both get the denser layout (consistent with how the density PRD already treats them as one). All inline-styled — no portal CSS change. Updated `tests/tmo-loan-details-density.test.ts` to lock the new dense grid + `dense`/`wide` field rendering.
+
+If you want a *specific* further tweak (3-up at wider widths, Borrower Info also two-up, a particular field order/grouping), re-queue with the target and I'll take it.
+
+> **Queue prompt:** deploy.
+
+Done. `make deploy` ran: full suite **1228 pass / 0 fail**, `build` + `build:worker` clean, remote D1 migrate applied, worker uploaded and triggers deployed → `https://equityfundingsource.brian-takita.workers.dev` (Version `b9966711`). Submodule committed (`1c4fb1c`) and pushed to `origin/main` (`5b62fa6..1c4fb1c`). (The `d1 down` line in the test log is a deliberate negative-path test — *outbox enqueue failures are non-fatal* — not a real failure.)
+<!-- agent:boundary:c79ff45d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -130,8 +148,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=deal&dialog_deal_id=4d2b9382-06d5-498f-a306-64ea3e2870a7&deal_tab=loan: Borrower Info + Applicatino
-- deploy.
+- 🚧 Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=deal&dialog_deal_id=4d2b9382-06d5-498f-a306-64ea3e2870a7&deal_tab=loan: Borrower Info + Application cards.
+- ~~deploy.~~
 <!-- /agent:queue -->
 
 ## Backlog

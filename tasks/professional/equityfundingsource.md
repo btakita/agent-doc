@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -103,6 +103,11 @@ Production is on the new version with the 6 dead tables dropped.
 
 > **Queue prompt:**
 >
+> [#dfed93b-tests]
+
+
+> **Queue prompt:**
+>
 > do [#dfed93b-tests]
 
 
@@ -120,7 +125,7 @@ Done — step 4 (subject property + loan request) now always starts blank. Commi
 - `borrower-lead-to-tmo-flow.test.ts`: 6 pass / 0 fail; worker bundle builds clean.
 
 **Heads-up — `make check` is red from a separate, pre-existing cause (not this change).** 7 tests fail on `origin/main`, all from the operator commit `dfed93b` *"fix(admin): streamline document upload workflows"* (by Brian Dev), which refactored the admin/lender document-upload components but left their source-assertion tests behind (import shapes, CSS values, dropped fixtures, modal stacking). They live in a different subsystem and fail identically with my change stashed; my change is green in isolation. I did **not** guess-fix them — reconciling an active UI refactor's tests is outside this property-prefill directive and risks conflicting with your in-flight work. Tracked as backlog `#dfed93b-tests`. Note `dfed93b` is on origin but **not yet deployed** (the prior deploy shipped a pre-rebase tree). This turn's preset was `#spec-test-commit-push`, so I committed + pushed but did not deploy.
-<!-- agent:boundary:b7ad2d5b -->
+<!-- agent:boundary:b57d0259 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -145,13 +150,13 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#dfed93b-tests] [operator-verify] 7 EFS tests are red on origin/main from the operator commit dfed93b "fix(admin): streamline document upload workflows" (by Brian Dev) — stale source-assertion tests not updated to the refactored document-upload components (advance-lender-documents, admin-application-lead-detail, admin-investor-pipeline x2, investor-documents, submit-button-busy). NOT caused by #noproppfill (different subsystem; #noproppfill is green in isolation). Operator decision: align each assertion to the committed dfed93b components, OR revert the dfed93b test expectations — do not guess-fix mid-refactor. Restore green make check before the next deploy. dfed93b is on origin but NOT yet deployed.
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#dfed93b-tests] [operator-verify] 7 EFS tests are red on origin/main from the operator commit dfed93b "fix(admin): streamline document upload workflows" (by Brian Dev) — stale source-assertion tests not updated to the refactored document-upload components (advance-lender-documents, admin-application-lead-detail, admin-investor-pipeline x2, investor-documents, submit-button-busy). NOT caused by #noproppfill (different subsystem; #noproppfill is green in isolation). Operator decision: align each assertion to the committed dfed93b components, OR revert the dfed93b test expectations — do not guess-fix mid-refactor. Restore green make check before the next deploy. dfed93b is on origin but NOT yet deployed.
 - [/] [#04v8] [recommended] Validate TMO cross-service lender visibility in a real TMO sandbox/tenant before relying on automated LOS funding writes: create or link a lender through `LSS.svc`, confirm `GetLender`, then attempt `LOS.svc` `AddLoanFunding`/`UpdateLoanFunding` on a test loan or get written TMO support confirmation that LOS funding resolves the LSS lender/vendor master `Account`.
 - [/] [#apply-invite-fail-ux] Public `/apply` invite-failure UX: when the borrower invite email fails or is skipped after lead persistence, stop telling the borrower to check their inbox; show a received/follow-up message, keep the failed invite status visible to admins, and add a regression test.
 - [/] [#email-bg-outbox] Durable email delivery observability/retry: record lifecycle, secure-message, broker, lending-group, investor-interest, login-link, invite, reminder, and feedback email results in D1 with status/error/retry/dead-letter instead of relying on console-only warnings for background notifications.

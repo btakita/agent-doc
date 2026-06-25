@@ -39,8 +39,18 @@ queue: start
 Compacted content:
 - Archived 9 response topic(s): lazily bug-fix next-steps (cross-port); IPC proof diagnostic (interrupted-cycle recovery); #lzjshygiene node_modules purge; 6 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
+- `SPEC.md`: documented the two new methods + the before/after ordering in Invalidation Semantics.
+- `src/lazily/cell.zig`: added `before_change_subscribers` field + init/deinit; reordered `set()` to fire before-callbacks before `self.value = new_value`; added the two methods; added test `before_change fires before commit` proving the callback observes the OLD value (snapshot == 1 while new == 2) and that no-op sets + unsubscribe behave correctly.
+- **Symmetric API** — `subscribeBeforeChange` / `unsubscribeBeforeChange`, dedup'd via the same `SubscriberKey` mechanism as `subscribe`.
+- **Ordering** — `before_change_subscribers` fire **under the context lock, before the commit** (consistent with `emitChangeUnlocked`, which also runs locked). `change_subscribers` continue to fire after the commit (unlocked). Contract: before-change callbacks must not re-enter `Context`/`Cell` methods that take `ctx.mutex`; `Cell.get` is safe.
+- **Callback signature** — reused `ChangeCallback(T) = *const fn(*Cell(T)) void` for symmetry. At fire-time `Cell.get()` is lock-free and still returns the **outgoing** value, which is the useful "before" semantic; no new signature needed.
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+> **Queue prompt:**
+>
+> [#lzzigbeforechange]
+
 
 ```text
 **IPC proof issue dogfood log**
@@ -51,7 +61,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=31e1b437-a8b5-4279-b97c-65172e935912 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=22835 candidate_hash=2a854597debb4b045132a7d6d9d7f416f9ea27ab1a6e54ef2865efb28cb39932 content_ours_len=23524 content_ours_hash=6b228fd843fc3a80cc5a101216ebc615379249389ddb38b78d372802761939ce doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782344790899
 ```
-<!-- agent:boundary:19b6206b -->
+<!-- agent:boundary:8da8319b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -60,7 +70,7 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#lzzigbeforechange]
+- ~~🚧 [#lzzigbeforechange]~~
 - [#lzzigalloc]
 - [#lzjshygiene]
 <!-- /agent:queue -->
@@ -68,7 +78,6 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzzigbeforechange] lazily-zig: implement before_change_subscribers (cell.zig:35 TODO). Add a pre-change notification path to Cell/Slot mirroring change_subscribers but firing BEFORE a value is committed; needs API design (callback signature ChangeCallback vs a before-variant, ordering vs emitChange, unsubscribe symmetry). Split from #lzzigtodos.
 - [ ] [#lzzigalloc] lazily-zig: add allocator options to Context init (context.zig:615/619 TODOs) — option to use std.heap.c_allocator and/or std.heap.ArenaAllocator instead of the caller-supplied allocator. Needs API design (init flag vs builder, deinit ownership, interaction with build_options.link_libc). Split from #lzzigtodos.
 - [ ] [#lzjshygiene] lazily-js: node_modules NOT tracked (verified: git ls-files node_modules -> 0; .gitignore covers it; no commits touch it) — purge UNNEEDED, no history rewrite required. Remaining: validate conformance fixture assertions generically (parity with #lzktconf). npm test green (27 pass).
 <!-- /agent:backlog -->

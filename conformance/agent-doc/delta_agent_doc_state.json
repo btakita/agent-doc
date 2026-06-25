@@ -1,0 +1,49 @@
+{
+  "description": "agent-doc state projection delta applied to the snapshot_agent_doc_state fixture (base_epoch 3): the closeout.cycle node advances preflight_started -> committed (CellSet new serde_json payload), the queue.head completes (CellSet), and a transport.patch node is added mid-cycle (NodeAdd + EdgeAdd patch->cycle). Mirrors the warm-read delta derivation in plan-lazily-plugin-state-sync.md.",
+  "protocol_version": 1,
+  "schema_version": "1.0.0",
+  "kind": "Delta",
+  "assertions": {
+    "base_epoch": 3,
+    "epoch": 6,
+    "op_count": 4,
+    "added_type_tags": ["agent_doc.transport.patch"],
+    "all_type_tags_in_vocabulary": true,
+    "cycle_phase_after": "committed",
+    "queue_head_phase_after": "completed"
+  },
+  "wire": {
+    "Delta": {
+      "base_epoch": 3,
+      "epoch": 6,
+      "ops": [
+        {
+          "CellSet": {
+            "node": 102,
+            "payload": {
+              "Inline": [123, 34, 99, 121, 99, 108, 101, 95, 105, 100, 34, 58, 34, 99, 121, 99, 45, 55, 34, 44, 34, 112, 104, 97, 115, 101, 34, 58, 34, 99, 111, 109, 109, 105, 116, 116, 101, 100, 34, 44, 34, 99, 111, 109, 109, 105, 116, 34, 58, 34, 100, 101, 97, 100, 98, 101, 101, 102, 34, 44, 34, 115, 101, 115, 115, 105, 111, 110, 95, 99, 104, 101, 99, 107, 95, 112, 97, 115, 115, 101, 100, 34, 58, 116, 114, 117, 101, 125]
+            }
+          }
+        },
+        {
+          "CellSet": {
+            "node": 103,
+            "payload": {
+              "Inline": [123, 34, 112, 104, 97, 115, 101, 34, 58, 34, 99, 111, 109, 112, 108, 101, 116, 101, 100, 34, 44, 34, 98, 97, 99, 107, 108, 111, 103, 95, 105, 100, 34, 58, 34, 35, 103, 119, 119, 56, 34, 44, 34, 100, 114, 97, 105, 110, 97, 98, 108, 101, 34, 58, 116, 114, 117, 101, 125]
+            }
+          }
+        },
+        {
+          "NodeAdd": {
+            "node": 104,
+            "type_tag": "agent_doc.transport.patch",
+            "state": {
+              "Payload": [123, 34, 112, 104, 97, 115, 101, 34, 58, 34, 97, 99, 107, 101, 100, 34, 44, 34, 97, 99, 116, 111, 114, 95, 103, 101, 110, 101, 114, 97, 116, 105, 111, 110, 34, 58, 49, 50, 125]
+            }
+          }
+        },
+        { "EdgeAdd": { "dependent": 104, "dependency": 102 } }
+      ]
+    }
+  }
+}

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -107,7 +107,24 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=e9d60d77-ad79-4030-be5e-5f0f4040fe3f invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782372613863
 ```
-<!-- agent:boundary:a780ea91 -->
+
+### Re: Deploy — campaign-final Cloudflare Workers deploy — opus-4-8
+
+> **Queue prompt:** :pushpin: deploy
+
+Deployed to production. The Messages-dialog restructure (per-participant tabs + merged deal-group view) is now live.
+
+- **URL**: https://equityfundingsource.brian-takita.workers.dev
+- **Version ID**: `1fc4c91d-07fd-474c-9fce-195323bca984`
+- **Worker startup**: 33ms; 1 modified static asset uploaded (`index.browser-P2BKFFQO.js`).
+- **Remote D1 migrations**: no-op — this change is frontend-only (no new migrations).
+
+Built from the pushed commit `8464ac0` (full suite 1223 pass, build + worker bundle clean before deploy).
+
+Operator live-verify (cannot be agent-done): open a deal → **Message borrower**, confirm the dialog shows a tab per participant (borrower + interested lenders) + a **Deal** group tab (merged history), the top-level **All Messages** tab, its **All** role sub-tab, and **Contact Messages** — with the old per-user "All Messages" tab gone.
+
+Queue drained.
+<!-- agent:boundary:9cad98e2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -127,9 +144,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline > Available Deal cards should show the number of interested lenders.~~
-- ~~When opening the Messages dialog on user context, render a specific tab for each user in the user context. Also render another tab for the user group. These tabs are dedicated to the user(s). Remove the existing All Messages tab. Rename Messages tab to All Messages. Add an All tab in Messages dialog > Messages tab...a sibling to Borrowers|Lenders|Brokers. This tab effectively replaces the replaced All Messages tab.~~
-- 🚧 :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

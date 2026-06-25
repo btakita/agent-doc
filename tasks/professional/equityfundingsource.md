@@ -62,7 +62,20 @@ Net effect: the deal's existing priority logic (Approve accreditation → Move t
 Shipped in the prior entry (submodule `f8b111d`, pushed to `equityfundingsource-dev` main): the shared `use_dialog_action_navigation_` hook now upgrades focus to a late-rendering `data-dialog-initial-focus` target via a `MutationObserver`, gated on no user interaction — so the deal dialog (and every dialog) focuses its real first action once async content mounts. `make check` → 1217 pass / 0 fail. Striking this head.
 
 **Next queue head:** `deploy`.
-<!-- agent:boundary:859bc6e2 -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:** deploy
+
+**Deployed** (`make deploy`) from EFS submodule HEAD `f8b111d` (the generalized async dialog-focus fix, already pushed to `equityfundingsource-dev` main).
+
+- **Build** → worker bundle OK; uploaded 1 new/modified static asset (`index.browser-UDBNZSTE.js`), 43 already present. Worker startup 18 ms.
+- **D1 migrations** (`--remote`) → **No migrations to apply** (remote already current).
+- **Worker deploy** → ✅ success on account `1e7e194f…`; all bindings intact (Durable Objects, D1, R2 ×3, email/access env).
+- **Smoke check** → `https://equityfundingsource.brian-takita.workers.dev/` returns **HTTP 200**.
+
+Live now: the shared `use_dialog_action_navigation_` MutationObserver focus upgrade — every dialog (deal dialog included) focuses its real first action once async content mounts. Striking this head; the queue is now drained.
+<!-- agent:boundary:a424c9d9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -82,7 +95,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Opening https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan should focus on the first actionable item...in this case the "Review Interested Lenders" button. How can we make this focus logic generalized so it works for all dialogs?~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 ~~Opening https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan should focus on the first actionable item...in this case the "Review Interested Lenders" button. How can we make this focus logic generalized so it works for all dialogs?~~ — auto-struck: answered this cycle (#ftstrike)
 - deploy
 <!-- /agent:queue -->
 

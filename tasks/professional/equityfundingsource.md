@@ -73,7 +73,19 @@ Overall "completed" = e-sign consent **and** signed **and** submitted. Printed n
 **Verify + deploy.** Added a `#full-app-review-sign-status` regression test and updated the boolean-checkbox test for the E-sign → completion-mark change. `bun test` → **1228 pass / 0 fail**; `bun run build` + `build:worker` clean. Pushed `5b62fa6`, deployed Version `cfb313d3-a40a-4d05-aec6-246e689458bc`. Post-deploy smoke `GET /` → 200. No CI workflow in the EFS repo, so the local suite + build are the evidence.
 
 Reload the `dialog=application` → **Open Full Application** path to see the denser Address/Employment/Income cards and the Review & Sign green-check/red-x status.
-<!-- agent:boundary:57a00c2a -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=a7a8adee-5308-46e6-9fb3-aec0c11c6337 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782415989846
+```
+<!-- agent:boundary:2db68b3d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -95,7 +107,8 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - 🚧 Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Full Application: Personal, Address, Employment, Income
 - ~~Optimize the layout of Review & Sign. Add a green checkmark if the borrower completed and a red x if not.~~ — auto-struck: answered this cycle (#ftstrike)
-- deploy
+- In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097, what is the Proposed Loan Amount vs the Loan Amount?
+- ~~deploy~~
 <!-- /agent:queue -->
 
 ## Backlog

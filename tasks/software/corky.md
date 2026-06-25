@@ -170,7 +170,7 @@ Files: `crates/corky-mail/src/draft/send.rs`, `SPEC.md` §5.5.1.
 **Design note.** The backlog suggested the Gmail resumable/multipart media-upload endpoint; I kept the proven `messages.send` + `raw` endpoint and streamed the base64url body instead — identical wire format, fully unit-testable offline (live send can't be exercised here without OAuth). Peak RAM for a 500 MB attachment drops from ~1.8 GB to roughly the streaming buffers (spool on disk, not RAM).
 
 Queue advances to **#ckymimeinline** (draft send drops inline CID images — reuse draft push `multipart/related` logic in `build_mime_message`).
-<!-- agent:boundary:97c7bf16 -->
+<!-- agent:boundary:583d9703 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -182,8 +182,8 @@ Please give me a report the performance
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~[#ckythreadmerge]~~
-- 🚧 :pushpin: [#ckymimestream]
-- :pushpin: [#ckymimeinline]
+- ~~:pushpin: [#ckymimestream]~~
+- 🚧 :pushpin: [#ckymimeinline]
 - ~~[#ckythreadmerge]~~
 <!-- /agent:queue -->
 

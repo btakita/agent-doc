@@ -70,9 +70,13 @@
 //!   state, while also ensuring stale tmux scrollback cannot be mistaken for
 //!   the new child's prompt and a stale worker cannot later type into the
 //!   supervisor prompt or a replacement process in the tmux pane. If the
-//!   prompt still has not appeared after 30 seconds, the thread logs a
-//!   provisional timeout but keeps watching until the child exits or the
-//!   prompt appears.
+//!   prompt still has not appeared after a hard 30-second deadline
+//!   (`AUTO_TRIGGER_TIMEOUT`), the thread fails closed (`#startupdeadline`):
+//!   it records a `startup_miss` marker against the owned pane and surfaces an
+//!   actionable "session did not become dispatch-ready in Ns" diagnostic on
+//!   stderr instead of watching the hung child forever. The same hard-deadline
+//!   fail-closed path covers the clear-cooldown and managed capability-proof
+//!   waits so no startup branch can hang silently.
 //!
 //! ## Agentic Contracts
 //! - The file path must exist before `run` is called; callers must not rely on
@@ -109,6 +113,11 @@
 //!   after `agent_args` and ignores `claude_args`.
 //! - `start_opencode_uses_opencode_specific_alias_chain`: OpenCode resolves
 //!   `opencode_args` after `agent_args` and ignores Claude/Codex aliases.
+//! - `auto_trigger_no_prompt_continues_before_deadline_then_fails_closed`: the
+//!   no-prompt auto-trigger wait keeps polling before `AUTO_TRIGGER_TIMEOUT`
+//!   and fails closed exactly once at the hard deadline so the caller records a
+//!   `startup_miss` and returns instead of watching the child forever
+//!   (`#startupdeadline`).
 
 use anyhow::{Context, Result};
 use portable_pty::PtySize;
@@ -355,6 +364,81 @@ fn auto_trigger_clear_cooldown_action(
     } else {
         AutoTriggerCooldownAction::Wait
     }
+}
+
+/// Hard-deadline decision for the auto-trigger no-prompt wait (`#startupdeadline`).
+///
+/// The auto-trigger thread used to log a *provisional* `no_prompt_after_30s`
+/// timeout and then keep watching the child forever (until it exited or a prompt
+/// finally appeared). A harness that never becomes dispatch-ready (hung TUI,
+/// auth wall, stuck network) therefore left the session silently hanging with no
+/// recoverable signal. This makes the deadline hard: once the monitor's timeout
+/// expires without a dispatch-ready prompt, the thread fails closed instead of
+/// continuing to poll, mirroring the existing clear-cooldown / capability-proof
+/// timeout branches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutoTriggerNoPromptAction {
+    Continue,
+    FailClosed,
+}
+
+fn auto_trigger_no_prompt_action(
+    monitor: &mut AutoTriggerMonitor,
+    now: Instant,
+) -> AutoTriggerNoPromptAction {
+    if monitor.note_no_prompt(now) {
+        AutoTriggerNoPromptAction::FailClosed
+    } else {
+        AutoTriggerNoPromptAction::Continue
+    }
+}
+
+/// Fail-closed handler for an expired session-startup deadline: record a
+/// `startup_miss` marker against the owned pane and surface an actionable
+/// "session did not become dispatch-ready in Ns" diagnostic on stderr, so a hung
+/// harness child becomes a recoverable, dogfoodable error instead of an
+/// indefinite hang (`#startupdeadline`). `reason` is the timeout provenance
+/// (`no_prompt`, `capability_proof`, `clear_cooldown`).
+fn record_session_startup_miss(
+    path: &Path,
+    shared: &SupervisorShared,
+    harness: &crate::harness::HarnessConfig,
+    session_log: &mut Option<std::fs::File>,
+    reason: &str,
+) {
+    let pane = shared.inject_pane.as_deref().unwrap_or("child_pty");
+    let session_id = crate::frontmatter_io::read_session_id(path).unwrap_or_default();
+    let deadline_secs = AUTO_TRIGGER_TIMEOUT.as_secs();
+    match crate::startup_miss::record(
+        path,
+        pane,
+        &session_id,
+        &harness.binary,
+        crate::startup_miss::StartupMissOrigin::FreshStart,
+        None,
+    ) {
+        Ok(_) => log_event(
+            session_log,
+            &format!(
+                "startup_miss_recorded harness={} pane={} reason={} deadline_secs={}",
+                harness.binary, pane, reason, deadline_secs
+            ),
+        ),
+        Err(e) => log_event(
+            session_log,
+            &format!(
+                "startup_miss_record_failed harness={} pane={} reason={} error={}",
+                harness.binary, pane, reason, e
+            ),
+        ),
+    }
+    eprintln!(
+        "[agent-doc] session did not become dispatch-ready in {}s ({}) for {}; recorded startup-miss and failing closed instead of hanging. Run 'agent-doc start {}' to retry.",
+        deadline_secs,
+        reason,
+        harness.binary,
+        path.display()
+    );
 }
 
 pub mod decisions;
@@ -1513,8 +1597,12 @@ fn spawn_auto_trigger_thread(
                                     harness.binary
                                 ),
                             );
-                            eprintln!(
-                                "[agent-doc] auto-trigger: timed out waiting for clear cooldown to expire"
+                            record_session_startup_miss(
+                                &path,
+                                &shared,
+                                &harness,
+                                &mut session_log,
+                                "clear_cooldown",
                             );
                             return;
                         }
@@ -1533,8 +1621,12 @@ fn spawn_auto_trigger_thread(
                                     harness.binary
                                 ),
                             );
-                            eprintln!(
-                                "[agent-doc] auto-trigger: timed out waiting for managed Codex capability proof"
+                            record_session_startup_miss(
+                                &path,
+                                &shared,
+                                &harness,
+                                &mut session_log,
+                                "capability_proof",
                             );
                             return;
                         }
@@ -1605,21 +1697,30 @@ fn spawn_auto_trigger_thread(
                     );
                     return;
                 }
-                if monitor.note_no_prompt(Instant::now()) {
-                    shared
-                        .auto_trigger_outcome
-                        .store(AutoTriggerOutcome::Timeout as u8, Ordering::Relaxed);
-                    log_event(
-                        &mut session_log,
-                        &format!(
-                            "auto_trigger_timeout harness={} reason=no_prompt_after_30s",
-                            harness.binary
-                        ),
-                    );
-                    eprintln!(
-                        "[agent-doc] auto-trigger: timed out waiting for {} prompt",
-                        harness.binary
-                    );
+                match auto_trigger_no_prompt_action(&mut monitor, Instant::now()) {
+                    AutoTriggerNoPromptAction::Continue => {}
+                    AutoTriggerNoPromptAction::FailClosed => {
+                        shared
+                            .auto_trigger_outcome
+                            .store(AutoTriggerOutcome::Timeout as u8, Ordering::Relaxed);
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "auto_trigger_timeout harness={} reason=no_prompt_after_30s",
+                                harness.binary
+                            ),
+                        );
+                        // Hard deadline: record startup-miss + fail closed instead of
+                        // silently watching the child forever (`#startupdeadline`).
+                        record_session_startup_miss(
+                            &path,
+                            &shared,
+                            &harness,
+                            &mut session_log,
+                            "no_prompt",
+                        );
+                        return;
+                    }
                 }
             }
         })
@@ -3917,6 +4018,30 @@ Done.
             AutoTriggerCooldownAction::Wait,
             "timeout is reported once; the caller exits after recording it"
         );
+    }
+    #[test]
+    fn auto_trigger_no_prompt_continues_before_deadline_then_fails_closed() {
+        // Before the deadline the no-prompt branch keeps polling; once the hard
+        // deadline expires it fails closed exactly once so the caller records a
+        // startup-miss and returns instead of watching the child forever
+        // (`#startupdeadline`).
+        let start = Instant::now();
+        let mut monitor = AutoTriggerMonitor::new(start, Duration::from_millis(5));
+
+        assert_eq!(
+            auto_trigger_no_prompt_action(&mut monitor, start + Duration::from_millis(4)),
+            AutoTriggerNoPromptAction::Continue
+        );
+        assert_eq!(
+            auto_trigger_no_prompt_action(&mut monitor, start + Duration::from_millis(5)),
+            AutoTriggerNoPromptAction::FailClosed
+        );
+        assert_eq!(
+            auto_trigger_no_prompt_action(&mut monitor, start + Duration::from_millis(10)),
+            AutoTriggerNoPromptAction::Continue,
+            "fail-closed fires once; the caller returns after recording the startup-miss"
+        );
+        assert_eq!(monitor.stop_outcome(), AutoTriggerOutcome::Timeout);
     }
     #[test]
     fn auto_trigger_thread_cancels_cleanly_before_prompt_poll() {

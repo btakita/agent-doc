@@ -16,9 +16,9 @@ name = "agent_doc_orchestration"
 test-support = []
 
 [dependencies]
-agent-doc-core = { path = "../agent-doc-core", version = "0.34.46" }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.46" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.46" }
+agent-doc-core = { path = "../agent-doc-core", version = "0.34.48" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.48" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.48" }
 lazily = "0.12.2"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }

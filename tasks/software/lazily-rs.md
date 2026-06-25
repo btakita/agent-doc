@@ -126,7 +126,23 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=socket_ack_content patch_id=f66024c9-9f07-4680-a390-501054e2fd1d invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=14822 candidate_hash=80dc5e010b40e5a29459104fccbc03071a57ec7e1847c40baf4d8a074bfeae5f content_ours_len=16704 content_ours_hash=b8a2967d9c8f5d578272625625ac96a8839806272764f75c7a3665438b9249b4 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782420348170
 ```
-<!-- agent:boundary:81a4c627 -->
+
+### Re: Cell CRDT package boundary — gpt-5
+
+> **Queue prompt:**
+> Should we create separate packages for Cell CRDT or keep it in the core packages?
+
+Keep Cell CRDT in the core packages, with feature gates or stability markers if needed. Do not split it into separate public packages yet.
+
+Reasoning:
+- Cell CRDT is a graph cell kind and synchronization semantic, not an optional transport adapter. If a document can contain a CRDT-backed cell, every language runtime needs to understand its schema, permissions, merge semantics, snapshots, deltas, and conformance fixtures.
+- A separate package would create version-skew risk between core cell traversal/storage and CRDT merge behavior. That is worse than carrying the code in core because CRDT semantics must remain lockstep with the protocol.
+- Agent ergonomics are better when the canonical cell kinds live in one package and one docs/fixture set. Splitting CRDT out would force agents and humans to remember which cell kinds are core versus extension-only.
+- Ecosystems can still hide unstable or heavier pieces behind feature flags, experimental namespaces, or internal modules while the public package stays unified.
+
+The split point should be around integrations, not the cell kind itself. Separate packages make sense later for storage backends, collaboration service adapters, provider-specific sync bridges, benchmarking harnesses, or optional UI bindings. The core CRDT cell type, operation format, merge rules, and conformance tests should stay in core across languages.
+
+<!-- agent:boundary:958c1f1e -->
 <!-- /agent:exchange -->
 ###
 <!--

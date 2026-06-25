@@ -298,7 +298,27 @@ Goal drive complete and **deployed**. The fixed binary `agent-doc 0.34.48` + cdy
 **Backlog + queue synced to the drained state** — all agent-doable items reaped to `agent:done`; the only remaining work is `[operator-verify]` live-eyeballs that need a live editor/pane: `#crdtauth6` (live 2-editor relay hookup), `#nsfz` (startup-deadline live), `#kj5f` (merge-SM live editor).
 
 **Remaining operator step:** restart/recycle the supervisors still on the old binary (the 2 skipped + this pane's parent, driven last since it ends the session). After restart, the stale-binary churn that affected this session is gone and the operator-verify items can be checked live.
-<!-- agent:boundary:de2c738b -->
+
+### Re: queue sync — resolving remaining free-text heads — opus-4-8
+
+Striking the four remaining stale free-text queue heads — all are now addressed by merged work, leaving the queue mirroring exactly the backlog (`#nsfz`, `#crdtauth6` operator-verify items).
+
+> **Queue prompt:** Fix the root cause of the CRDT churn.
+
+Root-caused and fixed (merged to main): the whole-document `crdt::merge` that spliced content across cells is replaced by per-node/per-component merge isolation (`#qcellmerge1`/`#qnodemerge`/`#hap7`), plus the state-vector commit barrier replacing the fragile patch-ack (`#crdtauth`) and hosting-epoch per-document isolation (`#xdocsuper`). The churn still visible in THIS session is the stale-binary supervisor — it clears once it recycles onto the just-installed 0.34.48.
+
+> **Queue prompt:** Still getting JB `File Cache Conflict` dialogs.
+
+Fixed by `#p2j4`: the trigger was PromptPoller's 1.5s timer `VirtualFile.refresh` against unsaved buffers (a continuous behind-editor refresh); now gated on save-state. The Rust post-commit reconcile was confirmed already IPC-first.
+
+> **Queue prompt:** Opencode responses are reverse ordering numeric lists.
+
+Resolved (`#4pdp`): the OpenCode send/parse/merge paths are order-stable; the reversal was a CRDT merge-during-finalize artifact already root-fixed by hap7 scoped merge (`#gf5n`). Added order-stability regression locks.
+
+> **Queue prompt:** Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.
+
+Now isolated (`#xdocsuper`): one route-owned supervisor was reusing per-document in-memory state across documents (the contamination you observed). Fixed via a `SupervisorHosting` backbone transition that resets the queue overlay on document switch + hosting-epoch gating, so each document's context is keyed/isolated by `document_hash`. Covered by `cross_document_switch_does_not_contaminate_sibling_overlay`.
+<!-- agent:boundary:7d3ab0d0 -->
 <!-- /agent:exchange -->
 
 ## Queue

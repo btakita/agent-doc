@@ -184,7 +184,7 @@ ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=fil
 **Deployed.** `make deploy` built the worker, applied remote D1 migrations (idempotent — 0110 already applied), uploaded + activated version `d1f62058-b80b-4833-84de-2fd6d2691241`. Smoke check: `https://equityfundingsource.brian-takita.workers.dev/` → **HTTP 200** (0.16s).
 
 Production is now live with the dead-table drop (#bxtd), no subject-property prefill (#noproppfill), per-line form errors, and the dfed93b document-upload refactor — all on a green suite. `#dfed93b-tests` resolved; `deploy` drained.
-<!-- agent:boundary:90f222ce -->
+<!-- agent:boundary:d730ef3d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -204,9 +204,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Borrower, Broker, Lender, Admin form errors should each have their own line...not "Missing required values: property type, A. Will you occupy the property as your primary residence?, B. Family or business relationship with the seller? (purchase), C. Borrowing undisclosed money for this transaction?, D1. Applying for another mortgage on/before closing (not disclosed)?, D2. Applying for new credit on/before closing (not disclosed)?, E. Will the property have a priority lien (e.g. PACE)?, F. Co-signer or guarantor on undisclosed debt?, G. Outstanding judgments against you?, H. Delinquent or in default on federal debt?, I. Party to a lawsuit with potential financial liability?, J. Conveyed title in lieu of foreclosure in the past 7 years?, K. Pre-foreclosure / short sale in the past 7 years?, L. Property foreclosed in the past 7 years?, M. Declared bankruptcy within the past 7 years?."~~
-- ~~deploy~~
-- deploy
+- 🚧 After applying for a new deal,
 <!-- /agent:queue -->
 
 ## Backlog

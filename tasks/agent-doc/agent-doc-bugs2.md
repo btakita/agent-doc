@@ -190,7 +190,7 @@ Phase 5 + Phase 6 of the CRDT authority model (`tasks/agent-doc/plan-crdt-author
 **Proven by SimWorld** (`src/sim_world.rs::crdt_relay_sim`, 8 scenarios + 10 module unit tests + 2 FFI round-trip tests, all green): multi-replica fan-out; convergence under out-of-order/lagged delivery; 3-replica commit-barrier consistent cut with a disconnected editor (no deadlock, no loss); offline→reconnect no-loss; duplicate-client-id rejection; awareness ephemerality; disk-projection recovery with in-memory-wins; deterministic replay. `make check` exit 0 (clippy `-D warnings` clean); `cargo build --release` green.
 
 **Remaining (gated — fresh clean supervisor session, per the plan; NOT this doc):** wire `RelayHub` into the live `finalize`/supervisor-IPC write path + the `.yrs` load call-sites (deliberately left as a documented contract here to avoid disturbing the live supervisor), merge the branch to `main`, then the operator's live multi-editor repro (the only operator-gated step). Gating `#crdtauth4` accordingly.
-<!-- agent:boundary:cef833a3 -->
+<!-- agent:boundary:4a798156 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -342,7 +342,6 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
-- [/] [#crdtauth4] [focused-cycle] Multi-editor relay hub + awareness + disk demotion — CODE-COMPLETE on branch crdtauth1-authority-sm (8b087ea6), SimWorld-proven (crdt_relay_sim; make check + release green). GATED on fresh-clean-session work (NOT this contamination-victim doc, per plan): wire RelayHub into live finalize/supervisor-IPC write path + .yrs load call-sites, merge branch to main, then operator live multi-editor repro. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [/] [#crdtauth3] 2 [focused-cycle] State-vector commit barrier: replace finalize patch-ack with flush-all-live-editors-to-SV then snapshot then commit; root-fix for the no_ack / ipc_proof_insufficient / postcommit-worktree-corruption class. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [/] [#crdtauth2] [focused-cycle] Editor-as-replica binding (FFI-first): cdylib is the CRDT node hosting a per-editor yrs replica; thin IntelliJ/VSCode bindings forward Document deltas + apply remote updates (cursor/undo preserving); plugin read/write-through FFI (completes #dsqa). Wire agent-doc shared roots (document/queue/hosting) to lazily replicated cells (per-cell merge #qcellmerge1); upgrade #lazilystatesync to bidirectional. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [/] [#crdtauth1sv] [focused-cycle] agent-doc state-vector sync protocol (deferred half of #crdtauth1): replace whole-.yrs snapshot merge_by_component with incremental per-replica StateVector / update exchange in the FFI node ↔ supervisor channel, gated on CrdtAuthority::MultiReplica. Builds on the authority SM (branch crdtauth1-authority-sm, 1b2a6e94). Plan: tasks/agent-doc/plan-crdt-authority-model.md

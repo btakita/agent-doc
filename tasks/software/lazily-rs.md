@@ -51,7 +51,49 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=a0d06514-4d61-4e39-80e9-51dfe63333e3 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=7422 candidate_hash=d5fe277899e37743258c3a872b7d0fa7d24d01ecd077fe15d3d722c8bd515709 content_ours_len=8946 content_ours_hash=c211c34309f039199ecaa80c915df0a4fdb44a7bd4ce4f6087179515c017e6d3 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782348633215
 ```
-<!-- agent:boundary:5701fd3a -->
+
+### Re: #next-steps — lazily bug-fix status across 6 ports — opus-4-8
+
+> **Queue prompt:**
+>
+> What are #next-steps to fix lazily-rs, lazily-kt, lazily-js, lazily-spec, lazily-zig, lazily-py bugs?
+
+**Short answer: the bug-fix campaign is essentially complete.** Every item filed in `tasks/software/lazily-rs.done.md` this cycle (all dated 2026-06-24) is fixed and pushed, and all six ports verify green this turn. The single genuinely-open correctness follow-up is now the top backlog item.
+
+**Top of backlog: `#gcp4` (`#lzasyncdispose2`)** — lazily-rs async dispose-recycle aliasing hardening (`[recommended]`).
+
+#### Verified fixed + pushed (do not re-file)
+
+| Port | Items confirmed shipped |
+|------|-------------------------|
+| **lazily-rs** | `#lzasyncrerunabort` (5b1ac88), `#lzwsinboundunbounded` (279eb74), `#lzwsunbounded` (a41aaec), `#lzstr0mnetacceptanswer` (7a28283), `#lzstr0mnetinbox` (e165720), `#lzasynceffdup` (090e104), `#lzstr0mloopbackinbox` (b8d4140), `#lzerrfrom` (From impls at ipc.rs:691–745), `#lzsid32` (now usize::try_from), `#gxzm` benchmark-check (green) |
+| **lazily-spec** | `#lzspecdrift` (a58eff8 — protocol.md source reconciled to canonical externally-tagged wire) |
+| **lazily-zig** | `#lzzigtodos` (db18dea), `#lzzigbeforechange` (1a2c81d), `#lzzigalloc` (41d773a), `#lzsigzig3` (suite green on Zig 0.17-dev) |
+| **lazily-py** | `#lzpyregress` (c255482), `#lzshmblobpy` (4a57eb2), `#lzshmblobconf` (26ef43e) |
+| **lazily-kt** | `#lzktconf` assertions validator + gradle wrapper (1500bea) |
+| **lazily-js** | `#lzjshygiene` (6d38122), `#tnbd` ffi-napi→koffi migration (7017b9d) |
+
+Cross-cutting `#bagt` arena conformance is wired in all three host ports (spec fixture + lazily-rs tests/conformance.rs + lazily-zig ipc.zig). All submodule gitlinks are in sync — no pending bumps.
+
+#### Green this turn
+
+- **lazily-rs** lib tests: 12 passed; `make benchmark-check`: green
+- **lazily-py** pytest: 77 passed
+- **lazily-js** node test: 28 pass / 0 fail
+- **lazily-zig** `zig build test`: 16/16 steps
+- **lazily-kt**: gradle test green per last commit; **lazily-spec**: protocol.md canonical
+
+#### The one open code item — `#gcp4` / `#lzasyncdispose2` (top of backlog)
+
+`AsyncContext::dispose_async_effect` recycles the `SlotId` into `free_ids` (LIFO) with **no generation guard** (async_context.rs:1050). A `flush_async_effects`-spawned re-run task in-flight across its `.await` (async_context.rs:1225) can re-lock *after* dispose and write cleanup/edges into whatever node now holds the recycled id (aliasing). Dispose does `take()+abort()` the node's `in_flight` (:1029/:1054), but `abort()` is cooperative — the id is recycled before the task observes the abort. Fix: generation-tag `SlotId`s (or await the abort) and generation-check before storing cleanup/edges; add an async stress test (dispose during a pending re-run). `[recommended]` hardening — no current red test reproduces it.
+
+#### Operator-gated (already tracked in Review, not backlog)
+
+- `#kb9b` — publish lazily-py v0.11.0 (PyPI token + passkey 2FA)
+- `#h6qb`/`#lzwebrtcnet-e2e` — live two-host/NAT WebRTC validation through the deployed signaling Worker
+
+**Top backlog id: `#gcp4` (`#lzasyncdispose2`).**
+<!-- agent:boundary:2beeadb9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -60,7 +102,7 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 What are #next-steps to fix lazily-rs, lazily-kt, lazily-js, lazily-spec, lazily-zig, lazily-py bugs?
+- ~~What are #next-steps to fix lazily-rs, lazily-kt, lazily-js, lazily-spec, lazily-zig, lazily-py bugs?~~
 - do [#gcp4]
 <!-- /agent:queue -->
 

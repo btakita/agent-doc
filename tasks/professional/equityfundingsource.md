@@ -38,7 +38,25 @@ complete
 Compacted content:
 - Archived 11 response topic(s): Available Deal cards show interested-lender count; IPC proof diagnostic (interrupted-cycle recovery); Messages dialog; 8 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:e94bf533 -->
+
+### Re: The application-feedback message deep-link — what it is and how it renders — glm-5.2
+
+> **Queue prompt:** A message says `Admin sent application feedback for [56b22a22-…](efs-app-feedback:56b22a22-…).`. Why does the message contain a markdown link? What is `efs-app-feedback:<uuid>` and how do we link to it?
+
+**Why the markdown link:** when an admin sends application feedback (email + logged report), `application_feedback_reflection_create_` (`app/.../borrower/messages/application_feedback_reflection.ts:41`) also posts a "reflection" admin message into the borrower's chat thread carrying an internal deep-link so the recipient can jump straight to that feedback.
+
+**What `efs-app-feedback:<uuid>` is:** a custom **internal URI scheme** — not a real URL. The `<uuid>` is the **application id** (`56b22a22-…`). The portal never fetches it; `safe_internal_href_` (`portal/shared/portal_messages.tsx:306`) rewrites it to a real in-app route — `/admin/loan-applications/<id>#feedback` (admin) or `/borrowers/application-status/<id>#feedback` (borrower).
+
+**How it links / why you saw raw markdown:** the chat-bubble `MessageBody` parses `[label](efs-app-feedback:id)` into a real `<a>`. But `UnifiedMessageThread` — used by the per-user, group, and unified tabs (the per-user tab was just refactored onto it) — rendered the body as **plain text**, so the raw markdown leaked through there. The label was also the raw UUID because the feedback call site fell back to `application.id` when no loan number existed.
+
+**Fixed this cycle** (committed + pushed to EFS `origin/main` `7eee8f4`):
+- `UnifiedMessageThread` now parses internal markdown links into clickable anchors (new `UnifiedMessageBody`), mirroring `MessageBody` — so the deep-link renders correctly in the per-user/group/unified tabs (also fixes the regression from the per-user refactor).
+- The reflection label no longer falls back to the application UUID; when no TMO/property loan number exists it reads "loan application" instead.
+
+**Verification**: `bun test` **1225 pass / 0 fail**; `bun run build` + `build:worker` clean. Tests assert the `UnifiedMessageBody` link parsing and the "loan application" fallback.
+
+**Not deployed** this cycle — the queue carried no `deploy` item (preset `#spec-test-commit-push`). Queue `deploy` to ship it live.
+<!-- agent:boundary:750287f2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,6 +76,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- 🚧 A message says `Admin sent application feedback for [56b22a22-80a7-46a9-ad69-5ab78d5449f9](efs-app-feedback:56b22a22-80a7-46a9-ad69-5ab78d5449f9).`. Why does the message contain a markdown link? What is efs-app-feedback:56b22a22-80a7-46a9-ad69-5ab78d5449f9 and how do we link to it?
 <!-- /agent:queue -->
 
 ## Backlog

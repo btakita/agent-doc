@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -128,7 +128,31 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=b2d84845-7358-4cc6-98ce-84f6873d29de invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782349558144
 ```
-<!-- agent:boundary:3d4fec8c -->
+
+### Re: Per-user Messages tab locked to one participant (search box hidden) — glm-5.2
+
+> **Queue prompt:** In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Messages Dialog > btak.dev+borrower3@gmail.com tab: Do not render the search box. Another user should not be opened in one user's message tab.
+
+Done — committed + pushed to EFS `origin/main` (`f78d5d9`). A per-user message tab is now locked to that one participant: the address search box **and** the user list are both hidden, so an admin cannot search for or open another participant inside someone else's tab.
+
+- **`AdminMessages` (`lib/ui--browser--efs/portal/admin/messages.tsx`)**: new `lock_user` prop collapses the two-pane `admin-msg-grid` to a single column (conversation pane only) and skips the search-box + user-list card entirely. The thread still loads via the existing `preferred_user_query` pre-fill, and the empty state is tailored ("No Conversation Found") instead of the searchable "No Thread Selected" message.
+- **Per-user tab (`AdminMessagesLauncher`)**: the `user:<email>` tab now renders `<AdminMessages … lock_user />`, so each participant tab is a single conversation channel scoped to that user. The "All Messages" group tabs keep their search/broadcast behavior unchanged.
+
+**Verification**: full `bun test` **1225 pass / 0 fail**; `bun run build` + `build:worker` clean. Updated `tests/messages-unified.test.ts` to assert the `lock_user` wiring (hidden search/list + single-column grid).
+
+### Re: Deploy — production deploy of locked per-user tabs — glm-5.2
+
+> **Queue prompt:** deploy
+
+Deployed to production from `f78d5d9`. Per-user message tabs are locked to one participant on the live site.
+
+- **URL**: https://equityfundingsource.brian-takita.workers.dev
+- **Version ID**: `ddbccc8b-3446-4ec8-b8fa-ce5a79e05a4b`
+- **Remote D1 migrations**: no-op — frontend + a test only, no new migrations (verified none pending pre- and post-deploy).
+- **Post-deploy smoke**: `GET /` → 200.
+
+Operator live-verify (cannot be agent-done): open a deal → Messages dialog → a per-user tab (e.g. btak.dev+borrower3@gmail.com) and confirm the search box is gone and you cannot navigate to another participant's thread from inside that tab; the "All Messages" and group tabs still search/broadcast as before.
+<!-- agent:boundary:4ea2b182 -->
 <!-- /agent:exchange -->
 ###
 <!--

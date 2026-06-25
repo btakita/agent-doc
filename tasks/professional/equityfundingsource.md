@@ -184,7 +184,33 @@ ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=fil
 **Deployed.** `make deploy` built the worker, applied remote D1 migrations (idempotent — 0110 already applied), uploaded + activated version `d1f62058-b80b-4833-84de-2fd6d2691241`. Smoke check: `https://equityfundingsource.brian-takita.workers.dev/` → **HTTP 200** (0.16s).
 
 Production is now live with the dead-table drop (#bxtd), no subject-property prefill (#noproppfill), per-line form errors, and the dfed93b document-upload refactor — all on a green suite. `#dfed93b-tests` resolved; `deploy` drained.
-<!-- agent:boundary:d730ef3d -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=816d9a07-1aa0-4d17-ab8a-6a0d6b6ba330 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782361375634
+```
+
+### Re: post-apply flash → Messages chat — glm-5.2
+
+> **Queue prompt:** After a borrower applies for a new deal, The flash message should also mention to use the message chat contact EFS staff about any questions.
+
+Done — all three post-apply surfaces now point the borrower to the Messages chat:
+
+- **Dashboard success toast** (`borrower/dashboard.tsx`): "Use Messages to chat with EFS staff about your application." appended to the submitted message.
+- **Dashboard flash banner** (`borrower/dashboard.tsx`): same nudge, with a direct `<a href="/borrowers/messages">Messages</a>` link (gold on the navy banner).
+- **In-wizard SuccessAlert** (`borrower/full_application.tsx`): same line added to the post-sign confirmation.
+
+`Messages` is the existing borrower chat at `/borrowers/messages` — the same thread the dashboard already surfaces for unread admin messages. Spec + tests updated: `prds/efs-full-application-intake-spec.md` documents the nudge; `tests/borrower-dashboard.test.ts` asserts the Messages text and the `/borrowers/messages` link, plus the SuccessAlert mention.
+
+**Verification:** `make check` → **1213 pass / 0 fail**. Committed `9c31d76`, pushed to origin (`b57f570..9c31d76`). Not deployed — preset `#spec-test-commit-push`.
+<!-- agent:boundary:56774d75 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -204,7 +230,12 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 After applying for a new deal,
+- ~~After a borrower applies for a new deal, The flash message should also mention to use the message chat contact EFS staff about any questions.~~
+- Admin Deal Pipeline: https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan should focus on the first actionable item when opened. In this case the "Review Interested Lenders" button in the flash message.
+- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan > Loan Detail should remove the "Borrower Chat" card. Use the chat should open the borrower (btak.dev+borrower@gmail.com) instead.
+- All dialog states in the Deal Pipeline and Lender Pipeline should have users associated with them. These users will be the focus of the chat. A single user will have a single message thread. Multiple users will have separate tabs in the chat dialog with the user type (Lender, Borrower, Broker). Another tab should be the group chat, where all users are emailed the messages.
+- All pages should have user(s) or a user type associated with it.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

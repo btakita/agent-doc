@@ -210,7 +210,24 @@ Done — all three post-apply surfaces now point the borrower to the Messages ch
 `Messages` is the existing borrower chat at `/borrowers/messages` — the same thread the dashboard already surfaces for unread admin messages. Spec + tests updated: `prds/efs-full-application-intake-spec.md` documents the nudge; `tests/borrower-dashboard.test.ts` asserts the Messages text and the `/borrowers/messages` link, plus the SuccessAlert mention.
 
 **Verification:** `make check` → **1213 pass / 0 fail**. Committed `9c31d76`, pushed to origin (`b57f570..9c31d76`). Not deployed — preset `#spec-test-commit-push`.
-<!-- agent:boundary:56774d75 -->
+
+### Re: deal dialog → focus first Available-Deals action — glm-5.2
+
+> **Queue prompt:**
+>
+> Admin Deal Pipeline: https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-b
+
+
+> **Queue prompt:** Admin Deal Pipeline deal dialog (deal_tab=loan) should focus on the first actionable item when opened — the "Review Interested Lenders" button in the flash message.
+
+Done — opening a deal dialog now focuses that deal's next-step action.
+
+The deal-advance-guidance card (`#deal-advance-guidance`, shown on the Loan tab when `tmo_loan_status === 'Application Received'`) now marks its first action button with `data-dialog-initial-focus="true"`, in priority: **Approve accreditation → Move to Loan Estimate → Review Interested Lenders**. For the deal you linked (Available Deal, no lender selected yet), that resolves to the **Review Interested Lenders** button.
+
+No new focus plumbing was needed — the shared `use_dialog_action_navigation_` hook already wired on `PipelineCardModal` (which wraps `<AdminDealDetail>`) focuses `[data-dialog-initial-focus="true"]` on open, including direct-URL restores (`?dialog=deal&dialog_deal_id=…`). Just the marker.
+
+Spec + test updated: `prds/67v2-admin-loan-pipeline-kanban.md` records the priority; `tests/admin-pipeline.test.ts` asserts the guidance card carries the focus marker. `make check` → **1214 pass / 0 fail**. Committed `1565e73`, pushed (`9c31d76..1565e73`). Not deployed — preset `#spec-test-commit-push`.
+<!-- agent:boundary:eac4e7e1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -231,11 +248,12 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~After a borrower applies for a new deal, The flash message should also mention to use the message chat contact EFS staff about any questions.~~
-- Admin Deal Pipeline: https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan should focus on the first actionable item when opened. In this case the "Review Interested Lenders" button in the flash message.
+- ~~Admin Deal Pipeline: https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-b~~
+- acb-a58f5d94b7da&deal_tab=loan should focus on the first actionable item when opened. In this case the "Review Interested Lenders" button in the flash message.
 - https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan > Loan Detail should remove the "Borrower Chat" card. Use the chat should open the borrower (btak.dev+borrower@gmail.com) instead.
-- All dialog states in the Deal Pipeline and Lender Pipeline should have users associated with them. These users will be the focus of the chat. A single user will have a single message thread. Multiple users will have separate tabs in the chat dialog with the user type (Lender, Borrower, Broker). Another tab should be the group chat, where all users are emailed the messages.
+- All dialog states in the Deal Pipeline and Lender Pipeline should have users associated with them. These users will be the focus of the chat. A single user will have a single message thread. Multiple users will have separate tabs in the chat dialog with the user type (Lender, Borrower, Broker). Another tab should be the group chat, where all users are emailed the messages. A borrower/broker + lender should not see each others' email addresses for any Borrower/Broker + Lender combo should be emailed with BCC.
 - All pages should have user(s) or a user type associated with it.
-- deploy
+- ~~deploy~~
 <!-- /agent:queue -->
 
 ## Backlog

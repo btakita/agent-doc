@@ -254,6 +254,64 @@ impl RelayHub {
         })
     }
 
+    /// Apply a **raw encoded yrs update** from member `client_id` to that
+    /// member's hub-side mirror, integrate the new op(s) into the canonical
+    /// replica, and capture the fan-out packet of those op(s) for every OTHER
+    /// live member **without delivering it** (the caller controls delivery — the
+    /// live IPC path delivers into the hub-side mirrors so the next peer
+    /// `ReplicaUpdate`/sync carries them, and returns the per-target deltas to
+    /// the requester for socket fan-out).
+    ///
+    /// This is the IPC-delta analog of [`Self::relay_capture`]: where
+    /// `relay_capture` works from a `local_edit` (offset/len) applied to the
+    /// mirror, this accepts the encoded update the editor's FFI node produced
+    /// (`agent_doc_replica_diff`) so the editor — not the hub — owns the local
+    /// edit. yrs guarantees the apply is idempotent + causal-buffered, so a
+    /// duplicate or out-of-order update converges rather than corrupting.
+    pub fn relay_update_capture(&self, client_id: u64, update: &[u8]) -> Result<BroadcastPacket> {
+        let member = self
+            .members
+            .get(&client_id)
+            .ok_or_else(|| anyhow!("replica {client_id} is not registered"))?;
+        // Apply the editor's encoded op to its hub-side mirror first.
+        member.replica.apply_update(update)?;
+        // Then pull whatever the mirror now holds that canonical is missing.
+        let before = self.canonical.state_vector();
+        let into_canonical = member.replica.diff(&self.canonical.state_vector())?;
+        self.canonical.apply_update(&into_canonical)?;
+        let delta = self.canonical.diff(&before)?;
+        let targets: Vec<u64> = self
+            .members
+            .iter()
+            .filter(|(id, m)| **id != client_id && m.live)
+            .map(|(id, _)| *id)
+            .collect();
+        Ok(BroadcastPacket {
+            origin: client_id,
+            update: delta,
+            targets,
+        })
+    }
+
+    /// Apply a raw encoded yrs update from `client_id` and **immediately
+    /// broadcast** the resulting delta to every other live member's hub-side
+    /// mirror (the normal live IPC path). Returns the delivered packet so the
+    /// caller can also relay the per-target delta out over the socket to the
+    /// peers' FFI nodes.
+    pub fn relay_update(&self, client_id: u64, update: &[u8]) -> Result<BroadcastPacket> {
+        let packet = self.relay_update_capture(client_id, update)?;
+        for target in &packet.targets {
+            self.deliver(*target, &packet.update)?;
+        }
+        Ok(packet)
+    }
+
+    /// The canonical replica's encoded state — the bootstrap snapshot a freshly
+    /// registering editor needs on first contact (all later traffic is deltas).
+    pub fn canonical_encoded_state(&self) -> Vec<u8> {
+        self.canonical.encode_state()
+    }
+
     /// Deliver an update to one target replica (idempotent + causal-buffered by
     /// yrs, so out-of-order delivery self-heals once causal deps arrive). A no-op
     /// if the target is gone.
@@ -460,6 +518,7 @@ pub fn mint_client_id(identity: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_doc_core::crdt_sync::ReplicaState;
 
     #[test]
     fn fan_out_reaches_every_other_live_replica() {
@@ -474,6 +533,35 @@ mod tests {
         assert_eq!(hub.member_text(2).unwrap(), "hello");
         assert_eq!(hub.member_text(3).unwrap(), "hello");
         assert_eq!(hub.member_text(4).unwrap(), "hello");
+    }
+
+    #[test]
+    fn relay_update_fans_a_raw_encoded_update_to_every_other_live_replica() {
+        // The IPC-delta path: an editor's FFI node produces an encoded update; the
+        // hub applies it to that member's mirror, integrates canonical, and fans
+        // the delta out to the other live replicas — the editor owns its local
+        // edit, the hub owns convergence + fan-out.
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+
+        // Replica 2's FFI node makes a local edit and encodes the delta it owes a
+        // peer that knows the (empty) shared base. We model that with a detached
+        // ReplicaState mirroring client 2.
+        let editor2 = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        editor2.apply_local_edit(0, 0, "hello-ipc");
+        let update = editor2.diff(&ReplicaState::new(99).state_vector()).unwrap();
+
+        let packet = hub.relay_update(2, &update).unwrap();
+        assert_eq!(packet.origin, 2);
+        assert_eq!(packet.targets, vec![3]);
+        assert_eq!(hub.canonical_text(), "hello-ipc");
+        assert_eq!(hub.member_text(2).unwrap(), "hello-ipc");
+        assert_eq!(
+            hub.member_text(3).unwrap(),
+            "hello-ipc",
+            "the raw-update fan-out reached the other live replica's mirror"
+        );
     }
 
     #[test]

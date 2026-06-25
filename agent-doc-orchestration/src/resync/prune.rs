@@ -613,7 +613,7 @@ mod tests {
                     }
                     crate::supervisor::ipc::IpcMethod::Restart { .. }
                     | crate::supervisor::ipc::IpcMethod::Stop { .. }
-                    | crate::supervisor::ipc::IpcMethod::StopAgent { .. } => {
+                    | crate::supervisor::ipc::IpcMethod::StopAgent { .. } | crate::supervisor::ipc::IpcMethod::ReplicaRegister { .. } | crate::supervisor::ipc::IpcMethod::ReplicaDeregister { .. } | crate::supervisor::ipc::IpcMethod::ReplicaUpdate { .. } | crate::supervisor::ipc::IpcMethod::ReplicaAwareness { .. } => {
                         crate::supervisor::ipc::IpcResponse::ok_empty()
                     }
                 }
@@ -675,7 +675,7 @@ mod tests {
                     }
                     crate::supervisor::ipc::IpcMethod::Restart { .. }
                     | crate::supervisor::ipc::IpcMethod::Stop { .. }
-                    | crate::supervisor::ipc::IpcMethod::StopAgent { .. } => {
+                    | crate::supervisor::ipc::IpcMethod::StopAgent { .. } | crate::supervisor::ipc::IpcMethod::ReplicaRegister { .. } | crate::supervisor::ipc::IpcMethod::ReplicaDeregister { .. } | crate::supervisor::ipc::IpcMethod::ReplicaUpdate { .. } | crate::supervisor::ipc::IpcMethod::ReplicaAwareness { .. } => {
                         crate::supervisor::ipc::IpcResponse::ok_empty()
                     }
                 }

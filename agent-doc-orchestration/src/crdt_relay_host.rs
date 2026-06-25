@@ -94,6 +94,166 @@ pub fn with_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T>
     Ok(f(hub))
 }
 
+/// Whether a relay hub has been allocated for `doc_hash` (test-only assertion
+/// helper, e.g. proving the Detached path allocates no hub).
+pub fn hub_is_allocated_for_test(doc_hash: &str) -> bool {
+    hub_registry()
+        .lock()
+        .map(|registry| registry.contains_key(doc_hash))
+        .unwrap_or(false)
+}
+
+/// The outcome of a live editor-replica IPC delta relayed through the
+/// per-document hub (`#crdtauth5`).
+#[derive(Debug, Clone)]
+pub struct FanOut {
+    /// The minted yrs client-id of the origin editor replica.
+    pub origin: u64,
+    /// The incremental update fanned out (only the new op(s)).
+    pub update: Vec<u8>,
+    /// The currently-live OTHER replicas that received `update`.
+    pub targets: Vec<u64>,
+    /// The canonical converged text length (chars) after integrating — for
+    /// diagnostics / ops.log only.
+    pub canonical_len: usize,
+}
+
+/// Register an editor replica with the document's per-document hub on the live
+/// IPC path (`#crdtauth5`, plan phase 5), authority-gated.
+///
+/// - [`CrdtAuthority::GitAuthoritative`] (**Detached**): refused — `Ok(None)`,
+///   and NO hub is allocated. A document with no live editor has no
+///   multi-replica session to join; the headless control-plane path is
+///   untouched.
+/// - [`CrdtAuthority::MultiReplica`] (**EditorAttached**): mints a stable
+///   client-id from `identity`, registers it in the per-document hub
+///   (bootstrapping it from canonical), and returns
+///   `Some((client_id, canonical_bootstrap_state))` so the editor's FFI node
+///   starts converged.
+///
+/// A client-id collision (already registered, or canonical-id collision) is a
+/// hard error per the plan's unique-stable-client-id rule.
+pub fn register_replica_for_file(
+    file: &Path,
+    identity: &str,
+) -> Result<Option<(u64, Vec<u8>)>> {
+    let authority = authority_for_file(&file.display().to_string());
+    if !authority.editor_attached() {
+        return Ok(None);
+    }
+    let client_id = crate::crdt_relay::mint_client_id(identity);
+    let bootstrap = with_hub(file, |hub| {
+        if hub.is_registered(client_id) {
+            // Idempotent re-register (e.g. an editor reconnect that re-announces
+            // the same stable identity): keep the existing mirror, just return
+            // the current canonical bootstrap state.
+            Ok(hub.canonical_encoded_state())
+        } else {
+            hub.register(client_id)
+                .map(|()| hub.canonical_encoded_state())
+        }
+    })??;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "crdt_replica_register file={} authority=multi_replica client_id={} bootstrap_bytes={}",
+            file.display(),
+            client_id,
+            bootstrap.len(),
+        ),
+    );
+    Ok(Some((client_id, bootstrap)))
+}
+
+/// Deregister an editor replica from the document's hub on the live IPC path
+/// (editor/IDE closed the document). Authority-gated like
+/// [`register_replica_for_file`]: `Ok(false)` (no hub touched) under Detached;
+/// `Ok(true)` when a live-attached hub dropped the mirror.
+pub fn deregister_replica_for_file(file: &Path, identity: &str) -> Result<bool> {
+    let authority = authority_for_file(&file.display().to_string());
+    if !authority.editor_attached() {
+        return Ok(false);
+    }
+    let client_id = crate::crdt_relay::mint_client_id(identity);
+    let removed = with_hub(file, |hub| hub.deregister(client_id))?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "crdt_replica_deregister file={} authority=multi_replica client_id={} removed={}",
+            file.display(),
+            client_id,
+            removed,
+        ),
+    );
+    Ok(removed)
+}
+
+/// Relay a **raw encoded yrs update** from an editor replica through the
+/// document's per-document hub: integrate it into the canonical replica and fan
+/// the missing delta out to every OTHER live replica's hub-side mirror
+/// (`#crdtauth5`, plan phase 5), authority-gated.
+///
+/// - [`CrdtAuthority::GitAuthoritative`] (**Detached**): refused — `Ok(None)`,
+///   no hub allocated. The headless path never fans deltas.
+/// - [`CrdtAuthority::MultiReplica`] (**EditorAttached**): applies the editor's
+///   op, integrates canonical, broadcasts, and returns the [`FanOut`] (per-target
+///   delta + canonical text length) so the IPC handler can relay the delta back
+///   out over the socket to the peers' FFI nodes.
+///
+/// Per-document isolation is structural: the update only ever reaches THIS
+/// document's hub (keyed by [`crate::snapshot::doc_hash`]) — `#xdocsuper1/3`.
+pub fn relay_replica_update_for_file(
+    file: &Path,
+    identity: &str,
+    update: &[u8],
+) -> Result<Option<FanOut>> {
+    let authority = authority_for_file(&file.display().to_string());
+    if !authority.editor_attached() {
+        return Ok(None);
+    }
+    let client_id = crate::crdt_relay::mint_client_id(identity);
+    let packet = with_hub(file, |hub| hub.relay_update(client_id, update))??;
+    let canonical_len = with_hub(file, |hub| hub.canonical_text().chars().count())?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "crdt_replica_fanout file={} authority=multi_replica origin={} targets={} update_bytes={} canonical_len={}",
+            file.display(),
+            packet.origin,
+            packet.targets.len(),
+            packet.update.len(),
+            canonical_len,
+        ),
+    );
+    Ok(Some(FanOut {
+        origin: packet.origin,
+        update: packet.update,
+        targets: packet.targets,
+        canonical_len,
+    }))
+}
+
+/// Push an ephemeral awareness/presence update for an editor replica through the
+/// document's hub (`#crdtauth5`). Authority-gated; presence is NOT part of the
+/// document CRDT, never persisted, never committed. Returns the deterministic
+/// presence snapshot of all live replicas for fan-out, or `None` under Detached.
+pub fn set_replica_awareness_for_file(
+    file: &Path,
+    identity: &str,
+    state: crate::crdt_relay::AwarenessState,
+) -> Result<Option<Vec<(u64, crate::crdt_relay::AwarenessState)>>> {
+    let authority = authority_for_file(&file.display().to_string());
+    if !authority.editor_attached() {
+        return Ok(None);
+    }
+    let client_id = crate::crdt_relay::mint_client_id(identity);
+    let snapshot = with_hub(file, |hub| {
+        hub.set_awareness(client_id, state);
+        hub.awareness_snapshot()
+    })?;
+    Ok(Some(snapshot))
+}
+
 /// Recover the per-document canonical replica from a durable disk recovery
 /// projection on supervisor restart (plan phase 6). At most one flush is lost;
 /// live editors re-sync newer ops when they re-register. The disk `.yrs` is a

@@ -162,6 +162,58 @@ pub enum IpcMethod {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
+
+    // --- CRDT live multi-editor delta fan-out (`#crdtauth5`, plan phase 5) ----
+    //
+    // These variants are ADDITIVE: they extend the control-plane enum with an
+    // editor-replica lifecycle/delta family without touching the existing
+    // variants or their handlers. All of them are routed through the per-document
+    // `crdt_relay_host` hub registry and are authority-gated — on a document with
+    // no live editor (`CrdtAuthority::GitAuthoritative` / Detached) the handler
+    // refuses them and allocates no hub, so the headless control-plane path is
+    // byte-for-byte unchanged.
+    //
+    // The wire carries `file` (the canonical document path, the per-document hub
+    // key), an `identity` string (a stable editor-process identity that mints a
+    // deterministic yrs client-id), and yrs update / state-vector bytes
+    // base64-encoded (NDJSON is text; raw yrs bytes are not UTF-8).
+    /// Register an editor replica with the document's relay hub. The supervisor
+    /// creates/attaches the editor replica in the per-document hub and replies
+    /// with the minted `client_id` plus the canonical replica's encoded state
+    /// (base64) so the editor's FFI node bootstraps converged on first contact.
+    ReplicaRegister {
+        /// Canonical document path (the per-document hub key).
+        file: String,
+        /// Stable editor-process identity (mints a deterministic client-id).
+        identity: String,
+    },
+    /// Deregister an editor replica (editor/IDE closed the document). Drops the
+    /// hub-side mirror and expires the ephemeral awareness entry.
+    ReplicaDeregister {
+        file: String,
+        identity: String,
+    },
+    /// Broadcast a yrs update from one editor replica: the supervisor applies it
+    /// to that replica's hub-side mirror, integrates the new op(s) into the
+    /// canonical replica, and fans the missing delta out to every OTHER live
+    /// replica. The reply carries the per-target fan-out updates (base64) so a
+    /// caller relaying for peers can deliver them, plus the canonical text length
+    /// for diagnostics.
+    ReplicaUpdate {
+        file: String,
+        identity: String,
+        /// Base64-encoded yrs update bytes produced by the editor's FFI node.
+        update_b64: String,
+    },
+    /// Push an ephemeral awareness/presence update (cursor/selection). NOT part
+    /// of the document CRDT, never persisted, never committed. Replies with the
+    /// current presence snapshot (base64 JSON) for the other live replicas.
+    ReplicaAwareness {
+        file: String,
+        identity: String,
+        /// Base64-encoded JSON [`crate::crdt_relay::AwarenessState`].
+        awareness_b64: String,
+    },
 }
 
 fn default_restart_mode() -> String {
@@ -455,6 +507,13 @@ mod tests {
             }
             IpcMethod::Inject { bytes } => IpcResponse::ok(serde_json::json!({ "n": bytes.len() })),
             IpcMethod::Clear { bytes } => IpcResponse::ok(serde_json::json!({ "n": bytes.len() })),
+            // The echo handler does not exercise the CRDT relay (that is covered
+            // by the live handler tests in `start::supervisor_io` and the
+            // end-to-end fan-out tests); just acknowledge structurally.
+            IpcMethod::ReplicaRegister { .. }
+            | IpcMethod::ReplicaDeregister { .. }
+            | IpcMethod::ReplicaUpdate { .. }
+            | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
         })
         .expect("start test handler")
     }
@@ -572,6 +631,49 @@ mod tests {
         let stop_json = serde_json::to_string(&IpcMethod::Stop { graceful: false }).unwrap();
         assert!(stop_json.contains(r#""method":"stop""#));
         assert!(!stop_json.contains("stop_agent"));
+    }
+
+    #[test]
+    fn crdt_replica_variants_serde_roundtrip_and_are_additive() {
+        // The new `#crdtauth5` replica family round-trips on the wire...
+        let reg = IpcMethod::ReplicaRegister {
+            file: "plan.md".into(),
+            identity: "intellij:1234".into(),
+        };
+        let json = serde_json::to_string(&reg).unwrap();
+        assert_eq!(
+            json,
+            r#"{"method":"replica_register","file":"plan.md","identity":"intellij:1234"}"#
+        );
+        assert_eq!(serde_json::from_str::<IpcMethod>(&json).unwrap(), reg);
+
+        let upd = IpcMethod::ReplicaUpdate {
+            file: "plan.md".into(),
+            identity: "vscode:99".into(),
+            update_b64: "AAEC".into(),
+        };
+        assert_eq!(serde_json::from_str::<IpcMethod>(&serde_json::to_string(&upd).unwrap()).unwrap(), upd);
+
+        // ...and the existing control-plane variants are byte-for-byte unchanged
+        // on the wire (additive enum extension — no method tag collision).
+        assert_eq!(
+            serde_json::to_string(&IpcMethod::State).unwrap(),
+            r#"{"method":"state"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&IpcMethod::Stop { graceful: false }).unwrap(),
+            r#"{"method":"stop","graceful":false}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&IpcMethod::Inject { bytes: "x".into() }).unwrap(),
+            r#"{"method":"inject","bytes":"x"}"#
+        );
+        // An OLD client that never sends the new methods is unaffected: parsing
+        // the legacy control messages still yields exactly the old variants.
+        assert_eq!(
+            serde_json::from_str::<IpcMethod>(r#"{"method":"pid"}"#).unwrap(),
+            IpcMethod::Pid
+        );
     }
 
     #[test]

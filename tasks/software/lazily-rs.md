@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -427,7 +427,32 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=eee09c11-e341-4856-9074-7e0186e31be6 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=37547 candidate_hash=f34a3dfc37201a839782389db916c7232e3f30253a99fdd9972162e6e23e1747 content_ours_len=40472 content_ours_hash=9ddb3cec6ff8cd6937e83ee736e73bde74f33b90ba7c77002d95c96223d41f38 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782382884404
 ```
-<!-- agent:boundary:89e43d3f -->
+
+### Re: Are the lazily-rs CRDT cells complete? — opus-4-8
+
+> **Queue prompt:** CRDT cells were implemented in lazily-rs. Please evaluate if this is complete.
+
+**Verdict: complete as a Phase-1 merge-mechanism core, but NOT yet end-to-end distributed.** The `merge: crdt` mechanism (`src/crdt.rs`, commit `e235f98`) is spec-complete and correct against `lazily-spec/cell-model.md`; the 7 unit tests pass (`cargo test --lib crdt --features distributed` → 7 passed). What's missing is everything that lets two *real* replicas converge over a wire — which the spec scopes as later phases, not part of the crdt mechanism itself.
+
+**What IS done (spec-complete, Phase 1):**
+- `MergeMechanism` enum — `Crdt` implemented; `Lww`/`Ot`/`Lease`/`Custom` reserved and **fail-closed** in `resolve()` (explicit rejection, never aliased to crdt — exactly what the spec mandates for capability negotiation).
+- `Hlc`/`HlcStamp` — hybrid logical clock, deterministic (caller-supplied wall time), total-ordered `(wall, logical, peer)`.
+- Three registers, all commutative/associative/idempotent: `LwwRegister`, `MvRegister` (version-vector multi-value), `PnCounter` (per-peer max).
+- `ReplicatedCell<C>` — multi-write ROOT cell; remote-op ingress merge folds remote state then pushes the converged value via `Context::set_cell`; PartialEq guard applied **after** merge so an equal/losing merge invalidates nothing. Two-replica order-independent convergence is tested.
+
+The spec itself positions this as the first of N mechanisms — *"`crdt` is the first mechanism this spec defines and the only one with a normative wire schema today"* — so "the crdt cell kind is complete" is a true and bounded statement.
+
+**What is NOT done (deferred; required for *usable* distributed cells):**
+1. **No wire/IPC transport** — `ipc.rs` has zero CRDT hooks. The registers carry `serde` derives but nothing serializes HLC/register state into `IpcValue`/Delta ops. `ReplicatedCell::merge_remote(&ctx, remote)` requires you to hand it an already-acquired remote replica; there is no path for a remote peer's delta to actually reach it. **Today, two hosts cannot replicate a crdt cell.** [spec-required, later phase]
+2. **No single-writer effect authority** — the spec mandates gating irreversible effects behind a designated writer / quorum for at-most-once semantics. Unimplemented. [spec-required, later phase]
+3. **No peer/replica identity wiring** — `Hlc::new(peer)` must be instantiated by hand; no session bootstrap, peer registry, or `#yxjw`-signaling integration.
+4. **No Context factory ergonomics** — `ReplicatedCell` is public but isolated behind `distributed`; there's no `ctx.replicated_cell(...)`, so a consumer wires it manually.
+5. **MvRegister version vectors grow unbounded** — no GC/tombstones (not spec-mentioned; an impl concern for long-lived replicas).
+
+**Bottom line:** if "complete" means *the crdt merge mechanism and its convergence proofs* — yes, done and green. If "complete" means *crdt cells you can actually run across two machines* — no; the transport binding (#1) and effect authority (#2) are the real next phases, and they're sizeable enough to deserve their own focused cycle(s) rather than auto-draining off this go-queue.
+
+Want me to file `#1` (IPC/wire transport for `ReplicatedCell`) and `#2` (single-writer effect authority) as backlog items, or open a phase plan for the distributed wiring? I left them out of the queue to avoid auto-implementing speculative scope without your go.
+<!-- agent:boundary:0260cdb4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -436,7 +461,6 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- 🚧 CRDT cells were implemented in lazily-rs. Please evaluate if this is complete.
 <!-- /agent:queue -->
 
 ## Backlog

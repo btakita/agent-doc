@@ -15,6 +15,10 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
+import {
+    StateGraphMirror,
+    type MirrorProjectionSummary,
+} from './stateMirror';
 
 // Result struct returned by FFI functions that produce text
 interface FfiPatchResult {
@@ -119,6 +123,7 @@ function resetBindings(): void {
     _free_string = null;
     _version = null;
     _state_projection = null;
+    _state_subscribe = null;
     _record_state_event = null;
     _record_editor_op = null;
     _document_base_hash = null;
@@ -230,6 +235,7 @@ let _resolve_project_path: any = null;
 let _free_string: any = null;
 let _version: any = null;
 let _state_projection: any = null;
+let _state_subscribe: any = null;
 let _record_state_event: any = null;
 let _reconnect_buffer_decision: any = null;
 let _record_editor_op: any = null;
@@ -346,6 +352,15 @@ function bindFunctions(): void {
         console.log(`[agent-doc/native] state projection ABI unavailable: ${e.message}`);
         _state_projection = null;
         _record_state_event = null;
+    }
+    try {
+        // #r5at lazily-js reactive mirror: warm subscribe (snapshot/delta) over
+        // the FFI state backbone. Optional so an older cdylib without the symbol
+        // does not break the rest of the bindings.
+        _state_subscribe = lib.func('agent_doc_state_subscribe', 'char*', ['str', 'uint64']);
+    } catch (e: any) {
+        console.log(`[agent-doc/native] state subscribe ABI unavailable: ${e.message}`);
+        _state_subscribe = null;
     }
     try {
         // #yzer reconnect-reread (VS Code parity with the JB plugin). Optional so an
@@ -590,6 +605,172 @@ export function stateProjection(documentHashValue: string, projectRoot?: string)
 
 export function stateProjectionForFile(filePath: string, projectRoot?: string): any | null {
     return stateProjection(documentHash(filePath), projectRoot);
+}
+
+// #r5at lazily-js reactive mirror — the VS Code counterpart of the JB plugin's
+// StateProjectionBridge per-document StateGraphMirror (#n529 / #lazilystatesync3).
+// Keyed by documentHash (canonical-path SHA-256); re-subscription lazily re-creates
+// the mirror from a fresh cold snapshot, so aggressive eviction is safe.
+const stateMirrors = new Map<string, StateGraphMirror>();
+
+/**
+ * Pull a raw `agent_doc_state_subscribe(documentHash, lastEpoch)` message
+ * (snapshot when lastEpoch==0 / uninitialized, delta thereafter). Returns the
+ * JSON string, or null when the FFI/symbol is unavailable or no state exists.
+ * Pure FFI wrapper — exported for diagnostics; mirror callers use
+ * {@link subscribeMirrorForFile}.
+ */
+export function stateSubscribe(
+    documentHashValue: string,
+    lastEpoch: number,
+    projectRoot?: string,
+): string | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    if (!_state_subscribe) return null;
+    let ptr: any = null;
+    try {
+        ptr = _state_subscribe(documentHashValue, lastEpoch);
+        if (!ptr) return null;
+        const raw = koffi.decode(ptr, 'char', -1);
+        if (!raw || raw === 'null' || raw === '') return null;
+        return raw;
+    } catch (e: any) {
+        console.warn(`[agent-doc/native] state_subscribe error: ${e.message}`);
+        return null;
+    } finally {
+        if (ptr) _free_string(ptr);
+    }
+}
+
+/** Whether the loaded cdylib exposes the reactive subscribe FFI (#r5at). */
+export function hasStateSubscribe(projectRoot?: string): boolean {
+    if (!ensureLoaded(projectRoot)) return false;
+    bindFunctions();
+    return Boolean(_state_subscribe);
+}
+
+/**
+ * Advance the per-document mirror by absorbing any FFI snapshot/delta since its
+ * current epoch (`#r5at`). First call (uninitialized mirror) requests a cold
+ * snapshot; subsequent calls request a delta from the mirror's current epoch.
+ * Returns the applied message type (`"snapshot"`/`"delta"`) or null when FFI is
+ * unavailable / no state yet.
+ */
+export function subscribeMirrorForFile(filePath: string, projectRoot?: string): string | null {
+    const docHash = documentHash(filePath);
+    let mirror = stateMirrors.get(docHash);
+    if (!mirror) {
+        mirror = new StateGraphMirror();
+        stateMirrors.set(docHash, mirror);
+    }
+    const lastEpoch = mirror.isInitialized ? mirror.epoch : 0;
+    const raw = stateSubscribe(docHash, lastEpoch, projectRoot);
+    if (!raw) return null;
+    if (!mirror.applyMessage(raw)) return null;
+    try {
+        const parsed = JSON.parse(raw);
+        return typeof parsed?.type === 'string' ? parsed.type : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Reactive summary derived from the per-document mirror's tracked cells
+ * (`#r5at`). Call after {@link subscribeMirrorForFile}. Returns null when the
+ * mirror has not been initialized yet.
+ */
+export function mirrorSummaryForFile(filePath: string): MirrorProjectionSummary | null {
+    const mirror = stateMirrors.get(documentHash(filePath));
+    if (!mirror || !mirror.isInitialized) return null;
+    return mirror.summary();
+}
+
+/** The current mirror epoch for [filePath], or null if never initialized (#r5at). */
+export function mirrorEpochForFile(filePath: string): number | null {
+    const mirror = stateMirrors.get(documentHash(filePath));
+    return mirror && mirror.isInitialized ? mirror.epoch : null;
+}
+
+/**
+ * Reactive read for consumers (`#r5at`, the VS Code analog of the JB
+ * `reactiveSummaryForFile`): advance the per-document mirror by absorbing FFI
+ * deltas since its current epoch, then derive the summary from tracked cells.
+ *
+ * Drop-in replacement for the cold {@link stateProjectionForFile} +
+ * {@link projectionSummary} pull on the read path:
+ *  - The reactive {@link MirrorProjectionSummary} cannot carry
+ *    `latestTransportPatchId` (the patch id is the node's `slot_id`, not a wire
+ *    payload field). When `includeTransportPatchId` and the mirror summary leaves
+ *    it undefined, backfill that one field from the cold projection.
+ *  - When the mirror never initializes (FFI unavailable / no recorded state yet),
+ *    fall back to the cold pull so a cold-start read still surfaces a summary.
+ *
+ * Returns null only when both the reactive mirror and the cold pull are empty.
+ */
+export function reactiveSummaryForFile(
+    filePath: string,
+    projectRoot?: string,
+    includeTransportPatchId: boolean = true,
+): MirrorProjectionSummary | null {
+    subscribeMirrorForFile(filePath, projectRoot);
+    const mirror = mirrorSummaryForFile(filePath);
+    if (!mirror) {
+        // Cold-start fallback: mirror never initialized (no FFI / no state yet).
+        const cold = stateProjectionForFile(filePath, projectRoot);
+        const summary = cold ? projectionSummary(cold) : null;
+        if (!summary) return null;
+        return {
+            routeReadiness: summary.routeReadiness,
+            routePaneId: summary.routePaneId,
+            latestTransportPatchId: summary.latestTransportPatchId,
+            latestTransportPhase: summary.latestTransportPhase,
+            proofMarkers: summary.proofMarkers,
+        };
+    }
+    if (includeTransportPatchId && mirror.latestTransportPatchId == null) {
+        // Narrow backfill: the wire delta does not carry the patch id, so pull
+        // just that field from the cold projection while keeping every other
+        // field reactive (from the mirror's tracked cells).
+        const cold = stateProjectionForFile(filePath, projectRoot);
+        const coldPatchId = cold ? projectionSummary(cold)?.latestTransportPatchId : undefined;
+        if (coldPatchId != null) {
+            return { ...mirror, latestTransportPatchId: coldPatchId };
+        }
+    }
+    return mirror;
+}
+
+/**
+ * Evict the per-document mirror for [filePath] (`#r5at`, the VS Code analog of
+ * the JB `evictForFile`). Called when the editor tab/document closes so a reused
+ * path (move/symlink/reopen) does not surface the prior document's stale state.
+ */
+export function evictStateMirrorForFile(filePath: string): void {
+    stateMirrors.delete(documentHash(filePath));
+}
+
+/** Test-only: number of live per-document mirrors (eviction coverage). */
+export function debugStateMirrorCount(): number {
+    return stateMirrors.size;
+}
+
+/**
+ * Test-only seam (`#r5at`): seed the per-document mirror by applying a
+ * lazily-spec snapshot/delta message directly, bypassing the FFI subscribe call.
+ * Lets consumer-observation tests assert the read path derives the summary from
+ * the reactive mirror's tracked cells rather than the cold pull (FFI is
+ * unavailable in plugin unit tests). Returns whether the message applied.
+ */
+export function seedStateMirrorMessageForTest(filePath: string, message: string): boolean {
+    const docHash = documentHash(filePath);
+    let mirror = stateMirrors.get(docHash);
+    if (!mirror) {
+        mirror = new StateGraphMirror();
+        stateMirrors.set(docHash, mirror);
+    }
+    return mirror.applyMessage(message);
 }
 
 export function recordStateEvent(

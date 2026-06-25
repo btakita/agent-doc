@@ -202,7 +202,7 @@ Post-restart recovery + first focused-cycle phase of the head epic.
 **Not yet wired into convergence** — that's `#cgfx` (`#queuestatemachine2`: route the ad-hoc dedup passes through the SM as transition guards), then `#brtc` (`#queuestatemachine3`: SimWorld re-emit-storm proof). No behavior change is live yet, so no install/recycle needed — consistent with the standing "stop cutting releases" hold.
 
 **Scope note:** no release ceremony (version/tag/publish/install) per your hold; the code is committed to the submodule and the superproject pointer follows.
-<!-- agent:boundary:3fc0e730 -->
+<!-- agent:boundary:55f134df -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -235,7 +235,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - :pushpin: do [#gww8]
 - :pushpin: do [#n529b]
 - ~~~~When adding a backlog item, the agent sometimes assigns an explicit id. But agent-doc ignores the explicit id and assigns a new id. The agent's explicit id should be used instead. So instead of `[#kj5f] #mergestatemachine3` the id should be `[#mergestatemachine3]`.~~ — auto-struck: answered this cycle (#ftstrike)~~
-- :pushpin: [#vwj7]
+- ~~:pushpin: [#vwj7]~~
 - :pushpin: [#cgfx]
 - :pushpin: [#gghx]
 - :pushpin: [#8g9w]
@@ -334,7 +334,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - :pushpin: do [#8g9w]
 - :pushpin: do [#6mjw]
 - :pushpin: do [#spy9]
-- :pushpin: do [#vwj7]
+- ~~:pushpin: do [#vwj7]~~
 - :pushpin: do [#cgfx]
 - ~~do [#nsq2]~~
 - ~~:pushpin: do [#t4x1]~~
@@ -367,7 +367,6 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue -->
 - [ ] [#n529b] #lazilystatesync3b Wire MirrorProjectionSummary into EditorCommandStateMachine / dispatch-ready / busy consumers (PromptPoller, RunAgentDocAttemptLedger) so they read StateProjectionBridge.mirrorSummaryForFile instead of the cold projectionSummaryForFile pull, then dogfood live in JB. Mirror substrate shipped in 0.2.190 (#n529). Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#gww8] #lazilyspecpin=Pin agent-doc state type_tag vocabulary (8 node kinds) + conformance snapshot/delta pair in lazily-spec as schemas/agent-doc-state.json (versioned) so kt/js/rs import one canonical vocabulary. Design pinned in tasks/agent-doc/plan-lazily-plugin-state-sync.md (Wire-shape definition section). Sibling-repo (src/lazily-spec) cycle per scope-discipline.
-- [ ] [#vwj7] #queuestatemachine1 Define queue-item identity + lifecycle-state model (Authored→Mirrored→InProgress→Answered→Struck→Reaped) + pure transition fn with exhaustive (state×event) tests. Replaces ad-hoc dedup passes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
 - [ ] [#cgfx] #queuestatemachine2 Route convergence through the SM; reduce dedup passes to transition guards; property test idempotence (re-emit=no-op) over #rt83qflood/#qdedupsync/#qauthorder duplication shapes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
 - [ ] [#brtc] #queuestatemachine3 SimWorld: stale-CRDT/supervisor re-emit storm converges to one item per identity; operator position-lock survives. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
 - [ ] [#r5at] #lazilystatesync4 VSCode plugin: lazily-js mirror graph applying FFI state deltas. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md

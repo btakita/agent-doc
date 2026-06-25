@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,75 +33,24 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-053841.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-064946.md`*
 
 Compacted content:
-❯ - Archived 1 response topic(s): realtime still flashing + deploy
+❯ - Archived 4 response topic(s): generalize dialog first-action focus; dialog-focus head closeout; deploy; 1 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
-### Re: generalize dialog first-action focus — glm-5.2
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
-> **Queue prompt:** Opening .../admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-...&deal_tab=loan should focus on the first actionable item — the "Review Interested Lenders" button. How can we make this focus logic generalized so it works for all dialogs?
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
 
-**Root cause.** The focus logic was already shared — every pipeline/lender dialog routes through `use_dialog_action_navigation_` (`shared/ui.tsx`), which focuses the `[data-dialog-initial-focus="true"]` control, falling back to the first enabled button/link/field. But it ran that selection only in the first `requestAnimationFrame`. The deal dialog loads its deal + interest data **asynchronously** (`AdminDealDetail` fetches in `useEffect`), so the `#deal-advance-guidance` card — and its marked "Review Interested Lenders" button — mount *after* that first frame. Focus stayed on whatever fallback was picked first, and the hook's effect deps never re-fired, so it never upgraded to the marked target.
-
-**The fix — generalized in the shared hook, not deal-specific.** The hook now observes its nav root with a `MutationObserver` and **re-runs focus selection whenever a marked `data-dialog-initial-focus` target appears** (a childList add, or its attribute flipping on). So *any* dialog whose first-action control renders late — after a fetch, a tab reveal, etc. — still lands focus on it. The upgrade stops the instant the user interacts (`pointerdown` / `keydown`, capture + once), so async content **never steals focus back** from a descendant that already has it — preserving the existing "PortalModal must not steal focus back" rule. `ArrowUp`/`ArrowDown` nav also settles it.
-
-Net effect: the deal's existing priority logic (Approve accreditation → Move to Loan Estimate → Review Interested Lenders) now actually wins focus once the guidance card mounts, and every other dialog gets the same late-focus behavior for free.
-
-**Verification.** `make check` → **1217 pass / 0 fail**; worker build OK. New `#dialog-async-initial-focus` test covers the MutationObserver upgrade + settle guard; PRD `#67v2` documents the async generalization.
-
-**Shipped:** committed `f8b111d` + pushed to `equityfundingsource-dev` main (spec + tests + code, per `#spec-test-commit-push`).
-
-**Next queue head:** `deploy` — say the word and I'll run `make deploy` (it builds, applies pending D1 migrations, and deploys the Worker).
-
-### Re: dialog-focus head closeout — glm-5.2
-
-> **Queue prompt:** Opening https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan should focus on the first actionable item...in this case the "Review Interested Lenders" button. How can we make this focus logic generalized so it works for all dialogs?
-
-Shipped in the prior entry (submodule `f8b111d`, pushed to `equityfundingsource-dev` main): the shared `use_dialog_action_navigation_` hook now upgrades focus to a late-rendering `data-dialog-initial-focus` target via a `MutationObserver`, gated on no user interaction — so the deal dialog (and every dialog) focuses its real first action once async content mounts. `make check` → 1217 pass / 0 fail. Striking this head.
-
-**Next queue head:** `deploy`.
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:**
->
-> ~~Opening https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan should focus on the first actionable item...in this case the "Review Interested Lenders" button. How can we make this focus logic generalized so it works for all dialogs?~~ — auto-struck: answered this cycle (#ftstrike)
-
-
-> **Queue prompt:** deploy
-
-**Deployed** (`make deploy`) from EFS submodule HEAD `f8b111d` (the generalized async dialog-focus fix, already pushed to `equityfundingsource-dev` main).
-
-- **Build** → worker bundle OK; uploaded 1 new/modified static asset (`index.browser-UDBNZSTE.js`), 43 already present. Worker startup 18 ms.
-- **D1 migrations** (`--remote`) → **No migrations to apply** (remote already current).
-- **Worker deploy** → ✅ success on account `1e7e194f…`; all bindings intact (Durable Objects, D1, R2 ×3, email/access env).
-- **Smoke check** → `https://equityfundingsource.brian-takita.workers.dev/` returns **HTTP 200**.
-
-Live now: the shared `use_dialog_action_navigation_` MutationObserver focus upgrade — every dialog (deal dialog included) focuses its real first action once async content mounts. Striking this head; the queue is now drained.
-
-### Re: deal loan-tab "Review Interested Lenders" with zero interests — opus-4-8
-
-> **Queue prompt:**
->
-> In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan, "Review Interested Lenders" button is show to advance the deal to the next stage. But there are no Interested Lenders. Please add count of interested lenders. If there are no interested lenders, add messaging that there are no interested lenders without the button.
-
-
-> **Queue prompt:** In .../admin/pipeline?dialog=deal&deal_tab=loan, "Review Interested Lenders" button is shown to advance the deal, but there are no Interested Lenders. Add count of interested lenders; if none, show messaging that there are none without the button.
-
-Fixed in `DealAdvanceGuidance` (`lib/ui--browser--efs/portal/admin/deal_detail.tsx`), the Available Deals advance-guidance card:
-
-- **Count on the button** — the action now reads `Review Interested Lenders (N)`.
-- **Zero-interest state** — when no lender has expressed interest (and none is selected / no accreditation hold), the card title becomes **"No interested lenders yet"**, the body reads "...No lenders have expressed interest yet — there is nothing to review until a lender requests this deal.", and the **Review button is suppressed** entirely (`{has_interests && (...)}`). Previously it rendered "Review 0 interested lenders" with a live button.
-- `review_is_first_action_` now requires `has_interests`, so the dialog initial-focus no longer targets a hidden button.
-
-Verification: full suite green (`bun run check` -> 1217 pass / 0 fail) plus build + worker bundle.
-
-> **Queue prompt:** deploy
-
-Committed (`8f4fc69`, pushed to `origin/main`) and deployed to Cloudflare Workers: remote D1 migrations applied, worker uploaded — `https://equityfundingsource.brian-takita.workers.dev`, Version ID `b6e130d7-73dc-4a87-ae33-7e3e2d7c4feb`.
-<!-- agent:boundary:6aa9c796 -->
+ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=48b3d190-6779-423a-9811-139cda04fea6 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782369337187
+```
+<!-- agent:boundary:665feb84 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -121,6 +70,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- 🚧 https://equityfundingsource.brian-takita.workers.dev/admin/pipeline > Available Deal cards should show the number of interested lenders.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

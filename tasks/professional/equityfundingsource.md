@@ -128,7 +128,19 @@ If you want a *specific* further tweak (3-up at wider widths, Borrower Info also
 > **Queue prompt:** deploy.
 
 Done. `make deploy` ran: full suite **1228 pass / 0 fail**, `build` + `build:worker` clean, remote D1 migrate applied, worker uploaded and triggers deployed → `https://equityfundingsource.brian-takita.workers.dev` (Version `b9966711`). Submodule committed (`1c4fb1c`) and pushed to `origin/main` (`5b62fa6..1c4fb1c`). (The `d1 down` line in the test log is a deliberate negative-path test — *outbox enqueue failures are non-fatal* — not a real failure.)
-<!-- agent:boundary:c79ff45d -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=2474ea4f-923c-4a13-be99-7e71fe43b091 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782417704874
+```
+<!-- agent:boundary:66f06894 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -148,7 +160,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=deal&dialog_deal_id=4d2b9382-06d5-498f-a306-64ea3e2870a7&deal_tab=loan: Borrower Info + Application cards.
+- 🚧 Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=deal&dialog_deal_id=4d2b9382-06d5-498f-a306-64ea3e2870a7&deal_tab=loan: Borrower Info + Application + Loan Terms cards.
+- Optimize the Loan Terms card as well.
 - ~~deploy.~~
 <!-- /agent:queue -->
 

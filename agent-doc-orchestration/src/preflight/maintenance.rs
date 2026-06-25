@@ -1845,16 +1845,20 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // the current response — was never struck. That left "completed residue"
     // that `check_free_text_queue_head_provenance` INTERRUPTs on every closeout
     // while backlog→queue convergence kept re-adding it, churning the go-queue
-    // forever (live repro: the `🚧 JB Run Agent Doc` head). This is the
-    // free-text analogue of `strike_done_queue_head_prompts` above: strike any
-    // active free-text head already answered anywhere in the committed exchange,
-    // using the SAME `free_text_head_answered_by_response` predicate (via
-    // `answered_free_text_head_node_keys`) the session-check residue guard uses,
-    // so the preflight strike set and the session-check INTERRUPT set always
-    // agree — anything struck here is exactly what would otherwise have
-    // INTERRUPTed closeout. `baseline=None` keeps that parity (the residue guard
-    // applies no in-flight-edit gate); the `#qstrikeexplain` baseline gate stays
-    // on the per-cycle write-side strike where in-flight operator edits live.
+    // forever (live repro: the `🚧 JB Run Agent Doc` head).
+    //
+    // This strikes at the QUEUE-ENTRY level (`Prompt` → `Completed`), NOT via
+    // `answered_free_text_head_node_keys`/`item_nodes`: the live churning heads
+    // are BARE, multi-line operator-pasted blocks (no `- ` bullet, embedded
+    // route-error code fences), which the markdown list-item parser does not
+    // surface — only `crate::queue::parse` represents them (as a multiline
+    // `Prompt`). The match reuses the SAME `free_text_head_answered_by_response`
+    // predicate the session-check residue guard uses, so the preflight strike set
+    // and the session-check INTERRUPT set agree — anything struck here is exactly
+    // what would otherwise have INTERRUPTed closeout. A snapshot gate restricts
+    // the strike to heads already present in the committed queue (mirroring
+    // session-check's `committed_queue_contains_active_free_text_head`), so an
+    // in-flight operator edit the convergence just added is never struck.
     let exchange_text = crate::component::parse(&current_content)
         .ok()
         .and_then(|comps| {
@@ -1865,51 +1869,68 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         })
         .unwrap_or_default();
     if !exchange_text.trim().is_empty() {
-        let answered_keys = crate::write::answered_free_text_head_node_keys(
-            &current_content,
-            &exchange_text,
-            None,
-        )?;
-        if !answered_keys.is_empty() {
-            let struck = crate::write::consume_queue_nodes_by_key(&current_content, &answered_keys)?;
-            if struck != current_content {
-                let annotated =
-                    crate::write::annotate_newly_struck_free_text_heads(&current_content, &struck)?;
-                // Re-derive the activation entry set from the struck queue so the
-                // halt/step/dispatch phases below see the post-strike head set.
-                let new_entries: Vec<crate::queue::QueueEntry> =
-                    crate::component::parse(&annotated)
-                        .ok()
-                        .and_then(|comps| {
-                            comps
-                                .iter()
-                                .find(|c| c.name == "queue")
-                                .map(|q| annotated[q.open_end..q.close_start].to_string())
-                        })
-                        .and_then(|body| crate::queue::parse(&body).ok())
-                        .unwrap_or_else(|| activation.entries_after.clone());
-                current_content = annotated;
-                activation.entries_after = new_entries;
-                mutated = true;
-                eprintln!(
-                    "[preflight] queue: auto-struck {} answered free-text head(s) by committed exchange match (#qheadresidue)",
-                    answered_keys.len()
-                );
-                crate::ops_log::log_op(
-                    file,
-                    &format!(
-                        "preflight_freetext_residue_strike file={} struck={}",
-                        file.display(),
-                        answered_keys.len()
-                    ),
-                );
-                // If the strike emptied the live head set, mirror the id-backed
-                // done-strike drain-clear so the queue does not report active with
-                // an empty prompt set (#drained-done-queue-clear).
-                if crate::queue::prompts(&activation.entries_after).is_empty() {
-                    activation.active = false;
-                    activation.trigger = None;
+        // Normalized prose of every free-text head committed in the snapshot — the
+        // in-flight-edit gate. `snapshot_queue_entries` was parsed above.
+        let gate_norm = |text: &str| -> String {
+            crate::queue::strip_priority_markers(text)
+                .to_lowercase()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let committed_free_text: std::collections::HashSet<String> = snapshot_queue_entries
+            .iter()
+            .filter_map(|e| match e {
+                crate::queue::QueueEntry::Prompt(p) => Some(gate_norm(&p.text)),
+                _ => None,
+            })
+            .collect();
+        let mut struck_count = 0usize;
+        let new_entries: Vec<crate::queue::QueueEntry> = activation
+            .entries_after
+            .iter()
+            .map(|entry| match entry {
+                crate::queue::QueueEntry::Prompt(p)
+                    if crate::write::queue_prompt_text_is_free_text(&current_content, &p.text)
+                        && crate::write::free_text_head_answered_by_response(
+                            &exchange_text,
+                            &p.text,
+                        )
+                        && committed_free_text.contains(&gate_norm(&p.text)) =>
+                {
+                    struck_count += 1;
+                    crate::queue::QueueEntry::Completed(p.clone())
                 }
+                other => other.clone(),
+            })
+            .collect();
+        if struck_count > 0 {
+            let new_body = crate::queue::render(&new_entries);
+            current_content = {
+                let comps = crate::component::parse(&current_content)?;
+                let q = comps.iter().find(|c| c.name == "queue").context(
+                    "queue maintenance: queue component vanished before free-text residue strike",
+                )?;
+                q.replace_content(&current_content, &new_body)
+            };
+            activation.entries_after = new_entries;
+            mutated = true;
+            eprintln!(
+                "[preflight] queue: auto-struck {struck_count} answered free-text head(s) by committed exchange match (#qheadresidue)"
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "preflight_freetext_residue_strike file={} struck={struck_count}",
+                    file.display(),
+                ),
+            );
+            // If the strike emptied the live head set, mirror the id-backed
+            // done-strike drain-clear so the queue does not report active with an
+            // empty prompt set (#drained-done-queue-clear).
+            if crate::queue::prompts(&activation.entries_after).is_empty() {
+                activation.active = false;
+                activation.trigger = None;
             }
         }
     }
@@ -5777,7 +5798,12 @@ mod tests {
             "Diagnosed: a paused stale parent supervisor. Restart it.\n",
             "<!-- /agent:exchange -->\n\n",
             "<!-- agent:queue priority go -->\n",
-            "- :pushpin: JB Run Agent Doc on equityfundingsource after switching from codex to opencode any agent change has this issue\n",
+            "🚧 :pushpin: JB Run Agent Doc on equityfundingsource after switching from codex to opencode any agent change has this issue\n",
+            "```\n",
+            "[route] target tmux session: 0\n",
+            "Error: authoritative actor record deferring to boundary agent restart\n",
+            "```\n",
+            "---\n",
             "- :pushpin: do [#beta]\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog priority queue -->\n",
@@ -5790,21 +5816,6 @@ mod tests {
         let _ = run_queue_maintenance(&doc, None).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        // The answered free-text head is now struck (wrapped + annotated), not an
-        // active queue line.
-        assert!(
-            updated.contains("~~")
-                && updated.contains("auto-struck")
-                && updated.contains("JB Run Agent Doc on equityfundingsource"),
-            "answered free-text head must be struck with the auto-struck note:\n{updated}"
-        );
-        // The unanswered id-backed head survives the strike pass.
-        assert!(
-            updated.contains("do [#beta]"),
-            "unanswered id-backed head must remain active:\n{updated}"
-        );
-        // The struck head is no longer an ACTIVE queue prompt — session-check's
-        // residue guard keys off active heads, so this is what clears the churn.
         let queue_body = crate::component::parse(&updated)
             .unwrap()
             .iter()
@@ -5812,25 +5823,39 @@ mod tests {
             .map(|q| updated[q.open_end..q.close_start].to_string())
             .unwrap();
         let entries = crate::queue::parse(&queue_body).unwrap();
-        let active: Vec<String> = crate::queue::prompts(&entries)
+        // The answered bare multi-line head is now a `Completed` (struck) entry,
+        // not an active `Prompt` — session-check's residue guard keys off active
+        // heads, so this is exactly what clears the churn.
+        let active: Vec<&str> = entries
             .iter()
-            .map(|p| p.text.clone())
+            .filter_map(|e| match e {
+                crate::queue::QueueEntry::Prompt(p) => Some(p.text.as_str()),
+                _ => None,
+            })
             .collect();
-        // session-check treats a `~~…~~`-wrapped line as struck/inactive, so the
-        // residue guard no longer fires once the head only appears struck. Prove
-        // every queue line carrying the head prose is struck (wrapped in `~~`).
+        let completed: Vec<&str> = entries
+            .iter()
+            .filter_map(|e| match e {
+                crate::queue::QueueEntry::Completed(p) => Some(p.text.as_str()),
+                _ => None,
+            })
+            .collect();
         assert!(
-            active
+            !active
                 .iter()
-                .filter(|t| t.contains("JB Run Agent Doc on equityfundingsource"))
-                .all(|t| t.contains("~~")),
-            "the answered head must only appear struck, never as an active line:\n{active:?}"
+                .any(|t| t.contains("JB Run Agent Doc on equityfundingsource")),
+            "answered head must NOT remain an active Prompt:\nactive={active:?}"
         );
         assert!(
-            active
+            completed
                 .iter()
-                .any(|t| t.contains("do [#beta]") && !t.contains("~~")),
-            "unanswered id-backed head must remain an active (unstruck) queue prompt:\n{active:?}"
+                .any(|t| t.contains("JB Run Agent Doc on equityfundingsource")),
+            "answered head must be moved to a Completed (struck) entry:\ncompleted={completed:?}\n{updated}"
+        );
+        // The unanswered id-backed head survives the strike pass, still active.
+        assert!(
+            active.iter().any(|t| t.contains("do [#beta]")),
+            "unanswered id-backed head must remain an active Prompt:\nactive={active:?}"
         );
     }
 

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -33,161 +33,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-073954.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-091955.md`*
 
 Compacted content:
-❯ - Archived 6 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); Available Deal cards show interested-lender count; IPC proof diagnostic (interrupted-cycle recovery); 3 more
-❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: Available Deal cards show interested-lender count — opus-4-8
-
-> **Queue prompt:**
->
-> The admin user Message tab should be an entire conversation tab, where the admin can write a message and send it to the user. If there are a group of users, create a tab for each user.
-
-
-> **Queue prompt:** https://equityfundingsource.brian-takita.workers.dev/admin/pipeline > Available Deal cards should show the number of interested lenders.
-
-Done. Available Deal pipeline cards now show how many lenders have expressed interest, mirroring the deal dialog's Interested Lenders tab count.
-
-- **Server** (`app/equityfundingsource/lib/admin/loan_management/index.ts`): new `deal_interest_counts_by_loan_R_` reader counts `lender_deal_interests` rows per deal (grouped by loan); `admin_pipeline_columns_` passes the count onto each card.
-- **Card model** (`app/equityfundingsource/lib/admin/repo.ts`): `pipeline_card_T` / `loan_pipeline_card_input_T` / `loan_pipeline_card_` carry `interested_lender_count` (defaults to 0).
-- **UI** (`lib/ui--browser--efs/portal/admin/pipeline.tsx`): new `PipelineInterestedLendersBadge` renders in the Available Deals lane (`column_id === 'application-received'`) — a blue **"N interested"** badge when lenders are present, and a muted **"No interested lenders"** badge when there are none. Wired into all three card render sites alongside the compliance badges.
-
-Coverage: added unit assertions in `tests/admin-pipeline.test.ts` for the count passthrough and the 0-default. Full suite green (`bun run check` -> 1217 pass / 0 fail) plus build + worker bundle.
-
-> **Queue prompt:** deploy
-
-Committed (`47e7949`, pushed to `origin/main`) and deployed to Cloudflare Workers: remote D1 migrations applied, worker uploaded — `https://equityfundingsource.brian-takita.workers.dev`, Version ID `db46084f-d881-4b51-90d6-a6d35c55f55c`.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=e9d60d77-ad79-4030-be5e-5f0f4040fe3f invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782372613863
-```
-
-### Re: Messages dialog — interactive per-user conversation tabs + group broadcast — opus-4-8
-
-> **Queue prompt:** The admin user Message tab should be an entire conversation tab, where the admin can write a message and send it to the user. If there are a group of users, create a tab for each user and a group message tab.
-
-Done — implemented, full suite green, committed + pushed to EFS `origin/main` (`a0ed0e4`), and deployed (below). This refines the read-only tabs I shipped earlier so the admin can actually message participants. (Note: the prior supervisor over-consumed/struck this head before it was done; this cycle re-does it so the strike is honest.)
-
-I confirmed the group-tab semantics with you: **broadcast to each participant**. (The per-user interaction question was unanswered — I took the recommended low-risk reuse and noted it.)
-
-**What changed** (`src/equityfundingsource-dev`):
-- **Per-user tab → full conversation with compose + send.** Each participant tab now renders the existing `AdminMessages` conversation pane auto-scoped to that user (by role + email), so the admin writes and sends on the user's normal channel (borrower-chat / lender messaging) — replacing the read-only unified history view.
-- **Group tab → broadcast.** Keeps the merged history and adds a compose box; **Send to group** posts one message to every participant via a new `POST /api/admin/messages/broadcast` (resolves each recipient email → user → ensures their chat session → posts the message; returns `sent`/`failed`). N individual sends, not a shared thread, per your choice. Endpoint registered before the `/:session_id` routes so "broadcast" is never read as a session id.
-
-**Verification**: full `bun test` **1224 pass / 0 fail**; `bun run build` + `build:worker` clean. Updated the per-user/group source-assertion tests and added a backend test for the broadcast route (resolve → ensure-session → send, ordered before `/:session_id`).
-
-### Re: Deploy — production deploy of interactive messaging — opus-4-8
-
-> **Queue prompt:** deploy
-
-Deployed to production from `a0ed0e4`. Interactive per-user conversation tabs + group broadcast are now live.
-
-- **URL**: https://equityfundingsource.brian-takita.workers.dev
-- **Version ID**: `fab47a72-09b1-48a5-b2df-1f2c020d8a4b`
-- **Remote D1 migrations**: no-op — frontend + a route handler only, no new migrations.
-
-Operator live-verify (cannot be agent-done): open a deal → **Message borrower** → on a per-user tab, send a message and confirm it posts to that user's thread; on the **group** tab, type a message and **Send to group**, confirm it reaches every participant.
-
-One follow-up I left out by design: broadcast currently delivers to each participant's portal chat + realtime notify but does **not** send the per-recipient notification email the single-send path does (that template is borrower-specific; emailing all participants via it could mis-template lender mail). Say the word if you want broadcast email parity and I'll add a role-aware notify.
-
-### Re: Group emails go to each individual, never the whole group — opus-4-8
-
-> **Queue prompt:** Outgoing group emails must be to each individual. Never to the entire group.
-
-Done — committed + pushed to EFS `origin/main` (`bd5412f`).
-
-First I audited every `email_send_` call site: the whole codebase already sends individually — every group notification (lending groups, broker, investor interest, etc.) loops `to: [oneAddress]` per person; there is **no** path that puts multiple recipients in one `To`/`Cc`. So the policy already held everywhere except my new broadcast, which (as I flagged) sent to portal chat only with no email.
-
-So I wired the group broadcast to the same individual pattern:
-- Each participant is notified **individually** in the per-recipient loop via `notify_party_of_admin_message_`, which sends `to: [party.email]` — one email per person, plus their in-app notification and a realtime push.
-- `broadcast_party_of_role_` maps the recipient's role to the message-thread party; non-messageable roles (e.g. admin) skip the email.
-- A group "Send to group" therefore produces **N individual emails**, never one email addressed to the group.
-
-**Verification**: full `bun test` **1225 pass / 0 fail**; `bun run build` + `build:worker` clean. Added a backend test asserting the per-recipient individual notify and that `notify_party_of_admin_message_` addresses a single party (`to: [party.email]`).
-
-**Not deployed** this cycle — the queue preset here is `#spec-test-commit-push` (no deploy), and this turns on real outbound email to participants. Queue `deploy` when you want the individual-email broadcast live on `equityfundingsource.brian-takita.workers.dev`.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=b2d84845-7358-4cc6-98ce-84f6873d29de invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782349558144
-```
-
-### Re: Per-user Messages tab locked to one participant (search box hidden) — glm-5.2
-
-> **Queue prompt:** In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Messages Dialog > btak.dev+borrower3@gmail.com tab: Do not render the search box. Another user should not be opened in one user's message tab.
-
-Done — committed + pushed to EFS `origin/main` (`f78d5d9`). A per-user message tab is now locked to that one participant: the address search box **and** the user list are both hidden, so an admin cannot search for or open another participant inside someone else's tab.
-
-- **`AdminMessages` (`lib/ui--browser--efs/portal/admin/messages.tsx`)**: new `lock_user` prop collapses the two-pane `admin-msg-grid` to a single column (conversation pane only) and skips the search-box + user-list card entirely. The thread still loads via the existing `preferred_user_query` pre-fill, and the empty state is tailored ("No Conversation Found") instead of the searchable "No Thread Selected" message.
-- **Per-user tab (`AdminMessagesLauncher`)**: the `user:<email>` tab now renders `<AdminMessages … lock_user />`, so each participant tab is a single conversation channel scoped to that user. The "All Messages" group tabs keep their search/broadcast behavior unchanged.
-
-**Verification**: full `bun test` **1225 pass / 0 fail**; `bun run build` + `build:worker` clean. Updated `tests/messages-unified.test.ts` to assert the `lock_user` wiring (hidden search/list + single-column grid).
-
-### Re: Deploy — production deploy of locked per-user tabs — glm-5.2
-
-> **Queue prompt:** deploy
-
-Deployed to production from `f78d5d9`. Per-user message tabs are locked to one participant on the live site.
-
-- **URL**: https://equityfundingsource.brian-takita.workers.dev
-- **Version ID**: `ddbccc8b-3446-4ec8-b8fa-ce5a79e05a4b`
-- **Remote D1 migrations**: no-op — frontend + a test only, no new migrations (verified none pending pre- and post-deploy).
-- **Post-deploy smoke**: `GET /` → 200.
-
-Operator live-verify (cannot be agent-done): open a deal → Messages dialog → a per-user tab (e.g. btak.dev+borrower3@gmail.com) and confirm the search box is gone and you cannot navigate to another participant's thread from inside that tab; the "All Messages" and group tabs still search/broadcast as before.
-
-### Re: Per-user tab matches group-tab styling; Group tab hidden for single participants — glm-5.2
-
-> **Queue prompt:** In the admin Messages dialog, the individual user message tab should have the same styling as the group tab.
-
-> **Queue prompt:** In the admin Messages dialog, if there is only 1 user, do not render the Group tab.
-
-Done — committed + pushed to EFS `origin/main` (`3f07d4f`). Both changes ship together since they touch the same dialog.
-
-- **Per-user tab → group-tab styling** (`messages_unified.tsx` / `messages.tsx`): the `user:<email>` tab now renders a new `AdminMessagesUser` component that reuses the **same `UnifiedMessageThread` card view** as the group tab (party/scope badges, bordered cards, description line) plus a compose box — so per-user and group tabs share one look end-to-end. Its compose sends to just that one participant via a single-recipient broadcast (1 individual send). The previous chat-bubble `lock_user` path on `AdminMessages` was removed as dead code.
-- **Group tab hidden for 1 participant** (`messages.tsx`): the Group tab is now gated on `context_users.length > 1` (both the tab list and the render), since a merged-group view is meaningless for a single participant.
-
-**Verification**: full `bun test` **1225 pass / 0 fail**; `bun run build` + `build:worker` clean. Updated `tests/messages-unified.test.ts` to assert the `AdminMessagesUser` wiring (shared `UnifiedMessageThread`, single-recipient send) and the `>1`-participant Group-tab gate.
-
-### Re: Deploy — production deploy — glm-5.2
-
-> **Queue prompt:** deploy
-
-Deployed to production from `3f07d4f`.
-
-- **URL**: https://equityfundingsource.brian-takita.workers.dev
-- **Version ID**: `29467e06-5d02-4fb7-a4e4-fb68c8be7a1d`
-- **Remote D1 migrations**: no-op — frontend + a test only, no new migrations (verified none pending pre- and post-deploy).
-- **Post-deploy smoke**: `GET /` → 200.
-
-Operator live-verify (cannot be agent-done): open a deal with multiple participants → Messages dialog → confirm a per-user tab now shows the same card style as the Group tab and its compose posts only to that user; open a single-participant (borrower-only) deal and confirm there is no Group tab.
-
-### Re: Queue drained — Messages-dialog items already shipped — glm-5.2
-
-Closeout only — no new work. The three queued items were completed in the prior cycle and the leftover heads (including `deploy`) were residue that is now struck/cleared:
-
-- Per-user tab → group-tab styling parity, and Group tab hidden for single participants: shipped in EFS `3f07d4f`.
-- Deploy: live as worker Version `29467e06-5d02-4fb7-a4e4-fb68c8be7a1d` (frontend-only, no migrations).
-
-Operator live-verify still stands: a multi-participant deal's per-user tab should match the Group tab's card style and post only to that user; a single-participant deal should show no Group tab.
-<!-- agent:boundary:83751da2 -->
+- Archived 11 response topic(s): Available Deal cards show interested-lender count; IPC proof diagnostic (interrupted-cycle recovery); Messages dialog; 8 more
+- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
+<!-- agent:boundary:e94bf533 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -207,9 +58,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~In the admin Messages dialog, the individual user message tab should have the same styling as the group tab.~~
-- 🚧 ~~In the admin Messages dialog, if there is only 1 user, do not render the Group tab.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~deploy~~
 <!-- /agent:queue -->
 
 ## Backlog

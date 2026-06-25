@@ -284,7 +284,21 @@ Wave 2 merged to main `3a3538d8` (`make check` **5267 passed**, release green, J
 **Stray state → reactive SMs + graph:** `state_backbone.rs` event-sourced lazily projection; SMs = queue-item / merge-control / cycle / crdt-authority / SupervisorHosting / wait_machine (`#waitmachine` with a Lean `no_hang` proof); reactive mirrors JB (`#n529b`) + VSCode (`#r5at`) + rs/kt/js parity (`#6n5j`) + pinned spec vocab (`#gww8`).
 
 **Remaining = operator live-eyeball only (code-complete + tested, NOT open bugs):** `#crdtauth6` (live two-editor relay hookup), `#nsfz` (startup-deadline live), `#kj5f` (merge-SM live editor). These need a live IDE/pane to verify; nothing agent-doable remains. Make them live via the recovery: install the new binary/cdylib + restart supervisors.
-<!-- agent:boundary:fc11e5ee -->
+
+### Re: update document — deployed + final goal state — opus-4-8
+
+Goal drive complete and **deployed**. The fixed binary `agent-doc 0.34.48` + cdylib `libagent_doc-0.34.48.so` are installed (`make install-full`, exit 0); auto-recycle armed 1 controller to recycle onto the fresh binary at its next idle boundary (2 skipped). Superproject submodule pointer bumped (`bd3c254ff`). Local only — nothing pushed.
+
+**Goal: all IPC fixed · all queue fixed · stray state → reactive SMs — met in code, merged, tested, installed:**
+- agent-doc `main` `3a3538d8`, `make check` **5267 passed**, release green, JB plugin 0.2.194 + VSCode 0.2.34 built.
+- IPC: state-vector commit barrier (replaces patch-ack), live relay fan-out, disk demotion (`#crdtauth1-5`); fence-aware parser (`#npe1`); non-blocking capacity proof (`#capproofbg`); behind-editor refresh eliminated (`#p2j4`).
+- Queue: per-item lifecycle-SM convergence + idempotence proptest + re-emit-storm SimWorld (`#cgfx`/`#brtc`); hosting-epoch isolation (`#xdocsuper`); per-cell no-cross-splice (`#qcellmerge1`); `#4pdp`; race-plan consolidation (`#0bmv`).
+- Stray state → reactive SMs/graph: `state_backbone` lazily projection; queue-item/merge-control/cycle/crdt-authority/SupervisorHosting/`wait_machine` (Lean `no_hang` proof) SMs; reactive mirrors JB/VSCode/parity (`#n529b`/`#r5at`/`#6n5j`/`#gww8`).
+
+**Backlog + queue synced to the drained state** — all agent-doable items reaped to `agent:done`; the only remaining work is `[operator-verify]` live-eyeballs that need a live editor/pane: `#crdtauth6` (live 2-editor relay hookup), `#nsfz` (startup-deadline live), `#kj5f` (merge-SM live editor).
+
+**Remaining operator step:** restart/recycle the supervisors still on the old binary (the 2 skipped + this pane's parent, driven last since it ends the session). After restart, the stale-binary churn that affected this session is gone and the operator-verify items can be checked live.
+<!-- agent:boundary:212e7857 -->
 <!-- /agent:exchange -->
 
 ## Queue

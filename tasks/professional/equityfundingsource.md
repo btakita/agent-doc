@@ -227,7 +227,26 @@ The deal-advance-guidance card (`#deal-advance-guidance`, shown on the Loan tab 
 No new focus plumbing was needed — the shared `use_dialog_action_navigation_` hook already wired on `PipelineCardModal` (which wraps `<AdminDealDetail>`) focuses `[data-dialog-initial-focus="true"]` on open, including direct-URL restores (`?dialog=deal&dialog_deal_id=…`). Just the marker.
 
 Spec + test updated: `prds/67v2-admin-loan-pipeline-kanban.md` records the priority; `tests/admin-pipeline.test.ts` asserts the guidance card carries the focus marker. `make check` → **1214 pass / 0 fail**. Committed `1565e73`, pushed (`9c31d76..1565e73`). Not deployed — preset `#spec-test-commit-push`.
-<!-- agent:boundary:eac4e7e1 -->
+
+### Re: Loan Detail → open borrower chat by user — glm-5.2
+
+> **Queue prompt:**
+>
+> :pushpin: https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan > Loan Detail should remove the "Borrower Chat" card. Use the chat should open the borrower (btak.dev+borrower@gmail.com) instead.
+
+
+> **Queue prompt:** Loan Detail should remove the "Borrower Chat" card; opening chat should open the borrower (e.g. btak.dev+borrower@gmail.com) instead.
+
+Done — the Loan tab no longer embeds an inline "Borrower chat" card.
+
+- Removed the inline `AdminConversationTabs title="Borrower chat"` from the Loan tab.
+- Added a **"Message borrower"** button that dispatches `ADMIN_MESSAGES_OPEN_EVENT` with `{ role: 'borrower', query: deal.borrower_email }`, opening the admin messages modal on that deal's borrower (e.g. btak.dev+borrower@gmail.com).
+- Surfaced `borrower_email` on `AdminDealRow` — the deal query already returned it from the loan; the frontend interface just wasn't exposing it. No backend change needed.
+
+The interests-tab "Borrower communication" thread is unchanged. This is the first step toward the broader per-user chat model (remaining queue items: dialogs→associated users, group chat w/ BCC, page→user association).
+
+Spec + test updated: `prds/67v2-admin-loan-pipeline-kanban.md` gets a `#deal-loan-open-borrower` entry; `tests/admin-pipeline.test.ts` asserts the button + event + `borrower_email`. `make check` → **1215 pass / 0 fail**, worker bundle clean. Committed `6552fd3`, pushed (`1565e73..6552fd3`). Not deployed — preset `#spec-test-commit-push`.
+<!-- agent:boundary:56de86ba -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -247,13 +266,11 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~After a borrower applies for a new deal, The flash message should also mention to use the message chat contact EFS staff about any questions.~~
-- ~~Admin Deal Pipeline: https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-b~~
-- acb-a58f5d94b7da&deal_tab=loan should focus on the first actionable item when opened. In this case the "Review Interested Lenders" button in the flash message.
-- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan > Loan Detail should remove the "Borrower Chat" card. Use the chat should open the borrower (btak.dev+borrower@gmail.com) instead.
-- All dialog states in the Deal Pipeline and Lender Pipeline should have users associated with them. These users will be the focus of the chat. A single user will have a single message thread. Multiple users will have separate tabs in the chat dialog with the user type (Lender, Borrower, Broker). Another tab should be the group chat, where all users are emailed the messages. A borrower/broker + lender should not see each others' email addresses for any Borrower/Broker + Lender combo should be emailed with BCC.
-- All pages should have user(s) or a user type associated with it.
-- ~~deploy~~
+- ~~:pushpin: https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan > Loan Detail should remove the "Borrower Chat" card. Use the chat should open the borrower (btak.dev+borrower@gmail.com) instead.~~
+- :pushpin: All dialog states in the Deal Pipeline and Lender Pipeline should have users associated with them. These users will be the focus of the chat. A single user will have a single message thread. Multiple users will have separate tabs in the chat dialog with the user type (Lender, Borrower, Broker). Another tab should be the group chat, where all users are emailed the messages. A borrower/broker + lender should not see each others' email addresses for any Borrower/Broker + Lender combo should be emailed with BCC.
+- All pages should have user(s) or a user type associated with it. Which will select the user(s) or user type in the chat dialog.
+- I'm seeing "Realtime connection failed. Refresh the page to reconnect." when rapidly switching between users in a search. Please diagnose and harden the realtime connection websocket(s).
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -318,7 +318,7 @@ Resolved (`#4pdp`): the OpenCode send/parse/merge paths are order-stable; the re
 > **Queue prompt:** Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.
 
 Now isolated (`#xdocsuper`): one route-owned supervisor was reusing per-document in-memory state across documents (the contamination you observed). Fixed via a `SupervisorHosting` backbone transition that resets the queue overlay on document switch + hosting-epoch gating, so each document's context is keyed/isolated by `document_hash`. Covered by `cross_document_switch_does_not_contaminate_sibling_overlay`.
-<!-- agent:boundary:7d3ab0d0 -->
+<!-- agent:boundary:771906a2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -333,7 +333,7 @@ Now isolated (`#xdocsuper`): one route-owned supervisor was reusing per-document
 - ~~:pushpin: [#brtc]~~
 - ~~:pushpin: do [#crdtauth4]~~
 - ~~:pushpin: do [#xdocsuper]~~
-- 🚧 :pushpin: Fix the root cause of the CRDT churn.
+- ~~:pushpin: Fix the root cause of the CRDT churn.~~
 - ~~:pushpin: do [#cgfx]~~
 - ~~:pushpin: do [#gww8]~~
 - ~~:pushpin: do [#n529b]~~
@@ -344,7 +344,7 @@ Now isolated (`#xdocsuper`): one route-owned supervisor was reusing per-document
 - ~~:pushpin: [#r5at]~~
 - ~~:pushpin: [#6n5j]~~
 ---
-:pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
+🚧 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
 ```
 resync: pruned 2 stale session(s)
 [route] target tmux session: 0
@@ -385,8 +385,8 @@ Affected component: editor IPC / writeback
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8c56928442bd4b165543ab0aad264d681b41b8898551d10f196018cd15a37304 content_len=11944 content_hash=46b47fdfe5505fb37c9e63df4167cb923df6b4ffc997ecca9009a15979c29a5e doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782339826601
 ```
 ---
-- :pushpin: Still getting JB `File Cache Conflict` dialogs.
-- :pushpin: Opencode responses are reverse ordering numeric lists.
+- ~~:pushpin: Still getting JB `File Cache Conflict` dialogs.~~
+- ~~:pushpin: Opencode responses are reverse ordering numeric lists.~~
 - ~~:pushpin: do [#npe1]~~
 - ~~:pushpin: do [#p2j4]~~
 - ~~:pushpin: do [#4pdp]~~
@@ -414,7 +414,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - ~~:pushpin: do [#8g9w]~~
 - ~~:pushpin: do [#6mjw]~~
 - ~~:pushpin: do [#spy9]~~
-- :pushpin: Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.
+- ~~:pushpin: Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.~~
 - :pushpin: ~~Would a reactive state machine help to manage the supervisor document bindings?~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: ~~I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: ~~I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?~~ — auto-struck: answered this cycle (#ftstrike)

@@ -104,7 +104,11 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=file_ipc p
 **Stale binary install.** `~/.cargo/bin/agent-doc` predates `e6e63d82` (cdylib was deployed but the CLI binary was not rebuilt at an unchanged `0.34.48`). Operator action before the next drain cycle: `make install` in `src/agent-doc` so live sessions run post-`e6e63d82` code. Not filed as a backlog item — it's a rebuild, not a code change.
 
 **Queue state.** 37 drainable heads remain; OpenCode has no auto-loop so each needs a fresh `/agent-doc` invocation. Preflight already auto-struck `#vm7g` (done). The semantic-completion warnings on `#fnxy`/`#kj5f`/`#cgfx` are false positives — those track the systemic SM refactor, not the `#6b5h`/`#qdedupsync` symptom patches. Next foundational heads (plans exist): `#vwj7` queue-item lifecycle SM core, `#gghx` wait-machine core, `#fnxy` merge-control SM core.
-<!-- agent:boundary:41ed2d9d -->
+
+### Re: dropped compaction-summary line recovery — glm-5.2
+
+The `❯ Archived 5 response topic(s)` line is compaction metadata dropped by the IPC `content_ours` merge (`#exchange-prompt-dropped-on-merge`) and re-injected by the binary. It already exists as a summary bullet (line 40) — acknowledging it here only to get it across the commit boundary so HEAD matches the working tree. No work item.
+<!-- agent:boundary:fc5e3d40 -->
 <!-- /agent:exchange -->
 
 ## Queue

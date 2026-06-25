@@ -96,7 +96,25 @@ Current open work lives in `agent:backlog` (`#ckystale`, `#ckybench`), not here.
 Compacted content:
 ❯ - Archived 2 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); corky bug next-steps
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bd...
-<!-- agent:boundary:738471da -->
+
+### Re: #ckyorphan — P0 orphan-cleanup data loss — opus-4-8
+
+Fixed and shipped (corky `9f74291` on `origin/main`). The fix was already implemented in the working tree from a prior interrupted cycle; this cycle verified, built, installed, and committed it.
+
+**Both data-loss paths guarded** in `crates/corky-mail/src/sync/mod.rs`:
+
+- **(a) Scoped `--account X` wipe** — a scoped full sync records only that account's touched files, but conversations live in one global `conversations/` dir, so global cleanup deleted every *other* account's data. Scoped syncs now **skip cleanup entirely** with a printed notice (`run()`, ~`:265`).
+- **(b) Transient empty/partial fetch wipe** — an empty/short fetch left `touched` empty, classifying every file as an orphan and reaping the whole store with no self-heal (state unchanged → no re-fetch). `cleanup_orphans` now **skips with a warning** when it would delete more than `ORPHAN_CLEANUP_MAX_DELETE_FRACTION` (50%) of conversations; files stay put for the next good sync. `CORKY_SYNC_FORCE_ORPHAN_CLEANUP=1` overrides for intentional bulk deletes.
+
+**Verification (`#spec-test-build-install-commit-push`):**
+- Tests: 3 new unit tests (empty-touched preserve, majority-orphan skip, below-threshold delete) — `cargo test -p corky-mail` → **219 passed**.
+- Clippy: clean (only pre-existing patch-not-used + imap-proto future-incompat warnings).
+- Build + install: `cargo build --release` + `cargo install --path .` → `corky 0.29.0` replaced in `~/.cargo/bin`.
+- Spec: SPEC.md §6.5 + AGENTS.md document both guards.
+- Commits: `a6ca9f0` (fix) + `9f74291` (lock criterion dev-deps for the `#ckybench` bench + bench clippy fix) — pushed.
+
+Next queue head: `#ckypanic` (P0 UTF-8 byte-slice panic).
+<!-- agent:boundary:9a4f8f09 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -120,14 +138,12 @@ Please give me a report the performance
 - [#ckyunicodeslug]
 - [#ckymime]
 - What are #next-steps to fix corky bugs?
-- 🚧 What are #next-steps to fix corky bugs?
-- [#ckyorphan]
+- What are #next-steps to fix corky bugs?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ckyorphan] [P0 data-loss] sync full orphan cleanup wipes ALL conversations: (a) --account X deletes every other account files (cleanup scans global mail/conversations but touched is account-scoped), (b) transient empty Gmail/IMAP fetch leaves touched empty so every file is reaped and not self-healing (state unchanged so no re-fetch). Guard cleanup_orphans: skip when account scoped or touched empty/sub-threshold. crates/corky-mail/src/sync/mod.rs:202-260,782-798
 - [ ] [#ckypanic] [P0 crash] UTF-8 byte-slice panics on realistic input: draft body preview &body[..80] (crates/corky-mail/src/draft/mod.rs:712-713, CJK/emoji replies) and tasks due &due[..10] (crates/corky-google/src/tasks/list.rs:40, short due string). One-line char-boundary-safe truncation (chars().take() or get(..n)).
 - [ ] [#ckysheets] [P0 data-loss] corky sheets push clears tab THEN writes in two HTTP calls; failure between them leaves tab empty with no backup. Use batchUpdate updateCells (atomic at API level) or buffer old values for rollback. crates/corky-google/src/doc/sheets.rs:148-174
 - [ ] [#ckywatchpanic] [P1] corky watch dies on any tick panic: spawn_blocking(...).await? under panic=abort (Cargo.toml:89) propagates JoinError and aborts the daemon, contradicting the never-crashes-loop contract in watch.rs doc comments. Wrap each tick in catch_unwind and log instead of ?. src/watch.rs:309-312

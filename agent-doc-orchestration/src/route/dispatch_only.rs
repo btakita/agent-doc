@@ -581,20 +581,15 @@ pub(crate) fn dispatch_only_reopen_existing_pane(
         tmux, file, pane_id, session_id, file_path, harness, false, false,
     )?;
     if !skip_capability_proof {
-        match wait_for_managed_capability_proof(
-            file,
-            session_id,
-            harness,
-            fresh_route_start_ack_timeout(),
-        )? {
-            ManagedCapabilityProofStatus::NotRequired | ManagedCapabilityProofStatus::Proven => {}
-            ManagedCapabilityProofStatus::Pending => anyhow::bail!(
-                "dispatch-only {} reopen for {} on pane {} is gated because managed capability proof is still pending after waiting {}s",
-                harness.binary,
-                file.display(),
-                dispatch_pane,
-                fresh_route_start_ack_timeout().as_secs()
-            ),
+        // `#capproofbg`: a still-`Pending` proof no longer blocks the dispatch-only
+        // reopen. Read status without polling for it to settle; a pending proof lets
+        // the reopen dispatch proceed while the proof runs in the background, and a
+        // later FAILURE is surfaced asynchronously by the supervisor. Only an
+        // already-failed/missing proof disables the reopen.
+        match managed_capability_proof_status(file, session_id, harness)? {
+            ManagedCapabilityProofStatus::NotRequired
+            | ManagedCapabilityProofStatus::Proven
+            | ManagedCapabilityProofStatus::Pending => {}
             ManagedCapabilityProofStatus::Failed => anyhow::bail!(
                 "dispatch-only {} reopen for {} on pane {} is disabled because managed capability proof failed",
                 harness.binary,

@@ -597,12 +597,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
                 }
-                // Gate on the managed capability proof exactly like the
-                // auto-trigger: never dispatch before network/SSH/write-root
-                // proof clears for a managed Codex launch.
-                if shared.capability_proof_gate() == CapabilityProofGate::Pending {
-                    continue;
-                }
+                // `#capproofbg`: a *pending* managed-capability proof no longer
+                // stalls the idle-queue dispatch. Drain dispatch proceeds
+                // immediately while the proof runs in the background; only a proven
+                // FAILURE gates dispatch (via `capability_dispatch_blocker` in the
+                // shared inject path), and that failure is surfaced asynchronously
+                // through the session log + tmux `display-message`.
                 let clear_cooldown_active = clear_cooldown_blocks_auto_dispatch(
                     &path,
                     &harness,

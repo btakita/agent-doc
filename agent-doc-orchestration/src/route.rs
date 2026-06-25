@@ -1572,22 +1572,6 @@ fn managed_capability_proof_status(
     Ok(ManagedCapabilityProofStatus::Missing)
 }
 
-fn wait_for_managed_capability_proof(
-    file: &Path,
-    session_id: &str,
-    harness: &HarnessConfig,
-    timeout: Duration,
-) -> Result<ManagedCapabilityProofStatus> {
-    let deadline = Instant::now() + timeout;
-    loop {
-        let status = managed_capability_proof_status(file, session_id, harness)?;
-        if status != ManagedCapabilityProofStatus::Pending || Instant::now() >= deadline {
-            return Ok(status);
-        }
-        std::thread::sleep(Duration::from_millis(250));
-    }
-}
-
 fn reapply_capability_contract_before_reuse(
     tmux: &Tmux,
     file: &Path,
@@ -1600,24 +1584,20 @@ fn reapply_capability_contract_before_reuse(
     if !enforce_capability_proof {
         return Ok(pane.to_string());
     }
-    let proof_status = wait_for_managed_capability_proof(
-        file,
-        session_id,
-        harness,
-        fresh_route_start_ack_timeout(),
-    )?;
+    // `#capproofbg`: do NOT block the `Run Agent Doc` dispatch waiting for the
+    // proof to finish. Read the current status without polling for it to leave
+    // `Pending` — a still-running proof lets dispatch proceed on the live pane
+    // immediately; the proof keeps running in the background and a later FAILURE
+    // is surfaced asynchronously (the supervisor flips the actor to Blocked,
+    // emits a tmux `display-message`, and gates *subsequent* dispatch). Only a
+    // proof that has ALREADY failed (or is missing) forces the fresh-restart
+    // recovery path here.
+    let proof_status = managed_capability_proof_status(file, session_id, harness)?;
     let reason = match proof_status {
-        ManagedCapabilityProofStatus::NotRequired | ManagedCapabilityProofStatus::Proven => {
+        ManagedCapabilityProofStatus::NotRequired
+        | ManagedCapabilityProofStatus::Proven
+        | ManagedCapabilityProofStatus::Pending => {
             return Ok(pane.to_string());
-        }
-        ManagedCapabilityProofStatus::Pending => {
-            anyhow::bail!(
-                "managed {} capability proof for {} on pane {} is still pending after waiting {}s; prompt dispatch remains gated until the proof succeeds",
-                harness.binary,
-                file.display(),
-                pane,
-                fresh_route_start_ack_timeout().as_secs()
-            );
         }
         ManagedCapabilityProofStatus::Failed => {
             anyhow::bail!(
@@ -1682,20 +1662,14 @@ fn reapply_capability_contract_before_reuse(
             file.display()
         );
     }
-    match wait_for_managed_capability_proof(
-        file,
-        session_id,
-        harness,
-        fresh_route_start_ack_timeout(),
-    )? {
-        ManagedCapabilityProofStatus::NotRequired | ManagedCapabilityProofStatus::Proven => {}
-        ManagedCapabilityProofStatus::Pending => anyhow::bail!(
-            "{} for {}, and the fresh recovery session in pane {} did not finish capability proof within {}s. Prompt dispatch remains gated until the proof succeeds",
-            reason,
-            file.display(),
-            dispatch_pane,
-            fresh_route_start_ack_timeout().as_secs()
-        ),
+    // `#capproofbg`: the fresh recovery session also dispatches immediately while
+    // its capability proof runs in the background — a still-`Pending` proof no
+    // longer blocks dispatch (a later FAILURE is surfaced asynchronously by the
+    // supervisor). Only an already-failed/missing proof aborts recovery.
+    match managed_capability_proof_status(file, session_id, harness)? {
+        ManagedCapabilityProofStatus::NotRequired
+        | ManagedCapabilityProofStatus::Proven
+        | ManagedCapabilityProofStatus::Pending => {}
         ManagedCapabilityProofStatus::Failed => anyhow::bail!(
             "{} for {}, and the fresh recovery session in pane {} failed capability proof. Run `agent-doc start {}` manually to recover",
             reason,

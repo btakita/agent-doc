@@ -99,22 +99,16 @@ pub(crate) fn load_authoritative_actor_binding(
         );
     }
     if enforce_capability_proof {
-        match wait_for_managed_capability_proof(
-            file,
-            session_id,
-            harness,
-            fresh_route_start_ack_timeout(),
-        )? {
-            ManagedCapabilityProofStatus::NotRequired | ManagedCapabilityProofStatus::Proven => {}
-            ManagedCapabilityProofStatus::Pending => {
-                anyhow::bail!(
-                    "managed {} capability proof for {} on pane {} is still pending after waiting {}s; prompt dispatch remains gated until the proof succeeds",
-                    harness.binary,
-                    file.display(),
-                    record.pane_id,
-                    fresh_route_start_ack_timeout().as_secs()
-                );
-            }
+        // `#capproofbg`: dispatch to the authoritative actor immediately while the
+        // managed-capability proof runs in the background. A still-`Pending` proof
+        // no longer blocks dispatch (read status without polling for it to settle);
+        // a later FAILURE is surfaced asynchronously by the supervisor (Blocked
+        // actor + tmux `display-message`) and gates subsequent dispatch. Only an
+        // already-failed proof disables dispatch here.
+        match managed_capability_proof_status(file, session_id, harness)? {
+            ManagedCapabilityProofStatus::NotRequired
+            | ManagedCapabilityProofStatus::Proven
+            | ManagedCapabilityProofStatus::Pending => {}
             ManagedCapabilityProofStatus::Failed => {
                 anyhow::bail!(
                     "managed {} capability proof for {} on pane {} failed; prompt dispatch is disabled for this pane. Inspect diagnostics, then run `agent-doc start {}` manually to recover",

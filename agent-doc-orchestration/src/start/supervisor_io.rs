@@ -820,9 +820,39 @@ mod tests {
         );
     }
     #[test]
-    fn handle_ipc_inject_rejects_pending_capability_proof() {
+    fn handle_ipc_inject_allows_pending_capability_proof() {
+        // `#capproofbg`: a *pending* managed-capability proof no longer blocks
+        // dispatch. The `Inject` is delivered immediately (here to a recording PTY
+        // writer) while the proof runs in the background; only a proven FAILURE
+        // gates the inject (`handle_ipc_inject_rejects_failed_capability_proof`).
         let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
         shared.set_capability_proof_gate(CapabilityProofGate::Pending, None);
+        let written = Arc::new(Mutex::new(Vec::new()));
+        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
+            Box::new(RecordingWriter(written.clone())),
+        ))));
+        let response = handle_ipc(
+            IpcMethod::Inject {
+                bytes: "agent-doc tasks/software/tsift.md\n".to_string(),
+            },
+            &shared,
+        );
+
+        assert!(response.ok, "{response:?}");
+        assert_eq!(
+            written.lock().unwrap().as_slice(),
+            b"agent-doc tasks/software/tsift.md\r"
+        );
+    }
+    #[test]
+    fn handle_ipc_inject_rejects_failed_capability_proof() {
+        // The dispatch gate still fails closed on a proven proof FAILURE — a
+        // failed proof must remain visible and block dispatch (`#tsiftmdcrash`).
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        shared.set_capability_proof_gate(
+            CapabilityProofGate::Failed,
+            Some("network denied".to_string()),
+        );
         let response = handle_ipc(
             IpcMethod::Inject {
                 bytes: "agent-doc tasks/software/tsift.md\n".to_string(),
@@ -836,7 +866,7 @@ mod tests {
                 .error
                 .as_deref()
                 .unwrap_or_default()
-                .contains("capability proof is still pending"),
+                .contains("capability proof failed"),
             "{response:?}"
         );
     }

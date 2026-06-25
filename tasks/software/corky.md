@@ -223,7 +223,23 @@ The trailing `_ignored` is part of the name — the test asserts that `scan_soci
 Fix applied **locally** (empty `images` slice added to the 3 bench callsites); clippy `--all-targets` is green again and the bench numbers above come from that fixed tree. I did **not** commit it — you asked for a report, not a ship. It's logged as `#ckybenchbreak` (P2), fix ready, just needs commit + push to restore the gate.
 
 **Queue note:** the active head `#ckymimeinline` already shipped (6056584), so the queue was stale — marked it done. `#ckybenchbreak` is the only new open item.
-<!-- agent:boundary:29713b4c -->
+
+### Re: fix test suite — glm-5.2
+
+> **Queue prompt:**
+>
+> fix test suite
+
+**Test suite fully green: 690 passed / 0 failed / 0 ignored** (was 684/6), and `make check` (clippy `--all-targets`) is green again. Shipped to corky origin/main (`6056584..39f266a`).
+
+**Root cause — `test_doctor` isolation broken by a `./mail` symlink.** The corky repo has `mail -> ~/work/btakita/mail`. `resolve::data_dir()` checked the CWD `mail/` heuristic — `PathBuf::from("mail").is_dir()` follows symlinks → true — **before** `CORKY_DATA`, so every `test_doctor` case loaded the developer's real config instead of its fixture. The 5 "passing" tests passed by coincidence (negative assertions); the 6 failures asserted positive content the real config lacks (gmail-api "main", LinkedIn/YouTube sections, checkmarks).
+
+**Fix `f3098ec` (#ckysuite):** `CORKY_DATA` — an explicit override (`--mailbox`, `corky init`, tests) — now wins over implicit CWD/app-config discovery (`crates/corky-core/src/resolve.rs`). SPEC §2.2 updated. All 11 `test_doctor` tests pass against their fixtures.
+
+**Fix `39f266a` (#ckybenchbreak):** the `draft_mime` criterion bench now passes the `images` slice added by #ckymimeinline (the E0061 that made `make check` red). Bench numbers: `build_mime_message` plain ~160 ns, in_reply_to ~209 ns, with_attachment(4 KiB) ~8.71 µs.
+
+**Build + install:** `make build` (transcribe-cuda) green; `make install` → `corky 0.29.0`. Both commits pushed (`6056584..39f266a`). `Cargo.lock` churn left unstaged (unrelated).
+<!-- agent:boundary:ce23d20f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -235,13 +251,16 @@ Please give me a report the performance
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~[#ckythreadmerge]~~
-- do [#ckybenchbreak]
+- 🚧 fix test suite. The turn should not end with a failing test suite.
+- ~~do [#ckybenchbreak]~~
+- fix test suite
+- do [#ckysuite]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ckybenchbreak] [P2] make check RED on main: #ckymimeinline (6056584) added a 7th images: &[PathBuf] param to build_mime_message but crates/corky-mail/benches/draft_mime.rs still calls it with 6 args (E0061 under clippy --all-targets). Benches arent compiled by cargo test, so the 237 mail tests stayed green while the gate went red. Fix applied locally (3 callsites + empty images slice); clippy --all-targets green again. Needs commit + push to origin/main. Optionally add an inline_images bench case while the file is open.
+- [ ] [#ckysuite] [done] test_doctor isolation fixed by honoring CORKY_DATA over ./mail symlink heuristic (corky f3098ec, SPEC §2.2). Shipped 2026-06-25.
 <!-- /agent:backlog -->
 
 ## Review

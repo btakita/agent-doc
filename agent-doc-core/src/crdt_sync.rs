@@ -139,6 +139,59 @@ pub fn sync(a: &ReplicaState, b: &ReplicaState) -> Result<()> {
     Ok(())
 }
 
+/// Whether `canonical` has already integrated every op the `peer` replica holds —
+/// i.e. the canonical replica is synced *through* the peer's current state vector.
+///
+/// Non-destructive: the ops the peer has beyond `canonical` are applied to a
+/// throwaway clone of `canonical`; if that changes the clone's state vector,
+/// canonical was missing them.
+fn canonical_covers(canonical: &ReplicaState, peer: &ReplicaState) -> Result<bool> {
+    let missing = peer.diff(&canonical.state_vector())?;
+    let probe = ReplicaState::from_encoded(0, &canonical.encode_state())?;
+    let before = probe.state_vector();
+    probe.apply_update(&missing)?;
+    Ok(probe.state_vector() == before)
+}
+
+/// State-vector **commit barrier** (`#crdtauth3`): is `canonical` a **consistent
+/// cut** — has it integrated every live editor's ops up to that editor's current
+/// state vector?
+///
+/// This replaces the fragile finalize **patch-ack** ("did a queued patch
+/// round-trip?") with a **state-vector ack** ("is the canonical replica synced
+/// through SV=N for every live editor?"), the structural root fix for the
+/// `no_ack` / `ipc_proof_insufficient` / post-commit-worktree-corruption class:
+/// a commit can only snapshot a state that provably holds every editor's last
+/// keystrokes, so un-propagated editor ops can never be lost at the commit
+/// instant. With no live editors the barrier is trivially satisfied (the headless
+/// / git-authoritative path).
+pub fn commit_barrier_ready(canonical: &ReplicaState, editors: &[&ReplicaState]) -> Result<bool> {
+    for editor in editors {
+        if !canonical_covers(canonical, editor)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Drive the commit barrier: **flush every live editor's missing ops into
+/// `canonical`** ("flush all live editors to SV=N"), then confirm the barrier is
+/// satisfied. After this returns `Ok(true)`, a snapshot of `canonical`
+/// ([`ReplicaState::encode_state`]) is a consistent cut safe to write to git.
+///
+/// This is the quiescence point `finalize` should snapshot at: instead of hoping
+/// a patch ACK round-tripped, it provably holds every editor's ops.
+pub fn flush_to_commit_barrier(
+    canonical: &ReplicaState,
+    editors: &[&ReplicaState],
+) -> Result<bool> {
+    for editor in editors {
+        let missing = editor.diff(&canonical.state_vector())?;
+        canonical.apply_update(&missing)?;
+    }
+    commit_barrier_ready(canonical, editors)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,5 +315,56 @@ mod tests {
         a.apply_local_edit(0, 0, "roundtrip me");
         let restored = ReplicaState::from_encoded(7, &a.encode_state()).unwrap();
         assert_eq!(restored.text(), "roundtrip me");
+    }
+
+    #[test]
+    fn commit_barrier_blocks_until_editor_ops_are_flushed() {
+        let canonical = ReplicaState::new(1);
+        canonical.apply_local_edit(0, 0, "base");
+        // An editor branches from canonical and types locally (un-propagated).
+        let editor = ReplicaState::from_encoded(2, &canonical.encode_state()).unwrap();
+        let len = editor.text().chars().count() as u32;
+        editor.apply_local_edit(len, 0, " typed");
+
+        // The barrier is NOT ready: a commit now would lose the editor's keystrokes.
+        assert!(
+            !commit_barrier_ready(&canonical, &[&editor]).unwrap(),
+            "barrier must block while an editor has un-propagated ops"
+        );
+
+        // Flush → ready; canonical is now a consistent cut holding the editor's ops.
+        assert!(flush_to_commit_barrier(&canonical, &[&editor]).unwrap());
+        assert!(commit_barrier_ready(&canonical, &[&editor]).unwrap());
+        assert!(canonical.text().contains("typed"));
+
+        // The snapshot at the barrier round-trips to the same text (consistent cut).
+        let restored = ReplicaState::from_encoded(9, &canonical.encode_state()).unwrap();
+        assert_eq!(restored.text(), canonical.text());
+    }
+
+    #[test]
+    fn commit_barrier_is_trivially_ready_with_no_live_editors() {
+        // Headless / git-authoritative: no editor replicas → nothing to lose.
+        let canonical = ReplicaState::new(1);
+        canonical.apply_local_edit(0, 0, "headless");
+        assert!(commit_barrier_ready(&canonical, &[]).unwrap());
+    }
+
+    #[test]
+    fn commit_barrier_reopens_on_a_new_unsynced_op() {
+        let canonical = ReplicaState::new(1);
+        let e1 = ReplicaState::new(2);
+        let e2 = ReplicaState::new(3);
+        e1.apply_local_edit(0, 0, "one");
+        e2.apply_local_edit(0, 0, "two");
+        assert!(flush_to_commit_barrier(&canonical, &[&e1, &e2]).unwrap());
+        assert!(canonical.text().contains("one") && canonical.text().contains("two"));
+
+        // A fresh un-synced keystroke on e1 re-opens the barrier.
+        e1.apply_local_edit(0, 0, "Z");
+        assert!(
+            !commit_barrier_ready(&canonical, &[&e1, &e2]).unwrap(),
+            "a new editor op after the cut must re-open the barrier"
+        );
     }
 }

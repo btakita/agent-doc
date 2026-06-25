@@ -237,6 +237,28 @@ pub fn sync_under_authority(
     }
 }
 
+/// The state-vector commit barrier gated by authority (`#crdtauth3`).
+///
+/// Under [`CrdtAuthority::MultiReplica`] it flushes every live editor's ops into
+/// the canonical replica ("flush all live editors to SV=N") and reports whether a
+/// snapshot of `canonical` is a consistent cut — the quiescence point `finalize`
+/// should snapshot at instead of a patch-ack. Under
+/// [`CrdtAuthority::GitAuthoritative`] there are no live editor replicas to flush
+/// (git is the source of truth, rebuilt from text), so the barrier is trivially
+/// satisfied and the canonical replica is left untouched. Returns whether a
+/// snapshot is safe to commit.
+pub fn commit_barrier_under_authority(
+    authority: CrdtAuthority,
+    canonical: &agent_doc_core::crdt_sync::ReplicaState,
+    editors: &[&agent_doc_core::crdt_sync::ReplicaState],
+) -> anyhow::Result<bool> {
+    if authority.editor_attached() {
+        agent_doc_core::crdt_sync::flush_to_commit_barrier(canonical, editors)
+    } else {
+        Ok(true)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,5 +436,35 @@ mod tests {
             "the git-authoritative/ephemeral path does not sync live replicas"
         );
         assert_ne!(c.text(), d.text(), "skipped sync leaves replicas untouched");
+    }
+
+    #[test]
+    fn commit_barrier_is_gated_by_authority() {
+        // MultiReplica → flush the live editor and confirm a consistent cut.
+        let canonical = ReplicaState::new(1);
+        let editor = ReplicaState::new(2);
+        editor.apply_local_edit(0, 0, "live");
+        assert!(
+            commit_barrier_under_authority(CrdtAuthority::MultiReplica, &canonical, &[&editor])
+                .unwrap()
+        );
+        assert!(
+            canonical.text().contains("live"),
+            "the barrier flushed the live editor into the canonical replica"
+        );
+
+        // GitAuthoritative → no live editors to flush; trivially ready, canonical
+        // untouched (the headless path snapshots git, not a live replica).
+        let c2 = ReplicaState::new(1);
+        let e2 = ReplicaState::new(2);
+        e2.apply_local_edit(0, 0, "ignored");
+        assert!(
+            commit_barrier_under_authority(CrdtAuthority::GitAuthoritative, &c2, &[&e2]).unwrap()
+        );
+        assert_eq!(
+            c2.text(),
+            "",
+            "the git-authoritative barrier does not flush live replicas"
+        );
     }
 }

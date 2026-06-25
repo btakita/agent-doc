@@ -377,7 +377,55 @@ For anchorless prose under **concurrent** edits the merge unit drops to **charac
 All seven phases of `tasks/software/plan-lazily-agent-doc-reactive-substrate.md` are shipped: **`#lzcellmove`** (atomic move) → **`#lzordtree`** (ordered keyed tree) → **`#lzkeyrecon`** (keyed reconciliation, the per-cell-merge enabler) → **`#lzseqcrdt`** (move-aware sequence CRDT) → **`#lzstableid`** (manufactured identity) → **`#lzsemtree`** (memoized semantics) → **`#lztextcrdt`** (free-text CRDT). Together they are the substrate for a reactive, **per-cell-mergeable** agent-doc document — replacing whole-document `crdt::merge` with minimal per-item ops. ~5,000 lines across 6 new modules + 41 new tests, all green; spec + lazily-spec updated each phase.
 
 **Closeout:** `#lztextcrdt` → done. Queue drained.
-<!-- agent:boundary:9de1cc06 -->
+
+### Re: Tombstones — 2P-Set, TP2, and GC in lazily-rs — opus-4-8
+
+> **Queue prompt:**
+>
+> I looked at Tombstones. Please address "In set CRDTs like the Two-Phase Set (2P-Set), a separate "tombstone set" tracks removed elements to ensure removals take precedence over additions during state merges." and "While tombstones solve the "TP2 puzzle" in operational transformation and ensure convergence without central coordination, they lead to memory bloat.  Some systems implement specialized garbage collection protocols to safely remove tombstones only when all replicas are confirmed to be aware of the deletion."
+
+
+> **Queue prompt:** I looked at Tombstones. Please address "In set CRDTs like the Two-Phase Set (2P-Set), a separate "tombstone set" tracks removed elements to ensure removals take precedence over additions during state merges." and "While tombstones solve the "TP2 puzzle" in operational transformation and ensure convergence without central coordination, they lead to memory bloat. Some systems implement specialized garbage collection protocols to safely remove tombstones only when all replicas are confirmed to be aware of the deletion."
+
+Both quotes describe machinery lazily-rs already ships — with two deliberate divergences. lazily uses tombstones in **two** of the substrate CRDTs, and they are **not the same flavor**:
+
+| Module | Tombstone | Semantics | 2P-Set-like? |
+|---|---|---|---|
+| `SeqCrdt` (#lzseqcrdt) | `deleted: LwwRegister<bool>` (`seq_crdt.rs:50`) | **LWW, revivable** — latest write by HLC stamp wins | No — recency, not remove-wins |
+| `TextCrdt` (#lztextcrdt) | `deleted: bool`, **sticky** (`text_crdt.rs:54,203`) | once true, never false; merge keeps it set | Yes — remove is permanent |
+
+**Quote 1 — 2P-Set "removals take precedence over additions."** That's the *remove-wins* bias, and it's a design choice, not a law. lazily made it differently per layer:
+
+- **Structural sequence (`SeqCrdt`)** deliberately does **not** use 2P-Set semantics. `remove` sets an **LWW** tombstone keyed by HLC, so a *later* re-add/un-delete wins — recency, not remove-precedence. The reason: agent-doc items (a queue line, a backlog row) get cut and re-pasted; a permanent "once deleted, dead forever" 2P-Set would make a re-add a *new* identity and lose lineage. LWW keeps the element's `Id` and lets the latest causal intent win.
+- **Free text (`TextCrdt`)** *does* use sticky/permanent tombstones — because it's an RGA/Fugue tree where a deleted character is still a **position anchor**: concurrent inserts reference it as their `left origin`. Reviving a char would corrupt the origin chain, so deletes must be sticky. This is precisely the 2P-Set "removal precedence" the quote describes, and it is correct *here*.
+
+Worth naming the third option both quotes omit: the **OR-Set (add-wins, unique tags)** is the modern answer to 2P-Set's "can't re-add" problem. lazily doesn't need OR-Set's tagging layer because **every element already carries a unique identity** — `OpId` in `TextCrdt`, `NodeId`/`Id` in `SeqCrdt` (#lzstableid manufactures it for prose). The unique-tag set OR-Set bolts on is inherent to lazily's per-element model, so we get add-can-win (where we want it, in `SeqCrdt`) without a separate tag store.
+
+**Quote 2 — TP2, convergence, and bloat.** Two parts:
+
+1. **TP2 / "no central coordination."** TP2 (the transformation-property puzzle) is an **operational-transformation** problem — it only exists if you transform ops against each other. lazily is **CRDT, not OT**: `TextCrdt::order` is *"a pure, deterministic function of the element set"* (`text_crdt.rs:17`), so there are no transformation functions and **TP2 never arises**. The tombstone's job here isn't to satisfy TP2 — it's to preserve the deleted node as a stable origin anchor so the order function stays total. Same convergence the quote credits to tombstones (commutative/associative/idempotent `merge`, verified), reached without OT.
+
+2. **Memory bloat is real and currently unmitigated — but scoped.** Both maps grow without bound: `SeqCrdt.entries` keeps every tombstoned element, `TextCrdt.elems` keeps every deleted char. There is **no GC today** — the quote's critique lands. Two things bound the blast radius:
+   - **CRDT lives only at the multi-writer distributed boundary.** The normal agent-doc path is the single-producer **IPC Snapshot/Delta** mirror (#lzcrdtplane keeps it unchanged) — it does *no* set-merge and accrues *zero* tombstones. Bloat is confined to the opt-in `distributed` feature with ≥2 live writers.
+   - **The text layer re-parses to a projection.** The *structural* tree is rebuilt from merged text (#lzstableid + #lzkeyrecon), so structural cells carry no char tombstones; only the raw `TextCrdt` buffer does.
+
+**GC design (the quote's "remove only when all replicas are aware").** That condition is **causal stability**: a delete is collectable once every replica has observed it. With lazily's HLC that's a **stability watermark** — the min over replicas of "highest stamp I've seen from you." A tombstone whose delete-stamp is ≤ watermark can never be contradicted (no in-flight concurrent op can still reference or revive it), so it is safe to drop.
+
+```mermaid
+flowchart LR
+    D["delete op @ stamp S"] --> T["tombstone live"]
+    T --> W{"S ≤ stability watermark?<br/>(min over replicas of<br/>highest stamp seen)"}
+    W -- "no — concurrent op<br/>could still reference/revive" --> T
+    W -- "yes — all replicas aware" --> C["causally stable"]
+    C --> G["GC: drop entry /<br/>compact RGA run"]
+```
+
+Two layer-specific cautions:
+- **`TextCrdt` (RGA):** only collect a stable tombstone when **no still-unstable insert** can reference it as `left origin`; collect contiguous stable tombstone *runs* and rewrite survivors' origins to the nearest live ancestor (standard RGA compaction).
+- **`SeqCrdt` (LWW):** because tombstones are revivable, drop an entry only once its `Id` is provably retired (stable + no future op will reuse the key) — otherwise a late re-add resurrects against a missing anchor.
+
+**Bottom line:** lazily already *uses* tombstones the way the quotes describe — split into LWW-revivable (sequence) and sticky-RGA (text), sidestepping OT/TP2 entirely. The unaddressed half is **GC**: it's deferred, bounded to the distributed plane, and the right protocol is an HLC causal-stability watermark + RGA run-compaction. Filing that as a recommended `#lztombgc` under #lzcrdtplane.
+<!-- agent:boundary:b871799c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -386,7 +434,8 @@ All seven phases of `tasks/software/plan-lazily-agent-doc-reactive-substrate.md`
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- I looked at Tombstones. Please address "In set CRDTs like the Two-Phase Set (2P-Set), a separate "tombstone set" tracks removed elements to ensure removals take precedence over additions during state merges." and "While tombstones solve the "TP2 puzzle" in operational transformation and ensure convergence without central coordination, they lead to memory bloat.  Some systems implement specialized garbage collection protocols to safely remove tombstones only when all replicas are confirmed to be aware of the deletion."
+- ~~I looked at Tombstones. Please address "In set CRDTs like the Two-Phase Set (2P-Set), a separate "tombstone set" tracks removed elements to ensure removals take precedence over additions during state merges." and "While tombstones solve the "TP2 puzzle" in operational transformation and ensure convergence without central coordination, they lead to memory bloat.  Some systems implement specialized garbage collection protocols to safely remove tombstones only when all replicas are confirmed to be aware of the deletion."~~
+- How can cut + paste be handled?
 <!-- /agent:queue -->
 
 ## Backlog

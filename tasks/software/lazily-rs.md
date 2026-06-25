@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -39,7 +39,7 @@ queue: stop
 Compacted content:
 - Archived 9 response topic(s): lazily bug-fix next-steps (cross-port); IPC proof diagnostic (interrupted-cycle recovery); #lzjshygiene node_modules purge; 6 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-<!-- agent:boundary:ad6d165c -->
+<!-- agent:boundary:a57b7600 -->
 <!-- /agent:exchange -->
 ###
 <!--

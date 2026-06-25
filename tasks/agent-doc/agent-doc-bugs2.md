@@ -83,7 +83,17 @@ You were right that I stalled — "OpenCode has no auto-loop" only blocks the `/
 ### Re: drain plan — glm-5.2
 
 Continuing the queue: next leading head is the `#jbrunhang` session-startup hang isolation, then collapse the ~7 actor-switch flood pins by completing `#actorswitchdefer` Part B and `queue consume`-ing the answered duplicates.
-<!-- agent:boundary:790c500f -->
+
+### Re: #jbrunhang + #ipc-recovery-diagnostic-patchback — glm-5.2
+
+`#jbrunhang` closed (code-complete: threaded controller accept `rpc.rs:2459`, bounded client reads `rpc.rs:2685`, idle-client close `rpc.rs:2712`, bounded route wait `route.rs:3243/3398`; 3278 orchestration tests pass).
+
+Fixed the stall root cause: `detect_bypassed_response_write_between` now exempts binary-authored `(interrupted-cycle recovery)` diagnostics via `is_binary_authored_recovery_diagnostic_heading` (`session_check/closeout_guards.rs`), breaking the append→flag→refuse→re-append loop. Regression test `detect_bypassed_response_write_exempts_binary_recovery_diagnostic` added; clippy clean; built + installed + controllers auto-recycled.
+
+⚠️ Editor IPC is degraded (socket ack timeouts, file-IPC patch never ACKed) — used `--force-disk` to land this commit. The opencode editor buffer now diverges from disk; expect a possible JB/opencode "File Cache Conflict" / "externally modified" prompt (`#p2j4`). Recommend restarting the opencode editor IPC listener (or the editor) to re-establish the patch queue.
+
+Next: commit this code fix (submodule) + push, then continue the queue drain (`#actorswitchdefer` Part B → consume flood pins).
+<!-- agent:boundary:d2208ec3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -267,7 +277,6 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue -->
 - [ ] [#rt83qflood] #rt83/#qflood phantom-pin flood dedup: queue convergence leaves duplicate binary-injected :round_pushpin:/:pushpin: actor-switch pins after a stale-CRDT/supervisor re-emit, flooding the queue with ~7 near-identical copies. Add deterministic dedup that collapses repeated phantom pins (the operator-authored line is position-locked under #queue-operator-pin-position-lock, but binary-injected phantom copies must converge to one) so restarting/resyncing a stale supervisor cannot reflood the queue.
 - [ ] [#capproofbg] Make the JB Run Agent Doc capacity proof non-blocking: dispatch immediately and run the capacity proof in the background, surfacing failure asynchronously instead of stalling every dispatch.
-- [ ] [#jbrunhang] JB Run Agent Doc on a session that is not open hangs the next invocation: the first run against a closed session must fail immediately instead of wedging the subsequent dispatch. See plan-controller-stalled-client-start-hang.md.
 - [ ] [#npe1] #codefencestrip=Template patch parser strips trailing code fences at the exchange boundary
 - [ ] [#p2j4] #jbcfdiag=JB File Cache Conflict: investigate remaining write-path triggering the JB VFS dialog beyond IPC-first writes
 - [ ] [#4pdp] #ocreverselist=OpenCode reverse-ordered numeric list rendering investigation

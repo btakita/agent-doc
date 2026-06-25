@@ -19,7 +19,9 @@ use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::ptr;
+use std::sync::{Mutex, OnceLock};
 
+use crate::crdt_sync::ReplicaState;
 use crate::{component, crdt, frontmatter, syntax, template};
 
 /// Free a string returned by an `agent_doc_*` function.
@@ -409,6 +411,247 @@ pub unsafe extern "C" fn agent_doc_crdt_merge(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Editor-as-replica FFI (`#crdtauth2`) — the cdylib hosts a per-editor yrs replica.
+//
+// FFI-first per the Shared Foundation pattern: the CRDT node (a durable
+// [`crate::crdt_sync::ReplicaState`]) lives in the shared library; thin editor
+// plugins are bindings that forward local Document deltas (`apply_local`) and
+// apply remote updates (`apply_update`), exchanging state vectors / updates with
+// the supervisor's canonical replica. Each replica is keyed by a caller-chosen
+// `replica_id` (also its yrs client id, so distinct replicas order concurrent
+// inserts deterministically). Authority gating (sync only under a multi-replica
+// authority, `#crdtauth1sv`) lives in the orchestration layer over this transport.
+// ---------------------------------------------------------------------------
+
+/// Process-wide registry of cdylib-hosted CRDT replicas, keyed by `replica_id`.
+static REPLICA_REGISTRY: OnceLock<Mutex<HashMap<u64, ReplicaState>>> = OnceLock::new();
+
+fn replica_registry() -> &'static Mutex<HashMap<u64, ReplicaState>> {
+    REPLICA_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Leak `bytes` to the C caller (freed with [`agent_doc_free_state`]); writes the
+/// length to `out_len` when non-null.
+fn leak_state(bytes: Vec<u8>, out_len: *mut usize) -> *mut u8 {
+    let len = bytes.len();
+    let mut boxed = bytes.into_boxed_slice();
+    let ptr = boxed.as_mut_ptr();
+    std::mem::forget(boxed);
+    if !out_len.is_null() {
+        unsafe { *out_len = len };
+    }
+    ptr
+}
+
+/// The null byte-buffer result: null pointer with `*out_len = 0`.
+fn null_state(out_len: *mut usize) -> *mut u8 {
+    if !out_len.is_null() {
+        unsafe { *out_len = 0 };
+    }
+    ptr::null_mut()
+}
+
+/// Open (or reset) the cdylib-hosted CRDT replica `replica_id`, optionally
+/// bootstrapping it from a previously encoded state (`init_state` / `init_len`;
+/// pass null / 0 for a fresh empty replica). `replica_id` is also the yrs client
+/// id, so distinct live replicas MUST use distinct ids.
+///
+/// Returns 0 on success, -1 on a poisoned registry, -2 on an invalid init state.
+///
+/// # Safety
+/// If `init_state` is non-null, `init_len` bytes must be readable from it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_replica_open(
+    replica_id: u64,
+    init_state: *const u8,
+    init_len: usize,
+) -> i32 {
+    let replica = if init_state.is_null() || init_len == 0 {
+        ReplicaState::new(replica_id)
+    } else {
+        let bytes = unsafe { std::slice::from_raw_parts(init_state, init_len) };
+        match ReplicaState::from_encoded(replica_id, bytes) {
+            Ok(r) => r,
+            Err(_) => return -2,
+        }
+    };
+    match replica_registry().lock() {
+        Ok(mut reg) => {
+            reg.insert(replica_id, replica);
+            0
+        }
+        Err(_) => -1,
+    }
+}
+
+/// Apply a local edit to replica `replica_id` (the editor forwarding a local
+/// `Document` delta): delete `delete_len` chars at `offset`, then insert
+/// `insert`. Returns 0 ok, -1 poison, -2 bad UTF-8, -3 replica not open.
+///
+/// # Safety
+/// `insert` must be a valid NUL-terminated UTF-8 string (may be empty), or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_replica_apply_local(
+    replica_id: u64,
+    offset: u32,
+    delete_len: u32,
+    insert: *const c_char,
+) -> i32 {
+    let insert_str = if insert.is_null() {
+        ""
+    } else {
+        match unsafe { CStr::from_ptr(insert) }.to_str() {
+            Ok(s) => s,
+            Err(_) => return -2,
+        }
+    };
+    match replica_registry().lock() {
+        Ok(reg) => match reg.get(&replica_id) {
+            Some(replica) => {
+                replica.apply_local_edit(offset, delete_len, insert_str);
+                0
+            }
+            None => -3,
+        },
+        Err(_) => -1,
+    }
+}
+
+/// The current text of replica `replica_id`, or null if not open / poisoned.
+/// Free with [`agent_doc_free_string`].
+///
+/// # Safety
+/// Always safe to call (no pointer arguments). The returned pointer, when
+/// non-null, must be freed exactly once with [`agent_doc_free_string`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_replica_text(replica_id: u64) -> *mut c_char {
+    match replica_registry().lock() {
+        Ok(reg) => match reg.get(&replica_id) {
+            Some(replica) => CString::new(replica.text()).unwrap_or_default().into_raw(),
+            None => ptr::null_mut(),
+        },
+        Err(_) => ptr::null_mut(),
+    }
+}
+
+/// The encoded state vector of replica `replica_id` (the compact causal summary a
+/// replica announces to a peer). Writes the length to `out_len`. Returns null
+/// (with `*out_len = 0`) if not open / poisoned. Free with [`agent_doc_free_state`].
+///
+/// # Safety
+/// `out_len` must be a valid writable `usize` pointer, or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_replica_state_vector(
+    replica_id: u64,
+    out_len: *mut usize,
+) -> *mut u8 {
+    match replica_registry().lock() {
+        Ok(reg) => match reg.get(&replica_id) {
+            Some(replica) => leak_state(replica.state_vector(), out_len),
+            None => null_state(out_len),
+        },
+        Err(_) => null_state(out_len),
+    }
+}
+
+/// The incremental update replica `replica_id` should send a peer whose state
+/// vector is `their_sv` — only the ops that peer is missing (a delta, not a
+/// snapshot). Writes length to `out_len`. Returns null on not-open / bad-sv /
+/// poison. Free with [`agent_doc_free_state`].
+///
+/// # Safety
+/// `their_sv` must point to `their_sv_len` readable bytes; `out_len` writable or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_replica_diff(
+    replica_id: u64,
+    their_sv: *const u8,
+    their_sv_len: usize,
+    out_len: *mut usize,
+) -> *mut u8 {
+    if their_sv.is_null() {
+        return null_state(out_len);
+    }
+    let sv = unsafe { std::slice::from_raw_parts(their_sv, their_sv_len) };
+    match replica_registry().lock() {
+        Ok(reg) => match reg.get(&replica_id) {
+            Some(replica) => match replica.diff(sv) {
+                Ok(update) => leak_state(update, out_len),
+                Err(_) => null_state(out_len),
+            },
+            None => null_state(out_len),
+        },
+        Err(_) => null_state(out_len),
+    }
+}
+
+/// Apply a remote update to replica `replica_id` (the editor applying a peer's
+/// ops — idempotent and yrs causal-buffered). Returns 0 ok, -1 poison, -2 bad
+/// update bytes, -3 replica not open.
+///
+/// # Safety
+/// `update` must point to `update_len` readable bytes, or be null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_replica_apply_update(
+    replica_id: u64,
+    update: *const u8,
+    update_len: usize,
+) -> i32 {
+    if update.is_null() {
+        return -2;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(update, update_len) };
+    match replica_registry().lock() {
+        Ok(reg) => match reg.get(&replica_id) {
+            Some(replica) => match replica.apply_update(bytes) {
+                Ok(()) => 0,
+                Err(_) => -2,
+            },
+            None => -3,
+        },
+        Err(_) => -1,
+    }
+}
+
+/// The full encoded state of replica `replica_id` (a durable checkpoint, or the
+/// snapshot a peer needs on first contact). Writes length to `out_len`. Returns
+/// null if not open / poisoned. Free with [`agent_doc_free_state`].
+///
+/// # Safety
+/// `out_len` must be writable or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_replica_encode_state(
+    replica_id: u64,
+    out_len: *mut usize,
+) -> *mut u8 {
+    match replica_registry().lock() {
+        Ok(reg) => match reg.get(&replica_id) {
+            Some(replica) => leak_state(replica.encode_state(), out_len),
+            None => null_state(out_len),
+        },
+        Err(_) => null_state(out_len),
+    }
+}
+
+/// Close (drop) replica `replica_id`. Returns 0 if it was open, -1 on poison,
+/// -3 if it was not open.
+///
+/// # Safety
+/// Always safe to call (no pointer arguments).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_replica_close(replica_id: u64) -> i32 {
+    match replica_registry().lock() {
+        Ok(mut reg) => {
+            if reg.remove(&replica_id).is_some() {
+                0
+            } else {
+                -3
+            }
+        }
+        Err(_) => -1,
+    }
+}
+
 /// Text-based CRDT 3-way merge. Simpler interface than [`agent_doc_crdt_merge`].
 ///
 /// All three parameters are plain UTF-8 text (not CRDT state bytes).
@@ -783,5 +1026,101 @@ mod tests {
             "native IPC append stripped the response opening fence:\n{text}"
         );
         unsafe { agent_doc_free_string(result.text) };
+    }
+
+    #[test]
+    fn replica_ffi_round_trip_converges_via_state_vector_exchange() {
+        use std::ffi::CString;
+
+        let a: u64 = 0xA11CE;
+        let b: u64 = 0xB0B;
+        assert_eq!(unsafe { agent_doc_replica_open(a, std::ptr::null(), 0) }, 0);
+        assert_eq!(unsafe { agent_doc_replica_open(b, std::ptr::null(), 0) }, 0);
+
+        // Each replica forwards a local Document delta (concurrent, non-overlapping).
+        let ins_a = CString::new("alpha").unwrap();
+        let ins_b = CString::new("beta").unwrap();
+        assert_eq!(
+            unsafe { agent_doc_replica_apply_local(a, 0, 0, ins_a.as_ptr()) },
+            0
+        );
+        assert_eq!(
+            unsafe { agent_doc_replica_apply_local(b, 0, 0, ins_b.as_ptr()) },
+            0
+        );
+
+        // Exchange state vectors → deltas (only the missing ops), then apply.
+        let mut b_sv_len: usize = 0;
+        let b_sv = unsafe { agent_doc_replica_state_vector(b, &mut b_sv_len) };
+        assert!(!b_sv.is_null());
+        let mut a_to_b_len: usize = 0;
+        let a_to_b = unsafe { agent_doc_replica_diff(a, b_sv, b_sv_len, &mut a_to_b_len) };
+        assert!(!a_to_b.is_null());
+
+        let mut a_sv_len: usize = 0;
+        let a_sv = unsafe { agent_doc_replica_state_vector(a, &mut a_sv_len) };
+        let mut b_to_a_len: usize = 0;
+        let b_to_a = unsafe { agent_doc_replica_diff(b, a_sv, a_sv_len, &mut b_to_a_len) };
+
+        assert_eq!(
+            unsafe { agent_doc_replica_apply_update(b, a_to_b, a_to_b_len) },
+            0
+        );
+        assert_eq!(
+            unsafe { agent_doc_replica_apply_update(a, b_to_a, b_to_a_len) },
+            0
+        );
+
+        let ta = unsafe { agent_doc_replica_text(a) };
+        let tb = unsafe { agent_doc_replica_text(b) };
+        let sa = unsafe { CStr::from_ptr(ta) }.to_str().unwrap().to_string();
+        let sb = unsafe { CStr::from_ptr(tb) }.to_str().unwrap().to_string();
+        assert_eq!(sa, sb, "replicas converge after FFI state-vector exchange");
+        assert!(sa.contains("alpha") && sa.contains("beta"));
+
+        // Re-applying a known update over the FFI is idempotent.
+        assert_eq!(
+            unsafe { agent_doc_replica_apply_update(b, a_to_b, a_to_b_len) },
+            0
+        );
+        let tb2 = unsafe { agent_doc_replica_text(b) };
+        let sb2 = unsafe { CStr::from_ptr(tb2) }.to_str().unwrap().to_string();
+        assert_eq!(sb2, sb, "re-applying a known update via FFI is idempotent");
+
+        unsafe {
+            agent_doc_free_state(b_sv, b_sv_len);
+            agent_doc_free_state(a_sv, a_sv_len);
+            agent_doc_free_state(a_to_b, a_to_b_len);
+            agent_doc_free_state(b_to_a, b_to_a_len);
+            agent_doc_free_string(ta);
+            agent_doc_free_string(tb);
+            agent_doc_free_string(tb2);
+        }
+
+        assert_eq!(unsafe { agent_doc_replica_close(a) }, 0);
+        assert_eq!(unsafe { agent_doc_replica_close(b) }, 0);
+        // Closing an already-closed replica reports not-open.
+        assert_eq!(unsafe { agent_doc_replica_close(a) }, -3);
+    }
+
+    #[test]
+    fn replica_ffi_reports_unopened_replica() {
+        let id: u64 = 0xDEAD_BEEF;
+        let ins = std::ffi::CString::new("x").unwrap();
+        assert_eq!(
+            unsafe { agent_doc_replica_apply_local(id, 0, 0, ins.as_ptr()) },
+            -3,
+            "apply_local on an unopened replica reports not-open"
+        );
+        // A null update is rejected before the lookup.
+        assert_eq!(
+            unsafe { agent_doc_replica_apply_update(id, std::ptr::null(), 0) },
+            -2
+        );
+        assert!(unsafe { agent_doc_replica_text(id) }.is_null());
+        let mut len: usize = 123;
+        assert!(unsafe { agent_doc_replica_state_vector(id, &mut len) }.is_null());
+        assert_eq!(len, 0, "null byte result sets out_len to 0");
+        assert_eq!(unsafe { agent_doc_replica_close(id) }, -3);
     }
 }

@@ -1817,16 +1817,17 @@ pub unsafe extern "C" fn agent_doc_record_state_event(
             return 0;
         }
     };
-    let mut event: agent_doc_orchestration::state_backbone::StateEvent =
-        match serde_json::from_str(fact_str) {
-            Ok(e) => e,
-            Err(err) => {
-                eprintln!(
-                    "[state-projection] agent_doc_record_state_event: failed to parse StateEvent JSON for {doc_hash}: {err}"
-                );
-                return 0;
-            }
-        };
+    let mut event: agent_doc_orchestration::state_backbone::StateEvent = match serde_json::from_str(
+        fact_str,
+    ) {
+        Ok(e) => e,
+        Err(err) => {
+            eprintln!(
+                "[state-projection] agent_doc_record_state_event: failed to parse StateEvent JSON for {doc_hash}: {err}"
+            );
+            return 0;
+        }
+    };
     match state_ledger().lock() {
         Ok(mut ledger) => {
             // `#xdocsuper3`: the binary owns the hosting-epoch gate (FFI-first).
@@ -1889,16 +1890,11 @@ pub unsafe extern "C" fn agent_doc_state_subscribe(
         }
     };
     let json = match state_ledger().lock() {
-        Ok(ledger) => agent_doc_orchestration::state_wire::subscribe(
-            &ledger,
-            doc_hash,
-            last_epoch,
-        )
-        .to_json(),
+        Ok(ledger) => {
+            agent_doc_orchestration::state_wire::subscribe(&ledger, doc_hash, last_epoch).to_json()
+        }
         Err(err) => {
-            eprintln!(
-                "[state-projection] agent_doc_state_subscribe: ledger lock poisoned: {err}"
-            );
+            eprintln!("[state-projection] agent_doc_state_subscribe: ledger lock poisoned: {err}");
             "null".to_string()
         }
     };
@@ -2303,6 +2299,17 @@ fn force_link_core_ffi_symbols() {
         agent_doc_crdt_merge;
     let _: unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> *mut c_char =
         agent_doc_merge_crdt;
+    // Editor-as-replica FFI (#crdtauth2).
+    let _: unsafe extern "C" fn(u64, *const u8, usize) -> i32 = agent_doc_replica_open;
+    let _: unsafe extern "C" fn(u64, u32, u32, *const c_char) -> i32 =
+        agent_doc_replica_apply_local;
+    let _: unsafe extern "C" fn(u64) -> *mut c_char = agent_doc_replica_text;
+    let _: unsafe extern "C" fn(u64, *mut usize) -> *mut u8 = agent_doc_replica_state_vector;
+    let _: unsafe extern "C" fn(u64, *const u8, usize, *mut usize) -> *mut u8 =
+        agent_doc_replica_diff;
+    let _: unsafe extern "C" fn(u64, *const u8, usize) -> i32 = agent_doc_replica_apply_update;
+    let _: unsafe extern "C" fn(u64, *mut usize) -> *mut u8 = agent_doc_replica_encode_state;
+    let _: unsafe extern "C" fn(u64) -> i32 = agent_doc_replica_close;
     let _: unsafe extern "C" fn(*const c_char) -> FfiPatchResult =
         agent_doc_reposition_boundary_to_end;
     let _: unsafe extern "C" fn(*const c_char, *const c_char) -> FfiPatchResult =
@@ -2385,8 +2392,7 @@ mod tests {
 
         let record = |event: &StateEvent| {
             let json = CString::new(serde_json::to_string(event).unwrap()).unwrap();
-            let rc =
-                unsafe { agent_doc_record_state_event(doc_hash_c.as_ptr(), json.as_ptr()) };
+            let rc = unsafe { agent_doc_record_state_event(doc_hash_c.as_ptr(), json.as_ptr()) };
             assert_eq!(1, rc, "record_state_event should succeed");
         };
         let projection = || {
@@ -2471,7 +2477,10 @@ mod tests {
             cold.contains("\"type\":\"snapshot\""),
             "cold subscribe with no state must yield a snapshot: {cold}"
         );
-        assert!(cold.contains("\"epoch\":0"), "empty cold read is epoch 0: {cold}");
+        assert!(
+            cold.contains("\"epoch\":0"),
+            "empty cold read is epoch 0: {cold}"
+        );
 
         // Record one baseline event.
         let baseline = StateEvent::new(
@@ -2484,7 +2493,8 @@ mod tests {
             },
         );
         let baseline_json = CString::new(serde_json::to_string(&baseline).unwrap()).unwrap();
-        let rc = unsafe { agent_doc_record_state_event(doc_hash_c.as_ptr(), baseline_json.as_ptr()) };
+        let rc =
+            unsafe { agent_doc_record_state_event(doc_hash_c.as_ptr(), baseline_json.as_ptr()) };
         assert_eq!(1, rc, "record_state_event should succeed");
 
         // Cold read now carries the baseline node at epoch 1.
@@ -2494,7 +2504,10 @@ mod tests {
             .unwrap()
             .to_string();
         drop(unsafe { CString::from_raw(cold_ptr) });
-        assert!(cold.contains("\"epoch\":1"), "one accepted event bumps epoch: {cold}");
+        assert!(
+            cold.contains("\"epoch\":1"),
+            "one accepted event bumps epoch: {cold}"
+        );
         assert!(
             cold.contains("agent_doc.document.baseline"),
             "cold snapshot must include the baseline type_tag: {cold}"

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -120,7 +120,7 @@ Done — step 4 (subject property + loan request) now always starts blank. Commi
 - `borrower-lead-to-tmo-flow.test.ts`: 6 pass / 0 fail; worker bundle builds clean.
 
 **Heads-up — `make check` is red from a separate, pre-existing cause (not this change).** 7 tests fail on `origin/main`, all from the operator commit `dfed93b` *"fix(admin): streamline document upload workflows"* (by Brian Dev), which refactored the admin/lender document-upload components but left their source-assertion tests behind (import shapes, CSS values, dropped fixtures, modal stacking). They live in a different subsystem and fail identically with my change stashed; my change is green in isolation. I did **not** guess-fix them — reconciling an active UI refactor's tests is outside this property-prefill directive and risks conflicting with your in-flight work. Tracked as backlog `#dfed93b-tests`. Note `dfed93b` is on origin but **not yet deployed** (the prior deploy shipped a pre-rebase tree). This turn's preset was `#spec-test-commit-push`, so I committed + pushed but did not deploy.
-<!-- agent:boundary:9a4a68ac -->
+<!-- agent:boundary:b7ad2d5b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -140,8 +140,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~In a New Loan Application, do not prefill any property info https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?step=4. Each property is different.~~
-- ~~do [#dfed93b-tests]~~
 <!-- /agent:queue -->
 
 ## Backlog

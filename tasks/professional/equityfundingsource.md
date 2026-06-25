@@ -103,7 +103,33 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=36a8f437-18f5-46e1-aeeb-52c10dbdaeb1 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782338579569
 ```
-<!-- agent:boundary:f6266c55 -->
+
+### Re: Borrower DOB prefill — wrong table + identity short-circuit — glm-5.2
+
+> **Queue prompt:**
+> https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?step=0 for btak.dev+borrower3@gmail.com
+> still does not capture already filled out borrower data (e.g. "Date of Birth"). Have we captured this borrower's data?
+
+> **Queue prompt:**
+> deploy
+
+**Yes — the borrower's data is captured.** Prod D1 confirms `btak.dev+borrower3@gmail.com` has **3 prior full_applications, all 3 with `date_of_birth` populated**. The data was never lost; the prefill just never reached it.
+
+Root cause was two compounding bugs in `borrower_prefill.ts` (the `#borrower-prefill` module shipped last cycle):
+
+1. **Wrong table (dominant).** `most_recent_prior_application_` queried `FROM applications` — the legacy table that holds no full-application drafts (those live in `full_applications`, which every other read/write in `repo.ts` uses). The prior-app lookup always returned null, so prefill exited before doing anything.
+2. **Identity short-circuit.** Even with the table fixed, the prefill bailed when the target already had identity (`first_name`/`last_name`/`email`). But every lead-originated draft has identity copied in by `lead_prefill`, so it would have skipped every lead-started application anyway.
+
+Fix: the lookup now reads `full_applications`, and the identity short-circuit is replaced by a field-by-field personal merge that fills only blank borrower fields (DOB, phones, marital status, …) while preserving any value the target already has. A `personal_changed_` guard skips the upsert once every field is filled, so repeated `GET /sections` doesn't bump `updated_at`. Array sections (addresses, employment, income, assets, liabilities, REO) still copy only into empty targets; subject property, declarations, signature, and broker info are never touched; the masked SSN token is still never copied. Per the "do not commingle" rule, only borrower-identifying data is reused.
+
+Verification: `bun test tests/apply4-full-application-p1.test.ts` → `10 pass / 0 fail` (2 new D1-backed behavioral tests — target-with-identity still gets DOB filled from prior + SSN not copied; plus a source guard locking `FROM full_applications a`). Full `bun test` → `1208 pass / 0 fail`. `make build` passed. `git diff --check` clean. `gh run list --workflow CI --limit 1` — this repo has no workflow named `CI`.
+
+Commits: EFS `d33680e` (identity short-circuit removal + field merge) and `48948e4` (`full_applications` prior-app lookup fix), both pushed to `origin/main`. Parent gitlink bumped locally (`3aefd4d2b`, `a8c3867e9`); parent `main` not pushed (already ahead of origin with unrelated work).
+
+Deploy: no schema change (reuses existing tables); remote D1 migrations had nothing to apply. `make deploy` completed. Worker URL `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID `4597b4b6-34a4-4faf-a2e1-08df5e1f1d34`. Post-deploy: public root `HTTP 200`. A new/resumed application for this borrower at step=0 will now prefill DOB (and other blank borrower fields) from the most recent prior application.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:fe539b65 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -123,7 +149,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?step=0 for btak.dev+borrower3@gmail.com
+- ~~https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?step=0 for btak.dev+borrower3@gmail.com~~
   still does not capture already filled out borrower data (e.g. "Date of Birth"). Have we captured this borrower's data?
 - deploy
 <!-- /agent:queue -->

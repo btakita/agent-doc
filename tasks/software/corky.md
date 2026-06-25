@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Session History
@@ -223,7 +223,7 @@ The trailing `_ignored` is part of the name — the test asserts that `scan_soci
 Fix applied **locally** (empty `images` slice added to the 3 bench callsites); clippy `--all-targets` is green again and the bench numbers above come from that fixed tree. I did **not** commit it — you asked for a report, not a ship. It's logged as `#ckybenchbreak` (P2), fix ready, just needs commit + push to restore the gate.
 
 **Queue note:** the active head `#ckymimeinline` already shipped (6056584), so the queue was stale — marked it done. `#ckybenchbreak` is the only new open item.
-<!-- agent:boundary:c4dfd30c -->
+<!-- agent:boundary:29713b4c -->
 <!-- /agent:exchange -->
 ###
 <!--

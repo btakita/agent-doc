@@ -282,7 +282,7 @@ Picked up as Claude Code on pane `%77`. `admin inspect` confirms `pane=%77 state
 The design question you raised this cycle — *"Would a reactive state machine help to manage the supervisor document bindings?"* — is already answered in the plan's **Design note** (yes for the document-switch/hosting half via the existing `state_backbone.rs`; no/over-engineering for the claim guard) and was auto-struck (`#ftstrike`).
 
 Queue note: 32 mirrored heads remain but they are dominated by supervisor-in-process-critical / focused-cycle items (`#brtc` `#queuestatemachine3`, `#xdocsuper*`, the merge/lazily state-sync work) whose own plans gate them to fresh focused cycles. Not looping those inline from a just-recovered supervisor.
-<!-- agent:boundary:01980ed8 -->
+<!-- agent:boundary:64430ef5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -457,7 +457,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#xdocsuper0] [focused-cycle] Claim guard consults document supervisor lease: claim.rs::cross_session_decision AcceptStale auto-grants a cross-pane reclaim without checking supervisor_lease_is_fresh_or_alive — so a relaunched-pane supervisor claims a doc a live supervisor still holds. Make claim+route reclaim Reject (or require --force) when a fresh supervisor lease is held. Plan: tasks/agent-doc/plan-cross-document-supervisor-contamination.md
 - [ ] [#xdocsuper] [focused-cycle] Cross-document supervisor contamination: one route-owned supervisor (per pane) reused across documents (corky.md→agent-doc-bugs2.md) carries prior doc's stale in-memory CRDT/queue/lease into the new doc → the live_prompt_drift / postcommit-worktree / answered-head-residue churn. Add a document-switch state-reset guard + SimWorld. Plan: tasks/agent-doc/plan-cross-document-supervisor-contamination.md
 - [ ] [#n529b] #lazilystatesync3b Wire MirrorProjectionSummary into EditorCommandStateMachine / dispatch-ready / busy consumers (PromptPoller, RunAgentDocAttemptLedger) so they read StateProjectionBridge.mirrorSummaryForFile instead of the cold projectionSummaryForFile pull, then dogfood live in JB. Mirror substrate shipped in 0.2.190 (#n529). Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#gww8] #lazilyspecpin=Pin agent-doc state type_tag vocabulary (8 node kinds) + conformance snapshot/delta pair in lazily-spec as schemas/agent-doc-state.json (versioned) so kt/js/rs import one canonical vocabulary. Design pinned in tasks/agent-doc/plan-lazily-plugin-state-sync.md (Wire-shape definition section). Sibling-repo (src/lazily-spec) cycle per scope-discipline.
@@ -481,6 +480,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#xdocsuper0] [focused-cycle] Claim guard consults document supervisor lease — CODE-COMPLETE on agent-doc branch xdocsuper0 (worktree src/agent-doc-xdocsuper0-wt, commit 2f704263): cross_session_decision_with_lease + project_controller::fresh_foreign_supervisor_lease_holds_document Reject the AcceptStale auto-force when a fresh foreign supervisor lease is held (unless --force). make check green 5152 passed. UNBLOCKS ON: merge branch to agent-doc main + install + live cross-doc-relaunch repro. Plan: tasks/agent-doc/plan-cross-document-supervisor-contamination.md
 - [/] [#kj5f] [operator-verify] #mergestatemachine3 remaining: JB+VSCode thin reporters emit attach/detach/ownership facts through the merge-ownership SM (via #lazilystatesync) + live editor-attached/detached repro for File Cache Conflict + #6b5h wedge. DONE: SM core Phases 1-2 + deterministic scenario repros for both wedge classes (agent-doc 34d7023d). Remaining needs the operator-paused plugin install + a live editor to verify. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 <!-- /agent:review -->
 

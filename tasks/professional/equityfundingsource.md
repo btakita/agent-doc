@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,176 +33,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-193022.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-223548.md`*
 
 Compacted content:
-❯ - Archived 14 response topic(s): The application-feedback message deep-link; Application-feedback deep-link; Queue residue cleared; 11 more
-❯ - Prior summary/context: prior compacted content: Archived 11 response topic(s): Available Deal cards show interested-lender count; IPC proof ...
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=58908d81-a732-4589-8343-6c07e5e6b498 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782376798544
-```
-
-### Re: Full Application layout — dense Address/Employment/Income + Review & Sign completion status — opus-4-8
-
-Drained all three queue heads (EFS `5b62fa6`, deployed Version `cfb313d3`).
-
-> **Queue prompt:** Optimize the layout of …/admin/pipeline?…&dialog=application&dialog_application_id=5cfa7c7b-… > Full Application: Personal, Address, Employment, Income
-
-> **Queue prompt:** Optimize the layout of Review & Sign. Add a green checkmark if the borrower completed and a red x if not.
-
-> **Queue prompt:** deploy
-
-**Personal, Address, Employment, Income → dense.** Personal already rendered dense (responsive multi-column field grid). The three list sections — **Addresses, Employment, Income** — were one-field-per-row stacks. `EditableListSectionCard` + `RecordList` now take a `dense` flag that lays each record's read-only fields out in a responsive `.full-app-record-grid` (`repeat(auto-fit,minmax(140px,1fr))`, label-above-value), so all the data shows multiple-per-row with far less vertical scrolling. The edit forms are untouched. Shared component, so the borrower application-status view gets the same compact layout.
-
-**Review & Sign → completion status.** The card header now carries an **always-visible green-check (`check_circle`) / red-x (`cancel`) mark** for whether the borrower completed Review & Sign — visible even while the card is collapsed, so an admin sees completion at a glance. Inside, the three completion gates render dense with their own per-gate marks:
-- **E-sign consent** — green check if consented, red x if not (was a read-only checkbox).
-- **Signed** — green check + signed date, or red x + "Not signed".
-- **Submitted** — green check + submitted date, or red x + "Not submitted".
-
-Overall "completed" = e-sign consent **and** signed **and** submitted. Printed name / EFS status / TMO application stay as plain fields, now in the same responsive grid.
-
-**Verify + deploy.** Added a `#full-app-review-sign-status` regression test and updated the boolean-checkbox test for the E-sign → completion-mark change. `bun test` → **1228 pass / 0 fail**; `bun run build` + `build:worker` clean. Pushed `5b62fa6`, deployed Version `cfb313d3-a40a-4d05-aec6-246e689458bc`. Post-deploy smoke `GET /` → 200. No CI workflow in the EFS repo, so the local suite + build are the evidence.
-
-Reload the `dialog=application` → **Open Full Application** path to see the denser Address/Employment/Income cards and the Review & Sign green-check/red-x status.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=a7a8adee-5308-46e6-9fb3-aec0c11c6337 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782415989846
-```
-
-### Re: Full Application layout (delivered) + Proposed vs Loan Amount — opus-4-8
-
-> **Queue prompt:** 🚧 Optimize the layout of …/admin/pipeline?…&dialog_application_id=5cfa7c7b-… > Full Application: Personal, Address, Employment, Income
-
-This shipped last cycle and is **live** (EFS `5b62fa6`, Version `cfb313d3`): **Personal** was already a dense multi-column field grid; **Addresses, Employment, Income** now render their read-only fields multiple-per-row in a responsive `.full-app-record-grid` (label-above-value) instead of one-per-line — so all four sections read with far less vertical scrolling. Reload the `dialog=application` → **Open Full Application** path to see it. If the 🚧 means you want a *specific* further refinement (tighter spacing, a particular field order, side-by-side sections, etc.), re-queue with the target and I'll take it.
-
-> **Queue prompt:** In …Full Application, what is the Proposed Loan Amount vs the Loan Amount?
-
-They are two distinct Subject-Property fields with different origins and roles:
-
-- **Loan amount** (`loan_amount`) — the figure the **borrower types into their Full Application** (Subject Property → "Loan amount"; it's a *required* borrower input — `borrower/full_application.tsx:1276`). It's the borrower's own stated request on the application form.
-- **Proposed loan amount** (`proposed_loan_amount`) — the amount captured during **onboarding / deal setup** (the lead/admin onboarding pipeline). This is the figure the financial calculators treat as **authoritative**: LTV, minimum-investment, and the G-formula all read `proposed_loan_amount` first, falling back to TMO's `LoanAmount` (`app/equityfundingsource/lib/gformula.ts:65,90`).
-
-So: **Loan amount = what the borrower entered on the application; Proposed loan amount = the deal/onboarding figure that drives LTV and investment math.** They're normally the same number but can diverge when the onboarding-proposed amount differs from what the borrower later types in. The admin loans table shows `loan_amount ?? proposed_loan_amount` — it prefers the borrower's application figure and falls back to the onboarding proposal (`admin/full_applications.tsx:505`).
-
-No code change this cycle — item 1 was already delivered/deployed and item 2 is a question answered from the source.
-
-### Re: Queue closeout — both heads answered above — opus-4-8
-
-Striking the two answered heads (full responses in the section above): the Full Application layout optimization was delivered + deployed (`cfb313d3`), and the Proposed-vs-Loan-Amount distinction is explained from the source.
-
-> **Queue prompt:** Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Full Application: Personal, Address, Employment, Income
-
-> **Queue prompt:** In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097, what is the Proposed Loan Amount vs the Loan Amount?
-
-### Re: Deal loan-tab layout (Borrower Info + Application) + deploy — opus-4-8
-
-> **Queue prompt:** Optimize the layout of …/admin/pipeline?…&dialog=deal&dialog_deal_id=4d2b9382-…&deal_tab=loan: Borrower Info + Application
-
-Delivered and **live** (EFS `1c4fb1c`, Version `b9966711-fcc7-4773-b217-9ee443114ed7`). The bottleneck on that loan tab was the **Application** card: ~11 fields stacked one-per-row, towering beside the short 4-field **Borrower Info** card and leaving a tall dead-space column. I applied the same density pattern you approved last cycle for the Full Application dialog (`.full-app-record-grid`):
-
-- **Application card** now flows its short scalar fields (Loan Number, Loan/Application Status, Ref #, Proposed Loan Amount, Loan Purpose, Occupancy, Property Value, Submitted, Last Updated) **multiple-per-row** in a responsive `repeat(auto-fit,minmax(190px,1fr))` grid, **label-above-value** instead of one tall right-aligned row each. On a wide card that's ~2 columns, roughly **halving the card height** so it no longer dwarfs Borrower Info.
-- **Property Address** moved to a **full-width row at the bottom** of the card (it carries a longer value + the address-verification pill, so it spans every column rather than cramping a 190px cell).
-- **Borrower Info** is intentionally left as the compact contact stack (Name/Email/Phone/Mailing Address with right-aligned copy buttons) — those values are long (emails, addresses) and read worse two-up, and it's already the dense form from the `#67v2` work.
-
-This is `lib/ui--browser--efs/portal/admin/loan_detail.tsx`, the **shared** component, so the admin loan page and the deal-dialog loan tab both get the denser layout (consistent with how the density PRD already treats them as one). All inline-styled — no portal CSS change. Updated `tests/tmo-loan-details-density.test.ts` to lock the new dense grid + `dense`/`wide` field rendering.
-
-If you want a *specific* further tweak (3-up at wider widths, Borrower Info also two-up, a particular field order/grouping), re-queue with the target and I'll take it.
-
-> **Queue prompt:** deploy.
-
-Done. `make deploy` ran: full suite **1228 pass / 0 fail**, `build` + `build:worker` clean, remote D1 migrate applied, worker uploaded and triggers deployed → `https://equityfundingsource.brian-takita.workers.dev` (Version `b9966711`). Submodule committed (`1c4fb1c`) and pushed to `origin/main` (`5b62fa6..1c4fb1c`). (The `d1 down` line in the test log is a deliberate negative-path test — *outbox enqueue failures are non-fatal* — not a real failure.)
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=2474ea4f-923c-4a13-be99-7e71fe43b091 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782417704874
-```
-
-### Re: Loan Terms card density — deal loan tab pass complete — opus-4-8
-
-> **Queue prompt:** Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=deal&dialog_deal_id=4d2b9382-06d5-498f-a306-64ea3e2870a7&deal_tab=loan: Borrower Info + Application + Loan Terms cards.
-
-> **Queue prompt:** Optimize the Loan Terms card as well.
-
-Done — the **Loan Terms** card now gets the same dense treatment as the Application card, completing the loan-tab density pass. Its 8 short scalar terms (Loan Amount, LTV/CLTV, Sold Rate, Note Rate, Duration, Due In, Frequency, Due Day) flow **multiple-per-row in the responsive `auto-fit minmax(190px,1fr)` grid, label-above-value**, instead of 8 one-per-row rows — so the card is ~half as tall on a wide viewport and reads in two compact columns. Same shared `AdminTmoLoanTermsCard` in `loan_detail.tsx`, so the admin loan page and the deal-dialog loan tab both pick it up. Density test extended to lock the Loan Terms grid + `dense` fields.
-
-Verified: full suite **1228 pass / 0 fail**, `build` + `build:worker` clean. Committed `3c5db1c` and pushed `origin/main` (`1c4fb1c..3c5db1c`), per the `#spec-test-commit-push` queue preset.
-
-**Not deployed this batch.** The preset is test-commit-push (no deploy), and there's no unstruck `deploy` item — last cycle's `deploy.` (which shipped the Borrower Info + Application pass, Version `b9966711`) is struck. So this Loan Terms change is pushed but **not yet live**. Add `deploy` to the queue (or say the word) and I'll ship it.
-
-### Re: Loan Terms queue residue — gpt-5
-
-> **Queue prompt:**
->
-> ~~Optimize the Loan Terms card as well.~~ — auto-struck: answered this cycle (#ftstrike)
-
-
-> **Queue prompt:** Optimize the Loan Terms card as well.
-
-This queue head was already answered by the preceding **Loan Terms card density** section: the Loan Terms card density pass shipped in EFS `3c5db1c`, the full suite and builds passed, and the branch was pushed to `origin/main`. I made no additional EFS code changes in this cycle.
-
-Noted preflight hygiene: one legacy gated backlog item still needs migration to review, and this workspace reports a stale `agent-doc` install relative to source. Those are existing agent-doc/session-maintenance warnings, not blockers for closing the already-answered Loan Terms queue item.
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:** deploy
-
-Deployed the EFS Worker to production — **Version ID `4ac3c33e-306d-42e3-9f19-939a75725b4e`** (`https://equityfundingsource.brian-takita.workers.dev`).
-
-Followed `runbooks/deployment.md`:
-- **Pre-deploy:** working tree clean on `main`, in sync with origin (behind=0 ahead=0); `make check` green (**1228 pass / 0 fail**, build + build:worker ok); **no pending remote D1 migrations** → code-only deploy, zero schema risk (skipped the destructive-migration backup/time-travel steps as they don't apply).
-- **Deploy:** `make deploy` → `build:worker` → `cf:d1:migrate:remote` (no-op) → `cf-deploy.ts worker`. Uploaded in 7.83s, triggers deployed (hourly schedule intact).
-- **Post-deploy verification:** public site `200`, `/admin/login` `200`, migrations list confirms none pending.
-
-Shipped the committed `main` state (`3c5db1c` — admin loan-tab dense responsive grid for Loan Terms + Application cards). No code changes this cycle; deploy only.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=44779e11-ecb0-4de9-896b-195336c9ce79 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782420593164
-```
-
-### Re: "Limited Time Only" vertical centering — scope check — opus-4-8
-
-> **Queue prompt:** "Limited Time Only ..." in ![img_38.png](img_38.png) should be vertically centered between the "Shop The Sale!" and footer ribbon.
-
-This looks **misdirected into the EFS session doc.** `img_38.png` is an e-commerce sale banner — "SHOP THE SALE!", "LIMITED TIME ONLY - ENDS JULY 4", "SAVE 20% ORDERS OVER $200 / SAVE 15% ORDERS UNDER $200". That's a shop/WooCommerce promo, not Equity Funding Source (a loan-funding admin app). Confirmed: no `Shop The Sale` / `Limited Time Only` / `orders over $200` strings exist anywhere in `src/equityfundingsource-dev`. So there's no EFS code this applies to, and I won't guess-edit a different project's repo from the EFS document (scope discipline).
-
-**Please confirm the target so I can act:**
-- If this is **monsterrodholders** (or another WooCommerce/WordPress site), point me at the page/template/email and I'll do it there — note that's a live WordPress site managed via wp-cli/SSH, not a local repo, so I'd want the explicit target (theme block, email template, or page builder section).
-- If it really is EFS, tell me which page/route renders this banner (I couldn't find one).
-
-**The fix itself, once targeted:** the `LIMITED TIME ONLY - ENDS JULY 4` line should be vertically centered in the gap between the red `SHOP THE SALE!` button and the footer ribbon — typically by making that band a flex container with `align-items: center` (and equal top/bottom padding), or removing an asymmetric top margin on the text so it sits mid-band rather than hugging the button. Happy to apply it the moment you confirm where.
-<!-- agent:boundary:1d17ba69 -->
+- Archived 12 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); Full Application layout; IPC proof diagnostic (interrupted-cycle recovery); 9 more
+- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
+<!-- agent:boundary:0c41b6fe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -222,6 +58,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- 🚧 This is mrh. wrong document
 <!-- /agent:queue -->
 
 ## Backlog

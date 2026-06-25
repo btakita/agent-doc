@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -165,7 +165,7 @@ You chose "Go lazily-spec only." Done.
 - **lazily-kt** — needs publish-infra bootstrap (separate task).
 
 Reply `go lazily-zig` (or `go non-2FA` for zig + rs) to continue, or drive the 2FA ports yourself.
-<!-- agent:boundary:d652ea47 -->
+<!-- agent:boundary:5e82de05 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -397,14 +397,32 @@ lazily-rs 0.13.0 ships `CellMap<K,V>` (keyed reactive collection — one `CellHa
 I checked the committed doc: each of your two new queue items appears **exactly once** in HEAD — `#qauthorderpin` (stable-identity slot preserve) + the Live<Struck lattice (0.34.48) held this round, so nothing duplicated landed. The most likely thing you saw is the **live-editor convergence transient**: typing a free-text item *during an active turn* briefly shows your buffer text alongside the binary's converged copy before the CRDT reconciles them. That's the `#qeditdup` class — code-complete on main but still `[operator-verify]` precisely because the deeper editor-edit-during-cycle guard only proves out with a live IDE eyeball. If you can catch it duplicating in **HEAD** (committed, not just transient in the buffer), capture that doc state and I'll add the stronger guard — that's the concrete repro `#qeditdup` is waiting on.
 
 (Session note: exchange is large — 24 sections, 345 lines — but the queue is active so I'm not stalling to compact.)
-<!-- agent:boundary:ccc6a112 -->
+
+### Re: harness-switch reactive pickup (answered by #actorswitchdefer) + clearing binary-authored queue noise — opus-4-8
+
+Draining the remaining free-text heads the stall-detector flagged: one is a genuine bug report (answered below), the rest are binary-authored diagnostics / stray console output.
+
+**JB `Run Agent Doc` harness switch (codex→opencode) — resolved by `#actorswitchdefer` (done 2026-06-25).**
+> **Queue prompt:** :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
+
+This is exactly what `#actorswitchdefer` shipped. The route still *defers* on a live harness mismatch (`route_authoritative_actor_harness_mismatch_deferred … action=defer_to_boundary_restart` in `route/authoritative_actor.rs:107`) rather than yanking a live pane mid-turn — but the supervisor **idle-watch now reactively completes the switch** at the next boundary, emitting `harness_change_detected → agent_restart_triggered → agent_restart_performed` and respawning the new harness FRESH (Part A `6c7455a8`; defer contract `SPEC.md:141`/`d2312da7`; SimWorld restart-flow coverage in `sim_world.rs:280-306,945-956`). So you should **not** need a manual `kill`/recycle anymore — the defer message is transient and the idle-boundary restart picks up `agent: opencode` on its own. If you still see it stick on the **current** binary (after a recycle), that's the live `[operator-verify]` proof for `#actorswitchdefer` — grab the pane + ops.log (`harness_change_detected`?) and I'll chase it; the most likely cause of a stuck switch is the supervisor still running a pre-`#actorswitchdefer` binary at the moment you hit Run.
+
+**Binary-authored queue noise — striking, no response cycle needed (the items say so themselves):**
+> **Queue prompt:** On a fresh lazily-rs.md tmux pane, `● State is racing between runs (live supervisor/editor writing concurrently). Let me look at the actual document to
+
+> **Queue prompt:** :pushpin: equityfundingsource.md turn has an IPC issue:
+
+> **Queue prompt:** :pushpin: lazily-rs.md IPC error
+
+The first is a captured prior-agent console fragment; the other two are `ipc_proof_insufficient` dogfood logs the binary appends during interrupted-cycle recovery — each explicitly says *"binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle."* They belong in `ops.log`, not the queue. Clearing them so the queue drains down to only the `[operator-verify]` heads (`#nsfz`, `#crdtauth6`, `#qftloss`, `#qeditdup`) that need your live eyeball.
+<!-- agent:boundary:4ef72663 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 On a fresh lazily-rs.md tmux pane, `● State is racing between runs (live supervisor/editor writing concurrently). Let me look at the actual document to
+- ~~On a fresh lazily-rs.md tmux pane, `● State is racing between runs (live supervisor/editor writing concurrently). Let me look at the actual document to~~ — auto-struck: answered this cycle (#ftstrike)
   understand what's being asked rather than chase the shifting sidecar state.`
 - ~~Use lazily-rs recent addition of Cell Families for reactive document structures. Can we represent a tree structure using lazily-rs?~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~When I make a free text item in a queue, my text is duplicated.~~ — auto-struck: answered this cycle (#ftstrike)

@@ -333,31 +333,26 @@ Thanks — these are the **stale-binary supervisor** corrupting your live edits.
 - `#qeditdup` — duplication + struck-item resurrection on queue-edit-during-active-turn (the merged `#queuestatemachine` Live<Struck lattice + idempotent convergence should fix this; verify on the recycled binary).
 
 **Urgent:** the live data loss you're hitting is the OLD supervisor. The fixes are installed + auto-recycle armed — **restart/recycle the supervisor on this pane** (you drive it, it ends the session) to stop the corruption now.
-<!-- agent:boundary:bd0d2b45 -->
+
+### Re: 🚧-stuck + free-text-loss — fixed — opus-4-8
+
+Both of the new queue bugs are fixed and merged (main `729038fc`, `make check` 5293 green, installing now).
+
+**#qftstuck (done, `bc4987da`)** — root cause: the strike scorer read the head text *including* the `🚧` marker, so an in-progress free-text head never met the match threshold → never got struck → the marker lingered forever (and the strike paths also baked `🚧` inside the strikethrough). Fixed by stripping `🚧` before scoring and before striking. Side benefit: `#qftbklgstrike` now actually fires on in-progress heads.
+
+**#qftloss (code-complete, `8b900bf4`; live eyeball remains)** — root cause: the `#qdurcrash` durability journal only captured *on-disk* content, so an operator free-text prompt living only in the unsaved editor buffer was never journaled and got clobbered by a concurrent commit/convergence/recovery. The plugin already mirrors the full buffer to `.agent-doc/live-buffer/<hash>` on each keystroke; the binary now journals operator prompts from that sidecar into the `#qdurcrash` store before any cycle observes them, replayed if absent. No plugin change needed. Kept as `[operator-verify]` for the live-IDE end-to-end eyeball.
+
+**#qeditdup** stays `[operator-verify]` — the merged `#queuestatemachine` idempotent convergence + `Live<Struck` lattice should already prevent the duplication/resurrection; verify on the recycled binary.
+
+So all three of your reports are now addressed in code (frontmatter-reset `#fmreset` + 🚧-stuck `#qftstuck` fully fixed; free-text-loss `#qftloss` code-complete; dup/resurrect `#qeditdup` fixed-pending-verify). The live data loss stops once the supervisor recycles onto the installed binary.
+<!-- agent:boundary:e8ea734f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: do [#lazilycrdtspec]: Make CRDT the first of several multi-write mechanisms.~~
-- ~~:pushpin: do [#lazilycrdtrs]~~
-- ~~:pushpin: do [#crdtauth1]~~
-- ~~:pushpin: do [#crdtauth2]~~
-- ~~:pushpin: do [#crdtauth3]~~
-- ~~:pushpin: [#brtc]~~
-- ~~:pushpin: do [#crdtauth4]~~
-- ~~:pushpin: do [#xdocsuper]~~
-- ~~:pushpin: Fix the root cause of the CRDT churn.~~
-- ~~:pushpin: do [#cgfx]~~
-- ~~:pushpin: do [#gww8]~~
-- ~~:pushpin: do [#n529b]~~
-- ~~:pushpin: [#gghx]~~
-- ~~:pushpin: [#8g9w]~~
-- ~~:pushpin: [#6mjw]~~
-- ~~:pushpin: [#spy9]~~
-- ~~:pushpin: [#r5at]~~
-- ~~:pushpin: [#6n5j]~~
+- I deleted some items from the queue but they came back. It seems that operator edits are not propagating to the CRDT authority models.
 ---
 🚧 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
 ```
@@ -461,8 +456,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#qftstuck] The 🚧 in-progress marker persists on a free-text queue head after the item is addressed/struck — it should clear when the head is struck or completed (observed live on the #brtc head).
-- [ ] [#qftloss] [operator-verify] Free-text queue prompts dropped (operator lost 3) — pure-editor-buffer loss before any cycle observes the edit (the OPEN mode-6 in plan-queue-edit-race-consolidated, #0bmv). Needs plugin buffer-flush-on-edit so an operator queue/prompt edit is durably captured before the next cycle. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
+- [ ] [#qftloss] [operator-verify] Free-text prompt loss (mode-6) — CODE-COMPLETE on main (8b900bf4): binary now journals operator prompts from the plugin live-buffer sidecar (.agent-doc/live-buffer/<hash>) into the #qdurcrash store before any convergence/recovery can clobber the unsaved buffer, replayed if absent. Remaining: live IDE eyeball that an unsaved prompt typed during a concurrent finalize survives end-to-end. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#qeditdup] [operator-verify] Queue items duplicated + manually-struck/deleted items resurrected when the operator edits the queue during an active turn. #queuestatemachine idempotent convergence + the Live<Struck lattice (merged, 0.34.48) should resolve this — VERIFY on the recycled binary; if it persists live, a deeper editor-edit-during-cycle guard is needed. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#crdtauth6] [operator-verify] crdtauth5 live hookup: thin JB DocumentListener calling CrdtReplicaForwarder.forwardLocalDelta + a Kotlin Unix-socket ReplicaTransport client (writes NDJSON register/deregister/update, delivers inbound update_b64 to applyRemoteUpdate); plus the deferred VS Code koffi replica seam (editors/vscode/src/native.ts out-param marshaling). Rust fan-out + Kotlin seam already merged + tested. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.

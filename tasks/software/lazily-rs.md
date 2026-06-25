@@ -79,7 +79,30 @@ Done: `BENCHMARKS.md#scale-1m-cells--lzscalebench` + `README.md` now link it wit
 **`#lzwirekey` — wire-keyed addressing (PLANNED, per your "plan only").** Wrote `tasks/software/plan-lazily-wire-keyed-addressing.md`: add an optional `key`/path field to `NodeAdd` + `NodeSnapshot` (a `key→NodeId` registry) so `CellFamily`/`CellMap` entries stay addressable across NodeId churn. Backlog item repointed at the plan and ungated (ready to implement on your go).
 
 **Verification:** `cargo fmt` clean; `clippy --all-targets --features scale-bench` clean; default test suite **191 pass** + **97** all-feature lib tests + doctests; `cargo build --all-features` compiles; scale bench runs. The full `make check` adds the Lean `lake` model + the whole criterion suite + every feature integration suite — orthogonal to these default-feature additions, so I ran the targeted equivalent rather than the multi-minute full gate. Note: `make benchmark-check` is **already red pre-existing** (`#lzbenchstale`, since v0.11.1 — stale baselines / thread_safe contention), unrelated to this work; my BENCHMARKS.md edit is outside the generated markers and does not affect it.
-<!-- agent:boundary:bee2bf39 -->
+
+### Re: Fix the benchmark — opus-4-8
+
+Investigated first: `make benchmark-check` was actually **green** (`#lzbenchstale` had already been fixed by `26be677`), my new scale bench passed strict `clippy --all-features -D warnings`, and CI (which doesn't run `benchmark-check`) was green — so there was no failing benchmark to reproduce. You picked **both** follow-ups: make the scale bench rigorous **and** integrate it into the suite. Done (lazily-rs `0277174`, superproject gitlink `4565367af`, pushed):
+
+**1 — Rigorous criterion benchmark.** Rewrote `benches/scale.rs` from a hand-rolled single-run timer into a real **criterion** benchmark (warmup + statistical sampling, 10-sample bounded windows), still gated behind `scale-bench`. Four cases over the ~2M-node spreadsheet graph at N=1,000,000:
+
+| case | criterion mean |
+|---|---:|
+| `build` (2M nodes) | ~132 ms |
+| `cold_full_recalc` (1M) | ~102 ms |
+| `full_recalc_invalidate_all` (1M) | ~65 ms |
+| `viewport_recalc` (1k) | **~11.5 µs** |
+
+The cheap-routine cases (`viewport_recalc`, `full_recalc`) run on a persistent warm graph so criterion doesn't rebuild 1M nodes per iteration. Viewport recalc is ~5,000× cheaper than a full recalc — the lazy-pull property a viewport-rendered sheet needs.
+
+**2 — Integrated into the suite.** Added the `scale` group to `GROUP_ORDER` and `scale-bench` to the generator's `cargo bench` features in `update-benchmark-results.py`, so `make benchmark-update` runs it and `make benchmark-check` tracks the `scale` rows (previously a separate hand-maintained section). Slimmed the manual BENCHMARKS.md Scale section to the memory figure (~216 B/node) + reproduce commands; updated the README numbers.
+
+**Verification:** `cargo fmt --check` clean; `clippy --locked --all-targets --all-features -- -D warnings` clean; `make benchmark-check` **green** (exit 0). The BENCHMARKS.md diff also refreshes instrumentation-profile timing fields (non-deterministic wall-time noise from the regenerate; the deterministic lock-count budgets are unchanged and still pass).
+
+> **Queue prompt:** Fix the benchmark.
+
+Note: the queue head `do [#lzwirekey]` is **not** drained — you scoped `#lzwirekey` to *plan only*, and the plan (`tasks/software/plan-lazily-wire-keyed-addressing.md`) is written. The queue is operator-paused; nothing else here is agent-drainable without your go.
+<!-- agent:boundary:8aa02be2 -->
 <!-- /agent:exchange -->
 ###
 <!--

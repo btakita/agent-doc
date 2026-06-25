@@ -153,7 +153,38 @@ Shipped — each missing/invalid field now renders on its own `• <field>` line
 - `tests/apply4-validation-errors-per-line.test.ts`: 4 source-assertion tests (all pass).
 
 Verification: 4 new tests pass; app build + worker build green. `make check`'s 7 failures are the pre-existing `dfed93b` admin/lender document-upload refactor (different subsystem, fail identically on origin/main). Not deployed — `deploy` stays queued (preset was #spec-test-commit-push).
-<!-- agent:boundary:96614bb4 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=dd141d8b-5c3c-4a0e-8ff4-08950f0285c0 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782359060477
+```
+
+### Re: reconcile dfed93b tests, then deploy — glm-5.2
+
+> **Queue prompt:** deploy (operator chose: reconcile tests, then deploy)
+
+`make check` was red — same 7 stale source-assertion tests from Brian Dev's `dfed93b` admin/lender document-upload refactor (submit-button-busy, admin-application-lead-detail, advance-lender-documents, investor-documents, admin-investor-pipeline ×2, investor-portal-e2e). My `#noproppfill` / form-errors work is green in isolation; these asserted on the pre-refactor component shapes.
+
+**Reconciled all 7 to the committed dfed93b components** (tests only — no source changed):
+- submit-button-busy: dropped deal_documents/lender_documents from the aria-busy list — uploads are now immediate-on-selection via FileDropZone, so those components no longer carry Preact submit buttons.
+- admin-application-lead-detail / advance-lender-documents: `AdminDocumentUploadField` now uses `align-items:stretch` + a FileDropZone label toggle (old `min-height:72px` / icon save-button gone); the import is multi-name now, so a regex asserts `AdminDocumentUploadField` comes from that module.
+- investor-documents: published/public cards now delegate to a shared `PreviewDocumentCard` that renders `DocumentFileLink`.
+- admin-investor-pipeline: lender-documents table column widths/gap updated to the new layout; multi-name import → regex.
+- investor-portal-e2e: deal_documents uses `DealDocumentUpload` with labeled Title/Description inputs + FileDropZone (the `IcUpload` icon is gone).
+
+**Verification:** `make check` → **1212 pass / 0 fail** (was 1205/7). Committed `b57f570`, pushed to origin (`269942a..b57f570`).
+
+**Deployed.** `make deploy` built the worker, applied remote D1 migrations (idempotent — 0110 already applied), uploaded + activated version `d1f62058-b80b-4833-84de-2fd6d2691241`. Smoke check: `https://equityfundingsource.brian-takita.workers.dev/` → **HTTP 200** (0.16s).
+
+Production is now live with the dead-table drop (#bxtd), no subject-property prefill (#noproppfill), per-line form errors, and the dfed93b document-upload refactor — all on a green suite. `#dfed93b-tests` resolved; `deploy` drained.
+<!-- agent:boundary:d15111b9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -174,7 +205,8 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~Borrower, Broker, Lender, Admin form errors should each have their own line...not "Missing required values: property type, A. Will you occupy the property as your primary residence?, B. Family or business relationship with the seller? (purchase), C. Borrowing undisclosed money for this transaction?, D1. Applying for another mortgage on/before closing (not disclosed)?, D2. Applying for new credit on/before closing (not disclosed)?, E. Will the property have a priority lien (e.g. PACE)?, F. Co-signer or guarantor on undisclosed debt?, G. Outstanding judgments against you?, H. Delinquent or in default on federal debt?, I. Party to a lawsuit with potential financial liability?, J. Conveyed title in lieu of foreclosure in the past 7 years?, K. Pre-foreclosure / short sale in the past 7 years?, L. Property foreclosed in the past 7 years?, M. Declared bankruptcy within the past 7 years?."~~
-- 🚧 deploy
+- ~~deploy~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -165,7 +165,7 @@ You chose "Go lazily-spec only." Done.
 - **lazily-kt** — needs publish-infra bootstrap (separate task).
 
 Reply `go lazily-zig` (or `go non-2FA` for zig + rs) to continue, or drive the 2FA ports yourself.
-<!-- agent:boundary:021fd35b -->
+<!-- agent:boundary:d652ea47 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -173,9 +173,9 @@ Reply `go lazily-zig` (or `go non-2FA` for zig + rs) to continue, or drive the 2
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 - ~~release + publish lazily-spec~~
-- 🚧 release + publish lazily-rs
+- release + publish lazily-rs
 - release + publish lazily-ky
 - release + publish lazily-js
 - release + publish lazily-zig

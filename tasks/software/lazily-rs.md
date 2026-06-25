@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 3d9ff8e4-bafd-4e1f-b48d-550d3c976904
-agent: claude
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -299,6 +299,19 @@ src/lazily-py: tag v0.11.0 + push → gh release create v0.11.0 --generate-notes
 - **lazily-zig** ✅ v0.2.0 — GitHub release
 - **lazily-kt** ⊘ no publish infra (separate bootstrap task)
 - **lazily-js / lazily-py** → your 2FA (py tracked in #kb9b)
+- **lazily-js** ⏳ the only one left — npm `@lazily/js` needs your npm 2FA (no API-token path configured like PyPI had). If you add an npm automation token to passage, I can publish it the same way.
+- **#xccx** Holons integration — blocked on Steve's answers.
+- **#h6qb** WebRTC live two-host e2e — `[operator-drive]`. The preflight `semantic_completion_match` warning (may be resolved by `#lzwebrtcwire`) is a **false positive**: `#lzwebrtcwire` was only the localhost wiring slice; `#h6qb` needs live two-host/NAT through the deployed `#yxjw` Worker. Operator runbook already exists (`tasks/software/runbook-lazily-webrtc-live-e2e.md`).
+- **lazily-js npm publish** — your 2FA (the only agent-blocked release).
+- **lazily-js** — still `0.1.0`, **no tag**, npm `@lazily/js` **not published** (registry dist-tags empty). The one remaining release; needs your npm 2FA (or an automation token in passage, like the PyPI path).
+- **lazily-zig v0.2.0** + **lazily-spec** (Pages) — tagged/pushed.
+- **lazily-py 0.11.0** — PyPI **confirmed live** (`pypi.org/pypi/lazily/json` → 0.11.0), tag `v0.11.0`. → review **#kb9b reaped** (it was still `[/]` describing pre-publish state).
+- **lazily-rs 0.12.3** — `Cargo.toml=0.12.3`, tag `v0.12.3` present. The `#lzstr0mpolldrive` send_to liveness fix is in source (`src/lazily-rs/src/str0m_net.rs:495` carries the `// was let _ = socket.send_to(...)` comment; `:508` now `match`es the `Result`). crates.io didn't answer curl from here (API blocked, same as the prior session observed) — registry publish claimed but not re-verified by me this turn.
+- **lazily-kt** ⊘ no publish infra (separate bootstrap task)
+- **lazily-spec** ✅ Pages • **lazily-rs** ✅ v0.12.3 crates.io+GitHub • **lazily-zig** ✅ v0.2.0 GitHub • **lazily-py** ✅ v0.11.0 PyPI+GitHub
+- No superproject gitlink bump (tag points at the already-committed `c255482`).
+- **GitHub release** — https://github.com/lazily-hub/lazily-py/releases/tag/v0.11.0 (tag `v0.11.0`).
+- **PyPI** — `lazily 0.11.0` **published** → https://pypi.org/project/lazily/0.11.0/ (was 0.10.2). Uploaded via the `btak/PYPI_PUBLISH_TOKEN` API token (token auth bypasses interactive 2FA; secret never printed).
 
 Queue now fully drained. Two operator follow-ups remain: the lazily-py PyPI publish (#kb9b) and — please — **restart this session** to clear the wedged editor IPC (a concurrent codex session has been contending the supervisor socket all along; I've been recovering every response via the git/CRDT path).
 
@@ -313,28 +326,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=file_ipc patch_id=18b16d61-065e-4747-90eb-5b29cab5f76c invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400.json doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782353796773
 ```
-
-### Re: release + publish lazily-py — v0.11.0 PUBLISHED to PyPI (#kb9b done) — opus-4-8
-
-> **Queue prompt:**
->
-> release + publish lazily-py
-
-You un-struck and re-marked lazily-py `🚧` — taken as the go to publish. **lazily-py v0.11.0 is fully published.** This closes review **#kb9b**.
-
-**Shipped**
-- **PyPI** — `lazily 0.11.0` **published** → https://pypi.org/project/lazily/0.11.0/ (was 0.10.2). Uploaded via the `btak/PYPI_PUBLISH_TOKEN` API token (token auth bypasses interactive 2FA; secret never printed).
-- **GitHub release** — https://github.com/lazily-hub/lazily-py/releases/tag/v0.11.0 (tag `v0.11.0`).
-- No superproject gitlink bump (tag points at the already-committed `c255482`).
-
-**Pre-publish gates satisfied**: `twine check` PASSED on both artifacts; pytest **77 passed**; fresh-venv round-trip was already verified (#kb9b). The `#lzpysigfix` ship-stopper was fixed in `30907ea`.
-
-## 🏁 Release campaign — 4 of 6 published, 1 remaining
-
-- **lazily-spec** ✅ Pages • **lazily-rs** ✅ v0.12.3 crates.io+GitHub • **lazily-zig** ✅ v0.2.0 GitHub • **lazily-py** ✅ v0.11.0 PyPI+GitHub
-- **lazily-kt** ⊘ no publish infra (separate bootstrap task)
-- **lazily-js** ⏳ the only one left — npm `@lazily/js` needs your npm 2FA (no API-token path configured like PyPI had). If you add an npm automation token to passage, I can publish it the same way.
-<!-- agent:boundary:d8fc4943 -->
+<!-- agent:boundary:0dedd68c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -342,19 +334,20 @@ You un-struck and re-marked lazily-py `🚧` — taken as the go to publish. **l
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- 🚧 What are #next-steps to fix lazily bugs?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzbenchstale] [recommended] make benchmark-check is RED (verified 2026-06-24 in src/lazily-rs: "BENCHMARKS.md benchmark results are stale; run update-benchmark-results.py") — supersedes the archived #lzbenchbudget, which the binary auto-reaps if re-queued. Contradicts the prior session "#gxzm green" note. #gxzm (#lzbmcheckdrift, missing p50/p95 rows) and #lzbenchbudget (thread_safe_contention lock-acquisition overages: set_cell_invalidation 78>32, lock_acquisitions 908>700, other 345>160) are distinct modes; the check is stale again. Do NOT blindly run make benchmark-update — this is either (a) stale baselines -> regenerate, or (b) a REAL contention regression from 8665e29 (SlotId casts) + 38b18e4 (eager Signal on ThreadSafeContext). Run an isolated-worktree A/B first, then refresh baselines OR file the regression. Pre-existing at v0.11.1; unrelated to the 0.12.3 str0m content.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
 - [/] [#lilazilysmpost] [/] [operator-drive] lazily state-machine LinkedIn post PUBLISHED WITH IMAGE: https://www.linkedin.com/feed/update/urn:li:share:7475622100263923712 (mail/social/20260624-142530-linkedin.md @ mail bf4ab26). CyclePhase diagram rendered from blog post SVG (light theme colors) + uploaded via LinkedIn digitalmediaAsset API. Old text-only post (urn:li:share:7475617202893639680) deleted + replaced. Remaining operator follow-up: post first comment (link + GitHub source) via corky linkedin comment.
-- [/] [#kb9b] #lzpypub011=[operator-drive] Publish lazily-py v0.11.0: SHIP-STOPPER #lzpysigfix is FIXED (commit 30907ea). Build artifacts rebuilt in src/lazily-py/dist/ (lazily-0.11.0-{whl,tar.gz}, twine check PASSED, fresh-venv install round-trip verified). From src/lazily-py: tag v0.11.0 + push, gh release create v0.11.0 --generate-notes, then python -m twine upload dist/* (needs PyPI token + browser/passkey 2FA). Gated on the pre-publish live-test confirm per the testing-gate rule. Commit 30907ea + superproject gitlink eb93a75ac already pushed.
 - [/] [#kabc] #lipostlazilyarch=[operator-drive] Main LinkedIn post is published and repaired: Corky edit updated mail/social/20260616-lazily-architecture-linkedin.md / https://www.linkedin.com/feed/update/urn:li:share:7472666756810190848 with the full body after the public post truncated at "The core is small: three primitives". Local metadata is committed in mail commit 07a9ea1 and superproject gitlink e7e0b08c1. Remaining operator follow-up: post the first comment from mail/drafts/linkedin/2026-06-16-lazily-architecture.md via `corky linkedin comment <published-file> <comment-body>` if still desired.
 - [/] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet backend through the LIVE #yxjw signaling Worker (two real hosts / NAT). Agent-doable slice (#lzwebrtcwire) is DONE: src/webrtc_signaling.rs wires SignalingClient↔Str0mNet and tests/webrtc_signaling.rs covers the localhost handshake. Remaining: live two-host/NAT run via deployed Worker — operator-only.
 - [/] [#xccx] #lzholons=[operator-drive] Map Holons ↔ lazily-rs integration. Phase 0 (discovery) is blocked on Steve Melville answering the 7 OPEN QUESTIONS (holon identity, holon↔node/edge mapping, change feed, write/conflict model, permissions mapping, preferred transport, spec reference). Plan: tasks/software/plan-map-holons-integration.md. Unblocks once answers land; then Phase 1 read-only inbound adapter.

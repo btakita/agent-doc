@@ -118,7 +118,7 @@ Nothing reaped.
 No new items added — the prior #code-review sweep already surfaced these; every other #cky* finding shipped on origin/main (6894c88 thread, 6c4c831 slug, 63cbb52 durability, 15c0498 mime). Remaining open work: the three splits above plus the operator-gated #pypi-trusted-publisher in review.
 
 Note: the local checkout at `~/work/btakita/corky` is stale at v0.13.1 (monolithic `src/`) with 3 uncommitted modifications (`filter/check.rs`, `filter/gmail_auth.rs`, `watch.rs`); the v0.29.0 workspace lives on origin/main. A fresh #code-review should run against an updated checkout.
-<!-- agent:boundary:701e8d8e -->
+<!-- agent:boundary:896ad8c1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,21 +128,10 @@ Please give me a report the performance
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~[#ckyorphan]~~
-- ~~[#ckypanic]~~
-- ~~[#ckysheets]~~
-- ~~[#ckywatchpanic]~~
-- ~~[#ckydedup]~~
-- ~~[#ckythread]~~
-- ~~[#ckytok401]~~
-- ~~[#ckypeoplesync]~~
-- ~~[#ckyconfigunwrap]~~
-- ~~[#ckyatomicwrite]~~
-- ~~[#ckyunicodeslug]~~
-- ~~[#ckymime]~~
-- ~~What are #next-steps to fix corky bugs?~~
-- What are #next-steps to fix corky bugs?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 [#ckythreadmerge]
+- [#ckymimestream]
+- [#ckymimeinline]
 <!-- /agent:queue -->
 
 ## Backlog

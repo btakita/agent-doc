@@ -34,185 +34,12 @@ queue: stop
 <!-- agent:exchange -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260624-213908.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260625-000604.md`*
 
 Compacted content:
-❯ - Archived 3 response topic(s): lazily-rs bug next-steps; lazily-rs bug fixes #e4tf + #xdsx shipped; #hses + #gxzm
-❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-
-### Re: lazily bug-fix next-steps (cross-port) — glm-5.2
-
-Investigated all five ports. **Health is green across the board** — no red tests:
-- **lazily-rs** — Phase 6 done; core/producer.
-- **lazily-kt** — `gradle test` ✓ (IPC conformance + agent-doc FFI state-projection client; NOT a reactive-core port).
-- **lazily-js** — `npm test` ✓ 27 pass (IPC + koffi FFI consumer).
-- **lazily-zig** — `zig build test` ✓ (full native impl: Cell/Signal/StateMachine/Context + ShmBlobArena).
-- **lazily-py** — `pytest` ✓ 72 pass (full native impl; v0.11.0 publish pending per review #kb9b).
-
-So the "bugs" here are **spec/conformance drift + hardening gaps**, not failing tests. Highest-leverage finding is cross-cutting:
-
-**`src/lazily-spec/protocol.md` is stale.** It documents a wire shape nothing implements — `{type:"snapshot", slot_id, state:"resolved"|"dirty"|"unset", payload:"base64", ops:"cell_set"/"slot_value"}` (snake_case, base64). The canonical format — emitted by lazily-rs `ipc.rs:323-343` (`NodeState::{Payload,SharedBlob,Opaque}`, field `node`), encoded in every `lazily-spec/conformance/*.json` fixture, and round-tripped by all four consumers — is externally-tagged `{"Snapshot":{epoch,nodes:[{node,type_tag,state:{Payload:[bytes]|SharedBlob{…}|Opaque}}],edges,roots}}` / `{"Delta":{base_epoch,epoch,ops:[{CellSet|SlotValue|Invalidate|NodeAdd|NodeRemove|EdgeAdd|EdgeRemove}{…}]}}` with inline byte arrays. A new port authored against protocol.md today would be wire-incompatible. lazily-rs, the fixtures, and kt/js/zig/py all agree — protocol.md is the lone outlier.
-
-**Per-port next-steps:**
-- **lazily-kt** (queue head): conformance tests only round-trip the fixture `wire` block; the `assertions` metadata (node_count, op_count, is_sequential, blob_*) is never validated generically — fixture drift passes silently. No `gradlew` wrapper (relies on system `gradle` → CI repro gap).
-- **lazily-js**: same conformance-assertions gap; `node_modules/` is committed to the submodule (bloat) — should be gitignored.
-- **lazily-zig**: open TODOs in `context.zig` (rename `.direct`→`.literal` :226/:273, `before_change_subscribers` cell.zig:35, allocator options :617/:621). Two recent memory-safety fixes (UAF `1dd8998`; iteration-during-mutation in `emitChangeUnlocked`) warrant a soak/cyclic test for Slot destroy↔unsubscribe ordering.
-- **lazily-py**: the Signal→Slot `RecursionError` fix (`30907ea`) has no deep/cyclic regression test guarding it.
-- **lazily-rs**: no open bug (done); only rs-adjacent work is the shared protocol.md reconciliation.
-
-> **Queue prompt:** What are #next-steps to fix lazily-kt bugs?
-
-Captured 5 prioritized backlog items (`#lzspecdrift`, `#lzktconf`, `#lzpyregress`, `#lzzigtodos`, `#lzjshygiene`). **Top of backlog: `#lzspecdrift`** — protocol.md reconciliation; cross-cutting, low-risk spec-only, unblocks every port. (Recovered via `--force-disk` after a wedged editor-IPC CRDT path repeatedly duplicated the exchange/queue; operator may want to reload the editor to resync the live buffer.)
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8c56928442bd4b165543ab0aad264d681b41b8898551d10f196018cd15a37304 content_len=11944 content_hash=46b47fdfe5505fb37c9e63df4167cb923df6b4ffc997ecca9009a15979c29a5e doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782339826601
-```
-
-### Re: #lzjshygiene node_modules purge — glm-5.2
-
-Verified `node_modules/` is **not tracked** in src/lazily-js — nothing to purge.
-- `git ls-files node_modules` → **0 files**; only 16 files tracked total (8 test, 4 src, package.json, Makefile, .gitignore, AGENTS.md)
-- `.gitignore` already lists `node_modules/`
-- `git log --all -- node_modules` → empty (no commit ever touches it)
-
-The "node_modules committed → bloat" premise in my earlier cross-port response was **wrong** — I read `ls` (working tree) instead of `git ls-files` (tracked). The state you want — no node_modules in history — already exists, so no history rewrite / `git filter-repo` is needed. Corrected #lzjshygiene in place; its remaining actionable work is the conformance-fixture `assertions` validation (parity with #lzktconf).
-
-> **Queue prompt:** - do [#lzjshygiene]: Please purge `node_modules/` from the git history.
-
-### Re: lazily-js next-steps — glm-5.2
-
-> **Queue prompt:**
->
-> What are #next-steps to fix lazily-rs bugs?
-
-
-> **Queue prompt:**
->
-> What are #next-steps to fix lazily-py bugs?
-
-
-> **Queue prompt:**
->
-> What are #next-steps to fix lazily-zig bugs?
-
-
-Deeper check confirms lazily-js is **clean** — `npm test` 27 pass, no TODO/FIXME, and thorough input validation (`src/index.js:22` enforces non-negative **safe-integer** NodeIds per protocol.md's 2^53 rule; byte-range 0..255 checks; externally-tagged variant validation). The IPC model mirrors lazily-kt and round-trips all 6 conformance fixtures.
-
-The only actionable next-step is already captured as **#lzjshygiene** (validate the conformance fixture `assertions` generically — currently only the `wire` block is round-tripped, so fixture metadata drift passes silently). node_modules confirmed not tracked last cycle. Nothing new to add to the backlog.
-
-> **Queue prompt:** What are #next-steps to fix lazily-js bugs?
-
-Note: the remaining planning heads (zig/py/rs `#next-steps`) are likewise already covered by backlog items `#lzzigtodos`, `#lzpyregress`, and `#lzspecdrift`; the substantive work is the `do [#id]` implementation queue.
-
-### Re: do [#lzspecdrift] — protocol.md reconciled + shipped — glm-5.2
-
-Reconciled `src/lazily-spec/protocol.md` to the canonical wire format. Committed lazily-spec (`a58eff8`) + bumped the superproject gitlink (`0b64553f9`). All 6 stale sections rewritten:
-
-- `IpcValue` (`Inline:[u8]` | `SharedBlob`) replaces the base64 `IpcPayload`.
-- `NodeState` (`Payload:[u8]` | `SharedBlob` | `Opaque`) replaces `"resolved"|"dirty"|"unset"`.
-- Snapshot: externally-tagged `{"Snapshot":{epoch,nodes:[{node,type_tag,state}],edges,roots}}` (was `{type,slot_id,...}`).
-- Delta: externally-tagged `{"Delta":{base_epoch,epoch,ops:[...]}}`.
-- DeltaOp table: PascalCase `CellSet|SlotValue|Invalidate|NodeAdd|NodeRemove|EdgeAdd|EdgeRemove` with `node` field (was snake_case + `slot_id`).
-- Invariants + Eager-Signal + Lazy-recon: all `cell_set`/`slot_value`/`invalidate` op refs → PascalCase.
-- `test_deep_signal_chain_propagates_without_recursion` — 200-deep eager-Signal chain recomputes end-to-end on one mutation.
-- `test_signal_over_slot_cycle_invalidates_without_recursion` — the original topology (Signal reads Slot, downstream Slot reads Signal) driven from a Cell mutation.
-- `test_deep_slot_cascade_invalidates_without_recursion` — 300-deep Slot chain invalidates + recomputes without stack overflow.
-- `test_slot_reset_is_reentrancy_safe` — **Fix 2 guard**: `Slot.reset` clears subscribers before notifying; a re-entrant-reset subscriber must not mutually recurse (reverting to notify-before-clear fails this with `RecursionError`).
-- `test_slot_call_does_not_notify_subscribers` — **Fix 1 guard**: computing a Slot must not `touch()` subscribers (re-adding `touch()` to `Slot.__call__` fails this).
-
-Verified: zero snake_case op refs remain; the 5 JSON blocks I touched all parse (the 6th — WebSocket signaling frames — is an intentional multi-frame sequence). Matches lazily-rs `src/ipc.rs:323-459` + every `conformance/*.json` fixture. Doc-only change; the Lean `check` target is unaffected.
-
-`#lzspecdrift` → done. Remaining implementation queue: `#lzktconf`, `#lzpyregress`, `#lzzigtodos` (+ `#lzjshygiene` conformance slice).
-
-> **Queue prompt:** do [#lzspecdrift]
-
-### Re: do [#lzktconf] — conformance assertions validator + gradle wrapper shipped — glm-5.2
-
-**Spec:** no spec-doc change (protocol.md was already reconciled under #lzspecdrift). The work is the lazily-kt test + build surface.
-
-**Tests — generic assertions validator added** (`src/lazily-kt/.../IpcConformanceTest.kt`, +115). New `assertAssertions(message, fixture)` validates every present `assertions` field against the parsed message, so fixture drift now fails instead of passing silently. It is **not a no-op**: I confirmed all 6 fixtures carry real `assertions` blocks and every field name matches the validator — `epoch/node_count/edge_count/root_count/first_node_type_tag/first_node_state_kind/has_opaque_node/opaque_node_id/blob_offset/blob_len/blob_epoch` (snapshots) and `base_epoch/epoch/op_count/is_sequential/has_all_op_variants/first_op_kind/first_op_payload_kind/resync_after_epoch_*` (deltas). Missing keys skip gracefully (`?.let`); present keys assert. A drift like bumping a fixture `node_count` without editing the wire would now fail `assertEquals`.
-
-**Gradle wrapper added** (`gradlew`, `gradlew.bat`, `gradle/wrapper/*`, gradle 8.5). `Makefile` switched `gradle test` → `./gradlew test`, so `make check` is now self-contained — CI no longer depends on a system gradle. Wrapper files confirmed not gitignored (`.gitignore` covers only `.gradle/`/`build/`).
-
-**Build + install (local test):** `make check` → BUILD SUCCESSFUL; `:jar` produced the artifact (plain Kotlin/JVM lib, no publish plugin, so jar = local install). All **23 tests green, 0 skipped**: IpcConformanceTest 8 (was 7 — the new assertions test ran and passed), IpcTest 8, StateProjectionClientTest 7.
-
-**Commands:** `make check` (lazily-kt) · `git push origin main` (lazily-kt `f8d6a78..1500bea`) · superproject gitlink bump.
-**Changed paths:** `src/lazily-kt` → `1500bea` (commit `1500bea test: generic conformance assertions validator + gradle wrapper (#lzktconf)`, + unrelated earlier `213c691` state-projection-bridge also flushed); superproject gitlink `db4747eb1`.
-**Confidence:** high — tested at HEAD; wrapper downloaded + ran clean; fixture/validator field audit exact.
-**Escalation:** none. Note: an earlier `ipc_proof_insufficient` diagnostic (recovery=retry_without_disk_write) from the prior interrupted cycle is resolved by this proven closeout.
-
-`#lzktconf` → done. Remaining implementation queue: `#lzpyregress`, `#lzzigtodos` (+ `#lzjshygiene` conformance slice).
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-> **Queue prompt:**
->
-> :pushpin: do [#lzpyregress]
-
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=bed87b8e-4bad-4178-b623-0c9e90e4930d invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=18166 candidate_hash=4a2cbb8e322fe5cd39fa7dba825fb6f027011ef3e65e182af743bd41e18f1ebc content_ours_len=18441 content_ours_hash=96d3d3598dc8ebc7389584f28654b8a90c7ff90d6e2958bd7355ef8646a290e3 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782342826547
-```
-
-### Re: do [#lzpyregress] — Signal→Slot RecursionError regression suite shipped — glm-5.2
-
-*(Recovered response — the original closeout committed the backlog reap + queue strike but the response body was dropped by a wedged editor-IPC CRDT path; work was already pushed as `c255482`. No new backlog follow-ups: #lzpyregress was reaped last cycle.)*
-
-**Spec:** no spec change — `SPEC.md` already documents the re-entrancy guarantees from the 30907ea fix.
-
-**Tests — dedicated regression module** (`tests/test_recursion_regression.py`, +141). Five tests pin the two surgical fixes and stress the recursion path:
-- `test_slot_call_does_not_notify_subscribers` — **Fix 1 guard**: computing a Slot must not `touch()` subscribers.
-- `test_slot_reset_is_reentrancy_safe` — **Fix 2 guard**: `Slot.reset` clears subscribers before notifying; a re-entrant-reset subscriber must not mutually recurse.
-- `test_deep_slot_cascade_invalidates_without_recursion` — 300-deep Slot chain invalidates + recomputes without stack overflow.
-- `test_signal_over_slot_cycle_invalidates_without_recursion` — the original topology (Signal reads Slot, downstream Slot reads Signal) driven from a Cell mutation.
-- `test_deep_signal_chain_propagates_without_recursion` — 200-deep eager-Signal chain recomputes end-to-end.
-
-**Mutation-checked (guards proven real):** restored the pre-fix `slot.py` (parent of 30907ea) → both Fix-1/Fix-2 guard tests **failed**, the re-entrant one with the exact `RecursionError: maximum recursion depth exceeded`; restored fixed `slot.py` (verified clean vs HEAD).
-
-**Build + install:** `uv build` → `lazily-0.11.0` sdist + wheel; fresh-venv install imports `lazily` 0.11.0 clean. **Lint/type:** ruff clean; `ty check src` shows 2 pre-existing `invalid-argument-type` diagnostics (state_machine.py/cell.py, present on baseline too). **Suite:** 77 passed (was 72 + 5).
-
-**Changed paths:** `src/lazily-py` → `c255482`; superproject gitlink `8a1b33132`. **Confidence:** high (mutation-tested). **Escalation:** none.
-
-`#lzpyregress` → done. Next queue head: `#lzzigtodos`.
-
-### Re: do [#lzzigtodos] — rename `.direct`→`.literal` + destroy/unsubscribe soak tests shipped — glm-5.2
-
-> **Queue prompt:**
->
-> :pushpin: do [#lzzigtodos]
-
-
-*(Also recovered the prior `#lzpyregress` response this session — it had been dropped by the wedged editor-IPC CRDT path; that work shipped as lazily-py `c255482`.)*
-
-**Spec:** no SPEC change for lazily-zig (rename + tests). Decomposed the design-heavy TODOs into new backlog items (below).
-
-**Done this cycle (the mechanical, compiler-verified slice):**
-- **Rename** (resolves context.zig:226 + :273 TODOs): `Slot.Modes.direct`→`.literal` across context/slot/signal; `GetPtrError.CannotGetPtrOfDirectMode`→`LiteralHasNoPtr`. Verified zero stale refs; `zig build test` green.
-- **Soak tests** (`slot.zig`, +143, 2 tests × 300 iterations each, `std.testing.allocator`) guarding the two memory-safety fixes:
-  - `destroy/unsubscribe soak — diamond DAG` — `sink` has **two parents** (`left`,`right`); `src.touch()` cascades teardown where `sink.destroySelf` unsubscribes from both while each parent's destroy cascades into it — the exact destroy↔unsubscribeChangeUnlocked ordering `1dd8998` (capture-ctx-before-destroy UAF) protects.
-  - `emitChange soak — multi-subscriber invalidation` — `src` with 3 direct dependents; `emitChange` runs the snapshot+clear-before-iterate loop (the iteration-during-mutation fix) at scale.
-
-**Split out (design-heavy, need their own cycle):** `#lzzigbeforechange` (the `before_change_subscribers` *feature* — cell.zig:35, needs API/signature/ordering design) and `#lzzigalloc` (c_allocator/ArenaAllocator `Context.init` options — context.zig:615/619, needs API + ownership design). The umbrella `#lzzigtodos` is resolved by this decomposition — nothing lost, per the one-ID-per-phase pattern.
-
-**Build + install:** `zig build test` → all green (28 tests, was 26 + 2 new). lazily-zig lib + tests compile clean on zig 0.17.0-dev.
-**Changed paths:** `src/lazily-zig` → `db18dea` (`288d788..db18dea`); superproject gitlink `e64264a8f`. **Confidence:** high — rename compiler-verified; soak tests pass at HEAD and would catch destroy/unsubscribe regressions. **Escalation:** none.
-
-`#lzzigtodos` → done (decomposed; see `#lzzigbeforechange`, `#lzalloc`→`#lzzigalloc`). Queue now drained.
-<!-- agent:boundary:a58b74ae -->
+- Archived 9 response topic(s): lazily bug-fix next-steps (cross-port); IPC proof diagnostic (interrupted-cycle recovery); #lzjshygiene node_modules purge; 6 more
+- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
+<!-- agent:boundary:ad6d165c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -221,6 +48,9 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- [#lzzigbeforechange]
+- [#lzzigalloc]
+- [#lzjshygiene]
 <!-- /agent:queue -->
 
 ## Backlog

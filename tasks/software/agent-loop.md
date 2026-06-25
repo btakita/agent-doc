@@ -33,86 +33,12 @@ Operational task document for agent-loop workspace management.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca3007b9c6c5bc21d81a0b9ff27f894487e97141f4cdafe2a9d12a4a19b1-20260622-175506.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca3007b9c6c5bc21d81a0b9ff27f894487e97141f4cdafe2a9d12a4a19b1-20260625-183304.md`*
 
 Compacted content:
-❯ - Archived 2 response topic(s): Release + publish submodules with pending releases; do #jq1r
-❯ - Prior summary/context: prior compacted content: Archived 1 response topic(s): Fix workspace patch warnings for agent-kit, tagpath, tmux-router
-
-### Re: Commit + push workspace changes — gpt-5
-
-> **Queue prompt:**
->
-> Commit + push all uncommitted files in submodules + agent-loop.
-
-Completed for the agent-drainable workspace state I could own from this session.
-
-Pushed newly committed submodules: `mail` `8c1f562`, `resume` `ee14f8f`, `src/agent-doc` `48cf0210`, `src/boost-client` `d0f410bd`, Equal Experts `a93de56` to `btakita/solution`, `src/eval-runner` `46b9d0e`, `src/session-share` `f9249661`, `src/tmux-router` `7e0e065`, and `src/webmaster` `4e27fef`. I also pushed already-committed-but-unpushed heads in `agent-doc-js`, `agent-resume`, `ctx-core-dev/lib/rebuildjs`, `existence`/`ontology`/`spec`, `module-harness`, and the two `rappstack` blog domain repos.
-
-Pushed the `agent-loop` superproject through `72f21a392` after rebasing over `origin/main`. I intentionally left `tasks/professional/equityfundingsource.md` untouched because preflight reported it foreign-owned by pane `%24`.
-
-Verification: `make check` passed at the root after fixing the `agent-doc` install-profile call sites; `uv run pytest` passed for Equal Experts (`34 passed, 7 skipped`); `cargo test` passed for `eval-runner`; `cargo test` passed for `webmaster` after pinning its skill install wrapper to the Claude Code layout. `src/session-share` had a broken local pre-commit hook pointing at missing `scripts/doc-lint.sh`, so that artifact commit used `--no-verify`; I checked for >100 MB untracked blobs before committing. GitHub workflow check: `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
-
-### Re: Rebase agent-loop origin — gpt-5
-
-> **Queue prompt:**
->
-> rebase agent-loop origin onto the local repo or force push if it is too difficult.
-
-
-> **Queue prompt:**
->
-> rebase agent-loop origin onto the local repo.
-
-Completed. I rebased the `agent-loop` root `main` history onto the pre-merge remote head `40bda6d55`, skipped obsolete `src/boost-client` pointer-only commits that were already contained by the rebased base, and force-updated `origin/main` with a lease from the accidental merge commit `ad2433059` to the rebased linear head `b34635be1`.
-
-Changed paths: no final file-content change from the rebase; the final tree matches the pre-merge local tree. Existing unrelated dirty work remains in `src/equityfundingsource-dev`, `tasks/agent-doc/agent-doc-bugs2.md`, and `tasks/professional/equityfundingsource.md`; I left those intact.
-
-Verification: `git rev-list --left-right --count main...origin/main` is `0 0`; `git ls-remote origin refs/heads/main` reports `b34635be1ff6b3997e41afc2bfaaf91e8b8be776`; `git log --merges 40bda6d55..main` is empty; `git diff --stat a3700b068..main` is empty. I did not run `make check` because this was a history rewrite with no content delta and the workspace contains unrelated dirty edits. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`; `gh workflow list` shows only `Agent Doc`.
-
-Escalation: used a guarded `git push --force-with-lease=main:ad2433059...` because the remote had been pushed to the merge commit during the cycle; the lease ensured the push would fail if origin moved again.
-
-### Re: Queue Preservation Repair — gpt-5
-
-> **Queue prompt:**
->
-> rebase agent-loop origin onto the local repo or force push if it is too difficult.
-
-Consumed by the completed rebase/force-push above. `origin/main` was rewritten with `--force-with-lease` from the accidental merge commit `ad2433059` to the rebased linear head `b34635be1`, and the latest remote check reported the expected SHA before the session response commit.
-
-Changed paths: only the session document was repaired in this closeout; no repo content changed for the rebase itself. Verification remains: local and remote were aligned at the rebased head (`git rev-list --left-right --count main...origin/main` returned `0 0` before this document repair commit), the rebased range had no merge commits, and `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
-
-### Re: JetBrains Run Agent Doc restart delay — gpt-5
-
-> **Queue prompt:**
->
-> JB `Run Agent Doc` while codex session was restarting had a long delay to add the prompt and did not submit.
-
-I’m treating this as a JetBrains/Codex restart handoff bug report, not as proof that the route consumed the prompt. The important distinction is pane-input acceptance versus actual dispatch/start proof: a delayed prompt write without submission means the diagnostics need to show whether the IDE action was waiting on Codex readiness, whether the pane accepted text but skipped Enter/submission, or whether restart-state routing dropped the submit phase.
-
-Follow-up added to backlog: investigate the JetBrains `Run Agent Doc` delay/submission miss during Codex session restart and require diagnostics that separate input acceptance from dispatch/start proof.
-
-Changed paths: session document only. Commands: `tsift status`, `tsift status --fix`, `agent-doc --version`, agent-doc preflight/plan/read/finalize. Verification: preflight and plan completed; no code or tests changed for this prompt-response cycle. Confidence: medium, based on the queue report rather than route logs. Escalation: none.
-
-Session note: the exchange is at warn-level accretion, but the queue is active, so this cycle continues the drain path rather than pausing for compaction.
-Agent-doc cycle completed and committed for [agent-loop.md](/home/brian/work/btakita/agent-loop/tasks/software/agent-loop.md).
-
-I treated the JetBrains `Run Agent Doc` restart delay as a bug report, added a concrete backlog item for investigating pane-input acceptance vs dispatch/start proof, and verified closeout with `agent-doc session-check`. The queue now reports no remaining continuation prompt.
-
-### Re: #advance-review — gpt-5
-
-> **Queue prompt:**
->
-> #advance-review
-
-I checked this session document for review work to advance. `tasks/software/agent-loop.md` has no `agent:review` component, and its frontmatter does not define a local `#advance-review` prompt preset. That makes the queue head inert in this document rather than an actionable review sweep.
-
-I added one backlog item to normalize this: define the `#advance-review` preset/review section for this document, or remove the token from the queue pattern so it cannot wedge the stop hook again.
-
-Changed paths: session document only. Commands: agent-doc preflight/plan/read/finalize plus `rg` checks for `#advance-review` and `agent:review`. Verification: confirmed there is no review component or local preset in this document before committing the closeout. Confidence: high for the document state; medium for the stop-hook behavior because the hook still reported the inert token after session-check said no continuation. Escalation: none.
-
-Session note: exchange accretion is still warn-level, but the active queue closeout takes priority over compaction.
-<!-- agent:boundary:b010cb2b -->
+- Archived 5 response topic(s): Commit + push workspace changes; Rebase agent-loop origin; Queue Preservation Repair; 2 more
+- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca3007b9c6c5bc21d81a0b...
+<!-- agent:boundary:545cd8fe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -127,7 +53,6 @@ Session note: exchange accretion is still warn-level, but the active queue close
 
 <!-- agent:backlog -->
 - [ ] [#2f3v] Define or remove the unregistered `#advance-review` queue token in `tasks/software/agent-loop.md`; this document has no `agent:review` component and no local preset for that token.
-- [ ] [#t0d0] Investigate JetBrains `Run Agent Doc` delay/submission miss while a Codex session is restarting; require diagnostics that separate pane-input acceptance from dispatch/start proof.
 - [ ] [#bx57] Disable unused MCP servers — currently managed via Claude Code UI, not settings.json
 - [ ] [#wr52] Run litellm proxy pointing at vllm
 - [ ] [#04hc] Test `claude` against local model via `ANTHROPIC_BASE_URL`

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -98,7 +98,7 @@ Deployed the EFS Worker with the `#bxtd` dead-table drop now live.
 - **Smoke check:** `https://equityfundingsource.brian-takita.workers.dev/` → HTTP 200 (0.24s).
 
 Production is on the new version with the 6 dead tables dropped.
-<!-- agent:boundary:65807d3f -->
+<!-- agent:boundary:3a00141f -->
 <!-- /agent:exchange -->
 ###
 <!--

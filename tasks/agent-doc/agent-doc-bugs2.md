@@ -126,7 +126,7 @@ When I set up the worktree I found `#crdtauth1`'s authority layer **already pres
 **Gated `#crdtauth1`** — code-complete + verified, but genuinely blocked on: (1) operator merge `crdtauth1-authority-sm` → main + install + supervisor restart (deliberately not auto-installed mid-session per the isolated-worktree choice), and (2) the deferred **state-vector sync** half, now filed as `#crdtauth1sv`.
 
 > **Queue prompt:** do [#crdtauth1]
-<!-- agent:boundary:ab79cf18 -->
+<!-- agent:boundary:a0b333bc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -136,7 +136,7 @@ When I set up the worktree I found `#crdtauth1`'s authority layer **already pres
 - ~~:pushpin: do [#lazilycrdtspec]: Make CRDT the first of several multi-write mechanisms.~~
 - ~~:pushpin: do [#lazilycrdtrs]~~
 - ~~:pushpin: do [#crdtauth1]~~
-- :pushpin: do [#crdtauth2]
+- 🚧 :pushpin: do [#crdtauth2]
 - :pushpin: do [#crdtauth3]
 - :pushpin: [#brtc]
 - :pushpin: do [#crdtauth4]
@@ -228,6 +228,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - :pushpin: ~~Would a reactive state machine help to manage the supervisor document bindings?~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: ~~I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: ~~I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?~~ — auto-struck: answered this cycle (#ftstrike)
+- do [#crdtauth1sv]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

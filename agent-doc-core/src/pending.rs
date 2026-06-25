@@ -996,6 +996,44 @@ fn extract_inline_tag_id(text: &str) -> Option<(String, String)> {
     None
 }
 
+/// Promote a leading bare `#tag` to the item id. A bare leading tag is treated
+/// as the caller's intended id when it is a clean pending id (ASCII alphanumeric
+/// plus hyphen) immediately followed by whitespace and more item text. Mid-text
+/// `#tag` references are never promoted — only a tag at the very front of the
+/// line qualifies, and a trailing non-whitespace char (e.g. `=` in
+/// `#lazilyspecpin=Pin …`) disqualifies it so compound topic labels keep their
+/// auto hash id. Returns `(id, remaining_text)` or `None`.
+///
+/// This closes the "agent-doc ignores the explicit id" gap: an agent that adds
+/// `#mergestatemachine3 JB+VSCode report…` now gets `[#mergestatemachine3] …`
+/// instead of a generated hash with the tag left dangling in the text.
+fn leading_bare_tag_id(text: &str) -> Option<(String, String)> {
+    let trimmed = text.trim_start();
+    let after_hash = trimmed.strip_prefix('#')?;
+    let end = after_hash
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+        .unwrap_or(after_hash.len());
+    if end == 0 {
+        return None;
+    }
+    let token = &after_hash[..end];
+    if !is_valid_pending_id(token) {
+        return None;
+    }
+    // The token must be terminated by whitespace (not punctuation like `=`), and
+    // there must be remaining item text — a bare `#tag` that IS the whole line is
+    // a reference, not an id request, and is left untouched.
+    let separator = after_hash[end..].chars().next()?;
+    if !separator.is_whitespace() {
+        return None;
+    }
+    let rest = after_hash[end..].trim_start();
+    if rest.is_empty() {
+        return None;
+    }
+    Some((token.to_lowercase(), rest.to_string()))
+}
+
 fn custom_id_error(raw_id: &str) -> anyhow::Error {
     anyhow!(
         "pending add: invalid custom id `{}` — ids must be non-empty ASCII alphanumeric strings (hyphen allowed)",
@@ -1067,7 +1105,16 @@ fn parse_custom_id_prefix(text: &str) -> Result<(Option<String>, String)> {
 /// rejected before the add is written.
 pub fn explicit_custom_id(item: &str) -> Option<String> {
     match parse_custom_id_prefix(item) {
-        Ok((id, _)) => id,
+        Ok((id, _)) => {
+            if id.is_some() {
+                id
+            } else {
+                // No `id=` / `[#id]` prefix; a leading bare `#tag` is also an
+                // explicit id request (promoted at add time), so collision
+                // enforcement must see it too.
+                leading_bare_tag_id(item).map(|(id, _)| id)
+            }
+        }
         Err(_) => None,
     }
 }
@@ -2437,11 +2484,14 @@ pub fn op_add_at_with_outcome(
     }
 
     let mut inline_custom_id = None;
-    if custom_id.is_none()
-        && let Some((tag_id, cleaned)) = extract_inline_tag_id(&text)
-    {
-        inline_custom_id = Some(tag_id);
-        text = cleaned;
+    if custom_id.is_none() {
+        if let Some((tag_id, cleaned)) = leading_bare_tag_id(&text) {
+            inline_custom_id = Some(tag_id);
+            text = cleaned;
+        } else if let Some((tag_id, cleaned)) = extract_inline_tag_id(&text) {
+            inline_custom_id = Some(tag_id);
+            text = cleaned;
+        }
     }
 
     let mut layout = PendingLayout::parse(body);
@@ -4249,6 +4299,65 @@ mod tests {
             new_body.contains("- [ ] [#myid] text with [#other] inline"),
             "got: {}",
             new_body
+        );
+    }
+
+    #[test]
+    fn op_add_promotes_leading_bare_tag_to_id() {
+        // Operator-reported gap (#qexplicitid): an agent that adds
+        // `#mergestatemachine3 JB+VSCode report…` must get
+        // `[#mergestatemachine3] JB+VSCode report…`, not a generated hash with
+        // the tag left dangling in the text.
+        let (new_body, id) = op_add(
+            "",
+            "#mergestatemachine3 JB+VSCode report attach/detach through SM",
+            DOC_ID,
+            false,
+        )
+        .unwrap();
+        assert_eq!(id, "mergestatemachine3");
+        assert!(
+            new_body.contains("- [ ] [#mergestatemachine3] JB+VSCode report attach/detach through SM"),
+            "got: {}",
+            new_body
+        );
+    }
+
+    #[test]
+    fn op_add_leading_bare_tag_with_trailing_equals_keeps_auto_hash() {
+        // A compound topic label like `#lazilyspecpin=Pin …` is NOT an id
+        // request — the `=` terminator disqualifies promotion, so the item
+        // keeps an auto hash id and the full text is preserved.
+        let (new_body, id) = op_add("", "#lazilyspecpin=Pin the vocabulary", DOC_ID, false).unwrap();
+        assert_ne!(id, "lazilyspecpin");
+        assert!(
+            new_body.contains("#lazilyspecpin=Pin the vocabulary"),
+            "got: {}",
+            new_body
+        );
+    }
+
+    #[test]
+    fn op_add_leading_bare_tag_alone_is_reference_not_id() {
+        // A bare `#tag` that IS the whole line is a reference, not an id
+        // request: it must be left untouched and get an auto hash id.
+        let (new_body, id) = op_add("", "#somereference", DOC_ID, false).unwrap();
+        assert_ne!(id, "somereference");
+        assert!(
+            new_body.contains("#somereference"),
+            "got: {}",
+            new_body
+        );
+    }
+
+    #[test]
+    fn op_add_leading_bare_tag_rejects_existing_id() {
+        let body = "- [ ] [#mergestatemachine3] existing task\n";
+        let err = op_add(body, "#mergestatemachine3 new task", DOC_ID, false).unwrap_err();
+        assert!(
+            format!("{}", err).contains("inline tag id already exists"),
+            "expected inline tag id already exists, got: {}",
+            err
         );
     }
 

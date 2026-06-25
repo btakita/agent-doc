@@ -837,6 +837,9 @@ pub fn detect_bypassed_response_write_between(
             continue;
         }
         let trimmed = change.value().trim();
+        if is_binary_authored_recovery_diagnostic_heading(trimmed) {
+            continue;
+        }
         if trimmed.starts_with("### Re:") || trimmed == "## Assistant" {
             if let Some(bare_target) =
                 first_bare_prompt_prefix_target_before_marker(&diff_text, trimmed)
@@ -897,6 +900,19 @@ pub fn is_exchange_response_heading(trimmed: &str) -> bool {
         || trimmed.starts_with("#### Re:")
         || trimmed.starts_with("##### Re:")
         || trimmed.starts_with("###### Re:")
+}
+
+/// Binary-authored interrupted-cycle recovery diagnostics are appended by
+/// `preflight::format_ipc_dogfood_note` with a `### Re:` heading so the diff
+/// classifier sees a `RecoveryArtifact` (never a user `PromptTarget`). That same
+/// `### Re:` would otherwise trip this direct-patchback detector, wedging the
+/// cycle in an append -> flag -> refuse -> re-append loop. Exempt the known
+/// recovery-diagnostic shape (`#ipc-recovery-diagnostic-patchback`).
+pub(crate) fn is_binary_authored_recovery_diagnostic_heading(trimmed: &str) -> bool {
+    (trimmed.starts_with("### Re:")
+        || trimmed.starts_with("#### Re:")
+        || trimmed.starts_with("##### Re:"))
+        && trimmed.contains("interrupted-cycle recovery")
 }
 
 /// `#prompt-preempts-auto-queue`: snapshot-independent detection of a live

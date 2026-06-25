@@ -2997,6 +2997,29 @@ Body\n\
         assert!(detect_bypassed_response_write(&doc).unwrap().is_none());
     }
     #[test]
+    fn detect_bypassed_response_write_exempts_binary_recovery_diagnostic() {
+        // `#ipc-recovery-diagnostic-patchback`: the interrupted-cycle recovery
+        // appender (`preflight::format_ipc_dogfood_note`) writes its diagnostic
+        // with a `### Re:` heading so the diff classifier sees a RecoveryArtifact.
+        // The direct-patchback detector must exempt that known binary-authored
+        // shape instead of flagging it, which otherwise wedges the cycle in an
+        // append -> flag -> refuse -> re-append loop.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        let snapshot = "## Exchange\n\nHello\n";
+        fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        fs::write(
+            &doc,
+            format!(
+                "{snapshot}\n### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc\n\n```text\nipc_proof_insufficient file=doc invariant=live_prompt_drift_after_preflight\n```\n"
+            ),
+        )
+        .unwrap();
+
+        assert!(detect_bypassed_response_write(&doc).unwrap().is_none());
+    }
+    #[test]
     fn detect_bypassed_response_write_reports_bare_prompt_target() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = make_project(tmp.path());

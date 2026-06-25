@@ -123,7 +123,32 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=05a50802c4ec76199164014dc39faf3c110c3ce588b2b27623ecb7d07014d8cc content_len=21783 content_hash=6774359487524b8e2822e9646d5660975e8c7f4539a544f4c759b173469c6c1f doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782362390987
 ```
-<!-- agent:boundary:499f1ab9 -->
+
+### Re: lazily-rs context isolation per document — glm-5-2
+
+**Yes — lazily-rs contexts are distinct per document.** They are actually stricter than per-document: each `ThreadSafeContext` is private to a single state-machine instance, and every machine is built and dropped for a single `transition()` call. There is **no persistent or shared lazily-rs graph** anywhere.
+
+Evidence:
+- `ThreadSafeContext::new()` mints a fresh isolated `Arc<ThreadSafeInner>` graph (`lazily-rs/src/thread_safe.rs:1464,1519`); the only `static` in all of lazily-rs is an ID counter (`async_context.rs:48`), not a graph.
+- Each machine owns a private `ctx` field (`cycle_state_machine.rs:45`; `state_backbone.rs:1064,1140,1243,1377,1484`; `merge_control_state_machine.rs:88`) and is instantiated only ephemerally inside `transition()` — never held as long-lived per-document state.
+- The one process-global piece — the FFI `STATE_LEDGER` (`ffi.rs:1701`) — is a shared `Vec<StateEvent>`, but **every read partitions by `document_hash`** (`state_backbone.rs:298-348,371-380`; `state_wire.rs:588-626`), and wire `slot_id` is FNV-hashed over `document_hash ‖ type_tag ‖ entity_key` (`state_wire.rs:90`), so document A's events cannot address document B's slots. Editor mirrors are per-document too (JB `StateProjectionBridge.kt:25,105`; VSCode `native.ts:611`).
+
+**So the symptom you're seeing is not lazily-rs state bleed.** The most likely real cause is the **JB `StateProjectionBridge` singleton** (`StateProjectionBridge.kt:21`): its `mirrors: ConcurrentHashMap<String, StateGraphMirror>` is keyed by SHA-256 of the canonical file path and **never evicts on document close**. A moved/symlinked/reopened path reuses the old mirror entry and can surface stale projection state from the earlier document. Filed as `#jbmirrorevict` to audit eviction-on-close. Cross-document UI binding (a status surface reading the wrong `filePath`) and tmux pane reuse are the other two candidates — none involve the reactive graph.
+
+### Re: #fnxy merge-control SM shipped — glm-5-2
+
+**`#fnxy` (#mergestatemachine1) — shipped + committed (`ea7b0ec4`).** New `merge_control_state_machine.rs` defines the FFI write-ownership SM (`Detached→Attached→EditorOwnsBuffer→BinaryWriteRequested→IpcAckProven→Committed`) on the lazily `ThreadSafeStateMachine`, following the `cycle_state_machine`/`TransportPatchMachine` conventions exactly. Three deliverables:
+
+- **Transition table** — exhaustive `transition_merge_ownership` (7 events × 6 states); in-flight writes are never disturbed by attach/detach churn, `Committed` is reachable only from a proven-safe phase (`Detached` direct-disk or `IpcAckProven`), and `BinaryWriteRequested` is editor-path only.
+- **`disk_write_permitted(phase)`** — the safety gate: disk writes permitted only in `Detached` (no editor) or `IpcAckProven` (editor applied + ACK). This is the invariant that eliminates both `File Cache Conflict` and the `#6b5h` no_ack wedge.
+- **`ownership_probe`** — the liveness classifier composing the existing `plugin_owner` lease (pid liveness, not heartbeat freshness, matching the shipped fail-safe): live pid → `EditorBufferObserved`; dead pid → `EditorDetached`; no lease → `HeartbeatStale` (the `#6b5h` stale-listener demote to `Detached`).
+
+15 exhaustive tests green; `make check` green. **Phase 1 (define) complete.** Wiring into `try_ipc`/`commit`/disk-write is `#t4x1` (phase 2) — next merge-machine queue item after `#gww8`.
+
+### Re: cycle closeout (#6b5h wedge recovery) — glm-5-2
+
+The first `finalize` wedged on the `#6b5h` IPC guard (listener active, no live JB editor ACKing in this OpenCode session, `reason=ack_mismatch`) — recovered via `--force-disk`. This is the exact failure class `#fnxy`/`#t4x1` will eliminate: the ownership SM's `ownership_probe` demotes a no-lease stale listener to `Detached`, and `disk_write_permitted(Detached)` then permits the write instead of wedging.
+<!-- agent:boundary:13ca894b -->
 <!-- /agent:exchange -->
 
 ## Queue

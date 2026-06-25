@@ -217,7 +217,27 @@ Drained both heads.
 **Collapsed by default.** The **Personal** and **Subject Property** cards in the Full Application detail are now collapsible and **default to collapsed** (chevron header to expand), so the dialog opens compact and you scroll far less to see all sections — matching the Declarations + Review & Sign behavior added earlier. `Personal` reuses the `EditableObjectSectionCard` `collapsible`/`default_collapsed` props; I added the same `collapsible`/`default_collapsed` support to `SubjectPropertyCard`. Shared component, so the borrower application-status view gets the same compact default. `lib/ui--browser--efs/portal/shared/full_application_detail.tsx`.
 
 **Verify + deploy.** Added a `#full-app-collapsible-cards` regression test; `bun run test` → 1227 pass / 0 fail; `build` + `build:worker` clean. Pushed `0222de8`, deployed Version `be8be001-3491-4799-b471-718cff488ff1`. No CI workflow in the EFS repo.
-<!-- agent:boundary:d8c50aae -->
+
+### Re: Revert collapse → dense multi-column field cards (Personal + Subject Property) + deploy — opus-4-8
+
+Drained both heads.
+
+> **Queue prompt:**
+>
+> Revert the last change. You went in the wrong direction. Instead don't make 1 row per line but a well formatted card to combine lines instead. It should read with minimal scrolling.
+
+> **Queue prompt:**
+>
+> deploy
+
+Reverted the default-collapsed Personal + Subject Property cards (`0222de8`) — that hid the data, which wasn't what you wanted. Instead the two cards now render **dense**: a responsive grid (`.full-app-field-grid`) lays the read-only fields **multiple per row** with the label above the value, so all the data shows at once with much less vertical scrolling — no chevron, nothing hidden.
+
+- `EditableObjectSectionCard` gained a `dense` prop that wraps its read-only children in the field grid (Personal uses it). `SubjectPropertyCard` gained the same `dense` flag for its read view. The edit forms are unchanged (they already use a multi-column `form-grid`).
+- `.full-app-field-grid` = `grid-template-columns:repeat(auto-fit,minmax(180px,1fr))` → 2–3 fields per row depending on width; each field is label-over-value for clean wrapping.
+- Collapsible **Declarations + Review & Sign** are unchanged (you asked for those separately and didn't revert them).
+
+**Verify + deploy.** Tests updated (`#full-app-dense-cards`); `bun run test` → 1227 pass / 0 fail; `build` + `build:worker` clean. Pushed `05fe7a3`, deployed Version `7fe3901f-41fd-4f0e-bd3d-b2b0b440d2a4`. No CI workflow in the EFS repo.
+<!-- agent:boundary:c6d946a0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -237,6 +257,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~Revert the last change. You went in the wrong direction. Instead don't make 1 row per line but a well formatted card to combine lines instead. It should read with minimal scrolling.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -253,7 +253,7 @@ Large-attachment memory (`#ckymimestream`, `9e3f1c4`): `corky draft send` previo
 **Suite health:** 711 pass / 0 fail / 0 ignored (workspace with `transcribe` feature; 237 in corky-mail). `make check` (clippy `-D warnings` + test) green; `draft_mime` bench repaired (`#ckybenchbreak`) and green under `--all-targets`.
 
 No follow-ups — nothing for the backlog.
-<!-- agent:boundary:29ad7c83 -->
+<!-- agent:boundary:d291ce64 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -269,6 +269,7 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#5jax] release + publish
 <!-- /agent:backlog -->
 
 ## Review

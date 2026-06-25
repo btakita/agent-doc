@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -313,7 +313,28 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=file_ipc patch_id=18b16d61-065e-4747-90eb-5b29cab5f76c invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400.json doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782353796773
 ```
-<!-- agent:boundary:1a128d47 -->
+
+### Re: release + publish lazily-py — v0.11.0 PUBLISHED to PyPI (#kb9b done) — opus-4-8
+
+> **Queue prompt:**
+>
+> release + publish lazily-py
+
+You un-struck and re-marked lazily-py `🚧` — taken as the go to publish. **lazily-py v0.11.0 is fully published.** This closes review **#kb9b**.
+
+**Shipped**
+- **PyPI** — `lazily 0.11.0` **published** → https://pypi.org/project/lazily/0.11.0/ (was 0.10.2). Uploaded via the `btak/PYPI_PUBLISH_TOKEN` API token (token auth bypasses interactive 2FA; secret never printed).
+- **GitHub release** — https://github.com/lazily-hub/lazily-py/releases/tag/v0.11.0 (tag `v0.11.0`).
+- No superproject gitlink bump (tag points at the already-committed `c255482`).
+
+**Pre-publish gates satisfied**: `twine check` PASSED on both artifacts; pytest **77 passed**; fresh-venv round-trip was already verified (#kb9b). The `#lzpysigfix` ship-stopper was fixed in `30907ea`.
+
+## 🏁 Release campaign — 4 of 6 published, 1 remaining
+
+- **lazily-spec** ✅ Pages • **lazily-rs** ✅ v0.12.3 crates.io+GitHub • **lazily-zig** ✅ v0.2.0 GitHub • **lazily-py** ✅ v0.11.0 PyPI+GitHub
+- **lazily-kt** ⊘ no publish infra (separate bootstrap task)
+- **lazily-js** ⏳ the only one left — npm `@lazily/js` needs your npm 2FA (no API-token path configured like PyPI had). If you add an npm automation token to passage, I can publish it the same way.
+<!-- agent:boundary:d8fc4943 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -322,12 +343,6 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=file_ipc patch_id
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- ~~release + publish lazily-spec~~
-- ~~release + publish lazily-rs~~
-- ~~release + publish lazily-ky~~
-- ~~release + publish lazily-js~~
-- ~~release + publish lazily-zig~~
-- 🚧 release + publish lazily-py
 <!-- /agent:queue -->
 
 ## Backlog

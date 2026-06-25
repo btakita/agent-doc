@@ -3409,6 +3409,159 @@ fn qflood2_drain_dedups_trigger_already_pending_in_composer() {
     assert_eq!(world.coverage.drain_dedup_skips, 1);
 }
 
+/// `#brtc` / `#queuestatemachine3`: a deterministic stale-CRDT / supervisor
+/// re-emit **storm**. The same identities are re-injected many times across
+/// simulated cycles, mixed across every duplication shape the historical ad-hoc
+/// dedup passes each patched — pin-variant `do [#id]` (`#qdedupsync` /
+/// `#pushpinaccum`), bare `[#id]` mirror references (`#qdup-bare-id`),
+/// multiline phantom pins (`#rt83qflood`), and operator free-text re-emits
+/// (`#qauthorder`). Driving the production convergence
+/// (`queue::converge_queue_via_lifecycle`, the unified SM-driven pass from
+/// `#cgfx`) over the storm must converge to **exactly one item per identity**,
+/// and an operator position-locked free-text line must keep its authored slot
+/// across the whole storm.
+///
+/// This exercises the same production convergence path preflight queue
+/// maintenance uses, modeled without a live editor/tmux.
+#[test]
+fn brtc_reemit_storm_converges_to_one_item_per_identity_and_preserves_operator_position() {
+    use agent_doc_orchestration::queue::{self, QueueEntry, QueuePrompt};
+
+    fn pr(text: &str) -> QueueEntry {
+        QueueEntry::Prompt(QueuePrompt {
+            text: text.to_string(),
+            multiline: false,
+        })
+    }
+    fn multi(text: &str) -> QueueEntry {
+        QueueEntry::Prompt(QueuePrompt {
+            text: text.to_string(),
+            multiline: true,
+        })
+    }
+
+    // The operator-authored snapshot: two id heads with a position-locked
+    // free-text line wedged between them, plus one phantom-pin block authored
+    // once. This is the lawful baseline the storm must converge back to.
+    let operator_line = "do not bubble my queue items to the top";
+    let phantom = ":round_pushpin: switch actor\nroute error: pane busy";
+    let snapshot = vec![
+        pr("do [#alpha]"),
+        pr(operator_line),
+        pr("do [#beta]"),
+        multi(phantom),
+    ];
+
+    // Build the storm: start from the snapshot, then have a stale CRDT /
+    // supervisor re-emit each identity under MANY shapes across several cycles.
+    let mut stormed = snapshot.clone();
+    let mut rng = DeterministicRng::new(0xB17C);
+    for _cycle in 0..6 {
+        // Re-emit alpha under pin + bare-reference + bare-directive variants.
+        let alpha_variants = [
+            ":pushpin: do [#alpha]",
+            "do [#alpha]",
+            "[#alpha]",
+            "#alpha",
+            "_prioritized_ do [#alpha]",
+        ];
+        let beta_variants = [":pushpin: do [#beta]", "do [#beta]", "[#beta]", "#beta"];
+        // Inject a deterministic but shuffled subset each cycle.
+        for _ in 0..3 {
+            stormed.push(pr(alpha_variants[rng.next_usize(alpha_variants.len())]));
+            stormed.push(pr(beta_variants[rng.next_usize(beta_variants.len())]));
+            // Free-text re-emit (#qauthorder) + phantom-pin flood (#rt83qflood).
+            stormed.push(pr(operator_line));
+            stormed.push(multi(phantom));
+        }
+    }
+    assert!(
+        stormed.len() > 50,
+        "storm should be large: {} entries",
+        stormed.len()
+    );
+
+    // Drive the production convergence to a fixpoint (a multi-cycle preflight
+    // would re-run it each cycle; converging to a fixpoint models that).
+    let mut converged = stormed.clone();
+    let mut passes = 0;
+    while let Some(next) = queue::converge_queue_via_lifecycle(&converged, &snapshot) {
+        converged = next;
+        passes += 1;
+        assert!(passes < 10, "convergence must reach a fixpoint quickly");
+    }
+    // Idempotent: one more pass is a guaranteed no-op.
+    assert!(
+        queue::converge_queue_via_lifecycle(&converged, &snapshot).is_none(),
+        "converged queue must be a fixpoint:\n{converged:?}"
+    );
+
+    // EXACTLY ONE item per identity. Count live prompt heads by normalized id /
+    // text key.
+    let count_id = |id: &str| {
+        converged
+            .iter()
+            .filter(|e| matches!(e, QueueEntry::Prompt(p) if {
+                use agent_doc_orchestration::queue_item_state_machine::QueueItemIdentity;
+                QueueItemIdentity::from_prompt(&p.text)
+                    == QueueItemIdentity::Id(id.to_string())
+            }))
+            .count()
+    };
+    assert_eq!(count_id("alpha"), 1, "alpha must converge to one head:\n{converged:?}");
+    assert_eq!(count_id("beta"), 1, "beta must converge to one head:\n{converged:?}");
+
+    let free_text_count = converged
+        .iter()
+        .filter(|e| matches!(e, QueueEntry::Prompt(p) if !p.multiline && p.text == operator_line))
+        .count();
+    assert_eq!(
+        free_text_count, 1,
+        "operator free-text line must converge to its authored count of one:\n{converged:?}"
+    );
+    let phantom_count = converged
+        .iter()
+        .filter(|e| matches!(e, QueueEntry::Prompt(p) if p.multiline))
+        .count();
+    assert_eq!(
+        phantom_count, 1,
+        "phantom-pin flood must converge to its authored count of one:\n{converged:?}"
+    );
+
+    // OPERATOR POSITION-LOCK survives the storm: the operator's free-text line
+    // stays between the two id heads exactly as authored — never bubbled to the
+    // top, never sunk below.
+    let texts: Vec<String> = converged
+        .iter()
+        .filter_map(|e| match e {
+            QueueEntry::Prompt(p) if !p.multiline => Some(p.text.clone()),
+            _ => None,
+        })
+        .collect();
+    let alpha_pos = texts
+        .iter()
+        .position(|t| {
+            use agent_doc_orchestration::queue_item_state_machine::QueueItemIdentity;
+            QueueItemIdentity::from_prompt(t) == QueueItemIdentity::Id("alpha".into())
+        })
+        .expect("alpha head present");
+    let op_pos = texts
+        .iter()
+        .position(|t| t == operator_line)
+        .expect("operator line present");
+    let beta_pos = texts
+        .iter()
+        .position(|t| {
+            use agent_doc_orchestration::queue_item_state_machine::QueueItemIdentity;
+            QueueItemIdentity::from_prompt(t) == QueueItemIdentity::Id("beta".into())
+        })
+        .expect("beta head present");
+    assert!(
+        alpha_pos < op_pos && op_pos < beta_pos,
+        "operator position-lock must hold across the storm: alpha={alpha_pos} op={op_pos} beta={beta_pos}\n{texts:?}"
+    );
+}
+
 #[test]
 fn qdedup_between_turn_enqueue_waits_for_idle_and_dedupes_command_set() {
     // `#qdedup`: repeated supervisor/PCP between-turn handoff requests should be

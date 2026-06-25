@@ -295,7 +295,19 @@ Per your pick, implemented the claim-lease guard in an isolated worktree (`src/a
 **Verification:** 6 new deterministic predicate tests (stale-no-lease→AcceptStale, stale+foreign-lease→Reject, +force→AcceptForce, matching-session short-circuit, live-mismatch unaffected, legacy entry-point preserved). `make check` green — **5152 passed, 241 skipped**, clippy `-D warnings` clean.
 
 `#xdocsuper0` gated `[/]` (code-complete) — **unblocks on:** merge `xdocsuper0` → agent-doc main + install + a live cross-doc-relaunch repro (the operator-gated half). The remaining plan rungs stay queued: `#xdocsuper1` folded into `#xdocsuper3` (state_backbone document-switch transition) and `#xdocsuper2` (SimWorld contamination regression).
-<!-- agent:boundary:9efb11f8 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=2c8c737a-6fa9-49be-928a-ffe3887f5a01 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=56211 candidate_hash=bbaac8be5354e309c0c866f96d5d59d9a86fc12043f5e091939e7c385b86d5b2 content_ours_len=57223 content_ours_hash=23ecb80397c703520e8f9b23fd4741da4859c0e92fa62b29627882cb5111e5ca doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782377777241
+```
+<!-- agent:boundary:dba14feb -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -334,10 +346,11 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 ```
 ---
 - :pushpin: do [#xdocsuper]
-- Fix the root cause of the recurring degraded-supervisor drift and #postcommit-ipc-worktree-corruption.
+- Fix the root cause of the CRDT churn.
+- ~~Fix the root cause of the recurring degraded-supervisor drift and #postcommit-ipc-worktree-corruption.~~
 - :pushpin: do [#cgfx]
 - ~~Would a reactive state machine help to manage the supervisor document bindings?~~ — auto-struck: answered this cycle (#ftstrike)
-- [#xdocsuper0]
+- ~~[#xdocsuper0]~~
 - :pushpin: do [#gww8]
 - :pushpin: do [#n529b]
 - ~~~~When adding a backlog item, the agent sometimes assigns an explicit id. But agent-doc ignores the explicit id and assigns a new id. The agent's explicit id should be used instead. So instead of `[#kj5f] #mergestatemachine3` the id should be `[#mergestatemachine3]`.~~ — auto-struck: answered this cycle (#ftstrike)~~
@@ -444,7 +457,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - ~~do [#nsq2]~~
 - ~~:pushpin: do [#t4x1]~~
 - :pushpin: Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.
-- do [#xdocsuper0]
+- ~~do [#xdocsuper0]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

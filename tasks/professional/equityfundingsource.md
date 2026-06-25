@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: opencode
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -95,7 +95,17 @@ Both queued items (per-user compose auto-focus + deploy) shipped this cycle (EFS
 ### Re: Queue cleared — glm-5.2
 
 Clearing the inert queue residue (focus item + deploy both shipped this cycle).
-<!-- agent:boundary:80a6d598 -->
+
+### Re: Full Application dialog full screen + deploy — opus-4-8
+
+Drained both queue heads.
+
+**Full Application dialog → full screen.** The Full Application stacked dialog (opened from the admin pipeline Application dialog) was a centered `max-w-[72rem]` panel. `PortalModal` already had a `full_screen` prop that fills the viewport edge-to-edge (no backdrop gutter, square corners, `width:100%;height:100dvh`), so I switched the dialog to it and adjusted the modal body root from `max-height:calc(100dvh - 40px)` to `height:100%;max-height:100dvh` so it fills the full-screen panel. `lib/ui--browser--efs/portal/admin/pipeline.tsx`, commit `dba3bfd`.
+
+**Verify + deploy.** `bun run test` → 1225 pass / 0 fail; `bun run build` + `build:worker` clean. Pushed to `origin/main`, then `deploy:worker` → live at https://equityfundingsource.brian-takita.workers.dev (Version `ff4b8896-a7a7-4d1a-9e59-6577b69df521`). No CI workflow in the EFS repo, so local suite + build are the evidence.
+
+Reload the `dialog=application` → **Open Full Application** path to see it fill the screen.
+<!-- agent:boundary:1a5e77a7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -115,6 +125,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- 🚧 Make the https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Full Application dialog full screen.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -147,7 +147,7 @@ Files: `crates/corky-mail/src/sync/{types,markdown,imap_sync,mod}.rs`, `tests/te
 **Limitation (documented §4.5):** a message with no `Message-ID` cannot bridge, so two distinct keys for it still yield two files (pre-fix behavior); replies unique to one provider attach via the alias once the parent files are merged.
 
 Queue advances to **#ckymimestream** (draft-send buffers whole attachment in RAM — stream base64 / use Gmail resumable upload).
-<!-- agent:boundary:1e1baf2f -->
+<!-- agent:boundary:95cd46d2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -158,16 +158,16 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#ckythreadmerge]
-- [#ckymimestream]
-- [#ckymimeinline]
-- [#ckythreadmerge]
+- ~~[#ckythreadmerge]~~
+- 🚧 :pushpin: [#ckymimestream]
+- :pushpin: [#ckymimeinline]
+- ~~[#ckythreadmerge]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ckymimestream] [P3] corky draft send buffers the whole attachment in RAM then base64-encodes it (~1.8GB peak for a 500MB file). Use the Gmail API resumable/multipart upload endpoint for large attachments and stream the base64 encoding instead of building one giant String. crates/corky-mail/src/draft/send.rs:build_mime_message + send_via_gmail_api. Split from #ckymime.
+- [ ] 🚧 [#ckymimestream] [P3] corky draft send buffers the whole attachment in RAM then base64-encodes it (~1.8GB peak for a 500MB file). Use the Gmail API resumable/multipart upload endpoint for large attachments and stream the base64 encoding instead of building one giant String. crates/corky-mail/src/draft/send.rs:build_mime_message + send_via_gmail_api. Split from #ckymime.
 - [ ] [#ckymimeinline] [P3] corky draft send silently drops inline images: YAML (only draft push handles images+CID via multipart/related). Add CID inline-image support to send build_mime_message (multipart/related wrapping the text part + image parts with Content-ID), reusing draft push image-resolution logic. crates/corky-mail/src/draft/send.rs, mod.rs (push image handling). Split from #ckymime.
 <!-- /agent:backlog -->
 

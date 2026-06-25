@@ -276,6 +276,36 @@ enum SimCommand {
     /// policy: drain the in-flight turn, then in-place `execve` reexec (stale) or
     /// relaunch (fresh) at the turn boundary.
     RequestSupervisorRestart,
+    /// `#actorswitchdefer`: the operator edited the document frontmatter `agent:`
+    /// from `from` to `to` while an actor of the OLD harness is live. Records the
+    /// launch harness (the authoritative actor's stored harness) and the new
+    /// frontmatter-resolved harness so the route defer + idle-watch restart flow can
+    /// be driven offline against the real production predicates. Driven only by
+    /// targeted tests, not the random generator.
+    SwitchFrontmatterHarness {
+        from: &'static str,
+        to: &'static str,
+    },
+    /// `#actorswitchdefer`: a `route` dispatch (JB `Run Agent Doc`) lands while the
+    /// frontmatter harness no longer matches the live actor's harness. Drives the
+    /// production `mismatched_authoritative_actor_can_be_replaced` guard + the route
+    /// `agent_change_restart_enabled` bail: a healthy old-harness actor must DEFER
+    /// (not replace the pane); a disabled knob must bail explicitly.
+    DispatchRouteAfterHarnessSwitch,
+    /// `#actorswitchdefer`: opt OUT of agent-change-restart (`#agentreloadrestart`
+    /// knob off). With it off the idle-watch never restarts on a harness change, so
+    /// the route defer would never self-heal.
+    DisableAgentChangeRestart,
+    /// `#actorswitchdefer`: one supervisor idle-watch tick that runs the production
+    /// `agent_change_restart_decision` boundary gate for a pending harness switch.
+    /// At a quiet dispatch-ready boundary it emits `harness_change_detected` +
+    /// `agent_restart_triggered`; mid-turn / paused it emits only the detection +
+    /// holds the switch pending (no silent drop).
+    SupervisorHarnessSwitchTick,
+    /// `#actorswitchdefer`: the supervisor restart loop (run.rs) re-read the changed
+    /// frontmatter, re-resolved the harness, and respawned the new harness FRESH
+    /// (`agent_restart_performed`), completing the deferred switch.
+    PerformDeferredHarnessRestart,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -636,6 +666,20 @@ struct RecycleClearModel {
     /// cycle observed the fresh binary or mapped to the existing recycle-failure
     /// operator-verify buckets.
     jb_run_recycle_probe_pending: bool,
+    /// `#actorswitchdefer`: the harness this supervisor LAUNCHED with (the
+    /// authoritative actor's stored harness, e.g. `codex`). Empty when no
+    /// harness-switch scenario is active.
+    launch_harness: String,
+    /// `#actorswitchdefer`: the harness the CURRENT frontmatter `agent:` now
+    /// resolves to (e.g. `opencode`). Empty when no harness-switch scenario is
+    /// active. A non-empty value differing from `launch_harness` is a pending
+    /// switch that route must DEFER (not replace the live pane) and the idle-watch
+    /// must drive to a fresh restart.
+    frontmatter_harness: String,
+    /// `#actorswitchdefer`: agent-change-restart knob (`#agentreloadrestart`). When
+    /// false the idle-watch never restarts on a harness change, so the route defer
+    /// would never self-heal — route must bail explicitly. Default ON.
+    agent_change_restart_enabled: bool,
 }
 
 #[derive(Debug, Default)]
@@ -818,6 +862,27 @@ struct Coverage {
     /// active `exchange` area auto-resolved operator-wins with NO ack noise, while
     /// the identical conflict INSIDE the active area raised an ack.
     semantic_merge_scope_gated_acks: usize,
+    /// `#actorswitchdefer`: a `route` harness-switch (e.g. codex→opencode) found a
+    /// healthy old-harness authoritative actor and DEFERRED to the boundary restart
+    /// (`mismatched_authoritative_actor_can_be_replaced == false`) instead of
+    /// replacing the live pane.
+    actor_switch_route_defers: usize,
+    /// `#actorswitchdefer`: the supervisor idle-watch detected the frontmatter
+    /// harness change (`harness_change_detected`).
+    actor_switch_changes_detected: usize,
+    /// `#actorswitchdefer`: the idle-watch requested a FRESH restart at a quiet
+    /// dispatch-ready boundary (`agent_restart_triggered`).
+    actor_switch_restarts_triggered: usize,
+    /// `#actorswitchdefer`: the supervisor respawned the new harness fresh
+    /// (`agent_restart_performed`), completing the deferred switch.
+    actor_switch_restarts_performed: usize,
+    /// `#actorswitchdefer`: a paused/stuck supervisor could not reach the restart
+    /// boundary, so the idle-watch held the deferred switch pending (no silent drop)
+    /// and the route bail carried the `restart-supervisor` recovery suffix.
+    actor_switch_defer_bail_recoveries: usize,
+    /// `#actorswitchdefer` Part B: route bailed EXPLICITLY because
+    /// `agent_change_restart` was disabled (the defer would never self-heal).
+    actor_switch_restart_disabled_bails: usize,
 }
 
 impl Coverage {
@@ -972,6 +1037,12 @@ impl Coverage {
         self.semantic_merge_operator_wins += other.semantic_merge_operator_wins;
         self.semantic_merge_delete_acks += other.semantic_merge_delete_acks;
         self.semantic_merge_scope_gated_acks += other.semantic_merge_scope_gated_acks;
+        self.actor_switch_route_defers += other.actor_switch_route_defers;
+        self.actor_switch_changes_detected += other.actor_switch_changes_detected;
+        self.actor_switch_restarts_triggered += other.actor_switch_restarts_triggered;
+        self.actor_switch_restarts_performed += other.actor_switch_restarts_performed;
+        self.actor_switch_defer_bail_recoveries += other.actor_switch_defer_bail_recoveries;
+        self.actor_switch_restart_disabled_bails += other.actor_switch_restart_disabled_bails;
     }
 }
 
@@ -1992,6 +2063,255 @@ fn route_sim_restart_drain_waits_for_dispatch_ready_prompt_before_send() {
     assert!(
         !ops_log.contains("attempt=2"),
         "a correct restart drain must never log a second dispatch_inject attempt:\n{ops_log}"
+    );
+}
+
+#[test]
+fn route_sim_harness_switch_defers_then_idle_watch_drives_fresh_restart() {
+    // `#actorswitchdefer` Part B: the operator switched the doc frontmatter
+    // `agent: codex → opencode` while a HEALTHY codex authoritative actor owns the
+    // live pane (the equityfundingsource.md report). Route must DEFER (not replace
+    // the live codex pane), and the supervisor idle-watch must drive the deferred
+    // restart sequence at a quiet dispatch-ready boundary:
+    //   harness_change_detected → agent_restart_triggered → agent_restart_performed.
+    let mut world = SimWorld::new(7_101);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Ready);
+
+    // The frontmatter `agent:` flips codex→opencode while the codex actor is live.
+    world
+        .apply(SimCommand::SwitchFrontmatterHarness {
+            from: "codex",
+            to: "opencode",
+        })
+        .unwrap();
+
+    // (a) Route DEFERS instead of replacing the live pane.
+    let before_defers = world.coverage.actor_switch_route_defers;
+    world
+        .apply(SimCommand::DispatchRouteAfterHarnessSwitch)
+        .unwrap();
+    assert_eq!(
+        world.coverage.actor_switch_route_defers,
+        before_defers + 1,
+        "a healthy old-harness actor must DEFER, not be replaced"
+    );
+    assert_eq!(
+        world.coverage.route_dispatch_acceptances, 0,
+        "a deferred harness switch must NOT accept a dispatch into the old pane"
+    );
+    assert_eq!(
+        world.coverage.actor_switch_restart_disabled_bails, 0,
+        "agent_change_restart is ON, so the route must not take the disabled-bail path"
+    );
+    let ops_log = world.ops_log.join("\n");
+    assert!(
+        ops_log.contains("route_authoritative_actor_harness_mismatch_deferred")
+            && ops_log.contains("action=defer_to_boundary_restart")
+            && ops_log.contains("recovery=agent-doc_session_restart-supervisor"),
+        "route defer must log the boundary-restart defer + recovery hint:\n{ops_log}"
+    );
+
+    // (b) The supervisor idle-watch drives the restart sequence. At a quiet
+    // dispatch-ready boundary (actor Ready, queue resumed) the gate returns
+    // `Restart`, emitting harness_change_detected → agent_restart_triggered.
+    world.apply(SimCommand::SupervisorHarnessSwitchTick).unwrap();
+    assert_eq!(
+        world.coverage.actor_switch_changes_detected, 1,
+        "the idle-watch must DETECT the harness change"
+    );
+    assert_eq!(
+        world.coverage.actor_switch_restarts_triggered, 1,
+        "a quiet dispatch-ready boundary must TRIGGER the fresh restart"
+    );
+
+    // The supervisor restart loop respawns opencode fresh: agent_restart_performed.
+    world
+        .apply(SimCommand::PerformDeferredHarnessRestart)
+        .unwrap();
+    assert_eq!(
+        world.coverage.actor_switch_restarts_performed, 1,
+        "the deferred restart must be PERFORMED, completing the switch"
+    );
+
+    // The full ordered sequence must be present, in order.
+    let ops_log = world.ops_log.join("\n");
+    let detected = ops_log
+        .find("harness_change_detected")
+        .expect("harness_change_detected must be logged");
+    let triggered = ops_log
+        .find("agent_restart_triggered")
+        .expect("agent_restart_triggered must be logged");
+    let performed = ops_log
+        .find("agent_restart_performed")
+        .expect("agent_restart_performed must be logged");
+    assert!(
+        detected < triggered && triggered < performed,
+        "restart-flow markers must appear in order detected→triggered→performed:\n{ops_log}"
+    );
+    assert!(
+        ops_log.contains("old=codex new=opencode")
+            && ops_log.contains("old_harness=codex new_harness=opencode"),
+        "the restart-flow markers must name the codex→opencode switch:\n{ops_log}"
+    );
+
+    // After the switch the supervisor now runs opencode — a further tick is a no-op
+    // (no standing change), proving the switch is fully resolved (not stuck pending).
+    let detected_before = world.coverage.actor_switch_changes_detected;
+    world.apply(SimCommand::SupervisorHarnessSwitchTick).unwrap();
+    assert_eq!(
+        world.coverage.actor_switch_changes_detected, detected_before,
+        "once launch==frontmatter the switch is resolved; no further change is detected"
+    );
+}
+
+#[test]
+fn route_sim_harness_switch_paused_supervisor_holds_pending_no_silent_drop() {
+    // `#actorswitchdefer` Part B regression: this is the dead-end the operator hit —
+    // the codex→opencode switch deferred, but the supervisor was PAUSED (stale
+    // #rt83/#qflood pause), so the idle-watch could not reach the restart boundary.
+    // The defer must NOT be a silent drop: the route bail carries the
+    // `restart-supervisor` recovery suffix, and the idle-watch DETECTS the change but
+    // HOLDS the switch pending (never triggers a restart into the paused supervisor).
+    let mut world = SimWorld::new(7_102);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    // The stale supervisor pause: the idle-watch drain boundary cannot fire.
+    world.apply(SimCommand::AdminPauseQueue).unwrap();
+    assert!(matches!(
+        world.route.queue_control,
+        QueueControlState::Paused
+    ));
+
+    world
+        .apply(SimCommand::SwitchFrontmatterHarness {
+            from: "codex",
+            to: "opencode",
+        })
+        .unwrap();
+
+    // Route still DEFERS (healthy old-harness actor) AND carries the recovery suffix.
+    world
+        .apply(SimCommand::DispatchRouteAfterHarnessSwitch)
+        .unwrap();
+    assert_eq!(
+        world.coverage.actor_switch_route_defers, 1,
+        "a paused supervisor still defers a healthy old-harness actor"
+    );
+    assert_eq!(
+        world.coverage.actor_switch_defer_bail_recoveries, 1,
+        "the paused/stuck defer bail must carry the restart-supervisor recovery suffix"
+    );
+    let ops_log = world.ops_log.join("\n");
+    assert!(
+        ops_log.contains("queue_paused=true")
+            && ops_log.contains("recovery=agent-doc_session_restart-supervisor"),
+        "the paused defer bail must surface the recovery command:\n{ops_log}"
+    );
+
+    // The idle-watch ticks repeatedly while paused. It must DETECT the change every
+    // time (so the switch is never silently lost) but NEVER trigger a restart into
+    // the paused supervisor — the switch is held pending the boundary.
+    for _ in 0..5 {
+        world.apply(SimCommand::SupervisorHarnessSwitchTick).unwrap();
+    }
+    assert_eq!(
+        world.coverage.actor_switch_changes_detected, 5,
+        "the deferred switch must keep being detected (no silent drop) while paused"
+    );
+    assert_eq!(
+        world.coverage.actor_switch_restarts_triggered, 0,
+        "no restart may be triggered into a paused supervisor (no boundary reached)"
+    );
+    assert_eq!(
+        world.coverage.actor_switch_restarts_performed, 0,
+        "no restart may be performed while the switch is held pending"
+    );
+    // The pending switch is still present in the model — nothing dropped it.
+    assert_eq!(world.route.queue_control, QueueControlState::Paused);
+
+    // Operator runs `restart-supervisor` (resume): the boundary reopens and the next
+    // tick drives the held switch through to a fresh restart — the dead-end recovers.
+    world.apply(SimCommand::AdminResumeQueue).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::SupervisorHarnessSwitchTick).unwrap();
+    assert_eq!(
+        world.coverage.actor_switch_restarts_triggered, 1,
+        "after resume the held switch must finally trigger the fresh restart"
+    );
+    world
+        .apply(SimCommand::PerformDeferredHarnessRestart)
+        .unwrap();
+    assert_eq!(
+        world.coverage.actor_switch_restarts_performed, 1,
+        "the recovered switch must complete with agent_restart_performed"
+    );
+}
+
+#[test]
+fn route_sim_harness_switch_disabled_restart_bails_explicitly_no_silent_proceed() {
+    // `#actorswitchdefer` Part B: when `agent_change_restart` is DISABLED the
+    // idle-watch will NEVER restart on a harness change, so the route defer would be
+    // a permanent dead-end. Route must bail EXPLICITLY with that fact rather than
+    // silently proceeding, replacing the pane, or handing back a restart-supervisor
+    // hint that will not switch harnesses.
+    let mut world = SimWorld::new(7_103);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::DisableAgentChangeRestart).unwrap();
+
+    world
+        .apply(SimCommand::SwitchFrontmatterHarness {
+            from: "codex",
+            to: "opencode",
+        })
+        .unwrap();
+
+    world
+        .apply(SimCommand::DispatchRouteAfterHarnessSwitch)
+        .unwrap();
+
+    // Explicit disabled-bail — NOT a silent proceed and NOT a pane replacement.
+    assert_eq!(
+        world.coverage.actor_switch_restart_disabled_bails, 1,
+        "a disabled agent_change_restart must take the explicit disabled-bail path"
+    );
+    assert_eq!(
+        world.coverage.actor_switch_route_defers, 1,
+        "the route still recognizes this as a deferred (not replaced) switch"
+    );
+    assert_eq!(
+        world.coverage.route_dispatch_acceptances, 0,
+        "the disabled bail must NOT silently proceed with a dispatch into the old pane"
+    );
+    assert_eq!(
+        world.coverage.actor_switch_defer_bail_recoveries, 0,
+        "the disabled bail must NOT hand back the self-heal restart-supervisor suffix"
+    );
+    let ops_log = world.ops_log.join("\n");
+    assert!(
+        ops_log.contains("agent_change_restart=disabled")
+            && ops_log.contains("action=bail_restart_disabled"),
+        "the disabled bail must explicitly state agent_change_restart=disabled:\n{ops_log}"
+    );
+    assert!(
+        !ops_log.contains("action=defer_to_boundary_restart"),
+        "a disabled restart must not claim a boundary restart will fire:\n{ops_log}"
+    );
+
+    // Even if the idle-watch ticks, the knob-off gate is a no-op: the change is
+    // detected (observable) but NO restart is ever triggered/performed.
+    for _ in 0..3 {
+        world.apply(SimCommand::SupervisorHarnessSwitchTick).unwrap();
+    }
+    assert_eq!(
+        world.coverage.actor_switch_restarts_triggered, 0,
+        "a knob-off idle-watch must never trigger a restart"
+    );
+    assert_eq!(
+        world.coverage.actor_switch_restarts_performed, 0,
+        "a knob-off idle-watch must never perform a restart"
     );
 }
 

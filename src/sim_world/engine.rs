@@ -17,6 +17,10 @@ impl SimWorld {
                 // ON in production (`resolve_supervisor_auto_recycle`), so the model's
                 // baseline matches. Opt out via `DisableSupervisorAutoRecycle`.
                 auto_recycle: true,
+                // `#actorswitchdefer`: agent-change-restart defaults ON in production
+                // (`resolve_agent_change_restart`). Opt out via
+                // `DisableAgentChangeRestart`.
+                agent_change_restart_enabled: true,
                 ..RecycleClearModel::default()
             },
             sync: SyncProjection::default(),
@@ -522,6 +526,21 @@ impl SimWorld {
             SimCommand::RequestSupervisorRestart => {
                 self.recycle_clear.restart_requested = true;
             }
+            SimCommand::SwitchFrontmatterHarness { from, to } => {
+                self.switch_frontmatter_harness(from, to);
+            }
+            SimCommand::DispatchRouteAfterHarnessSwitch => {
+                self.dispatch_route_after_harness_switch();
+            }
+            SimCommand::DisableAgentChangeRestart => {
+                self.recycle_clear.agent_change_restart_enabled = false;
+            }
+            SimCommand::SupervisorHarnessSwitchTick => {
+                self.supervisor_harness_switch_tick();
+            }
+            SimCommand::PerformDeferredHarnessRestart => {
+                self.perform_deferred_harness_restart();
+            }
         }
         Ok(())
     }
@@ -715,6 +734,180 @@ impl SimWorld {
         self.route.pending_dispatch = None;
         self.route.supervisor_lease_generation = Some(generation);
         self.coverage.route_generation_rebinds += 1;
+    }
+
+    /// `#actorswitchdefer`: model the operator editing the document frontmatter
+    /// `agent:` from `from` to `to` while a live actor of the OLD harness owns the
+    /// pane. Records the launch harness (the authoritative actor's stored harness)
+    /// and the new frontmatter-resolved harness; the live actor stays Ready (a
+    /// healthy old-harness authority that route must NOT replace).
+    fn switch_frontmatter_harness(&mut self, from: &str, to: &str) {
+        self.recycle_clear.launch_harness = from.to_string();
+        self.recycle_clear.frontmatter_harness = to.to_string();
+    }
+
+    /// `#actorswitchdefer`: model a `route` dispatch (JB `Run Agent Doc`) landing
+    /// while the frontmatter harness no longer matches the live actor's harness.
+    ///
+    /// Mirrors `route/authoritative_actor.rs::load_authoritative_actor_binding`:
+    /// - The replace-or-defer guard `mismatched_authoritative_actor_can_be_replaced`
+    ///   returns `false` for a healthy, non-closed old-harness actor — so route
+    ///   DEFERS (does not replace the live pane).
+    /// - When `agent_change_restart` is DISABLED the defer would never self-heal, so
+    ///   route bails EXPLICITLY (`action=bail_restart_disabled`) rather than handing
+    ///   back a `restart-supervisor` recovery hint that will not switch harnesses.
+    /// - Otherwise it bails with the operator-actionable defer message, carrying the
+    ///   paused/stuck `restart-supervisor` recovery suffix when the boundary restart
+    ///   cannot fire yet (no silent drop of the switch).
+    fn dispatch_route_after_harness_switch(&mut self) {
+        let pending_switch = !self.recycle_clear.frontmatter_harness.is_empty()
+            && self.recycle_clear.frontmatter_harness != self.recycle_clear.launch_harness;
+        if !pending_switch {
+            return;
+        }
+        // The live old-harness actor's health/state. Mirrors the production
+        // `mismatched_authoritative_actor_can_be_replaced` rule: replaceable ONLY
+        // when the supervisor is unhealthy OR the actor is Closed. A healthy
+        // Ready/Busy/WaitingInput old-harness actor is still authoritative → defer.
+        let actor_closed =
+            matches!(self.route.durable.lifecycle, SupervisorLifecycle::Closed);
+        let supervisor_unhealthy = matches!(
+            self.route.durable.lifecycle,
+            SupervisorLifecycle::Starting
+        ) && self.route.supervisor_lease_generation.is_none();
+        let can_replace = actor_closed || supervisor_unhealthy;
+        if can_replace {
+            // Not the deferred path: a stale/closed actor is replaced by the normal
+            // create/rebind path. Out of scope for this regression.
+            return;
+        }
+
+        let old = self.recycle_clear.launch_harness.clone();
+        let new = self.recycle_clear.frontmatter_harness.clone();
+        // The switch is DEFERRED, never a live-pane replacement.
+        self.coverage.actor_switch_route_defers += 1;
+        self.coverage.route_dispatch_acceptances += 0; // no dispatch acceptance on a defer
+
+        if !self.recycle_clear.agent_change_restart_enabled {
+            // Part B explicit disabled-bail: the defer would never self-heal.
+            self.coverage.actor_switch_restart_disabled_bails += 1;
+            self.record_ops_proof(format!(
+                "route_authoritative_actor_harness_mismatch_deferred stored_harness={old} expected_harness={new} agent_change_restart=disabled action=bail_restart_disabled"
+            ));
+            return;
+        }
+
+        // The pane is paused / not at a dispatch-ready boundary while a turn is in
+        // flight or the queue is paused — the boundary restart cannot fire yet, so
+        // the bail must carry the `restart-supervisor` recovery suffix and the switch
+        // must be held pending (no silent drop).
+        let queue_paused =
+            matches!(self.route.queue_control, QueueControlState::Paused);
+        let turn_active = matches!(
+            self.route.durable.lifecycle,
+            SupervisorLifecycle::Busy | SupervisorLifecycle::WaitingInput
+        );
+        if queue_paused || turn_active {
+            self.coverage.actor_switch_defer_bail_recoveries += 1;
+            self.record_ops_proof(format!(
+                "route_authoritative_actor_harness_mismatch_deferred stored_harness={old} expected_harness={new} queue_paused={queue_paused} action=defer_to_boundary_restart recovery=agent-doc_session_restart-supervisor"
+            ));
+        } else {
+            self.record_ops_proof(format!(
+                "route_authoritative_actor_harness_mismatch_deferred stored_harness={old} expected_harness={new} action=defer_to_boundary_restart recovery=agent-doc_session_restart-supervisor"
+            ));
+        }
+    }
+
+    /// `#actorswitchdefer`: one supervisor idle-watch tick for a pending harness
+    /// switch. Drives the production `agent_change_restart_decision` boundary gate
+    /// (`#agentreloadrestart`) and emits the SAME ops-log markers `idle_watch.rs`
+    /// does: `harness_change_detected` on any detected change, and
+    /// `agent_restart_triggered` only when the decision is `Restart` (knob on + a
+    /// quiet dispatch-ready boundary). A paused/stuck pane stays at
+    /// `WaitForBoundary` — detection still fires, the trigger does NOT, and the
+    /// switch is held pending (no silent drop).
+    fn supervisor_harness_switch_tick(&mut self) {
+        use agent_doc_orchestration::start::decisions::{
+            AgentChangeRestartAction, agent_change_restart_decision,
+        };
+        let pending_switch = !self.recycle_clear.frontmatter_harness.is_empty()
+            && self.recycle_clear.frontmatter_harness != self.recycle_clear.launch_harness;
+        if !pending_switch {
+            return;
+        }
+        let prompt_visible =
+            matches!(self.route.durable.lifecycle, SupervisorLifecycle::Ready);
+        let turn_active = matches!(
+            self.route.durable.lifecycle,
+            SupervisorLifecycle::Busy | SupervisorLifecycle::WaitingInput
+        );
+        // A paused queue means the supervisor idle-watch does not tick the drain
+        // boundary; model it as "no dispatch-ready boundary reached".
+        let queue_paused =
+            matches!(self.route.queue_control, QueueControlState::Paused);
+        let boundary_prompt_visible = prompt_visible && !queue_paused;
+
+        let decision = agent_change_restart_decision(
+            true,
+            self.recycle_clear.agent_change_restart_enabled,
+            boundary_prompt_visible,
+            turn_active,
+        );
+
+        let old = self.recycle_clear.launch_harness.clone();
+        let new = self.recycle_clear.frontmatter_harness.clone();
+        // Detection fires on every observed change (deduped in production per new
+        // harness; the model counts each tick that observes the change for the
+        // regression assertion that detection is never silently dropped).
+        self.coverage.actor_switch_changes_detected += 1;
+        self.record_ops_proof(format!(
+            "harness_change_detected old={old} new={new} gate={decision:?}"
+        ));
+
+        match decision {
+            AgentChangeRestartAction::Restart => {
+                // Request a FRESH restart (no resume args) at the quiet boundary.
+                self.recycle_clear.restart_requested = true;
+                self.coverage.actor_switch_restarts_triggered += 1;
+                self.record_ops_proof(format!(
+                    "agent_restart_triggered old={old} new={new} action=request_fresh_restart"
+                ));
+            }
+            AgentChangeRestartAction::WaitForBoundary => {
+                // The switch is HELD pending (a later quiet boundary fires it). No
+                // silent drop — `frontmatter_harness` stays set.
+            }
+            AgentChangeRestartAction::None => {
+                // Knob off: the idle-watch never restarts. The route disabled-bail
+                // owns the operator guidance in that state.
+            }
+        }
+    }
+
+    /// `#actorswitchdefer`: the supervisor restart loop respawned the new harness
+    /// FRESH after the deferred switch was triggered. Re-resolves the harness from
+    /// the current frontmatter, rebinds the actor to the new harness, and emits
+    /// `agent_restart_performed`, completing the switch.
+    fn perform_deferred_harness_restart(&mut self) {
+        if !self.recycle_clear.restart_requested
+            || self.recycle_clear.frontmatter_harness.is_empty()
+        {
+            return;
+        }
+        let old = self.recycle_clear.launch_harness.clone();
+        let new = self.recycle_clear.frontmatter_harness.clone();
+        self.recycle_clear.restart_requested = false;
+        // The supervisor now runs the new harness: launch == frontmatter.
+        self.recycle_clear.launch_harness = new.clone();
+        // Fresh restart: a new generation/pane comes up Starting then settles Ready.
+        self.bind_route_owner();
+        self.route.durable.lifecycle = SupervisorLifecycle::Ready;
+        self.route.projection = self.route.durable.clone();
+        self.coverage.actor_switch_restarts_performed += 1;
+        self.record_ops_proof(format!(
+            "agent_restart_performed old_harness={old} new_harness={new} action=spawn_fresh_harness"
+        ));
     }
 
     pub(crate) fn clear_session_context(&mut self) -> Result<()> {

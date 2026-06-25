@@ -94,7 +94,17 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=file_ipc p
 **Verification.** `make check` green: clippy clean (lib), 5112 tests passed / 241 skipped. Release build installed + lib deployed (`libagent_doc-0.34.48.so`), controllers auto-marked to recycle. (The one transient `sync::tests::safe_passive_sync…` failure on the first run was a parallel-tmux `duplicate session: test` race — it passed in isolation and didn't recur; unrelated to this additive change.)
 
 **Follow-ups (already queued, not this cycle):** the consumers are `#n529` (JB lazily-kt mirror), `#r5at` (VSCode lazily-js mirror), `#6n5j` (cross-editor conformance + FFI round-trip), and the lazily-spec schema pin `#gww8`/`#lazilyspecpin` (sibling `lazily-spec` session). `#vm7g` is code-complete + verified; closing it.
-<!-- agent:boundary:b95fc84d -->
+
+### Re: #vm7g summary restoration + orchestrate recovery + stale binary — glm-5.2
+
+**Summary restoration confirmed.** The re-added bullets (Tests, `specs/13-state-backbone.md`, `ffi.rs`, `state_backbone.rs`, `state_wire.rs`) document the already-shipped `#vm7g` work (commit `e6e63d82`, `make check` green, release lib deployed). No further action — the deleted full response section is now correctly preserved as compaction-summary bullets.
+
+**Orchestrate false positive → interrupted cycle recovered.** The plan's `handoff=orchestrate` parsed the 7 compacted-summary lines as sequential tasks and hung >120s in its inner preflight when the editor-IPC queue-convergence step never acked — the same `#mergestatemachine` / `#6b5h` write-ownership race dogfooded all session, not a defect in the summary text. `session-check` recovered with `content_ours_snapshot_next_cycle`; no response fabricated for the orphaned cycle. Did not re-run orchestrate.
+
+**Stale binary install.** `~/.cargo/bin/agent-doc` predates `e6e63d82` (cdylib was deployed but the CLI binary was not rebuilt at an unchanged `0.34.48`). Operator action before the next drain cycle: `make install` in `src/agent-doc` so live sessions run post-`e6e63d82` code. Not filed as a backlog item — it's a rebuild, not a code change.
+
+**Queue state.** 37 drainable heads remain; OpenCode has no auto-loop so each needs a fresh `/agent-doc` invocation. Preflight already auto-struck `#vm7g` (done). The semantic-completion warnings on `#fnxy`/`#kj5f`/`#cgfx` are false positives — those track the systemic SM refactor, not the `#6b5h`/`#qdedupsync` symptom patches. Next foundational heads (plans exist): `#vwj7` queue-item lifecycle SM core, `#gghx` wait-machine core, `#fnxy` merge-control SM core.
+<!-- agent:boundary:41ed2d9d -->
 <!-- /agent:exchange -->
 
 ## Queue

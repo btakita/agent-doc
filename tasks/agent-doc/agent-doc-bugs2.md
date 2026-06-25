@@ -77,7 +77,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=file_ipc patch_id=9ab691b5-9b11-4928-a7e2-31fbf89e9264 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0.json doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782353889911
 ```
-<!-- agent:boundary:7f4082fd -->
+<!-- agent:boundary:acf02fd6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -259,7 +259,7 @@ What are #next-steps to fix bugs?
 - [ ] [#fnxy] #mergestatemachine1 Define FFI write-ownership SM (Detached→Attached→EditorOwnsBuffer→BinaryWriteRequested→IpcAckProven→Committed) + editor-heartbeat liveness probe distinguishing live-editor from stale listener (#6b5h). Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#t4x1] #mergestatemachine2 Gate try_ipc/commit/disk-write on the ownership SM; route Detached/stale writes to controller-host disk path so CLI-only/no-editor never wedges on no_ack. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#kj5f] #mergestatemachine3 JB+VSCode report attach/detach/ownership through SM (thin reporters via #lazilystatesync); SimWorld + live repro for File Cache Conflict + #6b5h wedge. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
-- [ ] 🚧 [#vm7g] #lazilystatesync2 Back agent_doc_state_projection with a lazily-rs Context/Cells graph + add agent_doc_state_subscribe delta export (lazily-spec format); keep full-snapshot cold read. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
+- [ ] [#vm7g] #lazilystatesync2 Back agent_doc_state_projection with a lazily-rs Context/Cells graph + add agent_doc_state_subscribe delta export (lazily-spec format); keep full-snapshot cold read. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#n529] #lazilystatesync3 JB plugin: replace StateProjectionBridge manual JSON render with a lazily-kt mirror graph applying FFI deltas; EditorCommandStateMachine becomes a derived lazily-kt cell. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#r5at] #lazilystatesync4 VSCode plugin: lazily-js mirror graph applying FFI state deltas. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#6n5j] #lazilystatesync5 Parity+tests: lazily-spec cross-editor conformance (extend EditorCommandStateMachineTest to reactive path) + FFI round-trip proving kt/js mirror converges to rs authoritative graph. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md

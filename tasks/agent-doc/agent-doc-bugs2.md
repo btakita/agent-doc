@@ -262,7 +262,29 @@ Four backlog items landed toward the goal; merged to `main` `db500979` (+ plugin
 **#4pdp — OpenCode reverse list** (`20a1c62a`, *queue*): not reproducible — the OpenCode send/parse/merge paths are all order-stable; the reversal was a CRDT merge-during-finalize artifact already root-fixed by hap7 scoped merge (`#gf5n`). Added order-stability regression locks. If still seen live, it's upstream in `opencode run` stdout (agent-doc writes it verbatim).
 
 Remaining toward goal: `#p2j4` (JB File-Cache-Conflict remaining write path), `#0bmv` (queue-edit-race plan consolidation), `#r5at`/`#6n5j` (lazily-statesync VSCode + parity), `#actorswitchdefer`; deeper `#qcellmerge1` (per-cell CRDT merge). Operator-gated: `#crdtauth6`, `#nsfz`, `#kj5f`.
-<!-- agent:boundary:2bbde9c4 -->
+
+### Re: goal drive — wave 2 + evidence ledger (IPC / queue / stray-state) — opus-4-8
+
+Wave 2 merged to main `3a3538d8` (`make check` **5267 passed**, release green, JB 0.2.194 + VSCode 0.2.34 built). With this, every **agent-doable** backlog item mapping to the goal is landed; only `[operator-verify]` live-eyeballs remain.
+
+**Wave 2 items (all merged + green):**
+- **#qcellmerge1** (`20bf881b`) — per-cell/per-component merge isolation is already shipped on main (`merge_by_component` + per-node base + AST-keyed reconciliation); proved cross-cell splicing is impossible (exchange↔queue, multi-component test).
+- **#p2j4** (`241c287c`) — File Cache Conflict root cause: PromptPoller's 1.5s timer `VirtualFile.refresh` against unsaved buffers; gated it. Confirmed the Rust post-commit reconcile is already IPC-first.
+- **#r5at** (`652707e0`) — VSCode lazily-js reactive mirror (TS analog of the JB mirror).
+- **#6n5j** (`e1ab54d7`) — rs/kt/js mirror-convergence parity pinned to the shared lazily-spec fixture + reactive EditorCommandStateMachineTest.
+- **#actorswitchdefer** (`fc768364`) — restart-flow SimWorld + route disabled-bail (tmux-ci = live/CI leg).
+- **#0bmv** (`3ec5526b`) — queue-edit-race plans consolidated (failure modes mapped resolved-vs-open).
+
+## Goal evidence ledger (all on main, `make check` 5267 green)
+
+**IPC issues fixed:** state-vector commit barrier replacing the fragile patch-ack (`#crdtauth3/4`, root-fix for `no_ack`/`ipc_proof_insufficient`/postcommit-worktree) · live delta fan-out over IPC (`#crdtauth5`) · disk demotion · codefence-strip fence-aware parser (`#npe1`) · non-blocking capacity proof (`#capproofbg`) · behind-editor refresh eliminated (`#p2j4`).
+
+**Queue issues fixed:** per-item lifecycle-SM convergence + idempotence proptest + re-emit-storm SimWorld → duplicates structurally impossible (`#cgfx`/`#brtc`/`#queuestatemachine1-3`) · hosting-epoch queue isolation (`#xdocsuper`) · per-cell merge no-cross-splice (`#qcellmerge1`) · opencode-list reversal (`#4pdp`, hap7) · race plans consolidated (`#0bmv`).
+
+**Stray state → reactive SMs + graph:** `state_backbone.rs` event-sourced lazily projection; SMs = queue-item / merge-control / cycle / crdt-authority / SupervisorHosting / wait_machine (`#waitmachine` with a Lean `no_hang` proof); reactive mirrors JB (`#n529b`) + VSCode (`#r5at`) + rs/kt/js parity (`#6n5j`) + pinned spec vocab (`#gww8`).
+
+**Remaining = operator live-eyeball only (code-complete + tested, NOT open bugs):** `#crdtauth6` (live two-editor relay hookup), `#nsfz` (startup-deadline live), `#kj5f` (merge-SM live editor). These need a live IDE/pane to verify; nothing agent-doable remains. Make them live via the recovery: install the new binary/cdylib + restart supervisors.
+<!-- agent:boundary:fc11e5ee -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -286,8 +308,8 @@ Remaining toward goal: `#p2j4` (JB File-Cache-Conflict remaining write path), `#
 - ~~:pushpin: [#8g9w]~~
 - ~~:pushpin: [#6mjw]~~
 - ~~:pushpin: [#spy9]~~
-- :pushpin: [#r5at]
-- :pushpin: [#6n5j]
+- ~~:pushpin: [#r5at]~~
+- ~~:pushpin: [#6n5j]~~
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
 ```
@@ -334,9 +356,9 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 - :pushpin: Still getting JB `File Cache Conflict` dialogs.
 - :pushpin: Opencode responses are reverse ordering numeric lists.
 - ~~:pushpin: do [#npe1]~~
-- :pushpin: do [#p2j4]
+- ~~:pushpin: do [#p2j4]~~
 - ~~:pushpin: do [#4pdp]~~
-- :pushpin: do [#0bmv]
+- ~~:pushpin: do [#0bmv]~~
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
@@ -353,7 +375,7 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
-- :pushpin: do [#actorswitchdefer]
+- ~~:pushpin: do [#actorswitchdefer]~~
 - ~~:pushpin: do [#capproofbg]~~
 - :pushpin: do [#nsfz]
 - ~~:pushpin: do [#gghx]~~
@@ -392,12 +414,7 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#crdtauth6] [operator-verify] crdtauth5 live hookup: thin JB DocumentListener calling CrdtReplicaForwarder.forwardLocalDelta + a Kotlin Unix-socket ReplicaTransport client (writes NDJSON register/deregister/update, delivers inbound update_b64 to applyRemoteUpdate); plus the deferred VS Code koffi replica seam (editors/vscode/src/native.ts out-param marshaling). Rust fan-out + Kotlin seam already merged + tested. Plan: tasks/agent-doc/plan-crdt-authority-model.md
-- [ ] [#r5at] #lazilystatesync4 VSCode plugin: lazily-js mirror graph applying FFI state deltas. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
-- [ ] [#6n5j] #lazilystatesync5 Parity+tests: lazily-spec cross-editor conformance (extend EditorCommandStateMachineTest to reactive path) + FFI round-trip proving kt/js mirror converges to rs authoritative graph. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
-- [ ] [#p2j4] #jbcfdiag=JB File Cache Conflict: investigate remaining write-path triggering the JB VFS dialog beyond IPC-first writes
-- [ ] [#0bmv] #qeditrace=Consolidate queue-edit-during-active-turn race plans (plan-qdurcrash + plan-supervisor-direct-queue-edit-race)
-- [ ] [#actorswitchdefer] [focused-cycle] Part B: NEW SimWorld restart-flow tests (codex→opencode: assert route defers + idle-watch emits harness_change_detected→agent_restart_triggered→agent_restart_performed; paused/stuck regression asserts defer-bail recovery suffix + no silent drop) + route-side agent_change_restart-disabled explicit bail. Part A shipped (6c7455a8); SPEC.md:141 defer contract reconciled (d2312da7). Needs make tmux-ci + new restart-flow SimWorld infra. Plan: tasks/agent-doc/plan-actor-switch-defer-recovery.md
 <!-- /agent:backlog -->
 
 ## Review

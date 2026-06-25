@@ -73,7 +73,25 @@ Everything downstream is unchanged regardless of mechanism: derived cells are st
 - `#lazilycrdtspec` backlog item re-scoped to the pluggable-mechanism framing.
 
 `#lazilycrdtspec` stays `[focused-cycle]` (sibling-repo `src/lazily-spec`) — the actual spec authoring drains in its own fresh-context cycle with this framing baked in.
-<!-- agent:boundary:db1d2ca4 -->
+
+### Re: #lazilycrdtspec — spec authored: CRDT as the first multi-write mechanism — opus-4-8
+
+Drained the focused-cycle item. The prior cycle re-scoped the framing; this cycle **authored the spec** in the sibling repo `src/lazily-spec` (commit `6e86dea`, superproject gitlink bumped `e6f5feea7`).
+
+**New normative chapter `cell-model.md`** (wired into the mdbook: `SUMMARY.md`, `introduction.md`; renders to `book/cell-model.html`):
+
+- **Single axis = concurrent-writer count.** A cell is **single-writer** (`local`/`direct`, no merge) or **multi-write** (`merge: <mechanism>` ingress). Kind is static — chosen by what the cell represents, no dynamic per-write mode-switching. Locality does not make a cell multi-write; a *second concurrent writer* does (a one-way mirror like `#lazilystatesync` stays single-writer).
+- **Multi-write = one category parameterized by a pluggable `merge:` mechanism — NOT a hardcoded `crdt` cell kind.** `crdt` is the **first** normative mechanism (converges without coordination); `lww` / `ot` / `lease` / `custom` are reserved extension points. Every mechanism MUST be deterministic; an unimplemented one MUST be rejected explicitly, never aliased to `crdt`.
+- **Merge is an ingress op on ROOT cells only.** Derived cells are never multi-write (deterministic functions of roots → single-writer); effects stay single-writer authority (state convergence ≠ effect authorization).
+- **Cell = merge unit (`#qcellmerge1`).** Each multi-write cell converges independently; a merge MUST NOT move content across cell boundaries — cross-cell contamination (the `crdt::merge` whole-document splice class) becomes impossible by construction.
+- **Liveness vs mechanism.** The attach/detach authority SM governs how many writers are *live*, never a cell's kind/mechanism.
+
+**Wire surface:** `protocol.md`'s Distributed plane reframed as `merge: crdt` (one mechanism, not *the* mechanism); `schemas/distributed.json` gains a `MergeMechanism` enum (`crdt` first) + a `CellKind` descriptor (`single_writer` | `multi_write {merge}`).
+
+**Verified:** `distributed.json` valid JSON; `make check` (Lean formal model) green; `mdbook build` renders `cell-model.html`.
+
+This is the foundation rung for the CRDT-authority model (`plan-crdt-authority-model.md`); the implementation siblings `#lazilycrdtrs` / `#crdtauth1–4` build on it in their own focused cycles.
+<!-- agent:boundary:375934a2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -201,7 +219,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilycrdtspec] [focused-cycle] lazily-spec: specify cell kinds — local/direct (single-writer) vs multi-write (multi-writer, ingress merge on root cells only) with a PLUGGABLE merge mechanism; CRDT is the FIRST multi-write mechanism, not the only one (leave room for LWW/OT/lease-serialized/custom-merge), modeled as a multi-write cell category with a merge:<mechanism> attribute (crdt first) rather than a hardcoded crdt cell kind. Multi-write cell semantics + cell-as-merge-unit. Foundation for the CRDT-authority model. Sibling-repo (src/lazily-spec) cycle. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#lazilycrdtrs] [focused-cycle] lazily-rs: implement the replicated/CRDT-backed cell kind per #lazilycrdtspec — CRDT-valued root cells, remote-op ingress merge feeding the reactive graph, direct downstream propagation unchanged. Sibling-repo (src/lazily-rs) cycle. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#crdtauth1] [focused-cycle] agent-doc authority state machine: Detached (git-authoritative, ephemeral CRDT) to EditorAttached (multi-replica) keyed on plugin attach/detach, riding the hosting-epoch backbone; extends #mergestatemachine. Plus state-vector sync protocol replacing whole-.yrs snapshot merge_by_component. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#crdtauth2] [focused-cycle] Editor-as-replica binding (FFI-first): cdylib is the CRDT node hosting a per-editor yrs replica; thin IntelliJ/VSCode bindings forward Document deltas + apply remote updates (cursor/undo preserving); plugin read/write-through FFI (completes #dsqa). Wire agent-doc shared roots (document/queue/hosting) to lazily replicated cells (per-cell merge #qcellmerge1); upgrade #lazilystatesync to bidirectional. Plan: tasks/agent-doc/plan-crdt-authority-model.md

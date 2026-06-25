@@ -260,7 +260,7 @@ Fixed and shipped (corky `ec67c22` on `origin/main`). A Google-revoked but clock
 - Commit `ec67c22` (16 files) — pushed.
 
 Next queue head: `#ckypeoplesync`.
-<!-- agent:boundary:5d7439ee -->
+<!-- agent:boundary:37919626 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -277,8 +277,8 @@ Please give me a report the performance
 - ~~[#ckywatchpanic]~~
 - ~~[#ckydedup]~~
 - ~~[#ckythread]~~
-- 🚧 [#ckytok401]
-- [#ckypeoplesync]
+- ~~[#ckytok401]~~
+- 🚧 [#ckypeoplesync]
 - [#ckyconfigunwrap]
 - [#ckyatomicwrite]
 - [#ckyunicodeslug]

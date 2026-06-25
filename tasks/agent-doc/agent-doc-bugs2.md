@@ -112,7 +112,21 @@ Implemented the replicated/CRDT cell kind per `#lazilycrdtspec`, in `src/lazily-
 **Pieces:** `MergeMechanism` enum (`Crdt` first/implemented; `Lww`/`Ot`/`Lease`/`Custom` reserved + fail-closed via `resolve()`); `Hlc`/`HlcStamp` (deterministic caller-supplied wall time); three CRDT registers `LwwRegister`/`MvRegister`/`PnCounter` (all commutative/associative/idempotent); `CellCrdt` trait; `ReplicatedCell` binding.
 
 **Verified:** 7 new unit tests + full `make check` green (all feature suites, doctests, Lean model, benchmarks); default build (no `distributed`) unaffected. Next rungs: `#crdtauth1`/`#crdtauth2`. Plan: `tasks/agent-doc/plan-crdt-authority-model.md`.
-<!-- agent:boundary:0f858373 -->
+
+### Re: #crdtauth1 — CRDT authority state machine (authority-SM rung) implemented on an isolated branch — opus-4-8
+
+Per your two choices (isolated worktree now; authority-SM extension first), I built the authority-SM rung in an **isolated git worktree** off `src/agent-doc` — no install/recycle/push, so the live (currently stale-CRDT) supervisor stays undisturbed.
+
+When I set up the worktree I found `#crdtauth1`'s authority layer **already present as uncommitted work** (`crdt_authority.rs` + a `crdt_authority_sim` SimWorld block). I reviewed it for correctness against the plan, verified it, and committed it — I did not author it from scratch.
+
+**Branch `crdtauth1-authority-sm`, commit `1b2a6e94`** (NOT merged to main, NOT installed):
+- `agent-doc-orchestration/src/crdt_authority.rs` — `CrdtAuthority { GitAuthoritative, MultiReplica }`, an additive layer over `MergeOwnershipMachine` (#mergestatemachine) + the hosting-epoch backbone (#xdocsuper1/3). `Detached`/`Committed` → GitAuthoritative (ephemeral CRDT); editor phases → MultiReplica (disk = durable boundary-checkpointed projection). `authority_from_liveness` demotes a stale `#6b5h` listener; `authority_for_document` derives per-document from the backbone projection (live editor transport, non-`ForceDiskFallback`), so a stale-overlay replay for one doc can't flip another's authority. Changes **no** runtime disk-write/merge behavior — purely derived state later rungs consult.
+- Coverage: 7 unit tests + 6 deterministic SimWorld scenarios. Full **`make check` green** (clippy `-D warnings`, full suite, sim-medium, version-sync); orchestration crate also builds in release.
+
+**Gated `#crdtauth1`** — code-complete + verified, but genuinely blocked on: (1) operator merge `crdtauth1-authority-sm` → main + install + supervisor restart (deliberately not auto-installed mid-session per the isolated-worktree choice), and (2) the deferred **state-vector sync** half, now filed as `#crdtauth1sv`.
+
+> **Queue prompt:** do [#crdtauth1]
+<!-- agent:boundary:ab79cf18 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -121,7 +135,7 @@ Implemented the replicated/CRDT cell kind per `#lazilycrdtspec`, in `src/lazily-
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: do [#lazilycrdtspec]: Make CRDT the first of several multi-write mechanisms.~~
 - ~~:pushpin: do [#lazilycrdtrs]~~
-- :pushpin: do [#crdtauth1]
+- ~~:pushpin: do [#crdtauth1]~~
 - :pushpin: do [#crdtauth2]
 - :pushpin: do [#crdtauth3]
 - :pushpin: [#brtc]
@@ -240,7 +254,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#crdtauth1] [focused-cycle] agent-doc authority state machine: Detached (git-authoritative, ephemeral CRDT) to EditorAttached (multi-replica) keyed on plugin attach/detach, riding the hosting-epoch backbone; extends #mergestatemachine. Plus state-vector sync protocol replacing whole-.yrs snapshot merge_by_component. Plan: tasks/agent-doc/plan-crdt-authority-model.md
+- [ ] [#crdtauth1sv] [focused-cycle] agent-doc state-vector sync protocol (deferred half of #crdtauth1): replace whole-.yrs snapshot merge_by_component with incremental per-replica StateVector / update exchange in the FFI node ↔ supervisor channel, gated on CrdtAuthority::MultiReplica. Builds on the authority SM (branch crdtauth1-authority-sm, 1b2a6e94). Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#crdtauth2] [focused-cycle] Editor-as-replica binding (FFI-first): cdylib is the CRDT node hosting a per-editor yrs replica; thin IntelliJ/VSCode bindings forward Document deltas + apply remote updates (cursor/undo preserving); plugin read/write-through FFI (completes #dsqa). Wire agent-doc shared roots (document/queue/hosting) to lazily replicated cells (per-cell merge #qcellmerge1); upgrade #lazilystatesync to bidirectional. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#crdtauth3] 2 [focused-cycle] State-vector commit barrier: replace finalize patch-ack with flush-all-live-editors-to-SV then snapshot then commit; root-fix for the no_ack / ipc_proof_insufficient / postcommit-worktree-corruption class. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#crdtauth4] [focused-cycle] Multiple-editor relay + awareness + disk demotion: supervisor broadcast hub for N replicas (unique client-ids, ephemeral awareness channel, commit is a consistent cut of live replicas); .yrs demoted to write-through recovery projection, FFI nodes persist replicas locally. Plan: tasks/agent-doc/plan-crdt-authority-model.md
@@ -267,6 +281,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#crdtauth1] [focused-cycle] agent-doc authority state machine: Detached (git-authoritative, ephemeral CRDT) to EditorAttached (multi-replica) keyed on plugin attach/detach, riding the hosting-epoch backbone; extends #mergestatemachine. Plus state-vector sync protocol replacing whole-.yrs snapshot merge_by_component. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [/] [#kj5f] [operator-verify] #mergestatemachine3 remaining: JB+VSCode thin reporters emit attach/detach/ownership facts through the merge-ownership SM (via #lazilystatesync) + live editor-attached/detached repro for File Cache Conflict + #6b5h wedge. DONE: SM core Phases 1-2 + deterministic scenario repros for both wedge classes (agent-doc 34d7023d). Remaining needs the operator-paused plugin install + a live editor to verify. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 <!-- /agent:review -->
 

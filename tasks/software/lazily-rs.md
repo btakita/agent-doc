@@ -94,7 +94,34 @@ Drained queue head `#lzzigbeforechange`. The `semantic_completion_match` warning
 Heads-up on the remaining two queue heads — both `semantic_completion_match` warnings are likewise suspect: `#lzzigalloc` also "split from #lzzigtodos" and the `context.zig:615/619` allocator TODOs are still live (not done), and `#lzjshygiene` is lazily-js (different language from its `#lzktconf` match). Each will be re-verified before acting when those heads drain.
 
 (Closeout note: the editor-IPC listener for this pane was wedged on a stale `ack_content_sidecar` — `ipc_proof_insufficient` / `ack_mismatch` — deadlocking the normal `finalize` CRDT path and refusing direct disk writes while "active". Used `write --commit --force-disk` to cross the commit boundary so the cycle could close; the controller reports `fresh`, so this is a sidecar divergence, not a stale binary.)
-<!-- agent:boundary:5bb3468c -->
+
+### Re: #lzzigalloc — selectable allocator modes via init_context_with_mode — glm-5.2
+
+> **Queue prompt:**
+>
+> [#lzzigalloc]
+
+
+Drained queue head `#lzzigalloc`. As with `#lzzigbeforechange`, the `semantic_completion_match` to `#lzzigtodos` was a **false positive**: `#lzzigtodos` overclaimed — the `context.zig:615/619` allocator TODOs were still live. Verified, then implemented.
+
+**Design** (resolves the backlog's "init flag vs builder, deinit ownership, link_libc interaction" questions):
+- **Ownership via a post-deinit hook.** `Context.deinit` ends with `self.allocator.destroy(self)` — i.e. it frees the Context struct through its own allocator. A stateful allocator's state therefore can't live inside the Context it backs (use-after-free on the final `destroy`). Solution: a generic optional `post_deinit_fn` / `post_deinit_state` on `Context`, captured to locals before the `destroy(self)` and invoked *after* it. Native callers leave it null (unchanged behavior); only the FFI installer sets both.
+- **AllocatorHandle (ffi.zig).** Stateful modes (`debug`, `arena`) are hosted in an `AllocatorHandle` allocated by a stateless **bootstrap** allocator (`c` if `link_libc`, else `page`), so the state outlives the Context. `destroyFromHook` matches the `fn(*anyopaque) void` hook signature.
+- **init_context_with_mode(mode).** Stateless modes (`c`/`page`/`wasm`/`smp`) resolve directly to an allocator with no state to own (comptime-guarded so libc/wasm-only allocators are never referenced on targets lacking them). Stateful modes create a handle, init the Context with its allocator, and install the hook. `SmpAllocator` is a global singleton (`std.heap.smp_allocator`) → treated as stateless.
+
+**Changes** (`src/lazily-zig`, `1a2c81d..41d773a` on `main`):
+- `src/lazily/context.zig` — `post_deinit_fn`/`post_deinit_state` fields + hook call in `deinit`; `initContextWithMode` export (`init_context_with_mode`); `statelessAllocatorFor` helper; resolved the `initContext` allocator TODOs (now cross-reference `init_context_with_mode`).
+- `src/lazily/ffi.zig` — `bootstrapAllocator()`, `AllocatorHandle` (create/allocator/destroy/destroyFromHook), `initStateForMode`; dropped the unused `smp` arm from `AllocatorState` (singleton, no state).
+- `SPEC.md` — new "Allocator modes" FFI subsection documenting all six modes + the hook ownership model.
+
+**Verify**: `zig build test` green for both `thread_safe=true` and `thread_safe=false`. Added tests: `post-deinit hook fires after free` (proves the hook runs after `destroy(self)`), `initContextWithMode: stateless page-backed context`, `initContextWithMode: arena-backed context soak` (50 iterations through the handle init/use/deinit path).
+
+**Commit+push** (preset `#spec-test-build-install-commit-push`): submodule `1a2c81d..41d773a`; superproject gitlink bump `fff41c251`.
+
+Soundness note: the deinit ordering is correct by construction (hook is the last statement in `deinit`). Caveat: `arena` mode bulk-frees on `arena.deinit()`, so the arena soak test primarily guards crashes/hook-firing rather than per-allocation UAF; the `debug` mode's per-allocation tracking is the leak/UAF backstop for real workloads. No stateful allocator state is stored inside the Context, so the recent cell/slot UAF class (capture-ctx-before-destroy) is not reintroduced.
+
+Next head `#lzjshygiene` (lazily-js conformance fixtures) — its `semantic_completion_match` to `#lzktconf` (lazily-kt) is cross-language and weak; will verify the lazily-js side before acting.
+<!-- agent:boundary:7bb089dd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -104,14 +131,13 @@ Heads-up on the remaining two queue heads — both `semantic_completion_match` w
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~[#lzzigbeforechange]~~
-- 🚧 [#lzzigalloc]
+- ~~[#lzzigalloc]~~
 - [#lzjshygiene]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzzigalloc] lazily-zig: add allocator options to Context init (context.zig:615/619 TODOs) — option to use std.heap.c_allocator and/or std.heap.ArenaAllocator instead of the caller-supplied allocator. Needs API design (init flag vs builder, deinit ownership, interaction with build_options.link_libc). Split from #lzzigtodos.
 - [ ] [#lzjshygiene] lazily-js: node_modules NOT tracked (verified: git ls-files node_modules -> 0; .gitignore covers it; no commits touch it) — purge UNNEEDED, no history rewrite required. Remaining: validate conformance fixture assertions generically (parity with #lzktconf). npm test green (27 pass).
 <!-- /agent:backlog -->
 

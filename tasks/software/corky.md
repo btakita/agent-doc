@@ -160,7 +160,23 @@ Shipped the **social publish state machine** (corky `7ee6692`, pushed to `btakit
 **Verification:** `make check` → **683 pass / 0 fail** (6 new `DraftStatus` state-machine unit tests + 36 social integration tests green); `corky audit-docs` clean for this change (16 pre-existing mtime-staleness notes unrelated). SPEC.md §12.3/§12.6/§16 updated. `make build` + `make install` done — `corky 0.29.0` live in `~/.cargo/bin`.
 
 Next queue head: `do [#ckyemailsm]` (email draft status enum).
-<!-- agent:boundary:dd27b8a0 -->
+
+### Re: do [#ckyemailsm] — opus-4-8
+
+> **Queue prompt:** do [#ckyemailsm]
+
+Shipped the **typed email draft status enum** (corky `e6d8490`, pushed to `btakita/corky` main).
+
+**What changed**
+- New `EmailDraftStatus { Draft, Review, Approved, Scheduled, Sent, Failed }` (serde lowercase) replaces the stringly-typed `EmailDraftMeta.status: String`. I kept `Review`/`Approved` (real send-gate statuses) rather than the plan's narrower 4-variant sketch, and added `Failed`.
+- `is_send_eligible()` replaces the `VALID_SEND_STATUSES` const + `to_lowercase()` compare in the `draft push --send` gate; `is_scheduled()` replaces `status.to_lowercase() != "scheduled"` in the scheduler (both YAML and legacy-regex paths); `is_terminal()` (sent/failed) so the scheduler skips terminal drafts.
+- `transition(EmailEvent)` models `draft→review→approved→scheduled→sent` (+`failed`) and rejects invalid edges.
+- **Drift fix:** an unknown status now fails parsing instead of silently mis-comparing as before. `migrate`/`new`/`validate`/`update_draft_status` paths all adapted to the typed field.
+
+**Verification:** `make check` → **700 pass / 0 fail** (4 new `EmailDraftStatus` unit tests; 237 corky-mail tests green). SPEC.md §6/§12 updated. `make build` + `make install` done.
+
+Next queue head: `do [#ckysyncsm]` (sync run-state machine, design-first).
+<!-- agent:boundary:5404bd08 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -171,8 +187,8 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#ckypubsm]
-- do [#ckyemailsm]
+- ~~do [#ckypubsm]~~
+- 🚧 do [#ckyemailsm]
 - do [#ckysyncsm]
 - do [#ckywatchsm]
 <!-- /agent:queue -->
@@ -180,7 +196,6 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ckyemailsm] P2 — Email draft status enum (EmailDraftStatus Draft/Scheduled/Sent/Failed) replacing the stringly-typed 'scheduled' compares (schedule.rs:146) + legacy **Status** regex (schedule.rs:178-189); terminal Sent/Failed so scheduler skips them. Plan: tasks/software/corky-state-machines.md
 - [ ] [#ckysyncsm] P3 — Sync run-state machine (SyncRunState Idle/Fetching/Merging/Writing/Done/Error) persisted as sidecar so a crashed watch tick / corky sync refetch resumes instead of re-fetching; design-first. Plan: tasks/software/corky-state-machines.md
 - [ ] [#ckywatchsm] P3 — Watch phase enum (WatchPhase)+typed tick schedule replacing loose cycles_since_* counters (watch.rs:320-325)+backoff/circuit-breaker for repeated phase failures (polish). Plan: tasks/software/corky-state-machines.md
 <!-- /agent:backlog -->

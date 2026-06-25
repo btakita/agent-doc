@@ -138,6 +138,26 @@ object StateProjectionBridge {
     fun mirrorEpochForFile(filePath: String): Long? =
         mirrors[documentHash(filePath)]?.takeIf { it.isInitialized }?.epoch
 
+    /**
+     * Evict the per-document mirror and owner-generation counters for [filePath]
+     * (`#jbmirrorevict` / `#nsq2`). Called when the editor tab/document closes so a
+     * reused path (move/symlink/reopen) does not surface the prior document's stale
+     * projection state — the leak behind the "sessions working on other open
+     * documents" symptom. The [mirrors] and [generations] maps are keyed by
+     * `documentHash` (SHA-256 of the canonical path) and otherwise grow
+     * monotonically over the IDE lifetime. Re-subscription lazily re-creates the
+     * mirror from a fresh cold snapshot, so aggressive eviction is safe.
+     */
+    fun evictForFile(filePath: String) {
+        val docHash = documentHash(filePath)
+        mirrors.remove(docHash)
+        val genPrefix = "$docHash:"
+        generations.keys.filter { it.startsWith(genPrefix) }.forEach { generations.remove(it) }
+    }
+
+    /** Test-only: live mirror + generation entry counts (for eviction coverage). */
+    internal fun debugEntryCounts(): Pair<Int, Int> = mirrors.size to generations.size
+
     private fun messageKind(raw: String): String? = try {
         JsonParser.parseString(raw).takeIf { it.isJsonObject }?.asJsonObject?.get("type")?.asString
     } catch (_: Exception) {

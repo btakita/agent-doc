@@ -4,6 +4,7 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
+import com.intellij.openapi.vfs.VirtualFile
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -454,5 +455,17 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
         val snapshot = captureSnapshot(event.manager.project, file) ?: return
         requestAutomaticSync(event.manager.project, snapshot, immediateFocus = true)
+    }
+
+    /**
+     * Evict the per-document state-projection mirror + generation counters when an
+     * editor tab closes (`#jbmirrorevict` / `#nsq2`). Without this the
+     * `StateProjectionBridge` maps grow monotonically and a reused path
+     * (move/symlink/reopen) surfaces the prior document's stale projection state.
+     * Re-subscription lazily re-creates the mirror from a fresh cold snapshot.
+     */
+    override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
+        if (!file.name.endsWith(".md")) return
+        StateProjectionBridge.evictForFile(file.path)
     }
 }

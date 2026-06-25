@@ -198,4 +198,31 @@ class StateProjectionBridgeTest {
         org.junit.Assert.assertFalse(mirror.isInitialized)
         assertTrue(mirror.nodeCount == 0)
     }
+
+    @Test
+    fun `evictForFile clears owner-generation counters and restarts fresh`() {
+        // #jbmirrorevict / #nsq2: the mirrors + generations maps must not leak
+        // across document close/reopen. Use a unique path so the singleton bridge
+        // state never collides with other tests.
+        val path = "/tmp/agent-doc-nsq2-evict-${System.nanoTime()}.md"
+
+        // Seed an owner-generation counter. nextGeneration mutates `generations`
+        // unconditionally (FFI only gates recordFact, which is a no-op here).
+        val firstGen = StateProjectionBridge.recordEditorPatchQueued(path, "patch-evict-seed")
+        assertNotNull(firstGen)
+        assertEquals(1L, firstGen)
+        val secondGen = StateProjectionBridge.recordEditorPatchQueued(path, "patch-evict-seed-2")
+        assertEquals(2L, secondGen)
+
+        // Evict on close.
+        StateProjectionBridge.evictForFile(path)
+
+        // After eviction the docHash-scoped generation counter is gone, so a
+        // reopened (or reused) path restarts at 1 — no stale actor_generation
+        // bleed from the prior document.
+        val reGen = StateProjectionBridge.recordEditorPatchQueued(path, "patch-evict-reseed")
+        assertEquals(1L, reGen)
+        // Mirror was never created (no FFI in unit tests); epoch stays null.
+        assertNull(StateProjectionBridge.mirrorEpochForFile(path))
+    }
 }

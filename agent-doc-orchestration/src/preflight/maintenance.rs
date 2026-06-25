@@ -1665,69 +1665,24 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         eprintln!("[preflight] queue: collapsed {dropped} duplicate queue node-key(s)");
     }
 
-    // Collapse duplicate BARE id-reference heads (`[#id]` / `#id`) that the
-    // backlog→queue mirror / CRDT replay re-emitted for the same backlog item,
-    // keeping the first (#qdup-bare-id). The node-key dedup above only removes
-    // exact-same-occurrence dups, so a re-emitted `[#sqedit-race]` accumulated as a
-    // visible duplicate ("agent-doc duplicated my queue items"). This deliberately
-    // does NOT collapse `do [#id]` directive duplicates — those can be intentional
-    // "run it twice" intent (#queue-dedup-destroys-intentional-duplicates) — nor any
-    // free-text head.
-    if let Some(deduped_entries) =
-        crate::queue::dedup_bare_id_reference_heads(&activation.entries_after)
-    {
-        let dropped = activation.entries_after.len() - deduped_entries.len();
-        let new_body = crate::queue::render(&deduped_entries);
-        current_content = {
-            let comps = crate::component::parse(&current_content)?;
-            let q = comps
-                .iter()
-                .find(|c| c.name == "queue")
-                .context("queue maintenance: queue component vanished before id-dedup")?;
-            q.replace_content(&current_content, &new_body)
-        };
-        activation.entries_after = deduped_entries;
-        mutated = true;
-        eprintln!(
-            "[preflight] queue: collapsed {dropped} duplicate id-backed queue head(s) (#qdup-bare-id)"
-        );
-    }
-
-    // Collapse pin-variant `do [#id]` duplicates: a `:pushpin:`-pinned head that
-    // accumulated alongside its bare `do [#id]` twin for the same id (the
-    // pin-accumulation artifact — backlog→queue mirror / CRDT replay emit the bare
-    // form, an operator/agent pin adds a pinned copy instead of replacing it).
-    // Keeps a single strongest-pin instance at the earliest position. Unlike the
-    // bare-id dedup above, this targets `do [#id]` directives, but only those that
-    // disagree on the pin prefix — textually identical `do [#id]` duplicates stay
-    // as intentional "run it twice" intent (#qdedupsync / #pushpinaccum).
-    if let Some(deduped_entries) =
-        crate::queue::dedup_pin_variant_do_heads(&activation.entries_after)
-    {
-        let dropped = activation.entries_after.len() - deduped_entries.len();
-        let new_body = crate::queue::render(&deduped_entries);
-        current_content = {
-            let comps = crate::component::parse(&current_content)?;
-            let q = comps
-                .iter()
-                .find(|c| c.name == "queue")
-                .context("queue maintenance: queue component vanished before pin-variant dedup")?;
-            q.replace_content(&current_content, &new_body)
-        };
-        activation.entries_after = deduped_entries;
-        mutated = true;
-        eprintln!(
-            "[preflight] queue: collapsed {dropped} pin-variant duplicate queue head(s) (#qdedupsync)"
-        );
-    }
-
-    // Collapse duplicate FREE-TEXT operator queue lines (#qauthorder). The
-    // id-keyed dedups above are free-text-blind, so a CRDT/backlog-sync re-emit
-    // of an operator's prose line (one without a `do [#id]` directive or a pure
-    // `[#id]` reference) accumulated as a visible duplicate. Free-text repetition
-    // in the queue is overwhelmingly a convergence artifact, so byte-identical
-    // free-text lines (after stripping the cosmetic pin) collapse to the earliest
-    // instance; live vs struck lines are keyed separately.
+    // Unified, state-machine-driven queue convergence (#queuestatemachine2 /
+    // #cgfx). This single pass replaces the former pile of independent dedup
+    // normalizers (`dedup_bare_id_reference_heads` / #qdup-bare-id,
+    // `dedup_pin_variant_do_heads` / #qdedupsync+#pushpinaccum,
+    // `dedup_free_text_heads` / #qauthorder+#rt83qflood). It keys every
+    // prompt-bearing entry by its durable head identity
+    // (`queue_item_state_machine::QueueItemIdentity`) and drives each identity's
+    // per-item lifecycle SM to its lawful state: re-injecting an identity that
+    // already has a lawful representative is a no-op transition, so a
+    // stale-CRDT / supervisor re-emit cannot leave a visible duplicate —
+    // duplication is structurally impossible rather than patched after the fact.
+    // The historical passes survive only as transition guards inside
+    // `converge_queue_via_lifecycle` (intentional-twin guard, pin-variant
+    // collapse, snapshot-authored multiplicity) and as a thin migration shim
+    // (the unit-tested individual functions remain `pub` so external callers and
+    // their regression coverage do not break). Position-lock
+    // (#queue-operator-pin-position-lock) is preserved: convergence is purely
+    // subtractive at each identity's earliest slot.
     let snapshot_queue_entries: Vec<crate::queue::QueueEntry> = match snapshot::load(file) {
         Ok(Some(snap)) => crate::component::parse(&snap)
             .ok()
@@ -1741,23 +1696,27 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             .unwrap_or_default(),
         _ => Vec::new(),
     };
-    if let Some(deduped_entries) =
-        crate::queue::dedup_free_text_heads(&activation.entries_after, &snapshot_queue_entries)
-    {
-        let dropped = activation.entries_after.len() - deduped_entries.len();
-        let new_body = crate::queue::render(&deduped_entries);
+    if let Some(converged_entries) = crate::queue::converge_queue_via_lifecycle(
+        &activation.entries_after,
+        &snapshot_queue_entries,
+    ) {
+        let dropped = activation
+            .entries_after
+            .len()
+            .saturating_sub(converged_entries.len());
+        let new_body = crate::queue::render(&converged_entries);
         current_content = {
             let comps = crate::component::parse(&current_content)?;
             let q = comps
                 .iter()
                 .find(|c| c.name == "queue")
-                .context("queue maintenance: queue component vanished before free-text dedup")?;
+                .context("queue maintenance: queue component vanished before convergence")?;
             q.replace_content(&current_content, &new_body)
         };
-        activation.entries_after = deduped_entries;
+        activation.entries_after = converged_entries;
         mutated = true;
         eprintln!(
-            "[preflight] queue: collapsed {dropped} duplicate free-text queue line(s) (#qauthorder)"
+            "[preflight] queue: converged {dropped} duplicate queue head(s) via per-item lifecycle SM (#cgfx)"
         );
     }
 

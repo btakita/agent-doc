@@ -1891,6 +1891,366 @@ pub fn dedup_free_text_heads(
     if dropped { Some(deduped) } else { None }
 }
 
+/// The visible lifecycle of a queue entry, projected onto the
+/// [`QueueItemLifecycle`] lattice the per-item state machine joins over
+/// (`#queuestatemachine2` / `#cgfx`). A `Prompt` is a `Live` head; a `Completed`
+/// (struck) entry is the retired `Struck` state. Non-prompt entries have no
+/// lifecycle.
+fn entry_lifecycle(
+    entry: &QueueEntry,
+) -> Option<agent_doc_core::queue_item_lifecycle::QueueItemLifecycle> {
+    use agent_doc_core::queue_item_lifecycle::QueueItemLifecycle;
+    match entry {
+        QueueEntry::Prompt(_) => Some(QueueItemLifecycle::Live),
+        QueueEntry::Completed(_) => Some(QueueItemLifecycle::Struck),
+        _ => None,
+    }
+}
+
+/// The structural shape of a prompt-bearing queue head, the discriminator the
+/// historical passes used to decide whether a same-identity duplicate is a
+/// convergence artifact or intentional authoring. Folded into the convergence
+/// key so each shape keeps its own collapse rule and a `do [#id]` directive twin
+/// never shares a key with a bare `[#id]` reference of the same id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum HeadShape {
+    /// `do [#id]` / `do #id` directive head. Identical twins are intentional
+    /// "run it twice"; only pin-variant disagreement collapses
+    /// (`dedup_pin_variant_do_heads` / `#qdedupsync`).
+    Directive,
+    /// Pure `[#id]` / `#id` reference head — always a mirror/replay artifact when
+    /// duplicated (`dedup_bare_id_reference_heads` / `#qdup-bare-id`).
+    BareReference,
+    /// Free-text operator line (`#qauthorder` / `#rt83qflood`) — collapses beyond
+    /// snapshot-authored multiplicity.
+    FreeText,
+}
+
+fn head_shape(prompt: &QueuePrompt) -> HeadShape {
+    if dedup_key_for_prompt(prompt).is_some() {
+        HeadShape::Directive
+    } else if bare_id_reference_key(prompt).is_some() {
+        HeadShape::BareReference
+    } else {
+        HeadShape::FreeText
+    }
+}
+
+/// Full convergence key: durable identity, head shape, and visible lifecycle.
+///
+/// - **Identity** is exactly [`QueueItemIdentity::from_prompt`] (id-backed heads
+///   collapse every pin/prefix variant onto the durable id; free-text keys on
+///   normalized text) — the single dedup key the four historical ad-hoc passes
+///   each re-derived a partial version of.
+/// - **Shape** keeps each head shape's collapse rule independent, matching the
+///   original pass separation (directive twins are intentional; bare references
+///   and free-text re-emits collapse).
+/// - **Lifecycle** partitions live vs struck so a genuine "in progress" + "done"
+///   pair of the same work survives.
+///
+/// Returns `None` for non-prompt entries (fences, presets, dispatch, freeform),
+/// which convergence leaves untouched.
+type ConvergenceKey = (
+    crate::queue_item_state_machine::QueueItemIdentity,
+    HeadShape,
+    agent_doc_core::queue_item_lifecycle::QueueItemLifecycle,
+);
+
+fn convergence_identity(entry: &QueueEntry) -> Option<ConvergenceKey> {
+    let prompt = match entry {
+        QueueEntry::Prompt(p) | QueueEntry::Completed(p) => p,
+        _ => return None,
+    };
+    let lifecycle = entry_lifecycle(entry)?;
+    let identity = crate::queue_item_state_machine::QueueItemIdentity::from_prompt(&prompt.text);
+    Some((identity, head_shape(prompt), lifecycle))
+}
+
+/// `true` when two same-identity `do [#id]` directive heads are *textually
+/// identical* (modulo the in-progress marker) and therefore an intentional
+/// "run it twice" queue authoring (`#queue-dedup-destroys-intentional-duplicates`),
+/// not a convergence artifact. Free-text and bare-`[#id]` reference heads are
+/// never intentional duplicates — a repeated prose line / bare reference is
+/// always a mirror/replay artifact — so this only guards the `do [#id]` shape.
+fn is_intentional_directive_twin(a: &QueuePrompt, b: &QueuePrompt) -> bool {
+    let a_id = dedup_key_for_prompt(a);
+    let b_id = dedup_key_for_prompt(b);
+    match (a_id, b_id) {
+        (Some(ai), Some(bi)) if ai == bi => {
+            strip_in_progress_marker(&a.text) == strip_in_progress_marker(&b.text)
+        }
+        _ => false,
+    }
+}
+
+/// Strongest pin marker observed across a group of same-identity `do [#id]`
+/// heads, used to choose the survivor's rendered text when collapsing
+/// pin-variant duplicates (`#qdedupsync` / `#pushpinaccum`). Operator pin beats
+/// agent pin beats bare; ties keep the earliest member's text.
+fn strongest_pin_text<'a>(texts: &[&'a str]) -> &'a str {
+    texts
+        .iter()
+        .enumerate()
+        .max_by(|(ia, a), (ib, b)| {
+            do_head_priority_rank(a)
+                .cmp(&do_head_priority_rank(b))
+                .then_with(|| ib.cmp(ia))
+        })
+        .map(|(_, t)| *t)
+        .expect("group is non-empty")
+}
+
+/// **Unified, state-machine-driven queue convergence (`#queuestatemachine2` /
+/// `#cgfx`).**
+///
+/// This is the single authoritative convergence pass that replaces the pile of
+/// independent best-effort dedup normalizers
+/// (`dedup_bare_id_reference_heads`, `dedup_pin_variant_do_heads`,
+/// `dedup_free_text_heads`, `dedup_live_prompts`) — each of which patched one
+/// duplication shape after the fact. Instead of "append then dedup," it drives
+/// each **durable head identity** ([`QueueItemIdentity`]) to its lawful state:
+/// re-injecting an identity that already has a lawful representative in this
+/// convergence is a **no-op transition**, so a stale-CRDT / supervisor re-emit
+/// cannot create a visible duplicate. Duplication is structurally impossible,
+/// not patched.
+///
+/// ## How each historical pass becomes a transition guard
+///
+/// - **bare-id mirror dups** (`#qdup-bare-id` / `dedup_bare_id_reference_heads`)
+///   and **free-text re-emit** (`#qauthorder` / `dedup_free_text_heads`,
+///   including the `#rt83qflood` multiline phantom-pin flood): a re-sighting of
+///   an identity already kept *beyond its authored multiplicity* is a hold (no
+///   advance) → dropped. The authored multiplicity comes from `snapshot_entries`
+///   exactly as `dedup_free_text_heads` computed it, so an intentionally
+///   double-authored line keeps its count.
+/// - **pin-variant dups** (`#qdedupsync` / `#pushpinaccum` /
+///   `dedup_pin_variant_do_heads`): a same-id `do [#id]` group whose members
+///   disagree on the pin prefix collapses to one survivor at the earliest slot,
+///   rendered with the strongest pin observed — *unless* the members are
+///   textually identical, which stays as intentional "run it twice."
+/// - **live-prompt id dups** (`dedup_live_prompts`): subsumed — an id-backed
+///   identity beyond its authored multiplicity holds and is dropped.
+///
+/// ## Preserved invariants
+///
+/// - **Operator-authored position-lock** (`#queue-operator-pin-position-lock` /
+///   `#qauthorder`): convergence never reorders. The survivor of each identity
+///   group is kept at the group's **earliest** position, and every non-prompt
+///   entry stays in place, so `sort_prompts_by_priority`'s later position-lock
+///   sees the same slots. This convergence is purely subtractive (plus the
+///   pin-text rewrite on the survivor); it is the `Authored` state's
+///   position property carried across the dedup.
+/// - **Intentional duplicates** (`#queue-dedup-destroys-intentional-duplicates`):
+///   identical `do [#id]` directive twins survive; only re-emit artifacts collapse.
+/// - **Live vs struck**: keyed separately via [`QueueItemLifecycle`], so an
+///   in-progress + done pair of the same work is two lawful states, not a dup.
+///
+/// Returns `Some(converged)` when anything changed, `None` when the queue is
+/// already at its lawful fixpoint (idempotent — safe every cycle). Driving the
+/// output through this function again is a guaranteed no-op (the idempotence
+/// property `#cgfx` proves).
+pub fn converge_queue_via_lifecycle(
+    entries: &[QueueEntry],
+    snapshot_entries: &[QueueEntry],
+) -> Option<Vec<QueueEntry>> {
+    use crate::queue_item_state_machine::{QueueItemEvent, QueueItemMachine, QueueItemState};
+
+    // Authored multiplicity per (identity, lifecycle): how many copies the
+    // operator committed in the snapshot. A given identity may lawfully appear
+    // that many times; at least one copy is always allowed even for an identity
+    // absent from the snapshot (a freshly-authored line / freshly-mirrored head).
+    // This is exactly `dedup_free_text_heads`'s snapshot-authored-count guard,
+    // now applied uniformly to every identity shape.
+    let mut authored: std::collections::HashMap<_, usize> = std::collections::HashMap::new();
+    for entry in snapshot_entries {
+        if let Some(key) = convergence_identity(entry) {
+            *authored.entry(key).or_insert(0) += 1;
+        }
+    }
+
+    // First pass: group same-identity prompt indices to detect pin-variant
+    // `do [#id]` groups whose survivor needs a text rewrite. Free-text and bare
+    // reference identities never rewrite text; only id-backed directive groups do.
+    let mut id_groups: std::collections::HashMap<String, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (idx, entry) in entries.iter().enumerate() {
+        if let QueueEntry::Prompt(p) = entry
+            && let Some(id) = dedup_key_for_prompt(p)
+        {
+            id_groups.entry(id).or_default().push(idx);
+        }
+    }
+    // For each id group with >1 member that are NOT all identical: the survivor
+    // (earliest member) should render the strongest-pin variant. Maps the
+    // earliest index → rewritten text. Identical twins are left untouched
+    // (intentional "run it twice"). A pin-variant group is force-collapsed to a
+    // single survivor (its identity's allowed multiplicity is capped at 1)
+    // regardless of snapshot count — a pin disagreement is always the
+    // accumulation artifact `dedup_pin_variant_do_heads` targeted, never
+    // intentional.
+    let mut survivor_text: std::collections::HashMap<usize, String> =
+        std::collections::HashMap::new();
+    let mut pin_collapse_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (id, idxs) in &id_groups {
+        if idxs.len() < 2 {
+            continue;
+        }
+        let prompt_at = |i: usize| match &entries[i] {
+            QueueEntry::Prompt(p) => p,
+            _ => unreachable!("id group index points at a Prompt"),
+        };
+        let first = prompt_at(idxs[0]);
+        if idxs.iter().all(|&i| is_intentional_directive_twin(first, prompt_at(i))) {
+            continue; // all identical — intentional duplicate, never collapse
+        }
+        let texts: Vec<&str> = idxs.iter().map(|&i| prompt_at(i).text.as_str()).collect();
+        survivor_text.insert(idxs[0], strongest_pin_text(&texts).to_string());
+        pin_collapse_ids.insert(id.clone());
+    }
+
+    // Cross-shape subsumption (`#brtc` / `#queuestatemachine3`): an actionable
+    // live `do [#id]` **directive** head subsumes a pure bare `[#id]` / `#id`
+    // **reference** of the SAME id — the bare reference is always a mirror/replay
+    // artifact (`#qdup-bare-id`) and adds nothing once the directive that does the
+    // work is present. The legacy `dedup_bare_id_reference_heads` only collapsed
+    // bare references against other bare references, so a directive + reference of
+    // one id used to coexist; unifying by *identity* (the whole point of `#cgfx`)
+    // means the reference collapses into the directive. This is what lets a
+    // re-emit storm converge to exactly ONE visible item per identity.
+    let directive_ids: std::collections::HashSet<String> = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            QueueEntry::Prompt(p) => dedup_key_for_prompt(p),
+            _ => None,
+        })
+        .collect();
+
+    // Second pass: drive the lifecycle SM per identity, dropping re-emits beyond
+    // the authored multiplicity. The SM makes the no-op explicit — re-sighting an
+    // already-kept identity is `OperatorAuthored`/`BacklogMirrored` against an
+    // already-advanced state, which holds (no advance), so the copy is dropped.
+    let mut machines: std::collections::HashMap<_, QueueItemMachine> =
+        std::collections::HashMap::new();
+    let mut kept_count: std::collections::HashMap<_, usize> = std::collections::HashMap::new();
+    let mut converged = Vec::with_capacity(entries.len());
+    let mut changed = false;
+
+    for (idx, entry) in entries.iter().enumerate() {
+        let Some(key) = convergence_identity(entry) else {
+            // Non-prompt entry (fence / preset / dispatch / freeform): position-
+            // and content-stable, never a convergence target.
+            converged.push(entry.clone());
+            continue;
+        };
+
+        let (identity, shape, lifecycle) = (&key.0, key.1, key.2);
+
+        // The first sighting of an identity authors/mirrors it; the genesis
+        // event for a struck copy is the struck terminal so a re-emit cannot
+        // un-retire it (mirrors the CRDT `Struck` lattice join).
+        let genesis_event = match lifecycle {
+            agent_doc_core::queue_item_lifecycle::QueueItemLifecycle::Live => {
+                if identity.is_id_backed() {
+                    QueueItemEvent::BacklogMirrored
+                } else {
+                    QueueItemEvent::OperatorAuthored
+                }
+            }
+            agent_doc_core::queue_item_lifecycle::QueueItemLifecycle::Struck => {
+                QueueItemEvent::StruckThrough
+            }
+        };
+
+        // Lawful multiplicity for this key (how many copies survive):
+        // - A pin-variant `do [#id]` group collapses to exactly one survivor
+        //   regardless of snapshot count (`#qdedupsync` / `#pushpinaccum`).
+        // - Otherwise a `do [#id]` **directive** identity is unbounded: identical
+        //   directive twins are intentional "run it twice"
+        //   (`#queue-dedup-destroys-intentional-duplicates`).
+        // - Bare references and free-text lines collapse to the snapshot-authored
+        //   multiplicity (min 1) — `#qdup-bare-id` / `#qauthorder` / `#rt83qflood`.
+        // A bare `[#id]` reference subsumed by a live directive of the same id is
+        // never kept — its lawful multiplicity is zero (`#brtc` cross-shape
+        // subsumption above).
+        let subsumed_by_directive = matches!(
+            (shape, identity, lifecycle),
+            (
+                HeadShape::BareReference,
+                crate::queue_item_state_machine::QueueItemIdentity::Id(id),
+                agent_doc_core::queue_item_lifecycle::QueueItemLifecycle::Live,
+            ) if directive_ids.contains(id)
+        );
+        let pin_collapsing = matches!(
+            identity,
+            crate::queue_item_state_machine::QueueItemIdentity::Id(id) if pin_collapse_ids.contains(id)
+        );
+        let allowed = if subsumed_by_directive {
+            0
+        } else if pin_collapsing {
+            1
+        } else if shape == HeadShape::Directive {
+            usize::MAX // intentional run-twice: never drop identical directive twins
+        } else {
+            authored.get(&key).copied().unwrap_or(0).max(1)
+        };
+        let seen = kept_count.entry(key.clone()).or_insert(0);
+
+        if *seen >= allowed {
+            // Re-emit beyond the authored multiplicity: drive the existing
+            // identity's machine with the re-emit event and observe that it is a
+            // HOLD (no state advance) — the structural anti-duplication no-op.
+            // The copy is dropped.
+            if let Some(machine) = machines.get(&key) {
+                let before = machine.state();
+                machine.send(genesis_event);
+                debug_assert_eq!(
+                    machine.state(),
+                    before,
+                    "re-emit of an already-kept identity must be a no-op transition"
+                );
+            }
+            changed = true;
+            continue;
+        }
+
+        // First lawful sighting (within authored multiplicity): keep it. Seed the
+        // machine at its genesis state so later re-emits see an advanced state.
+        let initial = match lifecycle {
+            agent_doc_core::queue_item_lifecycle::QueueItemLifecycle::Struck => {
+                QueueItemState::Struck
+            }
+            agent_doc_core::queue_item_lifecycle::QueueItemLifecycle::Live => {
+                if identity.is_id_backed() {
+                    QueueItemState::Mirrored
+                } else {
+                    QueueItemState::Authored
+                }
+            }
+        };
+        machines
+            .entry(key.clone())
+            .or_insert_with(|| QueueItemMachine::new(initial));
+        *seen += 1;
+
+        // Apply the pin-variant survivor rewrite if this is the earliest member
+        // of a collapsing id group.
+        match (survivor_text.get(&idx), entry) {
+            (Some(text), QueueEntry::Prompt(p)) => {
+                if *text != p.text {
+                    changed = true;
+                }
+                converged.push(QueueEntry::Prompt(QueuePrompt {
+                    text: text.clone(),
+                    multiline: false,
+                }));
+            }
+            _ => converged.push(entry.clone()),
+        }
+    }
+
+    if changed { Some(converged) } else { None }
+}
+
 pub fn first_prompt(entries: &[QueueEntry]) -> Option<&QueuePrompt> {
     entries.iter().find_map(|e| match e {
         QueueEntry::Prompt(p) => Some(p),
@@ -4222,6 +4582,266 @@ mod tests {
                 once, twice,
                 "render(parse(x)) must be a fixed point for case:\n{case}\n--- once ---\n{once}\n--- twice ---\n{twice}"
             );
+        }
+    }
+
+    // ---- Unified SM-driven convergence (`#cgfx` / `#queuestatemachine2`) ----
+
+    fn p(text: &str) -> QueueEntry {
+        QueueEntry::Prompt(QueuePrompt {
+            text: text.to_string(),
+            multiline: false,
+        })
+    }
+    fn c(text: &str) -> QueueEntry {
+        QueueEntry::Completed(QueuePrompt {
+            text: text.to_string(),
+            multiline: false,
+        })
+    }
+
+    /// Apply convergence, returning the converged entries (or the input unchanged
+    /// when the queue is already at its lawful fixpoint).
+    fn converge(entries: &[QueueEntry], snapshot: &[QueueEntry]) -> Vec<QueueEntry> {
+        converge_queue_via_lifecycle(entries, snapshot).unwrap_or_else(|| entries.to_vec())
+    }
+
+    /// `#qdedupsync` / `#pushpinaccum`: a pinned `do [#id]` accumulated alongside
+    /// its bare twin collapses to one strongest-pin survivor at the earliest slot.
+    #[test]
+    fn converge_collapses_pin_variant_do_head() {
+        let entries = vec![p(":pushpin: do [#6b5hwire]"), p("do [#6b5hwire]")];
+        let out = converge(&entries, &[]);
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert_eq!(out, vec![p(":pushpin: do [#6b5hwire]")]);
+    }
+
+    /// `#queue-dedup-destroys-intentional-duplicates`: textually-identical
+    /// `do [#id]` directive twins are intentional "run it twice" and survive.
+    #[test]
+    fn converge_preserves_identical_directive_twins() {
+        let entries = vec![p("do [#deploy]"), p("do [#deploy]")];
+        assert!(
+            converge_queue_via_lifecycle(&entries, &[]).is_none(),
+            "identical directive twins must be left untouched"
+        );
+    }
+
+    /// `#qdup-bare-id` + `#brtc` cross-shape subsumption: bare `[#id]` references
+    /// re-emitted by the mirror/CRDT replay collapse to zero when a live `do [#id]`
+    /// **directive** of the same id is present — the actionable directive subsumes
+    /// the pure reference, so an identity converges to exactly one visible head.
+    #[test]
+    fn converge_bare_reference_subsumed_by_directive() {
+        let entries = vec![p("[#sqedit-race]"), p("[#sqedit-race]"), p("do [#sqedit-race]")];
+        let out = converge(&entries, &[]);
+        assert_eq!(out, vec![p("do [#sqedit-race]")], "{out:?}");
+    }
+
+    /// Without a directive, bare `[#id]` reference dups still collapse to one
+    /// (the original `#qdup-bare-id` behavior).
+    #[test]
+    fn converge_collapses_bare_reference_dups_without_directive() {
+        let entries = vec![p("[#sqedit-race]"), p("[#sqedit-race]")];
+        let out = converge(&entries, &[]);
+        assert_eq!(out, vec![p("[#sqedit-race]")], "{out:?}");
+    }
+
+    /// `#qauthorder`: a free-text operator line re-emitted beyond its snapshot
+    /// multiplicity collapses to the authored count; position is preserved.
+    #[test]
+    fn converge_collapses_free_text_to_snapshot_multiplicity() {
+        let snapshot = vec![p("queue items are not bubbled to the top")];
+        let entries = vec![
+            p("queue items are not bubbled to the top"),
+            p("queue items are not bubbled to the top"),
+        ];
+        let out = converge(&entries, &snapshot);
+        assert_eq!(out, vec![p("queue items are not bubbled to the top")], "{out:?}");
+    }
+
+    /// A genuinely twice-authored free-text line keeps both copies.
+    #[test]
+    fn converge_preserves_double_authored_free_text() {
+        let snapshot = vec![p("run the smoke test"), p("run the smoke test")];
+        let entries = snapshot.clone();
+        assert!(
+            converge_queue_via_lifecycle(&entries, &snapshot).is_none(),
+            "double-authored free-text must survive at its authored multiplicity"
+        );
+    }
+
+    /// Live vs struck of the same identity are distinct lawful states — a genuine
+    /// "in progress" + "done" pair survives.
+    #[test]
+    fn converge_keeps_live_and_struck_pair() {
+        let entries = vec![p("ship the release"), c("ship the release")];
+        assert!(
+            converge_queue_via_lifecycle(&entries, &[]).is_none(),
+            "a live + struck pair of the same text is not a duplicate"
+        );
+    }
+
+    /// `#queue-operator-pin-position-lock` / `#qauthorder`: convergence never
+    /// reorders. An operator free-text line authored between two id heads holds
+    /// its slot across a re-emit storm of the surrounding heads.
+    #[test]
+    fn converge_preserves_operator_authored_position() {
+        let snapshot = vec![p("do [#first]"), p("keep me here"), p("do [#second]")];
+        // A re-emit storm duplicates the id heads around the operator line.
+        let entries = vec![
+            p("do [#first]"),
+            p("[#first]"),
+            p("keep me here"),
+            p("keep me here"),
+            p("do [#second]"),
+            p("[#second]"),
+        ];
+        let out = converge(&entries, &snapshot);
+        // Bare references collapse, free-text collapses to authored 1, directive
+        // heads survive — and the operator line stays between the two id heads.
+        let texts: Vec<&str> = out
+            .iter()
+            .filter_map(|e| match e {
+                QueueEntry::Prompt(pr) => Some(pr.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        let first = texts.iter().position(|t| *t == "do [#first]").unwrap();
+        let keep = texts.iter().position(|t| *t == "keep me here").unwrap();
+        let second = texts.iter().position(|t| *t == "do [#second]").unwrap();
+        assert!(
+            first < keep && keep < second,
+            "operator line must keep its authored slot: {texts:?}"
+        );
+        assert_eq!(
+            texts.iter().filter(|t| **t == "keep me here").count(),
+            1,
+            "free-text re-emit must collapse: {texts:?}"
+        );
+    }
+
+    /// Idempotence: converging the output again is a no-op (`None`). This is the
+    /// fixpoint guarantee — a re-emit storm settles to a stable queue.
+    #[test]
+    fn converge_is_idempotent_over_known_duplication_shapes() {
+        let cases: Vec<(Vec<QueueEntry>, Vec<QueueEntry>)> = vec![
+            // #qdedupsync / #pushpinaccum — pin-variant accumulation
+            (vec![p(":pushpin: do [#a]"), p("do [#a]")], vec![]),
+            // #qdup-bare-id — bare reference mirror dups
+            (vec![p("[#b]"), p("[#b]"), p("[#b]")], vec![]),
+            // #qauthorder — free-text re-emit beyond snapshot
+            (
+                vec![p("operator note"), p("operator note")],
+                vec![p("operator note")],
+            ),
+            // #rt83qflood — multiline phantom-pin flood (keyed via from_prompt)
+            (
+                vec![
+                    QueueEntry::Prompt(QueuePrompt {
+                        text: ":round_pushpin: switch actor\nroute error body".into(),
+                        multiline: true,
+                    }),
+                    QueueEntry::Prompt(QueuePrompt {
+                        text: ":round_pushpin: switch actor\nroute error body".into(),
+                        multiline: true,
+                    }),
+                ],
+                vec![],
+            ),
+            // mixed shapes + intentional directive twin survives
+            (
+                vec![p("do [#c]"), p("do [#c]"), p("[#c]"), p("[#c]"), p("free")],
+                vec![],
+            ),
+        ];
+        for (entries, snapshot) in cases {
+            let once = converge(&entries, &snapshot);
+            assert!(
+                converge_queue_via_lifecycle(&once, &snapshot).is_none(),
+                "convergence must be a fixpoint:\n{entries:?}\n--- once ---\n{once:?}"
+            );
+        }
+    }
+
+    proptest::proptest! {
+        /// **The `#cgfx` idempotence / no-op-re-emit property.** For an arbitrary
+        /// queue assembled from the duplication shapes that `#rt83qflood`,
+        /// `#qdedupsync`, `#qauthorder`, `#qdup-bare-id`, and `#pushpinaccum` each
+        /// patched — id-backed directive heads (pinned + bare variants), bare
+        /// `[#id]` reference heads, and free-text operator lines, each re-emitted
+        /// an arbitrary number of extra times across the queue — convergence is a
+        /// **fixpoint**: re-running it on its own output is a guaranteed no-op.
+        /// Re-injecting an identity that already has a lawful representative is a
+        /// no-op transition, so a re-emit storm settles to a stable queue with no
+        /// new duplicates ever introduced.
+        #[test]
+        fn converge_via_lifecycle_is_idempotent_under_reemit_storms(
+            // Each shape token re-emits one of the historical duplication shapes;
+            // 0..=5 ids, each with a random multiset of variants.
+            id_kinds in proptest::collection::vec(0u8..6, 0..12),
+            free_text_reemits in 0usize..6,
+        ) {
+            use proptest::prelude::*;
+            // Deterministically build a queue from the shape tokens. The same id
+            // surfaces under several shapes (pinned directive / bare directive /
+            // bare reference) so pin-variant + bare-reference collapse both fire.
+            let mut entries: Vec<QueueEntry> = Vec::new();
+            for (i, kind) in id_kinds.iter().enumerate() {
+                let id = format!("id{}", i % 4); // reuse ids → cross-shape collisions
+                match kind {
+                    0 => entries.push(p(&format!("do [#{id}]"))),
+                    1 => entries.push(p(&format!(":pushpin: do [#{id}]"))),
+                    2 => entries.push(p(&format!("_prioritized_ do [#{id}]"))),
+                    3 => entries.push(p(&format!("[#{id}]"))),
+                    4 => entries.push(p(&format!("#{id}"))),
+                    _ => entries.push(c(&format!("do [#{id}]"))),
+                }
+            }
+            for _ in 0..free_text_reemits {
+                entries.push(p("operator authored prose line"));
+            }
+
+            // No snapshot → every free-text/bare identity collapses to one; only
+            // intentional identical directive twins survive.
+            let once = converge_queue_via_lifecycle(&entries, &[]);
+            let converged = once.clone().unwrap_or_else(|| entries.clone());
+
+            // FIXPOINT: a second convergence over the output is a no-op.
+            prop_assert!(
+                converge_queue_via_lifecycle(&converged, &[]).is_none(),
+                "convergence is not a fixpoint:\n{entries:?}\n--- converged ---\n{converged:?}"
+            );
+
+            // NO-OP RE-EMIT: re-appending an already-present **artifact-shaped**
+            // identity (bare `[#id]` reference or free-text line) to the converged
+            // queue does not increase its converged head count — re-injection is
+            // structurally absorbed. Identical `do [#id]` *directive* twins are
+            // intentional "run it twice" (#queue-dedup-destroys-intentional-
+            // duplicates), so a directive re-emit is excluded from this assertion;
+            // its multiplication is the lawful authored behavior, not a dup bug.
+            let storm_target = converged.iter().find_map(|e| match e {
+                QueueEntry::Prompt(q) if head_shape(q) != HeadShape::Directive => Some(q.clone()),
+                _ => None,
+            });
+            if let Some(first) = storm_target {
+                let mut stormed = converged.clone();
+                for _ in 0..3 {
+                    stormed.push(QueueEntry::Prompt(first.clone()));
+                }
+                let restormed = converge_queue_via_lifecycle(&stormed, &converged)
+                    .unwrap_or(stormed);
+                let count_in = |v: &[QueueEntry], t: &str| {
+                    v.iter()
+                        .filter(|e| matches!(e, QueueEntry::Prompt(q) if q.text == t))
+                        .count()
+                };
+                prop_assert!(
+                    count_in(&restormed, &first.text) <= count_in(&converged, &first.text).max(1),
+                    "re-emit storm of artifact-shaped {:?} must not multiply the identity\n--- converged ---\n{converged:?}\n--- restormed ---\n{restormed:?}",
+                    first.text
+                );
+            }
         }
     }
 }

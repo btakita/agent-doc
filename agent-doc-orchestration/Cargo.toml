@@ -59,6 +59,11 @@ tsift-memory = "0.1.70"
 [dev-dependencies]
 tempfile = "3"
 filetime = "0.2"
+# Property tests for the unified queue convergence (`#cgfx`) prove idempotence /
+# no-op-re-emit over generated duplication shapes (`#rt83qflood`, `#qdedupsync`,
+# `#qauthorder`, `#qdup-bare-id`, `#pushpinaccum`). Matches the existing
+# proptest-based closeout model coverage in the binary crate's `tests/`.
+proptest = "1"
 # Controller-state tests open `agent-doc-sqlite`'s state DB directly to assert
 # the schema/rows the `state_store` seam writes. The SQLite layer itself lives
 # in `agent-doc-sqlite`; this dev-only dependency keeps those tests compiling

@@ -139,6 +139,59 @@ object StateProjectionBridge {
         mirrors[documentHash(filePath)]?.takeIf { it.isInitialized }?.epoch
 
     /**
+     * Reactive read for consumers (`#n529b` / `#lazilystatesync3b`): advance the
+     * per-document mirror by absorbing any FFI deltas since its current epoch, then
+     * derive the summary from the mirror's tracked cells.
+     *
+     * This is the drop-in replacement for the cold [projectionSummaryForFile] pull
+     * on the read path. Recording a fact (e.g. [recordRouteDispatchStarted] /
+     * [recordRouteDispatchProven]) appends to the binary's ledger; this call pulls
+     * those accepted events forward as a `delta` (or a cold `snapshot` on the first
+     * read) so the summary reflects the just-recorded state without a full re-render.
+     *
+     * Cold-pull fallback is intentional and narrow:
+     *  - The reactive [MirrorProjectionSummary] cannot carry `latestTransportPatchId`
+     *    (the patch id is the node's `slot_id`, not a wire payload field — see
+     *    [MirrorProjectionSummary]). When [includeTransportPatchId] and the mirror
+     *    summary leaves it null, backfill that one field from the cold projection.
+     *  - When the mirror never initializes (FFI unavailable, or no recorded state
+     *    yet), fall back to the cold [projectionSummaryForFile] so a cold-start read
+     *    still surfaces a summary.
+     *
+     * Returns null only when both the reactive mirror and the cold pull are empty.
+     */
+    fun reactiveSummaryForFile(
+        filePath: String,
+        includeTransportPatchId: Boolean = true,
+    ): MirrorProjectionSummary? {
+        // Drive the mirror forward (snapshot on first read, delta thereafter).
+        subscribeMirrorForFile(filePath)
+        val mirror = mirrorSummaryForFile(filePath)
+        if (mirror == null) {
+            // Cold-start fallback: mirror never initialized (no FFI / no state yet).
+            return projectionSummaryForFile(filePath)?.let {
+                MirrorProjectionSummary(
+                    routeReadiness = it.routeReadiness,
+                    routePaneId = it.routePaneId,
+                    latestTransportPatchId = it.latestTransportPatchId,
+                    latestTransportPhase = it.latestTransportPhase,
+                    proofMarkers = it.proofMarkers,
+                )
+            }
+        }
+        if (includeTransportPatchId && mirror.latestTransportPatchId == null) {
+            // Narrow backfill: the wire delta does not carry the patch id, so pull
+            // just that field from the cold projection while keeping every other
+            // field reactive (from the mirror's tracked cells).
+            val coldPatchId = projectionSummaryForFile(filePath)?.latestTransportPatchId
+            if (coldPatchId != null) {
+                return mirror.copy(latestTransportPatchId = coldPatchId)
+            }
+        }
+        return mirror
+    }
+
+    /**
      * Evict the per-document mirror and owner-generation counters for [filePath]
      * (`#jbmirrorevict` / `#nsq2`). Called when the editor tab/document closes so a
      * reused path (move/symlink/reopen) does not surface the prior document's stale
@@ -157,6 +210,19 @@ object StateProjectionBridge {
 
     /** Test-only: live mirror + generation entry counts (for eviction coverage). */
     internal fun debugEntryCounts(): Pair<Int, Int> = mirrors.size to generations.size
+
+    /**
+     * Test-only seam (`#n529b`): seed the per-document mirror by applying a
+     * lazily-spec snapshot/delta message directly, bypassing the FFI subscribe
+     * call. Lets consumer-observation tests assert that the read path derives the
+     * summary from the reactive mirror's tracked cells rather than the cold pull
+     * (FFI is unavailable in plugin unit tests). Returns whether the message
+     * applied.
+     */
+    internal fun seedMirrorMessageForTest(filePath: String, message: String): Boolean {
+        val mirror = mirrors.computeIfAbsent(documentHash(filePath)) { StateGraphMirror() }
+        return mirror.applyMessage(message)
+    }
 
     private fun messageKind(raw: String): String? = try {
         JsonParser.parseString(raw).takeIf { it.isJsonObject }?.asJsonObject?.get("type")?.asString

@@ -567,7 +567,12 @@ object TerminalUtil {
                             )
                         }
                     }
-                    StateProjectionBridge.projectionSummaryForFile(documentPath)?.let {
+                    // #n529b: read the reactive lazily-kt mirror (advanced by the
+                    // route facts recorded above) instead of the cold projection
+                    // pull, so the logged route/transport/proof summary derives from
+                    // tracked cells. Cold pull is kept only as a cold-start fallback
+                    // + transport-patch-id backfill inside reactiveSummaryForFile.
+                    StateProjectionBridge.reactiveSummaryForFile(documentPath)?.let {
                         LOG.warn("[state-projection] ${it.compact()} file=$relativePath")
                     }
                     handle.markCompleted()

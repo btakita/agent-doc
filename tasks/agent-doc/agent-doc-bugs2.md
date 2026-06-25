@@ -32,66 +32,27 @@ done
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-- **lazily-kt (conformance pin):** new `StateGraphMirror` + wire shapes
-- **JB plugin 0.2.189 → 0.2.190:** `AgentDocLib.agent_doc_state_subscribe`
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260625-041022.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260625-053644.md`*
 
 Compacted content:
-❯ - Archived 6 response topic(s): state machines for queue activity + plugin/binary merge control; #56ta lazily-spec wire-shape + interrupted-cycle recovery + semantic triage; IPC proof diagnostic (interrupted-cycle recovery); 3 more
-❯ - Prior summary/context: prior compacted content: Archived 5 response topic(s): bounded session-startup wait + isolating why the session hangs...
 
-### Re: #n529 JB reactive state mirror via FFI deltas — glm-5-2
+### Re: #nsq2 JB mirror eviction on close — root cause of cross-doc symptom — glm-5-2
 
-**`#n529` (lazilystatesync3) — shipped + tested.** The JB plugin now holds a
-per-document lazily-spec mirror graph that applies `agent_doc_state_subscribe`
-snapshot/delta messages, so editor UI reads tracked cells reactively instead of
-re-parsing the full projection JSON on every observed event. The binary stays
-the authoritative graph (`#lazilystatesync2` already shipped); the plugin is a
-thin mirror consumer.
+**`#nsq2` (#jbmirrorevict) — investigated, fixed, shipped + committed (`56f093c3`).** Confirmed the root cause of the "sessions working on other open documents" symptom and fixed it.
 
-**What landed (two repos):**
+**Root cause:** `StateProjectionBridge` holds `mirrors` and `generations` as `ConcurrentHashMap<String, ...>` keyed by `documentHash` (SHA-256 of canonical path). Both maps used `computeIfAbsent` adds with **no eviction ever** — they grew monotonically over the IDE lifetime. A reused path (move/symlink/close-reopen) inherited the prior document's stale mirror + `actor_generation` counters, surfacing cross-document state. (lazily-rs contexts were already confirmed per-document, so this was the leak.)
 
-- **lazily-kt (conformance pin):** new `StateGraphMirror` + wire shapes
-  (`WireSnapshot`/`WireDelta`/`WireDeltaOp`/`WireSubscribe`) matching
-  `state_wire.rs` 1:1; `LazilyFFI.agent_doc_state_subscribe` + a
-  `StateProjectionClient.refreshMirror()` delta path. Added the missing
-  `kotlin("plugin.serialization")` so the `@Serializable` shapes generate
-  serializers. 32 gradle tests green, including the defining property: *cold
-  snapshot of full state* converges identically to *partial cold + delta*.
-- **JB plugin 0.2.189 → 0.2.190:** `AgentDocLib.agent_doc_state_subscribe`
-- **`ownership_probe`** — the liveness classifier composing the existing `plugin_owner` lease (pid liveness, not heartbeat freshness, matching the shipped fail-safe): live pid → `EditorBufferObserved`; dead pid → `EditorDetached`; no lease → `HeartbeatStale` (the `#6b5h` stale-listener demote to `Detached`).
-- **`disk_write_permitted(phase)`** — the safety gate: disk writes permitted only in `Detached` (no editor) or `IpcAckProven` (editor applied + ACK). This is the invariant that eliminates both `File Cache Conflict` and the `#6b5h` no_ack wedge.
-- **Transition table** — exhaustive `transition_merge_ownership` (7 events × 6 states); in-flight writes are never disturbed by attach/detach churn, `Committed` is reachable only from a proven-safe phase (`Detached` direct-disk or `IpcAckProven`), and `BinaryWriteRequested` is editor-path only.
-- The one process-global piece — the FFI `STATE_LEDGER` (`ffi.rs:1701`) — is a shared `Vec<StateEvent>`, but **every read partitions by `document_hash`** (`state_backbone.rs:298-348,371-380`; `state_wire.rs:588-626`), and wire `slot_id` is FNV-hashed over `document_hash ‖ type_tag ‖ entity_key` (`state_wire.rs:90`), so document A's events cannot address document B's slots. Editor mirrors are per-document too (JB `StateProjectionBridge.kt:25,105`; VSCode `native.ts:611`).
-- Each machine owns a private `ctx` field (`cycle_state_machine.rs:45`; `state_backbone.rs:1064,1140,1243,1377,1484`; `merge_control_state_machine.rs:88`) and is instantiated only ephemerally inside `transition()` — never held as long-lived per-document state.
-- `ThreadSafeContext::new()` mints a fresh isolated `Arc<ThreadSafeInner>` graph (`lazily-rs/src/thread_safe.rs:1464,1519`); the only `static` in all of lazily-rs is an ID counter (`async_context.rs:48`), not a graph.
-  JNA binding; plugin-local `StateGraphMirror.kt` (Gson, Kotlin 1.9) pinned to
-  the lazily-kt tests via `#lzpkgwire`; `StateProjectionBridge.subscribeMirrorForFile`
-  advances the mirror and `mirrorSummaryForFile` derives `MirrorProjectionSummary`
-  (routeReadiness / routePaneId / transportPhase / proofMarkers) from tracked
-  cells. Legacy `projectionSummary(json)` kept as cold-read fallback. 9 plugin
-  tests green (6 new mirror conformance tests).
+**Fix:**
+- `StateProjectionBridge.evictForFile(path)` — removes the mirror + all `"$docHash:*"` generation entries.
+- `EditorTabSyncListener.fileClosed` — evicts on `.md` tab close. Re-subscription lazily re-creates the mirror from a fresh cold snapshot, so aggressive eviction is safe (a live editor in another split just re-fetches).
 
-**Known gap → `#n529b`:** the reactive summary is *available* but not yet read by
-the dispatch-ready / busy consumers (`PromptPoller`, `RunAgentDocAttemptLedger`
-still pull the cold path). That ECSM consumption + live dogfood is the next
-focused phase — no gate on `#n529`, the substrate is shipped and builds clean.
+10 `StateProjectionBridgeTest` tests green incl. new eviction coverage (`evictForFile clears owner-generation counters and restarts fresh`). Plugin **0.2.190 → 0.2.191** (structural: new methods). Signed zip built at `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.191-signed.zip`.
 
-**Operator action — JB plugin install:** rebuild ready at
-`src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.190-signed.zip`.
-Since `NativeLib.kt` gained a JNA symbol, please **uninstall → restart →
-install → restart** (structural class change). No Rust binary change needed —
-`agent_doc_state_subscribe` FFI already exists.
-
-**Process note:** the prior `finalize` wedged on editor-IPC `no_ack` (`#6b5h` —
-no live JB editor acknowledging in this OpenCode session) and leaked two orphan
-fragment lines at the exchange top; recovering via `write --force-disk --commit`.
-
-### Re: cycle closeout (IPC wedge recovery) — glm-5-2
-
-Closing the cycle after the `#6b5h` editor-IPC `no_ack` wedge. `#n529` work + response are committed; deduped the duplicate `#ekv8` backlog entry (same text as `#n529b`, generated when the first IPC-failed finalize partially landed the `--pending-add`). `#n529b` remains the canonical follow-up. No further code work this cycle.
+**Operator action:** uninstall → restart → install → restart (structural class change — JB caches bytecode on reinstall).
+❯ - Archived 9 response topic(s): #n529 JB reactive state mirror via FFI deltas; cycle closeout (IPC wedge recovery); IPC proof diagnostic (interrupted-cycle recovery); 6 more
+❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
@@ -102,69 +63,9 @@ This is binary-authored diagnostic content, not a user prompt, so it does not re
 Issue class: `ipc_proof_insufficient`
 Affected component: editor IPC / writeback
 
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=file_ipc patch_id=948e7a22-07a6-4b03-a4c7-0ae705df8aa8 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0.json doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782347563865
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=389b42c4-39d7-4783-8d43-fd6f1dace5d6 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=26507 candidate_hash=7c80b60cd19df366ffdf926683a956b6744bdea9722b78e71b4fb1a98feb4ff9 content_ours_len=27760 content_ours_hash=e301451aceffd5dddeb58965306908b021966ef1f37a9ca040b0072aacfe96d7 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782364110435
 ```
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-> **Queue prompt:**
->
-> :pushpin: do [#fnxy]
->
-> :pushpin: do [#fnxy]
-
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=05a50802c4ec76199164014dc39faf3c110c3ce588b2b27623ecb7d07014d8cc content_len=21783 content_hash=6774359487524b8e2822e9646d5660975e8c7f4539a544f4c759b173469c6c1f doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782362390987
-```
-
-### Re: lazily-rs context isolation per document — glm-5-2
-
-**Yes — lazily-rs contexts are distinct per document.** They are actually stricter than per-document: each `ThreadSafeContext` is private to a single state-machine instance, and every machine is built and dropped for a single `transition()` call. There is **no persistent or shared lazily-rs graph** anywhere.
-
-Evidence:
-- `ThreadSafeContext::new()` mints a fresh isolated `Arc<ThreadSafeInner>` graph (`lazily-rs/src/thread_safe.rs:1464,1519`); the only `static` in all of lazily-rs is an ID counter (`async_context.rs:48`), not a graph.
-- Each machine owns a private `ctx` field (`cycle_state_machine.rs:45`; `state_backbone.rs:1064,1140,1243,1377,1484`; `merge_control_state_machine.rs:88`) and is instantiated only ephemerally inside `transition()` — never held as long-lived per-document state.
-- The one process-global piece — the FFI `STATE_LEDGER` (`ffi.rs:1701`) — is a shared `Vec<StateEvent>`, but **every read partitions by `document_hash`** (`state_backbone.rs:298-348,371-380`; `state_wire.rs:588-626`), and wire `slot_id` is FNV-hashed over `document_hash ‖ type_tag ‖ entity_key` (`state_wire.rs:90`), so document A's events cannot address document B's slots. Editor mirrors are per-document too (JB `StateProjectionBridge.kt:25,105`; VSCode `native.ts:611`).
-
-**So the symptom you're seeing is not lazily-rs state bleed.** The most likely real cause is the **JB `StateProjectionBridge` singleton** (`StateProjectionBridge.kt:21`): its `mirrors: ConcurrentHashMap<String, StateGraphMirror>` is keyed by SHA-256 of the canonical file path and **never evicts on document close**. A moved/symlinked/reopened path reuses the old mirror entry and can surface stale projection state from the earlier document. Filed as `#jbmirrorevict` to audit eviction-on-close. Cross-document UI binding (a status surface reading the wrong `filePath`) and tmux pane reuse are the other two candidates — none involve the reactive graph.
-
-### Re: #fnxy merge-control SM shipped — glm-5-2
-
-**`#fnxy` (#mergestatemachine1) — shipped + committed (`ea7b0ec4`).** New `merge_control_state_machine.rs` defines the FFI write-ownership SM (`Detached→Attached→EditorOwnsBuffer→BinaryWriteRequested→IpcAckProven→Committed`) on the lazily `ThreadSafeStateMachine`, following the `cycle_state_machine`/`TransportPatchMachine` conventions exactly. Three deliverables:
-
-- **Transition table** — exhaustive `transition_merge_ownership` (7 events × 6 states); in-flight writes are never disturbed by attach/detach churn, `Committed` is reachable only from a proven-safe phase (`Detached` direct-disk or `IpcAckProven`), and `BinaryWriteRequested` is editor-path only.
-- **`disk_write_permitted(phase)`** — the safety gate: disk writes permitted only in `Detached` (no editor) or `IpcAckProven` (editor applied + ACK). This is the invariant that eliminates both `File Cache Conflict` and the `#6b5h` no_ack wedge.
-- **`ownership_probe`** — the liveness classifier composing the existing `plugin_owner` lease (pid liveness, not heartbeat freshness, matching the shipped fail-safe): live pid → `EditorBufferObserved`; dead pid → `EditorDetached`; no lease → `HeartbeatStale` (the `#6b5h` stale-listener demote to `Detached`).
-
-15 exhaustive tests green; `make check` green. **Phase 1 (define) complete.** Wiring into `try_ipc`/`commit`/disk-write is `#t4x1` (phase 2) — next merge-machine queue item after `#gww8`.
-
-### Re: cycle closeout (#6b5h wedge recovery) — glm-5-2
-
-The first `finalize` wedged on the `#6b5h` IPC guard (listener active, no live JB editor ACKing in this OpenCode session, `reason=ack_mismatch`) — recovered via `--force-disk`. This is the exact failure class `#fnxy`/`#t4x1` will eliminate: the ownership SM's `ownership_probe` demotes a no-lease stale listener to `Detached`, and `disk_write_permitted(Detached)` then permits the write instead of wedging.
-
-### Re: #t4x1 wire write path on ownership SM + ack_mismatch wedge fix — glm-5-2
-
-**`#t4x1` (#mergestatemachine2) — shipped + committed (`df2c0cbb`).** The `#fnxy` ownership SM now gates the converge disk-write refusal path, and the actual `#6b5h` wedge I hit twice this session is fixed at the source.
-
-**Root-cause gap found:** `refuse_or_editorless_disk_fallback` (converge.rs:1054) already consulted `live_editor_endpoint_attached` for the `no_ack` / `no_ack_content` / `send_failed` paths — but the **`ack_mismatch` branch hard-bailed `refused direct disk write` regardless of editor presence**. That was exactly my wedge: ACK came back with drifted content (`reason=ack_mismatch`), no live JB editor in this OpenCode session, yet the write was refused → `recovery=retry_without_disk_write`.
-
-**Changes:**
-- **converge.rs** — `refuse_or_editorless_disk_fallback` now consults `disk_write_permitted_for_file` (the SM gate) instead of raw `live_editor_endpoint_attached`; the `ack_mismatch` branch routes through it instead of hard-bailing. Net effect: a CLI-only/no-editor session (stale controller-hosted listener, no plugin lease) now disk-falls-back on `ack_mismatch` instead of wedging; a live editor buffer still fail-closes (preserves `#editorbufwin` / the File Cache Conflict guard).
-- **merge_control_state_machine.rs** — added `OwnershipLiveness::for_file` (reads the lease sidecar fresh each write) + `disk_write_permitted_for_file` (probe from `Attached` → resolve → `disk_write_permitted`), the phase-2 write-path gate. Decision-equivalent to `!live_editor_endpoint_attached`, routed through the ownership vocabulary.
-- **plugin_owner.rs** — exposed `plugin_owner_pid_is_live` pub wrapper so the SM builds liveness from the lease.
-- **FlowCore reason= budget 21→20** (audited): the standalone `ack_mismatch` bail was deduplicated into the shared helper's `reason={reason}` token.
-
-16 SM tests green (incl. decision-equivalence assertion), converge suite (72) green, `make check` green, CI green.
-
-**Caveat:** the fix lands in the *next* `make install-full` + supervisor recycle — the running binary is still 0.34.48, so this cycle's `finalize` still needs `--force-disk`. After install, the `ack_mismatch`/`no_ack` wedge self-resolves for CLI-only sessions.
-<!-- agent:boundary:7a9990a3 -->
+<!-- agent:boundary:e720d873 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -173,21 +74,21 @@ The first `finalize` wedged on the `#6b5h` IPC guard (listener active, no live J
 - ~~:pushpin: [#56ta]~~
 - ~~:pushpin: [#vm7g]~~
 - ~~:pushpin: [#n529]~~
-- ~~🚧 :pushpin: do [#fnxy]~~
+- ~~:pushpin: do [#fnxy]~~
+- ~~:pushpin: do [#t4x1]~~
+- 🚧 :pushpin: [#kj5f]
+- :pushpin: [#brtc]
 - :pushpin: do [#gww8]
 - :pushpin: do [#n529b]
-- :pushpin: do [#t4x1]
-- [#kj5f]
 - Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.
 - :pushpin: [#vwj7]
 - :pushpin: [#cgfx]
-- :pushpin: [#brtc]
 - :pushpin: [#gghx]
 - :pushpin: [#8g9w]
 - :pushpin: [#6mjw]
 - :pushpin: [#spy9]
 ---
-:round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
+:pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
 resync: pruned 2 stale session(s)
 [route] target tmux session: 0
@@ -205,7 +106,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - :pushpin: [#r5at]
 - :pushpin: [#6n5j]
 ---
-:round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
+:pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
 ```
 resync: pruned 2 stale session(s)
 [route] target tmux session: 0
@@ -221,7 +122,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 ```
 ---
 ---
-:round_pushpin: equityfundingsource.md turn has an IPC issue:
+:pushpin: equityfundingsource.md turn has an IPC issue:
 `### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc`
 
 ```text
@@ -235,7 +136,7 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/profession
 ```
 ---
 ---
-:round_pushpin: lazily-rs.md IPC error
+:pushpin: lazily-rs.md IPC error
 ```text
 **IPC proof issue dogfood log**
 Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
@@ -246,17 +147,17 @@ Affected component: editor IPC / writeback
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8c56928442bd4b165543ab0aad264d681b41b8898551d10f196018cd15a37304 content_len=11944 content_hash=46b47fdfe5505fb37c9e63df4167cb923df6b4ffc997ecca9009a15979c29a5e doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782339826601
 ```
 ---
-- [#nsfz]
+- :pushpin: [#nsfz]
 - ~~:round_pushpin: do [#rt83qflood]~~
-- ~~I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?~~ — auto-struck: answered this cycle (#ftstrike)
-- Still getting JB `File Cache Conflict` dialogs.
-- Opencode responses are reverse ordering numeric lists.
-- [#actorswitchdefer]
-- do [#npe1]
-- do [#p2j4]
-- do [#4pdp]
-- do [#0bmv]
+- :pushpin: ~~I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?~~ — auto-struck: answered this cycle (#ftstrike)
+- :pushpin: ~~I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?~~ — auto-struck: answered this cycle (#ftstrike)
+- :pushpin: Still getting JB `File Cache Conflict` dialogs.
+- :pushpin: Opencode responses are reverse ordering numeric lists.
+- :pushpin: [#actorswitchdefer]
+- :pushpin: do [#npe1]
+- :pushpin: do [#p2j4]
+- :pushpin: do [#4pdp]
+- :pushpin: do [#0bmv]
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
@@ -289,18 +190,17 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
-- do [#actorswitchdefer]
-- do [#capproofbg]
-- do [#nsfz]
-- do [#gghx]
-- do [#8g9w]
-- do [#6mjw]
-- do [#spy9]
-- do [#vwj7]
-- do [#cgfx]
-- do [#brtc]
-- do [#kj5f]
-- ~~:pushpin: do [#fnxy]~~
+- :pushpin: do [#actorswitchdefer]
+- :pushpin: do [#capproofbg]
+- :pushpin: do [#nsfz]
+- :pushpin: do [#gghx]
+- :pushpin: do [#8g9w]
+- :pushpin: do [#6mjw]
+- :pushpin: do [#spy9]
+- :pushpin: do [#vwj7]
+- :pushpin: do [#cgfx]
+- do [#nsq2]
+- ~~:pushpin: do [#t4x1]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -327,7 +227,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#nsq2] #jbmirrorevict Investigate JB StateProjectionBridge singleton mirrors map (ConcurrentHashMap keyed by SHA-256 of canonical path) not evicting on document close — reused/moved/symlinked paths surface stale projection state, the likely real cause of the 'sessions working on other open documents' symptom (lazily-rs contexts are already per-document). Audit eviction-on-close + documentHash reuse. [recommended]
 - [ ] [#n529b] #lazilystatesync3b Wire MirrorProjectionSummary into EditorCommandStateMachine / dispatch-ready / busy consumers (PromptPoller, RunAgentDocAttemptLedger) so they read StateProjectionBridge.mirrorSummaryForFile instead of the cold projectionSummaryForFile pull, then dogfood live in JB. Mirror substrate shipped in 0.2.190 (#n529). Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#gww8] #lazilyspecpin=Pin agent-doc state type_tag vocabulary (8 node kinds) + conformance snapshot/delta pair in lazily-spec as schemas/agent-doc-state.json (versioned) so kt/js/rs import one canonical vocabulary. Design pinned in tasks/agent-doc/plan-lazily-plugin-state-sync.md (Wire-shape definition section). Sibling-repo (src/lazily-spec) cycle per scope-discipline.
 - [ ] [#vwj7] #queuestatemachine1 Define queue-item identity + lifecycle-state model (Authored→Mirrored→InProgress→Answered→Struck→Reaped) + pure transition fn with exhaustive (state×event) tests. Replaces ad-hoc dedup passes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md

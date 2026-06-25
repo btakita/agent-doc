@@ -326,7 +326,29 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=file_ipc patch_id=18b16d61-065e-4747-90eb-5b29cab5f76c invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400.json doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782353796773
 ```
-<!-- agent:boundary:44f19097 -->
+
+### Re: #next-steps — lazily bug-fix status; top of backlog = #lzbenchstale — glm-5.2
+
+**Short answer: the lazily *runtime* bug backlog is drained.** Every correctness fix from the 2026-06-24 sweep shipped and is released in 0.12.3. I verified source, tags, and registry publishes this turn rather than trusting the prior (IPC-recovery-path) narrative. The one genuinely open code-side item is a benchmark/CI gap — now top of backlog (filed as `#lzbenchstale` because the binary auto-reaps `#lzbenchbudget`, which already exists in the done archive despite the check being red).
+
+#### Verified this turn (read-only)
+- **lazily-rs 0.12.3** — `Cargo.toml=0.12.3`, tag `v0.12.3` present. The `#lzstr0mpolldrive` send_to liveness fix is in source (`src/lazily-rs/src/str0m_net.rs:495` carries the `// was let _ = socket.send_to(...)` comment; `:508` now `match`es the `Result`). crates.io didn't answer curl from here (API blocked, same as the prior session observed) — registry publish claimed but not re-verified by me this turn.
+- **lazily-py 0.11.0** — PyPI **confirmed live** (`pypi.org/pypi/lazily/json` → 0.11.0), tag `v0.11.0`. → review **#kb9b reaped** (it was still `[/]` describing pre-publish state).
+- **lazily-zig v0.2.0** + **lazily-spec** (Pages) — tagged/pushed.
+- **lazily-js** — still `0.1.0`, **no tag**, npm `@lazily/js` **not published** (registry dist-tags empty). The one remaining release; needs your npm 2FA (or an automation token in passage, like the PyPI path).
+
+#### Top of backlog — `#lzbenchstale` (red benchmark-check; supersedes archived #lzbenchbudget)
+`make benchmark-check` is **RED right now** (verified in `src/lazily-rs`: `BENCHMARKS.md benchmark results are stale; run update-benchmark-results.py`) — this contradicts the prior session's "#gxzm benchmark-check (green)" note. `#gxzm` (#lzbmcheckdrift, missing p50/p95 rows) and `#lzbenchbudget` (thread_safe_contention lock-acquisition overages: set_cell_invalidation 78>32, lock_acquisitions 908>700) are distinct failure modes; the check is stale again.
+
+I did **not** blindly run `make benchmark-update`: the archived `#lzbenchbudget` itself flags this as either (a) stale baselines → regenerate, or (b) a **real contention regression** from `8665e29` (SlotId casts) + `38b18e4` (eager Signal on ThreadSafeContext). That decision needs an isolated-worktree A/B, not a paper-over. Say `do #lzbenchstale` and I'll run the A/B first, then refresh baselines or file the regression.
+
+#### Remaining follow-ups (none are code bugs)
+- **lazily-js npm publish** — your 2FA (the only agent-blocked release).
+- **#h6qb** WebRTC live two-host e2e — `[operator-drive]`. The preflight `semantic_completion_match` warning (may be resolved by `#lzwebrtcwire`) is a **false positive**: `#lzwebrtcwire` was only the localhost wiring slice; `#h6qb` needs live two-host/NAT through the deployed `#yxjw` Worker. Operator runbook already exists (`tasks/software/runbook-lazily-webrtc-live-e2e.md`).
+- **#xccx** Holons integration — blocked on Steve's answers.
+
+**Top backlog id: `#lzbenchstale`.**
+<!-- agent:boundary:cba898b9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -335,8 +357,8 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=file_ipc patch_id
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- [#lzbenchstale]
-- 🚧 What are #next-steps to fix lazily bugs?
+- 🚧 [#lzbenchstale]
+- What are #next-steps to fix lazily bugs?
 <!-- /agent:queue -->
 
 ## Backlog

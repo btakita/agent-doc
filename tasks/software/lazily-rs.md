@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -223,7 +223,7 @@ agent-doc's document is a **shallow, ordered, stably-keyed tree**: root → comp
 Answered in full above ("Best tree algorithm for agent-doc AST + semantic trees"): an **ordered keyed tree** (stable ids, per-node value cells, `CellList` children) + **keyed reconciliation with LIS move-minimization** + a **move-aware sequence CRDT** for sibling order + **atomic move (`#lzcellmove`)** — which together form the per-cell CRDT-merge substrate. Consuming the head.
 
 > **Queue prompt:** What tree algorithm would be best for agent-doc document AST + semantic document trees?
-<!-- agent:boundary:519ec504 -->
+<!-- agent:boundary:5dfae3cf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -232,7 +232,9 @@ Answered in full above ("Best tree algorithm for agent-doc AST + semantic trees"
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- 🚧 Can Cell Families support tree structures?
+- ~~Can Cell Families support tree structures?~~
+- 🚧 ~~What tree algorithm would be best for agent-doc document AST + semantic document trees?~~ — auto-struck: answered this cycle (#ftstrike)
+- What happens if the user makes large structural edits to the document?
 <!-- /agent:queue -->
 
 ## Backlog

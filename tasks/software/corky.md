@@ -356,7 +356,7 @@ Fixed and shipped (corky `6c4c831` on `origin/main`). The slug regex `[^a-z0-9]+
 - Commit `6c4c831` — pushed.
 
 Next (final) queue head: `#ckymime`.
-<!-- agent:boundary:7001801a -->
+<!-- agent:boundary:6acb0a9e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -378,7 +378,7 @@ Please give me a report the performance
 - ~~[#ckyconfigunwrap]~~
 - ~~[#ckyatomicwrite]~~
 - ~~[#ckyunicodeslug]~~
-- [#ckymime]
+- 🚧 [#ckymime]
 - What are #next-steps to fix corky bugs?
 - What are #next-steps to fix corky bugs?
 <!-- /agent:queue -->
@@ -387,7 +387,7 @@ Please give me a report the performance
 
 <!-- agent:backlog -->
 - [ ] [#ckythreadmerge] [P2 correctness] threading provider-switch merge: IMAP threads keyed by subject (thread_key_from_subject) and Gmail-API threads keyed by Gmail threadId never merge when the same conversation is synced from both providers, producing duplicate thread files. Design a unified thread-identity reconciliation (e.g. index by Message-ID/References across providers, or map Gmail threadId<->subject-key). Architectural — needs its own focused cycle. Split from #ckythread. crates/corky-mail/src/sync/{imap_sync.rs,gmail_api_sync.rs}, markdown.rs
-- [ ] [#ckymime] [P2] corky draft send MIME issues: raw filename in Content-Disposition (header-injection/malformed MIME), whole attachment buffered in RAM (~1.8GB peak for 500MB), inline images: YAML silently dropped (only draft push handles images+CID), In-Reply-To not normalized to angle-bracket RFC 5322 form. crates/corky-mail/src/draft/send.rs:70-98,186-237
+- [ ] 🚧 [#ckymime] [P2] corky draft send MIME issues: raw filename in Content-Disposition (header-injection/malformed MIME), whole attachment buffered in RAM (~1.8GB peak for 500MB), inline images: YAML silently dropped (only draft push handles images+CID), In-Reply-To not normalized to angle-bracket RFC 5322 form. crates/corky-mail/src/draft/send.rs:70-98,186-237
 <!-- /agent:backlog -->
 
 ## Review

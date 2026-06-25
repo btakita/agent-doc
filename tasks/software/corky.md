@@ -239,7 +239,15 @@ Fix applied **locally** (empty `images` slice added to the 3 bench callsites); c
 **Fix `39f266a` (#ckybenchbreak):** the `draft_mime` criterion bench now passes the `images` slice added by #ckymimeinline (the E0061 that made `make check` red). Bench numbers: `build_mime_message` plain ~160 ns, in_reply_to ~209 ns, with_attachment(4 KiB) ~8.71 µs.
 
 **Build + install:** `make build` (transcribe-cuda) green; `make install` → `corky 0.29.0`. Both commits pushed (`6056584..39f266a`). `Cargo.lock` churn left unstaged (unrelated).
-<!-- agent:boundary:ce23d20f -->
+
+### Re: do [#ckysuite] — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#ckysuite]
+
+Already shipped as part of the "fix test suite" turn — corky `f3098ec` (prioritize `CORKY_DATA` over the `./mail` symlink heuristic in `resolve::data_dir`), SPEC §2.2 updated, on origin/main. No further work; reaping `#ckysuite`. Full suite: 690 passed / 0 failed / 0 ignored.
+<!-- agent:boundary:08dcb235 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -251,16 +259,17 @@ Please give me a report the performance
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~[#ckythreadmerge]~~
-- 🚧 fix test suite. The turn should not end with a failing test suite.
+- ~~fix test suite. The turn should not end with a failing test suite.~~
 - ~~do [#ckybenchbreak]~~
-- fix test suite
-- do [#ckysuite]
+- ~~fix test suite~~
+- ~~do [#ckysuite]~~
+- What are #next-steps to fix corky bugs?
+- Would corky benefit from lazily-rs? Reactive graphs + state machines?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ckysuite] [done] test_doctor isolation fixed by honoring CORKY_DATA over ./mail symlink heuristic (corky f3098ec, SPEC §2.2). Shipped 2026-06-25.
 <!-- /agent:backlog -->
 
 ## Review

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,83 +33,11 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-091955.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-193022.md`*
 
 Compacted content:
-- Archived 11 response topic(s): Available Deal cards show interested-lender count; IPC proof diagnostic (interrupted-cycle recovery); Messages dialog; 8 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: The application-feedback message deep-link — what it is and how it renders — glm-5.2
-
-> **Queue prompt:** A message says `Admin sent application feedback for [56b22a22-…](efs-app-feedback:56b22a22-…).`. Why does the message contain a markdown link? What is `efs-app-feedback:<uuid>` and how do we link to it?
-
-**Why the markdown link:** when an admin sends application feedback (email + logged report), `application_feedback_reflection_create_` (`app/.../borrower/messages/application_feedback_reflection.ts:41`) also posts a "reflection" admin message into the borrower's chat thread carrying an internal deep-link so the recipient can jump straight to that feedback.
-
-**What `efs-app-feedback:<uuid>` is:** a custom **internal URI scheme** — not a real URL. The `<uuid>` is the **application id** (`56b22a22-…`). The portal never fetches it; `safe_internal_href_` (`portal/shared/portal_messages.tsx:306`) rewrites it to a real in-app route — `/admin/loan-applications/<id>#feedback` (admin) or `/borrowers/application-status/<id>#feedback` (borrower).
-
-**How it links / why you saw raw markdown:** the chat-bubble `MessageBody` parses `[label](efs-app-feedback:id)` into a real `<a>`. But `UnifiedMessageThread` — used by the per-user, group, and unified tabs (the per-user tab was just refactored onto it) — rendered the body as **plain text**, so the raw markdown leaked through there. The label was also the raw UUID because the feedback call site fell back to `application.id` when no loan number existed.
-
-**Fixed this cycle** (committed + pushed to EFS `origin/main` `7eee8f4`):
-- `UnifiedMessageThread` now parses internal markdown links into clickable anchors (new `UnifiedMessageBody`), mirroring `MessageBody` — so the deep-link renders correctly in the per-user/group/unified tabs (also fixes the regression from the per-user refactor).
-- The reflection label no longer falls back to the application UUID; when no TMO/property loan number exists it reads "loan application" instead.
-
-**Verification**: `bun test` **1225 pass / 0 fail**; `bun run build` + `build:worker` clean. Tests assert the `UnifiedMessageBody` link parsing and the "loan application" fallback.
-
-**Not deployed** this cycle — the queue carried no `deploy` item (preset `#spec-test-commit-push`). Queue `deploy` to ship it live.
-
-### Re: Application-feedback deep-link — answered and fixed — glm-5.2
-
-> **Queue prompt:** A message says `Admin sent application feedback for [56b22a22-80a7-46a9-ad69-5ab78d5449f9](efs-app-feedback:56b22a22-80a7-46a9-ad69-5ab78d5449f9).`. Why does the message contain a markdown link? What is `efs-app-feedback:56b22a22-80a7-46a9-ad69-5ab78d5449f9` and how do we link to it?
-
-Queue closeout: this investigation was answered and fixed earlier this cycle — the `efs-app-feedback:<application_id>` is an internal deep-link URI scheme rewritten by the portal to the application's `#feedback` section; the two fixes shipped in EFS `7eee8f4` (UnifiedMessageThread now renders the link as a clickable anchor; the label falls back to "loan application" instead of the raw UUID). Striking the residue head.
-
-### Re: Queue residue cleared — glm-5.2
-
-The application-feedback investigation is answered and fixed (EFS `7eee8f4`); clearing the lingering queue head (#qheadresidue).
-
-### Re: Auto-focus compose textarea when the Messages dialog opens on a user context — glm-5.2
-
-> **Queue prompt:** When opening the Message dialog, within a user context, focus on the message textarea field.
-
-Done — committed + pushed to EFS `origin/main` (`3ac287a`). `AdminMessagesUser` (the per-user Messages-dialog tab) now focuses its Reply textarea on mount and whenever the participant identifier changes, so opening the dialog on (or switching to) a user context puts the cursor in the compose box immediately.
-
-**Verification**: `bun test` **1225 pass / 0 fail**; build + worker bundle clean. Tests assert the `textarea_ref` + focus wiring.
-
-### Re: Deploy — glm-5.2
-
-> **Queue prompt:** deploy
-
-Deployed to production from `3ac287a`.
-
-- **Version ID**: `db976d48-dcdd-47fa-ab1f-ac21358a1f12`
-- **URL**: https://equityfundingsource.brian-takita.workers.dev
-- **Remote D1 migrations**: no-op — frontend + a test only (verified none pending).
-- **Post-deploy smoke**: `GET /` → 200.
-
-Operator live-verify: open a deal → Messages dialog → a per-user tab and confirm the compose textarea takes focus automatically.
-
-### Re: Queue drained — glm-5.2
-
-Both queued items (per-user compose auto-focus + deploy) shipped this cycle (EFS `3ac287a`, worker `db976d48`); clearing the residue head.
-
-### Re: Queue cleared — glm-5.2
-
-Clearing the inert queue residue (focus item + deploy both shipped this cycle).
-
-### Re: Full Application dialog full screen + deploy — opus-4-8
-
-> **Queue prompt:**
->
-> Make the https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Full Application dialog full screen.
-
-
-Drained both queue heads.
-
-**Full Application dialog → full screen.** The Full Application stacked dialog (opened from the admin pipeline Application dialog) was a centered `max-w-[72rem]` panel. `PortalModal` already had a `full_screen` prop that fills the viewport edge-to-edge (no backdrop gutter, square corners, `width:100%;height:100dvh`), so I switched the dialog to it and adjusted the modal body root from `max-height:calc(100dvh - 40px)` to `height:100%;max-height:100dvh` so it fills the full-screen panel. `lib/ui--browser--efs/portal/admin/pipeline.tsx`, commit `dba3bfd`.
-
-**Verify + deploy.** `bun run test` → 1225 pass / 0 fail; `bun run build` + `build:worker` clean. Pushed to `origin/main`, then `deploy:worker` → live at https://equityfundingsource.brian-takita.workers.dev (Version `ff4b8896-a7a7-4d1a-9e59-6577b69df521`). No CI workflow in the EFS repo, so local suite + build are the evidence.
-
-Reload the `dialog=application` → **Open Full Application** path to see it fill the screen.
+❯ - Archived 14 response topic(s): The application-feedback message deep-link; Application-feedback deep-link; Queue residue cleared; 11 more
+❯ - Prior summary/context: prior compacted content: Archived 11 response topic(s): Available Deal cards show interested-lender count; IPC proof ...
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
@@ -120,124 +48,9 @@ This is binary-authored diagnostic content, not a user prompt, so it does not re
 Issue class: `ipc_proof_insufficient`
 Affected component: editor IPC / writeback
 
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=d3db89be-fac6-4f71-bd5b-4b333cc1fdb7 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782402762643
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=58908d81-a732-4589-8343-6c07e5e6b498 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782376798544
 ```
-### Re: Full Application cleanup (remove Feedback Report card + Step prefixes) + deploy — opus-4-8
-
-> **Queue prompt:**
->
-> From https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Full Application, remove "Feedback Report" card. Admins will use the Messaging feature to send emails to borrowers.
-
-
-Drained all three queue heads.
-
-> **Queue prompt:**
->
-> From the admin pipeline Full Application, remove "Feedback Report" card. Admins will use the Messaging feature to send emails to borrowers.
-
-> **Queue prompt:**
->
-> Remove the Step #: prefix from the Full Application dialog.
-
-> **Queue prompt:**
->
-> deploy
-
-**Removed the Feedback Report card.** The admin Full Application detail rendered a `FeedbackReportCard` (subject/message compose + "Send to borrower" + a "Sent feedback" log) via the `left_actions` slot of `FullApplicationDetailView`. I dropped that slot and deleted the now-dead `FeedbackReportCard` component (`lib/ui--browser--efs/portal/admin/full_applications.tsx`). Admins now use the Messaging feature to email borrowers. The borrower-facing admin-feedback display and the feedback entries in the Activity History merge are untouched.
-
-**Removed the "Step #:" prefix.** Section titles read "Step 1 - Personal", "Step 4 - Subject Property", etc. I stripped the `Step N - ` prefix from every section card title **and** the advancement-requirement section labels in the shared `full_application_detail.tsx`, so the dialog now shows clean names (Personal, Addresses, Employment, Income, Assets, Liabilities, Real estate owned, Subject Property, Declarations, Review & Sign). Display-only strings; `section_key` is unchanged. Shared component, so the borrower application-status view gets the same cleaner headers.
-
-**Verify + deploy.** Tests updated to lock in both changes; `bun run test` → 1225 pass / 0 fail; `build` + `build:worker` clean. Pushed to `origin/main` (commit `fa27562`), then `deploy:worker` → live (Version `9889de6b-5293-4703-868f-2a7dd7b80a43`). No CI workflow in the EFS repo, so local suite + build are the evidence.
-
-### Re: Full Application dialog layout — Declarations moved + collapsible cards + inline document uploads — opus-4-8
-
-Drained the four Full Application layout heads (deployed in Version `02130b3c`). The Messages-dialog scroll head + the trailing `deploy` are left active — see the note at the end.
-
-> **Queue prompt:**
->
-> Admin > Data Pipeline + Page: Remove the Step #: prefix from the Full Application dialog.
-
-> **Queue prompt:**
->
-> Move the Declarations card to the left side of the Full Application dialog.
-
-> **Queue prompt:**
->
-> Make the Declarations + Review & Sign cards collapsible and default to collapsed.
-
-> **Queue prompt:**
->
-> Remove the dropdown in the Documents card. Show each document type with the upload inline.
-
-**Step #: prefix** — stripped `Step N - ` from every section card title **and** the advancement-requirement section labels in the shared `full_application_detail.tsx` (covers both the dialog and the standalone page). Display-only; `section_key` unchanged. (Committed earlier as `fa27562`.)
-
-**Declarations moved left** — the Declarations card now renders in the left column of the Full Application detail (after Real estate owned) instead of the right column.
-
-**Collapsible Declarations + Review & Sign** — new `CollapseToggle` (chevron header). `EditableObjectSectionCard` gained `collapsible`/`default_collapsed` props (used by Declarations); Review & Sign was extracted into a `ReviewSignCard`. Both default to collapsed.
-
-**Documents card — no dropdown** — the admin Full Application used the `table` upload variant (a document-type `<select>` + single drop zone). Switched it to the `per_type` variant, which already renders **each** document type with its own inline drop zone and status — no dropdown. Removed the now-dead `FullApplicationDocumentsTableUpload` + unused `PortalSelect` import.
-
-Verify: tests updated; `bun run test` → 1225 pass / 0 fail; `build` + `build:worker` clean. Pushed `28bd4b1`, deployed Version `02130b3c-108b-44ab-9531-c381b416e6e6`. No CI workflow in the EFS repo.
-
-**Left queued (next iteration):** "The Messages dialog should not have a vertical scrollbar … textarea + Send fixed at the bottom, messages independently scrollable" + `deploy`. This is a multi-surface dialog scroll/layout change (per-user / group / messages / contact tabs) whose correctness needs live visual verification, so it deserves a focused pass rather than a build-green-only change in this degraded-IPC session.
-
-### Re: Admin Messages dialog — independent thread scroll, pinned compose — opus-4-8
-
-> **Queue prompt:**
->
-> The Messages dialog should not have a vertical scrollbar for the messages + textarea + Send button. The text area + Send button should be fixed at the bottom of the dialog viewport. The messages should have an independent vertical scrollbar.
-
-Done — implemented + deployed (you chose implement+deploy via the prompt-choice). The dialog body was one scrolling block (thread + textarea + Send scrolled together). It is now a non-scrolling flex column so the compose bar stays pinned at the dialog's bottom and only the message thread scrolls.
-
-- `lib/ui--server--efs/portal.ts`: `.admin-messages-panel>.modal-body` is now `overflow:hidden` + `display:flex;flex-direction:column` (no whole-body scroll); added `.admin-messages-tab-scroll` for the messages/contact tabs.
-- `lib/ui--browser--efs/portal/admin/messages_unified.tsx`: `AdminMessagesUser` + `AdminMessagesGroup` are flex columns — the `UnifiedMessageThread` sits in its own `flex:1; overflow-y:auto` scroller and the compose footer is `flex:none` (pinned).
-- `lib/ui--browser--efs/portal/admin/messages.tsx`: the messages + contact tabs render inside the `admin-messages-tab-scroll` container so they scroll within the non-scrolling body.
-
-Verify: added `#msg-dialog-scroll` regression test; `bun run test` → 1226 pass / 0 fail; `build` + `build:worker` clean. Pushed `cc3e1db`, deployed Version `352fe989-e969-456c-8ffa-794ea32f9196`.
-
-**Please eyeball it** (this is a layout change I can't visually verify from here): open a deal → Messages, check the per-user, group, messages, and contact tabs — the compose box should stay pinned at the bottom while the thread scrolls on its own.
-
-### Re: Collapse Personal + Subject Property cards + deploy — opus-4-8
-
-> **Queue prompt:**
->
-> Please collapse the https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 fields of "Personal" + "Subject Property" to reduce scrolling to view all data.
-
-
-Drained both heads.
-
-> **Queue prompt:**
->
-> Please collapse the Full Application fields of "Personal" + "Subject Property" to reduce scrolling to view all data.
-
-> **Queue prompt:**
->
-> deploy
-
-**Collapsed by default.** The **Personal** and **Subject Property** cards in the Full Application detail are now collapsible and **default to collapsed** (chevron header to expand), so the dialog opens compact and you scroll far less to see all sections — matching the Declarations + Review & Sign behavior added earlier. `Personal` reuses the `EditableObjectSectionCard` `collapsible`/`default_collapsed` props; I added the same `collapsible`/`default_collapsed` support to `SubjectPropertyCard`. Shared component, so the borrower application-status view gets the same compact default. `lib/ui--browser--efs/portal/shared/full_application_detail.tsx`.
-
-**Verify + deploy.** Added a `#full-app-collapsible-cards` regression test; `bun run test` → 1227 pass / 0 fail; `build` + `build:worker` clean. Pushed `0222de8`, deployed Version `be8be001-3491-4799-b471-718cff488ff1`. No CI workflow in the EFS repo.
-
-### Re: Revert collapse → dense multi-column field cards (Personal + Subject Property) + deploy — opus-4-8
-
-Drained both heads.
-
-> **Queue prompt:**
->
-> Revert the last change. You went in the wrong direction. Instead don't make 1 row per line but a well formatted card to combine lines instead. It should read with minimal scrolling.
-
-> **Queue prompt:**
->
-> deploy
-
-Reverted the default-collapsed Personal + Subject Property cards (`0222de8`) — that hid the data, which wasn't what you wanted. Instead the two cards now render **dense**: a responsive grid (`.full-app-field-grid`) lays the read-only fields **multiple per row** with the label above the value, so all the data shows at once with much less vertical scrolling — no chevron, nothing hidden.
-
-- `EditableObjectSectionCard` gained a `dense` prop that wraps its read-only children in the field grid (Personal uses it). `SubjectPropertyCard` gained the same `dense` flag for its read view. The edit forms are unchanged (they already use a multi-column `form-grid`).
-- `.full-app-field-grid` = `grid-template-columns:repeat(auto-fit,minmax(180px,1fr))` → 2–3 fields per row depending on width; each field is label-over-value for clean wrapping.
-- Collapsible **Declarations + Review & Sign** are unchanged (you asked for those separately and didn't revert them).
-
-**Verify + deploy.** Tests updated (`#full-app-dense-cards`); `bun run test` → 1227 pass / 0 fail; `build` + `build:worker` clean. Pushed `05fe7a3`, deployed Version `7fe3901f-41fd-4f0e-bd3d-b2b0b440d2a4`. No CI workflow in the EFS repo.
-<!-- agent:boundary:1f920893 -->
+<!-- agent:boundary:4c9c7ba3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -257,6 +70,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- 🚧 Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Full Application: Personal, Address, Employment, Income
+- Optimize the layout of Review & Sign. Add a green checkmark if the borrower completed and a red x if not.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

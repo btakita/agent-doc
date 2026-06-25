@@ -6936,3 +6936,119 @@ mod crdt_relay_sim {
         assert_eq!(run(), run());
     }
 }
+
+/// Deterministic SimWorld for the LIVE relay-host cutover (`#crdtauth4`).
+///
+/// Where `crdt_relay_sim` above exercises the standalone `RelayHub` API directly,
+/// this module drives the wiring the live finalize / disk paths actually call:
+/// `agent_doc_orchestration::crdt_relay_host` — the per-document hub registry, the
+/// authority-gated finalize commit barrier (`commit_barrier_for_file_with_authority`),
+/// and the authority-gated disk-demotion reconcile. It proves the LIVE seams (a)
+/// gate on `CrdtAuthority::EditorAttached` vs `Detached`, (b) never allocate / touch
+/// a hub on the Detached path (so headless traffic is byte-for-byte unchanged), and
+/// (c) flush live replicas to a consistent cut for the EditorAttached path — all
+/// keyed per-document through a real tracked path, no live editor / tmux / socket.
+mod crdt_relay_host_sim {
+    use agent_doc_orchestration::crdt_authority::CrdtAuthority;
+    use agent_doc_orchestration::crdt_relay::mint_client_id;
+    use agent_doc_orchestration::crdt_relay_host::{
+        commit_barrier_for_file_with_authority, recover_hub_from_disk, with_hub,
+    };
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    /// A throwaway tracked document under its own temp project root, so the live
+    /// `crdt_relay_host` registry keys per-document via `snapshot::doc_hash`.
+    fn temp_doc(name: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let path = dir.path().join(name);
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, "# {name}\n\nbody").unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn live_finalize_barrier_flushes_editor_attached_but_noops_detached() {
+        // EDITOR-ATTACHED doc: a live editor types a local op that has NOT been
+        // relayed; the LIVE finalize barrier flushes it into the committed cut.
+        let (_attached_dir, attached) = temp_doc("live-attached.md");
+        let editor = mint_client_id("intellij:live-finalize");
+        with_hub(&attached, |hub| {
+            hub.register(editor).unwrap();
+            hub.local_edit(editor, 0, 0, "keystroke").unwrap();
+            assert!(!hub.canonical_text().contains("keystroke"), "not relayed yet");
+        })
+        .unwrap();
+        assert!(commit_barrier_for_file_with_authority(
+            &attached,
+            CrdtAuthority::MultiReplica
+        ));
+        with_hub(&attached, |hub| {
+            assert!(
+                hub.canonical_text().contains("keystroke"),
+                "the live finalize barrier flushed the editor's op into the cut"
+            );
+        })
+        .unwrap();
+
+        // DETACHED doc (a SEPARATE document): the live barrier is a trivial no-op
+        // that allocates no hub — per-document isolation + headless path unchanged.
+        let (_detached_dir, detached) = temp_doc("live-detached.md");
+        let hash = agent_doc_orchestration::snapshot::doc_hash(&detached).unwrap();
+        assert!(commit_barrier_for_file_with_authority(
+            &detached,
+            CrdtAuthority::GitAuthoritative
+        ));
+        // The Detached path never touched a hub for its own document.
+        let touched = with_hub(&detached, |hub| hub.live_count()).unwrap();
+        assert_eq!(
+            touched, 0,
+            "the Detached commit barrier allocates no live replicas (hub {hash} stays empty)"
+        );
+    }
+
+    #[test]
+    fn live_barrier_does_not_block_on_disconnected_editor() {
+        // A disconnected editor must not deadlock the live finalize barrier.
+        let (_dir, doc) = temp_doc("live-disconnect.md");
+        let live = mint_client_id("vscode:live");
+        let slow = mint_client_id("intellij:slow");
+        with_hub(&doc, |hub| {
+            hub.register(live).unwrap();
+            hub.register(slow).unwrap();
+            hub.local_edit(live, 0, 0, "LIVE").unwrap();
+            hub.local_edit(slow, 0, 0, "SLOW").unwrap();
+            hub.disconnect(slow);
+        })
+        .unwrap();
+        assert!(commit_barrier_for_file_with_authority(
+            &doc,
+            CrdtAuthority::MultiReplica
+        ));
+        with_hub(&doc, |hub| {
+            let cut = hub.canonical_text();
+            assert!(cut.contains("LIVE"));
+            assert!(!cut.contains("SLOW"), "disconnected op excluded, no deadlock");
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn live_supervisor_restart_recovers_canonical_from_disk_projection() {
+        // Supervisor restart: the live recovery path rebuilds the per-document
+        // canonical replica from the last disk recovery projection.
+        let (_dir, doc) = temp_doc("live-recover.md");
+        let mut prior = agent_doc_orchestration::crdt_relay::RelayHub::new(1);
+        let ed = mint_client_id("intellij:prior-restart");
+        prior.register(ed).unwrap();
+        prior.apply_local(ed, 0, 0, "survives-restart").unwrap();
+        let projection = prior.projection_bytes();
+
+        recover_hub_from_disk(&doc, &projection).unwrap();
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), "survives-restart");
+        })
+        .unwrap();
+    }
+}

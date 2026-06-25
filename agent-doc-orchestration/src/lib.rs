@@ -143,6 +143,7 @@ pub mod sessions;
 pub mod snapshot;
 pub mod crdt_authority;
 pub mod crdt_relay;
+pub mod crdt_relay_host;
 pub mod merge_control_state_machine;
 pub mod start;
 pub mod startup_miss;

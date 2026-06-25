@@ -1861,6 +1861,18 @@ fn apply_template_response(
     } else if use_crdt {
         eprintln!("File was modified during run. CRDT merging changes...");
         let base_state = snapshot::crdt_merge_base_state(file, baseline)?.state;
+        // `#crdtauth4` — disk demotion (plan phase 6). Under `MultiReplica` (a live
+        // editor is attached) the in-memory canonical replica is authoritative and
+        // the disk `.yrs` is a write-through recovery projection only: reconcile the
+        // just-loaded base state INTO the live replica so in-memory wins (a stale
+        // disk projection can only add ops the live replica genuinely lost, never
+        // regress live text). Under `GitAuthoritative` (headless) this returns
+        // `None` and the existing baseline-wins load above runs unchanged.
+        if let Err(e) =
+            crate::crdt_relay_host::reconcile_disk_projection_for_file(file, &base_state)
+        {
+            eprintln!("[crdt] disk-demotion reconcile failed (non-fatal): {e}");
+        }
         let (merged, state) =
             merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current)?;
         (merged, Some(state))

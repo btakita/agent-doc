@@ -76,7 +76,26 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=cd3b4893-c3da-4103-8039-b5dd1aaead8b invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782370285223
 ```
-<!-- agent:boundary:b795fb09 -->
+
+### Re: Messages dialog — per-user tabs + deal-group merged view — opus-4-8
+
+> **Queue prompt:** 🚧 When opening the Messages dialog on user context, render a specific tab for each user in the user context. Also render another tab for the user group. These tabs are dedicated to the user(s). Remove the existing All Messages tab. Rename Messages tab to All Messages. Add an All tab in Messages dialog > Messages tab...a sibling to Borrowers|Lenders|Brokers. This tab effectively replaces the replaced All Messages tab.
+
+Done — implemented, full suite green, committed + pushed to EFS `origin/main` (`8464ac0`).
+
+I confirmed the design with you first (it wasn't derivable from code — the dialog only ever opened with **one** user): **deal participants** for the context, and a **merged** group tab.
+
+**What changed** (`src/equityfundingsource-dev`):
+- **User context = deal participants.** Extended `ADMIN_MESSAGES_OPEN_EVENT` detail with `users[]` + `group_label`. Opening Messages from a deal (`deal_detail` "Message borrower") now passes the borrower **and every interested lender**; the dialog renders one dedicated tab per participant. A single-user open (lead pipeline, borrower-only deal) still yields that one participant's tab.
+- **Per-user tab** = `AdminMessagesUnified` locked to the participant's email — their full cross-source history (borrower-chat + lender-deal + lender-account), with the address-search box hidden (satisfies the earlier "no user search, only the context users" intent).
+- **Group tab** = new `AdminMessagesGroup`: every participant's unified thread fetched, merged chronologically, de-duplicated, read-only.
+- **Tab restructure**: removed the legacy top-level **All Messages** (unified) tab; renamed **Messages → All Messages**; added an **All** role sub-tab beside Borrowers|Lenders|Brokers that renders the cross-role unified view the removed tab used to show.
+- Extracted `UnifiedMessageThread` for reuse across the single-user and group views.
+
+**Verification**: full `bun test` **1223 pass / 0 fail**; `bun run build` + `build:worker` clean. Updated 4 existing source-assertion tests for the rename/restructure and added 6 new tests under `#msg-user-context-tabs`. (EFS repo has no CI workflow; local suite is the gate.)
+
+Next queue head is **deploy** — I'll take that on the next drain.
+<!-- agent:boundary:08b36ead -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -97,7 +116,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline > Available Deal cards should show the number of interested lenders.~~
-- 🚧 When opening the Messages dialog on user context, render a specific tab for each user in the user context. Also render another tab for the user group. These tabs are dedicated to the user(s). Remove the existing All Messages tab. Rename Messages tab to All Messages. Add an All tab in Messages dialog > Messages tab...a sibling to Borrowers|Lenders|Brokers. This tab effectively replaces the replaced All Messages tab.
+- ~~When opening the Messages dialog on user context, render a specific tab for each user in the user context. Also render another tab for the user group. These tabs are dedicated to the user(s). Remove the existing All Messages tab. Rename Messages tab to All Messages. Add an All tab in Messages dialog > Messages tab...a sibling to Borrowers|Lenders|Brokers. This tab effectively replaces the replaced All Messages tab.~~
 - :pushpin: deploy
 <!-- /agent:queue -->
 

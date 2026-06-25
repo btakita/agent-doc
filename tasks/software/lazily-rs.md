@@ -123,7 +123,7 @@ The genuine gaps for a *keyed dynamic collection*:
 2. **Sub-path addressing for nested collections** falls out of (1) once entries carry keys/paths — no new transport machinery, just the key table.
 
 **Net across all three:** the dynamic-shape graph and per-node delta addressing are already designed and shipped. To turn that into ergonomic "dynamic cell collections with KV lookup," the two additions are (a) a `CellFamily`/`CellMap` core primitive, and (b) an optional `key`/path field on `NodeAdd`/`NodeSnapshot`. Filed as `[recommended]` backlog items (plan-first, not implemented this cycle — design recommendations awaiting your go).
-<!-- agent:boundary:ab24deac -->
+<!-- agent:boundary:5e464101 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -141,6 +141,8 @@ The genuine gaps for a *keyed dynamic collection*:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [/] [#lzcellfamily] [recommended] CellFamily / CellMap keyed reactive collection primitive: index cell (reactive membership: add/remove keys) + per-entry value cells minted/cached via get_or_create(key), freed on removal; replaces ad-hoc Cell<HashMap<K,V>> coarse model. Plan first. Gated: design recommendation from dynamic-cells Q&A, awaiting operator go.
+- [/] [#lzwirekey] [recommended] Add optional key/path field to NodeAdd + NodeSnapshot so CellFamily entries are addressable by a stable key (key->NodeId registry) surviving NodeId churn across reconnect/resync. Depends on #lzcellfamily. Gated: awaiting operator go.
 <!-- /agent:backlog -->
 
 ## Review

@@ -274,7 +274,7 @@ You re-activated the queue and marked lazily-rs `🚧` — taken as the go. **la
 - `release + publish lazily-py` (#kb9b) — PyPI `lazily` 0.11.0 needs passkey 2FA.
 
 That's the end of the agent-doable releases (spec ✅, rs ✅, zig ✅; kt removed). The two remaining are operator-driven 2FA publishes. Want to walk through one together (I prep, you supply the OTP), or are we done here?
-<!-- agent:boundary:649b8064 -->
+<!-- agent:boundary:aabc2feb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -288,7 +288,7 @@ That's the end of the agent-doable releases (spec ✅, rs ✅, zig ✅; kt remov
 - ~~release + publish lazily-ky~~
 - ~~release + publish lazily-js~~
 - ~~release + publish lazily-zig~~
-- release + publish lazily-py
+- 🚧 release + publish lazily-py
 <!-- /agent:queue -->
 
 ## Backlog

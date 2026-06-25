@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -110,7 +110,29 @@ Drained both queue heads.
 **Verify + deploy.** `bun run test` → 1225 pass / 0 fail; `bun run build` + `build:worker` clean. Pushed to `origin/main`, then `deploy:worker` → live at https://equityfundingsource.brian-takita.workers.dev (Version `ff4b8896-a7a7-4d1a-9e59-6577b69df521`). No CI workflow in the EFS repo, so local suite + build are the evidence.
 
 Reload the `dialog=application` → **Open Full Application** path to see it fill the screen.
-<!-- agent:boundary:4d4e07b7 -->
+
+### Re: Full Application cleanup (remove Feedback Report card + Step prefixes) + deploy — opus-4-8
+
+Drained all three queue heads.
+
+> **Queue prompt:**
+>
+> From the admin pipeline Full Application, remove "Feedback Report" card. Admins will use the Messaging feature to send emails to borrowers.
+
+> **Queue prompt:**
+>
+> Remove the Step #: prefix from the Full Application dialog.
+
+> **Queue prompt:**
+>
+> deploy
+
+**Removed the Feedback Report card.** The admin Full Application detail rendered a `FeedbackReportCard` (subject/message compose + "Send to borrower" + a "Sent feedback" log) via the `left_actions` slot of `FullApplicationDetailView`. I dropped that slot and deleted the now-dead `FeedbackReportCard` component (`lib/ui--browser--efs/portal/admin/full_applications.tsx`). Admins now use the Messaging feature to email borrowers. The borrower-facing admin-feedback display and the feedback entries in the Activity History merge are untouched.
+
+**Removed the "Step #:" prefix.** Section titles read "Step 1 - Personal", "Step 4 - Subject Property", etc. I stripped the `Step N - ` prefix from every section card title **and** the advancement-requirement section labels in the shared `full_application_detail.tsx`, so the dialog now shows clean names (Personal, Addresses, Employment, Income, Assets, Liabilities, Real estate owned, Subject Property, Declarations, Review & Sign). Display-only strings; `section_key` is unchanged. Shared component, so the borrower application-status view gets the same cleaner headers.
+
+**Verify + deploy.** Tests updated to lock in both changes; `bun run test` → 1225 pass / 0 fail; `build` + `build:worker` clean. Pushed to `origin/main` (commit `fa27562`), then `deploy:worker` → live (Version `9889de6b-5293-4703-868f-2a7dd7b80a43`). No CI workflow in the EFS repo, so local suite + build are the evidence.
+<!-- agent:boundary:54af4338 -->
 <!-- /agent:exchange -->
 ###
 <!--

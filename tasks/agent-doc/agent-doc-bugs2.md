@@ -255,7 +255,7 @@ Its only invariant is *"never commandeer another **document's** pane"* (SPEC §8
 **Fix (added as `#xdocsuper0`, plan updated):** before `AcceptStale` (and on the route reclaim path), check `supervisor_lease_is_fresh_or_alive` for the document — if a fresh lease is held by a live supervisor, `Reject` (or require `--force`) even when the prior pane/session looks stale. That closes the two-supervisors-one-document window at the source. Plan: `tasks/agent-doc/plan-cross-document-supervisor-contamination.md`.
 
 This is still a `[focused-cycle]` fix on `project_controller`/`route`/`claim` + SimWorld, and must not be implemented from this contaminated session — but you now have the precise answer: a present-but-unconsulted supervisor lease.
-<!-- agent:boundary:9bf90dce -->
+<!-- agent:boundary:3937ee98 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -285,6 +285,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 ```
 ~~~
 - 🚧 :pushpin: [#brtc]
+- :pushpin: do [#xdocsuper]
 ---
 Please fix the cross document supervisor contamination. This was from the session that started off running corky.md, but somehow run agent-doc-bugs2.md. This may have started when we added the IPC state machine between the FFI Plugin and the JB Plugin. How was the supervisor even allowed to claim a document that another supervisor claimed?
 ```
@@ -400,7 +401,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - ~~do [#nsq2]~~
 - ~~:pushpin: do [#t4x1]~~
 - :pushpin: Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.
-- do [#xdocsuper]
+- do [#xdocsuper0]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

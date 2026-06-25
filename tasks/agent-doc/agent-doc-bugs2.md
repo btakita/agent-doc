@@ -72,6 +72,11 @@ Live dogfood of the hang→`startup_miss` behavior in a real editor/pane needs a
 
 ### Re: state machine for the wait machinery + Lean no-hang proof — opus-4.8
 
+> **Queue prompt:**
+>
+> Can we have a state machine for the wait machinery? And prove that we will never hang with tests & formal logic (i.e. Lean)? We should never hang for more than 10s. I know there is a dogfood reinstall that we pause for, which is the only exception.
+
+
 Yes — and it's the right next step, because the wait machinery is currently *not* one thing. I inventoried every blocking wait and they're scattered ad-hoc loops with inconsistent budgets, several of which already violate your 10s ceiling:
 
 | Site | Budget today |
@@ -94,14 +99,14 @@ So today's worst case is ~30s, not 10s. That's exactly the gap a single state ma
 2. *Lean* — `formal/wait_machine/` encodes `WaitState` as an inductive type and `tick` as a `Step` relation mirroring the Rust 1:1, then proves `no_hang : ∀ p, Reachable p → ExemptFree p → dwell p ≤ 10s`, with a second lemma that `ReinstallPause` is the sole state that can exceed it. The honest caveat: Lean proves the *model*; a Rust↔Lean `tick`/`Step` mismatch would make it vacuous, so the plan pins a parity test enumerating the Rust transition table against the Lean one (Rust `tick` is the source of truth).
 
 Queued as four dependency-ordered phases — **#waitmachine1** (core), **#waitmachine2** (migrate call sites + lower the 30s budgets to the 10s ceiling), **#waitmachine3** (deterministic bound proof), **#waitmachine4** (Lean). Each phase is its own focused cycle per the deep-refactor pacing rule; #waitmachine2 is where your "never >10s" constraint actually lands.
-<!-- agent:boundary:104aec6c -->
+<!-- agent:boundary:2c9fba81 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~"Add a bounded `session_startup` wait in `route.rs`/`start.rs` with a hard deadline; on expiry, fail closed with `startup_miss` + an actionable error ("session did not become dispatch-ready in Ns") rather than hanging.": Can you retry or isolate why the session hangs so we can further dogfood these sort of errors?~~
-- 🚧 Can we have a state machine for the wait machinery? And prove that we will never hang with tests & formal logic (i.e. Lean)? We should never hang for more than 10s. I know there is a dogfood reinstall that we pause for, which is the only exception.
+- ~~Can we have a state machine for the wait machinery? And prove that we will never hang with tests & formal logic (i.e. Lean)? We should never hang for more than 10s. I know there is a dogfood reinstall that we pause for, which is the only exception.~~
 - What are #next-steps to use lazily-ky and lazily-js to sync the plugin state machines and state graphs from the FFI plugin?
 ---
 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.

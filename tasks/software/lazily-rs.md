@@ -223,7 +223,23 @@ agent-doc's document is a **shallow, ordered, stably-keyed tree**: root → comp
 Answered in full above ("Best tree algorithm for agent-doc AST + semantic trees"): an **ordered keyed tree** (stable ids, per-node value cells, `CellList` children) + **keyed reconciliation with LIS move-minimization** + a **move-aware sequence CRDT** for sibling order + **atomic move (`#lzcellmove`)** — which together form the per-cell CRDT-merge substrate. Consuming the head.
 
 > **Queue prompt:** What tree algorithm would be best for agent-doc document AST + semantic document trees?
-<!-- agent:boundary:5dfae3cf -->
+
+### Re: Large structural edits to the document — opus-4-8
+
+> **Queue prompt:** What happens if the user makes large structural edits to the document?
+
+It comes down to whether **stable ids survive the edit**, because the keyed-reconciliation model degrades gracefully only while identity is preserved:
+
+**1. Ids preserved → minimal keyed op set, identity intact.** A big reorder / cut-and-paste / multi-section restructure is still diffed by **stable id**, so it reconciles to a minimal `{insert, remove, move, update}` set. Nodes that merely moved emit **move** ops (via the move-aware sequence CRDT), keeping their value cell + dependents + CRDT lineage. Reactivity is proportional to *what actually changed*: only touched cells and their dependents recompute; untouched subtrees keep cached computeds (memo / PartialEq guard). A 10k-node doc with a 50-node edit does ~50 nodes of work, not 10k — the lazy-pull / scale property.
+
+**2. Ids lost → reconciliation degrades to replace, history is the casualty.** If the edit is a wholesale rewrite the parser can't key-match (no stable ids, or ids reassigned positionally), keyed reconciliation falls back to **remove-all + insert-all**: new cells, lost per-cell CRDT lineage — exactly the whole-document-merge failure mode the per-cell design exists to avoid. So **id stability across structural edits is the linchpin**; favor content/semantic-derived ids over positional ones so a moved or reindented node keeps its id.
+
+**3. Concurrent large edits merge per-layer.** Two writers each making big edits: per-cell **value** merges resolve independently of sibling **order** merges (the sequence CRDT), so a structural change by one and a value change by another don't conflict. Genuine structural conflicts (both move/reparent the same node) resolve by the move-CRDT's policy, not by clobbering the whole subtree.
+
+**4. This session is the live proof.** Every "File was modified during response generation — CRDT merging… merge successful, no conflicts possible" you've seen is precisely this: your structural edits (and prompt rewrites) landing concurrently with my finalize, merged per-component. The failure cases were not the *edits* but a **stale in-memory CRDT base** (snapshot lagging the live buffer) → the `queue consume … head prompts do not match` races; the fix is rebasing on the current file (`reset --from-current`). So: large edits are fine *given a fresh base and stable ids*; the fragility is stale base + lost identity, not edit size.
+
+**Bottom line:** structural-edit cost scales with the **diff**, not the document, as long as stable ids hold — and the per-cell CRDT substrate (`#lzcellmove` move ops + sequence CRDT for order) keeps a large edit from collapsing into a whole-document replace.
+<!-- agent:boundary:b85873c6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -234,7 +250,7 @@ Answered in full above ("Best tree algorithm for agent-doc AST + semantic trees"
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~Can Cell Families support tree structures?~~
 - 🚧 ~~What tree algorithm would be best for agent-doc document AST + semantic document trees?~~ — auto-struck: answered this cycle (#ftstrike)
-- What happens if the user makes large structural edits to the document?
+- What happens if the user makes large structural edits to the document? It's text, so not necessarily stable.
 <!-- /agent:queue -->
 
 ## Backlog

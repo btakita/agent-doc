@@ -295,7 +295,21 @@ This is the document tree shape agent-doc components→items map onto, and the s
 **Verification:** `cargo fmt` clean; `clippy --all-targets --all-features -D warnings` clean; **202** default / **411** all-features tests pass (11 new: 4 `#lzcellmove` move/identity/no-op/anchor, 6 `CellTree`, 1 doctest); `cargo build --release` clean. SPEC.md + lazily-spec `cell-model.md` gained atomic-move + ordered-keyed-tree conformance. CI run `28206351889` is freshly queued post-push (not yet started) — reporting from local evidence per the test-bearing-turn rule.
 
 **Closeout:** `#lzordtree` → done; `#lzcellmove` removed from review (implemented as its keystone — git `4d246d4` is the record). Queue continues to `do [#lzkeyrecon]`.
-<!-- agent:boundary:723a3a25 -->
+
+### Re: do [#lzkeyrecon] — keyed reconciliation with LIS move-minimization — opus-4-8
+
+Implemented Phase 2 **`#lzkeyrecon`** (lazily-rs `1944749`, lazily-spec `48badbd`, superproject `cb8bd274c`, all pushed). New `src/reconcile.rs`, exported from the crate root.
+
+**`reconcile(old, new) -> Vec<DiffOp>`** diffs two keyed sequences **by stable key, not position**, emitting the minimal `{Insert, Remove, Move, Update}` op set:
+- keys in `old` only → `Remove`; in `new` only → `Insert{index}`; in both with a changed value → `Update`.
+- **Move-minimization (the core)**: of the keys present in both, those already in relative order — the **longest-increasing-subsequence** over their old indices (O(n log n) patience sort) — stay put; only the rest emit `Move{to}`. So move count = `(common keys) − |LIS|`, the provable minimum (a 4-element reversal = 3 moves, not 4; verified), strictly fewer than remove-all + insert-all.
+
+**`apply_to_map` / `CellMap::reconcile`** drive a live reactive `CellMap` from the op set, with `Move` going through the `#lzcellmove` atomic-move path. The reactive win is verified: a **stable** entry (in the LIS, value unchanged) has its value-cell reader **stay cached** through a sibling reorder — reactivity is proportional to what actually changed, not to the document size. This minimal per-item op set, applied per-cell, **is** the enabling step for per-cell CRDT merge (it replaces whole-subtree replacement).
+
+**Verification:** `cargo fmt` clean; `clippy --all-targets --all-features -D warnings` clean; **209** default / **418** all-features pass (7 new: LIS basic, pure-reorder-minimal, insert/remove/update combined, full-reversal minimality, apply-converges-and-spares-stable-cell, apply-handles-inserts/removes/updates, doctest); `cargo build --release` clean. SPEC.md + lazily-spec `cell-model.md` gained reconciliation conformance.
+
+**Closeout:** `#lzkeyrecon` → done. Queue continues to `do [#lzseqcrdt]` (move-aware sequence CRDT for sibling order).
+<!-- agent:boundary:8b39164c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -315,7 +329,6 @@ This is the document tree shape agent-doc components→items map onto, and the s
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzkeyrecon] [recommended] Phase 2 — keyed reconciliation with LIS move-minimization: diff each tree level by stable id, emit minimal {insert,remove,move,update} op set (longest-increasing-subsequence over matched keys). THE per-cell-CRDT-merge enabler (minimal per-item ops vs whole-subtree replace). Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 2). Depends on #lzordtree.
 - [ ] [#lzseqcrdt] [recommended] Phase 3 — move-aware sequence CRDT for sibling order under concurrency: fractional indexing or RGA/Fugue, move-aware (one move op, not delete+reinsert that duplicates on merge). Sits above per-cell value merge in crdt.rs. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 3). Pairs with #lzcrdtplane multi-writer boundary.
 - [ ] [#lzstableid] [recommended] Phase 4 — manufactured identity for markdown text: honor in-band anchors/item-ids (agent-doc has these) + content-derived block-hash keys (survive reflow/reorder) + alignment diff (Myers/patience/histogram) for edit-vs-move detection on free prose. Gives reconciliation keys to match on. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 4).
 - [ ] [#lzsemtree] [recommended] Phase 5 — memoized semantic-tree computed layer: derive unresolved-prompts / drainable-heads / section-summaries as memoized computeds over the relevant subtree (recompute only on that subtree change; lazy, glitch-free). Demonstrates the lazy-pull win on a real agent-doc query. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 5).

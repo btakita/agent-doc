@@ -83,18 +83,17 @@ You were right that I stalled — "OpenCode has no auto-loop" only blocks the `/
 ### Re: drain plan — glm-5.2
 
 Continuing the queue: next leading head is the `#jbrunhang` session-startup hang isolation, then collapse the ~7 actor-switch flood pins by completing `#actorswitchdefer` Part B and `queue consume`-ing the answered duplicates.
-<!-- agent:boundary:781d6000 -->
+<!-- agent:boundary:790c500f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~JB `Recycle Supervisor` receives a message that the agent is busy even though the opencode terminal is idle. The state needs to be updated to idle once the turn completes...even if the turn did not finalize. If the agent stops the turn due IPC churn or a Supervisor version mismatch, the state should indicate the agents idle. No need for the extra 2 steps of to press "Interrupt & Restart" + the confirmation.~~
-- "Add a bounded `session_startup` wait in `route.rs`/`start.rs` with a hard deadline; on expiry, fail closed with `startup_miss` + an actionable error ("session did not become dispatch-ready in Ns") rather than hanging.": Can you retry or isolate why the session hangs so we can further dogfood these sort of errors?
+- 🚧 "Add a bounded `session_startup` wait in `route.rs`/`start.rs` with a hard deadline; on expiry, fail closed with `startup_miss` + an actionable error ("session did not become dispatch-ready in Ns") rather than hanging.": Can you retry or isolate why the session hangs so we can further dogfood these sort of errors?
 - :pushpin: do [#jbrunhang]
-❯ ---
-❯ equityfundingsource.md turn has an IPC issue:
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+---
+equityfundingsource.md turn has an IPC issue:
+`### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc`
 
 ```text
 **IPC proof issue dogfood log**

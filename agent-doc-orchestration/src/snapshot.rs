@@ -1753,6 +1753,72 @@ Second answer line three.
         );
     }
 
+    /// #4pdp / #ocreverselist: an OpenCode-shaped response whose new `### Re:`
+    /// turn carries an ordered (numeric) markdown list must keep the list items in
+    /// authored order (1, 2, 3) through the real overlay-as-merge-base CRDT merge,
+    /// even when a foreign supervisor concurrently appends a queue item at the tail
+    /// (the merge-during-finalize shape that produced the reversed-list artifact).
+    #[test]
+    fn overlay_merge_base_preserves_ordered_list_in_exchange_append() {
+        let (_dir, doc) = setup();
+        let header = "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n";
+        let exchange_committed = "\
+❯ first question
+
+### Re: first question — opus-4-8
+
+First answer here. Already committed to HEAD.
+
+❯ second question
+";
+        let queue_open = "<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n";
+        let queue_close = "<!-- /agent:queue -->\n";
+
+        let base_markdown = format!(
+            "{header}{exchange_committed}<!-- agent:boundary:base-id -->\n{queue_open}{queue_close}"
+        );
+
+        let stale_legacy = crate::crdt::CrdtDoc::from_text("stale legacy text").encode_state();
+        save_document_crdt(&doc, &stale_legacy, &base_markdown).unwrap();
+
+        let base = crdt_merge_base_state(&doc, &base_markdown).unwrap();
+
+        // Ours: agent replaces the boundary with a new turn carrying an ordered list.
+        let agent_response = "\
+### Re: second question — opus-4-8
+
+Steps to take:
+
+1. First step.
+2. Second step.
+3. Third step.
+
+";
+        let ours = format!(
+            "{header}{exchange_committed}{agent_response}<!-- agent:boundary:new-id -->\n{queue_open}{queue_close}"
+        );
+        // Theirs: a foreign supervisor appended a queue item at the tail mid-cycle.
+        let theirs = format!(
+            "{header}{exchange_committed}<!-- agent:boundary:base-id -->\n{queue_open}- do [#foreign-task]\n{queue_close}"
+        );
+
+        let merged = crate::crdt::merge(Some(&base.state), &ours, &theirs).unwrap();
+
+        let s1 = merged.find("1. First step.").expect("ordered item 1 missing");
+        let s2 = merged
+            .find("2. Second step.")
+            .expect("ordered item 2 missing");
+        let s3 = merged.find("3. Third step.").expect("ordered item 3 missing");
+        assert!(
+            s1 < s2 && s2 < s3,
+            "ordered list reversed under overlay base (s1={s1} s2={s2} s3={s3}):\n{merged}"
+        );
+        assert!(
+            merged.contains("do [#foreign-task]"),
+            "foreign queue append lost under overlay base:\n{merged}"
+        );
+    }
+
     #[test]
     fn crdt_load_returns_none_when_missing() {
         let (_dir, doc) = setup();

@@ -85,7 +85,24 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=a7a8adee-5308-46e6-9fb3-aec0c11c6337 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782415989846
 ```
-<!-- agent:boundary:2db68b3d -->
+
+### Re: Full Application layout (delivered) + Proposed vs Loan Amount — opus-4-8
+
+> **Queue prompt:** 🚧 Optimize the layout of …/admin/pipeline?…&dialog_application_id=5cfa7c7b-… > Full Application: Personal, Address, Employment, Income
+
+This shipped last cycle and is **live** (EFS `5b62fa6`, Version `cfb313d3`): **Personal** was already a dense multi-column field grid; **Addresses, Employment, Income** now render their read-only fields multiple-per-row in a responsive `.full-app-record-grid` (label-above-value) instead of one-per-line — so all four sections read with far less vertical scrolling. Reload the `dialog=application` → **Open Full Application** path to see it. If the 🚧 means you want a *specific* further refinement (tighter spacing, a particular field order, side-by-side sections, etc.), re-queue with the target and I'll take it.
+
+> **Queue prompt:** In …Full Application, what is the Proposed Loan Amount vs the Loan Amount?
+
+They are two distinct Subject-Property fields with different origins and roles:
+
+- **Loan amount** (`loan_amount`) — the figure the **borrower types into their Full Application** (Subject Property → "Loan amount"; it's a *required* borrower input — `borrower/full_application.tsx:1276`). It's the borrower's own stated request on the application form.
+- **Proposed loan amount** (`proposed_loan_amount`) — the amount captured during **onboarding / deal setup** (the lead/admin onboarding pipeline). This is the figure the financial calculators treat as **authoritative**: LTV, minimum-investment, and the G-formula all read `proposed_loan_amount` first, falling back to TMO's `LoanAmount` (`app/equityfundingsource/lib/gformula.ts:65,90`).
+
+So: **Loan amount = what the borrower entered on the application; Proposed loan amount = the deal/onboarding figure that drives LTV and investment math.** They're normally the same number but can diverge when the onboarding-proposed amount differs from what the borrower later types in. The admin loans table shows `loan_amount ?? proposed_loan_amount` — it prefers the borrower's application figure and falls back to the onboarding proposal (`admin/full_applications.tsx:505`).
+
+No code change this cycle — item 1 was already delivered/deployed and item 2 is a question answered from the source.
+<!-- agent:boundary:94a157e3 -->
 <!-- /agent:exchange -->
 ###
 <!--

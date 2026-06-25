@@ -3506,4 +3506,144 @@ Second answer line three.
             base = merged;
         }
     }
+
+    // ---- #qcellmerge1: cross-cell contamination is impossible by construction --
+
+    /// Build a 3-component template doc (`status`, `exchange`, `queue`) for the
+    /// multi-component concurrent-edit case.
+    fn doc_with_status_exchange_queue(status: &str, exchange: &str, queue: &str) -> String {
+        format!(
+            "---\nagent_doc_format: template\n---\n\n## Status\n\n<!-- agent:status -->\n{status}\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange -->\n{exchange}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n{queue}\n<!-- /agent:queue -->\n"
+        )
+    }
+
+    fn body_of<'a>(merged: &'a str, name: &str) -> &'a str {
+        let open = format!("<!-- agent:{name} -->");
+        let close = format!("<!-- /agent:{name} -->");
+        merged
+            .split(&open)
+            .nth(1)
+            .and_then(|s| s.split(&close).next())
+            .unwrap_or("")
+    }
+
+    /// The headline `#qcellmerge1` invariant, asserted as one test in all three
+    /// required directions: forward, inverse, and a multi-component concurrent
+    /// edit. Each `agent:*` component is its own CRDT merge unit, so content from
+    /// one component can NEVER splice into another — the live 2026-06-20
+    /// console-output-in-`agent:queue` corruption class is unreproducible by
+    /// construction.
+    #[test]
+    fn cross_cell_contamination_is_impossible() {
+        let console = "```\n● Supervisor is now fresh (recycled to 0.34.35).\n```";
+
+        // --- Forward: extra content in A (exchange) must NOT leak into B (queue).
+        // The documented real failure shape: an `agent:exchange` console block
+        // must never appear inside `agent:queue`. The agent appends the console
+        // block to `exchange` while the operator concurrently types in `queue`.
+        {
+            let base = doc_with_exchange_queue("Q.", "- operator typing");
+            let base_state = CrdtDoc::from_text(&base).encode_state();
+            let ours =
+                doc_with_exchange_queue(&format!("Q.\n\n### Re: q — opus\n\n{console}"), "- operator typing");
+            let theirs = doc_with_exchange_queue("Q.", "- operator typing more");
+
+            let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+            assert!(
+                !body_of(&merged, "queue").contains("Supervisor is now fresh"),
+                "FORWARD: exchange console block spliced into queue:\n{}",
+                body_of(&merged, "queue")
+            );
+            // Both real edits survived, in their own cells.
+            assert!(
+                body_of(&merged, "exchange").contains("Supervisor is now fresh"),
+                "FORWARD: console block lost from its own (exchange) cell:\n{merged}"
+            );
+            assert!(
+                body_of(&merged, "queue").contains("typing more"),
+                "FORWARD: operator queue edit lost:\n{merged}"
+            );
+        }
+
+        // --- Inverse: extra content in B (queue) must NOT leak into A (exchange).
+        // The operator pastes a multi-line fenced block into a `queue` item while
+        // the agent concurrently appends a `### Re:` block to `exchange`. The
+        // queue paste must never appear inside the exchange cell.
+        {
+            let queue_paste = "- here is my log:\n  ```\n  panic at line 9000\n  ```";
+            let base = doc_with_exchange_queue("Q.", "- placeholder");
+            let base_state = CrdtDoc::from_text(&base).encode_state();
+            let ours = doc_with_exchange_queue("Q.\n\n### Re: q — opus\n\nAgent answer.", "- placeholder");
+            let theirs = doc_with_exchange_queue("Q.", queue_paste);
+
+            let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+            assert!(
+                !body_of(&merged, "exchange").contains("panic at line 9000"),
+                "INVERSE: queue paste spliced into exchange:\n{}",
+                body_of(&merged, "exchange")
+            );
+            assert!(
+                body_of(&merged, "queue").contains("panic at line 9000"),
+                "INVERSE: queue paste lost from its own cell:\n{merged}"
+            );
+            assert!(
+                body_of(&merged, "exchange").contains("Agent answer."),
+                "INVERSE: agent exchange edit lost:\n{merged}"
+            );
+        }
+
+        // --- Multi-component concurrent edit: three cells (status, exchange,
+        // queue) edited concurrently across ours/theirs. Each cell keeps exactly
+        // its own edit and nothing crosses a cell boundary.
+        {
+            let base = doc_with_status_exchange_queue("idle", "Q.", "- do [#a1]");
+            let base_state = CrdtDoc::from_text(&base).encode_state();
+            // ours: agent flips status + appends an exchange response block.
+            let ours = doc_with_status_exchange_queue(
+                "running OURS_STATUS",
+                &format!("Q.\n\n### Re: q — opus\n\n{console}"),
+                "- do [#a1]",
+            );
+            // theirs: operator adds a queue item (and leaves status/exchange alone).
+            let theirs =
+                doc_with_status_exchange_queue("idle", "Q.", "- do [#a1]\n- do [#THEIRS_ITEM]");
+
+            let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+
+            let status_body = body_of(&merged, "status");
+            let exchange_body = body_of(&merged, "exchange");
+            let queue_body = body_of(&merged, "queue");
+
+            // Each edit landed in its own cell.
+            assert!(
+                status_body.contains("OURS_STATUS"),
+                "MULTI: status edit lost:\n{merged}"
+            );
+            assert!(
+                exchange_body.contains("Supervisor is now fresh"),
+                "MULTI: exchange edit lost:\n{merged}"
+            );
+            assert!(
+                queue_body.contains("[#THEIRS_ITEM]"),
+                "MULTI: queue edit lost:\n{merged}"
+            );
+
+            // Nothing crossed a cell boundary, in any direction.
+            assert!(
+                !status_body.contains("Supervisor is now fresh")
+                    && !status_body.contains("[#THEIRS_ITEM]"),
+                "MULTI: foreign content spliced into status:\n{status_body}"
+            );
+            assert!(
+                !exchange_body.contains("OURS_STATUS")
+                    && !exchange_body.contains("[#THEIRS_ITEM]"),
+                "MULTI: foreign content spliced into exchange:\n{exchange_body}"
+            );
+            assert!(
+                !queue_body.contains("Supervisor is now fresh")
+                    && !queue_body.contains("OURS_STATUS"),
+                "MULTI: foreign content spliced into queue:\n{queue_body}"
+            );
+        }
+    }
 }

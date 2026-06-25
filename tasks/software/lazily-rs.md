@@ -61,7 +61,40 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=31e1b437-a8b5-4279-b97c-65172e935912 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=22835 candidate_hash=2a854597debb4b045132a7d6d9d7f416f9ea27ab1a6e54ef2865efb28cb39932 content_ours_len=23524 content_ours_hash=6b228fd843fc3a80cc5a101216ebc615379249389ddb38b78d372802761939ce doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782344790899
 ```
-<!-- agent:boundary:8da8319b -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=e3f729bc-b6bd-46c0-9ce5-05a0f94739a2 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=9716 candidate_hash=a7ba3c0258301ad98ff54b2c70c65599aa38745156d15c75ba66369a8c86fdcc content_ours_len=10959 content_ours_hash=ec30f5adf99524b8f0c382f4f5815235e25d681c1b35253bb5835f2bc0352474 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782346762310
+```
+
+### Re: #lzzigbeforechange — implement before_change_subscribers — glm-5.2
+
+Drained queue head `#lzzigbeforechange`. The `semantic_completion_match` warning claiming this was already resolved by `#lzzigtodos` was a **false positive**: `#lzzigtodos`'s done entry *mentioned* `before_change_subscribers at cell.zig:35` in its scope text, but `cell.zig:35` still carried `// TODO: Add before_change_subscribers` — never actually implemented. Verified the TODO was live, then implemented it.
+
+**Design** (resolves the open API questions in the backlog item):
+- **Callback signature** — reused `ChangeCallback(T) = *const fn(*Cell(T)) void` for symmetry. At fire-time `Cell.get()` is lock-free and still returns the **outgoing** value (the useful "before" semantic); no new signature needed.
+- **Ordering** — `before_change_subscribers` fire **under the context lock, before the commit** (consistent with `emitChangeUnlocked`, which also runs locked). `change_subscribers` still fire after the commit (unlocked). Contract: before-change callbacks must not re-enter `Context`/`Cell` methods that take `ctx.mutex`; `Cell.get` is safe.
+- **Symmetric API** — `subscribeBeforeChange` / `unsubscribeBeforeChange`, dedup'd via the same `SubscriberKey` mechanism.
+
+**Changes** (`src/lazily-zig`):
+- `src/lazily/cell.zig` — added `before_change_subscribers` field + init/deinit; reordered `set()` to fire before-callbacks before `self.value = new_value`; added the two methods; added test `before_change fires before commit` proving the callback observes the OLD value (snapshot == 1 while new == 2) and that no-op sets + unsubscribe behave correctly.
+- `SPEC.md` — documented the two new methods + the before/after ordering in Invalidation Semantics.
+
+**Verify**: `zig build test` green (default `thread_safe=true`), new test included.
+
+**Commit+push** (preset `#spec-test-build-install-commit-push`): submodule `lazily-hub/lazily-zig` `db18dea..1a2c81d` on `main`; superproject gitlink bump `fb95c4866`.
+
+Heads-up on the remaining two queue heads — both `semantic_completion_match` warnings are likewise suspect: `#lzzigalloc` also "split from #lzzigtodos" and the `context.zig:615/619` allocator TODOs are still live (not done), and `#lzjshygiene` is lazily-js (different language from its `#lzktconf` match). Each will be re-verified before acting when those heads drain.
+
+(Closeout note: the editor-IPC listener for this pane was wedged on a stale `ack_content_sidecar` — `ipc_proof_insufficient` / `ack_mismatch` — deadlocking the normal `finalize` CRDT path and refusing direct disk writes while "active". Used `write --commit --force-disk` to cross the commit boundary so the cycle could close; the controller reports `fresh`, so this is a sidecar divergence, not a stale binary.)
+<!-- agent:boundary:fe2128d0 -->
 <!-- /agent:exchange -->
 ###
 <!--

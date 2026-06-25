@@ -415,7 +415,15 @@ This is exactly what `#actorswitchdefer` shipped. The route still *defers* on a 
 > **Queue prompt:** :pushpin: lazily-rs.md IPC error
 
 The first is a captured prior-agent console fragment; the other two are `ipc_proof_insufficient` dogfood logs the binary appends during interrupted-cycle recovery — each explicitly says *"binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle."* They belong in `ops.log`, not the queue. Clearing them so the queue drains down to only the `[operator-verify]` heads (`#nsfz`, `#crdtauth6`, `#qftloss`, `#qeditdup`) that need your live eyeball.
-<!-- agent:boundary:4ef72663 -->
+
+### Re: clearing answered queue residue (#qheadresidue) — opus-4-8
+
+Re-echoing the two answered heads `session-check` flagged as residue so `#ftstrike` consumes them — both already addressed above (actor-switch → `#actorswitchdefer` done; IPC dogfood logs are binary-authored, not prompts).
+
+> **Queue prompt:** JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
+
+> **Queue prompt:** lazily-rs.md IPC error
+<!-- agent:boundary:ed372baf -->
 <!-- /agent:exchange -->
 
 ## Queue

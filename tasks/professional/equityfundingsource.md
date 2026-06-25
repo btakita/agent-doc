@@ -98,7 +98,24 @@ Deployed the EFS Worker with the `#bxtd` dead-table drop now live.
 - **Smoke check:** `https://equityfundingsource.brian-takita.workers.dev/` → HTTP 200 (0.24s).
 
 Production is on the new version with the 6 dead tables dropped.
-<!-- agent:boundary:832ff170 -->
+
+### Re: don't prefill property info in a New Loan Application — opus-4-8
+
+> **Queue prompt:** In a New Loan Application, do not prefill any property info https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?step=4. Each property is different.
+
+Done — step 4 (subject property + loan request) now always starts blank. Committed + pushed as `0b83c5d` (`#noproppfill`).
+
+**What was prefilling it.** Only one path ever filled step 4: `lead_prefill.ts:subject_property_prefill_`, which runs when an application originates from a **lead** — the public `/apply` prequal handoff and admin borrower invites. A borrower starting a fresh application from their dashboard (no lead) already got a blank step 4, and the prior-application `borrower_prefill` never copies property.
+
+**Change (you chose "all of step 4").** `application_lead_prefill_apply_` no longer copies the subject-property section at all. The lead now carries forward **only the borrower's personal identity** (name, phone, email). No longer copied from the lead: property address, city, state, ZIP, value, occupancy, **and** loan amount + loan purpose. Each application's step 4 is entered fresh. The lead row still stores its original data (nothing is lost); it's just not pre-populated into the form.
+
+- Removed `subject_property_prefill_` + its now-unused helpers (`fill_number_`, `loan_purpose_`, `occupancy_`) and the two subject-property imports.
+- Updated `borrower-lead-to-tmo-flow.test.ts` to assert the lead prefill **never** touches subject property / loan amount.
+- Updated `prds/efs-full-application-intake-spec.md` §3 to document the exclusion.
+- `borrower-lead-to-tmo-flow.test.ts`: 6 pass / 0 fail; worker bundle builds clean.
+
+**Heads-up — `make check` is red from a separate, pre-existing cause (not this change).** 7 tests fail on `origin/main`, all from the operator commit `dfed93b` *"fix(admin): streamline document upload workflows"* (by Brian Dev), which refactored the admin/lender document-upload components but left their source-assertion tests behind (import shapes, CSS values, dropped fixtures, modal stacking). They live in a different subsystem and fail identically with my change stashed; my change is green in isolation. I did **not** guess-fix them — reconciling an active UI refactor's tests is outside this property-prefill directive and risks conflicting with your in-flight work. Tracked as backlog `#dfed93b-tests`. Note `dfed93b` is on origin but **not yet deployed** (the prior deploy shipped a pre-rebase tree). This turn's preset was `#spec-test-commit-push`, so I committed + pushed but did not deploy.
+<!-- agent:boundary:b3acb89c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -118,7 +135,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 In a New Loan Application, do not prefill any property info https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?step=4. Each property is different.
+- ~~In a New Loan Application, do not prefill any property info https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?step=4. Each property is different.~~
 - deploy
 - do [#dfed93b-tests]
 <!-- /agent:queue -->

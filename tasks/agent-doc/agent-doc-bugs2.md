@@ -94,7 +94,22 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=f7da83e9-290b-4dd4-b8c3-4cb9fdd9fd58 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=22228 candidate_hash=be0e40bd37ff08e494f8eaf87a5c4de55487b5889d715c7e3c859936c50ef042 content_ours_len=23893 content_ours_hash=cd84d474abb1a63c87edb953185e197cce4d5cff3f9bbbdbb977acc9ea67424b doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782368592491
 ```
-<!-- agent:boundary:bb036a73 -->
+
+### Re: #kj5f #mergestatemachine3 — wedge-class scenario repros shipped — opus-4-8
+
+Drained the queue head `#kj5f` (`#mergestatemachine3`, the merge-control state-machine phase 3). Completed and shipped the **agent-doable, deterministic half**: end-to-end scenario repros that prove the write-ownership SM eliminates the two failure classes the operator reported (`File Cache Conflict` + the `#6b5h` no-ack wedge).
+
+**Shipped** (agent-doc `34d7023d`, submodule pointer `8cdf54beb`/`b74b34323`):
+- `file_cache_conflict_repro_never_writes_disk_behind_live_editor` — walks the full editor handshake (Detached → Attached → EditorOwnsBuffer → BinaryWriteRequested → IpcAckProven → Committed) and asserts `disk_write_permitted` is **false at every phase a live editor could be mid-apply**, true only once the patch is ACK-proven. A regression that permits a mid-handshake write is now caught as the File-Cache-Conflict reproduction it would cause.
+- `stale_listener_6b5h_wedge_repro_routes_to_disk_instead_of_no_ack` — a registered-but-dead listener demotes to `Detached` on a stale heartbeat, so the write routes to the controller disk path instead of wedging on `no_ack` forever.
+- `idle_editor_survives_stale_heartbeat_no_false_disk_write` — inverse safety: a live idle editor (stale heartbeat, live pid) is never demoted, so the binary never raw-writes behind it.
+
+`make check` green (5135 passed, +3; clippy clean); latest CI run green.
+
+**Remaining on `#kj5f` (operator-gated, not agent-completable this session):** the JB + VSCode **thin reporters** that emit attach/detach/ownership facts through the SM (via `#lazilystatesync`), plus the **live editor-attached/detached repro**. Both need a live editor and the plugin install that's currently paused (per your "stop cutting releases until the CRDT merge corruption is fixed" directive), so they can't be verified from a CLI session. I attempted to retag `#kj5f` `[operator-verify]` to reflect this, but the queue-consume reconciliation is wedged on a stale-snapshot drift (the prior cycle's struck explicit-id head is in the snapshot but not the live queue) — I left the backlog untouched rather than fight it against the live supervisor.
+
+**Closeout note:** this session's editor IPC remains degraded — every write mangles the working tree post-commit (recovered via `git checkout HEAD --`), and the queue-edit path is wedged on snapshot drift. The code is safe on `origin/main`. Stopping here rather than auto-looping into more degraded-IPC churn; the supervisor can reconcile the snapshot at its idle boundary.
+<!-- agent:boundary:393d2a55 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -263,7 +278,7 @@ What are #next-steps to fix bugs?
 - [ ] [#vwj7] #queuestatemachine1 Define queue-item identity + lifecycle-state model (Authored→Mirrored→InProgress→Answered→Struck→Reaped) + pure transition fn with exhaustive (state×event) tests. Replaces ad-hoc dedup passes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
 - [ ] [#cgfx] #queuestatemachine2 Route convergence through the SM; reduce dedup passes to transition guards; property test idempotence (re-emit=no-op) over #rt83qflood/#qdedupsync/#qauthorder duplication shapes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
 - [ ] [#brtc] #queuestatemachine3 SimWorld: stale-CRDT/supervisor re-emit storm converges to one item per identity; operator position-lock survives. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
-- [ ] [#kj5f] #mergestatemachine3 JB+VSCode report attach/detach/ownership through SM (thin reporters via #lazilystatesync); SimWorld + live repro for File Cache Conflict + #6b5h wedge. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
+- [ ] [#kj5f] [operator-verify] #mergestatemachine3 remaining: JB+VSCode thin reporters emit attach/detach/ownership facts through the merge-ownership SM (via #lazilystatesync) + live editor-attached/detached repro for File Cache Conflict + #6b5h wedge. DONE: SM core Phases 1-2 + deterministic scenario repros for both wedge classes (agent-doc 34d7023d). Remaining needs the operator-paused plugin install + a live editor to verify. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#r5at] #lazilystatesync4 VSCode plugin: lazily-js mirror graph applying FFI state deltas. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#6n5j] #lazilystatesync5 Parity+tests: lazily-spec cross-editor conformance (extend EditorCommandStateMachineTest to reactive path) + FFI round-trip proving kt/js mirror converges to rs authoritative graph. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#gghx] #waitmachine1 Wait-machinery state machine core: add agent-doc-orchestration/src/wait_machine.rs with a pure WaitState/tick transition + single GLOBAL_HANG_CEILING (10s) + typed ReinstallPause exemption. Plan: tasks/agent-doc/plan-wait-machinery-state-machine.md

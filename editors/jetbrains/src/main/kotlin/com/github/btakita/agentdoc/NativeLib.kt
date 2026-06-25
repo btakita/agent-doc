@@ -480,6 +480,64 @@ interface AgentDocLib : Library {
      */
     fun agent_doc_document_base_hash(filePath: String): Pointer?
 
+    // --- CRDT editor-as-replica FFI node (`#crdtauth5`, plan phase 3/5) -------
+    //
+    // The cdylib hosts the per-editor yrs replica; the plugin stays THIN — it
+    // forwards a local `Document` delta into the replica and applies remote
+    // updates back, with NO CRDT logic in Kotlin (the yrs replica, state-vector
+    // logic, and op encode/decode all live once in Rust). yrs update / state-
+    // vector buffers cross the boundary as raw byte arrays.
+
+    /**
+     * Open the per-editor yrs replica for [replica_id]. Pass a stable, unique
+     * client-id (mint one from a stable editor-process identity so two IDEs never
+     * collide). When [init_state] is non-null/non-empty it bootstraps the replica
+     * from that encoded state (e.g. the canonical bootstrap returned by the
+     * supervisor `replica_register` ack). Returns 0 on success, negative on error.
+     */
+    fun agent_doc_replica_open(replica_id: Long, init_state: ByteArray?, init_len: Long): Int
+
+    /**
+     * Apply a LOCAL edit to the replica (delete [delete_len] chars at [offset],
+     * then insert [insert]). Offsets/lengths are yrs char units. Returns 0 on
+     * success, negative on error.
+     */
+    fun agent_doc_replica_apply_local(replica_id: Long, offset: Int, delete_len: Int, insert: String): Int
+
+    /** The replica's converged text. Caller must free with [agent_doc_free_string]. */
+    fun agent_doc_replica_text(replica_id: Long): Pointer?
+
+    /**
+     * The replica's encoded state vector (the compact causal summary to announce
+     * to a peer). Writes the length into [out_len]. Caller must free the returned
+     * buffer with [agent_doc_free_state].
+     */
+    fun agent_doc_replica_state_vector(replica_id: Long, out_len: com.sun.jna.ptr.LongByReference): Pointer?
+
+    /**
+     * The incremental update carrying exactly the ops [their_sv] is missing — the
+     * delta to fan out to a peer. Caller must free with [agent_doc_free_state].
+     */
+    fun agent_doc_replica_diff(replica_id: Long, their_sv: Pointer?, their_sv_len: Long, out_len: com.sun.jna.ptr.LongByReference): Pointer?
+
+    /**
+     * Apply a remote update (idempotent + causal-buffered by yrs). Returns 0 on
+     * success, negative on error.
+     */
+    fun agent_doc_replica_apply_update(replica_id: Long, update: ByteArray, update_len: Long): Int
+
+    /**
+     * The full encoded state — the bootstrap snapshot for a peer's first contact
+     * or a durable projection. Caller must free with [agent_doc_free_state].
+     */
+    fun agent_doc_replica_encode_state(replica_id: Long, out_len: com.sun.jna.ptr.LongByReference): Pointer?
+
+    /** Close the replica, freeing its yrs doc. Returns 0 on success. */
+    fun agent_doc_replica_close(replica_id: Long): Int
+
+    /** Free a byte buffer returned by a replica state/diff/encode call. */
+    fun agent_doc_free_state(ptr: Pointer?, len: Long)
+
     /** Free a string returned by any agent_doc_* function. */
     fun agent_doc_free_string(ptr: Pointer?)
 

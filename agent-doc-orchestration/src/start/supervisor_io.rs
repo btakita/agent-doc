@@ -177,6 +177,123 @@ pub(crate) fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcRes
             shared.kill_child();
             IpcResponse::ok_empty()
         }
+        IpcMethod::ReplicaRegister { file, identity } => {
+            handle_replica_register(&file, &identity)
+        }
+        IpcMethod::ReplicaDeregister { file, identity } => {
+            handle_replica_deregister(&file, &identity)
+        }
+        IpcMethod::ReplicaUpdate {
+            file,
+            identity,
+            update_b64,
+        } => handle_replica_update(&file, &identity, &update_b64),
+        IpcMethod::ReplicaAwareness {
+            file,
+            identity,
+            awareness_b64,
+        } => handle_replica_awareness(&file, &identity, &awareness_b64),
+    }
+}
+
+// --- CRDT live multi-editor delta fan-out IPC handlers (`#crdtauth5`) ---------
+//
+// Each handler routes the new editor-replica IPC family through the per-document
+// `crdt_relay_host` hub registry. The hub-host functions resolve the document's
+// `CrdtAuthority` first and refuse (return `None`/`false`, allocate no hub) when
+// the document has no live editor (Detached / `GitAuthoritative`), so this whole
+// family is inert on the headless control-plane path. Per-document isolation is
+// structural: the hub is keyed by the document hash, never shared across docs.
+
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+
+fn handle_replica_register(file: &str, identity: &str) -> IpcResponse {
+    match crate::crdt_relay_host::register_replica_for_file(std::path::Path::new(file), identity) {
+        Ok(Some((client_id, bootstrap))) => IpcResponse::ok(serde_json::json!({
+            "client_id": client_id,
+            "bootstrap_b64": BASE64_STANDARD.encode(&bootstrap),
+        })),
+        // Detached / no live editor: refuse so a headless document never spins up
+        // a multi-replica session. NOT an error — the editor falls back to the
+        // existing patch-file path.
+        Ok(None) => IpcResponse::err("crdt replica register refused: document is not editor-attached"),
+        Err(e) => IpcResponse::err(format!("crdt replica register failed: {e}")),
+    }
+}
+
+fn handle_replica_deregister(file: &str, identity: &str) -> IpcResponse {
+    match crate::crdt_relay_host::deregister_replica_for_file(std::path::Path::new(file), identity) {
+        Ok(removed) => IpcResponse::ok(serde_json::json!({ "removed": removed })),
+        Err(e) => IpcResponse::err(format!("crdt replica deregister failed: {e}")),
+    }
+}
+
+fn handle_replica_update(file: &str, identity: &str, update_b64: &str) -> IpcResponse {
+    let update = match BASE64_STANDARD.decode(update_b64) {
+        Ok(bytes) => bytes,
+        Err(e) => return IpcResponse::err(format!("crdt replica update: bad base64: {e}")),
+    };
+    match crate::crdt_relay_host::relay_replica_update_for_file(
+        std::path::Path::new(file),
+        identity,
+        &update,
+    ) {
+        Ok(Some(fan_out)) => {
+            // The per-target deltas are relayed back so the requester (or the
+            // supervisor's socket fan-out) can deliver them to the peers' FFI
+            // nodes. The hub already applied them to the hub-side mirrors.
+            let targets: Vec<serde_json::Value> = fan_out
+                .targets
+                .iter()
+                .map(|target| {
+                    serde_json::json!({
+                        "client_id": target,
+                        "update_b64": BASE64_STANDARD.encode(&fan_out.update),
+                    })
+                })
+                .collect();
+            IpcResponse::ok(serde_json::json!({
+                "origin": fan_out.origin,
+                "canonical_len": fan_out.canonical_len,
+                "targets": targets,
+            }))
+        }
+        Ok(None) => IpcResponse::err("crdt replica update refused: document is not editor-attached"),
+        Err(e) => IpcResponse::err(format!("crdt replica update failed: {e}")),
+    }
+}
+
+fn handle_replica_awareness(file: &str, identity: &str, awareness_b64: &str) -> IpcResponse {
+    let json = match BASE64_STANDARD.decode(awareness_b64) {
+        Ok(bytes) => bytes,
+        Err(e) => return IpcResponse::err(format!("crdt awareness: bad base64: {e}")),
+    };
+    let state: crate::crdt_relay::AwarenessState = match serde_json::from_slice(&json) {
+        Ok(state) => state,
+        Err(e) => return IpcResponse::err(format!("crdt awareness: bad json: {e}")),
+    };
+    match crate::crdt_relay_host::set_replica_awareness_for_file(
+        std::path::Path::new(file),
+        identity,
+        state,
+    ) {
+        Ok(Some(snapshot)) => {
+            let presence: Vec<serde_json::Value> = snapshot
+                .iter()
+                .map(|(client_id, state)| {
+                    serde_json::json!({
+                        "client_id": client_id,
+                        "awareness_b64": BASE64_STANDARD
+                            .encode(serde_json::to_vec(state).unwrap_or_default()),
+                    })
+                })
+                .collect();
+            IpcResponse::ok(serde_json::json!({ "presence": presence }))
+        }
+        Ok(None) => {
+            IpcResponse::err("crdt awareness refused: document is not editor-attached")
+        }
+        Err(e) => IpcResponse::err(format!("crdt awareness failed: {e}")),
     }
 }
 
@@ -502,6 +619,185 @@ mod tests {
     use crate::sessions::IsolatedTmux;
     use std::collections::HashMap;
     use tempfile::TempDir;
+    // --- `#crdtauth5` end-to-end fan-out over the NEW IPC path -------------------
+
+    /// A throwaway tracked document under a temp project root so `doc_hash` /
+    /// authority lease resolution work against a real path.
+    fn crdt_temp_doc(name: &str) -> (TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let path = dir.path().join(name);
+        std::fs::write(&path, format!("# {name}\n\nbody\n")).unwrap();
+        (dir, path)
+    }
+
+    /// Send a `#crdtauth5` replica IPC method over a REAL supervisor socket and
+    /// return the parsed response — the production handler routes it through the
+    /// per-document `crdt_relay_host` hub.
+    fn crdt_send(sock: &std::path::Path, method: &IpcMethod) -> crate::supervisor::ipc::IpcResponse {
+        crate::supervisor::ipc::send_command(sock, method).expect("send crdt ipc")
+    }
+
+    #[test]
+    fn crdtauth5_end_to_end_fan_out_over_the_ipc_path() {
+        use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+        use agent_doc_core::crdt_sync::ReplicaState;
+
+        let (_dir, doc) = crdt_temp_doc("fanout.md");
+        let project_root = doc.parent().unwrap().to_path_buf();
+        let file_str = doc.display().to_string();
+
+        // Make the document editor-attached (MultiReplica): seed a live owner
+        // lease for the CURRENT pid so `authority_for_file` resolves MultiReplica.
+        crate::plugin_owner::write_plugin_owner_lease_for_test(&file_str, std::process::id());
+        assert!(
+            crate::crdt_authority::authority_for_file(&file_str).editor_attached(),
+            "test setup: the document must be editor-attached"
+        );
+
+        // Stand up the REAL supervisor IPC socket with the production handler.
+        let shared = Arc::new(SupervisorShared::new("test", "crdtauth5-instance".to_string()));
+        let shared_for_ipc = shared.clone();
+        let session_id = "crdtauth5-session";
+        let mut ipc = crate::supervisor::ipc::SupervisorIpc::start(
+            &project_root,
+            session_id,
+            move |method| handle_ipc(method, &shared_for_ipc),
+        )
+        .expect("start supervisor ipc");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
+
+        // Editor A and Editor B each register over the socket. The supervisor
+        // hub mints their client-ids and returns the canonical bootstrap state.
+        let reg_a = crdt_send(
+            &sock,
+            &IpcMethod::ReplicaRegister {
+                file: file_str.clone(),
+                identity: "intellij:A".into(),
+            },
+        );
+        assert!(reg_a.ok, "register A: {reg_a:?}");
+        let a_id = reg_a.data.as_ref().unwrap()["client_id"].as_u64().unwrap();
+        let a_bootstrap = B64
+            .decode(reg_a.data.as_ref().unwrap()["bootstrap_b64"].as_str().unwrap())
+            .unwrap();
+
+        let reg_b = crdt_send(
+            &sock,
+            &IpcMethod::ReplicaRegister {
+                file: file_str.clone(),
+                identity: "vscode:B".into(),
+            },
+        );
+        assert!(reg_b.ok, "register B: {reg_b:?}");
+        let b_id = reg_b.data.as_ref().unwrap()["client_id"].as_u64().unwrap();
+        assert_ne!(a_id, b_id, "distinct editors mint distinct client-ids");
+
+        // Editor A's FFI node (a real ReplicaState bound to the minted id) makes a
+        // LOCAL edit and encodes the delta against the canonical bootstrap state.
+        let editor_a = ReplicaState::from_encoded(a_id, &a_bootstrap).unwrap();
+        editor_a.apply_local_edit(0, 0, "FROM-A");
+        let a_delta = editor_a.diff(&ReplicaState::new(0).state_vector()).unwrap();
+
+        // Editor A broadcasts its update OVER THE IPC PATH. The supervisor hub
+        // integrates canonical and fans the delta out to editor B's hub-side mirror.
+        let upd = crdt_send(
+            &sock,
+            &IpcMethod::ReplicaUpdate {
+                file: file_str.clone(),
+                identity: "intellij:A".into(),
+                update_b64: B64.encode(&a_delta),
+            },
+        );
+        assert!(upd.ok, "replica update: {upd:?}");
+        let data = upd.data.as_ref().unwrap();
+        assert_eq!(data["origin"].as_u64().unwrap(), a_id);
+        let targets = data["targets"].as_array().unwrap();
+        assert_eq!(targets.len(), 1, "the update fans out to the one other replica (B)");
+        assert_eq!(targets[0]["client_id"].as_u64().unwrap(), b_id);
+
+        // The fanned-out delta returned to B's FFI node converges B onto A's edit —
+        // this is the update reaching replica B THROUGH the supervisor hub.
+        let editor_b = ReplicaState::from_encoded(b_id, &a_bootstrap).unwrap();
+        let to_b = B64.decode(targets[0]["update_b64"].as_str().unwrap()).unwrap();
+        editor_b.apply_update(&to_b).unwrap();
+        assert!(
+            editor_b.text().contains("FROM-A"),
+            "replica B received A's op over the IPC fan-out path: {:?}",
+            editor_b.text()
+        );
+
+        // The commit barrier then captures a consistent cut INCLUDING the fanned-out
+        // ops: the canonical replica holds A's edit.
+        assert!(crate::crdt_relay_host::commit_barrier_for_file(&doc));
+        crate::crdt_relay_host::with_hub(&doc, |hub| {
+            assert!(
+                hub.canonical_text().contains("FROM-A"),
+                "the commit barrier cut holds the fanned-out op"
+            );
+        })
+        .unwrap();
+
+        // Deregister B over the socket; the hub drops its mirror.
+        let dereg = crdt_send(
+            &sock,
+            &IpcMethod::ReplicaDeregister {
+                file: file_str.clone(),
+                identity: "vscode:B".into(),
+            },
+        );
+        assert!(dereg.ok && dereg.data.as_ref().unwrap()["removed"].as_bool().unwrap());
+
+        ipc.stop();
+    }
+
+    #[test]
+    fn crdtauth5_detached_path_refuses_replica_register_and_allocates_no_hub() {
+        // A document with NO live editor (Detached / GitAuthoritative) must refuse
+        // the new replica family and allocate no hub — the headless control-plane
+        // path is unchanged.
+        let (_dir, doc) = crdt_temp_doc("detached.md");
+        let project_root = doc.parent().unwrap().to_path_buf();
+        let file_str = doc.display().to_string();
+        // No lease seeded → authority is GitAuthoritative.
+        assert!(
+            !crate::crdt_authority::authority_for_file(&file_str).editor_attached(),
+            "test setup: the document must be detached"
+        );
+
+        let shared = Arc::new(SupervisorShared::new("test", "detached-instance".to_string()));
+        let shared_for_ipc = shared.clone();
+        let session_id = "crdtauth5-detached";
+        let mut ipc = crate::supervisor::ipc::SupervisorIpc::start(
+            &project_root,
+            session_id,
+            move |method| handle_ipc(method, &shared_for_ipc),
+        )
+        .expect("start supervisor ipc");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
+
+        let reg = crdt_send(
+            &sock,
+            &IpcMethod::ReplicaRegister {
+                file: file_str.clone(),
+                identity: "intellij:detached".into(),
+            },
+        );
+        assert!(!reg.ok, "the detached path refuses replica register");
+        assert!(
+            reg.error.as_deref().unwrap_or_default().contains("not editor-attached"),
+            "{reg:?}"
+        );
+        // No hub was allocated for the detached document.
+        let hash = crate::snapshot::doc_hash(&doc).unwrap();
+        let allocated = crate::crdt_relay_host::hub_is_allocated_for_test(&hash);
+        assert!(!allocated, "the detached path must not allocate a relay hub");
+
+        ipc.stop();
+    }
+
     #[test]
     fn handle_ipc_inject_normalizes_submit_newline_before_writing() {
         let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));

@@ -556,7 +556,7 @@ mod tests {
                 | agent_doc_orchestration::supervisor::ipc::IpcMethod::Pid
                 | agent_doc_orchestration::supervisor::ipc::IpcMethod::Restart { .. }
                 | agent_doc_orchestration::supervisor::ipc::IpcMethod::Stop { .. }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::StopAgent { .. } => {
+                | agent_doc_orchestration::supervisor::ipc::IpcMethod::StopAgent { .. } | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaRegister { .. } | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaDeregister { .. } | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaUpdate { .. } | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaAwareness { .. } => {
                     agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty()
                 }
             },
@@ -616,7 +616,7 @@ mod tests {
                 | agent_doc_orchestration::supervisor::ipc::IpcMethod::Pid
                 | agent_doc_orchestration::supervisor::ipc::IpcMethod::Restart { .. }
                 | agent_doc_orchestration::supervisor::ipc::IpcMethod::Stop { .. }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::StopAgent { .. } => {
+                | agent_doc_orchestration::supervisor::ipc::IpcMethod::StopAgent { .. } | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaRegister { .. } | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaDeregister { .. } | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaUpdate { .. } | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaAwareness { .. } => {
                     agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty()
                 }
             },

@@ -246,9 +246,14 @@ class PatchWatcher(private val project: Project) : Disposable {
         }
         ApplicationManager.getApplication().invokeAndWait {
             val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeAndWait
-            targetFile.refresh(false, false)
             val fdm = FileDocumentManager.getInstance()
             val document = fdm.getDocument(targetFile) ?: return@invokeAndWait
+            // #p2j4 / #jbcfdiag — skip the content-bearing VFS refresh when the buffer
+            // is unsaved (the reread setText's the proven-stale content via the Document
+            // API regardless). See shouldRefreshVfsBeforeApplyUtil.
+            if (shouldRefreshVfsBeforeApplyUtil(fdm.isDocumentUnsaved(document))) {
+                targetFile.refresh(false, false)
+            }
             if (document.text == content) {
                 return@invokeAndWait
             }
@@ -644,9 +649,16 @@ class PatchWatcher(private val project: Project) : Disposable {
         var applied = false
         ApplicationManager.getApplication().invokeAndWait {
             val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeAndWait
-            targetFile.refresh(false, false)
             val fdm = FileDocumentManager.getInstance()
             val document = fdm.getDocument(targetFile) ?: return@invokeAndWait
+            // #p2j4 / #jbcfdiag — this socket refresh_content path is the IPC reconcile
+            // that exists specifically to AVOID a behind-editor disk write; it must not
+            // itself arm the File Cache Conflict dialog by refreshing an unsaved buffer.
+            // The setText below replaces the proven-stale buffer via the Document API.
+            // See shouldRefreshVfsBeforeApplyUtil.
+            if (shouldRefreshVfsBeforeApplyUtil(fdm.isDocumentUnsaved(document))) {
+                targetFile.refresh(false, false)
+            }
             val current = document.text
             if (current == content) {
                 LOG.info("[socket] refresh_content no-op: editor already matches committed content for $filePath")
@@ -724,9 +736,14 @@ class PatchWatcher(private val project: Project) : Disposable {
             ApplicationManager.getApplication().invokeLater {
                 val reposStart = System.nanoTime()
                 val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeLater
-                targetFile.refresh(false, false)
                 val fdm = FileDocumentManager.getInstance()
                 val document = fdm.getDocument(targetFile) ?: return@invokeLater
+                // #p2j4 / #jbcfdiag — only refresh the VFS when the buffer is clean;
+                // a content-bearing refresh against an unsaved buffer arms the platform
+                // File Cache Conflict dialog. See shouldRefreshVfsBeforeApplyUtil.
+                if (shouldRefreshVfsBeforeApplyUtil(fdm.isDocumentUnsaved(document))) {
+                    targetFile.refresh(false, false)
+                }
                 val diskContent = String(targetFile.contentsToByteArray(), targetFile.charset)
                 if (!fdm.isDocumentUnsaved(document)) {
                     fdm.reloadFromDisk(document)
@@ -1082,13 +1099,20 @@ class PatchWatcher(private val project: Project) : Disposable {
             return false
         }
 
-        // Refresh VirtualFile from disk to ensure we have latest content
-        // (boundary markers may have been written to disk by agent-doc boundary)
-        targetFile.refresh(false, false)
-
         // Reload document from disk if it was externally modified
         val fdm = FileDocumentManager.getInstance()
         val document = fdm.getDocument(targetFile)
+
+        // #p2j4 / #jbcfdiag — refresh the VFS from disk only when the document is
+        // saved (clean). A content-bearing refresh against an UNSAVED buffer is what
+        // arms IntelliJ's memory↔disk "File Cache Conflict" dialog behind the editor;
+        // for an unsaved buffer the apply path below reconciles via the Document API
+        // (and the unsaved branch deliberately does NOT reload from disk anyway), so
+        // the refresh adds no value and only triggers the dialog. See
+        // shouldRefreshVfsBeforeApplyUtil.
+        if (document == null || shouldRefreshVfsBeforeApplyUtil(fdm.isDocumentUnsaved(document))) {
+            targetFile.refresh(false, false)
+        }
 
         if (document == null) {
             // File not open in editor — apply patches via VFS (no Document API needed).
@@ -2263,6 +2287,29 @@ internal data class EditorApplyProof(
     val content: String,
     val modificationStamp: Long,
 )
+
+/**
+ * `#p2j4` / `#jbcfdiag` — decide whether a content-bearing `VirtualFile.refresh`
+ * is safe to run before applying an agent write.
+ *
+ * IntelliJ's `FileDocumentManagerImpl` arms its memory↔disk "File Cache Conflict"
+ * dialog *during* a VFS refresh: when the on-disk bytes diverge from an **unsaved**
+ * in-memory `Document`, the platform's `contentsChanged` handler pops the dialog
+ * synchronously. Every agent write path that reconciles the document through the
+ * Document API (`setText`) is the authority for an unsaved buffer, so a bare
+ * `refresh(false, false)` before that reconcile adds no value when the document is
+ * unsaved — it only hands the platform a window to fire the dialog behind the
+ * editor (the remaining trigger after IPC-first writes removed the Rust-side
+ * behind-editor disk writes).
+ *
+ * Therefore: refresh the VFS from disk only when the document is **saved** (clean).
+ * When the document is unsaved, skip the refresh — the in-memory buffer is the
+ * source of truth and the apply path (or `mergeOrReload`) reconciles any disk
+ * divergence through the Document API without arming the platform dialog. The
+ * `--force-disk` operator escape hatch is a Rust-side flag and is unaffected.
+ */
+internal fun shouldRefreshVfsBeforeApplyUtil(documentUnsaved: Boolean): Boolean =
+    !documentUnsaved
 
 internal fun editorApplyProofStillCurrentUtil(
     proof: EditorApplyProof,

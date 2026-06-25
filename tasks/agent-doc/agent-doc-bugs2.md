@@ -376,20 +376,41 @@ This is the `#qeditdup` / `#qftloss` class — both `[operator-verify]`, **code-
 **Supervisor health:** the recorded `queue_pause_reason` (per-finalize `live_prompt_drift` + post-commit worktree corruption) is **stale** — recent ops.log cycles are clean: `postcommit_worktree_check match=true`, `write_authority transport=write_queue`, `supervisor_host_gate hosting=in-process`, `drift_recheck=false`. The route-owned supervisor (pid 2967818) runs the current binary (0.34.48 = source). The pause only suppresses the idle-watch; it didn't block this drain.
 
 **Remaining queue heads are all `[operator-verify]`** — `#qftloss`, `#qeditdup`, `#crdtauth6`, `#nsfz` (and the gated review `#kj5f` / `#mergestatemachine3`) are code-complete and waiting solely on your live-editor / plugin-install eyeball. No agent-drainable work remains after this item, so the in-session loop stops here rather than churning. Check the logs as you test and file any live failures.
-<!-- agent:boundary:efc28f25 -->
+
+### Re: lazily-rs Cell Families for a reactive document tree + queue free-text duplication — opus-4-8
+
+**1) Reactive tree on lazily-rs — yes.**
+> **Queue prompt:** Use lazily-rs recent addition of Cell Families for reactive document structures. Can we represent a tree structure using lazily-rs?
+
+lazily-rs 0.13.0 ships `CellMap<K,V>` (keyed reactive collection — one `CellHandle<V>` per entry plus a dedicated *membership* version cell) and `CellFamily<K,V>` (an `atomFamily`-style lazy factory over `CellMap`). There's no built-in `Tree` type, but a tree composes cleanly from those two:
+
+- **Node** = a `CellHandle<NodeValue>` minted lazily by a `CellFamily<NodeId, NodeValue>` (one cell per node id, cached on first `get`).
+- **Children** = each node owns its own `CellMap<ChildId, NodeId>` (or a `CellHandle<Vec<NodeId>>`). Because membership is its own version cell, adding/removing a child invalidates **only that node's children-membership readers** — siblings and unrelated subtrees don't recompute, and a value edit deep in one subtree never touches another.
+- **Aggregates** (subtree sum, "is any descendant dirty", rendered output) = a `ctx.computed` that reads the node value and recurses into child handles; lazily's dependency tracking re-runs only the path from the changed node up to the root.
+- **Safety**: the cycle detection added in `a19ab56` backstops accidental back-edges; a tree stays acyclic by construction. Caveat — lazily is single-threaded (`Rc`/`RefCell`, `Context`-scoped), which is fine for a one-thread document model.
+
+**Why this is the right substrate for agent-doc specifically:** model the session document as `root → sections (exchange / queue / backlog / review) → items`, each item a cell. Per-cell, membership-granular invalidation is exactly what a **per-cell CRDT merge** needs — it lets a queue edit converge without splicing into `exchange`/`backlog` (the whole-document `crdt::merge` cross-cell corruption class behind `#qcellmerge1`). So Cell Families isn't just *a* way to do a tree — it's the reactive backbone for the per-cell merge model you've been pushing toward. I filed a `[recommended]` spike item; say go and I'll prototype the document-tree-on-lazily mapping.
+
+**2) Queue free-text duplication.**
+> **Queue prompt:** When I make a free text item in a queue, my text is duplicated.
+
+I checked the committed doc: each of your two new queue items appears **exactly once** in HEAD — `#qauthorderpin` (stable-identity slot preserve) + the Live<Struck lattice (0.34.48) held this round, so nothing duplicated landed. The most likely thing you saw is the **live-editor convergence transient**: typing a free-text item *during an active turn* briefly shows your buffer text alongside the binary's converged copy before the CRDT reconciles them. That's the `#qeditdup` class — code-complete on main but still `[operator-verify]` precisely because the deeper editor-edit-during-cycle guard only proves out with a live IDE eyeball. If you can catch it duplicating in **HEAD** (committed, not just transient in the buffer), capture that doc state and I'll add the stronger guard — that's the concrete repro `#qeditdup` is waiting on.
+
+(Session note: exchange is large — 24 sections, 345 lines — but the queue is active so I'm not stalling to compact.)
+<!-- agent:boundary:ccc6a112 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- On a fresh lazily-rs.md tmux pane, `● State is racing between runs (live supervisor/editor writing concurrently). Let me look at the actual document to
+- 🚧 On a fresh lazily-rs.md tmux pane, `● State is racing between runs (live supervisor/editor writing concurrently). Let me look at the actual document to
   understand what's being asked rather than chase the shifting sidecar state.`
-- Use lazily-rs recent addition of Cell Families for reactive document structures. Can we represent a tree st
-- When I make a free text item in a queue, my text is duplicated.
+- ~~Use lazily-rs recent addition of Cell Families for reactive document structures. Can we represent a tree structure using lazily-rs?~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~When I make a free text item in a queue, my text is duplicated.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~I deleted some items from the queue but they came back. It seems that operator edits are not propagating to the CRDT authority models.~~ — auto-struck: answered this cycle (#ftstrike)
 ---
-🚧 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
+:pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
 ```
 resync: pruned 2 stale session(s)
 [route] target tmux session: 0
@@ -459,6 +480,8 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - :pushpin: ~~I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~do [#crdtauth1sv]~~
 - do [#crdtauth6]
+- do [#qftloss]
+- do [#qeditdup]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

@@ -293,7 +293,28 @@ Fixed and shipped (corky `6d4e643` on `origin/main`). `.people-sync-state.json` 
 - Commit `6d4e643` — pushed.
 
 Next queue head: `#ckyconfigunwrap`.
-<!-- agent:boundary:405fe5e8 -->
+
+### Re: #ckyconfigunwrap — P1 panic on malformed config + missing git — opus-4-8
+
+> **Queue prompt:**
+>
+> [#ckyconfigunwrap]
+
+
+Fixed and shipped (corky `372627b` on `origin/main`).
+
+**Two panic classes:**
+- `save_topic`/`save_contact`/social profile updates did `doc[key].as_table_mut().unwrap()`, panicking when a hand-edited `.corky.toml` put a **scalar** where a `[topics]`/`[contacts]`/`[profiles.*]` table was expected. Now `ok_or_else(|| anyhow!("… is not a table; fix or remove it"))?` — actionable error.
+- The shared-mailbox `run_git` helpers (`mailbox/sync.rs`, `reset.rs`) did `Command::new("git").output().unwrap_or_else(|_| panic!(…))`, aborting the whole process if `git` was missing. Now returns code `-1` with the spawn error in stderr; callers already branch on the exit code.
+
+**Verification (`#spec-test-build-install-commit-push`):**
+- Tests: new scalar-`[topics]`-errors-not-panics unit test — `cargo test` → 296 passed across touched crates; full `make check` green.
+- Build + install (GPU/CUDA): `make install` → `corky 0.29.0` in `~/.cargo/bin`.
+- Spec: SPEC.md §3.3 updated.
+- Commit `372627b` — pushed.
+
+Next queue head: `#ckyunicodeslug`.
+<!-- agent:boundary:9dfa003b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -312,7 +333,7 @@ Please give me a report the performance
 - ~~[#ckythread]~~
 - ~~[#ckytok401]~~
 - ~~[#ckypeoplesync]~~
-- 🚧 [#ckyconfigunwrap]
+- ~~[#ckyconfigunwrap]~~
 - [#ckyatomicwrite]
 - [#ckyunicodeslug]
 - [#ckymime]
@@ -324,7 +345,6 @@ Please give me a report the performance
 
 <!-- agent:backlog -->
 - [ ] [#ckythreadmerge] [P2 correctness] threading provider-switch merge: IMAP threads keyed by subject (thread_key_from_subject) and Gmail-API threads keyed by Gmail threadId never merge when the same conversation is synced from both providers, producing duplicate thread files. Design a unified thread-identity reconciliation (e.g. index by Message-ID/References across providers, or map Gmail threadId<->subject-key). Architectural — needs its own focused cycle. Split from #ckythread. crates/corky-mail/src/sync/{imap_sync.rs,gmail_api_sync.rs}, markdown.rs
-- [ ] [#ckyconfigunwrap] [P1 panic] as_table_mut().unwrap() panics on a hand-edited .corky.toml that uses a scalar where a table is expected; Command::new(git).output() panic! if git binary missing. Replace with ok_or_else anyhow. crates/corky-core/src/config/{topic.rs:76,contact.rs:71}, crates/corky-social/src/social/auth.rs:373-391, crates/corky-mail/src/mailbox/{sync,reset}.rs
 - [ ] [#ckyatomicwrite] [P2 durability] conversation markdown written via plain fs::write (truncate+write, half-written on crash loses all prior merged messages since re-parse returns None and starts fresh); file_store atomic rename is missing sync_all before rename so not power-loss durable. Reuse NamedTempFile persist + sync_all. crates/corky-mail/src/sync/imap_sync.rs:193,224; crates/corky-core/src/file_store.rs:47-63
 - [ ] [#ckyunicodeslug] [P2] slug regex strips all non-ASCII so CJK/Cyrillic/emoji subjects collapse to untitled, untitled-2,... opaque filenames distinguished only by counter. Use regex Unicode classes or transliterate. crates/corky-core/src/util.rs:5,12-31
 - [ ] [#ckymime] [P2] corky draft send MIME issues: raw filename in Content-Disposition (header-injection/malformed MIME), whole attachment buffered in RAM (~1.8GB peak for 500MB), inline images: YAML silently dropped (only draft push handles images+CID), In-Reply-To not normalized to angle-bracket RFC 5322 form. crates/corky-mail/src/draft/send.rs:70-98,186-237

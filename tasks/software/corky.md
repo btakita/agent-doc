@@ -200,7 +200,28 @@ Fixed and shipped (corky `24baa0c` on `origin/main`). `corky watch` ran each loo
 - Commit `24baa0c` — pushed.
 
 Note: switching `panic = abort → unwind` slightly enlarges the release binary (unwind tables); that's the necessary cost of the never-crash contract. Next queue head: `#ckydedup` (P1 dedup key drops distinct same-second messages).
-<!-- agent:boundary:0204b245 -->
+
+### Re: #ckydedup — P1 dedup key drops messages + leaks cross-provider dupes — opus-4-8
+
+> **Queue prompt:**
+>
+> [#ckydedup]
+
+
+Fixed and shipped (corky `e14f2ae` on `origin/main`). Messages were deduplicated by the raw `(from, date)` string tuple (`crates/corky-mail/src/sync/imap_sync.rs`), which **dropped distinct same-second messages** (identical from+date string collapsed to one) and **leaked duplicates across providers** (date format/TZ and From display-name vary, so the same message synced twice looked different).
+
+**Fix — normalized `dedup_key`:**
+- Prefers the globally unique **`Message-ID`** (same message across providers shares one ID).
+- Falls back to **normalized sender address** (`normalize_from_address` strips display name + lowercases) + **UTC-second timestamp** (`parse_msg_date(..).timestamp()`), so TZ/format/display-name differences no longer leak dupes and distinct same-second messages stay apart.
+
+**Verification (`#spec-test-build-install-commit-push`):**
+- Tests: 4 new unit tests (display-name strip, Message-ID priority, same-second distinct, TZ/display-name fallback) — `cargo test -p corky-mail` → 223 passed; full `make check` green.
+- Build + install (GPU/CUDA): `make install` → `corky 0.29.0` in `~/.cargo/bin`.
+- Spec: SPEC.md §4.3 + AGENTS.md updated.
+- Commit `e14f2ae` — pushed.
+
+Note: IMAP messages currently carry `message_id: None` (the separate `#ckythread` item fixes that), so they use the normalized-fallback key today; Gmail-API messages already benefit from Message-ID dedup. Next queue head: `#ckythread`.
+<!-- agent:boundary:dd00c208 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -215,7 +236,7 @@ Please give me a report the performance
 - ~~[#ckypanic]~~
 - ~~[#ckysheets]~~
 - ~~[#ckywatchpanic]~~
-- [#ckydedup]
+- ~~[#ckydedup]~~
 - [#ckythread]
 - [#ckytok401]
 - [#ckypeoplesync]
@@ -230,7 +251,6 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ckydedup] [P1 correctness] dedup key (raw_from, raw_date) drops distinct same-second messages and leaks duplicates across providers (date string varies by TZ/format, From varies by display-name). Normalize address + parse date to UTC seconds + include message_id. crates/corky-mail/src/sync/imap_sync.rs:184-197
 - [ ] [#ckythread] [P1 correctness] threading gaps: IMAP path hardcodes message_id None (imap_sync.rs:542-552, breaks reply threading for IMAP accounts since **Message-ID** metadata is never written); no validation that in_reply_to AND thread_id are both set (draft/send.rs:91-104, reply silently un-threads); IMAP subject-key vs Gmail threadId-key never merge on provider switch.
 - [ ] [#ckytok401] [P1] 401 from Google APIs never invalidates the cached token, so a Google-revoked but clock-valid token traps the user until manual tokens.json delete; only draft send clears its send token. Drop token on 401 across cal/doc/tasks/chat. crates/corky-google/src/{cal,doc,tasks}/*.rs, crates/corky-social/src/social/chat.rs
 - [ ] [#ckypeoplesync] [P1 lost-update] .people-sync-state.json bypasses the locked atomic store (file_store::save_json_with_lock used by tokens.json and .sync-state.json); concurrent corky contact push clobbers resourceName updates and re-creates Google contacts as duplicates. Route load/save_sync_state through save_json_with_lock. crates/corky-mail/src/contact/push.rs:263-280,565,637

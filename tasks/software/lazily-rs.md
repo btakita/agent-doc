@@ -301,7 +301,19 @@ src/lazily-py: tag v0.11.0 + push → gh release create v0.11.0 --generate-notes
 - **lazily-js / lazily-py** → your 2FA (py tracked in #kb9b)
 
 Queue now fully drained. Two operator follow-ups remain: the lazily-py PyPI publish (#kb9b) and — please — **restart this session** to clear the wedged editor IPC (a concurrent codex session has been contending the supervisor socket all along; I've been recovering every response via the git/CRDT path).
-<!-- agent:boundary:daa29939 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/software/lazily-rs.md source=file_ipc patch_id=18b16d61-065e-4747-90eb-5b29cab5f76c invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400.json doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782353796773
+```
+<!-- agent:boundary:1a128d47 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -315,7 +327,7 @@ Queue now fully drained. Two operator follow-ups remain: the lazily-py PyPI publ
 - ~~release + publish lazily-ky~~
 - ~~release + publish lazily-js~~
 - ~~release + publish lazily-zig~~
-- ~~release + publish lazily-py~~
+- 🚧 release + publish lazily-py
 <!-- /agent:queue -->
 
 ## Backlog

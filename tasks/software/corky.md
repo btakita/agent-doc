@@ -108,6 +108,9 @@ Compacted content:
 
 - `#ckymime` (15c0498) fixed only filename sanitization + In-Reply-To normalization. Its commit body states the RAM-buffering and inline-CID-image sub-issues are "split into their own backlog items (#ckymimestream, #ckymimeinline) as they are feature/architecture-sized."
 - `#ckythread` (6894c88) fixed IMAP Message-ID population + partial-reply warning. Its commit body states the cross-provider thread merge "is architectural and split into its own backlog item (#ckythreadmerge)."
+- **`find_thread_file`** (sync) and **`find_thread_file_by_id`** (refetch) are alias-aware, so a merged thread resolves by any claimed key.
+- **`merge_message_to_file`** resolves the existing file by the provider key (alias-aware), then falls back to a **Message-ID lookup** so the same message from two providers lands in one file; the incoming key is recorded as an alias. Alias recording runs *before* the dedup short-circuit, so it persists even when the bridged message is a duplicate.
+- **`Thread.aliases`** — a file "claims" key `K` when `Thread ID == K` or `aliases` contains `K`. New `**Thread Aliases**:` line (serialize + parse); `parse_thread_identity` / `claims_key` helpers complete the foundation that was half-staged in the working tree (it parsed `aliases` but dropped it on construction — fixed).
 
 Nothing reaped.
 
@@ -118,7 +121,7 @@ Nothing reaped.
 No new items added — the prior #code-review sweep already surfaced these; every other #cky* finding shipped on origin/main (6894c88 thread, 6c4c831 slug, 63cbb52 durability, 15c0498 mime). Remaining open work: the three splits above plus the operator-gated #pypi-trusted-publisher in review.
 
 Note: the local checkout at `~/work/btakita/corky` is stale at v0.13.1 (monolithic `src/`) with 3 uncommitted modifications (`filter/check.rs`, `filter/gmail_auth.rs`, `watch.rs`); the v0.29.0 workspace lives on origin/main. A fresh #code-review should run against an updated checkout.
-<!-- agent:boundary:896ad8c1 -->
+<!-- agent:boundary:d067b52e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -132,12 +135,12 @@ Please give me a report the performance
 - 🚧 [#ckythreadmerge]
 - [#ckymimestream]
 - [#ckymimeinline]
+- [#ckythreadmerge]
 <!-- /agent:queue -->
 
 ## Backlog
 
-<!-- agent:backlog -->
-- [ ] [#ckythreadmerge] [P2 correctness] threading provider-switch merge: IMAP threads keyed by subject (thread_key_from_subject) and Gmail-API threads keyed by Gmail threadId never merge when the same conversation is synced from both providers, producing duplicate thread files. Design a unified thread-identity reconciliation (e.g. index by Message-ID/References across providers, or map Gmail threadId<->subject-key). Architectural — needs its own focused cycle. Split from #ckythread. crates/corky-mail/src/sync/{imap_sync.rs,gmail_api_sync.rs}, markdown.rs
+<!-- agent:backlog priority queue -->
 - [ ] [#ckymimestream] [P3] corky draft send buffers the whole attachment in RAM then base64-encodes it (~1.8GB peak for a 500MB file). Use the Gmail API resumable/multipart upload endpoint for large attachments and stream the base64 encoding instead of building one giant String. crates/corky-mail/src/draft/send.rs:build_mime_message + send_via_gmail_api. Split from #ckymime.
 - [ ] [#ckymimeinline] [P3] corky draft send silently drops inline images: YAML (only draft push handles images+CID via multipart/related). Add CID inline-image support to send build_mime_message (multipart/related wrapping the text part + image parts with Content-ID), reusing draft push image-resolution logic. crates/corky-mail/src/draft/send.rs, mod.rs (push image handling). Split from #ckymime.
 <!-- /agent:backlog -->

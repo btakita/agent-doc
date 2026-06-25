@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -32,10 +32,10 @@ queue: start
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
-❯ - **Minimal latency / efficiency:** MessagePack wins for all-port production use. Cap'n Proto can beat it in a native-only, schema-first benchmark, but not enough to justify the migration cost before we exhaust the cheaper codec swap. For huge values, the real answer remains `SharedBlob`, not a fancier envelope.
-❯ - **Developer ergonomics:** MessagePack is the smallest change from the current serde types. Cap'n Proto and gRPC require IDL/codegen and generated-type ownership across every port.
-❯ - **Agentic ergonomics:** JSON stays the canonical inspectable form. MessagePack is acceptable if every binary frame can be losslessly rendered to canonical JSON and fixtures remain JSON-first. Cap'n Proto/protobuf are much more opaque to agents unless the schema/toolchain is always loaded.
-❯ - **Transport fit:** MessagePack and JSON are byte payloads that fit FFI, IPC, WebSocket, and WebRTC data channels. gRPC is a transport/API stack and should not be nested inside WebRTC or C ABI buffers.
+- **Minimal latency / efficiency:** MessagePack wins for all-port production use. Cap'n Proto can beat it in a native-only, schema-first benchmark, but not enough to justify the migration cost before we exhaust the cheaper codec swap. For huge values, the real answer remains `SharedBlob`, not a fancier envelope.
+- **Developer ergonomics:** MessagePack is the smallest change from the current serde types. Cap'n Proto and gRPC require IDL/codegen and generated-type ownership across every port.
+- **Agentic ergonomics:** JSON stays the canonical inspectable form. MessagePack is acceptable if every binary frame can be losslessly rendered to canonical JSON and fixtures remain JSON-first. Cap'n Proto/protobuf are much more opaque to agents unless the schema/toolchain is always loaded.
+- **Transport fit:** MessagePack and JSON are byte payloads that fit FFI, IPC, WebSocket, and WebRTC data channels. gRPC is a transport/API stack and should not be nested inside WebRTC or C ABI buffers.
 ### Session Summary
 
 ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260625-202238.md`*
@@ -45,6 +45,11 @@ Compacted content:
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
 
 ### Re: protocol codec comparison — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzmsgpack]
+
 
 > **Queue prompt:**
 >
@@ -63,59 +68,65 @@ The important distinction is that lazily already has the right protocol shape: `
 
 By criterion:
 
-- **Minimal latency / efficiency:** MessagePack wins for all-port production use. Cap'n Proto can beat it in a native-only, schema-first benchmark, but not enough to justify the migration cost before we exhaust the cheaper codec swap. For huge values, the real answer remains `SharedBlob`, not a fancier envelope.
-- **Developer ergonomics:** MessagePack is the smallest change from the current serde types. Cap'n Proto and gRPC require IDL/codegen and generated-type ownership across every port.
-- **Agentic ergonomics:** JSON stays the canonical inspectable form. MessagePack is acceptable if every binary frame can be losslessly rendered to canonical JSON and fixtures remain JSON-first. Cap'n Proto/protobuf are much more opaque to agents unless the schema/toolchain is always loaded.
-- **Transport fit:** MessagePack and JSON are byte payloads that fit FFI, IPC, WebSocket, and WebRTC data channels. gRPC is a transport/API stack and should not be nested inside WebRTC or C ABI buffers.
+- parent repo gitlink: `9a2a86c8f` (`lazily-rs: bump MessagePack IPC codec`), pushed to `origin/main`.
+- Public APIs should expose one stable codec selection surface, such as `Codec.Json`, `Codec.MessagePack`, and `Codec.Postcard` where supported, instead of forcing users to compose separate package stacks.
+- Ecosystems can still hide unstable or heavier pieces behind feature flags, experimental namespaces, or internal modules while the public package stays unified.
+- Agent ergonomics are better when the canonical cell kinds live in one package and one docs/fixture set. Splitting CRDT out would force agents and humans to remember which cell kinds are core versus extension-only.
+- A separate package would create version-skew risk between core cell traversal/storage and CRDT merge behavior. That is worse than carrying the code in core because CRDT semantics must remain lockstep with the protocol.
+- Cell CRDT is a graph cell kind and synchronization semantic, not an optional transport adapter. If a document can contain a CRDT-backed cell, every language runtime needs to understand its schema, permissions, merge semantics, snapshots, deltas, and conformance fixtures.
+- Postcard should remain Rust-local or same-schema-local support, not a cross-language package boundary.
+- MessagePack should live in the core package as the preferred production cross-language binary codec, but it can be feature/dependency gated where the ecosystem supports that (`ipc-msgpack` in Rust, optional peer/dependency or subpath import in JS if needed).
+- Every core package must include JSON because it is the canonical/debug/conformance codec.
+- `src/lazily-rs`: `24b6a0b` (`feat: add negotiated MessagePack IPC codec`), pushed to `origin/main`.
+- Probed narrow no-default feature sets; they still fail on the existing unconditional `smallvec` imports in `context.rs` / `thread_safe.rs`, which is pre-existing and outside this queue item.
+- Passed full `make check` in `src/lazily-rs`.
+- Passed default-feature checks for `ipc-msgpack`, `webrtc ipc-msgpack`, and `ffi ipc-msgpack ipc-binary webrtc`.
+- Passed focused codec tests with `cargo test --features "ffi ipc-msgpack ipc-binary webrtc" --test ipc --test ffi --test webrtc_transport --test conformance`.
+- Added roundtrip, invalid-frame, conformance, FFI cross-codec, and WebRTC loopback coverage for MessagePack.
+- Documented the negotiated frame-codec model in `PROTOCOL.md` and `SPEC.md`: JSON stays canonical/debug/default, MessagePack is the cross-language production binary codec, postcard remains the Rust/same-schema binary option.
+- Updated WebRTC source/sink construction so JSON remains the default while callers can opt into `IpcCodec::MessagePack`.
+- Updated FFI channels to store decoded `IpcMessage`s and re-encode as the requested output codec, then added MessagePack send/recv/validate/kind/clone exports behind `ffi + ipc-msgpack`.
+- Added MessagePack encode/decode helpers for `IpcMessage` plus shared codec dispatch for IPC/WebRTC transport paths.
+- Added optional `ipc-msgpack` support backed by `rmp-serde`, with a feature-gated `IpcCodec` enum for JSON, MessagePack, and postcard.
 
 **Next step filed:** `#lzmsgpack` is now the top backlog item. Scope: add negotiated `json|msgpack|postcard` codec support, route WebRTC/FFI through that abstraction, add cross-language conformance vectors, and benchmark JSON vs MessagePack vs postcard before changing any default. This was a design/selection cycle only; I did not edit protocol code or run the build suite.
 
 **Top backlog id: `#lzmsgpack`.**
 
-### Re: do #lzmsgpack — gpt-5
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
 > **Queue prompt:**
-> do [#lzmsgpack]
+>
+> Should we create separate packages for Cell CRDT or keep it in the core packages?
 
-Implemented `#lzmsgpack` in `src/lazily-rs`.
-
-What changed:
-- Added optional `ipc-msgpack` support backed by `rmp-serde`, with a feature-gated `IpcCodec` enum for JSON, MessagePack, and postcard.
-- Added MessagePack encode/decode helpers for `IpcMessage` plus shared codec dispatch for IPC/WebRTC transport paths.
-- Updated FFI channels to store decoded `IpcMessage`s and re-encode as the requested output codec, then added MessagePack send/recv/validate/kind/clone exports behind `ffi + ipc-msgpack`.
-- Updated WebRTC source/sink construction so JSON remains the default while callers can opt into `IpcCodec::MessagePack`.
-- Documented the negotiated frame-codec model in `PROTOCOL.md` and `SPEC.md`: JSON stays canonical/debug/default, MessagePack is the cross-language production binary codec, postcard remains the Rust/same-schema binary option.
-- Added roundtrip, invalid-frame, conformance, FFI cross-codec, and WebRTC loopback coverage for MessagePack.
-
-Verification:
-- Passed focused codec tests with `cargo test --features "ffi ipc-msgpack ipc-binary webrtc" --test ipc --test ffi --test webrtc_transport --test conformance`.
-- Passed default-feature checks for `ipc-msgpack`, `webrtc ipc-msgpack`, and `ffi ipc-msgpack ipc-binary webrtc`.
-- Passed full `make check` in `src/lazily-rs`.
-- Probed narrow no-default feature sets; they still fail on the existing unconditional `smallvec` imports in `context.rs` / `thread_safe.rs`, which is pre-existing and outside this queue item.
-
-Commits:
-- `src/lazily-rs`: `24b6a0b` (`feat: add negotiated MessagePack IPC codec`), pushed to `origin/main`.
-- parent repo gitlink: `9a2a86c8f` (`lazily-rs: bump MessagePack IPC codec`), pushed to `origin/main`.
-
-Latest `lazily-rs` GitHub Actions CI run for `24b6a0b` was still `in_progress` when checked after the push (`28199211718`). Local verification is green; CI should be checked again before treating remote validation as complete.
-
-### Re: codec package boundaries — gpt-5
 
 > **Queue prompt:**
+>
 > Should we create separate packages for each codec across all languages or keep it in the core packages?
 
-Keep codec support in each language's core package for now. Do not create `lazily-json`, `lazily-msgpack`, `lazily-postcard`, etc. as separate public packages yet.
 
-Recommended shape:
-- Every core package must include JSON because it is the canonical/debug/conformance codec.
-- MessagePack should live in the core package as the preferred production cross-language binary codec, but it can be feature/dependency gated where the ecosystem supports that (`ipc-msgpack` in Rust, optional peer/dependency or subpath import in JS if needed).
-- Postcard should remain Rust-local or same-schema-local support, not a cross-language package boundary.
-- Public APIs should expose one stable codec selection surface, such as `Codec.Json`, `Codec.MessagePack`, and `Codec.Postcard` where supported, instead of forcing users to compose separate package stacks.
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
 
-Separate packages become worth it only if a codec brings a large runtime, native build step, transport stack, or ecosystem-specific dependency burden. That points to future Cap'n Proto/gRPC-style experiments, not the current JSON/MessagePack/postcard set.
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=socket_ack_content patch_id=aba09061-676d-4aad-8de9-4b8e97d063e8 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=13625 candidate_hash=82683e259fbbebd8b417b34a8028ba4c564e5e8282fe5fee2ca3c2b7b6583b5b content_ours_len=13821 content_ours_hash=f9484564a6348f05fe4dda0b0104662d9c2158e97a874452c041cd21b7fbf8e0 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782420288917
+```
 
-The agentic and developer ergonomics reason is straightforward: separate per-codec packages multiply install matrices, examples, conformance fixtures, and version skew across languages. The core package can still keep optional binary dependencies lightweight while preserving one obvious install path and one canonical fixture story.
-<!-- agent:boundary:80af96a1 -->
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=socket_ack_content patch_id=f66024c9-9f07-4680-a390-501054e2fd1d invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=14822 candidate_hash=80dc5e010b40e5a29459104fccbc03071a57ec7e1847c40baf4d8a074bfeae5f content_ours_len=16704 content_ours_hash=b8a2967d9c8f5d578272625625ac96a8839806272764f75c7a3665438b9249b4 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782420348170
+```
+<!-- agent:boundary:81a4c627 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -124,9 +135,6 @@ The agentic and developer ergonomics reason is straightforward: separate per-cod
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#lzmsgpack]~~
-- ~~Should we create separate packages for each codec across all languages or keep it in the core packages?~~
-- Should we create separate packages for Cell CRDT or keep it in the core packages?
 <!-- /agent:queue -->
 
 ## Backlog

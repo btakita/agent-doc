@@ -221,7 +221,7 @@ Fixed and shipped (corky `e14f2ae` on `origin/main`). Messages were deduplicated
 - Commit `e14f2ae` — pushed.
 
 Note: IMAP messages currently carry `message_id: None` (the separate `#ckythread` item fixes that), so they use the normalized-fallback key today; Gmail-API messages already benefit from Message-ID dedup. Next queue head: `#ckythread`.
-<!-- agent:boundary:dd00c208 -->
+<!-- agent:boundary:8494463e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -237,7 +237,7 @@ Please give me a report the performance
 - ~~[#ckysheets]~~
 - ~~[#ckywatchpanic]~~
 - ~~[#ckydedup]~~
-- [#ckythread]
+- 🚧 [#ckythread]
 - [#ckytok401]
 - [#ckypeoplesync]
 - [#ckyconfigunwrap]

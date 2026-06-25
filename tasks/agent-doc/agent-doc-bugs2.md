@@ -145,7 +145,23 @@ agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md
 **Remaining work** is `#actorswitchdefer` Part B (already queued, `[focused-cycle]`): deterministic SimWorld proof that the deferred restart actually fires at the boundary, the paused/stuck regression asserting the recovery hint shows and the deferred restart is never silently dropped, plus an explicit route bail when `agent_change_restart` is disabled. That needs restart-flow SimWorld infra + `make tmux-ci`, so it belongs in a fresh focused cycle on a healthy supervisor — implementing it on this stale-CRDT session would just re-corrupt the write.
 
 **I'm stopping after this and recommending the supervisor restart above** — the in-session loop can't fix its own parent; the operator restart is the unblock.
-<!-- agent:boundary:0906e7a1 -->
+
+### Re: queue bookkeeping — #actorswitchdefer pinned, supervisor recovered — opus-4-8
+
+Read your queue edit: marked the prior response `(HEAD)`, moved `[#actorswitchdefer]` to the top, and dropped its `do` prefix. Treating that exactly as written — it's now a **visible pin, not an executing directive**, so I will not auto-drain it. Correct call: `#actorswitchdefer` Part B is `[focused-cycle]` (needs restart-flow SimWorld infra + `make tmux-ci`), so it belongs in a fresh healthy cycle, not this one. Part A already shipped (`6c7455a8`).
+
+**Supervisor has recovered.** The paused/stale parent supervisor the HEAD response diagnosed is gone: `agent-doc admin inspect` now reports `state=ready queue_control=none freshness=controller:fresh,supervisor:fresh`, and preflight's IPC convergence ack'd `status:ok`. Only `projection_lag=true` remains (the state mirror trailing slightly — that's exactly what `#n529b` wires away). No `live_prompt_drift` this cycle; this finalize is going through the clean editor path, not `--force-disk`.
+
+**Why I'm not auto-looping the 34 "drainable" heads.** The count is real but the heads aren't quick drain work:
+
+- **Duplicates** — `#gghx`, `#8g9w`, `#vwj7`, `#cgfx`, `#nsfz` each appear twice (once as a `[#id]` pin, once as `do [#id]`). That's the `#queuestatemachine`/`#qdedupsync` duplication class itself; I'm leaving it to supervisor convergence rather than hand-editing the live queue (manual edits race the supervisor).
+- **Focused-cycle / cross-repo units** — the genuine heads are deep plan-backed refactors: `#vwj7`/`#cgfx`/`#brtc` (queue-activity SM), `#gghx`/`#8g9w`/`#6mjw`/`#spy9` (wait-machinery SM), `#n529b`/`#r5at`/`#6n5j` (lazily plugin state-sync). `#gww8` self-declares *"sibling-repo (src/lazily-spec) cycle per scope-discipline"* — by its own text it must run scoped to lazily-spec, not here.
+- **Operator-gated** — `#nsfz` is `[operator-verify]`, `#capproofbg`/`#p2j4` need a live JB editor.
+
+**Semantic-completion warnings are follow-ons, not duplicates** — `#n529b` is the consumer-wiring phase after `#n529` shipped the mirror substrate; `#cgfx` is SM route-convergence after `#qdedupsync`'s dedup fix; `#kj5f`'s review remainder is the operator-verify half after `#6b5h`. None are auto-strikable; leaving all three.
+
+**Recommendation:** pick one focused item for a fresh cycle (my suggestion: `#npe1` `#codefencestrip` — a concrete in-scope agent-doc parser bug, fully agent-completable; or `#0bmv` plan-consolidation), or restart the session to let convergence drop the duplicate queue churn first. I'm stopping here rather than force-draining a churned session (16 cycles / 30 min, accretion=warn) through cross-repo and focused-cycle heads.
+<!-- agent:boundary:1f195f5a -->
 <!-- /agent:exchange -->
 
 ## Queue

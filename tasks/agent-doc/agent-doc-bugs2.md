@@ -64,7 +64,7 @@ Working tree is clean — no code or deploy work was needed this cycle; the ship
 ### Re: live verify (yours, no gate) — glm-5.2
 
 Per your "I will test, file bugs, you check the logs" loop, the one non-code remaining check is the `plan-opencode-post-turn-false-active.md` trailing note: live-verify a real OpenCode pane re-dispatches after a completed turn (no false `alive-busy`; restart works without the 2-step). No review gate filed, per your "no more gates" instruction — flagging here for your next test pass.
-<!-- agent:boundary:6d4ef772 -->
+<!-- agent:boundary:26a93c67 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -235,6 +235,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#rt83qflood] #rt83/#qflood phantom-pin flood dedup: queue convergence leaves duplicate binary-injected :round_pushpin:/:pushpin: actor-switch pins after a stale-CRDT/supervisor re-emit, flooding the queue with ~7 near-identical copies. Add deterministic dedup that collapses repeated phantom pins (the operator-authored line is position-locked under #queue-operator-pin-position-lock, but binary-injected phantom copies must converge to one) so restarting/resyncing a stale supervisor cannot reflood the queue.
 - [ ] [#capproofbg] Make the JB Run Agent Doc capacity proof non-blocking: dispatch immediately and run the capacity proof in the background, surfacing failure asynchronously instead of stalling every dispatch.
 - [ ] [#jbrunhang] JB Run Agent Doc on a session that is not open hangs the next invocation: the first run against a closed session must fail immediately instead of wedging the subsequent dispatch. See plan-controller-stalled-client-start-hang.md.
 - [ ] [#npe1] #codefencestrip=Template patch parser strips trailing code fences at the exchange boundary

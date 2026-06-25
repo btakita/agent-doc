@@ -98,7 +98,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=file_ipc patch_id=948e7a22-07a6-4b03-a4c7-0ae705df8aa8 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0.json doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782347563865
 ```
-<!-- agent:boundary:ae388570 -->
+<!-- agent:boundary:8ff9e8e0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -106,8 +106,8 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: [#56ta]~~
 - ~~:pushpin: [#vm7g]~~
-- ~~🚧 :pushpin: [#n529]~~
-- :pushpin: do [#fnxy]
+- ~~:pushpin: [#n529]~~
+- 🚧 :pushpin: do [#fnxy]
 - :pushpin: do [#t4x1]
 ---
 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
@@ -247,6 +247,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - do [#brtc]
 - do [#kj5f]
 - do [#gww8]
+- do [#n529b]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

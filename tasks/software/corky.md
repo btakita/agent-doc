@@ -170,7 +170,19 @@ Files: `crates/corky-mail/src/draft/send.rs`, `SPEC.md` §5.5.1.
 **Design note.** The backlog suggested the Gmail resumable/multipart media-upload endpoint; I kept the proven `messages.send` + `raw` endpoint and streamed the base64url body instead — identical wire format, fully unit-testable offline (live send can't be exercised here without OAuth). Peak RAM for a 500 MB attachment drops from ~1.8 GB to roughly the streaming buffers (spool on disk, not RAM).
 
 Queue advances to **#ckymimeinline** (draft send drops inline CID images — reuse draft push `multipart/related` logic in `build_mime_message`).
-<!-- agent:boundary:583d9703 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/corky.md source=socket_ack_content patch_id=460ac752-e608-4362-9b45-7b6ff9a7475b invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=13957 candidate_hash=cdb4277d2d8b094340cef2d1650c6a73258d444cedfef72528ff9d7d8152d929 content_ours_len=10789 content_ours_hash=6e667648259b6a0c4f665f6f845103c1b74033c914b3f0cad62b2048528fd13e doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782344910865
+```
+<!-- agent:boundary:329be399 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -256,7 +256,28 @@ Right — that's the real problem, and it means **identity has to be *manufactur
 **So the answer to your pushback:** you can't key-reconcile what has no key. The design splits by controllability — **anchored** structure gets stable-id keyed reconciliation (cheap, exact); **free** text gets a character/line sequence CRDT + re-parse + alignment-based identity (robust to instability, but a true rewrite *is* a replace and should be). The per-cell merge ambition holds for the anchored layer; the free-text layer's honest floor is "merge the text, re-derive the tree." A large structural edit on unstable text therefore costs: a text-CRDT merge (scales with edited characters) + a re-parse (scales with document) + a keyed reconcile of the anchored skeleton (scales with the diff). The only thing you *can't* promise is preserving per-node lineage through an edit that erased the node's textual identity — there's nothing left to preserve it by.
 
 This is exactly why agent-doc leans on in-band markers: they're the cheapest way to buy stable identity over fundamentally unstable text.
-<!-- agent:boundary:e1945c62 -->
+
+### Re: #next-steps for lazily-rs to support agent-doc reactive documents — opus-4-8
+
+> **Queue prompt:** What are #next-steps for lazily-rs to support agent-doc reactive documents?
+
+The design is already settled across this session (tree algorithm → large structural edits → "it's text, identity isn't inherent"). The next steps are to **build the primitives** that turn an agent-doc markdown document into a reactive, **per-cell-mergeable, ordered keyed tree** — replacing the whole-document `crdt::merge` with minimal per-item ops. I wrote the roadmap as `tasks/software/plan-lazily-agent-doc-reactive-substrate.md` and filed six dependency-ordered backlog items (Phase 0 keystone `#lzcellmove` is already in review/operator-go):
+
+| # | id | what | depends on |
+|---|---|---|---|
+| 1 | **`#lzordtree`** | ordered keyed tree primitive (`CellTree`/ordered children) — the document tree shape | `#lzcellmove` |
+| 2 | **`#lzkeyrecon`** | keyed reconciliation + LIS move-minimization → minimal `{insert,remove,move,update}` ops — **THE per-cell-merge enabler** | `#lzordtree` |
+| 3 | **`#lzseqcrdt`** | move-aware sequence CRDT (fractional-index/RGA/Fugue) for mergeable sibling order | crdt.rs / `#lzcrdtplane` |
+| 4 | **`#lzstableid`** | manufactured identity for text: anchors + content-hash keys + alignment diff (edit-vs-move) | — |
+| 5 | **`#lzsemtree`** | memoized computed semantic tree (unresolved prompts / drainable heads) over subtrees | `#lzordtree` |
+| 6 | **`#lztextcrdt`** | free-text char/line CRDT + re-parse (heaviest, last — managed components already merge per-component) | — |
+
+**Critical path to per-cell CRDT merge:** `#lzcellmove` (atomic move) → `#lzordtree` (ordered tree) → `#lzkeyrecon` (minimal op set). Phases 4–6 harden identity and concurrency around it.
+
+**Top of backlog: `#lzordtree`** (Phase 1 — ordered keyed tree primitive).
+
+All six are `[recommended]` and depend on the operator-go keystone `#lzcellmove`; the queue stays operator-paused, so nothing here auto-drains — say go on `#lzcellmove` + `#lzordtree` to start the substrate.
+<!-- agent:boundary:7a5d7f0d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -265,14 +286,24 @@ This is exactly why agent-doc leans on in-band markers: they're the cheapest way
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~Can Cell Families support tree structures?~~
-- 🚧 ~~What tree algorithm would be best for agent-doc document AST + semantic document trees?~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~What happens if the user makes large structural edits to the document? It's text, so not necessarily stable.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~What are #next-steps for lazily-rs to support agent-doc reactive documents?~~
+- go [#lzordtree] [#lzkeyrecon] [#lzseqcrdt] [#lzstableid] [#lzsemtree] [#lztextcrdt]
+- do [#lzkeyrecon]
+- do [#lzseqcrdt]
+- do [#lzstableid]
+- do [#lzsemtree]
+- do [#lztextcrdt]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzordtree] [recommended] Phase 1 — ordered keyed tree primitive (CellTree / ordered-children node) on top of CellList/#lzcellmove: (kind, stable_id, value_cell, ordered children) with Rc structural sharing; per-node value isolation + per-level membership reactivity. The document tree shape agent-doc components+items map onto. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 1). Depends on #lzcellmove.
+- [ ] [#lzkeyrecon] [recommended] Phase 2 — keyed reconciliation with LIS move-minimization: diff each tree level by stable id, emit minimal {insert,remove,move,update} op set (longest-increasing-subsequence over matched keys). THE per-cell-CRDT-merge enabler (minimal per-item ops vs whole-subtree replace). Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 2). Depends on #lzordtree.
+- [ ] [#lzseqcrdt] [recommended] Phase 3 — move-aware sequence CRDT for sibling order under concurrency: fractional indexing or RGA/Fugue, move-aware (one move op, not delete+reinsert that duplicates on merge). Sits above per-cell value merge in crdt.rs. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 3). Pairs with #lzcrdtplane multi-writer boundary.
+- [ ] [#lzstableid] [recommended] Phase 4 — manufactured identity for markdown text: honor in-band anchors/item-ids (agent-doc has these) + content-derived block-hash keys (survive reflow/reorder) + alignment diff (Myers/patience/histogram) for edit-vs-move detection on free prose. Gives reconciliation keys to match on. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 4).
+- [ ] [#lzsemtree] [recommended] Phase 5 — memoized semantic-tree computed layer: derive unresolved-prompts / drainable-heads / section-summaries as memoized computeds over the relevant subtree (recompute only on that subtree change; lazy, glitch-free). Demonstrates the lazy-pull win on a real agent-doc query. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 5).
+- [ ] [#lztextcrdt] [recommended] Phase 6 (heaviest, last) — free-text char/line sequence CRDT (RGA / Yjs text) + re-parse: merge keystrokes on anchorless prose, then re-parse merged text and re-derive the tree (tree = projection of merged text). Honest floor: a true rewrite IS a replace. Least urgent — managed components already merge per-component. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 6).
 <!-- /agent:backlog -->
 
 ## Review

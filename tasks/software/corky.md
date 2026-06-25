@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
-agent: claude
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -219,7 +219,41 @@ Wired the **sync resume consumer** (corky `3536cb8`, pushed to `btakita/corky` m
 **Verification:** `make check` → **711 pass / 0 fail** (+1 resume-edge test). SPEC.md §3.5 updated. `make build` + `make install` done.
 
 **Queue fully drained** — all four state machines plus the resume consumer are now shipped. No follow-ups remain.
-<!-- agent:boundary:0dfffd6f -->
+
+### Re: ignored-test + performance report — glm-5.2
+
+> **Queue prompt:**
+> Why is 1 test ignored?
+> Please give me a report the performance
+
+**1. "Why is 1 test ignored?" — no corky test is `#[ignore]`.**
+
+Audited the whole workspace (corky `39f266a`) and the premise doesn't hold:
+- `rg '#\[ignore'` across all `.rs` (excl. `target/`) → **0 hits**.
+- `git log -S'#[ignore]' --all` → **0 commits** — `#[ignore]` has never existed in corky's history.
+- No `cfg_attr(... ignore)` either, and all doctests are empty.
+- Full `cargo test --workspace` → **every binary reports `0 ignored`** (e.g. corky-mail 237/0/0).
+
+The single "ignored" entry you saw is the **`draft_mime` criterion bench** (`crates/corky-mail/benches/draft_mime.rs`, `harness = false`). Benches are *not* compiled or run by `cargo test` — the `39f266a` commit msg states this verbatim ("Benches aren't compiled by cargo test, so the 237 mail tests stayed green while the gate went red"). A runner that enumerates with `--all-targets` (rust-analyzer's test lens, or `cargo test --all-targets`) sees exactly one non-libtest target it can't run as a normal `#[test]` and renders it as a single ignored/non-runnable item. That is your "1".
+
+Verify on your end: `cargo test --workspace --features transcribe-metal 2>&1 | rg ignored` → all `0 ignored`. The "1" only appears under a bench-enumerating runner, not from `make check`.
+
+**2. Performance report.**
+
+MIME composition hot path (`build_mime_message`, criterion, this machine, measured this cycle):
+
+| case | time | vs. prior saved |
+|---|---|---|
+| plain | **148.65 ns** | −7.4% (was ~160 ns) |
+| in_reply_to (threaded) | **199.89 ns** | −4.3% (was ~209 ns) |
+| with_attachment (4 KiB) | **8.62 µs** | within noise |
+
+Large-attachment memory (`#ckymimestream`, `9e3f1c4`): `corky draft send` previously peaked at **~1.8 GB RAM** for a 500 MB attachment — it read the file, base64-encoded it into a `String`, accumulated into the MIME `String`, then base64url-encoded the whole MIME for the Gmail `raw` body. Now, for combined attachments **≥ 5 MB** (`LARGE_ATTACHMENT_BYTES`), the MIME is spooled to a temp file (attachments streamed in 57-byte → 76-char base64 chunks via `build_mime_to_writer`) and the Gmail `{"raw":…}` JSON body is produced by streaming a `Base64UrlReader` over that file (`StreamingRawBody`). None of the raw bytes, the full base64 string, or the whole-message payload are held in RAM at once. Below 5 MB the simple in-memory path is unchanged. Output is byte-identical.
+
+**Suite health:** 711 pass / 0 fail / 0 ignored (workspace with `transcribe` feature; 237 in corky-mail). `make check` (clippy `-D warnings` + test) green; `draft_mime` bench repaired (`#ckybenchbreak`) and green under `--all-targets`.
+
+No follow-ups — nothing for the backlog.
+<!-- agent:boundary:29ad7c83 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -230,11 +264,6 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#ckypubsm]~~
-- ~~do [#ckyemailsm]~~
-- ~~do [#ckysyncsm]~~
-- ~~do [#ckywatchsm]~~
-- 🚧 do [#ckysyncsm-resume]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,25 +33,18 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-064946.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-073954.md`*
 
 Compacted content:
-❯ - Archived 4 response topic(s): generalize dialog first-action focus; dialog-focus head closeout; deploy; 1 more
+❯ - Archived 6 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); Available Deal cards show interested-lender count; IPC proof diagnostic (interrupted-cycle recovery); 3 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=48b3d190-6779-423a-9811-139cda04fea6 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782369337187
-```
-
 ### Re: Available Deal cards show interested-lender count — opus-4-8
+
+> **Queue prompt:**
+>
+> The admin user Message tab should be an entire conversation tab, where the admin can write a message and send it to the user. If there are a group of users, create a tab for each user.
+
 
 > **Queue prompt:** https://equityfundingsource.brian-takita.workers.dev/admin/pipeline > Available Deal cards should show the number of interested lenders.
 
@@ -63,38 +56,9 @@ Done. Available Deal pipeline cards now show how many lenders have expressed int
 
 Coverage: added unit assertions in `tests/admin-pipeline.test.ts` for the count passthrough and the 0-default. Full suite green (`bun run check` -> 1217 pass / 0 fail) plus build + worker bundle.
 
-Committed (`47e7949`, pushed to `origin/main`) and deployed this pipeline change to Cloudflare Workers (remote D1 migrations applied) — `https://equityfundingsource.brian-takita.workers.dev`, Version ID `db46084f-d881-4b51-90d6-a6d35c55f55c`. (The trailing `deploy` queue head stays active as the campaign-final deploy after the newly-queued Messages-dialog tasks.)
+> **Queue prompt:** deploy
 
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=cd3b4893-c3da-4103-8039-b5dd1aaead8b invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782370285223
-```
-
-### Re: Messages dialog — per-user tabs + deal-group merged view — opus-4-8
-
-> **Queue prompt:** 🚧 When opening the Messages dialog on user context, render a specific tab for each user in the user context. Also render another tab for the user group. These tabs are dedicated to the user(s). Remove the existing All Messages tab. Rename Messages tab to All Messages. Add an All tab in Messages dialog > Messages tab...a sibling to Borrowers|Lenders|Brokers. This tab effectively replaces the replaced All Messages tab.
-
-Done — implemented, full suite green, committed + pushed to EFS `origin/main` (`8464ac0`).
-
-I confirmed the design with you first (it wasn't derivable from code — the dialog only ever opened with **one** user): **deal participants** for the context, and a **merged** group tab.
-
-**What changed** (`src/equityfundingsource-dev`):
-- **User context = deal participants.** Extended `ADMIN_MESSAGES_OPEN_EVENT` detail with `users[]` + `group_label`. Opening Messages from a deal (`deal_detail` "Message borrower") now passes the borrower **and every interested lender**; the dialog renders one dedicated tab per participant. A single-user open (lead pipeline, borrower-only deal) still yields that one participant's tab.
-- **Per-user tab** = `AdminMessagesUnified` locked to the participant's email — their full cross-source history (borrower-chat + lender-deal + lender-account), with the address-search box hidden (satisfies the earlier "no user search, only the context users" intent).
-- **Group tab** = new `AdminMessagesGroup`: every participant's unified thread fetched, merged chronologically, de-duplicated, read-only.
-- **Tab restructure**: removed the legacy top-level **All Messages** (unified) tab; renamed **Messages → All Messages**; added an **All** role sub-tab beside Borrowers|Lenders|Brokers that renders the cross-role unified view the removed tab used to show.
-- Extracted `UnifiedMessageThread` for reuse across the single-user and group views.
-
-**Verification**: full `bun test` **1223 pass / 0 fail**; `bun run build` + `build:worker` clean. Updated 4 existing source-assertion tests for the rename/restructure and added 6 new tests under `#msg-user-context-tabs`. (EFS repo has no CI workflow; local suite is the gate.)
-
-Next queue head is **deploy** — I'll take that on the next drain.
+Committed (`47e7949`, pushed to `origin/main`) and deployed to Cloudflare Workers: remote D1 migrations applied, worker uploaded — `https://equityfundingsource.brian-takita.workers.dev`, Version ID `db46084f-d881-4b51-90d6-a6d35c55f55c`.
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
@@ -108,23 +72,34 @@ Affected component: editor IPC / writeback
 ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=e9d60d77-ad79-4030-be5e-5f0f4040fe3f invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782372613863
 ```
 
-### Re: Deploy — campaign-final Cloudflare Workers deploy — opus-4-8
+### Re: Messages dialog — interactive per-user conversation tabs + group broadcast — opus-4-8
 
-> **Queue prompt:** :pushpin: deploy
+> **Queue prompt:** The admin user Message tab should be an entire conversation tab, where the admin can write a message and send it to the user. If there are a group of users, create a tab for each user and a group message tab.
 
-Deployed to production. The Messages-dialog restructure (per-participant tabs + merged deal-group view) is now live.
+Done — implemented, full suite green, committed + pushed to EFS `origin/main` (`a0ed0e4`), and deployed (below). This refines the read-only tabs I shipped earlier so the admin can actually message participants. (Note: the prior supervisor over-consumed/struck this head before it was done; this cycle re-does it so the strike is honest.)
+
+I confirmed the group-tab semantics with you: **broadcast to each participant**. (The per-user interaction question was unanswered — I took the recommended low-risk reuse and noted it.)
+
+**What changed** (`src/equityfundingsource-dev`):
+- **Per-user tab → full conversation with compose + send.** Each participant tab now renders the existing `AdminMessages` conversation pane auto-scoped to that user (by role + email), so the admin writes and sends on the user's normal channel (borrower-chat / lender messaging) — replacing the read-only unified history view.
+- **Group tab → broadcast.** Keeps the merged history and adds a compose box; **Send to group** posts one message to every participant via a new `POST /api/admin/messages/broadcast` (resolves each recipient email → user → ensures their chat session → posts the message; returns `sent`/`failed`). N individual sends, not a shared thread, per your choice. Endpoint registered before the `/:session_id` routes so "broadcast" is never read as a session id.
+
+**Verification**: full `bun test` **1224 pass / 0 fail**; `bun run build` + `build:worker` clean. Updated the per-user/group source-assertion tests and added a backend test for the broadcast route (resolve → ensure-session → send, ordered before `/:session_id`).
+
+### Re: Deploy — production deploy of interactive messaging — opus-4-8
+
+> **Queue prompt:** deploy
+
+Deployed to production from `a0ed0e4`. Interactive per-user conversation tabs + group broadcast are now live.
 
 - **URL**: https://equityfundingsource.brian-takita.workers.dev
-- **Version ID**: `1fc4c91d-07fd-474c-9fce-195323bca984`
-- **Worker startup**: 33ms; 1 modified static asset uploaded (`index.browser-P2BKFFQO.js`).
-- **Remote D1 migrations**: no-op — this change is frontend-only (no new migrations).
+- **Version ID**: `fab47a72-09b1-48a5-b2df-1f2c020d8a4b`
+- **Remote D1 migrations**: no-op — frontend + a route handler only, no new migrations.
 
-Built from the pushed commit `8464ac0` (full suite 1223 pass, build + worker bundle clean before deploy).
+Operator live-verify (cannot be agent-done): open a deal → **Message borrower** → on a per-user tab, send a message and confirm it posts to that user's thread; on the **group** tab, type a message and **Send to group**, confirm it reaches every participant.
 
-Operator live-verify (cannot be agent-done): open a deal → **Message borrower**, confirm the dialog shows a tab per participant (borrower + interested lenders) + a **Deal** group tab (merged history), the top-level **All Messages** tab, its **All** role sub-tab, and **Contact Messages** — with the old per-user "All Messages" tab gone.
-
-Queue drained.
-<!-- agent:boundary:9cad98e2 -->
+One follow-up I left out by design: broadcast currently delivers to each participant's portal chat + realtime notify but does **not** send the per-recipient notification email the single-send path does (that template is borrower-specific; emailing all participants via it could mis-template lender mail). Say the word if you want broadcast email parity and I'll add a role-aware notify.
+<!-- agent:boundary:b1a32467 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -144,6 +119,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~The admin user Message tab should be an entire conversation tab, where the admin can write a message and send it to the user. If there are a group of users, create a tab for each user.~~
+- Outgoing group emails must be to each individual. Never to the entire group.
+- 🚧 deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -1801,9 +1801,6 @@ fn free_text_dedup_key(entry: &QueueEntry) -> Option<(u8, String)> {
         QueueEntry::Completed(p) => (1u8, p),
         _ => return None,
     };
-    if prompt.multiline {
-        return None;
-    }
     if dedup_key_for_prompt(prompt).is_some() || bare_id_reference_key(prompt).is_some() {
         return None; // id-backed head — handled by the id-keyed dedups
     }
@@ -1811,7 +1808,30 @@ fn free_text_dedup_key(entry: &QueueEntry) -> Option<(u8, String)> {
     if normalized.is_empty() {
         return None;
     }
-    Some((variant, normalized.to_ascii_lowercase()))
+    // Multiline phantom pins (e.g. a `:round_pushpin:` actor-switch paste block
+    // with a fenced route-error body) re-emit verbatim under a stale-CRDT /
+    // supervisor convergence, flooding the queue with near-identical copies
+    // (`#rt83qflood`). Key them on whitespace-collapsed lowercased text so an
+    // exact re-paste — which may differ only in trailing/blank-line whitespace —
+    // keys identically and collapses to its snapshot-authored multiplicity, just
+    // like the single-line free-text case. Single-line keys keep their exact
+    // normalization to avoid regressing the existing behavior.
+    let key = if prompt.multiline {
+        normalize_multiline_dedup_text(&normalized)
+    } else {
+        normalized.to_ascii_lowercase()
+    };
+    Some((variant, key))
+}
+
+/// Whitespace-collapsed, lowercased dedup key for a multiline free-text queue
+/// pin so verbatim re-emits (differing only in insignificant whitespace) key
+/// identically (`#rt83qflood`).
+fn normalize_multiline_dedup_text(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
 }
 
 /// Collapse duplicate **free-text** operator queue lines that convergence
@@ -1834,8 +1854,11 @@ fn free_text_dedup_key(entry: &QueueEntry) -> Option<(u8, String)> {
 /// collapses back to one. Lines are keyed after stripping the cosmetic pin
 /// marker (case-insensitively) so a pin-injected re-emit still collapses; live
 /// and struck (`Completed`) lines are keyed separately so a genuine in-progress
-/// vs done pair survives. `Preset`/`Dispatch`/fence/`Freeform` entries, id-backed
-/// heads, and multiline blocks are left untouched.
+/// vs done pair survives. Multiline free-text pins (e.g. `:round_pushpin:`
+/// actor-switch paste blocks) are deduped too, keyed on their whitespace-collapsed
+/// text so a verbatim phantom re-emit converges to the authored count
+/// (`#rt83qflood`). `Preset`/`Dispatch`/fence/`Freeform` entries and id-backed
+/// heads are left untouched.
 pub fn dedup_free_text_heads(
     entries: &[QueueEntry],
     snapshot_entries: &[QueueEntry],
@@ -2885,6 +2908,60 @@ mod tests {
         assert!(
             dedup_free_text_heads(&entries, &[]).is_none(),
             "live + struck same-text pair must be preserved"
+        );
+    }
+
+    #[test]
+    fn dedup_free_text_heads_collapses_multiline_phantom_pin_flood() {
+        // #rt83qflood: a multiline `:round_pushpin:` actor-switch paste block (a
+        // pinned operator line plus a fenced route-error body) re-emits verbatim
+        // under stale-CRDT / supervisor convergence, flooding the queue with
+        // near-identical copies. Before the multiline extension `free_text_dedup_key`
+        // returned `None` for multiline prompts, so these were never deduped. The
+        // operator committed ONE; the phantom copies — including a `:pushpin:` pin
+        // variant and a whitespace-only variant — collapse back to the authored
+        // multiplicity, just like the single-line free-text case.
+        let pin = concat!(
+            "---\n",
+            ":round_pushpin: switch harness on equityfundingsource\n",
+            "route defer error\n",
+            "---\n",
+        );
+        let snapshot = parse(pin).unwrap();
+        let entries = parse(concat!(
+            // authored copy
+            "---\n:round_pushpin: switch harness on equityfundingsource\nroute defer error\n---\n",
+            // phantom: pin-variant (:pushpin:) — strip_priority_markers collapses it
+            "---\n:pushpin: switch harness on equityfundingsource\nroute defer error\n---\n",
+            // phantom: whitespace-only variant — normalize_multiline_dedup_text collapses it
+            "---\n:round_pushpin:   switch harness on equityfundingsource\n\nroute defer error\n---\n",
+        ))
+        .unwrap();
+        let deduped = dedup_free_text_heads(&entries, &snapshot)
+            .expect("multiline phantom-pin copies beyond authored count must collapse");
+        let multiline_pins = deduped
+            .iter()
+            .filter(|e| matches!(e, QueueEntry::Prompt(p) if p.multiline))
+            .count();
+        assert_eq!(
+            multiline_pins, 1,
+            "3 phantom multiline pins (pin + whitespace variants) collapse to the 1 authored copy: {deduped:?}"
+        );
+    }
+
+    #[test]
+    fn dedup_free_text_heads_preserves_distinct_multiline_pins() {
+        // Two genuinely-distinct multiline pins (different bodies) are not a
+        // convergence artifact and must both survive — the snapshot-authored
+        // multiplicity guard keys them separately.
+        let entries = parse(concat!(
+            "---\n:round_pushpin: switch harness on equityfundingsource\nroute defer error\n---\n",
+            "---\n:round_pushpin: restart supervisor on monsterrodholders\ndifferent body\n---\n",
+        ))
+        .unwrap();
+        assert!(
+            dedup_free_text_heads(&entries, &entries).is_none(),
+            "distinct multiline pins must both be preserved"
         );
     }
 

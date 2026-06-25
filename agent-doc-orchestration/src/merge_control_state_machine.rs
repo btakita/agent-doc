@@ -701,4 +701,109 @@ mod tests {
         // Quiet the unused-import warning when the helper isn't compiled in.
         let _ = plugin_owner::plugin_owner_pid_is_live(0);
     }
+
+    // ---- #mergestatemachine3: end-to-end wedge-class repros ----
+    //
+    // The transition tests above prove individual edges; these walk the two
+    // operator-reported failure classes as full live sequences and assert the
+    // disk-write gate at *every* step, so a future edge regression that still
+    // type-checks (e.g. permitting a write mid-handshake) is caught as the
+    // concrete `File Cache Conflict` / `#6b5h` reproduction it would cause.
+
+    #[test]
+    fn file_cache_conflict_repro_never_writes_disk_behind_live_editor() {
+        // Class: a live editor owns the buffer while the binary wants to write.
+        // Writing disk in any phase between attach and ACK is exactly the
+        // `File Cache Conflict` dialog. Walk the full editor closeout and prove
+        // the gate forbids a disk write at every phase the editor could still
+        // be mid-apply, and permits it only once the patch is ACK-proven.
+        let machine = MergeOwnershipMachine::new(MergeOwnershipPhase::Detached);
+        assert!(
+            disk_write_permitted(machine.state()),
+            "no editor yet: direct disk write is the CLI-only path"
+        );
+
+        assert!(machine.send(MergeOwnershipEvent::EditorAttached));
+        assert_eq!(machine.state(), MergeOwnershipPhase::Attached);
+        assert!(
+            !disk_write_permitted(machine.state()),
+            "Attached is ambiguous (#6b5h) — must NOT write until ownership is resolved"
+        );
+
+        assert!(machine.send(MergeOwnershipEvent::EditorBufferObserved));
+        assert_eq!(machine.state(), MergeOwnershipPhase::EditorOwnsBuffer);
+        assert!(
+            !disk_write_permitted(machine.state()),
+            "live editor owns the buffer — a disk write here IS the File Cache Conflict"
+        );
+
+        assert!(machine.send(MergeOwnershipEvent::BinaryWriteRequested));
+        assert_eq!(machine.state(), MergeOwnershipPhase::BinaryWriteRequested);
+        assert!(
+            !disk_write_permitted(machine.state()),
+            "patch queued but unacked — editor may still apply its own buffer state"
+        );
+
+        assert!(machine.send(MergeOwnershipEvent::PatchAckObserved));
+        assert_eq!(machine.state(), MergeOwnershipPhase::IpcAckProven);
+        assert!(
+            disk_write_permitted(machine.state()),
+            "editor applied + ACKed — a disk sync now lands behind the editor's apply"
+        );
+
+        assert!(machine.send(MergeOwnershipEvent::Committed));
+        assert_eq!(machine.state(), MergeOwnershipPhase::Committed);
+    }
+
+    #[test]
+    fn stale_listener_6b5h_wedge_repro_routes_to_disk_instead_of_no_ack() {
+        // Class: the IPC listener is registered but no live editor sits behind
+        // it (a controller-hosted connectable socket). The pre-SM behavior
+        // queued a patch and wedged on `no_ack` / `retry_without_disk_write`
+        // forever. The SM must demote the stale listener to Detached on a stale
+        // heartbeat so the write routes to the controller-host disk path.
+        let machine = MergeOwnershipMachine::new(MergeOwnershipPhase::Detached);
+
+        assert!(machine.send(MergeOwnershipEvent::EditorAttached));
+        assert_eq!(machine.state(), MergeOwnershipPhase::Attached);
+        assert!(
+            !disk_write_permitted(machine.state()),
+            "ambiguous listener: writing now races; waiting forever is the #6b5h wedge"
+        );
+
+        // Liveness probe finds no proven editor behind the listener → stale.
+        assert!(machine.send(MergeOwnershipEvent::HeartbeatStale));
+        assert_eq!(
+            machine.state(),
+            MergeOwnershipPhase::Detached,
+            "stale listener demotes to Detached (#6b5h resolution)"
+        );
+        assert!(
+            disk_write_permitted(machine.state()),
+            "no live editor — the write routes to disk instead of wedging on no_ack"
+        );
+
+        assert!(machine.send(MergeOwnershipEvent::Committed));
+        assert_eq!(machine.state(), MergeOwnershipPhase::Committed);
+    }
+
+    #[test]
+    fn idle_editor_survives_stale_heartbeat_no_false_disk_write() {
+        // Inverse safety of the #6b5h repro: a *real* idle editor (live pid,
+        // stale heartbeat) must NOT be demoted by a stale heartbeat, or the
+        // binary would raw-write behind it and reintroduce File Cache Conflict.
+        // Staleness alone never demotes a proven EditorOwnsBuffer.
+        assert_eq!(
+            MergeOwnershipMachine::transition(
+                MergeOwnershipPhase::EditorOwnsBuffer,
+                MergeOwnershipEvent::HeartbeatStale,
+            ),
+            None,
+            "proven editor buffer survives a stale heartbeat — keyed off pid liveness, not freshness"
+        );
+        assert!(
+            !disk_write_permitted(MergeOwnershipPhase::EditorOwnsBuffer),
+            "an idle but live editor still owns the buffer — no disk write"
+        );
+    }
 }

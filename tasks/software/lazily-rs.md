@@ -178,7 +178,28 @@ So: insert/delete are atomic today; atomic ordered *move* is the gap, now backlo
 > **Queue prompt:** Add Google Sheets cell count benchmark to README. Why are there 2 cells per formula?
 
 Added the Google Sheets scale to the README Benchmarks section: at the full **10,000,000-cell** Sheets cap, lazily builds in ~0.7 s, cold-recomputes in ~0.5 s, viewport edit ~11 µs (with the Excel 17.18B-grid sparse-model note). On **"2 cells per formula"** — it's actually **2 cells per row**, not per formula: the bench models a column `=A_i + A_{i-1}`, so each row is **one input cell `A_i` + one formula cell** ⇒ `N` rows = `2N` cells, matching how a real sheet mixes value and formula cells. Each formula *depends on* 2 inputs but is itself a single cell. So "10M cells" = 5M inputs + 5M formulas. Clarified inline in the README.
-<!-- agent:boundary:9acacf54 -->
+
+### Re: Can Cell Families support tree structures? — opus-4-8
+
+> **Queue prompt:** Can Cell Families support tree structures?
+
+**Yes — a tree is a composition of `CellMap`s, no new primitive required.** Three idioms, in increasing structure:
+
+1. **Adjacency map (simplest).** One `CellMap<NodeId, Node>` where each `Node` value carries its `children: Vec<NodeId>`. Look up children by key in the same map. Per-node value edits invalidate only that node's readers; adding/removing a child edits the parent node's value. Flat storage, arbitrary depth.
+
+2. **Nested collections (tree of collections).** Each node's value owns its own child `CellMap<K, Node>`. This is the recursive "tree" shape and it gives **per-subtree membership reactivity**: a reader of one subtree's `keys()`/`len()` is invalidated only when *that* subtree gains/loses a child — sibling subtrees and deeper descendants don't disturb it. `CellMap` is cheaply `Clone` (an `Rc` to shared state), so a node can hold and hand out its child map.
+
+3. **Path-keyed `CellFamily` (flattened tree).** Key entries by hierarchical path (`"root/a/b"`). This is exactly the multi-segment key the `#lzwirekey` plan proposes for nested collections — a flat family that addresses tree positions by path, with the membership cell tracking which paths exist.
+
+**What you get for free:** fine-grained per-node reactivity (editing node `X` never invalidates unrelated nodes), reactive membership per level/subtree, and lazy recompute (a derived view over a subtree recomputes only when that subtree's cells change).
+
+**What is *not* built in** (app-level or future primitives):
+- **Traversal / ordered children.** `CellMap` is hash-keyed with insertion-order tracking but no ordered/indexed child API — ordered siblings + reordering is the `#lzcellmove` gap (atomic move).
+- **Reparenting (subtree move).** Moving a subtree today is remove+insert (loses entry-cell identity); an atomic optimized move is again `#lzcellmove`.
+- **Data-cycle prevention.** `#lzcycledetect` guards the *reactive dependency* graph (a computed reading itself), not your *data* tree — nothing stops you storing a child id that points back at an ancestor; that invariant is the app's to enforce.
+
+So: trees work well as nested/keyed cell collections with fine-grained reactivity today; the missing ergonomics are ordered children and atomic subtree move (both `#lzcellmove`). If you want a first-class `CellTree` / ordered `CellList` primitive, say the word and I'll plan it.
+<!-- agent:boundary:d161a549 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -187,6 +208,7 @@ Added the Google Sheets scale to the README Benchmarks section: at the full **10
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- 🚧 Can Cell Families support tree structures?
 <!-- /agent:queue -->
 
 ## Backlog

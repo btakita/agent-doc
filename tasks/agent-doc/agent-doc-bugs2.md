@@ -97,7 +97,22 @@ This is the foundation rung for the CRDT-authority model (`plan-crdt-authority-m
 > **Queue prompt:** do [#lazilycrdtspec]: Make CRDT the first of several multi-write mechanisms.
 
 Striking this head — the item was drained in the previous response this session: spec authored in `src/lazily-spec` (commit `6e86dea`, gitlink `e6f5feea7`, response committed `05edfe484`), `#lazilycrdtspec` backlog item reaped `[x]`. The `cell-model.md` chapter specifies single-writer vs multi-write cells with a pluggable `merge:<mechanism>` attribute, `crdt` first. No further work on this id.
-<!-- agent:boundary:0509fe61 -->
+
+### Re: #lazilycrdtrs — CRDT-backed multi-write cell kind implemented in lazily-rs — opus-4-8
+
+> **Queue prompt:**
+>
+> :pushpin: do [#lazilycrdtrs]
+
+
+Implemented the replicated/CRDT cell kind per `#lazilycrdtspec`, in `src/lazily-rs/src/crdt.rs` behind the existing `distributed` feature (commit `e235f98`, superproject gitlink `51417638f`).
+
+**The binding (key design point):** a `ReplicatedCell<C>` is a multi-write **root** cell. A remote-op **ingress merge** folds a remote replica's CRDT state, then pushes the converged value into an ordinary reactive cell via `Context::set_cell` — so downstream derived slots recompute through the normal direct mechanism. The `PartialEq` guard applies *after* merge, so a losing/equal/redundant merge invalidates nothing (verified by recompute-count assertions).
+
+**Pieces:** `MergeMechanism` enum (`Crdt` first/implemented; `Lww`/`Ot`/`Lease`/`Custom` reserved + fail-closed via `resolve()`); `Hlc`/`HlcStamp` (deterministic caller-supplied wall time); three CRDT registers `LwwRegister`/`MvRegister`/`PnCounter` (all commutative/associative/idempotent); `CellCrdt` trait; `ReplicatedCell` binding.
+
+**Verified:** 7 new unit tests + full `make check` green (all feature suites, doctests, Lean model, benchmarks); default build (no `distributed`) unaffected. Next rungs: `#crdtauth1`/`#crdtauth2`. Plan: `tasks/agent-doc/plan-crdt-authority-model.md`.
+<!-- agent:boundary:0f858373 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -105,7 +120,7 @@ Striking this head — the item was drained in the previous response this sessio
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: do [#lazilycrdtspec]: Make CRDT the first of several multi-write mechanisms.~~
-- 🚧 :pushpin: do [#lazilycrdtrs]
+- ~~:pushpin: do [#lazilycrdtrs]~~
 - :pushpin: do [#crdtauth1]
 - :pushpin: do [#crdtauth2]
 - :pushpin: do [#crdtauth3]
@@ -225,7 +240,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilycrdtrs] [focused-cycle] lazily-rs: implement the replicated/CRDT-backed cell kind per #lazilycrdtspec — CRDT-valued root cells, remote-op ingress merge feeding the reactive graph, direct downstream propagation unchanged. Sibling-repo (src/lazily-rs) cycle. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#crdtauth1] [focused-cycle] agent-doc authority state machine: Detached (git-authoritative, ephemeral CRDT) to EditorAttached (multi-replica) keyed on plugin attach/detach, riding the hosting-epoch backbone; extends #mergestatemachine. Plus state-vector sync protocol replacing whole-.yrs snapshot merge_by_component. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#crdtauth2] [focused-cycle] Editor-as-replica binding (FFI-first): cdylib is the CRDT node hosting a per-editor yrs replica; thin IntelliJ/VSCode bindings forward Document deltas + apply remote updates (cursor/undo preserving); plugin read/write-through FFI (completes #dsqa). Wire agent-doc shared roots (document/queue/hosting) to lazily replicated cells (per-cell merge #qcellmerge1); upgrade #lazilystatesync to bidirectional. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#crdtauth3] 2 [focused-cycle] State-vector commit barrier: replace finalize patch-ack with flush-all-live-editors-to-SV then snapshot then commit; root-fix for the no_ack / ipc_proof_insufficient / postcommit-worktree-corruption class. Plan: tasks/agent-doc/plan-crdt-authority-model.md

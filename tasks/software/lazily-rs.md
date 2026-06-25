@@ -71,7 +71,34 @@ By criterion:
 **Next step filed:** `#lzmsgpack` is now the top backlog item. Scope: add negotiated `json|msgpack|postcard` codec support, route WebRTC/FFI through that abstraction, add cross-language conformance vectors, and benchmark JSON vs MessagePack vs postcard before changing any default. This was a design/selection cycle only; I did not edit protocol code or run the build suite.
 
 **Top backlog id: `#lzmsgpack`.**
-<!-- agent:boundary:54a068a9 -->
+
+### Re: do #lzmsgpack — gpt-5
+
+> **Queue prompt:**
+> do [#lzmsgpack]
+
+Implemented `#lzmsgpack` in `src/lazily-rs`.
+
+What changed:
+- Added optional `ipc-msgpack` support backed by `rmp-serde`, with a feature-gated `IpcCodec` enum for JSON, MessagePack, and postcard.
+- Added MessagePack encode/decode helpers for `IpcMessage` plus shared codec dispatch for IPC/WebRTC transport paths.
+- Updated FFI channels to store decoded `IpcMessage`s and re-encode as the requested output codec, then added MessagePack send/recv/validate/kind/clone exports behind `ffi + ipc-msgpack`.
+- Updated WebRTC source/sink construction so JSON remains the default while callers can opt into `IpcCodec::MessagePack`.
+- Documented the negotiated frame-codec model in `PROTOCOL.md` and `SPEC.md`: JSON stays canonical/debug/default, MessagePack is the cross-language production binary codec, postcard remains the Rust/same-schema binary option.
+- Added roundtrip, invalid-frame, conformance, FFI cross-codec, and WebRTC loopback coverage for MessagePack.
+
+Verification:
+- Passed focused codec tests with `cargo test --features "ffi ipc-msgpack ipc-binary webrtc" --test ipc --test ffi --test webrtc_transport --test conformance`.
+- Passed default-feature checks for `ipc-msgpack`, `webrtc ipc-msgpack`, and `ffi ipc-msgpack ipc-binary webrtc`.
+- Passed full `make check` in `src/lazily-rs`.
+- Probed narrow no-default feature sets; they still fail on the existing unconditional `smallvec` imports in `context.rs` / `thread_safe.rs`, which is pre-existing and outside this queue item.
+
+Commits:
+- `src/lazily-rs`: `24b6a0b` (`feat: add negotiated MessagePack IPC codec`), pushed to `origin/main`.
+- parent repo gitlink: `9a2a86c8f` (`lazily-rs: bump MessagePack IPC codec`), pushed to `origin/main`.
+
+Latest `lazily-rs` GitHub Actions CI run for `24b6a0b` was still `in_progress` when checked after the push (`28199211718`). Local verification is green; CI should be checked again before treating remote validation as complete.
+<!-- agent:boundary:ede3b8f9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -86,7 +113,6 @@ By criterion:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzmsgpack] [recommended] Implement negotiated MessagePack for lazily-ipc: add a codec enum/capability handshake (json|msgpack|postcard), add rmp-serde encode/decode for IpcMessage, route WebRtcSink/WebRtcSource and FFI helpers through the codec abstraction instead of hard-coded serde_json, add cross-language canonical fixtures/round trips, and benchmark JSON vs MessagePack vs postcard before changing any default. Keep JSON canonical/debug fallback; keep postcard Rust-local.
 <!-- /agent:backlog -->
 
 ## Review

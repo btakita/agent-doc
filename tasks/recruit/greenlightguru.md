@@ -164,7 +164,33 @@ No single source dumps the full stack, so this is assembled from their HTEC mode
 - [Crunchbase tech details](https://www.crunchbase.com/organization/greenlight-guru/technology) (403 on automated fetch — open in a browser)
 
 Want me to turn this into a tailored cover note / outreach that leads with the MCP-server + auditable-AI overlap, or fold the architecture findings into your resume's GG-specific cut?
-<!-- agent:boundary:88966fc2 -->
+❯ Will my Martin Investments/Censible experience help me succeed at Greenlight Guru? I made a ESG portfolio rebalancer and Screener tools.
+
+### Re: Does your Martin Investments / Censible (ESG) experience transfer? — opus-4-8
+
+Short answer: **yes — not the *domain* (finance ≠ medtech), but the *engineering primitives* transfer almost one-for-one, and the ESG angle specifically hands you the "regulated, disclosure-driven scoring" vocabulary GG cares about.** Here's the mapping.
+
+#### What you actually built (the transferable shapes)
+
+- **A screener is a configurable rule-engine over a governed dataset.** Inclusion/exclusion criteria, thresholds, and policy filters applied to a universe of securities is *structurally the same machine* as a QMS applying acceptance criteria and compliance gates to design records. Their **AI Verifiability Check** (flags non-measurable/untestable requirements) and **AI Style Guide** (enforces writing rules across contributors) are literally automated screeners — you've built that class of system.
+- **A rebalancer is constraint-satisfaction + state reconciliation.** Compute a target allocation and the ordered transitions to reach it under constraints — that's the same shape as GG's **CAPA / change-control state machines and approval-routing lifecycles** (compute desired end-state, enforce the legal transitions to get there). This is one of the harder problems on their platform and you've shipped its analog.
+- **Heterogeneous-data aggregation + defensible scoring.** ESG scoring pulls noisy, multi-source data and produces a score you must be able to *explain*. Maps directly onto GG's analytics platform / Tableau BI and **AI Search summaries**, and onto the broader "every number must trace to its inputs" requirement.
+- **Decision-support React UI over complex data.** Screener tools are exactly that — and the Sr. SWE I role is weighted toward **modern front-end ownership (React)**. This is a clean, immediate stack match.
+
+#### The non-obvious advantage: ESG is itself a regulated, audit-driven domain
+
+This is the part most candidates can't claim. ESG investing lives under **disclosure regulation and greenwashing scrutiny** (SEC ESG disclosure rules, methodology-transparency expectations). So you've already worked where **provenance, methodology transparency, and a defensible/auditable score** are non-negotiable — that's the *same mindset* as ALCOA+ / 21 CFR Part 11 / "you cannot ship a hallucinated CAPA." You can say, credibly: *"I've built scoring systems whose methodology had to survive a regulator's and a skeptic's audit"* — which is precisely the bar GG's AI features must clear.
+
+#### How to position it (one line for outreach)
+
+> *"At Censible I built ESG screening and rebalancing — configurable rule engines and constraint-based state reconciliation over data whose scoring had to be transparent and defensible. That's the same engineering a QMS runs on: acceptance criteria, change-control workflows, and auditable scoring."*
+
+#### Honest gap
+
+It's finance-regulated, not medical-device-regulated — no ISO 13485 / 21 CFR 820 exposure. But frame it as transfer, not equivalence: *the regulatory vocabulary differs; the discipline (transparent rules, constraint-driven workflows, auditable scoring) is identical and already shipped.*
+
+**Bottom line:** Censible is a genuine asset for this role — lead with the rule-engine/constraint-solver and the "auditable scoring in a regulated domain" framing, and treat the medtech-domain gap as a few weeks of vocabulary, not a capability gap. Want me to fold this into the GG-specific resume cut alongside the EFS / tsift / agent-doc angles?
+<!-- agent:boundary:09738b34 -->
 <!-- /agent:exchange -->
 
 ## Queue

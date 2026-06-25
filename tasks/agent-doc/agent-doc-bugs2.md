@@ -376,7 +376,7 @@ This is the `#qeditdup` / `#qftloss` class — both `[operator-verify]`, **code-
 **Supervisor health:** the recorded `queue_pause_reason` (per-finalize `live_prompt_drift` + post-commit worktree corruption) is **stale** — recent ops.log cycles are clean: `postcommit_worktree_check match=true`, `write_authority transport=write_queue`, `supervisor_host_gate hosting=in-process`, `drift_recheck=false`. The route-owned supervisor (pid 2967818) runs the current binary (0.34.48 = source). The pause only suppresses the idle-watch; it didn't block this drain.
 
 **Remaining queue heads are all `[operator-verify]`** — `#qftloss`, `#qeditdup`, `#crdtauth6`, `#nsfz` (and the gated review `#kj5f` / `#mergestatemachine3`) are code-complete and waiting solely on your live-editor / plugin-install eyeball. No agent-drainable work remains after this item, so the in-session loop stops here rather than churning. Check the logs as you test and file any live failures.
-<!-- agent:boundary:3dd71a70 -->
+<!-- agent:boundary:4c51e298 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -483,7 +483,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#supdead-simworld] SimWorld dead-socket supervisor lifecycle: extend the route SimWorld model (SupervisorLifecycle = Starting/Ready/Busy/WaitingInput/Blocked/Closed) with a Dead / stale-socket state + socket connect-liveness, then drive the #supdead-coldstart-fallback path end-to-end deterministically — dead supervisor → restart-supervisor reaps the stale socket + cold-starts via route::auto_start when safe, vs the own-ancestor/no-tmux case returning actionable guidance (no raw ECONNREFUSED). Follow-up to #supdead-coldstart-fallback (8a4f2abc), which is currently covered by pure-decision + real-socket probe unit tests only.
 - [ ] [#qftloss] [operator-verify] Free-text prompt loss (mode-6) — CODE-COMPLETE on main (8b900bf4): binary now journals operator prompts from the plugin live-buffer sidecar (.agent-doc/live-buffer/<hash>) into the #qdurcrash store before any convergence/recovery can clobber the unsaved buffer, replayed if absent. Remaining: live IDE eyeball that an unsaved prompt typed during a concurrent finalize survives end-to-end. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#qeditdup] [operator-verify] Queue items duplicated + manually-struck/deleted items resurrected when the operator edits the queue during an active turn. #queuestatemachine idempotent convergence + the Live<Struck lattice (merged, 0.34.48) should resolve this — VERIFY on the recycled binary; if it persists live, a deeper editor-edit-during-cycle guard is needed. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#crdtauth6] [operator-verify] crdtauth5 live hookup: thin JB DocumentListener calling CrdtReplicaForwarder.forwardLocalDelta + a Kotlin Unix-socket ReplicaTransport client (writes NDJSON register/deregister/update, delivers inbound update_b64 to applyRemoteUpdate); plus the deferred VS Code koffi replica seam (editors/vscode/src/native.ts out-param marshaling). Rust fan-out + Kotlin seam already merged + tested. Plan: tasks/agent-doc/plan-crdt-authority-model.md

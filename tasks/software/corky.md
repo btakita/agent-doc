@@ -247,7 +247,40 @@ Fix applied **locally** (empty `images` slice added to the 3 bench callsites); c
 > do [#ckysuite]
 
 Already shipped as part of the "fix test suite" turn — corky `f3098ec` (prioritize `CORKY_DATA` over the `./mail` symlink heuristic in `resolve::data_dir`), SPEC §2.2 updated, on origin/main. No further work; reaping `#ckysuite`. Full suite: 690 passed / 0 failed / 0 ignored.
-<!-- agent:boundary:08dcb235 -->
+
+### Re: #next-steps to fix corky bugs — glm-5.2
+
+> **Queue prompt:**
+>
+> What are #next-steps to fix corky bugs?
+
+All corky bug items are shipped; suite is green (690/0/0, origin/main through `39f266a`): `#ckythreadmerge`, `#ckymimestream`, `#ckymimeinline` earlier, plus `#ckybenchbreak` (`39f266a`, make-check gate) and `#ckysuite` (`f3098ec`, test_doctor isolation) this turn.
+
+**Open corky work:**
+1. `#pypi-trusted-publisher` (review/gated) — the only remaining open item; operator-gated (PyPI must add a trusted publisher matching `repo:btakita/corky:environment:pypi`). No code action until then.
+2. Optional hardening: add an `inline_images` case to the now-compiling `draft_mime` bench; extend `test_doctor`-style fixture isolation to any other integration test touching the real `~/work/btakita/mail` config.
+3. Deeper coverage: property/round-trip tests for sync alias-merge + base64 streaming; live OAuth paths (untestable offline today).
+
+No new corky bugs are known open — next steps are closing #pypi-trusted-publisher, then hardening rather than more bug fixes.
+
+### Re: lazily-rs / reactive graphs + state machines — glm-5.2
+
+> **Queue prompt:**
+>
+> Would corky benefit from lazily-rs? Reactive graphs + state machines?
+
+**Mixed — typed state machines = modest win; reactive graphs = likely overkill.** (Evaluating against your "reactive graphs + state machines" framing of lazily-rs.)
+
+Stateful logic today:
+- `corky watch` (`src/watch.rs`) — tokio daemon ticking hourly: filter-drift check, `schedule run`, sync. A poll loop with a few statuses.
+- Publish/sync lifecycle — **stringly-typed** (`"ready"`/`"publishing"`/`"published"`, `manifest.toml` flags); OAuth + sync have implicit phase transitions.
+
+**Reactive graphs (propagated/derived signals):** corky is a batchy CLI/daemon, not a UI or a system with many derived interdependent values. The watch "poll → check → act" loop doesn't gain from signal propagation — it'd add indirection without payoff.
+
+**Explicit state machines (typed `enum State` + transitions):** real win. Modeling the draft/social publish lifecycle and sync phases as typed enums (instead of `String` statuses + ad-hoc checks) catches invalid transitions at compile time and makes guards like `s8b_social_published_skipped` (double-publish) and sync token/refetch phases provably correct. Localized refactor, not a framework.
+
+**Recommendation:** don't adopt lazily-rs/reactive graphs for corky's current shape. Do introduce `enum`-based state machines for publish + sync lifecycles (focused P3 hardening). Revisit reactive only if corky grows a long-lived observer graph (e.g., a TUI over watch state).
+<!-- agent:boundary:c69eb2ec -->
 <!-- /agent:exchange -->
 ###
 <!--

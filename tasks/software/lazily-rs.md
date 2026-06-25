@@ -323,7 +323,22 @@ Implemented Phase 3 **`#lzseqcrdt`** (lazily-rs `b637de4`, lazily-spec `72b0af9`
 **Verification:** `cargo fmt` clean; `clippy --all-targets --all-features -D warnings` clean; **425** all-features tests pass (7 new: fractional-key strict order over 50 subdivisions, insert front/back, move-no-duplication, concurrent-insert convergence, concurrent-move-later-wins, move-vs-value no-conflict, tombstone commutativity); `cargo build --release` clean. SPEC.md (§Distributed) + lazily-spec `cell-model.md` gained sequence-order conformance.
 
 **Closeout:** `#lzseqcrdt` → done. Queue continues to `do [#lzstableid]` (manufactured identity for markdown text).
-<!-- agent:boundary:44ee9dd4 -->
+
+### Re: do [#lzstableid] — manufactured identity for markdown text — opus-4-8
+
+Implemented Phase 4 **`#lzstableid`** (lazily-rs `9605f3f`, lazily-spec `0155f62`, superproject `b9c12442b`, all pushed). New `src/stable_id.rs`, exported from the crate root.
+
+Plain markdown has no node ids, so reconciliation (`#lzkeyrecon`) has nothing to match on. This **manufactures** identity from text in three layers:
+- **Anchored ids** — `block_key` returns an in-band anchor when present (agent-doc emits these). Exact, and **survives a full body rewrite** (verified — a re-prosed anchored block still matches by id, classified `Same` not `Edited`).
+- **Content-derived keys** — otherwise a hash of the **normalized** text (whitespace collapsed), so an unchanged block keeps its key across **reflow/rewrap/reorder** (verified) and an edit changes it.
+- **Alignment** (`align`) — a block with no exact match is matched to the most-similar unmatched old block above `EDIT_THRESHOLD` (word-LCS ratio `2·|LCS|/(|a|+|b|)`, nearest-index tiebreak) → `Edited`; else `Inserted`. Unmatched old blocks → `Removed`. This distinguishes an **edit** from a real **insert** (verified: a one-word change is `Edited`, dissimilar content is `Inserted`+`Removed`).
+
+**`assign_stable_keys`** is the bridge to `#lzkeyrecon`: a `Same`/`Edited` block reuses its matched old block's key so identity **flows through an edit** (reconciler emits `Update`, not remove+insert — verified), an `Inserted` block gets its own key. This is exactly why agent-doc leans on in-band markers — the cheapest stable identity over fundamentally unstable text.
+
+**Verification:** `cargo fmt` clean; `clippy --all-targets --all-features -D warnings` clean; **216** default tests pass (7 new: reflow-keeps/edit-changes content key, anchor-survives-rewrite, pure-reorder all-Same, small-edit→Edited, genuine insert/remove, identity-through-edit, anchored-align-by-id); `cargo build --release` clean. SPEC.md + lazily-spec `cell-model.md` gained manufactured-identity conformance.
+
+**Closeout:** `#lzstableid` → done. Queue continues to `do [#lzsemtree]` (memoized semantic-tree computeds).
+<!-- agent:boundary:01479226 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -343,7 +358,6 @@ Implemented Phase 3 **`#lzseqcrdt`** (lazily-rs `b637de4`, lazily-spec `72b0af9`
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzstableid] [recommended] Phase 4 — manufactured identity for markdown text: honor in-band anchors/item-ids (agent-doc has these) + content-derived block-hash keys (survive reflow/reorder) + alignment diff (Myers/patience/histogram) for edit-vs-move detection on free prose. Gives reconciliation keys to match on. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 4).
 - [ ] [#lzsemtree] [recommended] Phase 5 — memoized semantic-tree computed layer: derive unresolved-prompts / drainable-heads / section-summaries as memoized computeds over the relevant subtree (recompute only on that subtree change; lazy, glitch-free). Demonstrates the lazy-pull win on a real agent-doc query. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 5).
 - [ ] [#lztextcrdt] [recommended] Phase 6 (heaviest, last) — free-text char/line sequence CRDT (RGA / Yjs text) + re-parse: merge keystrokes on anchorless prose, then re-parse merged text and re-derive the tree (tree = projection of merged text). Honest floor: a true rewrite IS a replace. Least urgent — managed components already merge per-component. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 6).
 <!-- /agent:backlog -->

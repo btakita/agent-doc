@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: opencode
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -33,32 +33,11 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-052247.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-053841.md`*
 
 Compacted content:
-❯ - Archived 15 response topic(s): Can we remove the dead tables?; do [#bxtd]; deploy; 12 more
+❯ - Archived 1 response topic(s): realtime still flashing + deploy
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: realtime still flashing + deploy — glm-5.2
-
-> **Queue prompt:**
->
-> I'm still seeing "Realtime connection failed. Refresh the page to reconnect." flash when rapidly switching between users in a search — diagnose and harden the realtime websocket(s).
-
-
-> **Queue prompt:** Still seeing "Realtime connection failed" flash on rapid user switching.
-> **Queue prompt:** deploy
-
-You were right — the first fix was incomplete. There were **two** sources of that error and I'd only guarded one:
-
-- `admin/messages.tsx` (fixed in `85f7d30`) ✓
-- `borrower/messages.tsx` — the **shared PortalMessages** component — had the *same* unguarded WebSocket `error`/`open` handlers (`close` was already guarded). Rapid session switching closed a still-CONNECTING socket → its `error` fired → the false message flashed. Now guarded with `ws_ref.current === ws` the same way (`3800f6a`). The realtime-hardening test now covers **both** components.
-
-Also: the first fix was **pushed but not deployed**, so production still had the old code — compounding the "still seeing it."
-
-**Deployed** (`make deploy`) — Worker version `f26311d4-513a-4c1c-8272-6887ab7fe90d`, smoke check **HTTP 200**. Ships live: the realtime fix (both sources), the post-apply Messages nudge, the deal-dialog first-action focus, and the Loan-Detail "Message borrower" button. `make check` → **1216 pass / 0 fail**.
-
-Both queue heads drained.
 
 ### Re: generalize dialog first-action focus — glm-5.2
 
@@ -75,7 +54,15 @@ Net effect: the deal's existing priority logic (Approve accreditation → Move t
 **Shipped:** committed `f8b111d` + pushed to `equityfundingsource-dev` main (spec + tests + code, per `#spec-test-commit-push`).
 
 **Next queue head:** `deploy` — say the word and I'll run `make deploy` (it builds, applies pending D1 migrations, and deploys the Worker).
-<!-- agent:boundary:7fbcaf48 -->
+
+### Re: dialog-focus head closeout — glm-5.2
+
+> **Queue prompt:** Opening https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan should focus on the first actionable item...in this case the "Review Interested Lenders" button. How can we make this focus logic generalized so it works for all dialogs?
+
+Shipped in the prior entry (submodule `f8b111d`, pushed to `equityfundingsource-dev` main): the shared `use_dialog_action_navigation_` hook now upgrades focus to a late-rendering `data-dialog-initial-focus` target via a `MutationObserver`, gated on no user interaction — so the deal dialog (and every dialog) focuses its real first action once async content mounts. `make check` → 1217 pass / 0 fail. Striking this head.
+
+**Next queue head:** `deploy`.
+<!-- agent:boundary:859bc6e2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -95,9 +82,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~I'm still seeing "Realtime connection failed. Refresh the page to reconnect." flash when rapidly switching between users in a search — diagnose and harden the realtime websocket(s).~~
+- ~~Opening https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan should focus on the first actionable item...in this case the "Review Interested Lenders" button. How can we make this focus logic generalized so it works for all dialogs?~~ — auto-struck: answered this cycle (#ftstrike)
 - deploy
-- I'm still seeing "Realtime connection failed. Refresh the page to reconnect." flash when rapidly switching between users in a search — diagnose and harden the realtime websocket(s).
 <!-- /agent:queue -->
 
 ## Backlog

@@ -178,6 +178,28 @@ Affected component: editor IPC / writeback
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=a0cb1949-3c96-4ec9-b651-b24a57035f69 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=16518 candidate_hash=908a55c842838bca3e1f02273e0562fe86bae1a27874630166adc77f6a3f2f70 content_ours_len=17738 content_ours_hash=5cbb3d9517d30207571b099b01ed7c4dd35bad7799cf4bb86ac6b4ad734057ac doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782352670275
 ```
 <!-- agent:boundary:3817fbc2 -->
+
+### Re: release + publish lazily-rs — v0.12.3 shipped (crates.io + GitHub) — opus-4-8
+
+> **Queue prompt:**
+>
+> release + publish lazily-rs
+
+You re-activated the queue and marked lazily-rs `🚧` — taken as the go. **lazily-rs v0.12.3 is fully released and published.**
+
+**Confirmed crate ownership** — `cargo owner --list lazily` → `btakita (Brian Takita)`, so the crates.io publish was ours to make (resolving the audit's open ownership question).
+
+**Shipped**
+- **Version** 0.12.2 → **0.12.3** (Cargo.toml + Cargo.lock), commit `c3426a8`, pushed to `lazily-hub/lazily-rs`.
+- **crates.io** — `lazily v0.12.3` **published** → https://crates.io/crates/lazily/0.12.3
+- **GitHub release** — https://github.com/lazily-hub/lazily-rs/releases/tag/v0.12.3 (tag `v0.12.3`)
+- **Superproject** gitlink bumped + pushed (`788597955..1ad739255`).
+
+**Contents** (everything since v0.12.2): the #lzasyncdispose2 generation guard plus the async/ws hardening batch — re-run abort, pending-effect dedupe, bounded WsDataChannel/Str0mNet/loopback queues with drop counters, accept_answer failure surfacing, From impls, 32-bit SlotId hardening. `cargo publish` verify-packaged 82 files clean.
+
+**Remaining ports** (queue listed, none marked): **lazily-zig** (v0.1.1 GitHub release — safe), **lazily-kt** (no publish infra), **lazily-js** (npm @lazily/js — 2FA), **lazily-py** (#kb9b PyPI — 2FA). Mark the next one `🚧` or say `go lazily-zig`.
+
+*Note: editor IPC is wedged this turn (a concurrent session is contending the supervisor socket), so this response was landed via the git/CRDT recovery path.*
 <!-- /agent:exchange -->
 ###
 <!--
@@ -187,7 +209,7 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 - ~~release + publish lazily-spec~~
-- 🚧 release + publish lazily-rs
+- ~~release + publish lazily-rs~~
 - release + publish lazily-ky
 - release + publish lazily-js
 - release + publish lazily-zig

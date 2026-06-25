@@ -338,7 +338,24 @@ Plain markdown has no node ids, so reconciliation (`#lzkeyrecon`) has nothing to
 **Verification:** `cargo fmt` clean; `clippy --all-targets --all-features -D warnings` clean; **216** default tests pass (7 new: reflow-keeps/edit-changes content key, anchor-survives-rewrite, pure-reorder all-Same, small-edit→Edited, genuine insert/remove, identity-through-edit, anchored-align-by-id); `cargo build --release` clean. SPEC.md + lazily-spec `cell-model.md` gained manufactured-identity conformance.
 
 **Closeout:** `#lzstableid` → done. Queue continues to `do [#lzsemtree]` (memoized semantic-tree computeds).
-<!-- agent:boundary:01479226 -->
+
+### Re: do [#lzsemtree] — memoized semantic tree — opus-4-8
+
+Implemented Phase 5 **`#lzsemtree`** (lazily-rs `f8f9274`, lazily-spec `614e17b`, superproject `372379ca6`, all pushed). New `src/sem_tree.rs`, exported as `SemTree`.
+
+The syntactic `CellTree` holds *input* cells; the **semantic** tree (unresolved prompts, drainable heads, summaries) is a layer of **memoized computeds** derived from it. `SemTree::build` creates one `memo` slot per node folding `(node value, child derived values) -> D`.
+
+Because each node has its **own** memo slot and a parent reads its *children's* derived slots (not their raw cells), the derivation is **incremental and glitch-free**:
+- **Sibling isolation (the lazy-pull win)** — editing one node recomputes only its **ancestor chain**; a sibling subtree's derived value stays cached (verified: editing subtree B leaves subtree A's derived slot `is_set`). Cost is proportional to the diff, not the document.
+- **Memo guard** — a node edit that doesn't change the folded result doesn't re-run downstream consumers (verified with a recompute counter: flipping a positive value to another positive leaves an `unresolved-count` consumer at 1 invocation; flipping to negative re-runs it).
+- Value edits, removals, and reorders are incremental; a child **insertion** needs a cheap `build` rebuild (documented — only slot allocation, unchanged subtrees still won't recompute).
+
+Includes a concrete agent-doc-shaped test: a per-subtree **unresolved-prompt count** where resolving one prompt updates only its section's count and the root, leaving the sibling section cached.
+
+**Verification:** `cargo fmt` clean; `clippy --all-targets --all-features -D warnings` clean (factored the fold into a `FoldFn` type alias); **222** default tests pass (5 new + doctest); `cargo build --release` clean. SPEC.md + lazily-spec `cell-model.md` gained semantic-tree conformance.
+
+**Closeout:** `#lzsemtree` → done. Queue continues to `do [#lztextcrdt]` — the final phase (free-text char/line CRDT + re-parse).
+<!-- agent:boundary:7464c17d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -358,7 +375,6 @@ Plain markdown has no node ids, so reconciliation (`#lzkeyrecon`) has nothing to
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzsemtree] [recommended] Phase 5 — memoized semantic-tree computed layer: derive unresolved-prompts / drainable-heads / section-summaries as memoized computeds over the relevant subtree (recompute only on that subtree change; lazy, glitch-free). Demonstrates the lazy-pull win on a real agent-doc query. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 5).
 - [ ] [#lztextcrdt] [recommended] Phase 6 (heaviest, last) — free-text char/line sequence CRDT (RGA / Yjs text) + re-parse: merge keystrokes on anchorless prose, then re-parse merged text and re-derive the tree (tree = projection of merged text). Honest floor: a true rewrite IS a replace. Least urgent — managed components already merge per-component. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 6).
 <!-- /agent:backlog -->
 

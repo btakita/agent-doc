@@ -77,17 +77,24 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=file_ipc patch_id=9ab691b5-9b11-4928-a7e2-31fbf89e9264 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0.json doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782353889911
 ```
-<!-- agent:boundary:f8a2ef36 -->
+<!-- agent:boundary:7f4082fd -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 :pushpin: [#56ta]
-- :pushpin: [#vm7g]
+- ~~:pushpin: [#56ta]~~
+- 🚧 :pushpin: [#vm7g]
 - :pushpin: [#n529]
 - :pushpin: [#r5at]
 - :pushpin: [#6n5j]
+- :pushpin: [#vwj7]
+- :pushpin: [#cgfx]
+- :pushpin: [#brtc]
+- :pushpin: [#gghx]
+- :pushpin: [#8g9w]
+- :pushpin: [#6mjw]
+- :pushpin: [#spy9]
 ---
 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
@@ -136,10 +143,6 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
-- :pushpin: [#gghx]
-- :pushpin: [#8g9w]
-- :pushpin: [#6mjw]
-- :pushpin: [#spy9]
 ---
 :round_pushpin: equityfundingsource.md turn has an IPC issue:
 `### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc`
@@ -166,9 +169,6 @@ Affected component: editor IPC / writeback
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8c56928442bd4b165543ab0aad264d681b41b8898551d10f196018cd15a37304 content_len=11944 content_hash=46b47fdfe5505fb37c9e63df4167cb923df6b4ffc997ecca9009a15979c29a5e doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782339826601
 ```
 ---
-- [#vwj7]
-- [#cgfx]
-- [#brtc]
 - [#nsfz]
 - ~~:round_pushpin: do [#rt83qflood]~~
 - ~~I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?~~ — auto-struck: answered this cycle (#ftstrike)
@@ -259,7 +259,7 @@ What are #next-steps to fix bugs?
 - [ ] [#fnxy] #mergestatemachine1 Define FFI write-ownership SM (Detached→Attached→EditorOwnsBuffer→BinaryWriteRequested→IpcAckProven→Committed) + editor-heartbeat liveness probe distinguishing live-editor from stale listener (#6b5h). Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#t4x1] #mergestatemachine2 Gate try_ipc/commit/disk-write on the ownership SM; route Detached/stale writes to controller-host disk path so CLI-only/no-editor never wedges on no_ack. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#kj5f] #mergestatemachine3 JB+VSCode report attach/detach/ownership through SM (thin reporters via #lazilystatesync); SimWorld + live repro for File Cache Conflict + #6b5h wedge. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
-- [ ] [#vm7g] #lazilystatesync2 Back agent_doc_state_projection with a lazily-rs Context/Cells graph + add agent_doc_state_subscribe delta export (lazily-spec format); keep full-snapshot cold read. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
+- [ ] 🚧 [#vm7g] #lazilystatesync2 Back agent_doc_state_projection with a lazily-rs Context/Cells graph + add agent_doc_state_subscribe delta export (lazily-spec format); keep full-snapshot cold read. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#n529] #lazilystatesync3 JB plugin: replace StateProjectionBridge manual JSON render with a lazily-kt mirror graph applying FFI deltas; EditorCommandStateMachine becomes a derived lazily-kt cell. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#r5at] #lazilystatesync4 VSCode plugin: lazily-js mirror graph applying FFI state deltas. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#6n5j] #lazilystatesync5 Parity+tests: lazily-spec cross-editor conformance (extend EditorCommandStateMachineTest to reactive path) + FFI round-trip proving kt/js mirror converges to rs authoritative graph. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md

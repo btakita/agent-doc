@@ -541,6 +541,15 @@ impl SimWorld {
             SimCommand::PerformDeferredHarnessRestart => {
                 self.perform_deferred_harness_restart();
             }
+            SimCommand::AbandonSupervisorToDeadSocket => {
+                self.abandon_supervisor_to_dead_socket();
+            }
+            SimCommand::RecoverDeadSupervisor {
+                caller_is_own_ancestor,
+                can_resolve_tmux_target,
+            } => {
+                self.recover_dead_supervisor(caller_is_own_ancestor, can_resolve_tmux_target);
+            }
         }
         Ok(())
     }
@@ -733,7 +742,119 @@ impl SimWorld {
         self.route.projection = self.route.durable.clone();
         self.route.pending_dispatch = None;
         self.route.supervisor_lease_generation = Some(generation);
+        // A freshly bound route owner is a live process that binds a live socket.
+        self.route.socket = SupervisorSocket::Live;
         self.coverage.route_generation_rebinds += 1;
+    }
+
+    /// `#supdead-coldstart-fallback`: the supervisor PROCESS dies abruptly (crash /
+    /// OOM / host reboot) WITHOUT an orderly shutdown, so the AF_UNIX socket file is
+    /// left behind on disk and a later `connect()` is actively refused
+    /// (`ECONNREFUSED`). Distinct from an orderly `Closed` (which reaps its socket):
+    /// the actor goes `Dead` and the socket becomes `StaleRefused` ("present but not
+    /// accepting"). The lease is dropped (no live heartbeat) and any in-flight
+    /// dispatch is abandoned with the process.
+    pub(crate) fn abandon_supervisor_to_dead_socket(&mut self) {
+        let projection_was_current = self.projection_identity_matches_durable();
+        self.route.durable.lifecycle = SupervisorLifecycle::Dead;
+        if projection_was_current {
+            self.route.projection.lifecycle = SupervisorLifecycle::Dead;
+        }
+        self.route.socket = SupervisorSocket::StaleRefused;
+        self.route.pending_dispatch = None;
+        self.route.starting_timeout = None;
+        self.route.supervisor_lease_generation = None;
+        self.coverage.supervisor_deaths += 1;
+        self.record_ops_proof(format!(
+            "supervisor_socket_probe generation={} result=stale_refused note=present_but_not_accepting",
+            self.route.durable.generation
+        ));
+    }
+
+    /// `#supdead-coldstart-fallback`: drive the REAL production decision
+    /// (`session_actor_cmd::decide_dead_supervisor_recovery`) for a dead supervisor
+    /// and apply its outcome to the model. `socket_dead` is derived from the modeled
+    /// socket's production [`SocketLiveness`] mapping rather than re-deciding it in
+    /// the engine, so the SimWorld scenario exercises the shipped decision code.
+    ///
+    /// - `ColdStart` → reap the stale socket and cold-start a fresh route-owned
+    ///   supervisor (mirrors `cold_start_supervisor_for` + route `auto_start`).
+    /// - `Guidance(msg)` → refuse the unsafe cold-start; the supervisor stays `Dead`
+    ///   and the actionable message is surfaced (never a raw ECONNREFUSED).
+    /// Returns the production decision so callers/tests can assert on it directly.
+    pub(crate) fn recover_dead_supervisor(
+        &mut self,
+        caller_is_own_ancestor: bool,
+        can_resolve_tmux_target: bool,
+    ) -> crate::session_actor_cmd::DeadSupervisorRecovery {
+        use crate::session_actor_cmd::{
+            DeadSupervisorRecovery, DeadSupervisorRecoveryInputs, decide_dead_supervisor_recovery,
+        };
+        let decision = decide_dead_supervisor_recovery(
+            Path::new("sim.md"),
+            Path::new(".agent-doc/supervisor/sim.sock"),
+            &DeadSupervisorRecoveryInputs {
+                socket_dead: self.route.socket.is_dead(),
+                caller_is_own_ancestor,
+                can_resolve_tmux_target,
+            },
+        );
+        match &decision {
+            DeadSupervisorRecovery::InPlaceLive => {
+                // The socket probed live — not a dead-supervisor scenario; leave the
+                // model untouched and let the normal in-place restart/recycle apply.
+                self.record_ops_proof(
+                    "dead_supervisor_recovery decision=InPlaceLive action=in_place_restart",
+                );
+            }
+            DeadSupervisorRecovery::ColdStart => {
+                self.cold_start_dead_supervisor();
+            }
+            DeadSupervisorRecovery::Guidance(message) => {
+                // Refuse the unsafe cold-start: the supervisor stays Dead and the
+                // stale socket lingers; surface the actionable guidance message. The
+                // raw ECONNREFUSED is deliberately NOT surfaced.
+                debug_assert!(
+                    !message.contains("Connection refused") && !message.contains("os error 111"),
+                    "dead-supervisor guidance must not surface a raw ECONNREFUSED"
+                );
+                self.coverage.dead_supervisor_guidance_refusals += 1;
+                self.record_ops_proof(format!(
+                    "dead_supervisor_recovery decision=Guidance action=refuse_unsafe_cold_start message={message:?}"
+                ));
+            }
+        }
+        decision
+    }
+
+    /// `#supdead-coldstart-fallback`: reap the stale dead socket and cold-start a
+    /// fresh route-owned supervisor (mirrors `cold_start_supervisor_for` +
+    /// `route::startup::auto_start`). The fresh process binds a new live socket and
+    /// comes up `Starting`; a later dispatch-ready prompt promotes it to `Ready`.
+    fn cold_start_dead_supervisor(&mut self) {
+        // Reap the stale socket so the fresh supervisor can bind cleanly.
+        self.route.socket = SupervisorSocket::Absent;
+        self.record_ops_proof(
+            "supervisor_cold_start_reaped_stale_socket file=sim.md socket=.agent-doc/supervisor/sim.sock",
+        );
+        // Cold-start a fresh route-owned supervisor at a new generation.
+        let generation = self.route.durable.generation + 1;
+        self.route.durable = ActorState {
+            generation,
+            session_id: format!("session-{generation}"),
+            pane_id: Some(format!("%{generation}")),
+            lifecycle: SupervisorLifecycle::Starting,
+        };
+        self.route.projection = self.route.durable.clone();
+        self.route.pending_dispatch = None;
+        self.route.starting_timeout = None;
+        self.route.supervisor_lease_generation = Some(generation);
+        // The fresh process binds a new live socket as it starts.
+        self.route.socket = SupervisorSocket::Live;
+        self.coverage.dead_supervisor_cold_starts += 1;
+        self.record_ops_proof(format!(
+            "supervisor_cold_start decision=ColdStart action=route_auto_start generation={generation}"
+        ));
     }
 
     /// `#actorswitchdefer`: model the operator editing the document frontmatter

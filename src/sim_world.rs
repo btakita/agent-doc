@@ -306,6 +306,27 @@ enum SimCommand {
     /// frontmatter, re-resolved the harness, and respawned the new harness FRESH
     /// (`agent_restart_performed`), completing the deferred switch.
     PerformDeferredHarnessRestart,
+    /// `#supdead-coldstart-fallback`: the supervisor PROCESS dies abruptly (crash /
+    /// OOM / host reboot) leaving a stale socket FILE on disk. Drives the actor to
+    /// `Dead` and the socket to `StaleRefused` (`connect()` → ECONNREFUSED), the
+    /// pre-condition for the dead-supervisor recovery decision. Driven only by
+    /// targeted tests, not the random generator, so the seed corpus traces are
+    /// unchanged.
+    AbandonSupervisorToDeadSocket,
+    /// `#supdead-coldstart-fallback`: run the production
+    /// `decide_dead_supervisor_recovery` decision against the modeled dead socket
+    /// and apply its outcome — ColdStart reaps the stale socket + cold-starts a
+    /// fresh supervisor through the route path; Guidance refuses an unsafe
+    /// cold-start and leaves the supervisor `Dead` with an actionable message (no
+    /// raw ECONNREFUSED). Driven only by targeted tests, not the random generator.
+    RecoverDeadSupervisor {
+        /// The recovery caller is the dead supervisor's own pane/ancestor — an
+        /// in-process cold-start would be unsafe (self-targeting).
+        caller_is_own_ancestor: bool,
+        /// A cold-start can resolve a tmux target session from this context (the
+        /// caller is inside tmux or a project tmux session is configured).
+        can_resolve_tmux_target: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -316,6 +337,59 @@ enum SupervisorLifecycle {
     WaitingInput,
     Blocked,
     Closed,
+    /// `#supdead-coldstart-fallback`: the supervisor PROCESS is gone (crash / OOM /
+    /// host reboot) but a stale socket FILE still lingers on disk, so a `connect()`
+    /// is actively refused (`ECONNREFUSED`). Distinct from `Closed` (an orderly
+    /// shutdown that reaped its socket): a `Dead` supervisor cannot be restarted /
+    /// recycled in place — the in-place IPC connect hits the stale socket and fails,
+    /// so recovery must reap the stale socket and COLD-START a fresh supervisor
+    /// (unless a safe cold-start is impossible, in which case it surfaces actionable
+    /// guidance instead of a raw ECONNREFUSED).
+    Dead,
+}
+
+/// `#supdead-coldstart-fallback`: connect-liveness of the supervisor's AF_UNIX
+/// socket file, modeled so a scenario can assert "socket present but not
+/// accepting" independently of the lifecycle. Maps onto the production
+/// [`agent_doc_orchestration::supervisor::ipc::SocketLiveness`] (Live vs Dead)
+/// that `probe_socket` returns, but keeps a third `Absent` state so the model can
+/// distinguish a reaped socket from a stale-but-present one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SupervisorSocket {
+    /// `connect()` succeeds — a live supervisor process is listening.
+    Live,
+    /// The socket file is present on disk but the owning process is gone, so
+    /// `connect()` is actively refused (`ECONNREFUSED`). The stale-socket case.
+    StaleRefused,
+    /// No socket file on disk (never started, or reaped during cold-start).
+    Absent,
+}
+
+impl SupervisorSocket {
+    /// Map to the production `SocketLiveness` the live `probe_socket` returns: both
+    /// a refused stale socket and a missing socket classify as `Dead`.
+    fn liveness(self) -> agent_doc_orchestration::supervisor::ipc::SocketLiveness {
+        use agent_doc_orchestration::supervisor::ipc::SocketLiveness;
+        match self {
+            Self::Live => SocketLiveness::Live,
+            Self::StaleRefused | Self::Absent => SocketLiveness::Dead,
+        }
+    }
+
+    /// The dead-supervisor `socket_dead` input fed to the production recovery
+    /// decision (`probe_socket(...) == SocketLiveness::Dead`).
+    fn is_dead(self) -> bool {
+        matches!(
+            self.liveness(),
+            agent_doc_orchestration::supervisor::ipc::SocketLiveness::Dead
+        )
+    }
+
+    /// The scenario assertion surface: the socket file is present on disk but is
+    /// not accepting connections (a stale socket left by a dead process).
+    fn present_but_not_accepting(self) -> bool {
+        matches!(self, Self::StaleRefused)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -573,6 +647,11 @@ struct RouteModel {
     /// (lib-install auto-recycle / operator restart). Models the project-scoped
     /// `recycle_inflight` marker the live `route` dispatch reads before typing.
     recycle_inflight: bool,
+    /// `#supdead-coldstart-fallback`: connect-liveness of the supervisor socket
+    /// file. A live supervisor binds a `Live` socket; an abandoned (crashed) one
+    /// leaves a `StaleRefused` socket; a cold-start reaps it back to `Absent` then
+    /// the fresh process binds a new `Live` socket.
+    socket: SupervisorSocket,
 }
 
 impl RouteModel {
@@ -586,6 +665,7 @@ impl RouteModel {
             queue_control: QueueControlState::Resumed,
             supervisor_lease_generation: Some(1),
             recycle_inflight: false,
+            socket: SupervisorSocket::Live,
         }
     }
 }
@@ -883,6 +963,18 @@ struct Coverage {
     /// `#actorswitchdefer` Part B: route bailed EXPLICITLY because
     /// `agent_change_restart` was disabled (the defer would never self-heal).
     actor_switch_restart_disabled_bails: usize,
+    /// `#supdead-coldstart-fallback`: the supervisor process was abandoned, leaving
+    /// a stale socket (`Dead` lifecycle + `StaleRefused` socket).
+    supervisor_deaths: usize,
+    /// `#supdead-coldstart-fallback`: a dead supervisor's recovery decision resolved
+    /// to ColdStart — the stale socket was reaped and a fresh supervisor cold-started
+    /// through the route path.
+    dead_supervisor_cold_starts: usize,
+    /// `#supdead-coldstart-fallback`: a dead supervisor's recovery decision resolved
+    /// to Guidance — an unsafe cold-start was refused (own-ancestor caller, or no
+    /// reachable tmux target) and the actionable message was surfaced instead of a
+    /// raw ECONNREFUSED, leaving the supervisor `Dead`.
+    dead_supervisor_guidance_refusals: usize,
 }
 
 impl Coverage {
@@ -1043,6 +1135,9 @@ impl Coverage {
         self.actor_switch_restarts_performed += other.actor_switch_restarts_performed;
         self.actor_switch_defer_bail_recoveries += other.actor_switch_defer_bail_recoveries;
         self.actor_switch_restart_disabled_bails += other.actor_switch_restart_disabled_bails;
+        self.supervisor_deaths += other.supervisor_deaths;
+        self.dead_supervisor_cold_starts += other.dead_supervisor_cold_starts;
+        self.dead_supervisor_guidance_refusals += other.dead_supervisor_guidance_refusals;
     }
 }
 
@@ -2466,6 +2561,173 @@ fn route_sim_stale_busy_repair_requires_busy_lifecycle() {
     assert_eq!(
         world.coverage.busy_projection_ready_repairs, 0,
         "repair must not fire when the actor is not projected Busy"
+    );
+}
+
+#[test]
+fn route_sim_dead_supervisor_safe_caller_reaps_stale_socket_and_cold_starts() {
+    // `#supdead-coldstart-fallback`: the supervisor process died abruptly, leaving
+    // a stale socket (connect → ECONNREFUSED). `restart-supervisor` / `admin recycle`
+    // restart a LIVE supervisor in place, but cannot bootstrap a DEAD one. From a
+    // SAFE caller (not the dead supervisor's own ancestor) with a reachable tmux
+    // target, the production decision reaps the stale socket and cold-starts a fresh
+    // supervisor through the route path, reaching Ready.
+    let mut world = SimWorld::new(7_301);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Ready);
+    assert_eq!(world.route.socket, SupervisorSocket::Live);
+
+    // The supervisor PROCESS dies abruptly, leaving a stale socket file behind.
+    world
+        .apply(SimCommand::AbandonSupervisorToDeadSocket)
+        .unwrap();
+    assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Dead);
+    assert_eq!(world.route.socket, SupervisorSocket::StaleRefused);
+    assert!(
+        world.route.socket.present_but_not_accepting(),
+        "a dead supervisor's socket must be present on disk but not accepting"
+    );
+    assert!(
+        world.route.socket.is_dead(),
+        "the stale socket must classify as SocketLiveness::Dead for the recovery decision"
+    );
+    assert_eq!(world.coverage.supervisor_deaths, 1);
+
+    // A safe caller (not the dead supervisor's own ancestor) with a reachable tmux
+    // target: the production decision resolves to ColdStart.
+    let decision = world.recover_dead_supervisor(false, true);
+    assert_eq!(
+        decision,
+        crate::session_actor_cmd::DeadSupervisorRecovery::ColdStart,
+        "a safe caller with a reachable tmux target must cold-start, not surface guidance"
+    );
+    assert_eq!(world.coverage.dead_supervisor_cold_starts, 1);
+    assert_eq!(
+        world.coverage.dead_supervisor_guidance_refusals, 0,
+        "the safe cold-start path must not surface guidance"
+    );
+
+    // The stale socket was reaped and the fresh supervisor bound a new live socket,
+    // coming up Starting at a new generation.
+    assert_eq!(world.route.socket, SupervisorSocket::Live);
+    assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Starting);
+    let ops_log = world.ops_log.join("\n");
+    let reaped = ops_log
+        .find("supervisor_cold_start_reaped_stale_socket")
+        .expect("the stale socket must be reaped before cold-start");
+    let started = ops_log
+        .find("supervisor_cold_start decision=ColdStart action=route_auto_start")
+        .expect("the fresh supervisor must cold-start through the route path");
+    assert!(
+        reaped < started,
+        "the stale socket must be reaped BEFORE the fresh cold-start binds:\n{ops_log}"
+    );
+
+    // The fresh cold-started supervisor reaches a dispatch-ready Ready prompt.
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Ready);
+    // A dispatch now lands on the proven-ready fresh pane (recovery is complete).
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(
+        world.coverage.route_dispatch_acceptances, 1,
+        "after the cold-start recovery the prompt must dispatch to the fresh pane"
+    );
+}
+
+#[test]
+fn route_sim_dead_supervisor_own_ancestor_caller_refuses_with_guidance_no_raw_econnrefused() {
+    // `#supdead-coldstart-fallback`: the dead supervisor's recovery caller IS the
+    // supervisor's own pane/ancestor — an in-process cold-start would be unsafe
+    // (self-targeting). The production decision must refuse with actionable guidance
+    // rather than cold-start, and must NOT surface a raw ECONNREFUSED. The supervisor
+    // stays Dead (no state change), so the operator can recover from a different pane.
+    let mut world = SimWorld::new(7_302);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world
+        .apply(SimCommand::AbandonSupervisorToDeadSocket)
+        .unwrap();
+    let generation_before = world.route.durable.generation;
+
+    // caller_is_own_ancestor = true → Guidance, even though a tmux target is reachable.
+    let decision = world.recover_dead_supervisor(true, true);
+    let crate::session_actor_cmd::DeadSupervisorRecovery::Guidance(message) = &decision else {
+        panic!("an own-ancestor caller must refuse with Guidance, got {decision:?}");
+    };
+    assert!(
+        message.contains("refusing an unsafe in-process cold-start"),
+        "the guidance must name the unsafe in-process cold-start refusal:\n{message}"
+    );
+    assert!(
+        !message.contains("Connection refused") && !message.contains("os error 111"),
+        "the guidance must NOT surface a raw ECONNREFUSED:\n{message}"
+    );
+    assert_eq!(world.coverage.dead_supervisor_guidance_refusals, 1);
+    assert_eq!(
+        world.coverage.dead_supervisor_cold_starts, 0,
+        "an own-ancestor caller must not cold-start"
+    );
+
+    // No state change: the supervisor stays Dead with its stale socket lingering.
+    assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Dead);
+    assert_eq!(world.route.socket, SupervisorSocket::StaleRefused);
+    assert_eq!(
+        world.route.durable.generation, generation_before,
+        "a refused cold-start must not advance the generation"
+    );
+    let ops_log = world.ops_log.join("\n");
+    assert!(
+        ops_log.contains("dead_supervisor_recovery decision=Guidance action=refuse_unsafe_cold_start"),
+        "the refusal must be logged as a guidance decision:\n{ops_log}"
+    );
+    assert!(
+        !ops_log.contains("supervisor_cold_start_reaped_stale_socket"),
+        "a refused recovery must not reap the stale socket:\n{ops_log}"
+    );
+}
+
+#[test]
+fn route_sim_dead_supervisor_no_tmux_target_refuses_with_actionable_guidance() {
+    // `#supdead-coldstart-fallback`: the dead supervisor's recovery caller is safe
+    // (not own-ancestor) but no tmux target session is reachable from here, so a
+    // route-owned replacement pane cannot be spawned. The production decision must
+    // refuse with an actionable message (run `Run Agent Doc` from inside the editor's
+    // tmux session) and leave the supervisor Dead — not a raw ECONNREFUSED.
+    let mut world = SimWorld::new(7_303);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world
+        .apply(SimCommand::AbandonSupervisorToDeadSocket)
+        .unwrap();
+
+    // caller_is_own_ancestor = false, can_resolve_tmux_target = false → Guidance.
+    let decision = world.recover_dead_supervisor(false, false);
+    let crate::session_actor_cmd::DeadSupervisorRecovery::Guidance(message) = &decision else {
+        panic!("an unreachable tmux target must refuse with Guidance, got {decision:?}");
+    };
+    assert!(
+        message.contains("no tmux target session is reachable"),
+        "the guidance must explain why the cold-start could not run:\n{message}"
+    );
+    assert!(
+        message.contains("Run Agent Doc")
+            || message.contains("agent-doc start --route-owned"),
+        "the guidance must hand back an actionable recovery command:\n{message}"
+    );
+    assert!(
+        !message.contains("Connection refused") && !message.contains("os error 111"),
+        "the guidance must NOT surface a raw ECONNREFUSED:\n{message}"
+    );
+    assert_eq!(world.coverage.dead_supervisor_guidance_refusals, 1);
+    assert_eq!(world.coverage.dead_supervisor_cold_starts, 0);
+
+    // The supervisor stays Dead with its stale socket lingering (no cold-start).
+    assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Dead);
+    assert_eq!(world.route.socket, SupervisorSocket::StaleRefused);
+    assert!(
+        world.route.socket.present_but_not_accepting(),
+        "the stale socket must still be present-but-not-accepting after a refused recovery"
     );
 }
 

@@ -2923,7 +2923,7 @@ fn ensure_supervisor_socket(ctx: &SessionContext) -> Result<()> {
 /// this caller's context would be unsafe, in which case we hand back actionable
 /// guidance instead of a bare ECONNREFUSED.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum DeadSupervisorRecovery {
+pub(crate) enum DeadSupervisorRecovery {
     /// The supervisor is live — take the normal in-place restart/recycle path.
     InPlaceLive,
     /// The supervisor is dead — reap the stale socket and cold-start a fresh one
@@ -2938,21 +2938,21 @@ enum DeadSupervisorRecovery {
 /// Inputs to [`decide_dead_supervisor_recovery`], kept as a plain struct so the
 /// decision is a pure, unit-testable function with no process/socket I/O.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct DeadSupervisorRecoveryInputs {
+pub(crate) struct DeadSupervisorRecoveryInputs {
     /// Socket liveness as probed by `supervisor::ipc::probe_socket`.
-    socket_dead: bool,
+    pub(crate) socket_dead: bool,
     /// A live route-owned supervisor PID was found for this doc AND it is this
     /// caller's own process / ancestor. When the socket is dead this is normally
     /// `false` (the process is gone), but a transient stale-socket-with-live-proc
     /// race must still refuse a self-targeting cold-start.
-    caller_is_own_ancestor: bool,
+    pub(crate) caller_is_own_ancestor: bool,
     /// Whether a cold-start can resolve a tmux target session from this context.
     /// `false` when the caller is not inside tmux and no session override exists,
     /// so spawning a route-owned pane is impossible.
-    can_resolve_tmux_target: bool,
+    pub(crate) can_resolve_tmux_target: bool,
 }
 
-fn decide_dead_supervisor_recovery(
+pub(crate) fn decide_dead_supervisor_recovery(
     file: &Path,
     socket: &Path,
     inputs: &DeadSupervisorRecoveryInputs,

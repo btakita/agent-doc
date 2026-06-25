@@ -1180,7 +1180,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // +1 (#docdriftgrace): `stale_snapshot_visible_rebased ... reason={}` logs
         // the audited safe-rebase reason after the reset guard refreshes snapshot
         // and CRDT sidecars for unrelated visible drift.
-        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 21,
+        // 21 -> 20 (#mergestatemachine2): the `ack_mismatch` converge branch stopped
+        // emitting its own `bail!("... (reason=ack_mismatch)")` and now routes through
+        // `refuse_or_editorless_disk_fallback(file, source, "ack_mismatch")`, so the
+        // reason flows through the helper's existing `reason={reason}` token. Net -1:
+        // a CLI-only/no-editor session now disk-falls-back on ack_mismatch instead of
+        // hard-refusing (the #6b5h wedge). Audited — no new flow boundary.
+        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 20,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

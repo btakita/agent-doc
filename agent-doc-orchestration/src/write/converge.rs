@@ -1052,7 +1052,14 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
 /// never clobbers a real editor buffer (preserves `#editorbufwin`). Logs the
 /// chosen transport so each decision is attributable in `ops.log`.
 fn refuse_or_editorless_disk_fallback(file: &Path, source: &str, reason: &str) -> Result<bool> {
-    if crate::plugin_owner::live_editor_endpoint_attached(&file.to_string_lossy()) {
+    // `#mergestatemachine2`: gate the disk write through the ownership SM. A live
+    // editor (lease + live pid) resolves to EditorOwnsBuffer → refuse the disk
+    // clobber (preserves #editorbufwin / the File Cache Conflict guard). A stale
+    // listener / no editor resolves to Detached → route to the controller-host
+    // disk write so a CLI-only / no-editor session never wedges on no_ack.
+    if !crate::merge_control_state_machine::disk_write_permitted_for_file(
+        &file.to_string_lossy(),
+    ) {
         crate::ops_log::log_op(
             file,
             &format!(
@@ -1510,17 +1517,18 @@ pub fn try_editor_converge(
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "{source}_writeback file={} patch_id={} transport=blocked reason=ack_mismatch recovered_len={} target_len={} action=refuse_external_disk_write",
+                        "{source}_writeback file={} patch_id={} transport=blocked reason=ack_mismatch recovered_len={} target_len={} action=editorless_disk_fallback_or_refuse",
                         file.display(),
                         patch_id,
                         recovered.len(),
                         target.len()
                     ),
                 );
-                anyhow::bail!(
-                    "{source}: refused direct disk write for {} while editor IPC listener is active (reason=ack_mismatch)",
-                    file.display()
-                );
+                // `#mergestatemachine2`: the ACK came back but content drifted.
+                // Protect a live editor buffer; route an editor-less (controller-
+                // hosted socket, no plugin) session to the caller's disk fallback
+                // instead of hard-refusing — the #6b5h CLI-only wedge on ack_mismatch.
+                refuse_or_editorless_disk_fallback(file, source, "ack_mismatch")
             }
         }
         Ok(None) => {

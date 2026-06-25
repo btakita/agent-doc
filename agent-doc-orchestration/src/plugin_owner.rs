@@ -123,6 +123,13 @@ fn pid_is_live(pid: u32) -> bool {
     crate::hooks::pid_is_live(pid)
 }
 
+/// Public pid-liveness predicate — the signal behind [`live_editor_endpoint_attached`].
+/// Exposed so the merge-control ownership probe (`#mergestatemachine`) can build its
+/// liveness facts from the lease sidecar without re-reading the internals.
+pub fn plugin_owner_pid_is_live(pid: u32) -> bool {
+    pid_is_live(pid)
+}
+
 /// `#6b5h`: true when a **live** editor plugin process owns this document — i.e.
 /// there is a real editor buffer that the "editor IPC listener active → refuse
 /// direct disk write" guard is actually protecting.

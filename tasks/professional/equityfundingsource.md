@@ -63,10 +63,8 @@ Done. Available Deal pipeline cards now show how many lenders have expressed int
 
 Coverage: added unit assertions in `tests/admin-pipeline.test.ts` for the count passthrough and the 0-default. Full suite green (`bun run check` -> 1217 pass / 0 fail) plus build + worker bundle.
 
-> **Queue prompt:** deploy
-
-Committed (`47e7949`, pushed to `origin/main`) and deployed to Cloudflare Workers: remote D1 migrations applied, worker uploaded — `https://equityfundingsource.brian-takita.workers.dev`, Version ID `db46084f-d881-4b51-90d6-a6d35c55f55c`.
-<!-- agent:boundary:a659ab7b -->
+Committed (`47e7949`, pushed to `origin/main`) and deployed this pipeline change to Cloudflare Workers (remote D1 migrations applied) — `https://equityfundingsource.brian-takita.workers.dev`, Version ID `db46084f-d881-4b51-90d6-a6d35c55f55c`. (The trailing `deploy` queue head stays active as the campaign-final deploy after the newly-queued Messages-dialog tasks.)
+<!-- agent:boundary:2bb6f831 -->
 <!-- /agent:exchange -->
 ###
 <!--

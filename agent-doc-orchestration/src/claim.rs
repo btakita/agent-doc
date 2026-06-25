@@ -141,10 +141,51 @@ pub fn cross_session_decision(
     configured_alive: bool,
     force: bool,
 ) -> CrossSessionDecision {
+    // `#xdocsuper0`: no foreign supervisor lease known at this call site — the
+    // document-supervisor-lease guard is a no-op, preserving the historical
+    // pane/session-keyed behavior. Callers that can consult the lease should use
+    // `cross_session_decision_with_lease`.
+    cross_session_decision_with_lease(pane_session, configured, configured_alive, force, false)
+}
+
+/// `#xdocsuper0`: cross-session claim gate that also consults the document's
+/// supervisor lease.
+///
+/// The pane/session-keyed gate auto-forces (`AcceptStale`) whenever the
+/// configured/prior tmux session is dead, which lets a relaunched supervisor
+/// commandeer a document an OLD live supervisor still owns → two supervisors,
+/// one document → stale-CRDT replay and post-commit corruption.
+///
+/// `fresh_foreign_lease` is `true` when a FRESH lease is held by a LIVE foreign
+/// supervisor for this document (computed by the caller via
+/// `project_controller::fresh_foreign_supervisor_lease_holds_document`). When it
+/// is set and the gate would otherwise auto-force a stale-session reclaim, the
+/// decision becomes `Reject` unless the operator passes an explicit `force`
+/// override (in which case it is `AcceptForce`). This closes the
+/// "two supervisors own one document" window while keeping SPEC §8.5
+/// ("never commandeer another document's pane") intact and leaving the
+/// live-cross-session harness-mismatch guard unchanged.
+pub fn cross_session_decision_with_lease(
+    pane_session: &str,
+    configured: &str,
+    configured_alive: bool,
+    force: bool,
+    fresh_foreign_lease: bool,
+) -> CrossSessionDecision {
     if pane_session == configured {
         return CrossSessionDecision::Accept;
     }
     if !configured_alive {
+        // Prior/configured session is dead — historically an unconditional
+        // auto-force. But if a live foreign supervisor still holds a fresh lease
+        // on this document, refuse to auto-commandeer it: require an explicit
+        // force override instead.
+        if fresh_foreign_lease {
+            if force {
+                return CrossSessionDecision::AcceptForce;
+            }
+            return CrossSessionDecision::Reject;
+        }
         return CrossSessionDecision::AcceptStale;
     }
     if force {
@@ -310,12 +351,35 @@ pub fn run(
             && pane_tmux_session != configured
         {
             let configured_alive = sessions::Multiplexer::session_alive(&tmux, &configured);
+            // `#xdocsuper0`: before an `AcceptStale` auto-force can commandeer
+            // this document, consult its supervisor lease. If a live foreign
+            // supervisor still holds a fresh lease on the document, refuse the
+            // auto-reclaim (require explicit `--force`) so two supervisors never
+            // own one document. The lease lookup is keyed by the canonical
+            // document path (the controller's `document_id`); errors / absent
+            // state degrade to `false` (no guard fired).
+            let fresh_foreign_lease = crate::snapshot::find_project_root(file)
+                .map(|project_root| {
+                    crate::project_controller::fresh_foreign_supervisor_lease_holds_document(
+                        &project_root,
+                        &file.to_string_lossy(),
+                        std::process::id(),
+                        crate::project_controller::SUPERVISOR_LEASE_GUARD_STALE_AFTER,
+                    )
+                })
+                .unwrap_or(false);
             enforce_cross_session_claim(
                 file,
                 &pane_id,
                 &pane_tmux_session,
                 &configured,
-                cross_session_decision(&pane_tmux_session, &configured, configured_alive, force),
+                cross_session_decision_with_lease(
+                    &pane_tmux_session,
+                    &configured,
+                    configured_alive,
+                    force,
+                    fresh_foreign_lease,
+                ),
             )?;
         }
     }
@@ -939,6 +1003,68 @@ mod tests {
                 "[claim] cross-session-reject pane_id=%12 pane_session=claude configured=0"
             ),
             "reject marker should reach ops.log: {log}"
+        );
+    }
+
+    // `#xdocsuper0`: the cross-document supervisor-lease guard. When the prior
+    // session is stale, the historical behavior auto-forces (`AcceptStale`); the
+    // guard only intervenes when a fresh foreign supervisor lease still holds the
+    // document, in which case it refuses the silent reclaim unless `--force`.
+
+    #[test]
+    fn cross_session_stale_without_foreign_lease_still_accept_stale() {
+        // (a) prior session stale + NO fresh live foreign lease → unchanged
+        // AcceptStale auto-force.
+        let d = cross_session_decision_with_lease("claude", "0", false, false, false);
+        assert_eq!(d, CrossSessionDecision::AcceptStale);
+    }
+
+    #[test]
+    fn cross_session_stale_with_foreign_lease_rejects() {
+        // (b) prior session stale + a fresh foreign supervisor lease still holds
+        // the document → Reject instead of auto-commandeering it.
+        let d = cross_session_decision_with_lease("claude", "0", false, false, true);
+        assert_eq!(d, CrossSessionDecision::Reject);
+    }
+
+    #[test]
+    fn cross_session_stale_with_foreign_lease_and_force_accepts() {
+        // (c) same as (b) but with an explicit force override → AcceptForce.
+        let d = cross_session_decision_with_lease("claude", "0", false, true, true);
+        assert_eq!(d, CrossSessionDecision::AcceptForce);
+    }
+
+    #[test]
+    fn cross_session_matching_session_ignores_foreign_lease() {
+        // A matching pane session short-circuits to Accept regardless of any
+        // lease state — the guard never fires when there is no cross-session
+        // condition to gate.
+        let d = cross_session_decision_with_lease("0", "0", true, false, true);
+        assert_eq!(d, CrossSessionDecision::Accept);
+    }
+
+    #[test]
+    fn cross_session_live_configured_unaffected_by_lease_flag() {
+        // The live-cross-session harness-mismatch guard is unchanged: a live
+        // configured session still Rejects without force and AcceptForces with
+        // it, independent of the foreign-lease flag.
+        assert_eq!(
+            cross_session_decision_with_lease("claude", "0", true, false, true),
+            CrossSessionDecision::Reject
+        );
+        assert_eq!(
+            cross_session_decision_with_lease("claude", "0", true, true, true),
+            CrossSessionDecision::AcceptForce
+        );
+    }
+
+    #[test]
+    fn cross_session_decision_defaults_to_no_lease_guard() {
+        // The legacy 4-arg entry point preserves pre-`#xdocsuper0` behavior: a
+        // stale session auto-forces because no lease is consulted.
+        assert_eq!(
+            cross_session_decision("claude", "0", false, false),
+            CrossSessionDecision::AcceptStale
         );
     }
 

@@ -1636,6 +1636,63 @@ fn supervisor_lease_is_fresh_or_alive(
     lease.supervisor_pid.map(process_is_alive).unwrap_or(false)
 }
 
+/// Default staleness window for the cross-document supervisor-lease guard
+/// (`#xdocsuper0`). Matches the 60s heartbeat freshness window used by
+/// `reconcile_supervisor_leases_after_restart` and the GC's stale-actor sweep.
+pub const SUPERVISOR_LEASE_GUARD_STALE_AFTER: Duration = Duration::from_secs(60);
+
+/// `#xdocsuper0`: does a FRESH lease held by a LIVE *foreign* supervisor still
+/// own this document?
+///
+/// The claim binding is pane/session-keyed, so `claim::cross_session_decision`
+/// auto-forces (`AcceptStale`) whenever the prior/configured tmux session is
+/// dead — without ever checking whether another live supervisor still holds a
+/// fresh lease on the document. That window lets two supervisors (an old one and
+/// a relaunched one) both believe they own one document, which produces
+/// stale-CRDT replay, `live_prompt_drift_after_preflight`, and post-commit
+/// worktree corruption.
+///
+/// This predicate consults the document's supervisor lease so claim can refuse
+/// to auto-commandeer a document a live supervisor still owns. It returns `true`
+/// only when ALL of the following hold for the document's current actor
+/// generation:
+///   - a supervisor lease row exists,
+///   - the lease heartbeat is fresh (within `stale_after`) AND its
+///     `supervisor_pid` is a live process (`supervisor_lease_is_fresh_or_alive`),
+///   - the lease's `supervisor_pid` is *foreign* — i.e. not `self_pid` (the
+///     short-lived claim CLI's own process), so we never count our own process
+///     as a competing supervisor.
+///
+/// Any error loading state (missing db, no actor record, no lease) is treated as
+/// "no fresh foreign lease" so the guard can never turn a normal stale-session
+/// reclaim into a hard failure on absent state — it only fires on positive proof
+/// of a live competing supervisor.
+pub fn fresh_foreign_supervisor_lease_holds_document(
+    project_root: &Path,
+    document_id: &str,
+    self_pid: u32,
+    stale_after: Duration,
+) -> bool {
+    let now = timestamp_secs();
+    let Ok(Some(record)) = load_actor_record(project_root, document_id) else {
+        return false;
+    };
+    let conn = match open_state_db(project_root) {
+        Ok(conn) => conn,
+        Err(_) => return false,
+    };
+    let Ok(Some(lease)) = load_supervisor_lease_from_db(&conn, document_id, record.generation) else {
+        return false;
+    };
+    // A lease whose pid is our own claim process (or unset) is not a competing
+    // foreign supervisor.
+    match lease.supervisor_pid {
+        Some(pid) if pid != self_pid => {}
+        _ => return false,
+    }
+    supervisor_lease_is_fresh_or_alive(&lease, now, stale_after)
+}
+
 pub fn close_stale_starting_actors_for_caller(
     project_root: &Path,
     stale_after: Duration,

@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { execFile } from 'child_process';
 import * as native from './native';
+import * as stateMirror from './stateMirror';
 import { createEditorApplyProof, consumeClaimedPatch, isEditorApplyProofCurrent, isPatchAlreadyApplied } from './patchGuard';
 import { appendPatchAlreadyPresent, isPureRepositionSignal } from './patchPlan';
 import { parseCrossSessionReject, CrossSessionReject } from './crossSession';
@@ -771,10 +772,16 @@ async function executeRunForDocument(
             { signal: abortController.signal },
         );
         native.recordRouteDispatchProven(filePath, routeGeneration, `vscode:${routeKey}`, cwd);
-        const projection = native.stateProjectionForFile(filePath, cwd);
-        const summary = projection ? native.projectionSummary(projection) : null;
+        // #r5at: read via the lazily-js reactive mirror (snapshot/delta over the
+        // FFI state backbone), falling back to the cold projection pull. The
+        // just-recorded dispatch facts surface as a warm delta without a full
+        // re-render — the VS Code counterpart of the JB reactiveSummaryForFile.
+        const summary = native.reactiveSummaryForFile(filePath, cwd);
         if (summary) {
-            console.log(`[agent-doc/state-projection] ${native.compactProjectionSummary(summary)} file=${rel}`);
+            console.log(
+                `[agent-doc/state-projection] ${stateMirror.compactMirrorSummary(summary)} `
+                + `epoch=${native.mirrorEpochForFile(filePath) ?? '-'} file=${rel}`,
+            );
         }
         showHint(output || `Routed ${rel}`);
         trackedFiles.add(filePath);
@@ -2870,6 +2877,9 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.workspace.onDidCloseTextDocument((document) => {
             if (document.languageId !== 'markdown') return;
             native.documentClosedForEditor(document.uri.fsPath, getWorkspaceRoot(document.uri), EDITOR_ID);
+            // #r5at: evict the per-document reactive mirror so a reused path
+            // (move/symlink/reopen) does not surface stale projection state.
+            native.evictStateMirrorForFile(document.uri.fsPath);
         })
     );
 

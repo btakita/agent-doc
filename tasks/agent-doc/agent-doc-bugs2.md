@@ -282,7 +282,20 @@ Picked up as Claude Code on pane `%77`. `admin inspect` confirms `pane=%77 state
 The design question you raised this cycle — *"Would a reactive state machine help to manage the supervisor document bindings?"* — is already answered in the plan's **Design note** (yes for the document-switch/hosting half via the existing `state_backbone.rs`; no/over-engineering for the claim guard) and was auto-struck (`#ftstrike`).
 
 Queue note: 32 mirrored heads remain but they are dominated by supervisor-in-process-critical / focused-cycle items (`#brtc` `#queuestatemachine3`, `#xdocsuper*`, the merge/lazily state-sync work) whose own plans gate them to fresh focused cycles. Not looping those inline from a just-recovered supervisor.
-<!-- agent:boundary:64430ef5 -->
+
+### Re: #xdocsuper0 implemented (isolated worktree) — opus-4-8
+
+Per your pick, implemented the claim-lease guard in an isolated worktree (`src/agent-doc-xdocsuper0-wt`, branch `xdocsuper0`, sibling `tmux-router` path-dep preserved) so this live route-owned supervisor was never disrupted — no install, no recycle, no push.
+
+**The fix (commit `2f704263`):**
+- `project_controller::fresh_foreign_supervisor_lease_holds_document(project_root, document_id, self_pid, stale_after)` — loads the document's actor generation + supervisor lease and returns `true` only on **positive proof** of a fresh, live, *foreign* supervisor pid (`supervisor_lease_is_fresh_or_alive` + `pid != self_pid`). Missing-db / no-lease / no-actor-record all degrade to `false`.
+- `claim.rs::cross_session_decision_with_lease(...)` — new lease-aware variant; the legacy `cross_session_decision` now delegates with `fresh_foreign_lease=false` so every prior call site is byte-for-byte unchanged. The single cross-session reclaim caller in `run()` computes the flag from the live lease.
+- **Guard:** when the prior/configured session is dead (the historical unconditional `AcceptStale` auto-force) **and** a fresh foreign supervisor lease is held → `Reject` (`--force` still overrides to `AcceptForce`). No foreign lease → `AcceptStale` unchanged. This closes the two-supervisors-own-one-document window at the source. Fail-open direction means a normal stale-session reclaim never hard-fails on missing state — only a *proven* live competitor is refused.
+
+**Verification:** 6 new deterministic predicate tests (stale-no-lease→AcceptStale, stale+foreign-lease→Reject, +force→AcceptForce, matching-session short-circuit, live-mismatch unaffected, legacy entry-point preserved). `make check` green — **5152 passed, 241 skipped**, clippy `-D warnings` clean.
+
+`#xdocsuper0` gated `[/]` (code-complete) — **unblocks on:** merge `xdocsuper0` → agent-doc main + install + a live cross-doc-relaunch repro (the operator-gated half). The remaining plan rungs stay queued: `#xdocsuper1` folded into `#xdocsuper3` (state_backbone document-switch transition) and `#xdocsuper2` (SimWorld contamination regression).
+<!-- agent:boundary:968bec3c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -480,7 +493,6 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
-- [/] [#xdocsuper0] [focused-cycle] Claim guard consults document supervisor lease — CODE-COMPLETE on agent-doc branch xdocsuper0 (worktree src/agent-doc-xdocsuper0-wt, commit 2f704263): cross_session_decision_with_lease + project_controller::fresh_foreign_supervisor_lease_holds_document Reject the AcceptStale auto-force when a fresh foreign supervisor lease is held (unless --force). make check green 5152 passed. UNBLOCKS ON: merge branch to agent-doc main + install + live cross-doc-relaunch repro. Plan: tasks/agent-doc/plan-cross-document-supervisor-contamination.md
 - [/] [#kj5f] [operator-verify] #mergestatemachine3 remaining: JB+VSCode thin reporters emit attach/detach/ownership facts through the merge-ownership SM (via #lazilystatesync) + live editor-attached/detached repro for File Cache Conflict + #6b5h wedge. DONE: SM core Phases 1-2 + deterministic scenario repros for both wedge classes (agent-doc 34d7023d). Remaining needs the operator-paused plugin install + a live editor to verify. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 <!-- /agent:review -->
 

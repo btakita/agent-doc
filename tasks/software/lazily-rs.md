@@ -51,7 +51,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=a0d06514-4d61-4e39-80e9-51dfe63333e3 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=7422 candidate_hash=d5fe277899e37743258c3a872b7d0fa7d24d01ecd077fe15d3d722c8bd515709 content_ours_len=8946 content_ours_hash=c211c34309f039199ecaa80c915df0a4fdb44a7bd4ce4f6087179515c017e6d3 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782348633215
 ```
-<!-- agent:boundary:5de9838e -->
+<!-- agent:boundary:5701fd3a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -61,11 +61,13 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 What are #next-steps to fix lazily-rs, lazily-kt, lazily-js, lazily-spec, lazily-zig, lazily-py bugs?
+- do [#gcp4]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#gcp4] [recommended] #lzasyncdispose2=lazily-rs: AsyncContext dispose recycles SlotId via free_ids LIFO with NO generation guard (async_context.rs:1050 free_ids.push(handle.id.0)). A flush_async_effects-spawned re-run task (async_context.rs:1225) in-flight across its .await can re-lock AFTER dispose and write cleanup/edges into whatever node now holds the recycled id (aliasing). Dispose take()+abort()s the node in_flight (1029/1054) but abort() is cooperative — the id is recycled before the task observes it. Fix: generation-tag SlotIds (free_ids stores id+gen) and generation-check before storing cleanup/edges on re-run, OR await the JoinHandle abort before recycling. Add an async stress test: dispose during a pending effect re-run. Only genuinely-open correctness hardening after the 6-port green sweep; no current red test.
 <!-- /agent:backlog -->
 
 ## Review

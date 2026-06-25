@@ -25,6 +25,7 @@ pub mod model_tier;
 pub mod op_log;
 pub mod pending;
 pub mod project_config;
+pub mod queue_item_lifecycle;
 pub mod replay_guard;
 pub mod syntax;
 pub mod template;

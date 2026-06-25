@@ -38,6 +38,14 @@
 use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 
+/// The coarse visible lifecycle lattice the CRDT convergence joins over
+/// (`#queuestatemachine2`/`#qheadresidue`). Lives in `agent-doc-core` because the
+/// convergence ([`agent_doc_core::crdt::merge_by_component`]) — the lower crate —
+/// must consult it; re-exported here so this module remains the single
+/// authoritative lifecycle surface. The finer-grained [`QueueItemState`] below
+/// refines it: see [`QueueItemState::lifecycle`].
+pub use agent_doc_core::queue_item_lifecycle::QueueItemLifecycle;
+
 /// Durable identity of a queue head.
 ///
 /// Two heads share an identity iff they refer to the same work, regardless of
@@ -122,6 +130,23 @@ impl QueueItemState {
     /// Terminal states accept no advancing transition.
     pub fn is_terminal(self) -> bool {
         matches!(self, QueueItemState::Reaped)
+    }
+
+    /// Project this fine-grained lifecycle state onto the coarse
+    /// [`QueueItemLifecycle`] lattice the CRDT convergence joins over
+    /// (`#queuestatemachine2`). Everything strictly below `Struck` renders as a
+    /// live head; `Struck`/`Reaped` render as the retired (`Struck`) lattice state.
+    /// This is the contract that keeps the two models from diverging: the
+    /// convergence's per-item join over rendered text agrees with this machine's
+    /// rank join over events.
+    pub fn lifecycle(self) -> QueueItemLifecycle {
+        match self {
+            QueueItemState::Authored
+            | QueueItemState::Mirrored
+            | QueueItemState::InProgress
+            | QueueItemState::Answered => QueueItemLifecycle::Live,
+            QueueItemState::Struck | QueueItemState::Reaped => QueueItemLifecycle::Struck,
+        }
     }
 }
 
@@ -358,6 +383,46 @@ mod tests {
             machine.state(),
             QueueItemState::Answered,
             "stale re-emit must not regress an answered item"
+        );
+    }
+
+    /// `#queuestatemachine2` single-model contract: this fine-grained machine's
+    /// rank join must agree with the coarse [`QueueItemLifecycle`] join the CRDT
+    /// convergence uses. For every pair of states, projecting then joining on the
+    /// lattice equals joining the states then projecting — so the convergence can
+    /// never disagree with the state machine about whether a head is retired.
+    #[test]
+    fn lifecycle_projection_commutes_with_join() {
+        for &a in &ALL_STATES {
+            for &b in &ALL_STATES {
+                // Join the fine states (max by rank), then project.
+                let joined_state = if a.rank() >= b.rank() { a } else { b };
+                let project_then_join = a.lifecycle().join(b.lifecycle());
+                assert_eq!(
+                    joined_state.lifecycle(),
+                    project_then_join,
+                    "projection must commute with join for {a:?} / {b:?}"
+                );
+            }
+        }
+    }
+
+    /// A `Struck` (answered-retired) item projects to the retired lattice state; a
+    /// stale `Authored`/`Mirrored` re-emit joins to it as a no-op — the same
+    /// anti-resurrection guarantee the convergence enforces over rendered text.
+    #[test]
+    fn struck_lifecycle_absorbs_stale_live_reemit() {
+        assert_eq!(QueueItemState::Struck.lifecycle(), QueueItemLifecycle::Struck);
+        assert_eq!(
+            QueueItemState::Struck
+                .lifecycle()
+                .join(QueueItemState::Authored.lifecycle()),
+            QueueItemLifecycle::Struck,
+            "a stale authored re-emit must not un-retire a struck head"
+        );
+        assert_eq!(
+            QueueItemState::Reaped.lifecycle(),
+            QueueItemLifecycle::Struck
         );
     }
 

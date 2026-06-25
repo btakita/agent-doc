@@ -919,6 +919,13 @@ fn reconcile_component_body(
     // #ipc-crdt-response-drift guard, applied here per block).
     let protect_deletes = name == "exchange";
 
+    // `#queuestatemachine2`/`#qheadresidue`: the operator-ordered list components
+    // carry per-item strike lifecycle. Route each matched item through the per-item
+    // lifecycle JOIN so a stale persisted-CRDT side cannot un-strike (resurrect) a
+    // head that another side already retired. `exchange` blocks are not list items
+    // and keep the leaf merge.
+    let lifecycle_governed = is_list_component(name);
+
     let mut out = String::new();
     for key in &order {
         let in_o = ours_map.get(key.as_str());
@@ -928,6 +935,14 @@ fn reconcile_component_body(
             (Some(o), Some(t)) => {
                 if o.text == t.text {
                     Some(o.text.clone())
+                } else if lifecycle_governed {
+                    // Drive the matched item to its lawful state via the per-item
+                    // lifecycle lattice (`Live < Struck`), exactly as the
+                    // orchestration `transition_queue_item` join specifies. The
+                    // highest-ranked side's rendered text governs, so a stale
+                    // un-strike from the persisted `.yrs` base/agent side can never
+                    // resurrect a head another side already struck.
+                    Some(reconcile_list_item_lifecycle(o, t, in_b.copied()))
                 } else {
                     // Matched-but-different child: leaf text merge against its
                     // own base child. A leaf merge error falls the whole
@@ -955,6 +970,55 @@ fn reconcile_component_body(
         }
     }
     Some(out)
+}
+
+/// Reconcile a matched-but-different list item through the per-item lifecycle
+/// lattice (`#queuestatemachine2`/`#qheadresidue`).
+///
+/// `ours`/`theirs` are the two live sides; `base` is the merge base child (the
+/// persisted-CRDT view), if any. Their *visible* lifecycle states
+/// ([`QueueItemLifecycle`]) are joined (`Live < Struck`): the merged item takes the
+/// rendered text of the side whose lifecycle equals the join, so a stale un-strike
+/// can never resurrect a head another side already struck.
+///
+/// Tie-break within the same lifecycle rank (e.g. both `Live` but differing text —
+/// an operator finishing a free-text line while the agent appends) preserves the
+/// historical behavior by falling back to the Yrs leaf merge against the base, so
+/// genuine concurrent edits at the same lifecycle level still reconcile losslessly.
+fn reconcile_list_item_lifecycle(
+    ours: &KeyedChild,
+    theirs: &KeyedChild,
+    base: Option<&KeyedChild>,
+) -> String {
+    use crate::queue_item_lifecycle::QueueItemLifecycle;
+
+    // The preamble child (leading text before the first list item) carries no
+    // item lifecycle — reconcile it as a plain leaf merge.
+    if ours.key == PREAMBLE_KEY {
+        let base_state = base.map(|b| CrdtDoc::from_text(&b.text).encode_state());
+        return merge(base_state.as_deref(), &ours.text, &theirs.text)
+            .unwrap_or_else(|_| ours.text.clone());
+    }
+
+    let ours_state = QueueItemLifecycle::classify(&ours.text);
+    let theirs_state = QueueItemLifecycle::classify(&theirs.text);
+    let joined = ours_state.join(theirs_state);
+
+    match (ours_state == joined, theirs_state == joined) {
+        // Only one side is at the lawful (joined) lifecycle — that side's rendered
+        // text governs. This is the anti-resurrection rung: a struck side beats a
+        // stale live side regardless of which input carried it.
+        (true, false) => ours.text.clone(),
+        (false, true) => theirs.text.clone(),
+        // Both sides share the lawful lifecycle level (both Live or both Struck)
+        // but differ in text — a genuine concurrent edit at the same level. Fall
+        // back to the leaf merge against the base so the edit reconciles losslessly.
+        _ => {
+            let base_state = base.map(|b| CrdtDoc::from_text(&b.text).encode_state());
+            merge(base_state.as_deref(), &ours.text, &theirs.text)
+                .unwrap_or_else(|_| ours.text.clone())
+        }
+    }
 }
 
 /// Merge two ordered key sequences into a supersequence: ours' order is the
@@ -3238,5 +3302,208 @@ Second answer line three.
         let children = split_exchange_children(body).unwrap();
         let joined: String = children.iter().map(|c| c.text.as_str()).collect();
         assert_eq!(joined, body, "exchange segmentation is not lossless");
+    }
+
+    /// #qheadresidue / #queuestatemachine2: a free-text queue head answered and
+    /// STRUCK in the committed doc (`ours`) must NOT be resurrected un-struck by a
+    /// stale persisted-CRDT side (`theirs`) that still carries the head live.
+    ///
+    /// This drives the real `merge_by_component` convergence path. The struck and
+    /// un-struck lines share the same `list_item_key` (strike markers are
+    /// normalized away), so the per-item reconciler leaf-merges them — and the
+    /// stale live text resurrects.
+    #[test]
+    fn merge_by_component_struck_free_text_head_not_resurrected_by_stale_crdt() {
+        // Base: the head is a live free-text queue item.
+        let base = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n- Still getting JB File Cache Conflict dialogs.\n<!-- /agent:queue -->\n";
+        // Ours (committed doc, authoritative): the agent answered and STRUCK it.
+        let ours = "<!-- agent:exchange -->\n### Re: topic\nAgent response body.\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n- ~~Still getting JB File Cache Conflict dialogs.~~\n<!-- /agent:queue -->\n";
+        // Theirs (persisted CRDT, stale): still carries the head un-struck.
+        let theirs = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n- Still getting JB File Cache Conflict dialogs.\n<!-- /agent:queue -->\n";
+
+        let base_state = CrdtDoc::from_text(base).encode_state();
+        let merged = merge_by_component(Some(&base_state), ours, theirs).unwrap();
+
+        let queue_body = merged
+            .split("<!-- agent:queue -->")
+            .nth(1)
+            .and_then(|s| s.split("<!-- /agent:queue -->").next())
+            .unwrap();
+        // The head must remain struck — never reappear as a fresh live head.
+        assert!(
+            queue_body.contains("~~Still getting JB File Cache Conflict dialogs.~~"),
+            "struck head must survive struck:\n{queue_body}"
+        );
+        let live_occurrences = queue_body
+            .lines()
+            .filter(|l| {
+                l.contains("Still getting JB File Cache Conflict dialogs.")
+                    && !l.contains("~~")
+            })
+            .count();
+        assert_eq!(
+            live_occurrences, 0,
+            "stale CRDT resurrected the struck head as a live queue line:\n{queue_body}"
+        );
+    }
+
+    /// #qheadresidue variant: the answered head was REAPED (removed) from the
+    /// committed doc (`ours`), but the stale persisted CRDT (`theirs`) still
+    /// carries it live. The merge must NOT re-add the reaped head.
+    ///
+    /// This is the canonical "answered head reappears every preflight" residue:
+    /// the committed queue is empty, the persisted `.yrs` still has the line, and
+    /// the per-item reconciler treats theirs-only as a clean insert.
+    #[test]
+    fn merge_by_component_reaped_free_text_head_not_readded_by_stale_crdt() {
+        let base = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n- Still getting JB File Cache Conflict dialogs.\n<!-- /agent:queue -->\n";
+        // Ours (committed): the head is gone — reaped after answering.
+        let ours = "<!-- agent:exchange -->\n### Re: topic\nAgent response body.\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n<!-- /agent:queue -->\n";
+        // Theirs (stale persisted CRDT): still carries the head live.
+        let theirs = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n- Still getting JB File Cache Conflict dialogs.\n<!-- /agent:queue -->\n";
+
+        let base_state = CrdtDoc::from_text(base).encode_state();
+        let merged = merge_by_component(Some(&base_state), ours, theirs).unwrap();
+
+        let queue_body = merged
+            .split("<!-- agent:queue -->")
+            .nth(1)
+            .and_then(|s| s.split("<!-- /agent:queue -->").next())
+            .unwrap();
+        assert!(
+            !queue_body.contains("Still getting JB File Cache Conflict dialogs."),
+            "stale CRDT re-added the reaped head:\n{queue_body}"
+        );
+    }
+
+    /// #qheadresidue / #queuestatemachine2 — THE genuinely-red resurrection case.
+    ///
+    /// This is the exact live churn: a queue head that was already answered+struck
+    /// (persisted into the `.yrs` BASE as `~~...~~`) is "un-struck" by the stale
+    /// agent side (`ours`), which still carries the head LIVE because the seam
+    /// strike was a direct file edit the CRDT base never saw advance. The
+    /// committed disk side (`theirs`) is correctly struck. A plain Yrs leaf merge
+    /// reads `ours` as having DELETED the `~~` markers (an edit vs base) while
+    /// `theirs` matches base, so the un-strike "edit" wins and the head reappears
+    /// LIVE every cycle.
+    ///
+    /// Before the per-item lifecycle wiring this asserts FAILED (merged dropped
+    /// the strike → live head). The fix joins each side through the queue-item
+    /// lifecycle SM: `Struck` outranks `Authored`/`Mirrored`, so a stale un-strike
+    /// can never regress a struck head.
+    #[test]
+    fn merge_by_component_struck_id_head_not_resurrected_by_stale_unstrike() {
+        // BASE: already struck (the answered state persisted into the .yrs).
+        let base = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n- ~~do [#abcd] fix the thing~~\n<!-- /agent:queue -->\n";
+        // OURS (agent / content_ours side): still LIVE — un-strikes vs base.
+        let ours = "<!-- agent:exchange -->\n### Re: topic\nAgent response body.\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n- do [#abcd] fix the thing\n<!-- /agent:queue -->\n";
+        // THEIRS (committed disk): correctly struck.
+        let theirs = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n- ~~do [#abcd] fix the thing~~\n<!-- /agent:queue -->\n";
+
+        let base_state = CrdtDoc::from_text(base).encode_state();
+        let merged = merge_by_component(Some(&base_state), ours, theirs).unwrap();
+
+        let queue_body = merged
+            .split("<!-- agent:queue -->")
+            .nth(1)
+            .and_then(|s| s.split("<!-- /agent:queue -->").next())
+            .unwrap();
+        assert!(
+            queue_body.contains("~~do [#abcd] fix the thing~~"),
+            "struck head must stay struck:\n{queue_body}"
+        );
+        let live = queue_body
+            .lines()
+            .filter(|l| l.contains("do [#abcd]") && !l.contains("~~"))
+            .count();
+        assert_eq!(
+            live, 0,
+            "stale un-strike resurrected the struck head LIVE:\n{queue_body}"
+        );
+    }
+
+    /// Free-text variant of the resurrection: same residue shape, but the head is
+    /// an operator free-text line (no `#id`), so the fix must also reconcile
+    /// free-text identities (`#qdedupsync` was free-text-blind).
+    #[test]
+    fn merge_by_component_struck_free_text_head_not_resurrected_by_stale_unstrike() {
+        let base = "<!-- agent:queue -->\n- ~~Still getting JB File Cache Conflict dialogs.~~\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- Still getting JB File Cache Conflict dialogs.\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:queue -->\n- ~~Still getting JB File Cache Conflict dialogs.~~\n<!-- /agent:queue -->\n";
+
+        let base_state = CrdtDoc::from_text(base).encode_state();
+        let merged = merge_by_component(Some(&base_state), ours, theirs).unwrap();
+
+        let queue_body = merged
+            .split("<!-- agent:queue -->")
+            .nth(1)
+            .and_then(|s| s.split("<!-- /agent:queue -->").next())
+            .unwrap();
+        assert!(
+            queue_body.contains("~~Still getting JB File Cache Conflict dialogs.~~"),
+            "struck free-text head must stay struck:\n{queue_body}"
+        );
+        let live = queue_body
+            .lines()
+            .filter(|l| {
+                l.contains("Still getting JB File Cache Conflict dialogs.") && !l.contains("~~")
+            })
+            .count();
+        assert_eq!(
+            live, 0,
+            "stale un-strike resurrected the struck free-text head LIVE:\n{queue_body}"
+        );
+    }
+
+    /// Multi-cycle no-churn proof (`#qheadresidue`): strike a head, persist the
+    /// struck state as the next cycle's base, then re-merge with a stale un-strike
+    /// agent side every cycle. The head must stay struck across every cycle with
+    /// no re-emit churn (struck stays struck, never re-added live then re-struck).
+    #[test]
+    fn merge_by_component_struck_head_stable_across_cycles_no_churn() {
+        // Cycle 0 starts from a struck base.
+        let mut base = "<!-- agent:queue -->\n- ~~do [#abcd] answered~~\n<!-- /agent:queue -->\n"
+            .to_string();
+        for cycle in 0..3 {
+            let base_state = CrdtDoc::from_text(&base).encode_state();
+            // Agent side keeps regenerating the head LIVE (stale un-strike).
+            let ours = "<!-- agent:queue -->\n- do [#abcd] answered\n<!-- /agent:queue -->\n";
+            // Disk stays correctly struck.
+            let theirs = "<!-- agent:queue -->\n- ~~do [#abcd] answered~~\n<!-- /agent:queue -->\n";
+            let merged = merge_by_component(Some(&base_state), ours, theirs).unwrap();
+            let queue_body = merged
+                .split("<!-- agent:queue -->")
+                .nth(1)
+                .and_then(|s| s.split("<!-- /agent:queue -->").next())
+                .unwrap();
+            let live = queue_body
+                .lines()
+                .filter(|l| l.contains("do [#abcd]") && !l.contains("~~"))
+                .count();
+            assert_eq!(
+                live, 0,
+                "cycle {cycle}: head resurrected LIVE (churn):\n{queue_body}"
+            );
+            assert!(
+                queue_body.contains("~~do [#abcd] answered~~"),
+                "cycle {cycle}: struck head lost:\n{queue_body}"
+            );
+            assert_eq!(
+                queue_body.matches("do [#abcd] answered").count(),
+                1,
+                "cycle {cycle}: head duplicated:\n{queue_body}"
+            );
+            // Persist the merged (lawful, struck) state as the next cycle's base.
+            base = merged;
+        }
     }
 }

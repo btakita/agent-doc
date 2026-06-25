@@ -56,6 +56,11 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 
 > **Queue prompt:**
 >
+> do [#gcp4]
+
+
+> **Queue prompt:**
+>
 > What are #next-steps to fix lazily-rs, lazily-kt, lazily-js, lazily-spec, lazily-zig, lazily-py bugs?
 
 **Short answer: the bug-fix campaign is essentially complete.** Every item filed in `tasks/software/lazily-rs.done.md` this cycle (all dated 2026-06-24) is fixed and pushed, and all six ports verify green this turn. The single genuinely-open correctness follow-up is now the top backlog item.
@@ -93,7 +98,7 @@ Cross-cutting `#bagt` arena conformance is wired in all three host ports (spec f
 - `#h6qb`/`#lzwebrtcnet-e2e` — live two-host/NAT WebRTC validation through the deployed signaling Worker
 
 **Top backlog id: `#gcp4` (`#lzasyncdispose2`).**
-<!-- agent:boundary:2beeadb9 -->
+<!-- agent:boundary:ce5242e8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,13 +108,18 @@ Cross-cutting `#bagt` arena conformance is wired in all three host ports (spec f
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~What are #next-steps to fix lazily-rs, lazily-kt, lazily-js, lazily-spec, lazily-zig, lazily-py bugs?~~
-- do [#gcp4]
+- ~~do [#gcp4]~~
+- release + publish lazily-spec
+- release + publish lazily-rs
+- release + publish lazily-ky
+- release + publish lazily-js
+- release + publish lazily-zig
+- release + publish lazily-py
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#gcp4] [recommended] #lzasyncdispose2=lazily-rs: AsyncContext dispose recycles SlotId via free_ids LIFO with NO generation guard (async_context.rs:1050 free_ids.push(handle.id.0)). A flush_async_effects-spawned re-run task (async_context.rs:1225) in-flight across its .await can re-lock AFTER dispose and write cleanup/edges into whatever node now holds the recycled id (aliasing). Dispose take()+abort()s the node in_flight (1029/1054) but abort() is cooperative — the id is recycled before the task observes it. Fix: generation-tag SlotIds (free_ids stores id+gen) and generation-check before storing cleanup/edges on re-run, OR await the JoinHandle abort before recycling. Add an async stress test: dispose during a pending effect re-run. Only genuinely-open correctness hardening after the 6-port green sweep; no current red test.
 <!-- /agent:backlog -->
 
 ## Review

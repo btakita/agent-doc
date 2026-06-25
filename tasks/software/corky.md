@@ -191,7 +191,21 @@ Shipped the **typed sync run-state machine + durable marker** (corky `97e762e`, 
 **Verification:** `make check` → **706 pass / 0 fail** (6 new run_state tests: transition table, predicates, `apply_event` started-at carry-forward, interrupted list, serde roundtrip). SPEC.md §3.5 added. `make build` + `make install` done.
 
 Next queue head: `do [#ckywatchsm]` (watch phase enum + backoff — the last, polish item).
-<!-- agent:boundary:2d458448 -->
+
+### Re: do [#ckywatchsm] — opus-4-8
+
+> **Queue prompt:** do [#ckywatchsm]
+
+Shipped the **typed watch-loop phase scheduler + circuit breaker** (corky `15cc39f`, pushed to `btakita/corky` main) — the last, polish item. The state-machine queue is now fully drained.
+
+**What changed**
+- New `PeriodicPhase` (cadence + per-phase circuit breaker) replaces the loose `cycles_since_upgrade_check`/`cycles_since_filter_check: u64` counters in the watch loop. `tick()` fires once every `every` cycles (`max(1, 3600/interval)`).
+- **Circuit breaker:** a periodic tick (`auto-upgrade`, `filter-drift`) that panics/cancels arms exponential backoff (`2^(failures-1)` cycles, capped at 64) instead of retrying every interval; a success clears it. `run_tick` now returns completion (`false` on panic/cancel) to feed the breaker.
+
+**Verification:** `make check` → **710 pass / 0 fail** (4 new watch tests: cadence, `every=0` clamp, backoff+recovery, cap). SPEC.md §9.2a added. `make build` + `make install` done.
+
+**Queue drained.** All four corky state machines shipped this run: `#ckypubsm` (social publish crash-safety), `#ckyemailsm` (email status enum), `#ckysyncsm` (sync run-state + durable marker), `#ckywatchsm` (watch phase + backoff). One follow-up remains in the backlog: `#ckysyncsm-resume` (wire the sync resume consumer).
+<!-- agent:boundary:2a2d43c7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -205,14 +219,13 @@ Please give me a report the performance
 - ~~do [#ckypubsm]~~
 - 🚧 do [#ckyemailsm]
 - ~~do [#ckysyncsm]~~
-- do [#ckywatchsm]
+- ~~do [#ckywatchsm]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [ ] [#ckysyncsm-resume] [recommended] Wire the #ckysyncsm resume consumer: on corky sync / watch tick start, check run_state::interrupted_accounts() and reconcile/repair an interrupted account (re-verify last-written conversations, resume from phase) instead of a plain cursor re-fetch. Plan: tasks/software/corky-state-machines.md
-- [ ] [#ckywatchsm] P3 — Watch phase enum (WatchPhase)+typed tick schedule replacing loose cycles_since_* counters (watch.rs:320-325)+backoff/circuit-breaker for repeated phase failures (polish). Plan: tasks/software/corky-state-machines.md
 <!-- /agent:backlog -->
 
 ## Review

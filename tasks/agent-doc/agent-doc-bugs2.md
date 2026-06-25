@@ -295,7 +295,7 @@ Per your pick, implemented the claim-lease guard in an isolated worktree (`src/a
 **Verification:** 6 new deterministic predicate tests (stale-no-lease→AcceptStale, stale+foreign-lease→Reject, +force→AcceptForce, matching-session short-circuit, live-mismatch unaffected, legacy entry-point preserved). `make check` green — **5152 passed, 241 skipped**, clippy `-D warnings` clean.
 
 `#xdocsuper0` gated `[/]` (code-complete) — **unblocks on:** merge `xdocsuper0` → agent-doc main + install + a live cross-doc-relaunch repro (the operator-gated half). The remaining plan rungs stay queued: `#xdocsuper1` folded into `#xdocsuper3` (state_backbone document-switch transition) and `#xdocsuper2` (SimWorld contamination regression).
-<!-- agent:boundary:968bec3c -->
+<!-- agent:boundary:9efb11f8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -334,6 +334,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 ```
 ---
 - :pushpin: do [#xdocsuper]
+- Fix the root cause of the recurring degraded-supervisor drift and #postcommit-ipc-worktree-corruption.
 - :pushpin: do [#cgfx]
 - ~~Would a reactive state machine help to manage the supervisor document bindings?~~ — auto-struck: answered this cycle (#ftstrike)
 - [#xdocsuper0]

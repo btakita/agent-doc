@@ -205,7 +205,21 @@ Shipped the **typed watch-loop phase scheduler + circuit breaker** (corky `15cc3
 **Verification:** `make check` → **710 pass / 0 fail** (4 new watch tests: cadence, `every=0` clamp, backoff+recovery, cap). SPEC.md §9.2a added. `make build` + `make install` done.
 
 **Queue drained.** All four corky state machines shipped this run: `#ckypubsm` (social publish crash-safety), `#ckyemailsm` (email status enum), `#ckysyncsm` (sync run-state + durable marker), `#ckywatchsm` (watch phase + backoff). One follow-up remains in the backlog: `#ckysyncsm-resume` (wire the sync resume consumer).
-<!-- agent:boundary:275f7aff -->
+
+### Re: do [#ckysyncsm-resume] — opus-4-8
+
+> **Queue prompt:** do [#ckysyncsm-resume]
+
+Wired the **sync resume consumer** (corky `3536cb8`, pushed to `btakita/corky` main) — the follow-up to `#ckysyncsm`.
+
+**What changed**
+- At the start of `corky sync`, it loads the run-state log and computes `interrupted_accounts()` (accounts left `is_in_flight` by a crash). Each such account being synced is forced to a **full re-fetch** this run (`account_full = full || resuming`), so its in-flight window is re-verified/reconciled (idempotent by Message-ID) instead of a thin incremental from a possibly mid-write cursor. A successful run records `Complete`, clearing the marker.
+- **Latent bug fixed:** the `#ckysyncsm` transition table didn't allow `Start` from an in-flight phase, so `record(Start)` *silently failed* on an interrupted account (leaving it stuck `Fetching`). `Start` is now a valid resume edge from `Fetching`/`Merging`/`Writing`.
+
+**Verification:** `make check` → **711 pass / 0 fail** (+1 resume-edge test). SPEC.md §3.5 updated. `make build` + `make install` done.
+
+**Queue fully drained** — all four state machines plus the resume consumer are now shipped. No follow-ups remain.
+<!-- agent:boundary:0dfffd6f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -226,7 +240,6 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ckysyncsm-resume] [recommended] Wire the #ckysyncsm resume consumer: on corky sync / watch tick start, check run_state::interrupted_accounts() and reconcile/repair an interrupted account (re-verify last-written conversations, resume from phase) instead of a plain cursor re-fetch. Plan: tasks/software/corky-state-machines.md
 <!-- /agent:backlog -->
 
 ## Review

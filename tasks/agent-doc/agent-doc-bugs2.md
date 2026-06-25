@@ -255,7 +255,7 @@ Its only invariant is *"never commandeer another **document's** pane"* (SPEC §8
 **Fix (added as `#xdocsuper0`, plan updated):** before `AcceptStale` (and on the route reclaim path), check `supervisor_lease_is_fresh_or_alive` for the document — if a fresh lease is held by a live supervisor, `Reject` (or require `--force`) even when the prior pane/session looks stale. That closes the two-supervisors-one-document window at the source. Plan: `tasks/agent-doc/plan-cross-document-supervisor-contamination.md`.
 
 This is still a `[focused-cycle]` fix on `project_controller`/`route`/`claim` + SimWorld, and must not be implemented from this contaminated session — but you now have the precise answer: a present-but-unconsulted supervisor lease.
-<!-- agent:boundary:89352954 -->
+<!-- agent:boundary:9bf90dce -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -427,6 +427,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#xdocsuper0] [focused-cycle] Claim guard consults document supervisor lease: claim.rs::cross_session_decision AcceptStale auto-grants a cross-pane reclaim without checking supervisor_lease_is_fresh_or_alive — so a relaunched-pane supervisor claims a doc a live supervisor still holds. Make claim+route reclaim Reject (or require --force) when a fresh supervisor lease is held. Plan: tasks/agent-doc/plan-cross-document-supervisor-contamination.md
 - [ ] [#xdocsuper] [focused-cycle] Cross-document supervisor contamination: one route-owned supervisor (per pane) reused across documents (corky.md→agent-doc-bugs2.md) carries prior doc's stale in-memory CRDT/queue/lease into the new doc → the live_prompt_drift / postcommit-worktree / answered-head-residue churn. Add a document-switch state-reset guard + SimWorld. Plan: tasks/agent-doc/plan-cross-document-supervisor-contamination.md
 - [ ] [#n529b] #lazilystatesync3b Wire MirrorProjectionSummary into EditorCommandStateMachine / dispatch-ready / busy consumers (PromptPoller, RunAgentDocAttemptLedger) so they read StateProjectionBridge.mirrorSummaryForFile instead of the cold projectionSummaryForFile pull, then dogfood live in JB. Mirror substrate shipped in 0.2.190 (#n529). Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#gww8] #lazilyspecpin=Pin agent-doc state type_tag vocabulary (8 node kinds) + conformance snapshot/delta pair in lazily-spec as schemas/agent-doc-state.json (versioned) so kt/js/rs import one canonical vocabulary. Design pinned in tasks/agent-doc/plan-lazily-plugin-state-sync.md (Wire-shape definition section). Sibling-repo (src/lazily-spec) cycle per scope-discipline.

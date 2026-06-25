@@ -125,7 +125,7 @@ Done — step 4 (subject property + loan request) now always starts blank. Commi
 - `borrower-lead-to-tmo-flow.test.ts`: 6 pass / 0 fail; worker bundle builds clean.
 
 **Heads-up — `make check` is red from a separate, pre-existing cause (not this change).** 7 tests fail on `origin/main`, all from the operator commit `dfed93b` *"fix(admin): streamline document upload workflows"* (by Brian Dev), which refactored the admin/lender document-upload components but left their source-assertion tests behind (import shapes, CSS values, dropped fixtures, modal stacking). They live in a different subsystem and fail identically with my change stashed; my change is green in isolation. I did **not** guess-fix them — reconciling an active UI refactor's tests is outside this property-prefill directive and risks conflicting with your in-flight work. Tracked as backlog `#dfed93b-tests`. Note `dfed93b` is on origin but **not yet deployed** (the prior deploy shipped a pre-rebase tree). This turn's preset was `#spec-test-commit-push`, so I committed + pushed but did not deploy.
-<!-- agent:boundary:b57d0259 -->
+<!-- agent:boundary:3c508380 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -145,6 +145,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- 🚧 Borrower, Broker, Lender, Admin form errors should each have their own line...not "Missing required values: property type, A. Will you occupy the property as your primary residence?, B. Family or business relationship with the seller? (purchase), C. Borrowing undisclosed money for this transaction?, D1. Applying for another mortgage on/before closing (not disclosed)?, D2. Applying for new credit on/before closing (not disclosed)?, E. Will the property have a priority lien (e.g. PACE)?, F. Co-signer or guarantor on undisclosed debt?, G. Outstanding judgments against you?, H. Delinquent or in default on federal debt?, I. Party to a lawsuit with potential financial liability?, J. Conveyed title in lieu of foreclosure in the past 7 years?, K. Pre-foreclosure / short sale in the past 7 years?, L. Property foreclosed in the past 7 years?, M. Declared bankruptcy within the past 7 years?."
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

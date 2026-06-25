@@ -152,7 +152,7 @@ Done — the **Loan Terms** card now gets the same dense treatment as the Applic
 Verified: full suite **1228 pass / 0 fail**, `build` + `build:worker` clean. Committed `3c5db1c` and pushed `origin/main` (`1c4fb1c..3c5db1c`), per the `#spec-test-commit-push` queue preset.
 
 **Not deployed this batch.** The preset is test-commit-push (no deploy), and there's no unstruck `deploy` item — last cycle's `deploy.` (which shipped the Borrower Info + Application pass, Version `b9966711`) is struck. So this Loan Terms change is pushed but **not yet live**. Add `deploy` to the queue (or say the word) and I'll ship it.
-<!-- agent:boundary:d7ecd87a -->
+<!-- agent:boundary:017aa0aa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -173,7 +173,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=deal&dialog_deal_id=4d2b9382-06d5-498f-a306-64ea3e2870a7&deal_tab=loan: Borrower Info + Application + Loan Terms cards.~~
-- ~~Optimize the Loan Terms card as well.~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 ~~Optimize the Loan Terms card as well.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~deploy.~~
 <!-- /agent:queue -->
 

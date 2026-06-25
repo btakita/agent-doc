@@ -167,7 +167,19 @@ So an interrupted push never silently discards the previous contents. I chose sn
 - Commit `5e7ba56` — pushed.
 
 Next queue head: `#ckywatchpanic` (P1 watch daemon dies on tick panic).
-<!-- agent:boundary:3a7ae8c7 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/software/corky.md source=socket_ack_content patch_id=103180a9-f5fe-418e-9696-d4bad052c171 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=16016 candidate_hash=c028248700880b79c7d1886d7af3af2c2a0f5c2f039996534555ed6fd8c45e36 content_ours_len=15869 content_ours_hash=b9d785dddaf2f661963541f3163c9705f93d940ac0aaaf85c299c913c1ec9cd2 doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782350975165
+```
+<!-- agent:boundary:9fb03d5f -->
 <!-- /agent:exchange -->
 ###
 <!--

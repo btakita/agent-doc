@@ -176,7 +176,22 @@ Shipped the **typed email draft status enum** (corky `e6d8490`, pushed to `btaki
 **Verification:** `make check` → **700 pass / 0 fail** (4 new `EmailDraftStatus` unit tests; 237 corky-mail tests green). SPEC.md §6/§12 updated. `make build` + `make install` done.
 
 Next queue head: `do [#ckysyncsm]` (sync run-state machine, design-first).
-<!-- agent:boundary:5404bd08 -->
+
+### Re: do [#ckysyncsm] — opus-4-8
+
+> **Queue prompt:** do [#ckysyncsm]
+
+Shipped the **typed sync run-state machine + durable marker** (corky `97e762e`, pushed to `btakita/corky` main). This is the design-first P3 item, scoped to the typed machine + persisted resume marker (the resume *consumer* is filed as follow-up `#ckysyncsm-resume`).
+
+**What changed**
+- New `sync/run_state.rs`: `SyncRunState { Idle, Fetching, Merging, Writing, Done, Error }` with a `transition(SyncRunEvent)` table (`Start`/`Fetched`/`Merged`/`Complete`/`Fail`/`Reset`), `is_terminal()`, `is_in_flight()`, and `interrupted_accounts()`.
+- Persisted `.sync-run-state.json` sidecar (per-account `SyncRunRecord`) written through the same locked atomic store (`save_json_with_lock`) as `.sync-state.json` — the cursor data stays the source of truth for *what* was fetched; this records *where in a run* a crash happened.
+- `corky sync` records `Start` before each account and `Complete`/`Fail` after, so a crash leaves an `is_in_flight` marker for the next run to detect.
+
+**Verification:** `make check` → **706 pass / 0 fail** (6 new run_state tests: transition table, predicates, `apply_event` started-at carry-forward, interrupted list, serde roundtrip). SPEC.md §3.5 added. `make build` + `make install` done.
+
+Next queue head: `do [#ckywatchsm]` (watch phase enum + backoff — the last, polish item).
+<!-- agent:boundary:2d458448 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -189,14 +204,14 @@ Please give me a report the performance
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#ckypubsm]~~
 - 🚧 do [#ckyemailsm]
-- do [#ckysyncsm]
+- ~~do [#ckysyncsm]~~
 - do [#ckywatchsm]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ckysyncsm] P3 — Sync run-state machine (SyncRunState Idle/Fetching/Merging/Writing/Done/Error) persisted as sidecar so a crashed watch tick / corky sync refetch resumes instead of re-fetching; design-first. Plan: tasks/software/corky-state-machines.md
+- [ ] [#ckysyncsm-resume] [recommended] Wire the #ckysyncsm resume consumer: on corky sync / watch tick start, check run_state::interrupted_accounts() and reconcile/repair an interrupted account (re-verify last-written conversations, resume from phase) instead of a plain cursor re-fetch. Plan: tasks/software/corky-state-machines.md
 - [ ] [#ckywatchsm] P3 — Watch phase enum (WatchPhase)+typed tick schedule replacing loose cycles_since_* counters (watch.rs:320-325)+backoff/circuit-breaker for repeated phase failures (polish). Plan: tasks/software/corky-state-machines.md
 <!-- /agent:backlog -->
 

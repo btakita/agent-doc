@@ -59,7 +59,23 @@ Also: the first fix was **pushed but not deployed**, so production still had the
 **Deployed** (`make deploy`) — Worker version `f26311d4-513a-4c1c-8272-6887ab7fe90d`, smoke check **HTTP 200**. Ships live: the realtime fix (both sources), the post-apply Messages nudge, the deal-dialog first-action focus, and the Loan-Detail "Message borrower" button. `make check` → **1216 pass / 0 fail**.
 
 Both queue heads drained.
-<!-- agent:boundary:5e2d54d8 -->
+
+### Re: generalize dialog first-action focus — glm-5.2
+
+> **Queue prompt:** Opening .../admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-...&deal_tab=loan should focus on the first actionable item — the "Review Interested Lenders" button. How can we make this focus logic generalized so it works for all dialogs?
+
+**Root cause.** The focus logic was already shared — every pipeline/lender dialog routes through `use_dialog_action_navigation_` (`shared/ui.tsx`), which focuses the `[data-dialog-initial-focus="true"]` control, falling back to the first enabled button/link/field. But it ran that selection only in the first `requestAnimationFrame`. The deal dialog loads its deal + interest data **asynchronously** (`AdminDealDetail` fetches in `useEffect`), so the `#deal-advance-guidance` card — and its marked "Review Interested Lenders" button — mount *after* that first frame. Focus stayed on whatever fallback was picked first, and the hook's effect deps never re-fired, so it never upgraded to the marked target.
+
+**The fix — generalized in the shared hook, not deal-specific.** The hook now observes its nav root with a `MutationObserver` and **re-runs focus selection whenever a marked `data-dialog-initial-focus` target appears** (a childList add, or its attribute flipping on). So *any* dialog whose first-action control renders late — after a fetch, a tab reveal, etc. — still lands focus on it. The upgrade stops the instant the user interacts (`pointerdown` / `keydown`, capture + once), so async content **never steals focus back** from a descendant that already has it — preserving the existing "PortalModal must not steal focus back" rule. `ArrowUp`/`ArrowDown` nav also settles it.
+
+Net effect: the deal's existing priority logic (Approve accreditation → Move to Loan Estimate → Review Interested Lenders) now actually wins focus once the guidance card mounts, and every other dialog gets the same late-focus behavior for free.
+
+**Verification.** `make check` → **1217 pass / 0 fail**; worker build OK. New `#dialog-async-initial-focus` test covers the MutationObserver upgrade + settle guard; PRD `#67v2` documents the async generalization.
+
+**Shipped:** committed `f8b111d` + pushed to `equityfundingsource-dev` main (spec + tests + code, per `#spec-test-commit-push`).
+
+**Next queue head:** `deploy` — say the word and I'll run `make deploy` (it builds, applies pending D1 migrations, and deploys the Worker).
+<!-- agent:boundary:7fbcaf48 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -73,7 +73,7 @@ Everything downstream is unchanged regardless of mechanism: derived cells are st
 - `#lazilycrdtspec` backlog item re-scoped to the pluggable-mechanism framing.
 
 `#lazilycrdtspec` stays `[focused-cycle]` (sibling-repo `src/lazily-spec`) — the actual spec authoring drains in its own fresh-context cycle with this framing baked in.
-<!-- agent:boundary:d6112642 -->
+<!-- agent:boundary:db1d2ca4 -->
 <!-- /agent:exchange -->
 
 ## Queue

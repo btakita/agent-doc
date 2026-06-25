@@ -277,7 +277,25 @@ The design is already settled across this session (tree algorithm → large stru
 **Top of backlog: `#lzordtree`** (Phase 1 — ordered keyed tree primitive).
 
 All six are `[recommended]` and depend on the operator-go keystone `#lzcellmove`; the queue stays operator-paused, so nothing here auto-drains — say go on `#lzcellmove` + `#lzordtree` to start the substrate.
-<!-- agent:boundary:7a5d7f0d -->
+
+### Re: do [#lzordtree] — ordered keyed tree + atomic move — opus-4-8
+
+Implemented Phase 1 **`#lzordtree`** and, because it is the hard dependency, the keystone **`#lzcellmove`** in the same cycle (lazily-rs `4d246d4`, lazily-spec `04c59a2`, superproject `28b5a5940`, all pushed).
+
+**`#lzcellmove` — atomic ordered move on `CellMap`.** Split the single membership version into two independent signals: a **set-membership** signal (add/remove) and an **order** signal (add/remove + move). `len()`/`contains_key()`/`is_empty()` subscribe to set-membership; `keys()` subscribes to order. New `move_to(key,index)` / `move_before(key,anchor)` / `move_after(key,anchor)` reorder a key **in place** — same value cell (handle identity), same dependents, same lineage, one order bump — vs the naive remove+entry that re-mints the cell and double-bumps. So a **pure reorder invalidates only `keys()` readers**, leaving `len`/`contains` readers cached. Clamps to `[0,len)`; no-op when position is unchanged.
+
+**`#lzordtree` — `CellTree<Id, V>` ordered keyed tree.** New `src/cell_tree.rs`, exported from the crate root. Each node is `(stable id, value cell, ordered children)`:
+- **Per-node value isolation** — editing node `X` invalidates only readers of `X`, never a sibling/descendant (verified by test).
+- **Per-level membership/order reactivity** — a child change under one node does **not** invalidate a *sibling subtree's* or the *parent level's* child readers (verified). `child_ids()`/`children()` track order; `len()`/`contains_child()` track set membership.
+- **Atomic child move** — `move_child*` inherit the `#lzcellmove` guarantee: the moved child keeps its node identity **and its whole subtree**, and a pure reorder spares `len()` readers (verified).
+- **Structural sharing** — `Rc`-backed, cheap `Clone`; the same subtree node can be held in multiple places. `resolve_path(&[id])` walks segments.
+
+This is the document tree shape agent-doc components→items map onto, and the substrate the next phase (`#lzkeyrecon`, keyed reconciliation + LIS move-min) emits ops against.
+
+**Verification:** `cargo fmt` clean; `clippy --all-targets --all-features -D warnings` clean; **202** default / **411** all-features tests pass (11 new: 4 `#lzcellmove` move/identity/no-op/anchor, 6 `CellTree`, 1 doctest); `cargo build --release` clean. SPEC.md + lazily-spec `cell-model.md` gained atomic-move + ordered-keyed-tree conformance. CI run `28206351889` is freshly queued post-push (not yet started) — reporting from local evidence per the test-bearing-turn rule.
+
+**Closeout:** `#lzordtree` → done; `#lzcellmove` removed from review (implemented as its keystone — git `4d246d4` is the record). Queue continues to `do [#lzkeyrecon]`.
+<!-- agent:boundary:723a3a25 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -286,8 +304,7 @@ All six are `[recommended]` and depend on the operator-go keystone `#lzcellmove`
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~What are #next-steps for lazily-rs to support agent-doc reactive documents?~~
-- go [#lzordtree] [#lzkeyrecon] [#lzseqcrdt] [#lzstableid] [#lzsemtree] [#lztextcrdt]
+- 🚧 do [#lzordtree]
 - do [#lzkeyrecon]
 - do [#lzseqcrdt]
 - do [#lzstableid]
@@ -298,7 +315,6 @@ All six are `[recommended]` and depend on the operator-go keystone `#lzcellmove`
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzordtree] [recommended] Phase 1 — ordered keyed tree primitive (CellTree / ordered-children node) on top of CellList/#lzcellmove: (kind, stable_id, value_cell, ordered children) with Rc structural sharing; per-node value isolation + per-level membership reactivity. The document tree shape agent-doc components+items map onto. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 1). Depends on #lzcellmove.
 - [ ] [#lzkeyrecon] [recommended] Phase 2 — keyed reconciliation with LIS move-minimization: diff each tree level by stable id, emit minimal {insert,remove,move,update} op set (longest-increasing-subsequence over matched keys). THE per-cell-CRDT-merge enabler (minimal per-item ops vs whole-subtree replace). Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 2). Depends on #lzordtree.
 - [ ] [#lzseqcrdt] [recommended] Phase 3 — move-aware sequence CRDT for sibling order under concurrency: fractional indexing or RGA/Fugue, move-aware (one move op, not delete+reinsert that duplicates on merge). Sits above per-cell value merge in crdt.rs. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 3). Pairs with #lzcrdtplane multi-writer boundary.
 - [ ] [#lzstableid] [recommended] Phase 4 — manufactured identity for markdown text: honor in-band anchors/item-ids (agent-doc has these) + content-derived block-hash keys (survive reflow/reorder) + alignment diff (Myers/patience/histogram) for edit-vs-move detection on free prose. Gives reconciliation keys to match on. Plan: tasks/software/plan-lazily-agent-doc-reactive-substrate.md (Phase 4).
@@ -309,7 +325,6 @@ All six are `[recommended]` and depend on the operator-go keystone `#lzcellmove`
 ## Review
 
 <!-- agent:review -->
-- [/] [#lzcellmove] [recommended] [operator-go] CellMap/CellFamily atomic + optimized move/reorder: reorder a key in place (same entry cell + dependents, single membership bump) vs naive remove+insert. Likely CellList<V> or CellMap::move_to(key,index). Insert/delete already atomic; ordered MOVE is the gap. Surfaced by the move-atomicity question — awaiting operator go to implement.
 - [/] [#lzwirekey] [recommended] [operator-go] Wire-stable keyed addressing for collection entries: add optional key/path field to NodeAdd + NodeSnapshot (key->NodeId registry) so CellFamily/CellMap entries survive NodeId churn. Depends on #lzcellfamily (DONE). PLAN COMPLETE: tasks/software/plan-lazily-wire-keyed-addressing.md — implementation gated on operator go (you scoped this plan-only).
 - [/] [#lzcrdtplane] [recommended] Implement the distributed CRDT cell plane (spec §Distributed). Decision: purpose-built HLC + LWW/MV/PN registers (matches lazily's lazy reactive graph + memo-equality invariants); do NOT adopt YRS/YJS document model (wrong replication unit). Keep IPC Snapshot/Delta as the single-producer mirror; CRDT merge lives only at the multi-writer distributed boundary. Optional later: borrow YRS binary anti-entropy sync engine as transport. Plan first: tasks/software/plan-lazily-distributed-crdt-plane.md.
 - [/] [#lilazilysmpost] [/] [operator-drive] lazily state-machine LinkedIn post PUBLISHED WITH IMAGE: https://www.linkedin.com/feed/update/urn:li:share:7475622100263923712 (mail/social/20260624-142530-linkedin.md @ mail bf4ab26). CyclePhase diagram rendered from blog post SVG (light theme colors) + uploaded via LinkedIn digitalmediaAsset API. Old text-only post (urn:li:share:7475617202893639680) deleted + replaced. Remaining operator follow-up: post first comment (link + GitHub source) via corky linkedin comment.

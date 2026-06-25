@@ -244,7 +244,7 @@ Fixed and shipped the two concrete reply-threading bugs (corky `6894c88` on `ori
 - Commit `6894c88` — pushed.
 
 Next queue head: `#ckytok401`.
-<!-- agent:boundary:123ddbe8 -->
+<!-- agent:boundary:5dc9a8dd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -261,7 +261,7 @@ Please give me a report the performance
 - ~~[#ckywatchpanic]~~
 - ~~[#ckydedup]~~
 - ~~[#ckythread]~~
-- [#ckytok401]
+- 🚧 [#ckytok401]
 - [#ckypeoplesync]
 - [#ckyconfigunwrap]
 - [#ckyatomicwrite]

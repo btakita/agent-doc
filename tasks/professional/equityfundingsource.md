@@ -153,7 +153,7 @@ Shipped — each missing/invalid field now renders on its own `• <field>` line
 - `tests/apply4-validation-errors-per-line.test.ts`: 4 source-assertion tests (all pass).
 
 Verification: 4 new tests pass; app build + worker build green. `make check`'s 7 failures are the pre-existing `dfed93b` admin/lender document-upload refactor (different subsystem, fail identically on origin/main). Not deployed — `deploy` stays queued (preset was #spec-test-commit-push).
-<!-- agent:boundary:aaab040b -->
+<!-- agent:boundary:96614bb4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -174,7 +174,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~Borrower, Broker, Lender, Admin form errors should each have their own line...not "Missing required values: property type, A. Will you occupy the property as your primary residence?, B. Family or business relationship with the seller? (purchase), C. Borrowing undisclosed money for this transaction?, D1. Applying for another mortgage on/before closing (not disclosed)?, D2. Applying for new credit on/before closing (not disclosed)?, E. Will the property have a priority lien (e.g. PACE)?, F. Co-signer or guarantor on undisclosed debt?, G. Outstanding judgments against you?, H. Delinquent or in default on federal debt?, I. Party to a lawsuit with potential financial liability?, J. Conveyed title in lieu of foreclosure in the past 7 years?, K. Pre-foreclosure / short sale in the past 7 years?, L. Property foreclosed in the past 7 years?, M. Declared bankruptcy within the past 7 years?."~~
-- deploy
+- 🚧 deploy
 <!-- /agent:queue -->
 
 ## Backlog

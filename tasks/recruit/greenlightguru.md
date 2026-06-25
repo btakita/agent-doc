@@ -2,6 +2,7 @@
 agent_doc_session: 64316602-b77c-48ce-b990-92fc72425f26
 agent_doc_format: template
 agent_doc_write: crdt
+queue: stop
 ---
 
 ## Status
@@ -73,13 +74,12 @@ Greenlight Guru's value proposition sits at the intersection of **regulated-indu
 - Likely headcount discipline + ROI focus; strong individual contributors who don't need large teams tend to do well in this environment
 
 **Summary:** The highest-leverage profile combines regulated-industry fluency (medtech or adjacent: pharma, diagnostics, IVD) with modern SaaS skills (product, engineering, or go-to-market). Pure-tech generalists without QMS/regulatory context face a steep onboarding curve; pure-domain experts without product/software comfort will struggle on the execution side.
-<!-- agent:boundary:cc2bce04 -->
+<!-- agent:boundary:38aa61c6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
-- Tell me more about what is needed to contribute value to this company.
 <!-- /agent:queue -->
 
 ## Backlog

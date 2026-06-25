@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -40,6 +40,11 @@ Compacted content:
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
 ### Re: Can we remove the dead tables? — opus-4-8
+
+> **Queue prompt:**
+>
+> Can we remove the dead tables?
+
 
 Yes — I found **6 dead tables** in prod D1, all safe to drop. I cross-referenced the live prod schema (85 tables) against migrations and current source.
 
@@ -66,7 +71,7 @@ cd src/equityfundingsource-dev/app/equityfundingsource
 bun ./bin/cf-wrangler.ts d1 migrations apply equityfundingsource --remote -c ../../wrangler.toml
 ```
 Queued as an `[operator-verify]` backlog item.
-<!-- agent:boundary:1e90b2f1 -->
+<!-- agent:boundary:8fb43669 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -86,7 +91,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 Can we remove the dead tables?
 <!-- /agent:queue -->
 
 ## Backlog

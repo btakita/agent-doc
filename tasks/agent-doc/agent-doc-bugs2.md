@@ -147,45 +147,15 @@ This is tracked as **#actorswitchdefer** with a full root-cause in `tasks/agent-
 5. **#lazilystatesync5** — parity + tests (lazily-spec conformance + FFI round-trip proving kt/js mirror converges to the rs authoritative graph).
 
 **Top of backlog:** `#lazilystatesync1`. Note the `lazily-*` sibling repos stay confirmed/queued for their own sessions per scope-discipline — steps 1–2 anchor in this repo's FFI + lazily-spec/rs, 3–4 in the editor plugins. Each step is its own focused cycle.
-<!-- agent:boundary:3e66ecf6 -->
+<!-- agent:boundary:c72bc4ed -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~What are #next-steps to use lazily-ky and lazily-js to sync the plugin state machines and state graphs from the FFI plugin?~~
-- [#gghx]
-- [#8g9w]
-- [#6mjw]
-- [#spy9]
-- [#actorswitchdefer]
-- [#56ta]
-  [#vm7g]
-  [#n529]
-  [#r5at]
-  [#6n5j]
-- I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?
-- I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?
 ---
-:round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
-```
-resync: pruned 2 stale session(s)
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 
-Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
----
-- Still getting JB `File Cache Conflict` dialogs.
-- Opencode responses are reverse ordering numeric lists.
----
-:round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
+🚧 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
 resync: pruned 2 stale session(s)
 [route] target tmux session: 0
@@ -217,7 +187,23 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 ```
 ---
 ---
-equityfundingsource.md turn has an IPC issue:
+:round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
+```
+resync: pruned 2 stale session(s)
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 
+Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+---
+---
+:round_pushpin: equityfundingsource.md turn has an IPC issue:
 `### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc`
 
 ```text
@@ -231,7 +217,7 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/profession
 ```
 ---
 ---
-lazily-rs.md IPC error
+:round_pushpin: lazily-rs.md IPC error
 ```text
 **IPC proof issue dogfood log**
 Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
@@ -242,11 +228,25 @@ Affected component: editor IPC / writeback
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8c56928442bd4b165543ab0aad264d681b41b8898551d10f196018cd15a37304 content_len=11944 content_hash=46b47fdfe5505fb37c9e63df4167cb923df6b4ffc997ecca9009a15979c29a5e doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782339826601
 ```
 ---
+- ~~:round_pushpin: do [#rt83qflood]~~
+- [#vm7g]
+- [#n529]
+- [#r5at]
+- [#6n5j]
+- I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?
+- I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?
+- [#gghx]
+- Still getting JB `File Cache Conflict` dialogs.
+- Opencode responses are reverse ordering numeric lists.
+- [#8g9w]
+- [#6mjw]
+- [#spy9]
+- [#actorswitchdefer]
+- [#56ta]
 - do [#npe1]
 - do [#p2j4]
 - do [#4pdp]
 - do [#0bmv]
-- do [#actorswitchdefer]
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
@@ -279,17 +279,13 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
+- do [#actorswitchdefer]
 - do [#capproofbg]
-- do [#rt83qflood]
 - do [#nsfz]
 - do [#gghx]
 - do [#8g9w]
 - do [#6mjw]
 - do [#spy9]
-- do [#vm7g]
-- do [#n529]
-- do [#r5at]
-- do [#6n5j]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

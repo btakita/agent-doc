@@ -123,7 +123,39 @@ The genuine gaps for a *keyed dynamic collection*:
 2. **Sub-path addressing for nested collections** falls out of (1) once entries carry keys/paths — no new transport machinery, just the key table.
 
 **Net across all three:** the dynamic-shape graph and per-node delta addressing are already designed and shipped. To turn that into ergonomic "dynamic cell collections with KV lookup," the two additions are (a) a `CellFamily`/`CellMap` core primitive, and (b) an optional `key`/path field on `NodeAdd`/`NodeSnapshot`. Filed as `[recommended]` backlog items (plan-first, not implemented this cycle — design recommendations awaiting your go).
-<!-- agent:boundary:5e464101 -->
+
+### Re: >1M cells and backing a modern spreadsheet — opus-4-8
+
+> **Queue prompt:**
+>
+> Can lazily realistically support >1000000 cells. Can lazily be used to back a modern performant spreadsheet application?
+
+**Yes on capacity; qualified yes on "modern performant spreadsheet" — with three concrete gaps to close.** lazily is actually closer to a spreadsheet recalc engine than most reactive libraries, because its propagation is lazy, memoized, and glitch-free. But the published evidence stops well short of 1M, and a real spreadsheet needs a few things lazily does not have yet.
+
+#### 1M cells — architecturally sound, empirically unproven
+
+- **Storage is a dense arena.** `ContextInner.nodes: Vec<Option<Node>>` indexed by `SlotId(u64)`, with a `free_ids` free-list. Access/mutation by id is O(1) and cache-friendly, and allocation is *sparse* — only cells you actually create exist. A "1M-cell" sheet (1000×1000) is usually tens of thousands populated; lazily only pays for those.
+- **Memory is the real bound.** Each `Node` carries a value `Rc<dyn Any>`, an enum tag, and a `dependents: SmallVec<[SlotId; 4]>` (4 inline, heap beyond). Order-of-magnitude ~100–150 B/node plus heap for values and wide dependent lists → roughly ~100–300 MB for 1M *populated* formula cells. Feasible on a desktop; not free.
+- **The honest gap: no large-scale benchmark.** The suite tops out at fan-out 512 (`FAN_OUT_WIDTHS = [32, 256]`, `SET_CELL_INVALIDATION_FAN_OUT = 512`) and is otherwise contention micro-benchmarks. There is **no 1M-node (or even 100k) benchmark**. So capacity is sound by construction, but "performant at 1M" is currently an assumption, not measured.
+
+#### Spreadsheet fit — lazily *is* a recalc engine
+
+A spreadsheet is input cells (`Cell`) + formula cells (`computed`/`signal`, memoized slots). lazily maps 1:1 and brings properties a hand-rolled recalc loop usually lacks:
+
+- **Fine-grained dependency tracking** — only cells downstream of an edit are dirtied; `PartialEq`/memo-equality suppression stops propagation the moment a formula's result is unchanged.
+- **Lazy pull-based recompute** — off-screen formulas stay dirty until read. For a viewport-rendered sheet this is ideal: scroll into a region and only those cells compute.
+- **Glitch-free diamonds** — SPEC guarantees `D = f(A, g(A))` never observes a mixed new-`A`/old-`g(A)` intermediate, and the coalesced frontier marks each dependent once per batch even through duplicate diamond paths. That is exactly the consistency a recalc engine must provide.
+
+#### Three gaps before it's a *modern performant* spreadsheet backend
+
+1. **No circular-reference detection.** I found no cycle/circular guard in `src/`. A dependency cycle (`A = B + 1`, `B = A + 1`) would recompute infinitely / overflow the stack. Spreadsheets must detect cycles and surface `#CIRCULAR!`. This is a required addition to the dependency walk. → filed `#lzcycledetect`.
+2. **A1-style keyed addressing.** Cells are addressed by opaque `SlotId`/`NodeId`, but a sheet addresses by name (`A1`, `B2`, named ranges). This is the same keyed-collection need from last cycle — `#lzcellfamily` (CellFamily/CellMap) + `#lzwirekey` (key→NodeId on the wire). The spreadsheet use case is the strongest motivation for that work.
+3. **Single-threaded recalc ceiling.** One `Context` is `Rc`/`RefCell` (not `Send`/`Sync`); `thread_safe`/`async_context` exist but carry contention cost (`same_slot_write_read` at 16 workers ≈ 6 ms). A full 1M-cell recalc won't parallelize on a single `Context`. UI-thread-owned sheets are fine; server-side bulk recompute would need sharding or measured `thread_safe` use.
+
+Plus the measurement gap above: a **≥1M-node benchmark** (realistic fan-out/depth, full + viewport recalc) so the scale claim is evidence-backed. → filed `#lzscalebench`.
+
+**Bottom line:** capacity and core recalc semantics are genuinely there, and the lazy + glitch-free + memoized model is a strong fit — better than most reactive libs for this. To call it a production spreadsheet backend you need (1) cycle detection, (2) keyed A1 addressing (already filed), and (3) a 1M-scale benchmark plus a parallel-recalc story. New follow-ups are filed gated (`[recommended]`, awaiting your go).
+<!-- agent:boundary:0f401503 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -133,9 +165,10 @@ The genuine gaps for a *keyed dynamic collection*:
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~Can lazily support dynamic collections of cells and a KV lookup for cells? Can the agent-doc document structure be represented as dynamically created cells?~~
-- ~~What would be a good name for what I call dynamic cells? Dynamic cell doesn't seem like it's the best term.~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 ~~What would be a good name for what I call dynamic cells? Dynamic cell doesn't seem like it's the best term.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~Can there be efficient addressing for dynamic cell structures for the message channels...rather than sending the entire cell structure over the wire when a change is made to a single dynamic child cell?~~ — auto-struck: answered this cycle (#ftstrike)
-- Can lazily realistically support >1000000 cells. Can lazily be used to back a modern spreadsheet application?
+- ~~Can lazily realistically support >1000000 cells. Can lazily be used to back a modern performant spreadsheet application?~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~What would be a good name for what I call dynamic cells? Dynamic cell doesn't seem like it's the best term.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

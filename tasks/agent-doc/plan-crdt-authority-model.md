@@ -204,9 +204,22 @@ engines.**
 - **Local / direct cells** — exactly one writer (this runtime's derivation graph,
   or a single owner with a one-way delta mirror like today's `#lazilystatesync`
   Rust→Kotlin projection). Propagation is direct reactive push/pull. No merge.
-- **Replicated / CRDT cells** — potentially many concurrent writers across
-  replicas. New values arrive via CRDT merge of remote ops; the merge result is
-  fed into the graph as an ordinary cell update.
+- **Multi-write cells** — potentially many concurrent writers across replicas.
+  New values arrive by **merging remote ops through a pluggable merge mechanism**;
+  the merge result is fed into the graph as an ordinary cell update.
+
+**CRDT is the *first* multi-write merge mechanism, not the only one (operator
+refinement 2026-06-25).** The distinguishing cell axis is single-writer vs
+multi-writer; *how* a multi-write cell converges is a parameter of the cell, not
+baked into the kind. CRDT (yrs) is the first mechanism the spec defines — chosen
+because it converges without coordination — but the cell kind must keep the merge
+strategy open so later mechanisms can slot in alongside it: last-writer-wins
+(timestamp/lamport), operational transform, lease/lock-serialized single-live-writer,
+or an application-supplied deterministic merge function. The spec therefore models a
+`multi-write` cell category with a `merge: <mechanism>` attribute (`crdt` first),
+**not** a hardcoded `crdt` cell kind. Downstream reactive propagation and the
+cell-as-merge-unit boundary are identical regardless of which mechanism a given
+multi-write cell selects.
 
 Crucially, **downstream reactive propagation is always the same direct mechanism.**
 CRDT is an *ingress merge* on replicated **root** cells only — not a parallel

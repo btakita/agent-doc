@@ -349,7 +349,7 @@ I did **not** blindly run `make benchmark-update`: the archived `#lzbenchbudget`
 
 **Top backlog id: `#lzbenchstale`.**
 
-### Re: do #lzbenchstale — benchmark-check RED root cause + fix — glm-5.2
+### Re: do #lzbenchstale — benchmark-check RED root cause + fix — glm-5.2 (HEAD)
 
 > **Queue prompt:**
 >
@@ -368,6 +368,18 @@ Drained `#lzbenchstale`. **`make benchmark-check` is green again.** Root cause w
 **Shipped** — lazily-rs `26be677` (pushed to `lazily-hub/lazily-rs`, `c3426a8..26be677`); superproject gitlink bumped + pushed (`ae5458eab..f85c838ec`). Only `BENCHMARKS.md` committed — the dirty `AGENTS.md`/`CLAUDE.md` are unrelated tsift code-nav v0.1.70→v0.1.73 drift, left unstaged.
 
 **#next-steps status** — the agent-drainable bug backlog is now empty. `#lzbenchstale` was the last open code item; it was the top-of-backlog and is now done. Remaining work is all operator-gated: `#h6qb` (WebRTC live two-host e2e), `#xccx` (Holons integration, blocked on Steve), `#kabc`/`#lilazilysmpost` (LinkedIn follow-up comments), and the lazily-js npm publish (needs npm 2FA). No agent-drainable `#next-steps` remain.
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=socket_ack_content patch_id=e53afaeb-c9b3-42a3-8bda-6eaaafa04d51 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=36184 candidate_hash=b6e234070283d79a568251fd180560ef4dc4242e351a2e27d32971ca3141d90c content_ours_len=36207 content_ours_hash=9d93933a97b4ec9bdf4d62a5d49706f74e022992fa29cadf10e9dbf78607f999 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782360628042
+```
 <!-- agent:boundary:c6f77e2d -->
 <!-- /agent:exchange -->
 ###
@@ -377,7 +389,6 @@ Drained `#lzbenchstale`. **`make benchmark-check` is green again.** Root cause w
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- 🚧 [#lzbenchstale]
 - ~~What are #next-steps to fix lazily bugs?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 

@@ -395,6 +395,21 @@ interface AgentDocLib : Library {
     fun agent_doc_state_projection(documentHash: String): Pointer?
 
     /**
+     * Subscribe to lazily-spec snapshot/delta messages for a document
+     * (`#lazilystatesync2` / `#lazilystatesync3`).
+     *
+     * - `lastEpoch == 0` → cold read returning a full
+     *   `{"type":"snapshot",...}` graph image.
+     * - `0 < lastEpoch < current` → warm `{"type":"delta",...}` the caller
+     *   applies verbatim to converge.
+     * - `lastEpoch >= current` → no-op delta (caller is current).
+     *
+     * Returns a NUL-terminated JSON string (or `"null"` on failure). Caller
+     * must free the returned pointer with [agent_doc_free_string].
+     */
+    fun agent_doc_state_subscribe(documentHash: String, lastEpoch: Long): Pointer?
+
+    /**
      * Record a typed state-backbone event. Returns 1 on success, 0 on any error.
      */
     fun agent_doc_record_state_event(documentHash: String, eventJson: String): Int

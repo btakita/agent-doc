@@ -21,6 +21,8 @@ import java.util.concurrent.atomic.AtomicLong
 object StateProjectionBridge {
     private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(StateProjectionBridge::class.java)
     private val generations = ConcurrentHashMap<String, AtomicLong>()
+    /** Per-document reactive mirror (`#lazilystatesync3`), advanced by [subscribeMirrorForFile]. */
+    private val mirrors = ConcurrentHashMap<String, StateGraphMirror>()
 
     data class ProjectionSummary(
         val routeReadiness: String?,
@@ -84,6 +86,61 @@ object StateProjectionBridge {
         )
     } catch (e: Exception) {
         LOG.debug("[state-projection] projection summary parse failed: ${e.message}")
+        null
+    }
+
+    /**
+     * Subscribe the per-document [StateGraphMirror] to lazily-spec snapshot/delta
+     * messages from `agent_doc_state_subscribe` (`#lazilystatesync3`).
+     *
+     * First call requests a cold snapshot (the mirror is uninitialized);
+     * subsequent calls request a delta since the mirror's current epoch. The
+     * mirror converges identically to a full re-render because the projection is
+     * a pure fold of deduped events. Returns the applied message type
+     * (`"snapshot"`/`"delta"`) or null when FFI is unavailable / no state yet.
+     */
+    fun subscribeMirrorForFile(filePath: String): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val docHash = documentHash(filePath)
+        val mirror = mirrors.computeIfAbsent(docHash) { StateGraphMirror() }
+        val lastEpoch = if (mirror.isInitialized) mirror.epoch else 0L
+        val ptr = try {
+            lib.agent_doc_state_subscribe(docHash, lastEpoch)
+        } catch (e: Throwable) {
+            LOG.debug("[state-projection] subscribe unavailable: ${e.message}")
+            return null
+        }
+        val raw = try {
+            ptr?.getString(0)
+        } finally {
+            lib.agent_doc_free_string(ptr)
+        }
+        if (raw == null || raw == "null" || raw.isEmpty()) return null
+        return if (mirror.applyMessage(raw)) {
+            messageKind(raw)
+        } else {
+            null
+        }
+    }
+
+    /**
+     * Reactive summary derived from the per-document [StateGraphMirror]'s
+     * tracked cells (`#lazilystatesync3`). Call after [subscribeMirrorForFile].
+     * Returns null when the mirror has not been initialized yet.
+     */
+    fun mirrorSummaryForFile(filePath: String): MirrorProjectionSummary? {
+        val mirror = mirrors[documentHash(filePath)] ?: return null
+        if (!mirror.isInitialized) return null
+        return MirrorProjectionSummary.fromMirror(mirror)
+    }
+
+    /** The current mirror epoch for [filePath], or null if never initialized. */
+    fun mirrorEpochForFile(filePath: String): Long? =
+        mirrors[documentHash(filePath)]?.takeIf { it.isInitialized }?.epoch
+
+    private fun messageKind(raw: String): String? = try {
+        JsonParser.parseString(raw).takeIf { it.isJsonObject }?.asJsonObject?.get("type")?.asString
+    } catch (_: Exception) {
         null
     }
 

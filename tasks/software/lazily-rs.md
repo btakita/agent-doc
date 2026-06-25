@@ -153,7 +153,32 @@ So lazily comfortably backs a **full-capacity Google Sheets workbook**: sub-seco
 **Excel (17.18B grid) — sparse, not dense.** 17.18B is grid *capacity*, not populated cells. Building it densely would need ~7 TB at ~216 B/node — infeasible and unrepresentative. lazily's storage is a **sparse arena** (`Vec<Option<Node>>` + free-list) that only allocates cells you create, so the real limit is *populated* cells vs RAM (~216 B/node), not the grid. With the flat per-cell cost (the `scale` group held ~constant per-cell from 1M→10M), capacity ≈ available RAM ÷ ~216 B — this host could hold ~10⁸–10⁹ populated cells, far beyond any realistically-populated Excel sheet.
 
 Net: lazily handles Google Sheets' entire 10M-cell capacity with measured numbers, and Excel's grid is a non-issue because only populated cells cost anything. The default `scale` group (N=1M) stays in `make benchmark-check`; the 10M Sheets run is reproducible via `LAZILY_SCALE_N=5000000`.
-<!-- agent:boundary:e2336259 -->
+
+### Re: Cell Family support + release + insert/delete/move semantics — opus-4-8
+
+> **Queue prompt:** Are we currently support Hash + Collection Cell Families? If yes, update lazily-spec and release + publish lazily-rs.
+
+**Yes** — Hash + Collection Cell Families are supported: `CellMap<K,V>` (hash KV collection, fine-grained per-entry cells + reactive membership) and `CellFamily<K,V>` (atomFamily-style factory), in `src/cell_family.rs`, 5 tests green. So the "if yes" branch is done:
+
+- **lazily-spec updated** — `cell-model.md` gains a "Keyed cell collections" conformance section (composition of cells, value/membership reactivity independent); lazily-rs `SPEC.md` gains a "Keyed cell collections (`CellFamily`/`CellMap`)" section. Both pushed.
+- **Released + published lazily-rs 0.13.0** (semver minor for the new public API): published to **crates.io** (https://crates.io/crates/lazily/0.13.0), tag `v0.13.0` pushed, **GitHub release** created (https://github.com/lazily-hub/lazily-rs/releases/tag/v0.13.0). Dry-run validated, 191 tests + clippy `--all-features -D warnings` + benchmark-check all green before publish.
+
+### Re: Insertions, deletions, and atomic move — opus-4-8
+
+> **Queue prompt:** Do Cell Families handle insertions and deletions? Is move atomic and optimized? Can position changes be atomic as well?
+
+- **Insertions — yes, atomic.** `entry`/`entry_with`/`set` mint-and-cache a new entry cell and bump the membership version **once**. Re-inserting an existing key returns the *same* cell (handle identity preserved).
+- **Deletions — yes, atomic.** `remove` drops the entry, clears the removed cell's dependents, and bumps membership **once**. (The underlying `SlotId` isn't recycled yet — no node-free API — but the cell stops driving dependents.)
+- **Move / position change — NOT yet a first-class op, and this is the one real gap.** `CellMap` is hash-keyed with insertion-order tracking but exposes **no reorder API**. You *can* emulate a move via `remove` + `entry`, but that is **2 membership bumps and re-mints the cell** (losing its `SlotId`/dependents) — neither atomic nor optimized. An **atomic + optimized** move would reorder the key in place (same entry cell, dependents intact) with a **single** membership bump — a `CellList<V>` ordered variant or `CellMap::move_to(key, index)`. Filed as **`#lzcellmove`**.
+
+So: insert/delete are atomic today; atomic ordered *move* is the gap, now backlogged.
+
+### Re: README Sheets benchmark + "2 cells per formula" — opus-4-8
+
+> **Queue prompt:** Add Google Sheets cell count benchmark to README. Why are there 2 cells per formula?
+
+Added the Google Sheets scale to the README Benchmarks section: at the full **10,000,000-cell** Sheets cap, lazily builds in ~0.7 s, cold-recomputes in ~0.5 s, viewport edit ~11 µs (with the Excel 17.18B-grid sparse-model note). On **"2 cells per formula"** — it's actually **2 cells per row**, not per formula: the bench models a column `=A_i + A_{i-1}`, so each row is **one input cell `A_i` + one formula cell** ⇒ `N` rows = `2N` cells, matching how a real sheet mixes value and formula cells. Each formula *depends on* 2 inputs but is itself a single cell. So "10M cells" = 5M inputs + 5M formulas. Clarified inline in the README.
+<!-- agent:boundary:63195f23 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -165,8 +190,8 @@ Net: lazily handles Google Sheets' entire 10M-cell capacity with measured number
 - ~~Update the README with the benchmark table with my machine specs. Mention the lazy reactive win with viewport_recalc.~~
 - ~~How many cells does Google Sheets & MS Excel support? Add benchmarks for those numbers.~~
 - 🚧 Are we currently support Hash + Collection Cell Famlies? If yes, update lazily-spec and release + publish lazily-rs.
-- Do Cell Families handle insertions and deletions? Is move atomic and optimized? Can position changes be atomic as well?
-- Add Google Sheets cell count benchmark to README. Why are there 2 cells per formula?
+- ~~Do Cell Families handle insertions and deletions? Is move atomic and optimized? Can position changes be atomic as well?~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Add Google Sheets cell count benchmark to README. Why are there 2 cells per formula?~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#lzcellmove]
 <!-- /agent:queue -->
 

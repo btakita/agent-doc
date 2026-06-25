@@ -1273,6 +1273,16 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             file.display()
         );
     }
+    // `#qftloss` mode-6: also journal any operator queue prompt that lives only in
+    // the live editor buffer (reported to `.agent-doc/live-buffer/<hash>` but not
+    // yet on disk), so a pre-observation operator add is crash-durable from this
+    // cycle on — before any convergence/normalization branch below can erase it.
+    if let Err(err) = crate::queue_journal::record_live_buffer(file) {
+        eprintln!(
+            "[agent-doc] queue_journal: early live-buffer record failed for {} ({err:#})",
+            file.display()
+        );
+    }
 
     let raw_queue_tag = &current_content[comp.open_start..comp.open_end];
     let normalized_queue_tag = crate::queue::normalize_queue_tag_attrs(raw_queue_tag);

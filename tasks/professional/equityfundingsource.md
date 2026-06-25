@@ -102,7 +102,15 @@ They are two distinct Subject-Property fields with different origins and roles:
 So: **Loan amount = what the borrower entered on the application; Proposed loan amount = the deal/onboarding figure that drives LTV and investment math.** They're normally the same number but can diverge when the onboarding-proposed amount differs from what the borrower later types in. The admin loans table shows `loan_amount ?? proposed_loan_amount` — it prefers the borrower's application figure and falls back to the onboarding proposal (`admin/full_applications.tsx:505`).
 
 No code change this cycle — item 1 was already delivered/deployed and item 2 is a question answered from the source.
-<!-- agent:boundary:94a157e3 -->
+
+### Re: Queue closeout — both heads answered above — opus-4-8
+
+Striking the two answered heads (full responses in the section above): the Full Application layout optimization was delivered + deployed (`cfb313d3`), and the Proposed-vs-Loan-Amount distinction is explained from the source.
+
+> **Queue prompt:** Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Full Application: Personal, Address, Employment, Income
+
+> **Queue prompt:** In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097, what is the Proposed Loan Amount vs the Loan Amount?
+<!-- agent:boundary:ebde089c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -122,9 +130,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Full Application: Personal, Address, Employment, Income
+- ~~Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Full Application: Personal, Address, Employment, Income~~
 - ~~Optimize the layout of Review & Sign. Add a green checkmark if the borrower completed and a red x if not.~~ — auto-struck: answered this cycle (#ftstrike)
-- In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097, what is the Proposed Loan Amount vs the Loan Amount?
+- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097, what is the Proposed Loan Amount vs the Loan Amount?~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~deploy~~
 <!-- /agent:queue -->
 

@@ -66,7 +66,28 @@ Queue closeout: this investigation was answered and fixed earlier this cycle —
 ### Re: Queue residue cleared — glm-5.2
 
 The application-feedback investigation is answered and fixed (EFS `7eee8f4`); clearing the lingering queue head (#qheadresidue).
-<!-- agent:boundary:7c1260e7 -->
+
+### Re: Auto-focus compose textarea when the Messages dialog opens on a user context — glm-5.2
+
+> **Queue prompt:** When opening the Message dialog, within a user context, focus on the message textarea field.
+
+Done — committed + pushed to EFS `origin/main` (`3ac287a`). `AdminMessagesUser` (the per-user Messages-dialog tab) now focuses its Reply textarea on mount and whenever the participant identifier changes, so opening the dialog on (or switching to) a user context puts the cursor in the compose box immediately.
+
+**Verification**: `bun test` **1225 pass / 0 fail**; build + worker bundle clean. Tests assert the `textarea_ref` + focus wiring.
+
+### Re: Deploy — glm-5.2
+
+> **Queue prompt:** deploy
+
+Deployed to production from `3ac287a`.
+
+- **Version ID**: `db976d48-dcdd-47fa-ab1f-ac21358a1f12`
+- **URL**: https://equityfundingsource.brian-takita.workers.dev
+- **Remote D1 migrations**: no-op — frontend + a test only (verified none pending).
+- **Post-deploy smoke**: `GET /` → 200.
+
+Operator live-verify: open a deal → Messages dialog → a per-user tab and confirm the compose textarea takes focus automatically.
+<!-- agent:boundary:4d54b66c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -86,6 +107,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~When opening the Message dialog, within a user context, focus on the message textarea field.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

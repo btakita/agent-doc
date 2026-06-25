@@ -233,7 +233,29 @@ Root-caused it. This is the structural source of the stale-CRDT churn we've been
 **Why not inline now:** this is supervisor-in-process-critical (`project_controller`, `route`, `supervisor`) and needs new SimWorld infra — and it must not be implemented in a session that is *itself* a contamination victim (this degraded route-owned supervisor). Run `#xdocsuper` from a **fresh session/pane on a clean supervisor**. Restarting this pane's supervisor (or starting agent-doc-bugs2.md in its own pane) also clears the immediate contamination.
 
 **Also landed this turn:** `#vwj7` (`#queuestatemachine1`) — the per-item queue lifecycle state machine — is done (submodule `ee79b797`, `make check` green); `#cgfx`/`#brtc` remain as the wire-in + SimWorld phases.
-<!-- agent:boundary:2855b6bd -->
+
+### Re: how was the supervisor allowed to claim another supervisor's document? — opus-4-8
+
+> **Queue prompt:** How was the supervisor even allowed to claim a document that another supervisor claimed? (hypothesis: this may have started when we added the IPC state machine between the FFI Plugin and the JB Plugin.)
+
+Found the exact hole. Your `● Three agent-doc panes exist … %73 is the stale prior owner` block (it leaked into the doc — that's the CRDT cross-cell merge bug, separately tracked) is the live trace of it.
+
+**Why it's allowed:** the claim binding invariant is **pane/session-keyed, not document-supervisor-keyed**. `claim.rs::cross_session_decision(pane_session, configured, configured_alive, force)` returns:
+- `Accept` — pane's tmux session matches the configured project session;
+- **`AcceptStale` — the configured/prior session looks *not alive* → auto-force the claim;**
+- `AcceptForce` — `--force`;
+- else `Reject`.
+
+Its only invariant is *"never commandeer another **document's** pane"* (SPEC §8.5). There is **no** *"is another **live supervisor** already hosting this document?"* check. So when the harness relaunches your agent into a fresh pane (%73 → %69) and the prior owner pane is classified stale, the `AcceptStale` branch **auto-grants** the reclaim — two supervisors then both believe they own `agent-doc-bugs2.md` across the relaunch window. That's the contamination.
+
+**The kicker:** a document-level `supervisor_lease` already exists (`project_controller.rs::load_supervisor_lease_from_db` / `supervisor_lease_is_fresh_or_alive`, reconciled in `reconcile_supervisor_leases_after_restart`) — but **`claim.rs` never consults it.** The lease that would prevent this is present and simply not checked at claim time.
+
+**On your FFI↔JB IPC-state-machine hypothesis — partially right.** The merge-control IPC SM (`merge_control_state_machine.rs`) governs *write-ownership* (disk vs editor buffer), not *claim*, so it isn't the direct trigger. But the **same-era supervisor-in-process (08b) migration** is what lets one supervisor process host multiple documents in-process; combined with claim being pane/session-keyed and never checking the lease, that's the contamination surface. Your instinct pointed at the right neighborhood — the exact hole is the claim guard.
+
+**Fix (added as `#xdocsuper0`, plan updated):** before `AcceptStale` (and on the route reclaim path), check `supervisor_lease_is_fresh_or_alive` for the document — if a fresh lease is held by a live supervisor, `Reject` (or require `--force`) even when the prior pane/session looks stale. That closes the two-supervisors-one-document window at the source. Plan: `tasks/agent-doc/plan-cross-document-supervisor-contamination.md`.
+
+This is still a `[focused-cycle]` fix on `project_controller`/`route`/`claim` + SimWorld, and must not be implemented from this contaminated session — but you now have the precise answer: a present-but-unconsulted supervisor lease.
+<!-- agent:boundary:89352954 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -264,7 +286,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 ~~~
 - 🚧 :pushpin: [#brtc]
 ---
-Please fix the cross document supervisor contamination. This was from the session that started off running corky.md, but somehow run agent-doc-bugs2.md. This may have started when we added the IPC state machine between the FFI Plugin and the JB Plugin.
+Please fix the cross document supervisor contamination. This was from the session that started off running corky.md, but somehow run agent-doc-bugs2.md. This may have started when we added the IPC state machine between the FFI Plugin and the JB Plugin. How was the supervisor even allowed to claim a document that another supervisor claimed?
 ```
 ● Three agent-doc panes exist; the doc is owned by %73 but I'm now on %69 (the harness relaunched my agent into a new
   pane — %73 is the stale prior owner). The binary itself says to claim. The fix is already safely committed, so

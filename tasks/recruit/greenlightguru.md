@@ -240,7 +240,33 @@ Caveat: Lean is *supporting* — it strengthens your domain credibility and cult
 > *"A QMS is enforced, auditable state machines — CAPA, change control, document lifecycles — which is exactly the kind of system I've built (corky, EFS pipelines, agent-doc's own cycle engine). And I think in Lean terms, so I understand the continuous-improvement workflows those state machines exist to serve."*
 
 **Bottom line:** state machines = put it near the top of your technical pitch (peer to traceability graphs and auditable AI); Lean = weave in as domain-fluency + culture-fit signal. Want me to now assemble the full prioritized "why me for GG" narrative (state machines, traceability graphs, auditable AI, Censible, real-time, Lean) for the resume top / cover note?
-<!-- agent:boundary:c45e5b68 -->
+❯ I'm talking about the Lean language. For proofs.
+
+### Re: Lean (the theorem prover / formal proofs) — useful at Greenlight Guru? — opus-4-8
+
+Got it — and I misread you last cycle (I answered for Lean Six Sigma; you mean **Lean 4, the proof assistant / dependently-typed language for formal verification**). Different answer, and a more interesting one.
+
+**Honest take: not as a job requirement, but as a genuine rigor signal and a sharp niche differentiator — *if* you connect it to their state machines and data-integrity claims rather than pitching "formal methods" in the abstract.**
+
+#### Why it's almost certainly not a current job skill there
+
+Formal verification is rare in commercial SaaS, even regulated SaaS. A QMS company on Java/TS/React is overwhelmingly unlikely to have a Lean/formal-methods practice — that lives in aerospace, device *firmware*, cryptography, and a few high-assurance shops. The JD asks for React, REST/RPC/GraphQL, LLMs, tests/CI — nothing about proofs. So don't pitch it as "you need Lean." You'll read as off-target.
+
+#### Why it's still a real asset — the bridge is *invariants*
+
+The transferable core isn't "I write Lean," it's **"I reason about correctness formally — invariants, pre/postconditions, proven-not-just-tested properties."** That maps onto the two things GG cares most about:
+
+1. **Provably-correct workflow state machines.** This is the clean tie to last cycle's answer. CAPA / change-control / document lifecycles must *never* reach an illegal state — e.g., "an Effective document can't revert without a new controlled revision," "segregation-of-duties can't be bypassed," "no transition skips required approvals." In Lean you can encode the state machine as a type and **prove no illegal transition is representable** — turning "we have tests" into "this class of bug is impossible." In a regulated audit, "proven correct" is a strictly stronger claim than "tested."
+2. **Data-integrity / ALCOA+ as proven invariants.** Immutability, append-only audit trails, attributability — these are exactly the properties formal methods express well. Even if you never ship Lean to prod, *designing* the data model with provable invariants in mind produces a more defensible compliance posture.
+
+#### How to actually use it (don't oversell)
+
+- **As a credibility/rigor signal:** "I've used Lean for formal proofs" tells them you think at a level most SaaS engineers don't — valuable for the *highest-risk* parts of their platform (workflow engine, audit trail, e-signature integrity).
+- **As a forward-looking pitch, lightly:** offer it as *"for the safety-critical core — the workflow engine and audit invariants — formal methods could let us prove key properties, not just test them."* Frame as an option you can bring, not a tool they must adopt.
+- **Keep it behind the headline angles.** It's a differentiator, not the lead. Lead with state machines + traceability graphs + auditable AI; bring Lean as the "and I can take correctness further than testing when the risk justifies it" closer.
+
+**Bottom line:** Lean isn't on their checklist and shouldn't headline your pitch, but it's a rare, credible rigor signal — and it has one genuinely concrete application: **encoding their compliance-critical state machines so illegal transitions are unrepresentable and key audit/data-integrity invariants are proven.** Use it there. Want me to fold this (state-machine correctness + provable invariants) into the prioritized "why me for GG" narrative as the rigor/differentiator closer?
+<!-- agent:boundary:7c8ff768 -->
 <!-- /agent:exchange -->
 
 ## Queue

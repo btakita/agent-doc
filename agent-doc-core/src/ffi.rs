@@ -652,6 +652,101 @@ pub unsafe extern "C" fn agent_doc_replica_close(replica_id: u64) -> i32 {
     }
 }
 
+/// Persist replica `replica_id` to a local file for crash safety (`#crdtauth4`,
+/// disk demotion / plan phase 6). Each FFI node writes its OWN replica's encoded
+/// state through this so a plugin/IDE crash mid-lag does not lose un-synced ops.
+///
+/// The file is a **write-through durable recovery projection only** — it is read
+/// back by [`agent_doc_replica_recover`] on restart, never the coordination
+/// medium. The write is atomic (temp file + rename) so a crash mid-write cannot
+/// truncate the projection.
+///
+/// Returns 0 on success, -1 on poison, -2 on a bad path / IO error, -3 if the
+/// replica is not open.
+///
+/// # Safety
+/// `path` must be a valid NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_replica_persist(replica_id: u64, path: *const c_char) -> i32 {
+    if path.is_null() {
+        return -2;
+    }
+    let path_str = match unsafe { CStr::from_ptr(path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let state = match replica_registry().lock() {
+        Ok(reg) => match reg.get(&replica_id) {
+            Some(replica) => replica.encode_state(),
+            None => return -3,
+        },
+        Err(_) => return -1,
+    };
+    match atomic_write_bytes(std::path::Path::new(path_str), &state) {
+        Ok(()) => 0,
+        Err(_) => -2,
+    }
+}
+
+/// Recover (open) replica `replica_id` from a local durable recovery projection
+/// written by [`agent_doc_replica_persist`] (`#crdtauth4`, disk demotion / plan
+/// phase 6). On restart the node rebuilds its in-memory replica from disk; live
+/// peers re-sync any newer ops via the normal state-vector exchange afterward, so
+/// the recovered projection is a starting point, not authority.
+///
+/// Returns 0 on success, -1 on poison, -2 on a bad path / IO / decode error.
+///
+/// # Safety
+/// `path` must be a valid NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_replica_recover(replica_id: u64, path: *const c_char) -> i32 {
+    if path.is_null() {
+        return -2;
+    }
+    let path_str = match unsafe { CStr::from_ptr(path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let bytes = match std::fs::read(path_str) {
+        Ok(b) => b,
+        Err(_) => return -2,
+    };
+    let replica = match ReplicaState::from_encoded(replica_id, &bytes) {
+        Ok(r) => r,
+        Err(_) => return -2,
+    };
+    match replica_registry().lock() {
+        Ok(mut reg) => {
+            reg.insert(replica_id, replica);
+            0
+        }
+        Err(_) => -1,
+    }
+}
+
+/// Atomically write `bytes` to `path` (sibling temp file + rename) so a crash
+/// mid-write cannot truncate a recovery projection.
+fn atomic_write_bytes(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+    let pid = std::process::id();
+    let tmp_path = match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) => path.with_extension(format!("{ext}.tmp.{pid}")),
+        None => path.with_extension(format!("tmp.{pid}")),
+    };
+    {
+        let mut f = std::fs::File::create(&tmp_path)?;
+        f.write_all(bytes)?;
+        f.flush()?;
+    }
+    std::fs::rename(&tmp_path, path)?;
+    Ok(())
+}
+
 /// Text-based CRDT 3-way merge. Simpler interface than [`agent_doc_crdt_merge`].
 ///
 /// All three parameters are plain UTF-8 text (not CRDT state bytes).
@@ -1122,5 +1217,60 @@ mod tests {
         assert!(unsafe { agent_doc_replica_state_vector(id, &mut len) }.is_null());
         assert_eq!(len, 0, "null byte result sets out_len to 0");
         assert_eq!(unsafe { agent_doc_replica_close(id) }, -3);
+    }
+
+    #[test]
+    fn replica_ffi_persist_then_recover_round_trips_disk_projection() {
+        // Disk demotion (#crdtauth4): each FFI node persists its OWN replica to a
+        // local recovery projection and recovers it on restart.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("node.yrs");
+        let path_c = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+
+        let src: u64 = 0x5151;
+        assert_eq!(unsafe { agent_doc_replica_open(src, std::ptr::null(), 0) }, 0);
+        let ins = std::ffi::CString::new("crash-safe").unwrap();
+        assert_eq!(
+            unsafe { agent_doc_replica_apply_local(src, 0, 0, ins.as_ptr()) },
+            0
+        );
+        // Persist the node's own replica.
+        assert_eq!(
+            unsafe { agent_doc_replica_persist(src, path_c.as_ptr()) },
+            0,
+            "persist writes the recovery projection"
+        );
+        assert!(path.exists());
+        assert_eq!(unsafe { agent_doc_replica_close(src) }, 0);
+
+        // Recover into a fresh replica id (a restarted node) from disk.
+        let recovered: u64 = 0x5252;
+        assert_eq!(
+            unsafe { agent_doc_replica_recover(recovered, path_c.as_ptr()) },
+            0,
+            "recover rebuilds the in-memory replica from disk"
+        );
+        let t = unsafe { agent_doc_replica_text(recovered) };
+        assert!(!t.is_null());
+        let text = unsafe { CStr::from_ptr(t) }.to_str().unwrap().to_string();
+        unsafe { agent_doc_free_string(t) };
+        assert_eq!(text, "crash-safe");
+        assert_eq!(unsafe { agent_doc_replica_close(recovered) }, 0);
+    }
+
+    #[test]
+    fn replica_ffi_persist_recover_reject_bad_args() {
+        let id: u64 = 0x6363;
+        // persist on an unopened replica → not-open.
+        let p = std::ffi::CString::new("/tmp/agent-doc-nope.yrs").unwrap();
+        assert_eq!(unsafe { agent_doc_replica_persist(id, p.as_ptr()) }, -3);
+        // null path → bad arg.
+        assert_eq!(
+            unsafe { agent_doc_replica_persist(id, std::ptr::null()) },
+            -2
+        );
+        // recover from a missing file → bad arg / IO.
+        let missing = std::ffi::CString::new("/nonexistent/dir/agent-doc-missing.yrs").unwrap();
+        assert_eq!(unsafe { agent_doc_replica_recover(id, missing.as_ptr()) }, -2);
     }
 }

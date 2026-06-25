@@ -6648,3 +6648,291 @@ mod crdt_authority_sim {
         assert_eq!(run(), run());
     }
 }
+
+/// Deterministic SimWorld for the multi-editor relay hub + awareness
+/// (`#crdtauth4`, plan phase 5) and disk demotion (plan phase 6).
+///
+/// Models a single supervisor-hosted canonical replica with N editor replicas
+/// registered through the star-topology relay
+/// (`agent_doc_orchestration::crdt_relay::RelayHub`). Fan-out packets can be held
+/// in flight and delivered out of order to model propagation lag — no live editor
+/// / tmux / socket required. Convergence, the live-cut commit barrier, offline →
+/// reconnect catch-up, and unique-client-id enforcement are all asserted
+/// deterministically.
+mod crdt_relay_sim {
+    use agent_doc_orchestration::crdt_authority::CrdtAuthority;
+    use agent_doc_orchestration::crdt_relay::{AwarenessState, RelayHub, mint_client_id};
+
+    /// A supervisor pane hosting one document over the relay hub, plus an in-flight
+    /// packet queue modeling the editor↔supervisor network. Delivery order is
+    /// caller-controlled so lag / reordering is deterministic.
+    struct RelaySimWorld {
+        hub: RelayHub,
+        /// Pending fan-out deliveries: `(target_client_id, update_bytes)`.
+        inflight: Vec<(u64, Vec<u8>)>,
+    }
+
+    impl RelaySimWorld {
+        fn new(canonical_id: u64) -> Self {
+            Self {
+                hub: RelayHub::new(canonical_id),
+                inflight: Vec::new(),
+            }
+        }
+
+        /// Attach an editor identified by a stable string identity: mint its
+        /// stable client-id and register it. Returns the minted id.
+        fn attach(&mut self, identity: &str) -> u64 {
+            let id = mint_client_id(identity);
+            self.hub
+                .register(id)
+                .unwrap_or_else(|e| panic!("attach {identity}: {e}"));
+            id
+        }
+
+        /// An editor edit that relays + broadcasts immediately (the normal live path).
+        fn edit_now(&mut self, id: u64, offset: u32, delete_len: u32, insert: &str) {
+            self.hub.apply_local(id, offset, delete_len, insert).unwrap();
+        }
+
+        /// An editor edit relayed to the hub but whose fan-out packets to peers are
+        /// held in flight (supervisor→peer lag).
+        fn edit_lagged(&mut self, id: u64, offset: u32, delete_len: u32, insert: &str) {
+            self.hub.local_edit(id, offset, delete_len, insert).unwrap();
+            let packet = self.hub.relay_capture(id).unwrap();
+            for target in packet.targets {
+                self.inflight.push((target, packet.update.clone()));
+            }
+        }
+
+        /// An editor edit applied to its OWN replica only — NOT relayed to the hub
+        /// (an un-propagated op; the editor→supervisor direction is in flight).
+        fn edit_local_only(&mut self, id: u64, offset: u32, delete_len: u32, insert: &str) {
+            self.hub.local_edit(id, offset, delete_len, insert).unwrap();
+        }
+
+        /// Deliver all in-flight packets in REVERSE submission order (out of order).
+        fn deliver_reversed(&mut self) {
+            let mut pending = std::mem::take(&mut self.inflight);
+            pending.reverse();
+            for (target, update) in pending {
+                self.hub.deliver(target, &update).unwrap();
+            }
+        }
+
+        fn append_len(&self, id: u64) -> u32 {
+            self.hub
+                .member_text(id)
+                .unwrap_or_default()
+                .chars()
+                .count() as u32
+        }
+    }
+
+    #[test]
+    fn multi_replica_fan_out_reaches_all_other_editors() {
+        // Coverage: an update from one replica reaches every other live replica.
+        let mut world = RelaySimWorld::new(1);
+        let a = world.attach("intellij:a");
+        let b = world.attach("vscode:b");
+        let c = world.attach("intellij:c");
+
+        world.edit_now(a, 0, 0, "shared");
+        assert_eq!(world.hub.canonical_text(), "shared");
+        for id in [a, b, c] {
+            assert_eq!(
+                world.hub.member_text(id).unwrap(),
+                "shared",
+                "fan-out reached replica {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn convergence_under_lag_out_of_order_delivery() {
+        // Coverage: delayed / out-of-order fan-out still converges (yrs causal
+        // buffering at the hub-delivery layer).
+        let mut world = RelaySimWorld::new(1);
+        let a = world.attach("editor:a");
+        let b = world.attach("editor:b");
+
+        // Two dependent edits from `a`, packets held in flight.
+        world.edit_lagged(a, 0, 0, "first");
+        let len = world.append_len(a);
+        world.edit_lagged(a, len, 0, " second");
+
+        // `b` has not seen either yet (lagged).
+        assert_ne!(world.hub.member_text(b).unwrap(), world.hub.canonical_text());
+
+        // Deliver REVERSED (the dependent op before its dependency) — converges.
+        world.deliver_reversed();
+        assert_eq!(
+            world.hub.member_text(b).unwrap(),
+            world.hub.canonical_text(),
+            "out-of-order delivery self-heals once causal deps arrive"
+        );
+        assert!(world.hub.member_text(b).unwrap().contains("first second"));
+    }
+
+    #[test]
+    fn commit_barrier_consistent_cut_with_three_replicas_no_deadlock() {
+        // Coverage: the commit barrier with N=3 replicas captures all LIVE
+        // editors' ops; a disconnected editor does not deadlock the barrier and
+        // contributes its ops at next sync.
+        let mut world = RelaySimWorld::new(1);
+        let a = world.attach("editor:a");
+        let b = world.attach("editor:b");
+        let c = world.attach("editor:c");
+
+        // Each editor types locally WITHOUT relaying (un-propagated ops — the
+        // canonical replica does not hold them yet).
+        world.edit_local_only(a, 0, 0, "AAA");
+        world.edit_local_only(b, 0, 0, "BBB");
+        world.edit_local_only(c, 0, 0, "CCC");
+        // Editor c disconnects with its op un-flushed (slow / offline editor).
+        world.hub.disconnect(c);
+
+        // The barrier captures the two LIVE editors and does NOT block on c.
+        assert!(
+            world
+                .hub
+                .commit_barrier_under_authority(CrdtAuthority::MultiReplica)
+                .unwrap(),
+            "barrier completes a consistent cut of the live replicas"
+        );
+        let cut = world.hub.canonical_text();
+        assert!(cut.contains("AAA") && cut.contains("BBB"));
+        assert!(
+            !cut.contains("CCC"),
+            "the disconnected editor's op is NOT in this checkpoint"
+        );
+
+        // c contributes its op at the next checkpoint after reconnect — no loss.
+        world.hub.reconnect(c).unwrap();
+        assert!(world.hub.commit_barrier().unwrap());
+        assert!(world.hub.canonical_text().contains("CCC"));
+    }
+
+    #[test]
+    fn offline_then_reconnect_converges_no_data_loss() {
+        // Coverage: a replica that missed updates while offline converges on
+        // reconnect via state-vector catch-up; its offline local edits survive.
+        let mut world = RelaySimWorld::new(1);
+        let a = world.attach("editor:a");
+        let b = world.attach("editor:b");
+
+        world.hub.disconnect(b);
+        // `a` edits while `b` is offline (b misses the broadcast).
+        world.edit_now(a, 0, 0, "online-edit ");
+        // `b` edits locally while offline (its own replica only).
+        world.edit_local_only(b, 0, 0, "offline-edit ");
+
+        world.hub.reconnect(b).unwrap();
+        let tb = world.hub.member_text(b).unwrap();
+        assert!(tb.contains("online-edit"), "missed update caught up");
+        assert!(tb.contains("offline-edit"), "offline local edit preserved");
+        assert_eq!(
+            tb,
+            world.hub.canonical_text(),
+            "reconnected replica converged with canonical"
+        );
+    }
+
+    #[test]
+    fn duplicate_client_id_is_rejected() {
+        // Coverage: a client-id collision is a hard error (corruption per the
+        // unique-stable-client-id rule).
+        let mut world = RelaySimWorld::new(1);
+        let _a = world.attach("editor:a");
+        // The SAME identity mints the SAME id → registering twice collides.
+        let dup = mint_client_id("editor:a");
+        assert!(
+            world.hub.register(dup).is_err(),
+            "re-registering an existing client-id must be rejected"
+        );
+        // Colliding with the canonical id is also rejected.
+        assert!(world.hub.register(1).is_err());
+    }
+
+    #[test]
+    fn awareness_is_ephemeral_and_not_part_of_the_document() {
+        // Coverage: presence is a separate ephemeral channel; it never touches the
+        // document text and is expired on deregister.
+        let mut world = RelaySimWorld::new(1);
+        let a = world.attach("editor:a");
+        let b = world.attach("editor:b");
+        world.edit_now(a, 0, 0, "doc");
+
+        world.hub.set_awareness(
+            a,
+            AwarenessState {
+                cursor: Some(3),
+                user: Some("alice".into()),
+                ..Default::default()
+            },
+        );
+        world.hub.set_awareness(
+            b,
+            AwarenessState {
+                cursor: Some(0),
+                ..Default::default()
+            },
+        );
+        assert_eq!(world.hub.awareness_snapshot().len(), 2);
+        // Awareness did not alter the document text.
+        assert_eq!(world.hub.canonical_text(), "doc");
+
+        // Deregister expires presence (never persisted, never committed).
+        world.hub.deregister(b);
+        let snap = world.hub.awareness_snapshot();
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].0, a);
+    }
+
+    #[test]
+    fn disk_projection_recovers_canonical_and_in_memory_wins() {
+        // Coverage (phase 6): the disk projection is a recovery input; a restart
+        // rebuilds the canonical replica from it, and a stale projection never
+        // regresses a live replica (in-memory wins).
+        let mut world = RelaySimWorld::new(1);
+        let a = world.attach("editor:a");
+        world.edit_now(a, 0, 0, "v1");
+        let projection = world.hub.projection_bytes();
+
+        // Restart: rebuild canonical from the recovery projection.
+        let recovered = RelayHub::recover_from_projection(1, &projection).unwrap();
+        assert_eq!(recovered.canonical_text(), "v1");
+
+        // Live session advances; reconciling the STALE projection is a no-op.
+        let len = world.hub.canonical_text().chars().count() as u32;
+        world.edit_now(a, len, 0, " v2");
+        let changed = world.hub.reconcile_disk_projection(&projection).unwrap();
+        assert!(!changed);
+        assert_eq!(world.hub.canonical_text(), "v1 v2", "in-memory replica wins");
+    }
+
+    #[test]
+    fn deterministic_replay_is_stable_across_runs() {
+        // SimWorld determinism: byte-identical relay outcomes every run (stable
+        // minted ids, no wall-clock, no RNG).
+        fn run() -> String {
+            let mut world = RelaySimWorld::new(1);
+            let a = world.attach("editor:a");
+            let b = world.attach("editor:b");
+            let c = world.attach("editor:c");
+            world.edit_now(a, 0, 0, "x");
+            world.edit_lagged(b, 0, 0, "y");
+            world.edit_lagged(c, 0, 0, "z");
+            world.deliver_reversed();
+            world.hub.commit_barrier().unwrap();
+            format!(
+                "ids={a},{b},{c} canon={} a={} b={} c={}",
+                world.hub.canonical_text(),
+                world.hub.member_text(a).unwrap(),
+                world.hub.member_text(b).unwrap(),
+                world.hub.member_text(c).unwrap(),
+            )
+        }
+        assert_eq!(run(), run());
+    }
+}

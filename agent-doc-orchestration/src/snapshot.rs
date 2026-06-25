@@ -944,6 +944,20 @@ pub fn delete_pre_response(doc: &Path) -> Result<()> {
 
 // ---------------------------------------------------------------------------
 // CRDT state persistence (for stream mode)
+//
+// Disk-demotion contract (`#crdtauth4`, plan phase 6): the persisted
+// `.agent-doc/crdt/<hash>{,.overlay,.nodes}.yrs` files are **write-through
+// durable recovery projections only** — never the live coordination medium and
+// never the source of truth while a session is up. The live in-memory replica
+// (the supervisor's canonical `ReplicaState`, or the per-node merge state rebuilt
+// from the cycle baseline) is authoritative; disk is recovered-from on restart,
+// losing at most one flush. The load path below ENFORCES "in-memory wins": a
+// disk sidecar whose markdown projection does not match the explicit cycle
+// baseline is discarded in favor of the known baseline (it can otherwise replay
+// stale content as a fresh concurrent insert — the stale-`.yrs`-residue bug
+// class this whole model root-fixes). See
+// `agent_doc_orchestration::crdt_relay::DISK_IS_RECOVERY_PROJECTION_ONLY` and
+// `crdt_authority::CrdtAuthority::disk_is_durable_projection`.
 // ---------------------------------------------------------------------------
 
 /// Compute the legacy text CRDT state file path for a given document.

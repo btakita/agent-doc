@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Session History
@@ -160,6 +160,11 @@ Queue advances to **#ckymimestream** (draft-send buffers whole attachment in RAM
 
 - **`build_mime_to_writer`** writes attachments in 57-byte (→ 76-char) chunks straight to a writer (byte-identical to the old in-memory builder), so neither the raw bytes nor their full base64 string sit in RAM.
 - For combined attachments ≥ 5 MB, the MIME is spooled to a temp file and the Gmail `{"raw":"…"}` body is streamed through a base64url encoder (`Base64UrlReader` + `StreamingRawBody`); the whole-message payload is never materialized as one string. Below the threshold the simple in-memory JSON path is unchanged.
+- GPU transcription behind `transcribe-cuda` / `transcribe-metal` features; `make build` requires a local GPU.
+- `#ckymimestream` (9e3f1c4): attachment base64 streams in 57-byte chunks; ≥5 MB MIME spools to a temp file and the Gmail `{"raw":…}` body streams through `Base64UrlReader` + `StreamingRawBody`. Peak RAM for a 500 MB attachment: **~1.8 GB → streaming buffers** (spool on disk, not RAM).
+- `build_mime_message/with_attachment` (4 KiB) — **~8.71 µs** (231k iter; cost is base64-encoding the attachment)
+- `build_mime_message/in_reply_to` — **~209 ns** (9.6M iter)
+- `build_mime_message/plain` — **~160 ns** (13M iter)
 
 Files: `crates/corky-mail/src/draft/send.rs`, `SPEC.md` §5.5.1.
 
@@ -173,6 +178,11 @@ Queue advances to **#ckymimeinline** (draft send drops inline CID images — reu
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
+> **Queue prompt:**
+>
+> :pushpin: [#ckymimeinline]
+
+
 ```text
 **IPC proof issue dogfood log**
 Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
@@ -182,7 +192,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/corky.md source=socket_ack_content patch_id=460ac752-e608-4362-9b45-7b6ff9a7475b invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=13957 candidate_hash=cdb4277d2d8b094340cef2d1650c6a73258d444cedfef72528ff9d7d8152d929 content_ours_len=10789 content_ours_hash=6e667648259b6a0c4f665f6f845103c1b74033c914b3f0cad62b2048528fd13e doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782344910865
 ```
-<!-- agent:boundary:329be399 -->
+<!-- agent:boundary:fabe061f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -194,15 +204,13 @@ Please give me a report the performance
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~[#ckythreadmerge]~~
-- ~~:pushpin: [#ckymimestream]~~
-- 🚧 :pushpin: [#ckymimeinline]
-- ~~[#ckythreadmerge]~~
+- do [#ckybenchbreak]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ckymimeinline] [P3] corky draft send silently drops inline images: YAML (only draft push handles images+CID via multipart/related). Add CID inline-image support to send build_mime_message (multipart/related wrapping the text part + image parts with Content-ID), reusing draft push image-resolution logic. crates/corky-mail/src/draft/send.rs, mod.rs (push image handling). Split from #ckymime.
+- [ ] [#ckybenchbreak] [P2] make check RED on main: #ckymimeinline (6056584) added a 7th images: &[PathBuf] param to build_mime_message but crates/corky-mail/benches/draft_mime.rs still calls it with 6 args (E0061 under clippy --all-targets). Benches arent compiled by cargo test, so the 237 mail tests stayed green while the gate went red. Fix applied locally (3 callsites + empty images slice); clippy --all-targets green again. Needs commit + push to origin/main. Optionally add an inline_images bench case while the file is open.
 <!-- /agent:backlog -->
 
 ## Review

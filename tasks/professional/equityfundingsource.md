@@ -64,7 +64,19 @@ Done. Available Deal pipeline cards now show how many lenders have expressed int
 Coverage: added unit assertions in `tests/admin-pipeline.test.ts` for the count passthrough and the 0-default. Full suite green (`bun run check` -> 1217 pass / 0 fail) plus build + worker bundle.
 
 Committed (`47e7949`, pushed to `origin/main`) and deployed this pipeline change to Cloudflare Workers (remote D1 migrations applied) — `https://equityfundingsource.brian-takita.workers.dev`, Version ID `db46084f-d881-4b51-90d6-a6d35c55f55c`. (The trailing `deploy` queue head stays active as the campaign-final deploy after the newly-queued Messages-dialog tasks.)
-<!-- agent:boundary:2241bf03 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=cd3b4893-c3da-4103-8039-b5dd1aaead8b invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782370285223
+```
+<!-- agent:boundary:b795fb09 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,10 +97,8 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~https://equityfundingsource.brian-takita.workers.dev/admin/pipeline > Available Deal cards should show the number of interested lenders.~~
-- 🚧 When opening the Messages dialog on user context, the user search in the Messages dialog should not be rendered. Only show the conversation(s) with the users related to the user context.
-- Remove the All Messages tab in the Messages dialog.
-- Add an All tab in Messages dialog > Messages tab...a sibling to Borrowers|Lenders|Brokers. This tab effectively replaces the removed All Messages tab.
-- deploy
+- 🚧 When opening the Messages dialog on user context, render a specific tab for each user in the user context. Also render another tab for the user group. These tabs are dedicated to the user(s). Remove the existing All Messages tab. Rename Messages tab to All Messages. Add an All tab in Messages dialog > Messages tab...a sibling to Borrowers|Lenders|Brokers. This tab effectively replaces the replaced All Messages tab.
+- :pushpin: deploy
 <!-- /agent:queue -->
 
 ## Backlog

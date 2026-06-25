@@ -267,7 +267,22 @@ It builds on the unified `messages` model already approved (#msg-unify) — `par
 2. Fold the existing interests-tab "Borrower communication" + lender threads into the tabbed view now, or wait until #msg-unify3/4 read-cutover soaks?
 
 Backlog item `#deal-chat-users` added with the phase breakdown. Not deployed — planning cycle.
-<!-- agent:boundary:07f4acc9 -->
+
+### Re: page → user/type association — folded into the chat plan — glm-5.2
+
+> **Queue prompt:**
+>
+> All pages should have user(s) or a user type associated with it. Which will select the user(s) or user type in the chat dialog.
+
+
+> **Queue prompt:** All pages should have user(s) or a user type associated with it; which selects the user(s)/user type in the chat dialog.
+
+Folded into the per-user chat plan rather than a standalone build — it's the site-wide extension of the same model. Added phase **#deal-chat-users4** + a "Page → user/type association" section to `prds/dialog-user-chat-model.md` (`ecfb2e7`, pushed).
+
+Every admin page declares its associated user(s) (a borrower's loan page → that borrower; a lender's account page → that lender) or a user type when no single user applies (a pipeline board → lender/borrower scope). Opening chat from a page pre-selects that user/type, so the admin lands in the right thread without re-choosing. Glue over #deal-chat-users1–3 (pipeline dialog tabbed chat) + the unified admin inbox (#msg-unify2).
+
+Nothing to build yet — #deal-chat-users1–4 all wait on the two open questions in the plan (group reply routing; fold-in timing vs #msg-unify3/4 read-cutover soak). Not deployed — planning cycle.
+<!-- agent:boundary:5b6e6092 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -289,7 +304,7 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~:pushpin: https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=866e1c5a-e428-4b35-bacb-a58f5d94b7da&deal_tab=loan > Loan Detail should remove the "Borrower Chat" card. Use the chat should open the borrower (btak.dev+borrower@gmail.com) instead.~~
 - ~~:pushpin: All dialog states in the Deal Pipeline and Lender Pipeline should have users associated with them. These users will be the focus of the chat. A single user will have a single message thread. Multiple users will have separate tabs in the chat dialog with the user type (Lender, Borrower, Broker). Another tab should be the group chat, where all users are emailed the messages. A borrower/broker + lender should not see each others' email addresses for any Borrower/Broker + Lender combo should be emailed with BCC.~~
-- All pages should have user(s) or a user type associated with it. Which will select the user(s) or user type in the chat dialog.
+- ~~All pages should have user(s) or a user type associated with it. Which will select the user(s) or user type in the chat dialog.~~
 - I'm seeing "Realtime connection failed. Refresh the page to reconnect." when rapidly switching between users in a search. Please diagnose and harden the realtime connection websocket(s).
 - ~~deploy~~
 <!-- /agent:queue -->

@@ -132,7 +132,19 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/c
 Typed machines only — no lazily-rs/reactive graphs (confirmed overkill for corky's batchy shape last cycle). Each item ships as its own `#spec-test-build-install-commit-push` cycle.
 
 **Top of backlog: `#ckypubsm`**
-<!-- agent:boundary:942aba63 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/corky.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=929d6505cca8c761944be9926df20685ae6dfe0753453741c1b7e71767d2d3c6 content_len=28479 content_hash=956742e7a1360a06969351a17379b2ff4266904fa460a0d4602be3c6b075d867 doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782367673222
+```
+<!-- agent:boundary:b18012fe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -143,7 +155,7 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#ckypubsm]
+- 🚧 do [#ckypubsm]
 - do [#ckyemailsm]
 - do [#ckysyncsm]
 - do [#ckywatchsm]

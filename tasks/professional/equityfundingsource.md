@@ -98,7 +98,7 @@ Deployed the EFS Worker with the `#bxtd` dead-table drop now live.
 - **Smoke check:** `https://equityfundingsource.brian-takita.workers.dev/` → HTTP 200 (0.24s).
 
 Production is on the new version with the 6 dead tables dropped.
-<!-- agent:boundary:3a00141f -->
+<!-- agent:boundary:832ff170 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -118,11 +118,15 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- 🚧 In a New Loan Application, do not prefill any property info https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?step=4. Each property is different.
+- deploy
+- do [#dfed93b-tests]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#dfed93b-tests] 7 EFS tests are red on origin/main from the operator commit dfed93b "fix(admin): streamline document upload workflows" (by Brian Dev) — stale source-assertion tests not updated to the refactored document-upload components. Failing: advance-lender-documents (checklist import shape), admin-application-lead-detail (AdminDocumentUploadField combined import), admin-investor-pipeline (stacked doc modal + uploaded-date/actions layout), investor-documents (drop static fixtures), submit-button-busy (aria-busy). NOT caused by #noproppfill (different subsystem; my change is green in isolation). Align each assertion to the committed components (or revert dfed93b tests) to restore a green make check before the next deploy. dfed93b is NOT yet deployed.
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 

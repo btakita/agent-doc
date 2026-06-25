@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 3d9ff8e4-bafd-4e1f-b48d-550d3c976904
-agent: opencode
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -415,7 +415,19 @@ YRS's **binary anti-entropy / sync protocol** (stateless sync, efficient binary 
 #### Recommendation
 
 Keep FFI opaque, keep Snapshot/Delta as the single-producer mirror, implement §Distributed as a purpose-built HLC cell plane (optionally borrowing YRS sync later). Filed as `#lzcrdtplane` (top of backlog). Note: the queue preset `#spec-test-build-install-commit-push` does **not** apply to a "would it be beneficial?" question — this is a recommendation, not an authorized rewrite; a full protocol swap ripples across all 6 ports and is gated on the plan.
-<!-- agent:boundary:79f1b1f8 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=eee09c11-e341-4856-9074-7e0186e31be6 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=37547 candidate_hash=f34a3dfc37201a839782389db916c7232e3f30253a99fdd9972162e6e23e1747 content_ours_len=40472 content_ours_hash=9ddb3cec6ff8cd6937e83ee736e73bde74f33b90ba7c77002d95c96223d41f38 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782382884404
+```
+<!-- agent:boundary:89e43d3f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -424,6 +436,7 @@ Keep FFI opaque, keep Snapshot/Delta as the single-producer mirror, implement §
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- 🚧 CRDT cells were implemented in lazily-rs. Please evaluate if this is complete.
 <!-- /agent:queue -->
 
 ## Backlog

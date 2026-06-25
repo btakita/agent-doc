@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: opencode
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -33,124 +33,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260624-225055.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-004722.md`*
 
 Compacted content:
-❯ - Archived 3 response topic(s): Remove Required Indicator From Document Types And Deploy; E-Sign Redirect To Dashboard And Deploy; Struck Residue Drain
+❯ - Archived 6 response topic(s): Prefill New Applications From Prior Borrower Data And Deploy; Message Dialog Open Flash Jank And Deploy; IPC proof diagnostic (interrupted-cycle recovery); 3 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: Prefill New Applications From Prior Borrower Data And Deploy — glm-5.2
-
-> **Queue prompt:**
->
-> New Loan Applications in https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097&step=0 should prefill all available data that we have about the borrower. If we are not saving the borrower info, save it so future Loan Applicaitons can be prefilled. Do not commingle applicaiton-specific and property-specific data...those fields should not be prefilled.
-
-
-> **Queue prompt:**
-> New Loan Applications in https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097&step=0 should prefill all available data that we have about the borrower. If we are not saving the borrower info, save it so future Loan Applications can be prefilled. Do not commingle application-specific and property-specific data...those fields should not be prefilled.
->
-> **Queue prompt:**
-> deploy
-
-Implemented, pushed, and deployed. A new/resumed application now prefills borrower-identifying data from the borrower's most recent prior application.
-
-What changed: borrower personal info was already persisted per-application (`application_personal` + section tables), but never reused across applications. New module `borrower/applications/borrower_prefill.ts` exports `application_borrower_prefill_apply_`, wired into `GET /api/borrower/applications/:id/sections` (the single read path both the `application_id` and draft-load flows hit). It finds the borrower's most recent *other* application that has personal data, then copies only borrower-identifying sections — personal, addresses, employment, income, assets, liabilities, REO — into empty target fields/sections. The prefill is idempotent: a target that already has identity data (first name, last name, or email) is skipped entirely, and each array section is copied only when the target has no rows, so in-progress edits are never overwritten.
-
-Per the "do not commingle" requirement: subject property, loan request, declarations, signature, and broker info are **never** copied — those are application/property-specific. The masked SSN token is also excluded (security tier 0).
-
-Changed paths in `src/equityfundingsource-dev`: `app/equityfundingsource/lib/borrower/applications/borrower_prefill.ts` (new), `app/equityfundingsource/lib/borrower/applications/routes.ts` (import + prefill call in the sections endpoint), `prds/efs-full-application-intake-spec.md` (documented `#borrower-prefill`), and `tests/apply4-full-application-p1.test.ts` (2 source-level guard tests — borrower-only sections + sections-endpoint wiring).
-
-Commits: EFS submodule commit `e1b8668 feat(borrower): prefill new applications from prior borrower data (#borrower-prefill)` was pushed to `origin/main`. Parent repo gitlink commit `642de0f2c chore(efs): bump borrower prefill submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with unrelated work.
-
-Verification: focused `bun test tests/apply4-full-application-p1.test.ts` passed (`8 pass / 0 fail`). `git diff --check` passed. Full `bun test` passed (`1205 pass / 0 fail`); app build and Worker build passed. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-
-Deploy: remote D1 reported "No migrations to apply!" (no schema change — reuses existing application tables). `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `a6df6f88-f836-4b60-afd1-6df7e5bbad05`. Post-deploy check: public root returned `HTTP 200`.
-
-Escalation: none. Confidence: high.
-
-### Re: Message Dialog Open Flash Jank And Deploy — glm-5.2
-
-> **Queue prompt:**
-> Opening the Message dialog in the borrower, lender, broker causes a flash jank where the dialog appears then disappears then appears again.
->
-> **Queue prompt:**
-> deploy
-
-Implemented, pushed, and deployed. Opening the message launcher panel no longer flashes (appear → disappear → appear).
-
-Root cause: the launcher render gate `if (loading) return null` unmounted the entire `PortalMessages` component — including the trigger and the open panel — whenever a reload flipped `loading` to `true`. The load effect set `loading = true` on every open (to refetch the thread), so each open unmounted the panel (disappear) until the fetch resolved and `loading` went false (reappear).
-
-What changed: a `loaded_once_ref` now gates `set_loading(true)` to the very first load only. On subsequent opens/reloads the ref is already true, so `loading` stays false and the panel stays mounted throughout — the thread refreshes silently in place. The initial-load skeleton behavior is unchanged (first load still shows the loading gate).
-
-Changed paths in `src/equityfundingsource-dev`: `lib/ui--browser--efs/portal/shared/portal_messages.tsx` (`loaded_once_ref` + gated `set_loading(true)` + ref set after first load in both branches), `prds/portal-messages-component.md` (documented `#msg-flash-jank`), and `tests/msg-send-shortcut.test.ts` (1 source-level guard test).
-
-Commits: EFS submodule commit `bcf4771 fix(portal): stop message dialog open flash jank (#msg-flash-jank)` was pushed to `origin/main`. Parent repo gitlink commit `cae4a26d6 chore(efs): bump message dialog flash jank submodule` was committed locally only; I did not push parent `main` because it is already ahead of `origin/main` with unrelated work.
-
-Verification: focused `bun test tests/msg-send-shortcut.test.ts` passed (`15 pass / 0 fail`). `git diff --check` passed. Full `bun test` passed (`1206 pass / 0 fail`); app build and Worker build passed. `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`.
-
-Deploy: remote D1 reported "No migrations to apply!" `make deploy` completed successfully. Worker URL: `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID: `1248dcf6-ee93-4cd3-bc56-0a23d049a242`. Post-deploy check: public root returned `HTTP 200`.
-
-Escalation: none. Confidence: high.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=36a8f437-18f5-46e1-aeeb-52c10dbdaeb1 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782338579569
-```
-
-### Re: Borrower DOB prefill — wrong table + identity short-circuit — glm-5.2
-
-> **Queue prompt:**
-> https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?step=0 for btak.dev+borrower3@gmail.com
-> still does not capture already filled out borrower data (e.g. "Date of Birth"). Have we captured this borrower's data?
-
-> **Queue prompt:**
-> deploy
-
-**Yes — the borrower's data is captured.** Prod D1 confirms `btak.dev+borrower3@gmail.com` has **3 prior full_applications, all 3 with `date_of_birth` populated**. The data was never lost; the prefill just never reached it.
-
-Root cause was two compounding bugs in `borrower_prefill.ts` (the `#borrower-prefill` module shipped last cycle):
-
-1. **Wrong table (dominant).** `most_recent_prior_application_` queried `FROM applications` — the legacy table that holds no full-application drafts (those live in `full_applications`, which every other read/write in `repo.ts` uses). The prior-app lookup always returned null, so prefill exited before doing anything.
-2. **Identity short-circuit.** Even with the table fixed, the prefill bailed when the target already had identity (`first_name`/`last_name`/`email`). But every lead-originated draft has identity copied in by `lead_prefill`, so it would have skipped every lead-started application anyway.
-
-Fix: the lookup now reads `full_applications`, and the identity short-circuit is replaced by a field-by-field personal merge that fills only blank borrower fields (DOB, phones, marital status, …) while preserving any value the target already has. A `personal_changed_` guard skips the upsert once every field is filled, so repeated `GET /sections` doesn't bump `updated_at`. Array sections (addresses, employment, income, assets, liabilities, REO) still copy only into empty targets; subject property, declarations, signature, and broker info are never touched; the masked SSN token is still never copied. Per the "do not commingle" rule, only borrower-identifying data is reused.
-
-Verification: `bun test tests/apply4-full-application-p1.test.ts` → `10 pass / 0 fail` (2 new D1-backed behavioral tests — target-with-identity still gets DOB filled from prior + SSN not copied; plus a source guard locking `FROM full_applications a`). Full `bun test` → `1208 pass / 0 fail`. `make build` passed. `git diff --check` clean. `gh run list --workflow CI --limit 1` — this repo has no workflow named `CI`.
-
-Commits: EFS `d33680e` (identity short-circuit removal + field merge) and `48948e4` (`full_applications` prior-app lookup fix), both pushed to `origin/main`. Parent gitlink bumped locally (`3aefd4d2b`, `a8c3867e9`); parent `main` not pushed (already ahead of origin with unrelated work).
-
-Deploy: no schema change (reuses existing tables); remote D1 migrations had nothing to apply. `make deploy` completed. Worker URL `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID `4597b4b6-34a4-4faf-a2e1-08df5e1f1d34`. Post-deploy: public root `HTTP 200`. A new/resumed application for this borrower at step=0 will now prefill DOB (and other blank borrower fields) from the most recent prior application.
-
-Escalation: none. Confidence: high.
-
-### Re: Deploy closeout — glm-5.2
-
-> **Queue prompt:**
-> deploy
-
-Deploy was completed and documented in the DOB prefill response above (Worker Version `4597b4b6-34a4-4faf-a2e1-08df5e1f1d34`, public root `HTTP 200`). Striking the answered `deploy` head to clear the closeout residue.
-
-Escalation: none. Confidence: high.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=ca5b06f9-838b-4b60-9ce2-00519736fbb1 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782344406484
-```
-<!-- agent:boundary:b2114d36 -->
+<!-- agent:boundary:5ed1e846 -->
 <!-- /agent:exchange -->
 ###
 <!--

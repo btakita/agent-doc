@@ -77,7 +77,24 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=file_ipc patch_id=9ab691b5-9b11-4928-a7e2-31fbf89e9264 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0.json doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782353889911
 ```
-<!-- agent:boundary:52b7a94e -->
+
+### Re: #vm7g lazily-spec state wire — agent_doc_state_subscribe delta export — glm-5.2
+
+**Shipped.** `#vm7g` (`#lazilystatesync2`) maps the existing state backbone onto the lazily-spec `snapshot.json`/`delta.json` wire envelope so editor plugins hold a lazily-kt/lazily-js mirror graph and apply deltas instead of re-rendering the full projection on every event. The backbone was already further along than the plan implied (7 domains as `lazily::ThreadSafeStateMachine`s, idempotent `seen_event_ids`, per-`StateOwner` generation stale-rejection), so this reduced to the wire mapping + the subscribe entry point, exactly as `#56ta` scoped it.
+
+**What landed (commit `e6e63d82`, pushed to agent-doc origin; parent pointer `f1be9177e`):**
+- `agent-doc-orchestration/state_wire.rs` (new): `AgentDocNodeType` registry (8 `type_tag`s — document.baseline / queue / queue.head / closeout.cycle / transport.patch / supervisor.owner / route / proof.marker), `slot_id = fnv1a(document_hash, type_tag, entity_key)` (re-implementable identically across kt/js/rs — no `Hasher` drift), `WireSnapshot`/`WireDelta`/`WireDeltaOp` matching `src/lazily-spec/schemas/{snapshot,delta}.json`, snapshot + delta derivation from `DocumentStateProjection`, derivation edges (cycle→baseline, queue.head→cycle, transport.patch→cycle, route→route_dispatch owner, transport.patch→editor_ipc_bridge owner), and the `subscribe()` cold/warm/no-op resolver.
+- `state_backbone.rs`: `EventLedger::{accepted_events, document_epoch, project_document, project_document_at_epoch}` + pub `DocumentStateProjection::new`/`apply_fact` so the wire layer replays a bounded deduped event slice for delta derivation.
+- `ffi.rs`: `agent_doc_state_subscribe(document_hash, last_epoch)` → lazily-spec JSON (`"snapshot"` on cold read / `last_epoch=0`, `"delta"` on warm read, no-op empty delta when current). `agent_doc_state_projection` stays as the unchanged cold round-trip path.
+- `specs/13-state-backbone.md`: documented the wire surface, type_tag vocabulary, edges, and the idempotent epoch/delta contract.
+- Tests: 8 `state_wire` unit tests (slot_id stability/distinctness, cold-read snapshot, cycle→baseline edge, replay = no-op delta, node-add-then-change delta, route actor edge, lazily-spec JSON discriminators, base64 round-trip) + 1 FFI round-trip subscribe test.
+
+**Why this is the right substrate.** `epoch = accepted-event-count` per document; a re-emit/replay does not bump the epoch (the projection's `seen_event_ids` absorbs it), so a re-emit yields a no-op delta. Delta application is a pure fold of deduped events ⇒ deterministic + idempotent — the exact property `#queuestatemachine`/`#qdedupsync`/`#qauthorder` build on. The ledger is append-only within a process lifetime, so any `last_epoch ≤ current_epoch` is satisfiable without a resync; multi-epoch deltas converge identically to a fresh snapshot.
+
+**Verification.** `make check` green: clippy clean (lib), 5112 tests passed / 241 skipped. Release build installed + lib deployed (`libagent_doc-0.34.48.so`), controllers auto-marked to recycle. (The one transient `sync::tests::safe_passive_sync…` failure on the first run was a parallel-tmux `duplicate session: test` race — it passed in isolation and didn't recur; unrelated to this additive change.)
+
+**Follow-ups (already queued, not this cycle):** the consumers are `#n529` (JB lazily-kt mirror), `#r5at` (VSCode lazily-js mirror), `#6n5j` (cross-editor conformance + FFI round-trip), and the lazily-spec schema pin `#gww8`/`#lazilyspecpin` (sibling `lazily-spec` session). `#vm7g` is code-complete + verified; closing it.
+<!-- agent:boundary:b95fc84d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -259,7 +276,6 @@ What are #next-steps to fix bugs?
 - [ ] [#fnxy] #mergestatemachine1 Define FFI write-ownership SM (Detached→Attached→EditorOwnsBuffer→BinaryWriteRequested→IpcAckProven→Committed) + editor-heartbeat liveness probe distinguishing live-editor from stale listener (#6b5h). Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#t4x1] #mergestatemachine2 Gate try_ipc/commit/disk-write on the ownership SM; route Detached/stale writes to controller-host disk path so CLI-only/no-editor never wedges on no_ack. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#kj5f] #mergestatemachine3 JB+VSCode report attach/detach/ownership through SM (thin reporters via #lazilystatesync); SimWorld + live repro for File Cache Conflict + #6b5h wedge. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
-- [ ] [#vm7g] #lazilystatesync2 Back agent_doc_state_projection with a lazily-rs Context/Cells graph + add agent_doc_state_subscribe delta export (lazily-spec format); keep full-snapshot cold read. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#n529] #lazilystatesync3 JB plugin: replace StateProjectionBridge manual JSON render with a lazily-kt mirror graph applying FFI deltas; EditorCommandStateMachine becomes a derived lazily-kt cell. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#r5at] #lazilystatesync4 VSCode plugin: lazily-js mirror graph applying FFI state deltas. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#6n5j] #lazilystatesync5 Parity+tests: lazily-spec cross-editor conformance (extend EditorCommandStateMachineTest to reactive path) + FFI round-trip proving kt/js mirror converges to rs authoritative graph. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md

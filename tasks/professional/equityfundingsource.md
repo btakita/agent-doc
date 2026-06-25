@@ -165,7 +165,20 @@ Verified: full suite **1228 pass / 0 fail**, `build` + `build:worker` clean. Com
 This queue head was already answered by the preceding **Loan Terms card density** section: the Loan Terms card density pass shipped in EFS `3c5db1c`, the full suite and builds passed, and the branch was pushed to `origin/main`. I made no additional EFS code changes in this cycle.
 
 Noted preflight hygiene: one legacy gated backlog item still needs migration to review, and this workspace reports a stale `agent-doc` install relative to source. Those are existing agent-doc/session-maintenance warnings, not blockers for closing the already-answered Loan Terms queue item.
-<!-- agent:boundary:1d60cbfc -->
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:** deploy
+
+Deployed the EFS Worker to production — **Version ID `4ac3c33e-306d-42e3-9f19-939a75725b4e`** (`https://equityfundingsource.brian-takita.workers.dev`).
+
+Followed `runbooks/deployment.md`:
+- **Pre-deploy:** working tree clean on `main`, in sync with origin (behind=0 ahead=0); `make check` green (**1228 pass / 0 fail**, build + build:worker ok); **no pending remote D1 migrations** → code-only deploy, zero schema risk (skipped the destructive-migration backup/time-travel steps as they don't apply).
+- **Deploy:** `make deploy` → `build:worker` → `cf:d1:migrate:remote` (no-op) → `cf-deploy.ts worker`. Uploaded in 7.83s, triggers deployed (hourly schedule intact).
+- **Post-deploy verification:** public site `200`, `/admin/login` `200`, migrations list confirms none pending.
+
+Shipped the committed `main` state (`3c5db1c` — admin loan-tab dense responsive grid for Loan Terms + Application cards). No code changes this cycle; deploy only.
+<!-- agent:boundary:d1d30941 -->
 <!-- /agent:exchange -->
 ###
 <!--

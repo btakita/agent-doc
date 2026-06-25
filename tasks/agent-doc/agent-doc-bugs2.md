@@ -255,7 +255,24 @@ Its only invariant is *"never commandeer another **document's** pane"* (SPEC §8
 **Fix (added as `#xdocsuper0`, plan updated):** before `AcceptStale` (and on the route reclaim path), check `supervisor_lease_is_fresh_or_alive` for the document — if a fresh lease is held by a live supervisor, `Reject` (or require `--force`) even when the prior pane/session looks stale. That closes the two-supervisors-one-document window at the source. Plan: `tasks/agent-doc/plan-cross-document-supervisor-contamination.md`.
 
 This is still a `[focused-cycle]` fix on `project_controller`/`route`/`claim` + SimWorld, and must not be implemented from this contaminated session — but you now have the precise answer: a present-but-unconsulted supervisor lease.
-<!-- agent:boundary:5790cad8 -->
+
+### Re: reactive SM for supervisor document bindings — glm-5-2
+
+> **Queue prompt:** Would a reactive state machine help to manage the supervisor document bindings?
+
+**Yes for the document-switch/hosting problem; no (over-engineering) for the claim guard. And the reactive substrate already exists — this is an extension, not greenfield.**
+
+**The substrate is already built.** `state_backbone.rs` is already an event-sourced, per-`document_hash`, epoch'd, idempotent reactive projection — its `StateEvent` variants span the full lifecycle (`PreflightStarted`, `ResponseCaptured`, `WriteApplied`, `OwnerGenerationChanged`, `AgentRestartPerformed`, `RoutePaneObserved`, `DispatchProofObserved`…). The pane→document host binding is a *missing event variant*, not a new subsystem. This is distinct from the pure-transition SMs (`queue_item_state_machine`, `merge_control_state_machine`), which are `max`/join decision functions that make a bad transition a no-op; the backbone is the reactive/event-sourced layer those sit atop.
+
+**Three sub-problems, two tools:**
+- **`#xdocsuper0` (claim guard) — not an SM.** `claim.rs::cross_session_decision` never consults the existing `supervisor_lease_is_fresh_or_alive` (the lease already lives in SQLite via `state_store.rs::load_supervisor_lease_from_db`). A one-line guard on `AcceptStale`, not a reactive SM. Ship first — closes the two-supervisors-one-document window with no new infra.
+- **`#xdocsuper1` (document-switch reset) — this is where an SM pays off.** The illegal state is "hosting DocB while holding DocA's stale overlay (CRDT / queue projection / drain lease / cycle journal)." Modeling `Detached → Hosting(doc) → SwitchDetected → Resetting → Hosting(doc')` makes it unreachable by construction — the same guarantee `queue_item_state_machine` gives for duplicate queue items.
+- **`#xdocsuper3` (backbone binding) — re-scope from "optional" to "the vehicle for `#xdocsuper1`.**" Express the reset *as* a backbone transition (`SupervisorHosting`/`DocumentSwitched` event + projection), not ad-hoc host-loop reset code — otherwise `#1` becomes another bypassable implicit-reset path, the same bug class it's fixing.
+
+**Necessary but not sufficient:** the switch-event + on-disk reload must be the structurally-enforced *first* step of every document handoff (the `Hosting` projection state constructable only from a fresh switch event paired with reload, not an optional reconciliation pass) — a skipped emit under IPC drift reopens the hole. The `#queuestatemachine` lesson applies: convergence must *drive* to the lawful state, not patch after the fact.
+
+Full detail persisted in `tasks/agent-doc/plan-cross-document-supervisor-contamination.md` ("Design note: would a reactive state machine help?"). Not implementing inline — `#xdocsuper` is `[focused-cycle]` and per its own plan must run from a fresh, non-contaminated session.
+<!-- agent:boundary:88561d5c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -295,7 +312,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 ---
 - :pushpin: do [#xdocsuper]
 - :pushpin: do [#cgfx]
-- Would a reactive state machine help to manage the supervisor document bindings?
+- ~~Would a reactive state machine help to manage the supervisor document bindings?~~ — auto-struck: answered this cycle (#ftstrike)
 - [#xdocsuper0]
 - :pushpin: do [#gww8]
 - :pushpin: do [#n529b]

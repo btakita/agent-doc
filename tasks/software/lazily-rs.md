@@ -377,7 +377,7 @@ For anchorless prose under **concurrent** edits the merge unit drops to **charac
 All seven phases of `tasks/software/plan-lazily-agent-doc-reactive-substrate.md` are shipped: **`#lzcellmove`** (atomic move) → **`#lzordtree`** (ordered keyed tree) → **`#lzkeyrecon`** (keyed reconciliation, the per-cell-merge enabler) → **`#lzseqcrdt`** (move-aware sequence CRDT) → **`#lzstableid`** (manufactured identity) → **`#lzsemtree`** (memoized semantics) → **`#lztextcrdt`** (free-text CRDT). Together they are the substrate for a reactive, **per-cell-mergeable** agent-doc document — replacing whole-document `crdt::merge` with minimal per-item ops. ~5,000 lines across 6 new modules + 41 new tests, all green; spec + lazily-spec updated each phase.
 
 **Closeout:** `#lztextcrdt` → done. Queue drained.
-<!-- agent:boundary:d210518e -->
+<!-- agent:boundary:9de1cc06 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -386,6 +386,7 @@ All seven phases of `tasks/software/plan-lazily-agent-doc-reactive-substrate.md`
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- I looked at Tombstones. Please address "In set CRDTs like the Two-Phase Set (2P-Set), a separate "tombstone set" tracks removed elements to ensure removals take precedence over additions during state merges." and "While tombstones solve the "TP2 puzzle" in operational transformation and ensure convergence without central coordination, they lead to memory bloat.  Some systems implement specialized garbage collection protocols to safely remove tombstones only when all replicas are confirmed to be aware of the deletion."
 <!-- /agent:queue -->
 
 ## Backlog

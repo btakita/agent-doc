@@ -129,7 +129,7 @@ Commits: EFS `d33680e` (identity short-circuit removal + field merge) and `48948
 Deploy: no schema change (reuses existing tables); remote D1 migrations had nothing to apply. `make deploy` completed. Worker URL `https://equityfundingsource.brian-takita.workers.dev`. Current Version ID `4597b4b6-34a4-4faf-a2e1-08df5e1f1d34`. Post-deploy: public root `HTTP 200`. A new/resumed application for this borrower at step=0 will now prefill DOB (and other blank borrower fields) from the most recent prior application.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:fe539b65 -->
+<!-- agent:boundary:36ca172a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -151,7 +151,7 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~https://equityfundingsource.brian-takita.workers.dev/borrowers/new-application?step=0 for btak.dev+borrower3@gmail.com~~
   still does not capture already filled out borrower data (e.g. "Date of Birth"). Have we captured this borrower's data?
-- deploy
+- 🚧 deploy
 <!-- /agent:queue -->
 
 ## Backlog

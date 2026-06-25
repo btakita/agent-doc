@@ -13,6 +13,7 @@
 
 pub mod component;
 pub mod crdt;
+pub mod crdt_sync;
 pub mod diff;
 pub mod ffi;
 pub mod frontmatter;

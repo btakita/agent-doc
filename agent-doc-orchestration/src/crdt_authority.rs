@@ -38,7 +38,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::merge_control_state_machine::{
-    ownership_probe, MergeOwnershipEvent, MergeOwnershipPhase, OwnershipLiveness,
+    MergeOwnershipEvent, MergeOwnershipPhase, OwnershipLiveness, ownership_probe,
 };
 use crate::state_backbone::{DocumentStateProjection, EventLedger, TransportPatchPhase};
 
@@ -214,10 +214,34 @@ fn document_has_live_editor_transport(projection: &DocumentStateProjection) -> b
     }
 }
 
+/// Run one incremental state-vector sync round between two replicas ONLY under a
+/// multi-replica authority (`#crdtauth1sv` seam).
+///
+/// This wires the state-vector sync primitive ([`agent_doc_core::crdt_sync`]) to
+/// the authority SM: the incremental protocol is engaged exactly when the
+/// authority proves a live multi-replica session ([`CrdtAuthority::MultiReplica`]).
+/// Under [`CrdtAuthority::GitAuthoritative`] the CRDT is ephemeral — git is the
+/// source of truth, rebuilt from text each turn — so there is no second live
+/// writer to converge with and the sync is skipped. Returns whether a sync round
+/// actually ran.
+pub fn sync_under_authority(
+    authority: CrdtAuthority,
+    a: &agent_doc_core::crdt_sync::ReplicaState,
+    b: &agent_doc_core::crdt_sync::ReplicaState,
+) -> anyhow::Result<bool> {
+    if authority.editor_attached() {
+        agent_doc_core::crdt_sync::sync(a, b)?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::merge_control_state_machine::OwnershipLiveness;
+    use agent_doc_core::crdt_sync::ReplicaState;
 
     const ALL_PHASES: [MergeOwnershipPhase; 6] = [
         MergeOwnershipPhase::Detached,
@@ -230,7 +254,10 @@ mod tests {
 
     #[test]
     fn detached_and_committed_are_git_authoritative_ephemeral() {
-        for phase in [MergeOwnershipPhase::Detached, MergeOwnershipPhase::Committed] {
+        for phase in [
+            MergeOwnershipPhase::Detached,
+            MergeOwnershipPhase::Committed,
+        ] {
             let authority = authority_for(phase);
             assert_eq!(authority, CrdtAuthority::GitAuthoritative, "{phase:?}");
             assert!(
@@ -358,5 +385,34 @@ mod tests {
             !disk_write_permitted(MergeOwnershipPhase::Committed),
             "Committed is terminal — git-authoritative does not imply a live disk write"
         );
+    }
+
+    #[test]
+    fn state_vector_sync_runs_only_under_multi_replica_authority() {
+        // MultiReplica → the incremental sync engages and the replicas converge.
+        let a = ReplicaState::new(1);
+        a.apply_local_edit(0, 0, "alpha");
+        let b = ReplicaState::new(2);
+        b.apply_local_edit(0, 0, "beta");
+        let ran = sync_under_authority(CrdtAuthority::MultiReplica, &a, &b).unwrap();
+        assert!(
+            ran,
+            "a multi-replica authority engages the state-vector sync"
+        );
+        assert_eq!(a.text(), b.text(), "synced replicas converge");
+        assert!(a.text().contains("alpha") && a.text().contains("beta"));
+
+        // GitAuthoritative → ephemeral CRDT; no live peer to converge with, so the
+        // sync is skipped and the replicas are left untouched.
+        let c = ReplicaState::new(1);
+        c.apply_local_edit(0, 0, "gamma");
+        let d = ReplicaState::new(2);
+        d.apply_local_edit(0, 0, "delta");
+        let ran = sync_under_authority(CrdtAuthority::GitAuthoritative, &c, &d).unwrap();
+        assert!(
+            !ran,
+            "the git-authoritative/ephemeral path does not sync live replicas"
+        );
+        assert_ne!(c.text(), d.text(), "skipped sync leaves replicas untouched");
     }
 }

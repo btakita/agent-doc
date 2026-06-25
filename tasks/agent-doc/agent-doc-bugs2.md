@@ -127,15 +127,45 @@ This is tracked as **#actorswitchdefer** with a full root-cause in `tasks/agent-
 **Reactive auto-pickup (your actual ask) — remaining Part B, routed to a focused cycle.** The mechanism to make the deferred restart *fire reliably* + prove it needs **new SimWorld restart-flow infrastructure** (there is currently no `harness_change_detected` / `agent_restart_performed` SimWorld test to extend) plus a route-side explicit bail when `agent_change_restart` is disabled. Its own plan mandates a focused cycle with `make tmux-ci` (the unrunnable two-pane leg). This `/loop` is already several heavy deliverables deep with active IPC recovery-churn, so per the deep-supervisor-refactor rule I tagged **#actorswitchdefer `[focused-cycle]`** rather than author live-supervisor-critical test infra mid-churn. It stays an actionable backlog item (not a review gate), draining in a fresh focused cycle.
 
 **Today's workaround:** after switching `agent:`, run `agent-doc session restart-supervisor tasks/professional/equityfundingsource.md` (add `--force` if the codex pane is busy/stuck) — that re-resolves the harness and brings up opencode without the manual kill+restart.
-<!-- agent:boundary:5ad4d726 -->
+
+### Re: lazily-kt / lazily-js plugin state-sync + #rt83qflood flood fix — opus-4.8
+
+> **Queue prompt:**
+>
+> What are #next-steps to use lazily-ky and lazily-js to sync the plugin state machines and state graphs from the FFI plugin?
+
+**First — I fixed the flood that's been blocking this whole session (`#rt83qflood`, shipped).** Root cause found: `dedup_free_text_heads` collapses binary-injected free-text queue pins beyond their snapshot-authored count, but `free_text_dedup_key` **early-returned `None` for multiline prompts** — and the JB actor-switch pins are multiline (operator line + fenced route-error body), so they were never deduped and re-flooded every preflight (the 5–7 `:round_pushpin:`/`:pushpin:` copies that kept triggering `#qheadresidue` interrupts). Now multiline pins are keyed on whitespace-collapsed lowercased text (pin stripped), so verbatim phantom re-emits collapse to the authored count while distinct pins and intentional duplicates survive. `make check` **5103 passed**; committed + pushed (agent-doc `3d99f53e`, pointer `1edb88bf7`). `do [#rt83qflood]` → **done**.
+
+**Now your question (`#next-steps`).** I traced the pieces: `lazily` is the reactive-primitives family (`Context`/`Slots`/`Cells` + auto dependency tracking) with a language-agnostic wire protocol (`lazily-spec`) and per-language impls (`lazily-rs`/`-kt`/`-js`). The FFI already exposes `agent_doc_state_projection(doc_hash) → JSON` (`ffi.rs:1726`), and `StateProjectionBridge.kt` is explicitly "a thin editor-side bridge for the Rust-owned state backbone." **The gap:** the plugins consume that projection as a *pull/render JSON snapshot* — there's no reactive subscription, so the editor state machine/graph re-renders on observed events instead of auto-syncing from FFI state. Closing that with the lazily family is exactly the ask.
+
+**Target:** FFI (lazily-rs) owns the authoritative reactive state graph; each plugin holds a *mirror* lazily graph that applies FFI-emitted deltas, so `EditorCommandStateMachine` derives from tracked cells instead of manual re-render. Plan filed: `tasks/agent-doc/plan-lazily-plugin-state-sync.md`. Backlog (priority order):
+
+1. **#lazilystatesync1** — define the `lazily-spec` wire shape for the state projection (machine nodes + graph edges + generation) so FFI emits *deltas*, versioned so kt/js/rs stay in lockstep.
+2. **#lazilystatesync2** — back `agent_doc_state_projection` with a `lazily-rs` `Context`/`Cells` graph + add `agent_doc_state_subscribe` delta export (keep the snapshot as cold-read).
+3. **#lazilystatesync3** — JB: `lazily-kt` mirror graph applying FFI deltas; `EditorCommandStateMachine` becomes a derived cell.
+4. **#lazilystatesync4** — VSCode: `lazily-js` mirror.
+5. **#lazilystatesync5** — parity + tests (lazily-spec conformance + FFI round-trip proving kt/js mirror converges to the rs authoritative graph).
+
+**Top of backlog:** `#lazilystatesync1`. Note the `lazily-*` sibling repos stay confirmed/queued for their own sessions per scope-discipline — steps 1–2 anchor in this repo's FFI + lazily-spec/rs, 3–4 in the editor plugins. Each step is its own focused cycle.
+<!-- agent:boundary:3e66ecf6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~"Add a bounded `session_startup` wait in `route.rs`/`start.rs` with a hard deadline; on expiry, fail closed with `startup_miss` + an actionable error ("session did not become dispatch-ready in Ns") rather than hanging.": Can you retry or isolate why the session hangs so we can further dogfood these sort of errors?~~
-- ~~Can we have a state machine for the wait machinery? And prove that we will never hang with tests & formal logic (i.e. Lean)? We should never hang for more than 10s. I know there is a dogfood reinstall that we pause for, which is the only exception.~~
-- 🚧 What are #next-steps to use lazily-ky and lazily-js to sync the plugin state machines and state graphs from the FFI plugin?
+- ~~What are #next-steps to use lazily-ky and lazily-js to sync the plugin state machines and state graphs from the FFI plugin?~~
+- [#gghx]
+- [#8g9w]
+- [#6mjw]
+- [#spy9]
+- [#actorswitchdefer]
+- [#56ta]
+  [#vm7g]
+  [#n529]
+  [#r5at]
+  [#6n5j]
+- I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?
+- I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?
 ---
 :round_pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
@@ -217,7 +247,6 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 - do [#4pdp]
 - do [#0bmv]
 - do [#actorswitchdefer]
-- ~~:pushpin: do [#jbrunhang]~~
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
@@ -257,6 +286,10 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - do [#8g9w]
 - do [#6mjw]
 - do [#spy9]
+- do [#vm7g]
+- do [#n529]
+- do [#r5at]
+- do [#6n5j]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -283,12 +316,16 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#56ta] #lazilystatesync1 Define lazily-spec wire shape for agent-doc state projection (state-machine nodes + state-graph edges + generation) so FFI emits deltas not just snapshots. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
+- [ ] [#vm7g] #lazilystatesync2 Back agent_doc_state_projection with a lazily-rs Context/Cells graph + add agent_doc_state_subscribe delta export (lazily-spec format); keep full-snapshot cold read. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
+- [ ] [#n529] #lazilystatesync3 JB plugin: replace StateProjectionBridge manual JSON render with a lazily-kt mirror graph applying FFI deltas; EditorCommandStateMachine becomes a derived lazily-kt cell. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
+- [ ] [#r5at] #lazilystatesync4 VSCode plugin: lazily-js mirror graph applying FFI state deltas. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
+- [ ] [#6n5j] #lazilystatesync5 Parity+tests: lazily-spec cross-editor conformance (extend EditorCommandStateMachineTest to reactive path) + FFI round-trip proving kt/js mirror converges to rs authoritative graph. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#gghx] #waitmachine1 Wait-machinery state machine core: add agent-doc-orchestration/src/wait_machine.rs with a pure WaitState/tick transition + single GLOBAL_HANG_CEILING (10s) + typed ReinstallPause exemption. Plan: tasks/agent-doc/plan-wait-machinery-state-machine.md
 - [ ] [#8g9w] #waitmachine2 Migrate scattered waits (start.rs AutoTriggerMonitor 30s, route/startup.rs wait_for_agent_ready 30s, route.rs busy/shell waits, IPC ack) onto WaitMachine and lower budgets to the 10s ceiling (operator: never hang >10s). Plan: tasks/agent-doc/plan-wait-machinery-state-machine.md
 - [ ] [#6mjw] #waitmachine3 Deterministic bound proof: per-state transition tests + exhaustive (state×signal) property test asserting Σdwell≤10s on every exempt-free path + SimWorld hang-class coverage. Plan: tasks/agent-doc/plan-wait-machinery-state-machine.md
 - [ ] [#spy9] #waitmachine4 Lean model: formal/wait_machine/ encoding WaitState/Step mirroring Rust tick, theorem no_hang (exempt-free ⇒ dwell≤10s) + reinstall-pause sole-exemption lemma + Rust↔Lean parity test. Plan: tasks/agent-doc/plan-wait-machinery-state-machine.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
-- [ ] [#rt83qflood] #rt83/#qflood phantom-pin flood dedup: queue convergence leaves duplicate binary-injected :round_pushpin:/:pushpin: actor-switch pins after a stale-CRDT/supervisor re-emit, flooding the queue with ~7 near-identical copies. Add deterministic dedup that collapses repeated phantom pins (the operator-authored line is position-locked under #queue-operator-pin-position-lock, but binary-injected phantom copies must converge to one) so restarting/resyncing a stale supervisor cannot reflood the queue.
 - [ ] [#capproofbg] Make the JB Run Agent Doc capacity proof non-blocking: dispatch immediately and run the capacity proof in the background, surfacing failure asynchronously instead of stalling every dispatch.
 - [ ] [#npe1] #codefencestrip=Template patch parser strips trailing code fences at the exchange boundary
 - [ ] [#p2j4] #jbcfdiag=JB File Cache Conflict: investigate remaining write-path triggering the JB VFS dialog beyond IPC-first writes

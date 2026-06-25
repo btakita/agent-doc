@@ -121,7 +121,32 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=17d49729-8f3d-4c19-9863-eae235a8abc7 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=25858 candidate_hash=e57fc4f2504133c72064e14aa2419ad96b6a8d0f149898cb8c70d7d36ff48115 content_ours_len=27489 content_ours_hash=15d4e896e9e30ebaafb13017d7cb10fcd12f478ca0d466076a544d465e8ea7cc doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782369643340
 ```
-<!-- agent:boundary:565f5b16 -->
+
+### Re: agent switch isn't reactive + caused IPC drift — opus-4-8
+
+> **Queue prompt:** JB `Run Agent Doc` on equityfundingsource.md after switching from codex to opencode … any agent change has this issue. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change. This also caused IPC drift … as seen in a recent monsterrodholders.md session.
+
+**Your diagnosis is correct, and the two symptoms share one root cause: a paused/stale parent route-owned supervisor.**
+
+**The reactive restart mechanism IS shipped** (`#agentreloadrestart` Phase 1a+1b, confirmed in `agent-doc-orchestration/src/start/idle_watch.rs:719-771`): on any `agent:` harness change, route refuses to cold-kill the healthy old pane (the kill-guard, intentional) and **defers to a boundary restart**. The supervisor idle-watch is supposed to pick that up — each tick it re-resolves the harness and, when `agent_change_restart_decision` returns `Restart` (`harness_changed && enabled && prompt_visible && !turn_active`), emits `harness_change_detected` → `agent_restart_triggered` → `agent_restart_performed old=codex new=opencode`. That's the "reactive pickup" you're asking for — it exists.
+
+**Why it dead-ends for you (and why you must manually kill/restart):** the idle-watch only fires at a `prompt_visible && !turn_active` boundary. A **paused or stale supervisor never ticks it**, so `harness_change_detected` is never emitted and the restart never fires. This session is in exactly that state (`queue_paused`, stale in-memory CRDT).
+
+**The IPC drift is the same supervisor.** Every finalize this session hits `live_prompt_drift_after_preflight` + post-commit working-tree corruption (I've recovered it with `git checkout HEAD --` each cycle). That's the **same paused/stale parent route-owned supervisor replaying stale in-memory CRDT** — not a stale binary (the running build matches source), and not the IDE. So "agent switch won't pick up" and "IPC drift" are one failure, exactly as you observed across equityfundingsource / monsterrodholders / this doc.
+
+**Recovery (shipped — `#actorswitchdefer` Part A, `6c7455a8`):** the route defer bail is now operator-actionable and points at the fix. For this session, run:
+
+```
+agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md
+```
+
+(or kill+restart the pane / recycle the IDE). That re-resolves the harness, brings up the new agent, **and** clears the stale-CRDT drift in one shot. `restart-supervisor` already re-resolves frontmatter, so it's the single recovery for every branch.
+
+**Remaining work** is `#actorswitchdefer` Part B (already queued, `[focused-cycle]`): deterministic SimWorld proof that the deferred restart actually fires at the boundary, the paused/stuck regression asserting the recovery hint shows and the deferred restart is never silently dropped, plus an explicit route bail when `agent_change_restart` is disabled. That needs restart-flow SimWorld infra + `make tmux-ci`, so it belongs in a fresh focused cycle on a healthy supervisor — implementing it on this stale-CRDT session would just re-corrupt the write.
+
+**I'm stopping after this and recommending the supervisor restart above** — the in-session loop can't fix its own parent; the operator restart is the unblock.
+
+<!-- agent:boundary:3c075c33 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -133,19 +158,9 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack
 - ~~:pushpin: [#n529]~~
 - ~~:pushpin: do [#fnxy]~~
 - ~~:pushpin: do [#t4x1]~~
-- 🚧 :pushpin: [#kj5f]
-- :pushpin: [#brtc]
-- :pushpin: do [#gww8]
-- :pushpin: do [#n529b]
-- ~~When adding a backlog item, the agent sometimes assigns an explicit id. But agent-doc ignores the explicit id and assigns a new id. The agent's explicit id should be used instead. So instead of `[#kj5f] #mergestatemachine3` the id should be `[#mergestatemachine3]`.~~ — auto-struck: answered this cycle (#ftstrike)
-- :pushpin: [#vwj7]
-- :pushpin: [#cgfx]
-- :pushpin: [#gghx]
-- :pushpin: [#8g9w]
-- :pushpin: [#6mjw]
-- :pushpin: [#spy9]
+- ~~:pushpin: [#kj5f]~~
 ---
-:pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
+🚧 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to opencode...any agent change has this issue. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change. This also caused IPC drift...as seen in a recent monsterrodholders.md session.
 ```
 resync: pruned 2 stale session(s)
 [route] target tmux session: 0
@@ -160,6 +175,16 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
+- :pushpin: [#brtc]
+- :pushpin: do [#gww8]
+- :pushpin: do [#n529b]
+- ~~~~When adding a backlog item, the agent sometimes assigns an explicit id. But agent-doc ignores the explicit id and assigns a new id. The agent's explicit id should be used instead. So instead of `[#kj5f] #mergestatemachine3` the id should be `[#mergestatemachine3]`.~~ — auto-struck: answered this cycle (#ftstrike)~~
+- :pushpin: [#vwj7]
+- :pushpin: [#cgfx]
+- :pushpin: [#gghx]
+- :pushpin: [#8g9w]
+- :pushpin: [#6mjw]
+- :pushpin: [#spy9]
 - :pushpin: [#r5at]
 - :pushpin: [#6n5j]
 ---

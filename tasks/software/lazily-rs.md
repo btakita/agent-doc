@@ -102,7 +102,30 @@ The cheap-routine cases (`viewport_recalc`, `full_recalc`) run on a persistent w
 > **Queue prompt:** Fix the benchmark.
 
 Note: the queue head `do [#lzwirekey]` is **not** drained — you scoped `#lzwirekey` to *plan only*, and the plan (`tasks/software/plan-lazily-wire-keyed-addressing.md`) is written. The queue is operator-paused; nothing else here is agent-drainable without your go.
-<!-- agent:boundary:2a5d0edd -->
+
+### Re: queue cleanup — opus-4-8
+
+> **Queue prompt:**
+>
+> Update the README with the benchmark table with my machine specs. Mention the lazy reactive win with viewport_recalc.
+
+
+Consuming the lingering struck head (already completed — the scale benchmark is in `BENCHMARKS.md` and linked from `README.md`) and gating `#lzwirekey` to `[operator-go]` so go-mode stops re-mirroring it as a drainable head. You scoped `#lzwirekey` to plan-only; the plan is written and its implementation now waits on your explicit go. No agent-drainable work remains.
+
+> **Queue prompt:** Add the 1M+ benchmark to the documents and link in the README.
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=ipc_visible_repair patch_id=e9857be4-9dba-4cf8-95a7-8c03a93c1552 invariant=ipc_dedupe recovery=retry_without_disk_write redeliver_editor=true bad_len=10628 bad_hash=630a495072ecbd054b8e94145ebba5bcbebbaf9e9bc26aa5277fcde7d7738e7e repaired_len=15013 repaired_hash=a044c9a94e2160c8ea1ac71e6d8a01948d57f20dd447a4b578ddf30a9a5273e2 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782423321782
+```
+<!-- agent:boundary:e3ea19ae -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -111,9 +134,8 @@ Note: the queue head `do [#lzwirekey]` is **not** drained — you scoped `#lzwir
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#lzcycledetect] [#lzscalebench] [#lzcellfamily] [#lzwirekey]~~
-- 🚧 ~~Add the 1M+ benchmark to the documents and link in the README.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~do [#lzwirekey]~~
+- ~~Update the README with the benchmark table with my machine specs. Mention the lazy reactive win with viewport_recalc.~~
+- How many cells does Google Sheets & MS Excel support? Add benchmarks for those numbers.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -178,7 +178,7 @@ So: insert/delete are atomic today; atomic ordered *move* is the gap, now backlo
 > **Queue prompt:** Add Google Sheets cell count benchmark to README. Why are there 2 cells per formula?
 
 Added the Google Sheets scale to the README Benchmarks section: at the full **10,000,000-cell** Sheets cap, lazily builds in ~0.7 s, cold-recomputes in ~0.5 s, viewport edit ~11 µs (with the Excel 17.18B-grid sparse-model note). On **"2 cells per formula"** — it's actually **2 cells per row**, not per formula: the bench models a column `=A_i + A_{i-1}`, so each row is **one input cell `A_i` + one formula cell** ⇒ `N` rows = `2N` cells, matching how a real sheet mixes value and formula cells. Each formula *depends on* 2 inputs but is itself a single cell. So "10M cells" = 5M inputs + 5M formulas. Clarified inline in the README.
-<!-- agent:boundary:4ad1adcc -->
+<!-- agent:boundary:9acacf54 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -187,12 +187,6 @@ Added the Google Sheets scale to the README Benchmarks section: at the full **10
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~Update the README with the benchmark table with my machine specs. Mention the lazy reactive win with viewport_recalc.~~
-- ~~How many cells does Google Sheets & MS Excel support? Add benchmarks for those numbers.~~
-- 🚧 Are we currently support Hash + Collection Cell Famlies? If yes, update lazily-spec and release + publish lazily-rs.
-- ~~Do Cell Families handle insertions and deletions? Is move atomic and optimized? Can position changes be atomic as well?~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~:pushpin: do [#lzcellmove]~~
-- ~~Add Google Sheets cell count benchmark to README. Why are there 2 cells per formula?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

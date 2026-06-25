@@ -126,7 +126,23 @@ When I set up the worktree I found `#crdtauth1`'s authority layer **already pres
 **Gated `#crdtauth1`** — code-complete + verified, but genuinely blocked on: (1) operator merge `crdtauth1-authority-sm` → main + install + supervisor restart (deliberately not auto-installed mid-session per the isolated-worktree choice), and (2) the deferred **state-vector sync** half, now filed as `#crdtauth1sv`.
 
 > **Queue prompt:** do [#crdtauth1]
-<!-- agent:boundary:a0b333bc -->
+
+### Re: #crdtauth1sv — state-vector sync protocol primitive (authority-gated) implemented — opus-4-8
+
+Built the deferred state-vector-sync half in the **same isolated worktree** on branch `crdtauth1-authority-sm` (commit `0040203c`, on top of the authority SM `1b2a6e94`) — no install/recycle/push. No pre-staged work this time; written from scratch.
+
+**`agent-doc-core/src/crdt_sync.rs` — the incremental protocol primitive.** Where today's `crdt::merge_by_component` rebuilds throwaway yrs docs from text and runs a whole-`.yrs`-snapshot merge each cycle, `ReplicaState` keeps a **durable per-replica yrs Doc across cycles** and exchanges only deltas:
+- `state_vector()` — compact per-client causal summary (not the whole doc); `diff(their_sv)` — `encode_state_as_update`, ships only the missing ops; `apply_update` — idempotent + yrs causal-buffered; `encode_state` — durable checkpoint.
+- `sync(a, b)` — one incremental round (exchange SVs → apply only missing deltas → converge), modelling an FFI-node ↔ supervisor exchange.
+
+**Authority seam** (`crdt_authority.rs`): `sync_under_authority` engages the sync **only under `CrdtAuthority::MultiReplica`**; under `GitAuthoritative` the CRDT is ephemeral (git-authoritative, rebuilt from text) so live-replica sync is skipped. This ties the sv protocol to the `#crdtauth1` authority SM.
+
+**Verified:** 7 `crdt_sync` unit tests (convergence, delta-smaller-than-snapshot, idempotence, **out-of-order causal-buffering self-heal**, bidirectional, stable re-sync, roundtrip) + 1 authority-gate test; full **`make check` green**; release build OK.
+
+**Gated `#crdtauth1sv`** — primitive + authority gate code-complete + verified on the branch, but the actual *replacement* of the live `merge_by_component` call sites and the FFI-node↔supervisor channel wiring land in the existing downstream rungs **`#crdtauth2`** (editor-as-replica FFI binding) / **`#crdtauth3`** (state-vector commit barrier). Also blocked on the same operator merge→main + install + supervisor restart as `#crdtauth1`.
+
+> **Queue prompt:** do [#crdtauth1sv]
+<!-- agent:boundary:ec88c227 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -228,7 +244,7 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 - :pushpin: ~~Would a reactive state machine help to manage the supervisor document bindings?~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: ~~I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: ~~I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?~~ — auto-struck: answered this cycle (#ftstrike)
-- do [#crdtauth1sv]
+- ~~do [#crdtauth1sv]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -255,7 +271,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#crdtauth1sv] [focused-cycle] agent-doc state-vector sync protocol (deferred half of #crdtauth1): replace whole-.yrs snapshot merge_by_component with incremental per-replica StateVector / update exchange in the FFI node ↔ supervisor channel, gated on CrdtAuthority::MultiReplica. Builds on the authority SM (branch crdtauth1-authority-sm, 1b2a6e94). Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#crdtauth2] [focused-cycle] Editor-as-replica binding (FFI-first): cdylib is the CRDT node hosting a per-editor yrs replica; thin IntelliJ/VSCode bindings forward Document deltas + apply remote updates (cursor/undo preserving); plugin read/write-through FFI (completes #dsqa). Wire agent-doc shared roots (document/queue/hosting) to lazily replicated cells (per-cell merge #qcellmerge1); upgrade #lazilystatesync to bidirectional. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#crdtauth3] 2 [focused-cycle] State-vector commit barrier: replace finalize patch-ack with flush-all-live-editors-to-SV then snapshot then commit; root-fix for the no_ack / ipc_proof_insufficient / postcommit-worktree-corruption class. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#crdtauth4] [focused-cycle] Multiple-editor relay + awareness + disk demotion: supervisor broadcast hub for N replicas (unique client-ids, ephemeral awareness channel, commit is a consistent cut of live replicas); .yrs demoted to write-through recovery projection, FFI nodes persist replicas locally. Plan: tasks/agent-doc/plan-crdt-authority-model.md
@@ -282,6 +297,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#crdtauth1sv] [focused-cycle] agent-doc state-vector sync protocol (deferred half of #crdtauth1): replace whole-.yrs snapshot merge_by_component with incremental per-replica StateVector / update exchange in the FFI node ↔ supervisor channel, gated on CrdtAuthority::MultiReplica. Builds on the authority SM (branch crdtauth1-authority-sm, 1b2a6e94). Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [/] [#crdtauth1] [focused-cycle] agent-doc authority state machine: Detached (git-authoritative, ephemeral CRDT) to EditorAttached (multi-replica) keyed on plugin attach/detach, riding the hosting-epoch backbone; extends #mergestatemachine. Plus state-vector sync protocol replacing whole-.yrs snapshot merge_by_component. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [/] [#kj5f] [operator-verify] #mergestatemachine3 remaining: JB+VSCode thin reporters emit attach/detach/ownership facts through the merge-ownership SM (via #lazilystatesync) + live editor-attached/detached repro for File Cache Conflict + #6b5h wedge. DONE: SM core Phases 1-2 + deterministic scenario repros for both wedge classes (agent-doc 34d7023d). Remaining needs the operator-paused plugin install + a live editor to verify. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 <!-- /agent:review -->

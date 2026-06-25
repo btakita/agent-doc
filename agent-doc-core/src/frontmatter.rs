@@ -1369,6 +1369,171 @@ fn split_frontmatter(content: &str) -> Result<Option<(&str, &str)>> {
     Ok(Some((yaml, body)))
 }
 
+/// Split a document into `(Some(yaml_without_fences), body)` or `(None, content)`.
+///
+/// Merge-path convenience wrapper over the internal splitter that never errors:
+/// an unterminated / malformed leading block is treated as "no frontmatter" so a
+/// convergence merge degrades gracefully instead of panicking. `body` is the
+/// document text after the closing `---` fence (the same slice [`parse`] returns).
+pub fn split_frontmatter_parts(content: &str) -> (Option<&str>, &str) {
+    match split_frontmatter(content) {
+        Ok(Some((yaml, body))) => (Some(yaml), body),
+        _ => (None, content),
+    }
+}
+
+/// Top-level frontmatter keys that agent-doc itself manages as runtime state
+/// (`#fmreset`). On a *same-key* conflict — both the agent side (`ours`) and the
+/// operator side (`theirs`) changed the key relative to `base` — the AGENT value
+/// wins for these keys so a routine managed write (session/resume identity,
+/// pipeline tracker) is not clobbered. Every other key is operator-authoritative.
+/// Operator-only or agent-only edits always apply to their own key regardless of
+/// this set, so an operator's frontmatter edit is never reverted.
+///
+/// Note: `queue` / `queue_active` are intentionally NOT here — the operator owns
+/// `queue: start|stop`, and an agent-only drain flip still applies because it is
+/// an agent-only change (operator did not touch it).
+fn is_agent_managed_frontmatter_key(key: &str) -> bool {
+    matches!(
+        key,
+        "agent_doc_session" | "session" | "resume" | "agent_doc_pipeline"
+    )
+}
+
+/// Field-level three-way merge of the YAML frontmatter region (`#fmreset`).
+///
+/// Inputs are the raw YAML blocks (WITHOUT the `---` fences) for the merge base,
+/// the agent side (`ours`), and the operator side (`theirs`); `None` means that
+/// side had no frontmatter. Returns the merged block WITH fences and a trailing
+/// newline (ready to prepend to a body), or `None` when no side had frontmatter.
+///
+/// Resolution per top-level key:
+/// - changed on only one side → that side's value (operator edits and agent
+///   managed writes both apply to their own keys; this is what stops the operator
+///   frontmatter "reset");
+/// - changed on both sides to the same value → that value (convergent);
+/// - changed on both sides differently → operator (`theirs`) wins, EXCEPT for the
+///   agent-managed keys ([`is_agent_managed_frontmatter_key`]) where the agent
+///   value wins;
+/// - unchanged on both → base value.
+///
+/// Unknown / operator-authored keys are preserved verbatim because the merge runs
+/// over a `serde_yaml` mapping, never the typed [`Frontmatter`] struct (which would
+/// silently drop unmodeled keys). A side with no frontmatter is treated as "did
+/// not touch frontmatter" (its keys mirror base) so a transient absent side can
+/// never delete operator keys. When any present side does not parse as a YAML
+/// mapping, the merge falls back conservatively to the whole operator block when
+/// the operator changed it, else the agent block.
+pub fn merge_frontmatter_3way(
+    base_yaml: Option<&str>,
+    ours_yaml: Option<&str>,
+    theirs_yaml: Option<&str>,
+) -> Option<String> {
+    if base_yaml.is_none() && ours_yaml.is_none() && theirs_yaml.is_none() {
+        return None;
+    }
+
+    let wrap = |yaml: &str| {
+        let trimmed = yaml.trim_end_matches('\n');
+        if trimmed.is_empty() {
+            "---\n---\n".to_string()
+        } else {
+            format!("---\n{trimmed}\n---\n")
+        }
+    };
+
+    // Parse each present side as a YAML mapping. `Some(None)` = absent side;
+    // `Some(Some(map))` = parsed mapping; `None` = present but not a mapping.
+    let parse = |yaml: Option<&str>| -> Option<Option<serde_yaml::Mapping>> {
+        match yaml {
+            None => Some(None),
+            Some(s) if s.trim().is_empty() => Some(Some(serde_yaml::Mapping::new())),
+            Some(s) => match serde_yaml::from_str::<serde_yaml::Value>(s) {
+                Ok(serde_yaml::Value::Mapping(m)) => Some(Some(m)),
+                Ok(serde_yaml::Value::Null) => Some(Some(serde_yaml::Mapping::new())),
+                _ => None,
+            },
+        }
+    };
+
+    let (base_m, ours_m, theirs_m) =
+        match (parse(base_yaml), parse(ours_yaml), parse(theirs_yaml)) {
+            (Some(b), Some(o), Some(t)) => (b, o, t),
+            _ => {
+                // Conservative whole-block fallback: operator wins if it changed
+                // the block; otherwise keep the agent block, else operator, else base.
+                let operator_changed = base_yaml != theirs_yaml;
+                let chosen = if operator_changed {
+                    theirs_yaml
+                } else {
+                    ours_yaml.or(theirs_yaml)
+                };
+                return chosen.or(base_yaml).map(wrap);
+            }
+        };
+
+    let base_m = base_m.unwrap_or_default();
+    // A side with no frontmatter at all is treated as "unchanged from base" so it
+    // cannot spuriously delete keys the other side authored.
+    let ours_m = ours_m.unwrap_or_else(|| base_m.clone());
+    let theirs_m = theirs_m.unwrap_or_else(|| base_m.clone());
+
+    let key_str = |k: &serde_yaml::Value| k.as_str().map(|s| s.to_string());
+
+    // Key order: operator first (operator owns layout), then agent-only, then base-only.
+    let mut order: Vec<serde_yaml::Value> = Vec::new();
+    let push_unique = |order: &mut Vec<serde_yaml::Value>, k: &serde_yaml::Value| {
+        if !order.iter().any(|o| o == k) {
+            order.push(k.clone());
+        }
+    };
+    for k in theirs_m.keys() {
+        push_unique(&mut order, k);
+    }
+    for k in ours_m.keys() {
+        push_unique(&mut order, k);
+    }
+    for k in base_m.keys() {
+        push_unique(&mut order, k);
+    }
+
+    let mut merged = serde_yaml::Mapping::new();
+    for key in &order {
+        let b = base_m.get(key);
+        let o = ours_m.get(key);
+        let t = theirs_m.get(key);
+
+        let agent_changed = o != b;
+        let operator_changed = t != b;
+
+        let chosen: Option<&serde_yaml::Value> = if !agent_changed && !operator_changed {
+            b.or(o).or(t)
+        } else if agent_changed && operator_changed {
+            if o == t {
+                t
+            } else if key_str(key).as_deref().is_some_and(is_agent_managed_frontmatter_key) {
+                o
+            } else {
+                t
+            }
+        } else if operator_changed {
+            t
+        } else {
+            o
+        };
+
+        if let Some(v) = chosen {
+            merged.insert(key.clone(), v.clone());
+        }
+    }
+
+    if merged.is_empty() {
+        return Some("---\n---\n".to_string());
+    }
+    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(merged)).ok()?;
+    Some(wrap(&yaml))
+}
+
 /// Apply required-SSH defaults to a frontmatter using a pre-resolved context.
 ///
 /// Pure: no `&Path`, no `std::fs`. The caller is responsible for resolving
@@ -1506,6 +1671,100 @@ fn render_frontmatter_excerpt(yaml: &str, line: usize, column: usize) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- #fmreset: field-level frontmatter 3-way merge ----
+
+    fn yaml_of(merged: &str) -> serde_yaml::Mapping {
+        let (y, _) = split_frontmatter_parts(merged);
+        serde_yaml::from_str(y.unwrap()).unwrap()
+    }
+
+    #[test]
+    fn fm3way_operator_only_edit_wins_not_reverted() {
+        let base = "agent_doc_format: template\nclaude_model: sonnet";
+        let ours = base; // agent untouched
+        let theirs = "agent_doc_format: template\nclaude_model: opus"; // operator edit
+        let merged =
+            merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
+        let m = yaml_of(&merged);
+        assert_eq!(m["claude_model"].as_str(), Some("opus"));
+    }
+
+    #[test]
+    fn fm3way_agent_only_managed_write_applies() {
+        let base = "agent_doc_session: sid\nclaude_model: sonnet";
+        let ours = "agent_doc_session: sid\nresume: conv-1\nclaude_model: sonnet";
+        let theirs = base; // operator untouched
+        let merged =
+            merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
+        let m = yaml_of(&merged);
+        assert_eq!(m["resume"].as_str(), Some("conv-1"));
+        assert_eq!(m["claude_model"].as_str(), Some("sonnet"));
+    }
+
+    #[test]
+    fn fm3way_concurrent_operator_edit_and_agent_managed_write_field_wise() {
+        let base = "agent_doc_session: sid\nclaude_model: sonnet";
+        let ours = "agent_doc_session: sid\nresume: conv-1\nclaude_model: sonnet"; // agent wrote resume
+        let theirs = "agent_doc_session: sid\nclaude_model: opus"; // operator edited model
+        let merged =
+            merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
+        let m = yaml_of(&merged);
+        assert_eq!(m["resume"].as_str(), Some("conv-1"), "agent write kept");
+        assert_eq!(m["claude_model"].as_str(), Some("opus"), "operator edit kept");
+    }
+
+    #[test]
+    fn fm3way_same_key_conflict_operator_wins_for_operator_key() {
+        // Both changed claude_model differently → operator (theirs) wins.
+        let base = "claude_model: sonnet";
+        let ours = "claude_model: haiku"; // agent
+        let theirs = "claude_model: opus"; // operator
+        let merged =
+            merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
+        let m = yaml_of(&merged);
+        assert_eq!(m["claude_model"].as_str(), Some("opus"));
+    }
+
+    #[test]
+    fn fm3way_same_key_conflict_agent_wins_for_managed_key() {
+        // Both changed resume differently → agent (ours) wins (managed key).
+        let base = "resume: c0";
+        let ours = "resume: agent-new"; // agent
+        let theirs = "resume: operator-typo"; // operator (rare/unintended)
+        let merged =
+            merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
+        let m = yaml_of(&merged);
+        assert_eq!(m["resume"].as_str(), Some("agent-new"));
+    }
+
+    #[test]
+    fn fm3way_operator_adds_unknown_key_preserved() {
+        let base = "agent_doc_format: template";
+        let ours = base;
+        let theirs = "agent_doc_format: template\nmy_custom_key: hello";
+        let merged =
+            merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
+        let m = yaml_of(&merged);
+        assert_eq!(m["my_custom_key"].as_str(), Some("hello"));
+    }
+
+    #[test]
+    fn fm3way_operator_deletes_key() {
+        let base = "agent_doc_format: template\nbranch: feature";
+        let ours = base; // agent untouched
+        let theirs = "agent_doc_format: template"; // operator removed branch
+        let merged =
+            merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
+        let m = yaml_of(&merged);
+        assert!(!m.contains_key("branch"), "operator deletion honored: {merged}");
+        assert!(m.contains_key("agent_doc_format"));
+    }
+
+    #[test]
+    fn fm3way_none_when_no_frontmatter() {
+        assert!(merge_frontmatter_3way(None, None, None).is_none());
+    }
 
     #[test]
     fn parse_no_frontmatter() {

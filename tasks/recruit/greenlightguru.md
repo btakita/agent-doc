@@ -209,8 +209,38 @@ The core platform isn't streaming or sub-100ms; most of the surface is request/r
 
 > *"My real-time work gave me concurrency, state-synchronization, and latency discipline — which I'd apply to collaborative document editing (conflict-free co-authoring) and to making your AI features genuinely responsive — even though the core QMS isn't a streaming product."*
 
-**Bottom line:** transferable, yes — lead with the **CRDT/concurrency** and **streaming-AI-UX** slices, frame the rest as engineering discipline, and keep it behind the auditable-AI / traceability-graph angles that are your sharpest fits. Want me to assemble all of these (architecture, Censible, real-time) into a single prioritized "why me for GG" narrative for the resume top / cover note?
-<!-- agent:boundary:1fb2a6fe -->
+❯ **Bottom line:** transferable, yes — lead with the **CRDT/concurrency** and **streaming-AI-UX** slices, frame the rest as engineering discipline, and keep it behind the auditable-AI / traceability-graph angles that are your sharpest fits. Want me to assemble all of these (architecture, Censible, real-time) into a single prioritized "why me for GG" narrative for the resume top / cover note?
+❯ Are State Machines + Lean useful?
+### Re: Are state machines + Lean useful at Greenlight Guru? — opus-4-8
+
+Both yes — but for different reasons. **State machines are a direct, technical bullseye; Lean is domain/culture vocabulary that makes you credible.**
+
+#### State machines — a direct hit, arguably your sharpest engineering match
+
+A QMS *is* a collection of enforced state machines. Their own architecture calls it out: **"approval routing, CAPA lifecycles, change-control gates with enforced transitions and full history."** Every controlled object moves through a regulated lifecycle:
+
+- **Documents:** Draft → In Review → Approved → Effective → Obsolete (with e-signature gates).
+- **CAPA / quality events:** Open → Investigation → Root Cause → Action Plan → Verification of Effectiveness → Closed.
+- **Change orders:** Requested → Impact Assessment → Approval → Implementation → Verification.
+- **Design controls:** input → output → verification → validation, each a gated transition.
+
+The hard part isn't drawing the diagram — it's **enforcing legal transitions, preventing illegal ones, capturing full history for audit, and handling concurrent actors.** That's exactly what you've built repeatedly: corky's state machines, EFS's deal-pipeline state machines, and agent-doc's own cycle state machine (preflight → respond → finalize → committed with enforced recovery transitions). You can speak to *enforced, auditable transitions* — not just "I've used a state machine library." Lead with this; it's as strong as the traceability-graph angle.
+
+#### Lean — useful as the *language* of their domain and their moment
+
+"Lean" lands two ways at GG, both helpful:
+
+- **Lean / Lean Six Sigma is core quality-domain vocabulary.** Their customers live in continuous-improvement, waste-reduction, root-cause (5 Whys, fishbone), and CAPA-effectiveness thinking. Knowing Lean means you speak the quality org's language — it signals you understand *why* the workflows exist, not just how to code them. That's the domain-fluency gap most pure engineers have.
+- **Lean as execution philosophy fits the post-PE moment.** Post-Enzyme (PE-backed), the environment rewards "execute fast, measure impact, cut waste" — which is Lean startup / Lean software (build-measure-learn, small batches, flow). The earlier note about ROI-focus and headcount discipline is exactly where a Lean operating instinct reads as a fit.
+
+Caveat: Lean is *supporting* — it strengthens your domain credibility and culture fit, but it isn't a hard technical requirement. Don't over-index on it; use it to show you understand the quality world your code serves.
+
+#### How to position (one line)
+
+> *"A QMS is enforced, auditable state machines — CAPA, change control, document lifecycles — which is exactly the kind of system I've built (corky, EFS pipelines, agent-doc's own cycle engine). And I think in Lean terms, so I understand the continuous-improvement workflows those state machines exist to serve."*
+
+**Bottom line:** state machines = put it near the top of your technical pitch (peer to traceability graphs and auditable AI); Lean = weave in as domain-fluency + culture-fit signal. Want me to now assemble the full prioritized "why me for GG" narrative (state machines, traceability graphs, auditable AI, Censible, real-time, Lean) for the resume top / cover note?
+<!-- agent:boundary:c45e5b68 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -152,7 +152,33 @@ Deployed to production from `f78d5d9`. Per-user message tabs are locked to one p
 - **Post-deploy smoke**: `GET /` → 200.
 
 Operator live-verify (cannot be agent-done): open a deal → Messages dialog → a per-user tab (e.g. btak.dev+borrower3@gmail.com) and confirm the search box is gone and you cannot navigate to another participant's thread from inside that tab; the "All Messages" and group tabs still search/broadcast as before.
-<!-- agent:boundary:4ea2b182 -->
+
+### Re: Per-user tab matches group-tab styling; Group tab hidden for single participants — glm-5.2
+
+> **Queue prompt:** In the admin Messages dialog, the individual user message tab should have the same styling as the group tab.
+
+> **Queue prompt:** In the admin Messages dialog, if there is only 1 user, do not render the Group tab.
+
+Done — committed + pushed to EFS `origin/main` (`3f07d4f`). Both changes ship together since they touch the same dialog.
+
+- **Per-user tab → group-tab styling** (`messages_unified.tsx` / `messages.tsx`): the `user:<email>` tab now renders a new `AdminMessagesUser` component that reuses the **same `UnifiedMessageThread` card view** as the group tab (party/scope badges, bordered cards, description line) plus a compose box — so per-user and group tabs share one look end-to-end. Its compose sends to just that one participant via a single-recipient broadcast (1 individual send). The previous chat-bubble `lock_user` path on `AdminMessages` was removed as dead code.
+- **Group tab hidden for 1 participant** (`messages.tsx`): the Group tab is now gated on `context_users.length > 1` (both the tab list and the render), since a merged-group view is meaningless for a single participant.
+
+**Verification**: full `bun test` **1225 pass / 0 fail**; `bun run build` + `build:worker` clean. Updated `tests/messages-unified.test.ts` to assert the `AdminMessagesUser` wiring (shared `UnifiedMessageThread`, single-recipient send) and the `>1`-participant Group-tab gate.
+
+### Re: Deploy — production deploy — glm-5.2
+
+> **Queue prompt:** deploy
+
+Deployed to production from `3f07d4f`.
+
+- **URL**: https://equityfundingsource.brian-takita.workers.dev
+- **Version ID**: `29467e06-5d02-4fb7-a4e4-fb68c8be7a1d`
+- **Remote D1 migrations**: no-op — frontend + a test only, no new migrations (verified none pending pre- and post-deploy).
+- **Post-deploy smoke**: `GET /` → 200.
+
+Operator live-verify (cannot be agent-done): open a deal with multiple participants → Messages dialog → confirm a per-user tab now shows the same card style as the Group tab and its compose posts only to that user; open a single-participant (borrower-only) deal and confirm there is no Group tab.
+<!-- agent:boundary:11547bff -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -172,6 +198,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~In the admin Messages dialog, the individual user message tab should have the same styling as the group tab.~~
+- ~~In the admin Messages dialog, if there is only 1 user, do not render the Group tab.~~ — auto-struck: answered this cycle (#ftstrike)
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

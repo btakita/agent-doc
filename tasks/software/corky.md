@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
-agent: opencode
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -91,52 +91,12 @@ Current open work lives in `agent:backlog` (`#ckystale`, `#ckybench`), not here.
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260624-233130.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260625-005216.md`*
 
 Compacted content:
-❯ - Archived 5 response topic(s): corky ignored-test + performance + bug next-steps; IPC proof diagnostic (interrupted-cycle recovery); corky bug next-steps; 2 more
+❯ - Archived 2 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); corky bug next-steps
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bd...
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/corky.md source=socket_ack_content patch_id=5d96cfbd-5ae9-4578-9df1-1191291303e8 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=12002 candidate_hash=ae4a42ed9d1f3d8dab778278c3d07cf1a273a6660bb3b66f6bc8350278a82d97 content_ours_len=12362 content_ours_hash=ee3c7966174db5823da7842a7892803b2eb991fa135203e1dcfb8a9b3fbb9475 doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782335669784
-```
-
-### Re: corky bug next-steps — prioritized backlog from workspace review — glm-5.2
-
-Ran a deep `#code-review` across the 5-crate workspace (`corky-core/-google/-mail/-social/-transcribe` + bin, ~33k lines) with three parallel passes (concurrency/lifecycle, mail-sync/draft, google+error-unsafe sweep). 12 concrete bugs with `file:line` evidence, ranked by severity. The two most severe are active **data-loss** hazards in `sync full`.
-
-**Top of backlog: `#ckyorphan`** (P0 data-loss).
-
-**P0 — data loss / crash on realistic input**
-- **`#ckyorphan`** — `sync full` orphan cleanup reaps ALL conversations: (a) `--account X` deletes every other account's files (cleanup scans global `mail/conversations/` but the `touched` set is account-scoped), (b) a transient empty Gmail/IMAP fetch leaves `touched` empty so every file classifies as an orphan — and it's **not self-healing** (state stays unchanged → incremental runs never re-fetch). `sync/mod.rs:202-260,782-798`.
-- **`#ckypanic`** — UTF-8 byte-slice panics: `&body[..80]` (`draft/mod.rs:712`, CJK/emoji replies) and `&due[..10]` (`tasks/list.rs:40`). One-line char-boundary fixes.
-- **`#ckysheets`** — `sheets push` clears the tab then writes in two HTTP calls; a failure between them leaves the tab empty with no backup. `doc/sheets.rs:148-174`.
-
-**P1 — correctness / stuck users**
-- **`#ckywatchpanic`** — `corky watch` dies on any tick panic: `spawn_blocking(...).await?` + `panic="abort"` aborts the daemon, breaking the "never crashes the loop" contract. `watch.rs:309-312`, `Cargo.toml:89`.
-- **`#ckydedup`** — `(raw_from, raw_date)` dedup drops distinct same-second messages and leaks duplicates across providers. `imap_sync.rs:184-197`.
-- **`#ckythread`** — IMAP path hardcodes `message_id: None` (breaks reply threading for non-Gmail accounts); no validation that `in_reply_to`+`thread_id` are both set; IMAP subject-key vs Gmail threadId-key never merge on provider switch.
-- **`#ckytok401`** — 401 never invalidates the cached token → a Google-revoked but clock-valid token traps the user until a manual `tokens.json` delete. Only `draft send` clears its token.
-- **`#ckypeoplesync`** — `.people-sync-state.json` bypasses the locked atomic store; concurrent `contact push` → lost-update → duplicate Google contacts.
-- **`#ckyconfigunwrap`** — `.as_table_mut().unwrap()` panics on a hand-edited `.corky.toml`; `git` invocation panics if the binary is missing.
-
-**P2 — robustness**
-- **`#ckyatomicwrite`** — conversation files via plain `fs::write` (half-written on crash); `file_store` rename lacks `sync_all` (not power-loss durable).
-- **`#ckyunicodeslug`** — slug regex strips all non-ASCII → CJK/emoji subjects collapse to `untitled`, `untitled-2`…
-- **`#ckymime`** — `draft send`: raw filename (header-injection), whole attachment in RAM (~1.8 GB for 500 MB), inline `images:` silently dropped, `In-Reply-To` not angle-bracket normalized.
-
-**Verified correct (not filed):** `tokens.json`/`.sync-state.json` locking (`flock` + atomic rename + 3-way merge), SA token cache scoping by account/config fingerprint, loopback OAuth server lifecycle + CSRF `state` check, base64url decode padding, `multipart/mixed(alternative)` nesting on the `push` path.
-
-All 12 are in `agent:backlog` in priority order. `queue_continuation_required=false` so the queue stops here — say the word (or `do #ckyorphan`) to start on the P0 cluster.
-<!-- agent:boundary:25ed6157 -->
+<!-- agent:boundary:738471da -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -147,7 +107,21 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- 🚧 [#ckyorphan]
+- [#ckypanic]
+- [#ckysheets]
+- [#ckywatchpanic]
+- [#ckydedup]
+- [#ckythread]
+- [#ckytok401]
+- [#ckypeoplesync]
+- [#ckyconfigunwrap]
+- [#ckyatomicwrite]
+- [#ckyunicodeslug]
+- [#ckymime]
+- What are #next-steps to fix corky bugs?
 - 🚧 What are #next-steps to fix corky bugs?
+- [#ckyorphan]
 <!-- /agent:queue -->
 
 ## Backlog

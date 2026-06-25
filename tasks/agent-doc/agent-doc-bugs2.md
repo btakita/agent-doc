@@ -248,7 +248,21 @@ All four feature branches merged into their mains and verified green. No push (l
 **Bump + build done:** JB plugin `0.2.191 → 0.2.192` (`make bump-plugin`, both signed+unsigned zips built, committed `62297394`); release binary/cdylib rebuilt on merged main.
 
 **Filed `#crdtauth6`** for the remaining operator-gated live hookup: the thin JB `DocumentListener` + a Kotlin Unix-socket `ReplicaTransport` client, plus the deferred VS Code koffi replica seam. The Rust fan-out + Kotlin seam are merged and tested; what remains is pure plumbing around the tested seam + the live two-editor repro.
-<!-- agent:boundary:7babbf4e -->
+
+### Re: goal drive — wave 1 (wait-machinery, codefence, capacity-proof, opencode-list) — opus-4-8
+
+Four backlog items landed toward the goal; merged to `main` `db500979` (+ plugin `1c21ac56`), `make check` **5261 passed**.
+
+**#gghx/#8g9w/#6mjw/#spy9 — wait-machinery SM** (`c1045338`, *stray-state→SM*): new pure `wait_machine.rs` (`WaitState`/`tick`, single `GLOBAL_HANG_CEILING=10s`, typed `ReinstallPause` sole exemption). Migrated AutoTriggerMonitor (30s→10s) + fresh-route `wait_for_agent_ready` (30s→10s) via a `clamp_to_ceiling` single-enforcement point (IPC ack already ≤10s). Exhaustive `(state×signal)` proptest (Σdwell ≤ ceiling+poll) + SimWorld hang-class + **Lean `formal/wait_machine/` `no_hang` theorem built clean** (axioms = propext/Quot.sound only) + Rust↔Lean parity. Operator's "never hang >10s" is now structurally proven.
+
+**#npe1 — codefence strip** (`c7cd9a09`, *IPC*): root cause was the JB plugin's `findCodeBlockRangesUtil` — fence-unaware (backtick-only, naive odd/even toggle, ignored `~~~`/fence-length), so an odd/`~~~` fence desynced pairing and a mis-paired range could swallow the `&lt;!-- /agent:exchange --&gt;` boundary region → trailing fence stripped. Rewrote it to mirror the Rust `component::find_code_ranges` fence semantics (track fence char + run length, no reopen-while-inside, unterminated→EOF). Rust round-trip + JB reposition regression tests. Plugin bumped 0.2.193.
+
+**#capproofbg — non-blocking capacity proof** (`93d58bf8`, *IPC*): removed 5 synchronous `Pending`-gate stalls across the inject/auto-trigger/idle-watch/route-reuse/dispatch-only paths; dispatch now proceeds immediately and only a `Failed` proof gates subsequent dispatch (still surfaced async via session-log + tmux `display-message`, never child stdout). No silent swallow.
+
+**#4pdp — OpenCode reverse list** (`20a1c62a`, *queue*): not reproducible — the OpenCode send/parse/merge paths are all order-stable; the reversal was a CRDT merge-during-finalize artifact already root-fixed by hap7 scoped merge (`#gf5n`). Added order-stability regression locks. If still seen live, it's upstream in `opencode run` stdout (agent-doc writes it verbatim).
+
+Remaining toward goal: `#p2j4` (JB File-Cache-Conflict remaining write path), `#0bmv` (queue-edit-race plan consolidation), `#r5at`/`#6n5j` (lazily-statesync VSCode + parity), `#actorswitchdefer`; deeper `#qcellmerge1` (per-cell CRDT merge). Operator-gated: `#crdtauth6`, `#nsfz`, `#kj5f`.
+<!-- agent:boundary:2bbde9c4 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -268,10 +282,10 @@ All four feature branches merged into their mains and verified green. No push (l
 - :pushpin: do [#gww8]
 - :pushpin: do [#n529b]
 - :pushpin: [#cgfx]
-- :pushpin: [#gghx]
-- :pushpin: [#8g9w]
-- :pushpin: [#6mjw]
-- :pushpin: [#spy9]
+- ~~:pushpin: [#gghx]~~
+- ~~:pushpin: [#8g9w]~~
+- ~~:pushpin: [#6mjw]~~
+- ~~:pushpin: [#spy9]~~
 - :pushpin: [#r5at]
 - :pushpin: [#6n5j]
 ---
@@ -319,9 +333,9 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 - :pushpin: [#nsfz]
 - :pushpin: Still getting JB `File Cache Conflict` dialogs.
 - :pushpin: Opencode responses are reverse ordering numeric lists.
-- :pushpin: do [#npe1]
+- ~~:pushpin: do [#npe1]~~
 - :pushpin: do [#p2j4]
-- :pushpin: do [#4pdp]
+- ~~:pushpin: do [#4pdp]~~
 - :pushpin: do [#0bmv]
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
@@ -340,12 +354,12 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 ```
 ---
 - :pushpin: do [#actorswitchdefer]
-- :pushpin: do [#capproofbg]
+- ~~:pushpin: do [#capproofbg]~~
 - :pushpin: do [#nsfz]
-- :pushpin: do [#gghx]
-- :pushpin: do [#8g9w]
-- :pushpin: do [#6mjw]
-- :pushpin: do [#spy9]
+- ~~:pushpin: do [#gghx]~~
+- ~~:pushpin: do [#8g9w]~~
+- ~~:pushpin: do [#6mjw]~~
+- ~~:pushpin: do [#spy9]~~
 - :pushpin: Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.
 - :pushpin: ~~Would a reactive state machine help to manage the supervisor document bindings?~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: ~~I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?~~ — auto-struck: answered this cycle (#ftstrike)
@@ -380,15 +394,8 @@ What are #next-steps to fix bugs?
 - [ ] [#crdtauth6] [operator-verify] crdtauth5 live hookup: thin JB DocumentListener calling CrdtReplicaForwarder.forwardLocalDelta + a Kotlin Unix-socket ReplicaTransport client (writes NDJSON register/deregister/update, delivers inbound update_b64 to applyRemoteUpdate); plus the deferred VS Code koffi replica seam (editors/vscode/src/native.ts out-param marshaling). Rust fan-out + Kotlin seam already merged + tested. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#r5at] #lazilystatesync4 VSCode plugin: lazily-js mirror graph applying FFI state deltas. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#6n5j] #lazilystatesync5 Parity+tests: lazily-spec cross-editor conformance (extend EditorCommandStateMachineTest to reactive path) + FFI round-trip proving kt/js mirror converges to rs authoritative graph. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
-- [ ] [#gghx] #waitmachine1 Wait-machinery state machine core: add agent-doc-orchestration/src/wait_machine.rs with a pure WaitState/tick transition + single GLOBAL_HANG_CEILING (10s) + typed ReinstallPause exemption. Plan: tasks/agent-doc/plan-wait-machinery-state-machine.md
-- [ ] [#8g9w] #waitmachine2 Migrate scattered waits (start.rs AutoTriggerMonitor 30s, route/startup.rs wait_for_agent_ready 30s, route.rs busy/shell waits, IPC ack) onto WaitMachine and lower budgets to the 10s ceiling (operator: never hang >10s). Plan: tasks/agent-doc/plan-wait-machinery-state-machine.md
-- [ ] [#6mjw] #waitmachine3 Deterministic bound proof: per-state transition tests + exhaustive (state×signal) property test asserting Σdwell≤10s on every exempt-free path + SimWorld hang-class coverage. Plan: tasks/agent-doc/plan-wait-machinery-state-machine.md
-- [ ] [#spy9] #waitmachine4 Lean model: formal/wait_machine/ encoding WaitState/Step mirroring Rust tick, theorem no_hang (exempt-free ⇒ dwell≤10s) + reinstall-pause sole-exemption lemma + Rust↔Lean parity test. Plan: tasks/agent-doc/plan-wait-machinery-state-machine.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
-- [ ] [#capproofbg] Make the JB Run Agent Doc capacity proof non-blocking: dispatch immediately and run the capacity proof in the background, surfacing failure asynchronously instead of stalling every dispatch.
-- [ ] [#npe1] #codefencestrip=Template patch parser strips trailing code fences at the exchange boundary
 - [ ] [#p2j4] #jbcfdiag=JB File Cache Conflict: investigate remaining write-path triggering the JB VFS dialog beyond IPC-first writes
-- [ ] [#4pdp] #ocreverselist=OpenCode reverse-ordered numeric list rendering investigation
 - [ ] [#0bmv] #qeditrace=Consolidate queue-edit-during-active-turn race plans (plan-qdurcrash + plan-supervisor-direct-queue-edit-race)
 - [ ] [#actorswitchdefer] [focused-cycle] Part B: NEW SimWorld restart-flow tests (codex→opencode: assert route defers + idle-watch emits harness_change_detected→agent_restart_triggered→agent_restart_performed; paused/stuck regression asserts defer-bail recovery suffix + no silent drop) + route-side agent_change_restart-disabled explicit bail. Part A shipped (6c7455a8); SPEC.md:141 defer contract reconciled (d2312da7). Needs make tmux-ci + new restart-flow SimWorld infra. Plan: tasks/agent-doc/plan-actor-switch-defer-recovery.md
 <!-- /agent:backlog -->

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -38,7 +38,20 @@ complete
 Compacted content:
 - Archived 12 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); Full Application layout; IPC proof diagnostic (interrupted-cycle recovery); 9 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-<!-- agent:boundary:0c41b6fe -->
+
+### Re: mrh content — delete + purge from EFS — opus-4-8
+
+> **Queue prompt:** This is mrh. Delete + purge it from EFS.
+
+Done. The misrouted **monsterrodholders** sale-banner material (the "Limited Time Only" / "SHOP THE SALE!" / "ENDS JULY 4" exchange) is purged from the EFS document tree:
+
+- **Archive** `…-20260625-223548.md` — excised the `### Re: "Limited Time Only" vertical centering` section (the only mrh exchange that got compacted into EFS history). The legitimate EFS/mrh *account-disambiguation* notes in older archives (which Cloudflare account to use) are EFS context, not misrouted content — left intact.
+- **Image** `tasks/professional/img_38.png` (123 KB sale-banner screenshot dropped into the EFS task folder) — deleted. The unrelated `tasks/agent-doc/img_38.png` (different file) is untouched.
+
+The live EFS exchange had already been compacted to its Session Summary, so nothing mrh remained in the visible doc. Verified: no `shop the sale` / `limited time only` / `ends july` / `orders over $200` / `img_38` strings remain anywhere under the EFS doc or its archives. Both purged files were git-ignored, so this is local-only cleanup with no commit/history impact.
+
+If you want the banner centering actually fixed, it belongs in monsterrodholders (live WordPress via wp-cli/SSH) — point me at the page/template there and I'll do it in that session.
+<!-- agent:boundary:a5fa8f74 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,7 +71,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 This is mrh. wrong document
 <!-- /agent:queue -->
 
 ## Backlog

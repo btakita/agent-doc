@@ -275,6 +275,77 @@ impl EventLedger {
     pub fn project(&self) -> StateBackboneProjection {
         StateBackboneProjection::from_events(self.events())
     }
+
+    /// Return the globally-deduped accepted event stream in append order.
+    ///
+    /// The ledger is append-only and may carry duplicate `event_id`s (re-emits,
+    /// CRDT/supervisor replays). The projection's `seen_event_ids` absorbs those
+    /// during a global fold; this helper exposes the same deduped subsequence so
+    /// per-document epoch counts and bounded replay stay consistent with
+    /// [`StateBackboneProjection::from_events`].
+    pub fn accepted_events(&self) -> Vec<&StateEvent> {
+        let mut seen = BTreeSet::new();
+        self.events
+            .iter()
+            .filter(|event| seen.insert(event.event_id.clone()))
+            .collect()
+    }
+
+    /// Monotonic per-document epoch = number of accepted (deduped) events that
+    /// target `document_hash`. A re-emit does not bump the epoch (idempotent ⇒
+    /// no-op delta). This is the `lazily-spec` `epoch` for the document's state
+    /// graph (`#lazilystatesync2`).
+    pub fn document_epoch(&self, document_hash: &str) -> u64 {
+        self.accepted_events()
+            .iter()
+            .filter(|event| event.document_hash() == document_hash)
+            .count() as u64
+    }
+
+    /// Project the current state for a single document from the deduped event
+    /// stream. Returns `None` when no accepted event targets the document.
+    pub fn project_document(
+        &self,
+        document_hash: &str,
+    ) -> Option<DocumentStateProjection> {
+        let accepted: Vec<&StateEvent> = self
+            .accepted_events()
+            .into_iter()
+            .filter(|event| event.document_hash() == document_hash)
+            .collect();
+        if accepted.is_empty() {
+            return None;
+        }
+        let mut projection = DocumentStateProjection::new(document_hash);
+        for event in accepted {
+            projection.apply_fact(&event.fact);
+        }
+        Some(projection)
+    }
+
+    /// Project the document state as it stood after the first `epoch` accepted
+    /// events for that document were applied. Used to derive deltas since a
+    /// caller's `last_epoch` (`#lazilystatesync2`). `epoch` is clamped to the
+    /// current document epoch.
+    pub fn project_document_at_epoch(
+        &self,
+        document_hash: &str,
+        epoch: u64,
+    ) -> DocumentStateProjection {
+        let mut projection = DocumentStateProjection::new(document_hash);
+        let mut accepted_for_doc: u64 = 0;
+        for event in self.accepted_events() {
+            if event.document_hash() != document_hash {
+                continue;
+            }
+            if accepted_for_doc >= epoch {
+                break;
+            }
+            projection.apply_fact(&event.fact);
+            accepted_for_doc += 1;
+        }
+        projection
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -324,7 +395,10 @@ pub struct DocumentStateProjection {
 }
 
 impl DocumentStateProjection {
-    fn new(document_hash: &str) -> Self {
+    /// Construct an empty projection for `document_hash`. Public so the wire
+    /// delta derivation (`state_wire`) can build the cold/empty projection used
+    /// when a document has no accepted events yet (`#lazilystatesync2`).
+    pub fn new(document_hash: &str) -> Self {
         Self {
             document_hash: document_hash.to_string(),
             document: DocumentProjection::default(),
@@ -340,6 +414,14 @@ impl DocumentStateProjection {
 
     pub fn projection_summary(&self) -> ProjectionSummary {
         ProjectionSummary::from_document(self)
+    }
+
+    /// Apply a single state fact to this document projection. Public so the
+    /// wire/delta derivation (`state_wire`) can replay a bounded slice of the
+    /// accepted event stream into a fresh projection without going through the
+    /// backbone's global dedup map (`#lazilystatesync2`).
+    pub fn apply_fact(&mut self, fact: &StateFact) {
+        self.apply(fact);
     }
 
     fn apply(&mut self, fact: &StateFact) {

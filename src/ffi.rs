@@ -1815,6 +1815,66 @@ pub unsafe extern "C" fn agent_doc_record_state_event(
     }
 }
 
+/// Subscribe to the agent-doc state projection for a document (`#lazilystatesync2`).
+///
+/// `last_epoch` is the caller's last-seen lazily-spec epoch for this document.
+/// The return value is a NUL-terminated JSON message in the lazily-spec wire
+/// envelope:
+/// - `{ "type": "snapshot", ... }` when `last_epoch == 0` (cold read) or the
+///   document has no state yet — a full graph image the mirror applies once.
+/// - `{ "type": "delta", "base_epoch": <last_epoch>, "epoch": <current>, "ops": [...] }`
+///   when `0 < last_epoch < current_epoch` — the ordered ops the mirror applies
+///   verbatim to converge from `last_epoch` to current.
+/// - `{ "type": "delta", "ops": [], ... }` when the caller is already current.
+///
+/// The projection is a pure fold of deduped events, so delta application is
+/// deterministic and idempotent: a re-emit/replay yields an empty (no-op) delta.
+/// Because the ledger is append-only within a process lifetime, any
+/// `last_epoch <= current_epoch` is satisfiable without a resync.
+///
+/// This complements [`agent_doc_state_projection`], which stays as the full
+/// `DocumentStateProjection` JSON for round-trip/human reads (the cold path).
+/// Plugins that want reactive updates should subscribe here and apply deltas to a
+/// lazily-kt / lazily-js mirror graph instead of re-rendering the snapshot.
+///
+/// Caller must free the returned pointer with `agent_doc_free_string`.
+///
+/// # Safety
+///
+/// `document_hash` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_state_subscribe(
+    document_hash: *const c_char,
+    last_epoch: u64,
+) -> *mut c_char {
+    let doc_hash = match unsafe { CStr::from_ptr(document_hash) }.to_str() {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!(
+                "[state-projection] agent_doc_state_subscribe: non-UTF-8 document_hash; returning null: {err}"
+            );
+            return CString::new("null").unwrap().into_raw();
+        }
+    };
+    let json = match state_ledger().lock() {
+        Ok(ledger) => agent_doc_orchestration::state_wire::subscribe(
+            &ledger,
+            doc_hash,
+            last_epoch,
+        )
+        .to_json(),
+        Err(err) => {
+            eprintln!(
+                "[state-projection] agent_doc_state_subscribe: ledger lock poisoned: {err}"
+            );
+            "null".to_string()
+        }
+    };
+    CString::new(json)
+        .unwrap_or_else(|_| CString::new("null").unwrap())
+        .into_raw()
+}
+
 /// Inspect one actor through the project controller and return the same JSON
 /// shape as `agent-doc admin inspect --json`.
 ///
@@ -2281,6 +2341,74 @@ mod tests {
         assert_eq!(
             "null", missing,
             "unknown document_hash should project to null"
+        );
+    }
+
+    #[test]
+    fn state_subscribe_ffi_emits_snapshot_then_delta() {
+        use agent_doc_orchestration::state_backbone::{StateEvent, StateFact};
+
+        let doc_hash = "state_subscribe_ffi_round_trip_doc";
+        let doc_hash_c = CString::new(doc_hash).unwrap();
+
+        // Cold read with no events: snapshot, epoch 0, empty graph.
+        let cold_ptr = unsafe { agent_doc_state_subscribe(doc_hash_c.as_ptr(), 0) };
+        let cold = unsafe { CStr::from_ptr(cold_ptr) }
+            .to_str()
+            .unwrap()
+            .to_string();
+        drop(unsafe { CString::from_raw(cold_ptr) });
+        assert!(
+            cold.contains("\"type\":\"snapshot\""),
+            "cold subscribe with no state must yield a snapshot: {cold}"
+        );
+        assert!(cold.contains("\"epoch\":0"), "empty cold read is epoch 0: {cold}");
+
+        // Record one baseline event.
+        let baseline = StateEvent::new(
+            "evt-subscribe-ffi-1",
+            StateFact::BaselineSaved {
+                document_hash: doc_hash.to_string(),
+                cycle_id: "cycle-subscribe".to_string(),
+                baseline_hash: "bl-subscribe".to_string(),
+                baseline_path: None,
+            },
+        );
+        let baseline_json = CString::new(serde_json::to_string(&baseline).unwrap()).unwrap();
+        let rc = unsafe { agent_doc_record_state_event(doc_hash_c.as_ptr(), baseline_json.as_ptr()) };
+        assert_eq!(1, rc, "record_state_event should succeed");
+
+        // Cold read now carries the baseline node at epoch 1.
+        let cold_ptr = unsafe { agent_doc_state_subscribe(doc_hash_c.as_ptr(), 0) };
+        let cold = unsafe { CStr::from_ptr(cold_ptr) }
+            .to_str()
+            .unwrap()
+            .to_string();
+        drop(unsafe { CString::from_raw(cold_ptr) });
+        assert!(cold.contains("\"epoch\":1"), "one accepted event bumps epoch: {cold}");
+        assert!(
+            cold.contains("agent_doc.document.baseline"),
+            "cold snapshot must include the baseline type_tag: {cold}"
+        );
+
+        // Warm read at last_epoch=1 (caller is current) yields a no-op delta.
+        let delta_ptr = unsafe { agent_doc_state_subscribe(doc_hash_c.as_ptr(), 1) };
+        let delta = unsafe { CStr::from_ptr(delta_ptr) }
+            .to_str()
+            .unwrap()
+            .to_string();
+        drop(unsafe { CString::from_raw(delta_ptr) });
+        assert!(
+            delta.contains("\"type\":\"delta\""),
+            "warm read must yield a delta: {delta}"
+        );
+        assert!(
+            delta.contains("\"base_epoch\":1") && delta.contains("\"epoch\":1"),
+            "no-op delta keeps base_epoch == epoch == current: {delta}"
+        );
+        assert!(
+            delta.contains("\"ops\":[]"),
+            "caller-current delta must be empty: {delta}"
         );
     }
 

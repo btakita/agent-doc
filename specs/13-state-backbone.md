@@ -125,7 +125,79 @@ Package-level bridge parity is explicit:
   JB socket IPC, JB file IPC, and VS Code file IPC through live queued/retry/ack
   transport plus route started/proven/blocked events.
 
+## State Wire (lazily-spec snapshot/delta)
+
+`#lazilystatesync2` exposes the projection as a reactive lazily-spec wire graph
+so plugins mirror it into a lazily-kt / lazily-js graph and apply deltas instead
+of re-rendering the full snapshot on every event.
+
+Implementation: `agent-doc-orchestration/src/state_wire.rs` maps
+`DocumentStateProjection` onto the `src/lazily-spec/schemas/{snapshot,delta}.json`
+envelope. The existing `agent_doc_state_projection` FFI (full
+`DocumentStateProjection` JSON) stays as the cold round-trip path and is
+unchanged.
+
+### FFI surface
+
+- `agent_doc_state_subscribe(document_hash, last_epoch) -> JSON` — returns a
+  lazily-spec message with a `"type"` discriminator:
+  - `"snapshot"` when `last_epoch == 0` (cold read) or the document has no
+    accepted events yet — a full graph image the mirror applies once.
+  - `"delta"` when `0 < last_epoch < current_epoch` — ordered `ops` the mirror
+    applies verbatim to converge from `last_epoch` to current.
+  - `"delta"` with empty `ops` when the caller is already current.
+
+### type_tag vocabulary
+
+Each projection node maps to one lazily-spec node with a stable `type_tag`.
+`slot_id = fnv1a(document_hash, type_tag, entity_key)` so Rust/Kotlin/JS address
+the same node without a central allocator (FNV-1a is re-implemented identically
+across the three languages — no platform `Hasher` drift).
+
+| type_tag | entity_key | source |
+|---|---|---|
+| `agent_doc.document.baseline` | document_hash | `BaselineProjection` |
+| `agent_doc.queue` | document_hash | `QueueProjection` (singleton) |
+| `agent_doc.queue.head` | node_key | `QueueHeadProjection` |
+| `agent_doc.closeout.cycle` | cycle_id | `CloseoutProjection` |
+| `agent_doc.transport.patch` | patch_id | `TransportPatchProjection` |
+| `agent_doc.supervisor.owner` | owner name | `OwnerProjection` |
+| `agent_doc.route` | document_hash | `RouteProjection` (singleton) |
+| `agent_doc.proof.marker` | marker | `ProofMarkerProjection` |
+
+Node payloads are `base64(serde_json(struct))`.
+
+### Derivation edges
+
+The snapshot/delta carry dependency edges so a plugin mirror can
+invalidate/recompute only a derived subtree instead of re-rendering the whole
+projection:
+
+- `closeout.cycle → document.baseline`
+- `queue.head → closeout.cycle`
+- `transport.patch → closeout.cycle`
+- `route → supervisor.owner[route_dispatch]`
+- `transport.patch → supervisor.owner[editor_ipc_bridge]`
+
+### Epoch + idempotence
+
+- lazily-spec `epoch` = per-document monotonic counter = number of accepted
+  (deduped) `StateEvent`s targeting the document (`EventLedger::document_epoch`).
+  A re-emit/replay does not bump the epoch.
+- The projection is a pure fold of deduped events, so delta application is
+  deterministic and idempotent — a re-emit yields a no-op (empty) delta. This is
+  the property `#queuestatemachine` / `#qdedupsync` build on.
+- The ledger is append-only within a process lifetime, so any
+  `last_epoch <= current_epoch` is satisfiable without a resync. Deltas may span
+  multiple epochs (`epoch > base_epoch + 1`); the ordered `ops` converge
+  identically to a fresh snapshot.
+
+The `type_tag` table is the in-repo producer half of the wire vocabulary. The
+canonical schema pin (`lazily-spec/schemas/agent-doc-state.json` + a conformance
+snapshot/delta pair) is `#lazilyspecpin`, a sibling `lazily-spec` change.
+
 ## Actor Ownership
+
 
 Live mutable surfaces have exactly one current owner:
 

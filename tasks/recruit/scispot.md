@@ -81,7 +81,7 @@ AI-native lab informatics platform that replaces the fragmented stack of disconn
 - Be ready to articulate one concrete system you built where you normalized messy inputs into a structured model that downstream automation/AI consumed — that's the through-line they'll recognize.
 
 I've captured the company + interviewer profiles above. I filed a recommended follow-up to create a Corky contact for Satya (matching the Royce Stewart / Greenlight Guru pattern) if you want CRM tracking.
-<!-- agent:boundary:98e0189c -->
+<!-- agent:boundary:8f8abb46 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -92,10 +92,15 @@ I've captured the company + interviewer profiles above. I filed a recommended fo
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#kesh] [recommended] Create Corky contact for Satya Singh (mail/contacts/satya-singh/AGENTS.md) — Co-Founder & CPO, Scispot, https://www.linkedin.com/in/satyaravisingh/ — matching the royce-stewart pattern, for CRM tracking.
 <!-- /agent:backlog -->
 
 ## Icebox
 
 <!-- agent:icebox -->
 <!-- /agent:icebox -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-06-25 [#kesh] [recommended] Create Corky contact for Satya Singh (mail/contacts/satya-singh/AGENTS.md) — Co-Founder & CPO, Scispot, https://www.linkedin.com/in/satyaravisingh/ — matching the royce-stewart pattern, for CRM tracking.
+<!-- /agent:done -->

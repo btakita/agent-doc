@@ -192,7 +192,38 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/corky.md source=socket_ack_content patch_id=460ac752-e608-4362-9b45-7b6ff9a7475b invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=13957 candidate_hash=cdb4277d2d8b094340cef2d1650c6a73258d444cedfef72528ff9d7d8152d929 content_ours_len=10789 content_ours_hash=6e667648259b6a0c4f665f6f845103c1b74033c914b3f0cad62b2048528fd13e doc=corky session=584ef929-37ee-47f6-b3d8-d4266ad31ee9 turn=cycle-1782344910865
 ```
-<!-- agent:boundary:fabe061f -->
+
+### Re: "1 test ignored" — glm-5.2
+
+No test is actually ignored. corky has **zero** `#[ignore]` attributes anywhere in the workspace, and every test binary reports `0 ignored` (verified via `cargo test --workspace --features transcribe-cuda --no-fail-fast`).
+
+What you saw is the test **name** `s9_non_md_ignored` (`crates/corky-mail/src/schedule.rs:580`). cargo prints:
+
+    test schedule::tests::s9_non_md_ignored ... ok
+
+The trailing `_ignored` is part of the name — the test asserts that `scan_social_dir` **ignores non-markdown files** (it drops a `readme.txt` in the social dir and asserts the scheduler yields no items). It passes. At a glance "ignored" reads like a runner status, but it's the S9 behavioral test, not an ignored test.
+
+### Re: performance report — glm-5.2
+
+**Test suite** (~690 tests, `--features transcribe-cuda --no-fail-fast`): 684 passed / 6 failed / **0 ignored**. Nearly every binary finishes in <10 ms; slowest are `test_cli` (0.53 s), `test_resolve`/`test_sync` (~0.1 s). The 6 `test_doctor` failures are **pre-existing/environmental** — they read `~/work/btakita/mail/.corky.toml` (no gmail-api/LinkedIn/YouTube setup), identical on a stashed baseline.
+
+**Release binary:** 49 MB; debug+CUDA 316 MB. Release profile is aggressively tuned — `opt-level=3`, `lto="fat"`, `codegen-units=1`, `panic="unwind"` (unwind kept so `corky watch` survives a panicking tick via tokio's `JoinError`, #ckywatchpanic).
+
+**MIME hot-path bench** (`criterion` `benches/draft_mime.rs`, after the fix below):
+- `build_mime_message/plain` — **~160 ns** (13M iter)
+- `build_mime_message/in_reply_to` — **~209 ns** (9.6M iter)
+- `build_mime_message/with_attachment` (4 KiB) — **~8.71 µs** (231k iter; cost is base64-encoding the attachment)
+
+**Runtime perf wins already shipped:**
+- `#ckymimestream` (9e3f1c4): attachment base64 streams in 57-byte chunks; ≥5 MB MIME spools to a temp file and the Gmail `{"raw":…}` body streams through `Base64UrlReader` + `StreamingRawBody`. Peak RAM for a 500 MB attachment: **~1.8 GB → streaming buffers** (spool on disk, not RAM).
+- GPU transcription behind `transcribe-cuda` / `transcribe-metal` features; `make build` requires a local GPU.
+
+**Regression found — `make check` was RED on main.** `#ckymimeinline` (6056584) added a 7th `images: &[PathBuf]` param to `build_mime_message` (`crates/corky-mail/src/draft/send.rs:443`) but never updated `benches/draft_mime.rs` — 3 callsites still pass 6 args, so `cargo clippy --all-targets` (= `make clippy`/`make check`) fails with `E0061`. Benches aren't built by `cargo test`, which is why the 237 mail tests stayed green while the gate went red.
+
+Fix applied **locally** (empty `images` slice added to the 3 bench callsites); clippy `--all-targets` is green again and the bench numbers above come from that fixed tree. I did **not** commit it — you asked for a report, not a ship. It's logged as `#ckybenchbreak` (P2), fix ready, just needs commit + push to restore the gate.
+
+**Queue note:** the active head `#ckymimeinline` already shipped (6056584), so the queue was stale — marked it done. `#ckybenchbreak` is the only new open item.
+<!-- agent:boundary:c4dfd30c -->
 <!-- /agent:exchange -->
 ###
 <!--

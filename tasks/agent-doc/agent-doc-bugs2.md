@@ -148,7 +148,23 @@ Evidence:
 ### Re: cycle closeout (#6b5h wedge recovery) — glm-5-2
 
 The first `finalize` wedged on the `#6b5h` IPC guard (listener active, no live JB editor ACKing in this OpenCode session, `reason=ack_mismatch`) — recovered via `--force-disk`. This is the exact failure class `#fnxy`/`#t4x1` will eliminate: the ownership SM's `ownership_probe` demotes a no-lease stale listener to `Detached`, and `disk_write_permitted(Detached)` then permits the write instead of wedging.
-<!-- agent:boundary:13ca894b -->
+
+### Re: #t4x1 wire write path on ownership SM + ack_mismatch wedge fix — glm-5-2
+
+**`#t4x1` (#mergestatemachine2) — shipped + committed (`df2c0cbb`).** The `#fnxy` ownership SM now gates the converge disk-write refusal path, and the actual `#6b5h` wedge I hit twice this session is fixed at the source.
+
+**Root-cause gap found:** `refuse_or_editorless_disk_fallback` (converge.rs:1054) already consulted `live_editor_endpoint_attached` for the `no_ack` / `no_ack_content` / `send_failed` paths — but the **`ack_mismatch` branch hard-bailed `refused direct disk write` regardless of editor presence**. That was exactly my wedge: ACK came back with drifted content (`reason=ack_mismatch`), no live JB editor in this OpenCode session, yet the write was refused → `recovery=retry_without_disk_write`.
+
+**Changes:**
+- **converge.rs** — `refuse_or_editorless_disk_fallback` now consults `disk_write_permitted_for_file` (the SM gate) instead of raw `live_editor_endpoint_attached`; the `ack_mismatch` branch routes through it instead of hard-bailing. Net effect: a CLI-only/no-editor session (stale controller-hosted listener, no plugin lease) now disk-falls-back on `ack_mismatch` instead of wedging; a live editor buffer still fail-closes (preserves `#editorbufwin` / the File Cache Conflict guard).
+- **merge_control_state_machine.rs** — added `OwnershipLiveness::for_file` (reads the lease sidecar fresh each write) + `disk_write_permitted_for_file` (probe from `Attached` → resolve → `disk_write_permitted`), the phase-2 write-path gate. Decision-equivalent to `!live_editor_endpoint_attached`, routed through the ownership vocabulary.
+- **plugin_owner.rs** — exposed `plugin_owner_pid_is_live` pub wrapper so the SM builds liveness from the lease.
+- **FlowCore reason= budget 21→20** (audited): the standalone `ack_mismatch` bail was deduplicated into the shared helper's `reason={reason}` token.
+
+16 SM tests green (incl. decision-equivalence assertion), converge suite (72) green, `make check` green, CI green.
+
+**Caveat:** the fix lands in the *next* `make install-full` + supervisor recycle — the running binary is still 0.34.48, so this cycle's `finalize` still needs `--force-disk`. After install, the `ack_mismatch`/`no_ack` wedge self-resolves for CLI-only sessions.
+<!-- agent:boundary:7a9990a3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -317,7 +333,6 @@ What are #next-steps to fix bugs?
 - [ ] [#vwj7] #queuestatemachine1 Define queue-item identity + lifecycle-state model (Authored→Mirrored→InProgress→Answered→Struck→Reaped) + pure transition fn with exhaustive (state×event) tests. Replaces ad-hoc dedup passes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
 - [ ] [#cgfx] #queuestatemachine2 Route convergence through the SM; reduce dedup passes to transition guards; property test idempotence (re-emit=no-op) over #rt83qflood/#qdedupsync/#qauthorder duplication shapes. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
 - [ ] [#brtc] #queuestatemachine3 SimWorld: stale-CRDT/supervisor re-emit storm converges to one item per identity; operator position-lock survives. Plan: tasks/agent-doc/plan-queue-activity-state-machine.md
-- [ ] [#t4x1] #mergestatemachine2 Gate try_ipc/commit/disk-write on the ownership SM; route Detached/stale writes to controller-host disk path so CLI-only/no-editor never wedges on no_ack. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#kj5f] #mergestatemachine3 JB+VSCode report attach/detach/ownership through SM (thin reporters via #lazilystatesync); SimWorld + live repro for File Cache Conflict + #6b5h wedge. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#r5at] #lazilystatesync4 VSCode plugin: lazily-js mirror graph applying FFI state deltas. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md
 - [ ] [#6n5j] #lazilystatesync5 Parity+tests: lazily-spec cross-editor conformance (extend EditorCommandStateMachineTest to reactive path) + FFI round-trip proving kt/js mirror converges to rs authoritative graph. Plan: tasks/agent-doc/plan-lazily-plugin-state-sync.md

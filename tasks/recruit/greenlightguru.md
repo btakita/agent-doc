@@ -125,7 +125,46 @@ Your portfolio is an unusually direct match — not because you've worked in med
 **Suggested positioning one-liner for Royce:** *"I build systems where every change is tracked, attributable, and conflict-free — and I ship auditable AI on top of them. That's the same discipline a QMS lives or dies on."*
 
 Want me to draft the actual outreach message to Royce, or tailor one of your resume variants (the `ai-agents` or `backend` cut looks closest) toward this role?
-<!-- agent:boundary:5ece03c3 -->
+
+### Re: Job description + Greenlight Guru architecture — opus-4-8
+
+I pulled the posting and cross-checked it against public sources on the platform. Summary first, then the architecture, then the resource list.
+
+#### The role — Sr. Software Engineer I
+
+- **Shape:** Remote (US/Canada), 4+ years, full-stack leaning toward modern front-end ownership. You lead multiple concurrent initiatives, own features end-to-end, and mentor juniors.
+- **Stated stack expectations:** React (or similar modern JS); **fluency with REST, RPC, *and* GraphQL APIs**; cloud-native architecture; unit + integration test suites; CI pipelines; production observability (monitors, alerts, performance benchmarks) and incident response.
+- **The signal that matters:** they explicitly want *"hands-on experience with large language models (LLMs), generative AI APIs, and intelligent automation."* This is not a buzzword line — see the AI section below; they are actively shipping an AI layer and hiring to extend it.
+- **Culture tell:** the posting asks you to *"list your favorite seasoning for steak at the top of your resume."* It's a real filter for attention-to-instructions + personality. Actually do it.
+
+#### What architecture Greenlight Guru runs
+
+No single source dumps the full stack, so this is assembled from their HTEC modernization case study, the Built In company profile, their AI features page, and backend job postings:
+
+- **Cloud-native on AWS.** Java (backend), JavaScript/TypeScript across the stack, **React** front-end. Tableau for analytics/BI. (Built In tech profile.)
+- **Modular, decoupled platform reached via the Strangler pattern.** HTEC wrapped the legacy monolith behind an intermediary interface and carved out independent modules (the decoupled **Risk Management** module is the documented example). So it's a monolith → modular/microservices migration that is *still in progress* — meaning real legacy-code diagnosis work, which the JD calls out directly ("diagnosing performance issues in legacy code").
+- **Service-oriented backend.** Backend roles describe building **micro-services, an analytics-platform layer, and 3rd-party integrations** — consistent with the decoupled direction above and with the REST/RPC/GraphQL surface in this JD.
+- **A real, shipping AI layer — 13 features.** AI Brainstorming, AI Verifiability Check, **Suggested Links (AI traceability)**, AI Style Guide, AI Search with generated summaries, AI Chat over QMS data, AI Summaries, Quiz Builder, change/document-history summaries, and AI Training Analytics. Most pointed for you: the **AI Connector is built as a Model Context Protocol (MCP) server** exposing QMS data to external AI tools. (LLM provider/model isn't publicly disclosed.)
+
+**Net:** a regulated-SaaS document/workflow platform on AWS (Java + TS/React, GraphQL), mid-Strangler toward modular services, with an MCP-exposed generative-AI layer they're investing in.
+
+#### Why this maps to you (short — the deep portfolio tie-in is in the response above)
+
+- **The MCP server is the single sharpest hook.** Their AI Connector is an MCP server; you build MCP/agent tooling daily (tsift, agent-doc). That's a *literal, current* overlap — name it explicitly in outreach, not generically as "AI experience."
+- **"Auditable, bounded, citeable AI" is exactly the JD's hard part.** Their AI must survive a regulated audit; that's the whole thesis of tsift digests (bounded citeable evidence) and agent-doc's git-native audit trail.
+- **Strangler/modular + GraphQL + AWS** lines up with EFS (Workers/D1, 74 migrations, modular workflow platform) and Presence AI (React/GraphQL/Postgres). The traceability-graph angle (tsift's graph substrate ≈ their Suggested-Links / requirement→V&V matrix) is still your strongest structural match.
+- **Honest gap:** their backend is Java; you lean TS/Bun/Rust. Minor here — the role is front-end-and-AI weighted and the rest of the stack is TS/JS-heavy — but worth a one-line, non-defensive acknowledgment.
+
+#### Resources found
+
+- [The posting itself](https://job-boards.greenhouse.io/greenlightguru/jobs/5160112007) and [all GG openings](https://job-boards.greenhouse.io/greenlightguru) (Greenhouse)
+- [HTEC modernization case study](https://htec.com/insights/success-stories/greenlight-guru-advancing-quality-management-system/) — Strangler pattern + decoupled modular architecture
+- [Built In company profile](https://builtin.com/company/greenlight-guru) — Java / JS / TS / React / AWS / Tableau
+- [Greenlight Guru AI features](https://www.greenlight.guru/blog/greenlight-guru-ai-features) — the 13 AI features incl. the MCP-server AI Connector
+- [Crunchbase tech details](https://www.crunchbase.com/organization/greenlight-guru/technology) (403 on automated fetch — open in a browser)
+
+Want me to turn this into a tailored cover note / outreach that leads with the MCP-server + auditable-AI overlap, or fold the architecture findings into your resume's GG-specific cut?
+<!-- agent:boundary:88966fc2 -->
 <!-- /agent:exchange -->
 
 ## Queue

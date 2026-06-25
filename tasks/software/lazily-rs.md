@@ -125,7 +125,35 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=ipc_visible_repair patch_id=e9857be4-9dba-4cf8-95a7-8c03a93c1552 invariant=ipc_dedupe recovery=retry_without_disk_write redeliver_editor=true bad_len=10628 bad_hash=630a495072ecbd054b8e94145ebba5bcbebbaf9e9bc26aa5277fcde7d7738e7e repaired_len=15013 repaired_hash=a044c9a94e2160c8ea1ac71e6d8a01948d57f20dd447a4b578ddf30a9a5273e2 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782423321782
 ```
-<!-- agent:boundary:e3ea19ae -->
+
+### Re: Spreadsheet cell limits + benchmarks — opus-4-8
+
+> **Queue prompt:** How many cells does Google Sheets & MS Excel support? Add benchmarks for those numbers.
+
+**The limits:**
+
+| Spreadsheet | Documented limit | Cells |
+|---|---|---:|
+| **Google Sheets** | 10,000,000 cells per workbook (also 18,278 columns max) | **10,000,000** |
+| **Microsoft Excel** | 1,048,576 rows × 16,384 columns per worksheet | **17,179,869,184** (~17.18B) |
+
+**Benchmarks added** (committed in `BENCHMARKS.md` → "Spreadsheet cell-count context"; lazily-rs `27accd7`, superproject `4878dbdb4`, pushed):
+
+**Google Sheets (10M cells) — measured.** Ran the `scale` bench at the full Sheets cap (`LAZILY_SCALE_N=5000000` → 5M inputs + 5M formulas = 10M cells) on this 186 GB host:
+
+| case | mean |
+|---|---:|
+| `build` (10M cells) | ~706 ms |
+| `cold_full_recalc` (5M) | ~518 ms |
+| `full_recalc_invalidate_all` (5M) | ~329 ms |
+| `viewport_recalc` (1k) | ~11.4 µs |
+
+So lazily comfortably backs a **full-capacity Google Sheets workbook**: sub-second build, ~0.5 s full recompute, and viewport recalc stays **~11 µs regardless of sheet size** (same as at 1M — the lazy-pull model only recomputes cells you read).
+
+**Excel (17.18B grid) — sparse, not dense.** 17.18B is grid *capacity*, not populated cells. Building it densely would need ~7 TB at ~216 B/node — infeasible and unrepresentative. lazily's storage is a **sparse arena** (`Vec<Option<Node>>` + free-list) that only allocates cells you create, so the real limit is *populated* cells vs RAM (~216 B/node), not the grid. With the flat per-cell cost (the `scale` group held ~constant per-cell from 1M→10M), capacity ≈ available RAM ÷ ~216 B — this host could hold ~10⁸–10⁹ populated cells, far beyond any realistically-populated Excel sheet.
+
+Net: lazily handles Google Sheets' entire 10M-cell capacity with measured numbers, and Excel's grid is a non-issue because only populated cells cost anything. The default `scale` group (N=1M) stays in `make benchmark-check`; the 10M Sheets run is reproducible via `LAZILY_SCALE_N=5000000`.
+<!-- agent:boundary:8e26e98b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,7 +163,8 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/l
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~Update the README with the benchmark table with my machine specs. Mention the lazy reactive win with viewport_recalc.~~
-- How many cells does Google Sheets & MS Excel support? Add benchmarks for those numbers.
+- ~~How many cells does Google Sheets & MS Excel support? Add benchmarks for those numbers.~~
+- Are we currently support Hash + Collection Cell Famlies? If yes, update lazily-spec and release + publish lazily-rs.
 <!-- /agent:queue -->
 
 ## Backlog

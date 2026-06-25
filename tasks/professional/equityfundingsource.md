@@ -140,7 +140,19 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=2474ea4f-923c-4a13-be99-7e71fe43b091 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782417704874
 ```
-<!-- agent:boundary:66f06894 -->
+
+### Re: Loan Terms card density — deal loan tab pass complete — opus-4-8
+
+> **Queue prompt:** Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=deal&dialog_deal_id=4d2b9382-06d5-498f-a306-64ea3e2870a7&deal_tab=loan: Borrower Info + Application + Loan Terms cards.
+
+> **Queue prompt:** Optimize the Loan Terms card as well.
+
+Done — the **Loan Terms** card now gets the same dense treatment as the Application card, completing the loan-tab density pass. Its 8 short scalar terms (Loan Amount, LTV/CLTV, Sold Rate, Note Rate, Duration, Due In, Frequency, Due Day) flow **multiple-per-row in the responsive `auto-fit minmax(190px,1fr)` grid, label-above-value**, instead of 8 one-per-row rows — so the card is ~half as tall on a wide viewport and reads in two compact columns. Same shared `AdminTmoLoanTermsCard` in `loan_detail.tsx`, so the admin loan page and the deal-dialog loan tab both pick it up. Density test extended to lock the Loan Terms grid + `dense` fields.
+
+Verified: full suite **1228 pass / 0 fail**, `build` + `build:worker` clean. Committed `3c5db1c` and pushed `origin/main` (`1c4fb1c..3c5db1c`), per the `#spec-test-commit-push` queue preset.
+
+**Not deployed this batch.** The preset is test-commit-push (no deploy), and there's no unstruck `deploy` item — last cycle's `deploy.` (which shipped the Borrower Info + Application pass, Version `b9966711`) is struck. So this Loan Terms change is pushed but **not yet live**. Add `deploy` to the queue (or say the word) and I'll ship it.
+<!-- agent:boundary:d7ecd87a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -160,8 +172,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=deal&dialog_deal_id=4d2b9382-06d5-498f-a306-64ea3e2870a7&deal_tab=loan: Borrower Info + Application + Loan Terms cards.
-- Optimize the Loan Terms card as well.
+- ~~Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=deal&dialog_deal_id=4d2b9382-06d5-498f-a306-64ea3e2870a7&deal_tab=loan: Borrower Info + Application + Loan Terms cards.~~
+- ~~Optimize the Loan Terms card as well.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~deploy.~~
 <!-- /agent:queue -->
 

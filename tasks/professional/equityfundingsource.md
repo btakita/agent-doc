@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -110,7 +110,7 @@ Drained both queue heads.
 **Verify + deploy.** `bun run test` → 1225 pass / 0 fail; `bun run build` + `build:worker` clean. Pushed to `origin/main`, then `deploy:worker` → live at https://equityfundingsource.brian-takita.workers.dev (Version `ff4b8896-a7a7-4d1a-9e59-6577b69df521`). No CI workflow in the EFS repo, so local suite + build are the evidence.
 
 Reload the `dialog=application` → **Open Full Application** path to see it fill the screen.
-<!-- agent:boundary:c64925c2 -->
+<!-- agent:boundary:4d4e07b7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -130,6 +130,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- 🚧 From https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=application&dialog_application_id=5cfa7c7b-f7d2-4b2e-95b8-396b5b1c6097 > Full Application, remove "Feedback Report" card. Admins will use the Messaging feature to send emails to borrowers.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

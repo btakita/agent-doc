@@ -184,7 +184,7 @@ ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=fil
 **Deployed.** `make deploy` built the worker, applied remote D1 migrations (idempotent — 0110 already applied), uploaded + activated version `d1f62058-b80b-4833-84de-2fd6d2691241`. Smoke check: `https://equityfundingsource.brian-takita.workers.dev/` → **HTTP 200** (0.16s).
 
 Production is now live with the dead-table drop (#bxtd), no subject-property prefill (#noproppfill), per-line form errors, and the dfed93b document-upload refactor — all on a green suite. `#dfed93b-tests` resolved; `deploy` drained.
-<!-- agent:boundary:d15111b9 -->
+<!-- agent:boundary:90f222ce -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -218,7 +218,6 @@ After 20:30
 ## Review
 
 <!-- agent:review -->
-- [/] [#dfed93b-tests] [operator-verify] 7 EFS tests are red on origin/main from the operator commit dfed93b "fix(admin): streamline document upload workflows" (by Brian Dev) — stale source-assertion tests not updated to the refactored document-upload components (advance-lender-documents, admin-application-lead-detail, admin-investor-pipeline x2, investor-documents, submit-button-busy). NOT caused by #noproppfill (different subsystem; #noproppfill is green in isolation). Operator decision: align each assertion to the committed dfed93b components, OR revert the dfed93b test expectations — do not guess-fix mid-refactor. Restore green make check before the next deploy. dfed93b is on origin but NOT yet deployed.
 - [/] [#04v8] [recommended] Validate TMO cross-service lender visibility in a real TMO sandbox/tenant before relying on automated LOS funding writes: create or link a lender through `LSS.svc`, confirm `GetLender`, then attempt `LOS.svc` `AddLoanFunding`/`UpdateLoanFunding` on a test loan or get written TMO support confirmation that LOS funding resolves the LSS lender/vendor master `Account`.
 - [/] [#apply-invite-fail-ux] Public `/apply` invite-failure UX: when the borrower invite email fails or is skipped after lead persistence, stop telling the borrower to check their inbox; show a received/follow-up message, keep the failed invite status visible to admins, and add a regression test.
 - [/] [#email-bg-outbox] Durable email delivery observability/retry: record lifecycle, secure-message, broker, lending-group, investor-interest, login-link, invite, reminder, and feedback email results in D1 with status/error/retry/dead-letter instead of relying on console-only warnings for background notifications.

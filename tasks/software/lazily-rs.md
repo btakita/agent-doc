@@ -217,7 +217,13 @@ agent-doc's document is a **shallow, ordered, stably-keyed tree**: root → comp
 **5. Two layers: AST (input cells) + semantic tree (computeds).** The syntactic AST is input/value cells; the *semantic* tree (e.g. "unresolved prompts", "drainable heads", "section summaries") is **memoized `computed` nodes over the relevant subtree**, recomputing only when that subtree's cells change — lazy + glitch-free, the lazily win. Don't materialize semantics eagerly; derive them.
 
 **Net recommendation:** ordered keyed tree (stable ids, per-node value cells, `CellList` children) + **keyed reconciliation with LIS move-minimization** for diffs + a **move-aware sequence CRDT** (fractional-index/RGA) for sibling order + **atomic move (`#lzcellmove`)**. Cell Families supply the fine-grained reactivity; keyed reconciliation supplies minimal per-item ops; the sequence CRDT supplies mergeable order — together that *is* the per-cell CRDT-merge substrate agent-doc wants. If you want this written up as a plan (mapping it onto agent-doc's components + the existing node_key scheme), say so and I'll draft it.
-<!-- agent:boundary:0eac3a01 -->
+
+### Re: tree algorithm — recap — opus-4-8
+
+Answered in full above ("Best tree algorithm for agent-doc AST + semantic trees"): an **ordered keyed tree** (stable ids, per-node value cells, `CellList` children) + **keyed reconciliation with LIS move-minimization** + a **move-aware sequence CRDT** for sibling order + **atomic move (`#lzcellmove`)** — which together form the per-cell CRDT-merge substrate. Consuming the head.
+
+> **Queue prompt:** What tree algorithm would be best for agent-doc document AST + semantic document trees?
+<!-- agent:boundary:519ec504 -->
 <!-- /agent:exchange -->
 ###
 <!--

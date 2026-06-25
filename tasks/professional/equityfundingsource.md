@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -152,7 +152,20 @@ Done — the **Loan Terms** card now gets the same dense treatment as the Applic
 Verified: full suite **1228 pass / 0 fail**, `build` + `build:worker` clean. Committed `3c5db1c` and pushed `origin/main` (`1c4fb1c..3c5db1c`), per the `#spec-test-commit-push` queue preset.
 
 **Not deployed this batch.** The preset is test-commit-push (no deploy), and there's no unstruck `deploy` item — last cycle's `deploy.` (which shipped the Borrower Info + Application pass, Version `b9966711`) is struck. So this Loan Terms change is pushed but **not yet live**. Add `deploy` to the queue (or say the word) and I'll ship it.
-<!-- agent:boundary:017aa0aa -->
+
+### Re: Loan Terms queue residue — gpt-5
+
+> **Queue prompt:**
+>
+> ~~Optimize the Loan Terms card as well.~~ — auto-struck: answered this cycle (#ftstrike)
+
+
+> **Queue prompt:** Optimize the Loan Terms card as well.
+
+This queue head was already answered by the preceding **Loan Terms card density** section: the Loan Terms card density pass shipped in EFS `3c5db1c`, the full suite and builds passed, and the branch was pushed to `origin/main`. I made no additional EFS code changes in this cycle.
+
+Noted preflight hygiene: one legacy gated backlog item still needs migration to review, and this workspace reports a stale `agent-doc` install relative to source. Those are existing agent-doc/session-maintenance warnings, not blockers for closing the already-answered Loan Terms queue item.
+<!-- agent:boundary:1d60cbfc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -172,9 +185,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Optimize the layout of https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=deal&dialog_deal_id=4d2b9382-06d5-498f-a306-64ea3e2870a7&deal_tab=loan: Borrower Info + Application + Loan Terms cards.~~
-- 🚧 ~~Optimize the Loan Terms card as well.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~deploy.~~
 <!-- /agent:queue -->
 
 ## Backlog

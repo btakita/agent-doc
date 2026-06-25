@@ -237,7 +237,7 @@ Reverted the default-collapsed Personal + Subject Property cards (`0222de8`) —
 - Collapsible **Declarations + Review & Sign** are unchanged (you asked for those separately and didn't revert them).
 
 **Verify + deploy.** Tests updated (`#full-app-dense-cards`); `bun run test` → 1227 pass / 0 fail; `build` + `build:worker` clean. Pushed `05fe7a3`, deployed Version `7fe3901f-41fd-4f0e-bd3d-b2b0b440d2a4`. No CI workflow in the EFS repo.
-<!-- agent:boundary:c6d946a0 -->
+<!-- agent:boundary:1f920893 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -257,8 +257,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Revert the last change. You went in the wrong direction. Instead don't make 1 row per line but a well formatted card to combine lines instead. It should read with minimal scrolling.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

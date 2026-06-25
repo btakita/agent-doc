@@ -661,6 +661,7 @@ mod tests {
                 node_key: key.to_string(),
                 backlog_id: None,
                 drainable: true,
+                hosting_epoch: None,
             },
         )
     }
@@ -672,6 +673,7 @@ mod tests {
                 document_hash: doc.to_string(),
                 node_key: key.to_string(),
                 backlog_id: None,
+                hosting_epoch: None,
             },
         )
     }

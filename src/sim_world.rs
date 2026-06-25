@@ -6089,3 +6089,249 @@ fn simworld_jb_run_and_clear_share_codex_enter_submit_contract() {
         "tmux_text_enter"
     );
 }
+
+/// Deterministic SimWorld for the cross-document supervisor contamination class
+/// (`#xdocsuper1`/`#xdocsuper2`/`#xdocsuper3`).
+///
+/// Models ONE route-owned supervisor process per pane/session hosting response
+/// cycles in-process, backed by the *real* production state backbone
+/// (`agent_doc_orchestration::state_backbone::EventLedger`). The supervisor's
+/// per-document in-memory state is exactly the backbone projection, so a
+/// document switch / fresh host that fails to reset would surface here as a
+/// sibling/stale overlay leaking into the next cycle — no live tmux required.
+mod hosting_sim {
+    use agent_doc_orchestration::state_backbone::{
+        EventLedger, RejectedStaleEvent, StateDomain, StateEvent, StateFact, StateOwner,
+    };
+
+    /// A single route-owned supervisor pane hosting documents in-process over an
+    /// event-sourced backbone. `pane_session` is the stable pane/session this
+    /// supervisor owns; `lease_epoch` is its supervisor-lease incarnation.
+    struct HostingSimWorld {
+        ledger: EventLedger,
+        pane_session: String,
+        lease_epoch: u64,
+        next_event: u64,
+    }
+
+    impl HostingSimWorld {
+        fn new(pane_session: &str) -> Self {
+            Self {
+                ledger: EventLedger::new(),
+                pane_session: pane_session.to_string(),
+                lease_epoch: 1,
+                next_event: 0,
+            }
+        }
+
+        fn event_id(&mut self, label: &str) -> String {
+            self.next_event += 1;
+            format!("{label}-{}", self.next_event)
+        }
+
+        /// The supervisor begins hosting (or switches to) `document_hash` on its
+        /// pane. This is the FIRST thing the host loop does on every handoff —
+        /// it advances the document's hosting epoch and drops any stale queue
+        /// overlay by construction.
+        fn host(&mut self, document_hash: &str) {
+            let id = self.event_id("host");
+            let pane_session = self.pane_session.clone();
+            let lease_epoch = self.lease_epoch;
+            self.ledger.append(StateEvent::new(
+                id,
+                StateFact::SupervisorHosting {
+                    document_hash: document_hash.to_string(),
+                    pane_session,
+                    lease_epoch,
+                },
+            ));
+        }
+
+        /// Simulate a supervisor lease re-incarnation (e.g. an in-place recycle /
+        /// stale-CRDT replay boundary) before the next host on the same pane.
+        fn bump_lease(&mut self) {
+            self.lease_epoch += 1;
+        }
+
+        /// The current hosting epoch a live producer stamps onto queue facts.
+        fn hosting_epoch(&self, document_hash: &str) -> Option<u64> {
+            self.ledger.document_hosting_epoch(document_hash)
+        }
+
+        /// Select a free-text queue head for the document under the CURRENT
+        /// hosting epoch (the normal in-hosting path).
+        fn select_head(&mut self, document_hash: &str, node_key: &str) {
+            let hosting_epoch = self.hosting_epoch(document_hash);
+            let id = self.event_id("sel");
+            self.ledger.append(StateEvent::new(
+                id,
+                StateFact::QueueHeadSelected {
+                    document_hash: document_hash.to_string(),
+                    node_key: node_key.to_string(),
+                    backlog_id: None,
+                    drainable: true,
+                    hosting_epoch,
+                },
+            ));
+        }
+
+        /// Answer (complete) a queue head for the document under the CURRENT
+        /// hosting epoch.
+        fn complete_head(&mut self, document_hash: &str, node_key: &str) {
+            let hosting_epoch = self.hosting_epoch(document_hash);
+            let id = self.event_id("done");
+            self.ledger.append(StateEvent::new(
+                id,
+                StateFact::QueueHeadCompleted {
+                    document_hash: document_hash.to_string(),
+                    node_key: node_key.to_string(),
+                    backlog_id: None,
+                    hosting_epoch,
+                },
+            ));
+        }
+
+        /// Replay a stale answered-head fact stamped with an OLD hosting epoch —
+        /// the contamination vector (stale CRDT / answered-head residue).
+        fn replay_stale_complete(
+            &mut self,
+            document_hash: &str,
+            node_key: &str,
+            stale_hosting_epoch: u64,
+        ) {
+            let id = self.event_id("stale");
+            self.ledger.append(StateEvent::new(
+                id,
+                StateFact::QueueHeadCompleted {
+                    document_hash: document_hash.to_string(),
+                    node_key: node_key.to_string(),
+                    backlog_id: None,
+                    hosting_epoch: Some(stale_hosting_epoch),
+                },
+            ));
+        }
+
+        fn completed_heads(&self, document_hash: &str) -> Vec<String> {
+            self.ledger
+                .project_document(document_hash)
+                .map(|doc| doc.queue.completed_heads.iter().cloned().collect())
+                .unwrap_or_default()
+        }
+
+        fn active_head(&self, document_hash: &str) -> Option<String> {
+            self.ledger
+                .project_document(document_hash)
+                .and_then(|doc| doc.queue.active_head)
+        }
+
+        fn rejected_stale(&self, document_hash: &str) -> Vec<RejectedStaleEvent> {
+            self.ledger
+                .project_document(document_hash)
+                .map(|doc| doc.rejected_stale_events)
+                .unwrap_or_default()
+        }
+    }
+
+    #[test]
+    fn route_owned_supervisor_switch_reads_target_without_source_overlay() {
+        // (a) One route-owned supervisor hosts doc A, answers a free-text head,
+        // then is handed doc B on the SAME pane. B's first cycle must read B's
+        // on-disk state with NO A overlay, and A's state must be untouched.
+        let mut world = HostingSimWorld::new("%73:b26b9957");
+        world.host("doc-a");
+        world.select_head("doc-a", "a-free-text-head");
+        world.complete_head("doc-a", "a-free-text-head");
+        assert_eq!(world.completed_heads("doc-a"), vec!["a-free-text-head"]);
+
+        // Switch to doc B.
+        world.host("doc-b");
+        world.select_head("doc-b", "b-free-text-head");
+
+        // B sees only its own head; A is not contaminated.
+        assert_eq!(world.active_head("doc-b").as_deref(), Some("b-free-text-head"));
+        assert!(
+            world.completed_heads("doc-b").is_empty(),
+            "doc-b's first cycle must not inherit doc-a's answered head"
+        );
+        assert_eq!(
+            world.completed_heads("doc-a"),
+            vec!["a-free-text-head"],
+            "switching the pane to doc-b must not mutate doc-a"
+        );
+    }
+
+    #[test]
+    fn contamination_regression_no_answered_head_reinjection_after_switch() {
+        // (b) Contamination regression: after a switch (or stale same-document
+        // re-host), a sibling/stale in-memory overlay must not re-inject an
+        // already-answered free-text head — the live_prompt_drift / answered-head
+        // residue class. We drive the actual stale-fact replay vector.
+        let mut world = HostingSimWorld::new("%73:b26b9957");
+
+        // Same-document stale-CRDT replay boundary: host doc-a, answer a head,
+        // then the supervisor lease re-incarnates and re-hosts doc-a.
+        world.host("doc-a");
+        world.select_head("doc-a", "answered-head");
+        world.complete_head("doc-a", "answered-head");
+        let stale_epoch = world.hosting_epoch("doc-a").unwrap();
+
+        world.bump_lease();
+        world.host("doc-a");
+        assert!(
+            world.completed_heads("doc-a").is_empty(),
+            "fresh host must drop the prior hosting's answered-head residue"
+        );
+
+        // The stale supervisor replays the answered-head fact at the OLD epoch
+        // (the contamination vector). It must be rejected, not re-injected.
+        world.replay_stale_complete("doc-a", "answered-head", stale_epoch);
+        assert!(
+            world.completed_heads("doc-a").is_empty(),
+            "stale answered-head replay must not re-appear after the re-host"
+        );
+        assert_eq!(
+            world.rejected_stale("doc-a"),
+            vec![RejectedStaleEvent {
+                domain: StateDomain::Queue,
+                owner: StateOwner::QueueOrchestrator,
+            }],
+            "the stale-epoch queue replay must be recorded as rejected"
+        );
+
+        // Cross-document sibling contamination: switching the same pane to a
+        // second document must give doc-b a clean overlay (no doc-a head), and a
+        // doc-a stale replay must never reach doc-b's projection (facts are keyed
+        // by document_hash, and doc-b's switch reset already cleared its overlay).
+        world.host("doc-b");
+        world.replay_stale_complete("doc-a", "answered-head", stale_epoch);
+        assert!(
+            world.completed_heads("doc-b").is_empty(),
+            "a sibling document's stale overlay must not contaminate doc-b"
+        );
+    }
+
+    #[test]
+    fn deterministic_replay_is_stable_across_runs() {
+        // SimWorld determinism: the same scenario yields byte-identical projection
+        // JSON on every run (no live tmux, no wall-clock, no RNG dependence).
+        fn run() -> String {
+            let mut world = HostingSimWorld::new("%5:session-x");
+            world.host("doc-a");
+            world.select_head("doc-a", "h1");
+            world.complete_head("doc-a", "h1");
+            world.bump_lease();
+            world.host("doc-a");
+            world.select_head("doc-a", "h2");
+            world.host("doc-b");
+            world.select_head("doc-b", "h3");
+            let a = world.ledger.project_document("doc-a").unwrap();
+            let b = world.ledger.project_document("doc-b").unwrap();
+            format!(
+                "{}\n{}",
+                serde_json::to_string(&a).unwrap(),
+                serde_json::to_string(&b).unwrap()
+            )
+        }
+        assert_eq!(run(), run());
+    }
+}

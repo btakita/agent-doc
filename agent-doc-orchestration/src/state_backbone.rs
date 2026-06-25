@@ -78,17 +78,41 @@ pub enum StateFact {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         backlog_id: Option<String>,
         drainable: bool,
+        /// Hosting epoch this queue fact was produced under (`#xdocsuper3`). When
+        /// present and behind the document's current hosting epoch the fact is
+        /// rejected as a stale-overlay replay; `None` keeps legacy/un-hosted
+        /// producers backward compatible (accepted at any epoch).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hosting_epoch: Option<u64>,
     },
     QueueHeadDeferred {
         document_hash: String,
         node_key: String,
         reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hosting_epoch: Option<u64>,
     },
     QueueHeadCompleted {
         document_hash: String,
         node_key: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         backlog_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hosting_epoch: Option<u64>,
+    },
+    /// A route-owned supervisor process begins hosting (or switches to) a
+    /// document on a tmux pane/session (`#xdocsuper1`/`#xdocsuper3`).
+    ///
+    /// This is the pane→document host binding modeled as a backbone transition.
+    /// When the `pane_session` hosting this document changes, or the same pane
+    /// re-hosts at a higher `lease_epoch`, the projection treats it as a fresh
+    /// host/switch: the document's stale per-document queue overlay is dropped
+    /// and the document's hosting epoch advances, so any queue fact carrying an
+    /// older `hosting_epoch` becomes a no-op by construction.
+    SupervisorHosting {
+        document_hash: String,
+        pane_session: String,
+        lease_epoch: u64,
     },
     ResponseCaptured {
         document_hash: String,
@@ -219,7 +243,8 @@ impl StateFact {
             | Self::RouteReadinessObserved { document_hash, .. }
             | Self::DispatchProofObserved { document_hash, .. }
             | Self::ProofMarkerObserved { document_hash, .. }
-            | Self::ProofMarkerDisproved { document_hash, .. } => document_hash,
+            | Self::ProofMarkerDisproved { document_hash, .. }
+            | Self::SupervisorHosting { document_hash, .. } => document_hash,
         }
     }
 
@@ -243,7 +268,8 @@ impl StateFact {
             Self::OwnerGenerationChanged { .. }
             | Self::ActorLifecycleObserved { .. }
             | Self::AgentRestartPerformed { .. }
-            | Self::CapabilityProofObserved { .. } => StateDomain::Supervisor,
+            | Self::CapabilityProofObserved { .. }
+            | Self::SupervisorHosting { .. } => StateDomain::Supervisor,
             Self::RoutePaneObserved { .. }
             | Self::RouteReadinessObserved { .. }
             | Self::DispatchProofObserved { .. } => StateDomain::Route,
@@ -300,6 +326,15 @@ impl EventLedger {
             .iter()
             .filter(|event| event.document_hash() == document_hash)
             .count() as u64
+    }
+
+    /// The document's current hosting epoch (`#xdocsuper3`), or `None` when the
+    /// document has no `SupervisorHosting` fact yet. Live queue-fact producers
+    /// (supervisor host loop / FFI) call this and stamp the returned value onto
+    /// new `QueueHead*` facts so a later host/switch makes them stale.
+    pub fn document_hosting_epoch(&self, document_hash: &str) -> Option<u64> {
+        self.project_document(document_hash)
+            .and_then(|projection| projection.hosting_epoch())
     }
 
     /// Project the current state for a single document from the deduped event
@@ -390,6 +425,12 @@ pub struct DocumentStateProjection {
     pub supervisor: SupervisorProjection,
     pub route: RouteProjection,
     pub proof: ProofProjection,
+    /// Pane→document host binding for this document (`#xdocsuper1`/`#xdocsuper3`).
+    /// Tracks which `pane_session` currently hosts the document and the hosting
+    /// epoch that gates the queue overlay. `None` until the first
+    /// `SupervisorHosting` fact is observed (legacy/un-hosted documents).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hosting: Option<SupervisorHostingProjection>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rejected_stale_events: Vec<RejectedStaleEvent>,
 }
@@ -408,12 +449,20 @@ impl DocumentStateProjection {
             supervisor: SupervisorProjection::default(),
             route: RouteProjection::default(),
             proof: ProofProjection::default(),
+            hosting: None,
             rejected_stale_events: Vec::new(),
         }
     }
 
     pub fn projection_summary(&self) -> ProjectionSummary {
         ProjectionSummary::from_document(self)
+    }
+
+    /// The document's current hosting epoch (`#xdocsuper3`), or `None` when no
+    /// `SupervisorHosting` fact has been observed yet. Producers stamp new queue
+    /// facts with this value so a later host/switch makes them stale.
+    pub fn hosting_epoch(&self) -> Option<u64> {
+        self.hosting.as_ref().map(|hosting| hosting.hosting_epoch)
     }
 
     /// Apply a single state fact to this document projection. Public so the
@@ -442,22 +491,39 @@ impl DocumentStateProjection {
                 node_key,
                 backlog_id,
                 drainable,
+                hosting_epoch,
                 ..
             } => {
-                self.queue
-                    .apply_selected(node_key, backlog_id.as_deref(), *drainable);
+                if self.hosting_epoch_current(*hosting_epoch) {
+                    self.queue
+                        .apply_selected(node_key, backlog_id.as_deref(), *drainable);
+                } else {
+                    self.reject_stale(StateDomain::Queue, StateOwner::QueueOrchestrator);
+                }
             }
             StateFact::QueueHeadDeferred {
-                node_key, reason, ..
+                node_key,
+                reason,
+                hosting_epoch,
+                ..
             } => {
-                self.queue.apply_deferred(node_key, reason);
+                if self.hosting_epoch_current(*hosting_epoch) {
+                    self.queue.apply_deferred(node_key, reason);
+                } else {
+                    self.reject_stale(StateDomain::Queue, StateOwner::QueueOrchestrator);
+                }
             }
             StateFact::QueueHeadCompleted {
                 node_key,
                 backlog_id,
+                hosting_epoch,
                 ..
             } => {
-                self.queue.apply_completed(node_key, backlog_id.as_deref());
+                if self.hosting_epoch_current(*hosting_epoch) {
+                    self.queue.apply_completed(node_key, backlog_id.as_deref());
+                } else {
+                    self.reject_stale(StateDomain::Queue, StateOwner::QueueOrchestrator);
+                }
             }
             StateFact::PreflightStarted {
                 cycle_id,
@@ -637,6 +703,13 @@ impl DocumentStateProjection {
                     self.reject_stale(StateDomain::Supervisor, *owner);
                 }
             }
+            StateFact::SupervisorHosting {
+                pane_session,
+                lease_epoch,
+                ..
+            } => {
+                self.apply_supervisor_hosting(pane_session, *lease_epoch);
+            }
             StateFact::RoutePaneObserved {
                 pane_id,
                 actor_generation,
@@ -694,6 +767,55 @@ impl DocumentStateProjection {
             .get(&owner)
             .and_then(|projection| projection.generation)
             .is_none_or(|current| current == generation)
+    }
+
+    /// Apply a `SupervisorHosting` transition (`#xdocsuper1`/`#xdocsuper3`).
+    ///
+    /// Determines whether this host event is a fresh host or a switch — the
+    /// `pane_session` differs from the one currently hosting the document, or the
+    /// same pane re-hosts at a strictly higher `lease_epoch`. On a fresh
+    /// host/switch the document's hosting epoch advances and the stale
+    /// per-document queue overlay is dropped, so any queue fact carrying the old
+    /// `hosting_epoch` is rejected by [`Self::hosting_epoch_current`] — the
+    /// stale-overlay replay becomes a no-op by construction. A re-emit of the
+    /// same `(pane_session, lease_epoch)` is idempotent (no reset, no epoch bump).
+    fn apply_supervisor_hosting(&mut self, pane_session: &str, lease_epoch: u64) {
+        let (is_switch, next_hosting_epoch) = match &self.hosting {
+            None => (true, 1),
+            Some(current) => {
+                let switched = current.pane_session != pane_session
+                    || lease_epoch > current.lease_epoch;
+                if switched {
+                    (true, current.hosting_epoch + 1)
+                } else {
+                    (false, current.hosting_epoch)
+                }
+            }
+        };
+        if is_switch {
+            // First step on every document handoff/host: drop the prior
+            // document's stale in-memory queue overlay before any new-hosting
+            // queue fact can be accepted. Queue facts at the old hosting epoch
+            // are then rejected even if reordered/replayed.
+            self.queue = QueueProjection::default();
+        }
+        self.hosting = Some(SupervisorHostingProjection {
+            pane_session: pane_session.to_string(),
+            lease_epoch,
+            hosting_epoch: next_hosting_epoch,
+        });
+    }
+
+    /// A queue fact's `hosting_epoch` is current when it matches the document's
+    /// hosting epoch. `None` (legacy/un-hosted producers) is always accepted so
+    /// the gate is backward compatible; a fact stamped with an epoch older than
+    /// the current hosting is a stale-overlay replay and rejected.
+    fn hosting_epoch_current(&self, fact_hosting_epoch: Option<u64>) -> bool {
+        match (fact_hosting_epoch, &self.hosting) {
+            (None, _) => true,
+            (Some(_), None) => true,
+            (Some(fact_epoch), Some(hosting)) => fact_epoch >= hosting.hosting_epoch,
+        }
     }
 
     fn reject_stale(&mut self, domain: StateDomain, owner: StateOwner) {
@@ -922,6 +1044,20 @@ impl TransportProjection {
 pub struct TransportPatchProjection {
     pub phase: TransportPatchPhase,
     pub actor_generation: u64,
+}
+
+/// Pane→document host binding for a single document (`#xdocsuper1`/`#xdocsuper3`).
+///
+/// `pane_session` is the route-owned supervisor pane/session currently hosting
+/// the document, `lease_epoch` is the supervisor lease incarnation that hosted
+/// it, and `hosting_epoch` is the monotonic per-document counter that gates the
+/// queue overlay. The counter advances on every fresh host / document switch so
+/// queue facts from a prior hosting become no-ops.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SupervisorHostingProjection {
+    pub pane_session: String,
+    pub lease_epoch: u64,
+    pub hosting_epoch: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -1775,6 +1911,7 @@ mod tests {
                 node_key: "queue-node-1".into(),
                 backlog_id: Some("#advr-state".into()),
                 drainable: true,
+                hosting_epoch: None,
             },
         ));
         ledger.append(state_event(
@@ -1849,6 +1986,7 @@ mod tests {
                 document_hash: "doc-a".into(),
                 node_key: "queue-node-1".into(),
                 backlog_id: Some("#advr-state".into()),
+                hosting_epoch: None,
             },
         ));
 
@@ -2047,6 +2185,187 @@ mod tests {
                 domain: StateDomain::Route,
                 owner: StateOwner::RouteDispatch,
             }]
+        );
+    }
+
+    #[test]
+    fn supervisor_hosting_switch_resets_stale_queue_overlay() {
+        // `#xdocsuper1`/`#xdocsuper3`: a route-owned supervisor hosts doc-a, answers
+        // a free-text queue head (completed), then the SAME pane re-hosts doc-a at a
+        // higher lease epoch (a fresh host / stale-CRDT replay boundary). The prior
+        // hosting's answered-head residue must be dropped, and a stale queue fact
+        // stamped with the old hosting epoch must be rejected by construction.
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "host-1",
+            StateFact::SupervisorHosting {
+                document_hash: "doc-a".into(),
+                pane_session: "%73:session-a".into(),
+                lease_epoch: 1,
+            },
+        ));
+        // Hosting epoch is now 1; the producer stamps queue facts with it.
+        assert_eq!(ledger.document_hosting_epoch("doc-a"), Some(1));
+        ledger.append(state_event(
+            "sel-1",
+            StateFact::QueueHeadSelected {
+                document_hash: "doc-a".into(),
+                node_key: "free-text-head".into(),
+                backlog_id: None,
+                drainable: true,
+                hosting_epoch: Some(1),
+            },
+        ));
+        ledger.append(state_event(
+            "done-1",
+            StateFact::QueueHeadCompleted {
+                document_hash: "doc-a".into(),
+                node_key: "free-text-head".into(),
+                backlog_id: None,
+                hosting_epoch: Some(1),
+            },
+        ));
+        let before = ledger.project_document("doc-a").unwrap();
+        assert!(before.queue.completed_heads.contains("free-text-head"));
+
+        // Fresh host on the same document (higher lease epoch) = switch boundary.
+        ledger.append(state_event(
+            "host-2",
+            StateFact::SupervisorHosting {
+                document_hash: "doc-a".into(),
+                pane_session: "%73:session-a".into(),
+                lease_epoch: 2,
+            },
+        ));
+        let after = ledger.project_document("doc-a").unwrap();
+        assert_eq!(after.hosting_epoch(), Some(2));
+        assert!(
+            after.queue.completed_heads.is_empty(),
+            "fresh host must drop the prior hosting's answered-head residue"
+        );
+        assert!(after.queue.heads.is_empty());
+        assert_eq!(after.queue.active_head, None);
+
+        // A stale queue fact replayed at the OLD hosting epoch is a no-op.
+        ledger.append(state_event(
+            "stale-done",
+            StateFact::QueueHeadCompleted {
+                document_hash: "doc-a".into(),
+                node_key: "free-text-head".into(),
+                backlog_id: None,
+                hosting_epoch: Some(1),
+            },
+        ));
+        let replayed = ledger.project_document("doc-a").unwrap();
+        assert!(
+            replayed.queue.completed_heads.is_empty(),
+            "stale-epoch queue fact must be rejected, not re-inject the answered head"
+        );
+        assert_eq!(
+            replayed.rejected_stale_events,
+            vec![RejectedStaleEvent {
+                domain: StateDomain::Queue,
+                owner: StateOwner::QueueOrchestrator,
+            }]
+        );
+    }
+
+    #[test]
+    fn cross_document_switch_does_not_contaminate_sibling_overlay() {
+        // `#xdocsuper1`: ONE pane hosts doc-a (answers a head), then switches to
+        // doc-b. doc-b's queue projection must read its own state with NO doc-a
+        // overlay, and doc-a's state must be untouched by the switch.
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "a-host",
+            StateFact::SupervisorHosting {
+                document_hash: "doc-a".into(),
+                pane_session: "%73:session-a".into(),
+                lease_epoch: 1,
+            },
+        ));
+        ledger.append(state_event(
+            "a-done",
+            StateFact::QueueHeadCompleted {
+                document_hash: "doc-a".into(),
+                node_key: "a-head".into(),
+                backlog_id: None,
+                hosting_epoch: Some(1),
+            },
+        ));
+        // Same pane now hosts doc-b.
+        ledger.append(state_event(
+            "b-host",
+            StateFact::SupervisorHosting {
+                document_hash: "doc-b".into(),
+                pane_session: "%73:session-a".into(),
+                lease_epoch: 1,
+            },
+        ));
+        ledger.append(state_event(
+            "b-sel",
+            StateFact::QueueHeadSelected {
+                document_hash: "doc-b".into(),
+                node_key: "b-head".into(),
+                backlog_id: None,
+                drainable: true,
+                hosting_epoch: Some(1),
+            },
+        ));
+
+        let doc_b = ledger.project_document("doc-b").unwrap();
+        assert_eq!(doc_b.hosting_epoch(), Some(1));
+        assert!(
+            !doc_b.queue.heads.contains_key("a-head"),
+            "doc-b must not inherit doc-a's queue head"
+        );
+        assert!(doc_b.queue.completed_heads.is_empty());
+        assert_eq!(doc_b.queue.active_head.as_deref(), Some("b-head"));
+
+        let doc_a = ledger.project_document("doc-a").unwrap();
+        assert!(
+            doc_a.queue.completed_heads.contains("a-head"),
+            "switching the pane to doc-b must not mutate doc-a's state"
+        );
+        assert_eq!(doc_a.hosting_epoch(), Some(1));
+    }
+
+    #[test]
+    fn re_emit_same_hosting_is_idempotent() {
+        // A re-emit of the same (pane_session, lease_epoch) must not bump the
+        // hosting epoch or reset the queue overlay.
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "host-1",
+            StateFact::SupervisorHosting {
+                document_hash: "doc-a".into(),
+                pane_session: "%5:session-a".into(),
+                lease_epoch: 3,
+            },
+        ));
+        ledger.append(state_event(
+            "done-1",
+            StateFact::QueueHeadCompleted {
+                document_hash: "doc-a".into(),
+                node_key: "head".into(),
+                backlog_id: None,
+                hosting_epoch: Some(1),
+            },
+        ));
+        // Different event_id, identical hosting binding (CRDT/supervisor replay).
+        ledger.append(state_event(
+            "host-1-replay",
+            StateFact::SupervisorHosting {
+                document_hash: "doc-a".into(),
+                pane_session: "%5:session-a".into(),
+                lease_epoch: 3,
+            },
+        ));
+        let doc = ledger.project_document("doc-a").unwrap();
+        assert_eq!(doc.hosting_epoch(), Some(1));
+        assert!(
+            doc.queue.completed_heads.contains("head"),
+            "an idempotent re-host must not drop in-hosting queue state"
         );
     }
 

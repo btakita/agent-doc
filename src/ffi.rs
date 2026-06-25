@@ -1709,6 +1709,33 @@ fn state_ledger() -> &'static std::sync::Mutex<agent_doc_orchestration::state_ba
     })
 }
 
+/// Stamp a queue `StateFact` reported without an explicit `hosting_epoch` with
+/// the document's current hosting epoch (`#xdocsuper3`). The binary owns the
+/// gate so live producers stay thin: a queue fact reported during the current
+/// hosting carries that epoch and is rejected as stale after a host/switch.
+/// Facts that already carry an explicit `hosting_epoch` (e.g. an intentional
+/// stale-replay test) are left untouched, as are non-queue facts.
+fn stamp_queue_fact_hosting_epoch(
+    ledger: &agent_doc_orchestration::state_backbone::EventLedger,
+    event: &mut agent_doc_orchestration::state_backbone::StateEvent,
+) {
+    use agent_doc_orchestration::state_backbone::StateFact;
+    let current = ledger.document_hosting_epoch(event.document_hash());
+    let Some(current) = current else {
+        return;
+    };
+    match &mut event.fact {
+        StateFact::QueueHeadSelected { hosting_epoch, .. }
+        | StateFact::QueueHeadDeferred { hosting_epoch, .. }
+        | StateFact::QueueHeadCompleted { hosting_epoch, .. }
+            if hosting_epoch.is_none() =>
+        {
+            *hosting_epoch = Some(current);
+        }
+        _ => {}
+    }
+}
+
 /// Read the binary's lazily-powered state projection for a document.
 ///
 /// Returns a NUL-terminated JSON string of `DocumentStateProjection`
@@ -1790,19 +1817,24 @@ pub unsafe extern "C" fn agent_doc_record_state_event(
             return 0;
         }
     };
-    let event: agent_doc_orchestration::state_backbone::StateEvent = match serde_json::from_str(
-        fact_str,
-    ) {
-        Ok(e) => e,
-        Err(err) => {
-            eprintln!(
-                "[state-projection] agent_doc_record_state_event: failed to parse StateEvent JSON for {doc_hash}: {err}"
-            );
-            return 0;
-        }
-    };
+    let mut event: agent_doc_orchestration::state_backbone::StateEvent =
+        match serde_json::from_str(fact_str) {
+            Ok(e) => e,
+            Err(err) => {
+                eprintln!(
+                    "[state-projection] agent_doc_record_state_event: failed to parse StateEvent JSON for {doc_hash}: {err}"
+                );
+                return 0;
+            }
+        };
     match state_ledger().lock() {
         Ok(mut ledger) => {
+            // `#xdocsuper3`: the binary owns the hosting-epoch gate (FFI-first).
+            // Queue facts reported by a live producer without an explicit
+            // `hosting_epoch` are stamped with the document's CURRENT hosting
+            // epoch, so a later host/switch makes them stale automatically and
+            // a producer never has to track the epoch itself.
+            stamp_queue_fact_hosting_epoch(&ledger, &mut event);
             ledger.append(event);
             1
         }
@@ -2341,6 +2373,83 @@ mod tests {
         assert_eq!(
             "null", missing,
             "unknown document_hash should project to null"
+        );
+    }
+
+    #[test]
+    fn record_state_event_stamps_and_gates_queue_hosting_epoch() {
+        use agent_doc_orchestration::state_backbone::{StateEvent, StateFact};
+
+        let doc_hash = "ffi_hosting_epoch_gate_doc";
+        let doc_hash_c = CString::new(doc_hash).unwrap();
+
+        let record = |event: &StateEvent| {
+            let json = CString::new(serde_json::to_string(event).unwrap()).unwrap();
+            let rc =
+                unsafe { agent_doc_record_state_event(doc_hash_c.as_ptr(), json.as_ptr()) };
+            assert_eq!(1, rc, "record_state_event should succeed");
+        };
+        let projection = || {
+            let ptr = unsafe { agent_doc_state_projection(doc_hash_c.as_ptr()) };
+            let json = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_string();
+            drop(unsafe { CString::from_raw(ptr) });
+            json
+        };
+
+        // Supervisor begins hosting on a pane (hosting epoch 1).
+        record(&StateEvent::new(
+            "ffi-host-1",
+            StateFact::SupervisorHosting {
+                document_hash: doc_hash.to_string(),
+                pane_session: "%9:ffi-session".to_string(),
+                lease_epoch: 1,
+            },
+        ));
+        // A live producer reports a completed head WITHOUT a hosting_epoch; the
+        // binary stamps it with epoch 1 so it is accepted now.
+        record(&StateEvent::new(
+            "ffi-done-1",
+            StateFact::QueueHeadCompleted {
+                document_hash: doc_hash.to_string(),
+                node_key: "ffi-answered-head".to_string(),
+                backlog_id: None,
+                hosting_epoch: None,
+            },
+        ));
+        assert!(
+            projection().contains("ffi-answered-head"),
+            "in-hosting completed head should be accepted and projected"
+        );
+
+        // Supervisor re-hosts at a higher lease epoch (switch boundary): the
+        // answered-head residue is dropped by the reset.
+        record(&StateEvent::new(
+            "ffi-host-2",
+            StateFact::SupervisorHosting {
+                document_hash: doc_hash.to_string(),
+                pane_session: "%9:ffi-session".to_string(),
+                lease_epoch: 2,
+            },
+        ));
+        assert!(
+            !projection().contains("ffi-answered-head"),
+            "fresh host must drop the prior hosting's answered-head residue"
+        );
+
+        // A stale producer replays the answered head stamped with the OLD epoch;
+        // it must be rejected, not re-injected.
+        record(&StateEvent::new(
+            "ffi-stale-done",
+            StateFact::QueueHeadCompleted {
+                document_hash: doc_hash.to_string(),
+                node_key: "ffi-answered-head".to_string(),
+                backlog_id: None,
+                hosting_epoch: Some(1),
+            },
+        ));
+        assert!(
+            !projection().contains("ffi-answered-head"),
+            "stale-epoch queue replay must not re-inject the answered head"
         );
     }
 

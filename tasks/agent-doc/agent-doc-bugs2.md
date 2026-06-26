@@ -676,27 +676,21 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=6ed40d2d-3e24-4914-b1dd-f798caf58565 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=100812 candidate_hash=d04c4718e1766afcf0c8bbe2e53c5a48109eb31fc4bc45416e2c6e327b01b141 content_ours_len=103384 content_ours_hash=161f5ca5f3a08fa6de7c4e6060e355754731ab6adf5e0e3324a627de550d0219 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782506876152
 ```
-<!-- agent:boundary:a0231a57 -->
+<!-- agent:boundary:94e41bd5 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~I did `agent-doc admin list` and I see 60 actors...most of them dead. Can we automatically prune dead actors?~~
-- ~~When I restarted the equityfundingsource.md supervisor, equityfundingsource.md was re-associated with the agent-doc-bugs2.md claudesession.~~
 - 🚧 :pushpin: do [#qeditdup]
-- ~~"● Response committed (af759a5cf), but the answered free-text head wasn't auto-struck (the 🚧 prefix blocked the~~ — auto-struck: answered this cycle (#ftstrike)
-  exact-text match). session-check wants it struck. Let me find the strike flag and strike it.": The agent-doc binary should do this automatically...not the agent. As I was typing in this prompt, a 3-way merge occurred. I also have characters from a previous word I typed in deleted. Consistent CRDT issues. Is this a lazily-rs issue?
-- :pushpin: do [#crdtauth6]
-- :pushpin: do [#nsfz]
-- :pushpin: do [#kj5flive]
-- ~~do [#fma0]~~
-- ~~do [#v6b3]~~
+- do [#crdtsvdom] [#qheadstrikeauto] [#actorprune] [#suprestassoc]
+- do [#crdtauth6]: verified?
+- :pushpin: do [#nsfz]: verified?
+- :pushpin: do [#kj5flive]: verified?
 - do [#2y8j]
 - do [#cdtcutover]
 - do [#actorprune]
 - do [#suprestassoc]
-- do [#crdtsvdom]
 - do [#qheadstrikeauto]
 <!-- /agent:queue -->
 <!--

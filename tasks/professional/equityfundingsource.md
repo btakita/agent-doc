@@ -54,9 +54,9 @@ Shipped the carousel **foundation + the lender and admin surfaces** this cycle (
 - `#dealcarousel-broker` — `broker/my_pipeline.tsx` `BrokerDeal.loan_id` → `investment_deal`; same pattern, broker-scoped.
 
 **`deploy` (next queue item):** held. This is a partial landing of a production feature; the EFS lender+admin increment is a clean, shippable change, but I did not auto-deploy. Say the word to `deploy` the increment now, or I'll deploy once the borrower + broker phases land.
-❯ - Archived 1 response topic(s): mrh content
-❯ - Prior summary/context: prior compacted content: Archived 12 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); Full Appli...
-<!-- agent:boundary:288f46dd -->
+- Archived 1 response topic(s): mrh content
+- Prior summary/context: prior compacted content: Archived 12 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); Full Appli...
+<!-- agent:boundary:4eac59c4 -->
 <!-- /agent:exchange -->
 ###
 <!--

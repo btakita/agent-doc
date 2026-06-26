@@ -428,6 +428,11 @@ Re-echoing the two answered heads `session-check` flagged as residue so `#ftstri
 
 > **Queue prompt:**
 >
+> If a supervisor is running an old binary, please show it in the upper status area. Make the color red and have (restart/recycle your supervisor).
+
+
+> **Queue prompt:**
+>
 > ~~When I type into the queue, an old duplicate appears above where I'm typing.~~ — auto-struck: answered this cycle (#ftstrike)
 
 
@@ -450,42 +455,21 @@ That stale CRDT is exactly what you're seeing:
 - **Delete → reappears**: the old code replays the struck/deleted item from its stale in-memory CRDT instead of honoring your delete.
 - **Attributes disappear**: a component-attribute edit converges against the stale model and gets dropped.
 - **Type → old duplicate appears above the cursor**: the stale live-buffer↔CRDT merge re-inserts a prior copy above your insertion point (I watched this happen last cycle — your "Please look at lazily-rs…" line briefly duplicated, then vanished).
+- 7 tests (insert/remove idempotency + a real `run_pending_maintenance` integration test); `make check` green (5311 passed). Merged to main + submodule pointer bumped. No release ceremony (respecting your "stop cutting releases" hold) — the supervisor auto-install promotes the new binary at the next idle boundary.
+- **Upper status area** — when stale, the `&lt;!-- agent:status --&gt;` component gets the marker line `🔴 (restart/recycle your supervisor)` (I used your refined wording, not the earlier "(old supervisor)"). It's a constant `STALE_SUPERVISOR_STATUS_MARKER` (single source of truth), inserted/removed **idempotently** and reconciled on file + snapshot **every preflight**, so it appears the moment a supervisor goes stale and clears the moment it's recycled.
+- **Detection reuses the existing signal** — `stale_supervisor_warning_for_doc` (the `#fccsupwarn` check): it resolves the live route-owned host supervisor PID and compares the inode behind `/proc/<pid>/exe` against the installed binary's inode. `Some(_)` ⇔ the running supervisor is older than installed. Same predicate `admin recycle`/preflight already use — no parallel staleness check.
 
 **Fix applied this cycle:** recycling the supervisor onto the fresh binary via `agent-doc admin recycle` (non-disruptive in-place re-exec at the idle boundary — not the parent-killing `restart-supervisor`). Once it lands, re-test the three edits: deletes should stick, attributes should persist, and typing shouldn't duplicate. **If any still misbehave on the freshly-recycled binary**, that's the genuine `#qeditdup`/`#qftloss` deeper editor-edit-during-cycle guard — capture the before/after doc state and I'll fix the code, because then it's not just staleness.
 
 (Note: the matching `#qeditdup`/`#qftloss` backlog items stay `[operator-verify]` — this recycle + your re-test IS that verification.)
-<!-- agent:boundary:41042182 -->
+<!-- agent:boundary:90d8c8e8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~When I delete queue items, they reappear.~~
-- ~~~~When I add attributes to an element, the attributes disappear.~~ — auto-struck: answered this cycle (#ftstrike)~~
-- ~~When I type into the queue, an old duplicate appears above where I'm typing.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~On a fresh lazily-rs.md tmux pane, `● State is racing between runs (live supervisor/editor writing concurrently). Let me look at the actual document to~~ — auto-struck: answered this cycle (#ftstrike)
----
-  understand what's being asked rather than chase the shifting sidecar state.`
-- ~~Use lazily-rs recent addition of Cell Families for reactive document structures. Can we represent a tree structure using lazily-rs?~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~When I make a free text item in a queue, my text is duplicated.~~ — auto-struck: answered this cycle (#ftstrike)
-~~~done
-:pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
-```
-resync: pruned 2 stale session(s)
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 
-Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-~~~
----
+- ~~If a supervisor is running an old binary, please show it in the upper status area. Make the color red and have (restart/recycle your supervisor).~~
 ---
 :pushpin: equityfundingsource.md turn has an IPC issue:
 `### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc`
@@ -500,18 +484,6 @@ Affected component: editor IPC / writeback
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=ca5b06f9-838b-4b60-9ce2-00519736fbb1 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782344406484
 ```
 ---
-~~~done
-:pushpin: lazily-rs.md IPC error
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8c56928442bd4b165543ab0aad264d681b41b8898551d10f196018cd15a37304 content_len=11944 content_hash=46b47fdfe5505fb37c9e63df4167cb923df6b4ffc997ecca9009a15979c29a5e doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782339826601
-```
-~~~
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```
@@ -528,19 +500,27 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ---
-- ~~:pushpin: do [#actorswitchdefer]~~
-- ~~:pushpin: do [#capproofbg]~~
-- ~~:pushpin: do [#nsfz]~~
-- ~~:pushpin: do [#gghx]~~
-- ~~:pushpin: do [#8g9w]~~
-- ~~:pushpin: do [#6mjw]~~
-- ~~:pushpin: do [#spy9]~~
-- ~~:pushpin: Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.~~
-- ~~:pushpin: ~~Would a reactive state machine help to manage the supervisor document bindings?~~ — auto-struck: answered this cycle (#ftstrike)~~
-- ~~:pushpin: ~~I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?~~ — auto-struck: answered this cycle (#ftstrike)~~
-- ~~:pushpin: ~~I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?~~ — auto-struck: answered this cycle (#ftstrike)~~
-- ~~do [#crdtauth1sv]~~
-- ~~do [#crdtauth6]~~
+---
+:pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
+```
+resync: pruned 2 stale session(s)
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+```
+[route] target tmux session: 
+Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
+```
+---
+- :pushpin: do [#qftloss]
+- :pushpin: do [#qeditdup]
+- do [#crdtauth6]
+- do [#nsfz]
+- ~~If a supervisor is running an old binary, please show it in the upper status area. Make the color red and have (restart/recycle your supervisor).~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#qftloss]
 - do [#qeditdup]
 <!-- /agent:queue -->

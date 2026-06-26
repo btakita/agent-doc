@@ -26,7 +26,6 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -165,7 +164,24 @@ Done. The irreducible same-region overlap that opcapture leaves as silent ours-w
 This closes the agent-doable cell-path accuracy ladder: disjoint same-cell edits auto-merge (opcapture), and the genuine same-region remainder surfaces both versions instead of silently picking — the plan's "100% accuracy by refusing to guess."
 
 **Remaining = operator-gated only:** the whole cell-merge stack (`#qcellmerge1` opcapture + `#qcellconflict`, 7 commits on `celltree-percell-merge`) is default-OFF, not merged/installed. Flipping any gate to default-ON needs your live zero-drift proof + the merge-to-main/install decision (the `#qcm1verify` track, under the release-freeze). Higher layers can also echo `CellMergeOutcome.conflicts` into `agent:exchange` later if you want the conflict mirrored there too.
-<!-- agent:boundary:d397c191 -->
+
+### Re: make default + merge + install — reconciled with your real-op capture — opus-4-8
+
+Before flipping default-ON I found **pre-existing uncommitted real-editor-op-capture work** in `src/agent-doc` (`merge_3way_with_ops` / `route_ops_to_cells` / byte-span `project_document_spans`, wired into `crdt.rs::merge_inner`, mtime 23:25). You confirmed it predates lazily Cell Families and asked: divergent or complementary?
+
+**Answer: complementary.** Its own `merge_3way_with_ops` *delegates to `merge_3way`* (ends with `merge_3way(base, ours, &reconstructed_theirs)`) — it has no competing engine. It's a high-fidelity **front-end**: route real `EditorOp`s to cells by byte span → replay per-cell → byte-for-byte safety gate → hand to the shared lazily `merge_3way`. The only overlap with my text-diff `op_level_merge` is *how `theirs` is produced*, and the real-op code already documents the text-diff path as its **fallback**.
+
+**Reconciled + landed** (integrated into one `cell_doc.rs`, agent-doc `main` @ `f903f39e`):
+- **Primary path:** real editor ops → `route_ops_to_cells` → `reconstruct_theirs_from_ops` → `merge_3way` (inherits conflict-surfacing + `op_level_merge` + default-ON).
+- **Fallback path:** ops absent / stale / boundary-crossing → text-diff `op_level_merge` → `merge_3way`.
+- **Default-ON** for the whole stack (`AGENT_DOC_CELL_MERGE` / `…_OPCAPTURE` / `…_CONFLICT_MARKERS`) with an env **kill-switch** (`AGENT_DOC_CELL_MERGE=0` disables everything; byte-identical to legacy).
+- **Finalize-path parity** fix (the `is_body_only` splittability guard) so the default-ON per-cell exchange merge still regenerates the boundary, inserts the response, and **genuinely fails closed on a concurrent prompt** — that safety guard was the blocker the naive flip tripped; it's fixed, not weakened.
+- Your real-op function bodies ported **byte-identical**; original uncommitted copy preserved in `git stash@{0}` (and now in `main`).
+
+**Verification (independently re-run):** `make check` **5364 passed, 0 failed**; `cargo build --release` green.
+
+**Status:** merged to agent-doc `main`; **installing as the closing step** of this turn (supervisor recycles onto the new binary at its idle boundary — `AGENT_DOC_CELL_MERGE=0` is the instant rollback if any live regression shows). The earlier IPC-blocked `#qcellconflict` reap also resolved (now archived). Remaining = your live eyeball that per-cell merge behaves on a real edit-during-finalize (the `#qcm1verify` proof), now that it's the live default.
+<!-- agent:boundary:1f71935a -->
 <!-- /agent:exchange -->
 
 ## Queue

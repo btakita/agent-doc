@@ -349,7 +349,21 @@ Grouping the three live-JB heads — each is now resolved in code; what's left o
 - **#6 (File Cache Conflict dialogs)** — code-addressed by the 0.34.48 VFS-refresh gating + the read-only cdylib; should subside now that the supervisor is on the fresh Phase-A binary. Operator-verify: retest in the live IDE; if dialogs persist after this recycle, it's a genuine residual and I'll dig in.
 
 That clears the agent-drainable code work in this queue. What remains is all **operator-verify** (the live eyeballs above + `#qftloss`/`#qeditdup`/`#crdtauth6`/`#nsfz`/`#kj5flive`/`#2y8j`), **focused-cycle** (`#cdtcutover`, `#midturnresumeb` = Phase B), the **branch bundle** awaiting your merge/install nod (`#supstaledetect`, `#qimpstrike`, `#suptmuxstale`, `#ipcproofnostall`, `#agentchange` tests), and `#midturn-recycle-resume`'s live zero-drift proof.
-<!-- agent:boundary:25382274 -->
+
+### Re: test #queuebase — agent-drainable queue is now empty — opus-4-8
+
+> **Queue prompt:** test #queuebase
+
+That queue-base test is satisfied — the queue persisted and drained correctly across this entire session.
+
+With that struck, the **agent-drainable code work in this queue is complete.** Drained this session: `#supstaledetect`, Phase A (`#midturn-recycle-resume`, merged+installed+live), `#qimpstrike`, `#suptmuxstale`, `#ipcproofnostall`, and `#5`/agent-change (verified already-shipped + tests). Every remaining head is one of:
+
+- **Operator-verify (your live eyeball):** `#qftloss`, `#qeditdup`, `#crdtauth6`, `#nsfz`, `#kj5flive`, `#2y8j` (typing-burst), plus the live proofs for #4 (recycle→run no longer stalls), #6 (File Cache Conflict), and `#midturn-recycle-resume` (zero-drift in the preflight→finalize window).
+- **Focused-cycle (own session):** `#cdtcutover` (CellDocTree evented model), `#midturnresumeb` (Phase B — active turn-resume).
+- **Branch bundle (your merge/install nod):** `#supstaledetect`, `#qimpstrike`, `#suptmuxstale`, `#ipcproofnostall`, `#agentchange` tests — all code-complete, `make check` green, gated in review.
+
+There is no more in-session-drainable work, so the loop concludes here cleanly — not stalled, genuinely empty of agent-doable heads. Your move on the live verifications and whether to bundle-merge the five branches.
+<!-- agent:boundary:5ca88f3e -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -230,7 +230,25 @@ Evidence:
 - GitHub Actions: `gh workflow list` and `gh run list --limit 3` returned no workflows/runs for `lazily-zig`, so there was no CI run to inspect.
 
 Changed paths: none. Confidence: high for parity/readiness; release confidence is intentionally not claimed because public release/publish actions are operator-gated.
-<!-- agent:boundary:c03d7c1b -->
+
+### Re: lazily-py parity + release + publish — gpt-5
+
+> **Queue prompt:** lazily-py parity + release + publish
+
+`lazily-py` parity is verified. I did not perform PyPI/TestPyPI upload, create a GitHub release, or push tags; public release/publish actions remain operator-gated.
+
+Evidence:
+
+- Parent `agent-loop` points `src/lazily-py` at `c255482b0ff87c3ada4c0ac8124ac3e35186cc3f`.
+- `src/lazily-py` `origin/main` also resolves to `c255482b0ff87c3ada4c0ac8124ac3e35186cc3f`, so the parent gitlink is cloneable.
+- HEAD is tagged `v0.11.0` and `pyproject.toml` declares version `0.11.0`.
+- Recent parity commits are present: `9199550 feat: add StateMachine primitive`, `4a57eb2 feat: add ShmBlobArena host`, `26ef43e test: ShmBlobArena conformance`, and `c255482 test: Signal->Slot RecursionError regression suite (#lzpyregress)`.
+- Build artifacts already exist in `dist/`: `lazily-0.11.0-py3-none-any.whl` and `lazily-0.11.0.tar.gz`; I did not upload them.
+- Verification: `make check` passed in `src/lazily-py` via `tsift`/`rtk`, artifact `tart-b7ecc8d0d3`, exit 0.
+- GitHub Actions: `gh workflow list` shows active workflow `poe precommit`; `gh run list --limit 3` only listed old completed/success runs, latest `2026-03-15T18:22:12Z`, so no fresh CI run was available for this cycle.
+
+Changed paths: none. Confidence: high for parity/readiness; release confidence is intentionally not claimed because public registry publication is operator-gated.
+<!-- agent:boundary:bc8582e5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -239,15 +257,6 @@ Changed paths: none. Confidence: high for parity/readiness; release confidence i
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~[#lzbugtriage]~~
-- ~~[#lzsmstress]~~
-- ~~[#lzcrdtperms]~~
-- ~~lazily-spec parity~~
-- ~~lazily-kt parity~~
-- ~~release + publish — auto-struck: completed by #45rh (#qftbklgstrike)~~
-- ~~lazily-js parity + release + publish~~
-- ~~lazily-zig parity + release + publish~~
-- lazily-py parity + release + publish
 <!-- /agent:queue -->
 
 ## Backlog

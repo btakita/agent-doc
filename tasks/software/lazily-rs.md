@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -100,7 +100,23 @@ Done — deployed and verified live. Deployment is automatic: the `briantakita.m
 - Homepage `https://briantakita.me/` → 200.
 
 No manual deploy step was needed — the push-to-main pipeline already shipped it to Cloudflare Pages. One remaining queue head (the social teaser draft).
-<!-- agent:boundary:4dec5d13 -->
+
+### Re: Draft a linkedin teaser — opus-4-8
+
+> **Queue prompt:** Draft a linkedin teaser.
+
+Drafted (not published — LinkedIn publishing stays operator-gated behind 2FA, consistent with the existing `agent:review` posts). Saved to `mail/drafts/linkedin/2026-06-26-lazily-cell-family-spreadsheet.md`.
+
+**Angle:** opens on "a spreadsheet is the original reactive program," lands the headline number — edit one cell + read a 1,000-cell viewport ≈ 11µs *independent of sheet size* on a 10M-cell sheet — explains the lazy pull model ("don't recompute what no one is looking at"), names Cell Family, and closes with an engagement question. Includes a FIRST COMMENT block with the blog-post link, the GitHub repo, and the reproduce command.
+
+**Committed + pushed:**
+- `btakita/mail` → `df74fbc` (draft)
+- agent-loop superproject → `df0cac657` (gitlink)
+
+**To publish (operator, real terminal):** `corky linkedin` from the draft, approve the browser/passkey 2FA, then optionally post the FIRST COMMENT via `corky linkedin comment`.
+
+This was the last queue head. With the blog post (live) + this teaser draft, icebox **`#ppce`** ("blog post + linkedin teaser about the 1M+ Cell Family performance") is now satisfied — marking it done.
+<!-- agent:boundary:c1dd8e6f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,9 +125,6 @@ No manual deploy step was needed — the push-to-main pipeline already shipped i
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~Please write a blog post for briantakit with diagrams about recent changes in lazily-rs...Cell Family, 5M spreadsheet benchmark...focusing on how lazy reactivity improves performance by only eagerly recomputing the focused cells.~~
-- ~~deploy briantakita.me~~
-- Draft a linkedin teaser.
 <!-- /agent:queue -->
 
 ## Backlog

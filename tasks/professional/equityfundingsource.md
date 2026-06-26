@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -178,7 +178,7 @@ Investigated against **production D1** — this is a data gap, not a render bug.
 **Optional follow-up (your call):** if you want property photos to populate **automatically** rather than per-deal manual upload — e.g. pulled from the TMO loan record or an MLS feed by address — that's a net-new ingestion feature. Say the word and I'll scope it; I did not queue it speculatively.
 
 > **Queue prompt:** The cards are not showing the property photos.
-<!-- agent:boundary:055964c0 -->
+<!-- agent:boundary:2a1bed48 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -198,6 +198,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- 🚧 deploy
+- The borrower also uploads photos. Use the borrower uploaded photo
+- The borrower also uploads photos. Use the borrower uploaded photo as well.
 <!-- /agent:queue -->
 
 ## Backlog

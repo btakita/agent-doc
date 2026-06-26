@@ -175,6 +175,20 @@ Commits:
 - The relevant commits are on the current `src/lazily-spec` branch: `9fbc669 feat(spec): add StateMachine.lean formal model` and `2506182 feat: add StateMachine→IPC cross-module proof (#hj5x)`. Current `src/lazily-spec` HEAD is `f44a9c6`, and the working tree is clean.
 - The plan's remaining lazily-spec TODO is also present in `StateMachineIPC.lean`: `send` to IPC delta ops, guard/self-transition no-op behavior, changed transitions emitting `DeltaOp.cellSet`, accepted delta/epoch behavior, and payload/state correspondence.
 - `StateMachine.lean` exists and models `send`/`sends` with guard rejection, accepted transitions, self-transitions, changed-transition emission checks, and transition preservation.
+- GitHub Actions: `gh workflow list` and `gh run list --limit 3` returned no workflows/runs for `lazily-zig`, so there was no CI run to inspect.
+- GitHub Actions: `gh workflow list` shows active workflow `poe precommit`; `gh run list --limit 3` only listed old completed/success runs, latest `2026-03-15T18:22:12Z`, so no fresh CI run was available for this cycle.
+- Verification: `make check` passed in `src/lazily-py` via `tsift`/`rtk`, artifact `tart-b7ecc8d0d3`, exit 0.
+- Build artifacts already exist in `dist/`: `lazily-0.11.0-py3-none-any.whl` and `lazily-0.11.0.tar.gz`; I did not upload them.
+- Recent parity commits are present: `9199550 feat: add StateMachine primitive`, `4a57eb2 feat: add ShmBlobArena host`, `26ef43e test: ShmBlobArena conformance`, and `c255482 test: Signal->Slot RecursionError regression suite (#lzpyregress)`.
+- HEAD is tagged `v0.11.0` and `pyproject.toml` declares version `0.11.0`.
+- `src/lazily-py` `origin/main` also resolves to `c255482b0ff87c3ada4c0ac8124ac3e35186cc3f`, so the parent gitlink is cloneable.
+- Parent `agent-loop` points `src/lazily-py` at `c255482b0ff87c3ada4c0ac8124ac3e35186cc3f`.
+- The first `tsift digest-runner` attempt failed before running Zig because the wrapper did not execute from the package root and reported `no build.zig file found`; the direct package-root command is the valid verification.
+- Verification: `zig build test` passed from `src/lazily-zig`.
+- Recent parity/release commits are present: `c994783 feat: add ShmBlobArena host`, `288d788 test: ShmBlobArena conformance`, `db18dea refactor: rename .direct->.literal ... (#lzzigtodos)`, and `eacabb5 release: v0.2.0`.
+- HEAD is tagged `v0.2.0` and `build.zig.zon` declares version `0.2.0`.
+- `src/lazily-zig` `origin/main` also resolves to `eacabb588343196ebdf05b427987219fa1e55017`, so the parent gitlink is cloneable.
+- Parent `agent-loop` points `src/lazily-zig` at `eacabb588343196ebdf05b427987219fa1e55017`.
 
 I left the pre-existing dirty lazily-rs files `src/lib.rs` and `src/reconcile.rs` unstaged and uncommitted. Confidence: high; this was test-only hardening and the full local suite passed. Escalation: editor IPC repeatedly failed to preserve the response body, so this repair used the binary-owned force-disk commit path.
 
@@ -206,49 +220,23 @@ No queue head is being answered by this recovery response. The next substantive 
 
 > **Queue prompt:**
 >
+> lazily-py parity + release + publish
+
+
+> **Queue prompt:**
+>
+❯ > lazily-zig parity + release + publish
+
+
+❯ > **Queue prompt:**
+❯ >
 > lazily-js parity + release + publish
 
 
 This is a binary-owned recovery write for the post-commit live-buffer drift reported after `73cc7ecd7`. It preserves the already-visible parity evidence and does not answer or consume the next queue head.
 
 No repository work was performed in this recovery write. Release/publish work remains operator-gated.
-
-### Re: lazily-zig parity + release + publish — gpt-5
-
-> **Queue prompt:** lazily-zig parity + release + publish
-
-`lazily-zig` parity is verified. I did not perform any release/publish action; public release steps remain operator-gated.
-
-Evidence:
-
-- Parent `agent-loop` points `src/lazily-zig` at `eacabb588343196ebdf05b427987219fa1e55017`.
-- `src/lazily-zig` `origin/main` also resolves to `eacabb588343196ebdf05b427987219fa1e55017`, so the parent gitlink is cloneable.
-- HEAD is tagged `v0.2.0` and `build.zig.zon` declares version `0.2.0`.
-- Recent parity/release commits are present: `c994783 feat: add ShmBlobArena host`, `288d788 test: ShmBlobArena conformance`, `db18dea refactor: rename .direct->.literal ... (#lzzigtodos)`, and `eacabb5 release: v0.2.0`.
-- Verification: `zig build test` passed from `src/lazily-zig`.
-- The first `tsift digest-runner` attempt failed before running Zig because the wrapper did not execute from the package root and reported `no build.zig file found`; the direct package-root command is the valid verification.
-- GitHub Actions: `gh workflow list` and `gh run list --limit 3` returned no workflows/runs for `lazily-zig`, so there was no CI run to inspect.
-
-Changed paths: none. Confidence: high for parity/readiness; release confidence is intentionally not claimed because public release/publish actions are operator-gated.
-
-### Re: lazily-py parity + release + publish — gpt-5
-
-> **Queue prompt:** lazily-py parity + release + publish
-
-`lazily-py` parity is verified. I did not perform PyPI/TestPyPI upload, create a GitHub release, or push tags; public release/publish actions remain operator-gated.
-
-Evidence:
-
-- Parent `agent-loop` points `src/lazily-py` at `c255482b0ff87c3ada4c0ac8124ac3e35186cc3f`.
-- `src/lazily-py` `origin/main` also resolves to `c255482b0ff87c3ada4c0ac8124ac3e35186cc3f`, so the parent gitlink is cloneable.
-- HEAD is tagged `v0.11.0` and `pyproject.toml` declares version `0.11.0`.
-- Recent parity commits are present: `9199550 feat: add StateMachine primitive`, `4a57eb2 feat: add ShmBlobArena host`, `26ef43e test: ShmBlobArena conformance`, and `c255482 test: Signal->Slot RecursionError regression suite (#lzpyregress)`.
-- Build artifacts already exist in `dist/`: `lazily-0.11.0-py3-none-any.whl` and `lazily-0.11.0.tar.gz`; I did not upload them.
-- Verification: `make check` passed in `src/lazily-py` via `tsift`/`rtk`, artifact `tart-b7ecc8d0d3`, exit 0.
-- GitHub Actions: `gh workflow list` shows active workflow `poe precommit`; `gh run list --limit 3` only listed old completed/success runs, latest `2026-03-15T18:22:12Z`, so no fresh CI run was available for this cycle.
-
-Changed paths: none. Confidence: high for parity/readiness; release confidence is intentionally not claimed because public registry publication is operator-gated.
-<!-- agent:boundary:bc8582e5 -->
+<!-- agent:boundary:28e5763d -->
 <!-- /agent:exchange -->
 ###
 <!--

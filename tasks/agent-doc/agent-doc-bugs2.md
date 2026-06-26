@@ -39,7 +39,23 @@ done
 Compacted content:
 - Archived 29 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); #lazilycrdtspec; #lazilycrdtspec; 26 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-<!-- agent:boundary:709a1976 -->
+
+### Re: lazily CellGraph reactive document substrate — opus-4-8
+
+Your queue prompt — *use lazily Cell Family / CellGraph to reactively model the document and improve fine-grained sync* — is the per-cell CRDT-merge intent (`#qcellmerge1`), and it already has a sequenced plan: `tasks/software/plan-lazily-agent-doc-reactive-substrate.md`. Good news from checking the code — the keystone lazily-rs primitives the plan depends on **already exist**:
+
+- **`CellTree<Id, V>`** (`src/lazily-rs/src/cell_tree.rs`) — the ordered keyed tree (Phase 1 `#lzordtree`): `(kind, stable_id, value_cell, ordered children)` with `insert_child` / `attach_child` / `children` / `resolve_path`. Per-node value edits invalidate only that node's readers.
+- **`reconcile.rs` `apply_to_map`** — keyed reconciliation / per-item `DiffOp` application (Phase 2 `#lzkeyrecon`): the step that turns a structural edit into minimal per-item ops instead of a whole-subtree replace.
+- **`CellFamily` / `CellMap`** (`src/lazily-rs/src/cell_family.rs`) — the reactive keyed collection underneath.
+
+(There's no literal `CellGraph` type — that name maps to the `CellTree` + `CellFamily` reactive graph.)
+
+**The real gap is the agent-doc side, not lazily-rs.** agent-doc still merges with the whole-document `crdt::merge`, so the doc isn't yet *projected* onto `CellTree` and a queue/backlog edit can't be reconciled to minimal per-item ops — exactly what produces the recurring cross-cell splices you keep hitting (this very cycle included). "Fine-grained sync" concretely = model `root → component → item` as a `CellTree` keyed on the **existing** `component:occurrence:item-id:index` anchors, run `reconcile` per level to emit `{insert, remove, move, update}`, and merge each item's value cell independently instead of merging the whole document.
+
+**Why I'm not landing it in this drain cycle:** it replaces agent-doc's live merge path, which is supervisor-critical — the established safe path is an isolated worktree + focused cycle, not a live edit to the merge core mid-session-drain. The plan sequences the remaining phases (`#lzseqcrdt` move-aware order, `#lzstableid` manufactured identity, `#lzsemtree` memoized semantic tree, `#lztextcrdt` free-text CRDT) each as its own plan-first / test / commit unit.
+
+**Concrete next step** (its own focused cycle): build the agent-doc `document → CellTree` projection keyed on the existing anchors + a `reconcile`-based per-item differ as an **additive** module (leaving `crdt::merge` in place behind it), with deterministic tests, in an `src/agent-doc-*-wt` worktree — no install/recycle/push. Say "go" and I'll kick that off in an isolated worktree.
+<!-- agent:boundary:48347b58 -->
 <!-- /agent:exchange -->
 
 ## Queue

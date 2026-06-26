@@ -232,15 +232,15 @@ After the recycle, **the typing-slowdown / line-duplication / queue-eating set (
 - **#6 (`File Cache Conflict` dialogs)** — should subside once the cdylib is read-only + on the fresh binary; verify after recycle.
 
 I finalized this diagnosis *before* installing so the write crossed the still-matched stale pair (no finalize drift); the install + recycle run immediately after.
-<!-- agent:boundary:e3cf998e -->
+<!-- agent:boundary:50c4391e -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 :pushpin: You deleted my queue items.
-- :pushpin: all documents are difficult to type in. Idea is cpu thrashing.
+- 🚧 :pushpin: You keep on deleting my queue items. The merges are very unstable.
 - :pushpin: As I type in the queue, a previous state of the line is duplicated.
+- I'm confused over what sessions are running a stale supervisor. Please make the supervisor auto-restart at the first possible chance automatically.
 - :pushpin: JB `Recycle Supervisor` then JB `Run Agent Doc` stalls because the recycle is scheduled to run after the turn starts. But `Run Agent Doc` cannot start the turn.
 - :pushpin: When I change the agent, the supervisor state should pick up the change and be able to dispatch to the new agent.
 - :pushpin: Getting several JB `File Cache Conflict` dialogs.

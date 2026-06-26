@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -54,7 +54,7 @@ Already complete — no auto-publish needed (matches the `#kb9b`/`#lzpypub011` s
 - **Parity** — ShmBlobArena host port + Signal→Slot `RecursionError` regression suite committed (`4a57eb2`, `26ef43e`, `c255482`).
 
 The 2FA-gated publish the operator pause was guarding has already landed, so nothing remains to drain here. The remaining `agent:review` items (`#z0hq` npm publish, `#h6qb` WebRTC two-host e2e, `#xccx` Holons, LinkedIn comments) stay operator-gated.
-<!-- agent:boundary:3cefc23c -->
+<!-- agent:boundary:3fd56856 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,7 +63,7 @@ The 2FA-gated publish the operator pause was guarding has already landed, so not
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Please write a blog post for briantakit with diagrams about recent changes in lazily-rs...Cell Family, 5M spreadsheet benchmark...focusing on how lazy reactivity improves performance by only eagerly recomputing the focused cells.
+- 🚧 Please write a blog post for briantakit with diagrams about recent changes in lazily-rs...Cell Family, 5M spreadsheet benchmark...focusing on how lazy reactivity improves performance by only eagerly recomputing the focused cells.
 - deploy briantakita.me
 - Draft a 
 <!-- /agent:queue -->

@@ -525,6 +525,25 @@ distinct from the one-shot restart auto-trigger:
   `state_flush_drain` recycle-yield request (mirroring the `stale_binary_drain`
   path) so the loop yields one inter-item boundary and the process restart fires.
   It still respects `turn_boundary` — a fresh-binary flush never drops a live turn.
+- `#recycleforce` operator override: `agent-doc admin recycle --force` is a real
+  flag (no `-- ` separator needed) and composes with `--all-projects` and the
+  single-project form. `--force` overrides the controller-side in-flight-dispatch
+  deferral: the `recycle_force` RPC sets a `recycle_forced` flag so
+  `controller_recycle_idle` returns true without the open-dispatch idle probe
+  (pure decision `force_overrides_in_flight_gate`, which still requires the
+  controller to be `Stable` so a forced recycle never strands a half-promoted
+  handoff replacement). The recycle still fires at the next serve-loop tick, never
+  mid-RPC, but it MAY interrupt an in-flight turn — that is the point of `--force`.
+  When NO live controller answers the single-project form and a document path was
+  supplied (`agent-doc admin recycle <FILE> --force`), the no-op "nothing to
+  recycle" message is replaced by an escalation to the kill+cold-start path
+  (`session restart-supervisor`, which carries the same self-ancestor guard as
+  `admin kill-supervisor`, so a forced escalation never tears down the caller's own
+  ancestor supervisor). The escalation gate is the pure
+  `recycle_force_should_escalate_dead_supervisor` decision (requires force, a no-op
+  recycle, and a non-directory document target). Without `--force`, behavior is
+  byte-for-byte the prior defer-at-idle-boundary recycle. `--json` adds a
+  `forced: bool` field (and `escalated_cold_start: bool` on the single-project arm).
 - On `Dispatch` it injects a harness-specific trigger through the same
   `auto_trigger_inject_command` path (capability-proof gated, actor marked
   `busy` before bytes). Claude/OpenCode receive the normal harness trigger

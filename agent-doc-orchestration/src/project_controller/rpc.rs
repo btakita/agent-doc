@@ -2015,13 +2015,22 @@ pub(crate) fn shutdown_stale_controller(project_root: &Path) {
 /// controller was reached, `Ok(false)` when none is running (nothing to recycle).
 /// Never launches a controller — connect-only, so it is a no-op on a clean project.
 pub fn recycle_controller(project_root: &Path) -> Result<bool> {
+    recycle_controller_force(project_root, false)
+}
+
+/// `#recycleforce` — `recycle_controller` with an explicit operator force flag.
+/// When `force` is true, the controller-side handler recycles at the next serve-loop
+/// tick WITHOUT waiting on the in-flight-dispatch idle gate (`agent-doc admin recycle
+/// --force`). `force == false` is byte-for-byte the prior defer-at-idle behavior.
+pub fn recycle_controller_force(project_root: &Path, force: bool) -> Result<bool> {
     // The `recycle` RPC re-execs only the *authoritative* controller reachable over
     // the project socket. Capture its result but DON'T early-return — the orphan
     // reap below must run even when no authoritative controller answers (an orphaned
     // `Preparing` zombie can be the only process in this root, invisible to the
     // socket recycle).
+    let command = if force { "recycle_force" } else { "recycle" };
     let result = if connect(project_root).is_ok() {
-        request(project_root, "recycle").map(|response| response.contains("\"ok\":true"))
+        request(project_root, command).map(|response| response.contains("\"ok\":true"))
     } else {
         Ok(false)
     };
@@ -2044,6 +2053,13 @@ pub fn recycle_controller(project_root: &Path) -> Result<bool> {
 /// --all-projects`). Walks `/proc` for controllers, dedups by canonical project
 /// root, and sends each a `recycle`. Returns `(recycled, skipped)`.
 pub fn recycle_controllers_all_projects() -> Result<(usize, usize)> {
+    recycle_controllers_all_projects_force(false)
+}
+
+/// `#recycleforce` — `recycle_controllers_all_projects` with an explicit operator
+/// force flag applied to every project's recycle (`agent-doc admin recycle
+/// --all-projects --force`). `force == false` is the prior defer-at-idle behavior.
+pub fn recycle_controllers_all_projects_force(force: bool) -> Result<(usize, usize)> {
     let self_pid = std::process::id();
     let Ok(entries) = std::fs::read_dir("/proc") else {
         return Ok((0, 0));
@@ -2066,7 +2082,7 @@ pub fn recycle_controllers_all_projects() -> Result<(usize, usize)> {
     let mut recycled = 0;
     let mut skipped = 0;
     for root in roots {
-        match recycle_controller(&root) {
+        match recycle_controller_force(&root, force) {
             Ok(true) => recycled += 1,
             _ => skipped += 1,
         }
@@ -2503,7 +2519,9 @@ pub(crate) fn serve_with_options(
                 );
                 recycle_stale_since = next_since;
                 if do_recycle {
-                    let reason = if runtime.recycle_requested() {
+                    let reason = if runtime.recycle_forced() {
+                        "operator_force_request"
+                    } else if runtime.recycle_requested() {
                         "operator_request"
                     } else {
                         "stale_binary"
@@ -2639,10 +2657,29 @@ pub(crate) fn controller_recycle_idle(runtime: &ControllerRuntime) -> bool {
     if bootstrap.handoff_state != ControllerHandoffState::Stable {
         return false;
     }
+    // `#recycleforce`: a forced recycle (`agent-doc admin recycle --force`) is an
+    // explicit operator override of the in-flight-dispatch deferral. Skip the
+    // open-dispatch idle probe so the recycle takes effect at the next serve-loop
+    // tick even mid-turn. We still require `Stable` above so a forced recycle never
+    // lands mid-handoff (which would strand the replacement controller).
+    if force_overrides_in_flight_gate(
+        runtime.recycle_forced(),
+        bootstrap.handoff_state == ControllerHandoffState::Stable,
+    ) {
+        return true;
+    }
     let Ok(conn) = open_state_db(&bootstrap.project_root) else {
         return false;
     };
     !state_store::has_any_open_in_flight_dispatch(&conn).unwrap_or(true)
+}
+
+/// `#recycleforce` — pure decision: should a forced recycle bypass the in-flight
+/// dispatch idle gate? True only when the operator asked for force AND the
+/// controller is `Stable` (never mid-handoff — a forced recycle must still not
+/// strand a half-promoted replacement). Side-effect free for deterministic tests.
+pub(crate) fn force_overrides_in_flight_gate(recycle_forced: bool, handoff_stable: bool) -> bool {
+    recycle_forced && handoff_stable
 }
 
 /// `#ctlrecycle` R1/R2 — record the recycle and let the serve loop exit so the next
@@ -2800,6 +2837,27 @@ pub(crate) fn handle_request_locked(
                     bootstrap_snapshot.pid,
                     bootstrap_snapshot.controller_generation,
                     request.reason.as_deref().unwrap_or("operator_request"),
+                ),
+            );
+            Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
+        }
+        "recycle_force" => {
+            // `#recycleforce`: mark this controller to recycle promptly, overriding
+            // the in-flight-dispatch idle gate. Still acts at the serve-loop tick
+            // (never mid-RPC), but `controller_recycle_idle` returns true while
+            // forced, so the recycle is NOT deferred behind an open dispatch — an
+            // explicit operator override that MAY interrupt an in-flight turn.
+            runtime.request_recycle_force();
+            crate::ops_log::log_op(
+                &bootstrap_snapshot.project_root,
+                &format!(
+                    "controller_recycle_requested pid={} generation={} reason={} forced=true",
+                    bootstrap_snapshot.pid,
+                    bootstrap_snapshot.controller_generation,
+                    request
+                        .reason
+                        .as_deref()
+                        .unwrap_or("operator_force_request"),
                 ),
             );
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
@@ -4584,6 +4642,60 @@ mod tests {
             dir.path()
         ));
     }
+    #[test]
+    fn force_overrides_in_flight_gate_only_when_forced_and_stable() {
+        // `#recycleforce`: the force bypass of the in-flight-dispatch idle gate fires
+        // only when the operator asked for force AND the controller is `Stable`.
+        assert!(force_overrides_in_flight_gate(true, true));
+        // Not forced → never bypass (default defer-at-idle behavior unchanged).
+        assert!(!force_overrides_in_flight_gate(false, true));
+        // Forced but mid-handoff (not Stable) → do NOT bypass; a forced recycle must
+        // not strand a half-promoted replacement controller.
+        assert!(!force_overrides_in_flight_gate(true, false));
+        assert!(!force_overrides_in_flight_gate(false, false));
+    }
+
+    #[test]
+    fn recycle_force_rpc_sets_forced_flag_while_plain_recycle_does_not() {
+        // `#recycleforce`: the `recycle_force` RPC sets BOTH the want-recycle and the
+        // forced flags; the plain `recycle` RPC sets only want-recycle (so its idle
+        // gate is preserved).
+        let dir = tempfile::TempDir::new().unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = Arc::new(ControllerRuntime::new(bootstrap).unwrap());
+        let mut should_stop = false;
+
+        // Plain recycle: want-recycle set, force NOT set.
+        let response = handle_request_locked(
+            &(serde_json::json!({ "command": "recycle" }).to_string() + "\n"),
+            &runtime,
+            &mut should_stop,
+        )
+        .unwrap();
+        assert!(response.contains("\"ok\":true"));
+        assert!(runtime.recycle_requested());
+        assert!(!runtime.recycle_forced());
+        assert!(
+            !should_stop,
+            "recycle defers to the serve loop, never stops mid-RPC"
+        );
+
+        // Forced recycle: force flag now set too.
+        let response = handle_request_locked(
+            &(serde_json::json!({ "command": "recycle_force" }).to_string() + "\n"),
+            &runtime,
+            &mut should_stop,
+        )
+        .unwrap();
+        assert!(response.contains("\"ok\":true"));
+        assert!(runtime.recycle_requested());
+        assert!(runtime.recycle_forced());
+        assert!(
+            !should_stop,
+            "forced recycle still defers to the serve-loop tick, never stops mid-RPC"
+        );
+    }
+
     #[test]
     fn controller_status_reports_startup_binary_identity() {
         let dir = tempfile::TempDir::new().unwrap();

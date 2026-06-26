@@ -294,6 +294,12 @@ pub(crate) struct ControllerRuntime {
     /// once no dispatch is in flight (debounced), the controller self-terminates and
     /// the next `connect_or_launch` relaunches the fresh binary.
     recycle_requested: AtomicBool,
+    /// `#recycleforce` — set true by the `recycle_force` RPC (`agent-doc admin
+    /// recycle --force`). An explicit operator override: the serve-loop idle poll
+    /// recycles WITHOUT waiting on the in-flight-dispatch idle gate, so a forced
+    /// recycle takes effect at the next tick even mid-turn. Implies
+    /// `recycle_requested`.
+    recycle_forced: AtomicBool,
 }
 
 impl ControllerRuntime {
@@ -306,6 +312,7 @@ impl ControllerRuntime {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(memory),
             recycle_requested: AtomicBool::new(false),
+            recycle_forced: AtomicBool::new(false),
         })
     }
 
@@ -316,6 +323,18 @@ impl ControllerRuntime {
 
     fn recycle_requested(&self) -> bool {
         self.recycle_requested.load(Ordering::SeqCst)
+    }
+
+    /// `#recycleforce` — mark this controller to recycle promptly, overriding the
+    /// in-flight-dispatch idle gate (`agent-doc admin recycle --force`). Also sets
+    /// `recycle_requested` so the existing want-recycle predicate fires.
+    fn request_recycle_force(&self) {
+        self.recycle_forced.store(true, Ordering::SeqCst);
+        self.recycle_requested.store(true, Ordering::SeqCst);
+    }
+
+    fn recycle_forced(&self) -> bool {
+        self.recycle_forced.load(Ordering::SeqCst)
     }
 
     fn bootstrap_snapshot(&self) -> Result<ControllerBootstrap> {
@@ -1681,7 +1700,8 @@ pub fn fresh_foreign_supervisor_lease_holds_document(
         Ok(conn) => conn,
         Err(_) => return false,
     };
-    let Ok(Some(lease)) = load_supervisor_lease_from_db(&conn, document_id, record.generation) else {
+    let Ok(Some(lease)) = load_supervisor_lease_from_db(&conn, document_id, record.generation)
+    else {
         return false;
     };
     // A lease whose pid is our own claim process (or unset) is not a competing
@@ -5694,6 +5714,7 @@ agent:queue\n\
                 map_backend: "std_btree_map",
             }),
             recycle_requested: AtomicBool::new(false),
+            recycle_forced: AtomicBool::new(false),
         }
     }
     fn preparing_runtime_bootstrap(

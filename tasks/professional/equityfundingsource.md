@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -222,6 +222,11 @@ The **2 existing borrower-uploaded `dt_photos` PNG property photos** now appear 
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
+> **Queue prompt:**
+>
+> ~~The borrower also uploads photos. Use the borrower uploaded photo as well.~~ — auto-struck: answered this cycle (#ftstrike)
+
+
 ```text
 **IPC proof issue dogfood log**
 Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
@@ -231,7 +236,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=f9eedbbe-320d-4720-9bca-2856e0b7378a invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782446080826
 ```
-<!-- agent:boundary:9f21b3b7 -->
+<!-- agent:boundary:7bd84249 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -251,8 +256,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~deploy~~
-- 🚧 ~~The borrower also uploads photos. Use the borrower uploaded photo as well.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

@@ -74,7 +74,7 @@ No transport yet (that's `#lzcrdtplane3`); both types are gated behind `feature 
 **Next:** `#lzcrdtplane2` (expose registers via `MergeMechanism`) is queued in the backlog as the next actionable phase; `#lzcrdtplane` stays gated in review until the plane is complete.
 
 Note: I committed only `src/lazily-rs` and its gitlink — the unrelated dirty `src/agent-doc` submodule (`cell_doc.rs`/`crdt.rs`) belongs to a different active session, so I left it untouched.
-<!-- agent:boundary:02a5dd56 -->
+<!-- agent:boundary:9a02bc98 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,6 +88,7 @@ Note: I committed only `src/lazily-rs` and its gitlink — the unrelated dirty `
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#6qtj] lzcrdtplane3=Phase 3 of the distributed CRDT plane (parent plan tasks/software/plan-lazily-distributed-crdt-plane.md): op log + delta exchange. A causal op log keyed by (PeerId, HlcStamp); missing_since(frontier) + apply_remote(ops) with idempotent re-apply, driving the registers + SeqCrdt/TextCrdt. Localhost two-replica integration test driving convergence through the existing IpcSink/IpcSource / webrtc / ws transport seam.
 <!-- /agent:backlog -->
 
 ## Review

@@ -26,7 +26,6 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -570,6 +569,11 @@ Drained the bundle. Two of the three code items were already landed by a prior s
 - **#fma0 `crdtedgetests`** — **already done**, same commit `078ae2d0`: the 8-row SimWorld/unit matrix (overlay ahead-by-1-char, ahead-by-frontmatter-block, strictly-behind+logged, concurrent-divergent, empty-doc-first-keystroke, rapid-burst, decode-error, frontmatter-edit-during-convergence). Marking `--done`.
 - **#v6b3 `suprecyclespin`** — **built + shipped this cycle** (`agent-doc` `10b89a3c`, **0.34.51**, pushed + tagged `v0.34.51` + `make install-full`). Root cause: the `#midturn-recycle-resume` `DeferCycleOpen` interlock refused to `execve`-recycle while a cycle is open, but `cycle_open` at the `idle_watch` call site was computed purely from `CycleState::is_open()`, which stays `true` forever for an *abandoned older* turn that a newer cycle already superseded → `supervisor_recycle_deferred_cycle_open` spun ~2/sec and the stale supervisor never hot-reloaded. Fix (`#midturnresumeb` Phase B): at a turn boundary, an open cycle with **no IPC inflight** and **untouched > 45s** (`STALLED_CYCLE_RESOLVE_SECS`) is force-closed to `abandoned` (`mark_abandoned`, logged `supervisor_cycle_stale_resolved`) so the gate clears and the recycle fires; a live cycle is never touched (`updated_at` ticks per phase, finalize holds inflight). New pure `CycleState::open_stalled()` + unit test `open_stalled_resolves_only_abandoned_older_turns`. `make check` green (5412). Marking `--done`.
 - **#2y8j** — `[operator-verify]` typing-burst proof; stays open for your live eyeball.
+3. Live editor/pane zero-regression proof (FCC/IPC-drift watch).
+2. Consume the SemTree accessor in the live drainable path; land the write-side (`update_to` per-node deltas at finalize).
+1. Merge `cdtcutover` → submodule main, `make install`, recycle.
+- All four prerequisites (`#cdtdedup`/`#lzapplytree`/`#cdtupdate`/`#cdtsem`) remain committed-done.
+- Branch `cdtcutover` @ `9ca8838c` (*"#cdtcutover read-side — gated evented unresolved-prompt SemTree"*) in isolated worktree `src/agent-doc-cdtcutover-wt`. **Un-merged** — submodule HEAD is `10b89a3c`, a different line.
 
 **Release ceremony:** bump/`VERSIONS.md`/commit/push/tag/`install-full` done (the established 0.34.x flow); the registry **publish** (crates.io / PyPI / `gh release`) stays **skipped** per your standing release-pause directive — PyPI is still at 0.33.3, consistent with every 0.34.x.
 
@@ -583,15 +587,36 @@ Drained the bundle. Two of the three code items were already landed by a prior s
 That is the **stale route-owned supervisor replaying its old in-memory CRDT** (the `#qeditdup` class) — and I just made it worse: `make install-full` put **0.34.51** on disk while the supervisor driving this session is still on the older binary, so it's now **binary-stale** as well as CRDT-stale. `admin inspect`/the controller socket timed out and this cycle's preflight already showed `live_prompt_drift_after_preflight`, which is the same wedge. The deletes-reappear + duplicate-from-old-snapshot is exactly the symptom: the supervisor's lagging whole-document CRDT re-emits the pre-edit queue shape every convergence.
 
 **Remedy is a supervisor recycle onto the fresh binary**, not more queue edits (each edit just re-collides with the stale projection). I'm ending the turn after this closeout so the supervisor can recycle at its idle boundary; if it doesn't self-heal, `agent-doc admin recycle tasks/agent-doc/agent-doc-bugs2.md` (or restart the IDE session) brings it onto 0.34.51 with a clean CRDT. The `#v6b3` fix I just shipped is precisely what stops this stale supervisor from spinning forever instead of recycling — but it only takes effect **after** the recycle promotes 0.34.51.
-<!-- agent:boundary:9040f62b -->
+
+### Re: do [#cdtcutover] (re-pin) — opus-4-8
+
+> **Queue prompt:**
+>
+> I did `agent-doc admin list` and I see 60 actors...most of them dead. Can we automatically prune dead actors?
+
+
+Checked git before reciting a deferral (re-pin rule). The read-side code work is already done and committed — nothing new to build this cycle — and the remaining flip is the operator-gated rung, so this is a status report, not a stall.
+
+**State on disk:**
+- Branch `cdtcutover` @ `9ca8838c` (*"#cdtcutover read-side — gated evented unresolved-prompt SemTree"*) in isolated worktree `src/agent-doc-cdtcutover-wt`. **Un-merged** — submodule HEAD is `10b89a3c`, a different line.
+- All four prerequisites (`#cdtdedup`/`#lzapplytree`/`#cdtupdate`/`#cdtsem`) remain committed-done.
+
+**Why I'm not landing it from here:** `#cdtcutover` is the `[focused-cycle]` FUTURE/SEPARATE rung (doc §55, §99) — it rewires the *live* finalize/write path (whole-tree reconcile → per-node `update_to` deltas, SemTree queries into preflight/supervisor drainable computations). The binary agrees: `queue_drainable_head_count=0`, `queue_continuation_required=false` — it is **not** in-session-loop-drainable. Merging the write-side into this same live route-owned session and then proving it would require a live editor/pane zero-regression proof I cannot self-administer mid-session. That is the operator-gated step.
+
+**Remaining (operator-gated), in order:**
+1. Merge `cdtcutover` → submodule main, `make install`, recycle.
+2. Consume the SemTree accessor in the live drainable path; land the write-side (`update_to` per-node deltas at finalize).
+3. Live editor/pane zero-regression proof (FCC/IPC-drift watch).
+
+**Housekeeping this cycle:** the route-owned host supervisor (pid 124146, started 13:04) is mapping a **stale binary** vs the installed 0.34.51 (mtime 15:40) — confirmed by timestamps, matching the preflight `supervisor_binary_stale` warning. It will keep re-firing `[focused-cycle]` heads over the stale binary, so I'm issuing a non-disruptive `agent-doc admin recycle` after this finalize (idle-boundary re-exec onto the installed binary). Not looping — only `[focused-cycle]`/`[operator-verify]` heads remain.
+<!-- agent:boundary:555016bf -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#5e8k] [#fma0] [#v6b3] [#2y8j]~~
-- ~~When I delete queue items, they still reappear. And writing into the queue duplicates the line from an old snapshot.~~
-- :pushpin: do [#cdtcutover]
+- ~~I did `agent-doc admin list` and I see 60 actors...most of them dead. Can we automatically prune dead actors?~~
+- When I restarted the equityfundingsource.md supervisor, equityfundingsource.md was re-associated with the agent-doc-bugs2.md claudesession.
 - :pushpin: do [#qeditdup]
 - :pushpin: do [#crdtauth6]
 - :pushpin: do [#nsfz]

@@ -625,7 +625,19 @@ cd src/lazily-js && npm publish --access public
 (`--access public` is required for a scoped package's first publish.)
 
 **Parity note:** the only live cross-language gap is the optional additive `key` field from `#lzwirekey`; it's format-aware so all bindings stay conformance-green without it. The distributed CRDT plane (`#lzcrdtplane`) isn't built in lazily-rs yet, so there's no CRDT parity to port. All four `parity. release + publish` heads are drained; only the operator npm step remains. (Exchange is large — 565 lines / 31 sections; `/agent-doc compact` available when you want a lighter session.)
-<!-- agent:boundary:0bef3c53 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=socket_ack_content patch_id=5581cff5-36e3-4463-944e-7b7d8a980374 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=75481 candidate_hash=072f68298d0dd45f807770d153137b582fb7aca866991b5fb729f7deaf75b310 content_ours_len=76515 content_ours_hash=c9eb2c442944de4283c519a943e02118b96c52b26a62a4c213b3b5b66631cf25 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782436902148
+```
+<!-- agent:boundary:d7c6531e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -634,14 +646,7 @@ cd src/lazily-js && npm publish --access public
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~[#r86a]~~
-- ~~update lazily-spec with latest changes~~
-- ~~release + publish lazily-rs~~
-- ~~lazily-kt parity. release + publish~~
-- 🚧 ~~lazily-js parity. release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~lazily-zig parity. release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~lazily-py parity. release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~lazily-kt parity. release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 @lazily was taken on npmjs. I took @lazily-hub.
 <!-- /agent:queue -->
 
 ## Backlog

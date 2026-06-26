@@ -103,7 +103,7 @@ Ran `bun run deploy:worker`:
 All four portals now serve the deal-photo carousel (house placeholder on empty deals) through their auth-scoped download routes in production.
 
 > **Queue prompt:** deploy
-<!-- agent:boundary:1121ee00 -->
+<!-- agent:boundary:5c012f25 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -123,7 +123,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

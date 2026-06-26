@@ -67,6 +67,11 @@ I left the operator-gated review items in Review; they are not agent-drainable b
 
 ### Re: closeout repair — gpt-5
 
+> **Queue prompt:**
+>
+> [#lzsmstress]
+
+
 No new user-edit diff was present in this invocation. I preserved the existing lazily-rs queue state and closed the session-document commit boundary through `agent-doc finalize`.
 Blocked at agent-doc closeout, not at lazily-rs triage.
 
@@ -77,7 +82,7 @@ The closeout is stuck because the route-owned supervisor is running a stale `age
 `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md`
 
 That recycle is queued, but it cannot take effect until this busy Codex pane reaches idle.
-<!-- agent:boundary:9a8950dd -->
+<!-- agent:boundary:b8dd7e48 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -87,14 +92,18 @@ That recycle is queued, but it cannot take effect until this busy Codex pane rea
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#lzbugtriage]~~
-- [#lzsmstress]
+- ~~🚧 [#lzsmstress]~~
 - [#lzcrdtperms]
+- lazily-spec parity
+- lazily-kt parity
+- lazily-js parity
+- lazily-zig parity
+- lazily-py parity
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzsmstress] [recommended] #lzsmstress=Add state-machine hardening tests for StateMachine, ThreadSafeStateMachine, and AsyncStateMachine: invalid transitions, transition callbacks, dynamic dependencies, eager signals, dispose/recreate, and concurrent set/get. Start with failing regressions that prove no stale transition, cleanup leak, or stale dependency edge survives.
 - [ ] [#lzcrdtperms] [recommended] #lzcrdtperms=Add CRDT runtime permission/regression coverage: CrdtSync BridgeHub fan-out with mixed readable/unreadable peers, duplicate delivery, partial-frontier tombstone GC, and NodeKey/NodeId churn so multi-writer transport bugs fail deterministically.
 <!-- /agent:backlog -->
 

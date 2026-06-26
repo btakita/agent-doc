@@ -90,7 +90,26 @@ This is the realtime cutover; I filed it as **#pcwcrt** and it rides #provauth1 
 **On the provauth ids you flagged:** correct — my `--pending-add 'provauth2=…'` was wrong; the id needs `#` (`[#provauth2] text`, or `id=provauth2 ` with a trailing space). They landed under auto-ids (#f693=1, #q9w3=2, #fpyh=3, #818s=4) with the intended tag in the text. I tried to re-key them but there's no backlog-remove flag and `--pending-edit` embeds `[#provauth2]` as text rather than re-keying, so I stopped rather than churn this buffer further — the plan (`plan-operator-provenance-authority.md`) maps phase→id. A clean rename needs `--pending-clear`+re-add (destroys all 10 backlog items) or a manual edit when the IPC listener is quiet.
 
 Given this session is corrupting on nearly every write (live_prompt_drift + postcommit splice each cycle — itself the #pcwcrt evidence), I recommend we **recycle the supervisor / start a fresh session** before more document work. Want me to take **#provauth2** (the smallest standalone win — closes the "deleted items reappear" + "no duplicate adds" reports) in a fresh focused cycle?
-<!-- agent:boundary:4dca889a -->
+
+### Re: do #pcwcrt + all four #provauth — started foundation-first; #provauth2 slice shipped — opus-4-8
+
+I'm treating this as the full provenance+commit-cutover program. It's deep core CRDT/commit-path work and I'm executing it **foundation-first, in the submodule, `make check`-gated, no mid-session install** (installing a new binary against this live supervisor is what destabilizes it). Honest status:
+
+**Shipped this turn — #provauth2 (slice 1: multi-id dedup), committed `cd8f3522`, `make check` green:**
+- Root cause of the duplicate proliferation you saw: `sync_backlog_into_queue` deduped off `do_prompt_id`, which reads **only the first `#id`** on a line. So your manual `[#a] [#b] [#c]` line registered only `#a` as present and the mirror re-added `#b`/`#c` as duplicate `do [#id]` lines every preflight.
+- Fix: `do_prompt_ids`/`entry_do_ids` (multi-id aware); `existing_ids` now collects **every** id on every queue line. Operator multi-id lines are never duplicated by auto-add. +2 regression tests.
+
+**Remaining program (sequenced; each its own focused cycle on a clean session):**
+- **#provauth2 slice 2** — operator-delete **tombstone**: a queue id the operator deletes is suppressed from re-mirror (durable sidecar) until they re-add it or the backlog item closes. This is what closes "I deleted items and they reappeared" (the dedup slice closes "don't add duplicates").
+- **#provauth1** — CRDT transaction-origin tagging (Operator/Binary/Mirror) in crdt.rs/crdt_sync.rs. The foundation the rest keys off.
+- **#pcwcrt** — realtime commit cutover: skip the post-commit reconcile tower when a live CRDT replica is origin-proven converged. *Depends on #provauth1* — without the origin signal it's just another `is_listener_active` branch in an already-5-branch function that still corrupts (today's evidence).
+- **#provauth3** — replace `content_ours`/manual-cleanup/resurrection heuristics with origin checks.
+- **#provauth4** — per-cell provenance (rides #qcellmerge) so agent content can't splice into operator cells. This is the path that wrote the `<<<<<<< ours` conflict markers into your queue this session.
+
+**Why I'm not ramming the rest through now:** this session's in-memory CRDT is corrupting on nearly every write (live_prompt_drift + the conflict-marker splice — itself the #provauth4 evidence). The responsible path is: install `cd8f3522` + **recycle the supervisor** (clears the corrupt replica, picks up the new binary), then I drain #provauth2-slice-2 → #provauth1 → #pcwcrt → #provauth3 → #provauth4 against a clean supervisor. Also captured your new bug: **JB `Run Agent Doc` floods duplicate dispatch prompts** — it's the documented #vgat/#jbrundispatch no-submit-retry class (root-cause fix is a separate dispatch cycle).
+
+Recommend: recycle now, then I continue the program. Proceed?
+<!-- agent:boundary:901a15ae -->
 <!-- /agent:exchange -->
 ## Queue
 

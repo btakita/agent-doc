@@ -1135,7 +1135,21 @@ pub struct CrdtMergeBase {
 /// Line-multiset containment (not prefix length) is used so a divergence in an
 /// early region (e.g. a frontmatter edit) is not mistaken for staleness just
 /// because the tails still match.
-fn overlay_carries_unbaselined_content(overlay_md: &str, baseline: &str) -> bool {
+///
+/// `#crdtsvdom` (content form): the multiset scan only sees "ahead" when the
+/// overlay holds a line the baseline lacks — additions and within-line edits. It
+/// is **blind to a pure deletion / within-line shrink** (overlay ⊆ baseline),
+/// which is content-identical to a genuinely older committed subset. True yrs
+/// state-vector dominance can't disambiguate them either: the overlay sidecar is
+/// always a fresh lineage-free `from_markdown` projection (`save_document_crdt` /
+/// `rebuild_overlay_crdt_locked`), so there is no shared causal history to
+/// compare — the dominance test would be vacuous. The only causal discriminator
+/// the architecture leaves is the live editor **op-capture** sidecar: pending
+/// (not-yet-merged) editor ops prove the divergence is a live keystroke edit, not
+/// a stale subset. So when the projection differs from the baseline and ops are
+/// pending, the overlay is ahead/preserve (the deletion survives); with no
+/// pending ops it stays stale/discard (GC preserved).
+fn overlay_carries_unbaselined_content(doc: &Path, overlay_md: &str, baseline: &str) -> bool {
     use std::collections::HashMap;
     let mut baseline_lines: HashMap<&str, usize> = HashMap::new();
     for line in baseline.lines() {
@@ -1150,7 +1164,7 @@ fn overlay_carries_unbaselined_content(overlay_md: &str, baseline: &str) -> bool
             _ => return true,
         }
     }
-    false
+    overlay_md != baseline && crate::op_capture::has_pending_editor_ops(doc)
 }
 
 /// Rebuild the overlay sidecar from the cycle baseline (the stale/discard path).
@@ -1231,7 +1245,7 @@ pub fn crdt_merge_base_state(doc: &Path, fallback_markdown: &str) -> Result<Crdt
                         fallback_markdown.len()
                     ),
                 );
-                if overlay_carries_unbaselined_content(&overlay_md, fallback_markdown) {
+                if overlay_carries_unbaselined_content(doc, &overlay_md, fallback_markdown) {
                     // Overlay-ahead / concurrent-divergent: the overlay carries
                     // live keystrokes not yet committed. The merge base must stay
                     // the committed baseline — it is the common ancestor of the
@@ -1771,6 +1785,69 @@ mod tests {
             log.contains("crdt_merge_base_overlay_rebuilt"),
             "stale overlay rebuild should be observable:\n{log}"
         );
+    }
+
+    /// #crdtsvdom (content form): a PURE DELETION (overlay ⊆ baseline) racing
+    /// finalize must be PRESERVED, not discarded as stale — the line-multiset
+    /// scan alone cannot see a deletion, so the live op-capture sidecar is the
+    /// causal discriminator. With pending editor ops the overlay is ahead/live
+    /// (preserve); with no pending ops the identical-shaped subset is stale
+    /// (discard) — the existing GC behavior the test above pins.
+    #[test]
+    fn crdt_merge_base_state_preserves_pure_deletion_with_pending_editor_ops() {
+        let (dir, doc) = setup();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        // Baseline carries a line the overlay lacks; the overlay is a strict
+        // subset (the operator deleted `- do [#keepme]` live).
+        let baseline = concat!(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Queue\n\n<!-- agent:queue -->\n",
+            "- do [#keepme]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let deleted_overlay = concat!(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Queue\n\n<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let overlay_state =
+            agent_doc_markdown_ast::crdt::OverlayCrdtDoc::from_markdown(deleted_overlay)
+                .encode_state();
+        save_overlay_crdt(&doc, &overlay_state).unwrap();
+
+        // No pending editor ops yet → the subset reads as genuinely stale and is
+        // discarded (identical shape to the GC test above).
+        let stale = crdt_merge_base_state(&doc, baseline).unwrap();
+        assert_eq!(
+            stale.source,
+            CrdtMergeBaseSource::FallbackOverlayProjectionMismatch,
+            "a subset overlay with NO pending ops stays stale/discard"
+        );
+
+        // Re-seed the (now rebuilt-to-baseline) overlay back to the deleted shape
+        // and record a pending delete op — the live keystroke that produced it.
+        save_overlay_crdt(&doc, &overlay_state).unwrap();
+        crate::op_capture::record_editor_op(
+            &doc,
+            "live-base-hash",
+            agent_doc_core::crdt::EditorOp::Delete {
+                offset: baseline.find("- do [#keepme]\n").unwrap(),
+                len: "- do [#keepme]\n".len(),
+            },
+        )
+        .unwrap();
+
+        let live = crdt_merge_base_state(&doc, baseline).unwrap();
+        assert_eq!(
+            live.source,
+            CrdtMergeBaseSource::OverlayAheadPreserved,
+            "a pure deletion with pending editor ops must be preserved, not discarded"
+        );
+        // The overlay sidecar is left intact (not rebuilt) so the deletion survives.
+        let overlay = load_overlay_crdt(&doc).unwrap().unwrap();
+        let overlay =
+            agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state(&overlay).unwrap();
+        assert_eq!(overlay.to_markdown().unwrap(), deleted_overlay);
     }
 
     /// #ipc-drift-order-stable-merge: the overlay-as-merge-base path (suspect

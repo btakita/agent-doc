@@ -133,6 +133,24 @@ pub fn load_op_capture(doc: &Path) -> Result<Option<OpCaptureSidecar>> {
     }
 }
 
+/// True when there are **pending** captured editor ops for `doc` — live
+/// keystrokes the editor reported that a merge has not yet consumed+cleared.
+///
+/// This is the liveness anchor the CRDT merge base uses to tell a **live
+/// deletion** (the overlay shrank because the user just deleted a line; the ops
+/// are still pending) apart from a **genuinely stale** overlay (an older
+/// committed subset; no pending ops). The lineage-free `from_markdown` overlay
+/// leaves no causal history to compare, so the two are content-identical
+/// (overlay ⊆ baseline) — only the still-uncleared op-capture sidecar marks the
+/// divergence as live. After a committed cycle `merge_contents_crdt_with_ops`
+/// clears the sidecar, so a truly stale overlay reads `false` here and still GCs.
+///
+/// Over-reporting is the safe direction: a lingering non-empty sidecar at worst
+/// *preserves* a stale overlay (delayed GC), never discards a live edit.
+pub fn has_pending_editor_ops(doc: &Path) -> bool {
+    matches!(load_op_capture(doc), Ok(Some(sidecar)) if !sidecar.ops.is_empty())
+}
+
 /// Record one editor op for `doc`, captured against the buffer whose text hashes
 /// to `base_hash`.
 ///

@@ -371,7 +371,24 @@ Done, and shipped. `agent-doc admin recycle` now has a real `--force` flag — *
 What `--force` does: overrides the cycle-open / in-flight-dispatch deferral so the recycle lands at the next serve-loop tick instead of waiting for idle (it still requires controller `Stable`, so it never strands a half-promoted handoff); and when no live controller answers, it escalates to a kill+cold-start (`session restart-supervisor`) instead of the old "nothing to recycle" no-op. Default (no `--force`) behavior is byte-for-byte unchanged.
 
 Per agent-doc's `#deploy-just-do-it`, I shipped it to **live**, and bundled the other ready branches into the same deploy — merged to agent-doc main (`e96beca1`), `make check` green, **installed + recycle-marked**: `#recycleforce`, `#supstaledetect`, `#qimpstrike`, `#suptmuxstale`, `#ipcproofnostall`, `#agentchange` tests, on top of Phase A. **`#ipcproofnostall` going live kills the false closeout-interrupt** that stalled this queue all session — once this supervisor recycles onto the bundle at this turn's boundary, the wedge dance stops. I held only the public release (push/tag/publish); the local install gives you every feature now.
-<!-- agent:boundary:4f53a2f8 -->
+
+### Re: restart-supervisor --all + see which supervisors are stale — built on a branch — opus-4-8
+
+Built the bulk-restart + staleness-visibility you asked for. Done in the isolated worktree `src/agent-doc-rsall-wt` (branch `restart-supervisor-all`, commit `8aa96bfd`), `make check` green (5413 test items). New surface:
+
+- `agent-doc session restart-supervisor --all` — restart **every** live supervisor on the machine (all projects).
+- `agent-doc session restart-supervisor --project` — restart only the current project's supervisors.
+- `agent-doc session supervisor-status [--all|--project] [FILE]` — **read-only** staleness inspector: per-supervisor doc/pid/start-age, running-binary inode vs installed-binary inode, and a STALE flag. Default scope = current project. This is the "am I up to date in tmux" view, no restart.
+- Inline staleness flags are also printed in the `--all`/`--project` restart output, so you see which ones were stale as they cycle.
+
+How staleness is decided: a supervisor whose `/proc/<pid>/exe` inode differs from the freshly-installed `agent-doc` inode never re-exec'd onto the new build → **STALE** (fail-open to `unknown` if unreadable). Bulk restart **skips this session's own host supervisor** (walks `/proc` ppids; the host is an ancestor of this process) so it can't tear down the pane driving the drain.
+
+Live smoke of `supervisor-status --all` (restarted nothing): every running supervisor is currently **STALE** vs the installed binary — including this session's host. That stale supervisor is the root cause you already diagnosed for the queue-item-deletion / hard-to-type / CRDT-instability reports. This feature is the tool to recycle them all in one shot.
+
+**Deliberately NOT installed/pushed from inside this session.** Installing (`make install-full`) recycles a supervisor; doing it now would recycle *this* live session's stale host mid-drain — the exact mid-cycle-recycle wedge. The safe sequence is operator-side: review/merge `restart-supervisor-all`, `make install-full`, then run the new `agent-doc session restart-supervisor --all` to recycle everything onto the fresh binary. After that the rest of this queue drains on a non-stale supervisor.
+
+Heads-up on the rest of the queue: it will keep firing over a stale supervisor (#qeditdup/#crdtauth6/#cdtcutover/#midturnresumeb/#recycleforce etc. are each separate deep supervisor tasks, several with their own in-flight worktrees). Recommend installing + recycling first, otherwise the stale binary over-consumes heads.
+<!-- agent:boundary:34b7629f -->
 <!-- /agent:exchange -->
 ## Queue
 

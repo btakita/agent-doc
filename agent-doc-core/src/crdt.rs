@@ -519,10 +519,11 @@ pub fn merge_by_component(
         return Ok(ours_text.to_string());
     }
 
-    // `#qcellmerge1` cutover seam (default OFF). When `AGENT_DOC_CELL_MERGE` is
-    // enabled, attempt the lazily-`reconcile`-based per-cell 3-way merge first.
-    // It signals `fell_back` for any structural divergence; on fallback (or flag
-    // OFF) the existing whole-doc / per-node path below runs unchanged.
+    // `#qcellmerge1` cutover seam (default ON, env kill-switch). Unless
+    // `AGENT_DOC_CELL_MERGE` is explicitly falsy, attempt the lazily-`reconcile`-
+    // based per-cell 3-way merge first. It signals `fell_back` for any structural
+    // divergence; on fallback (or the explicit kill-switch) the existing
+    // whole-doc / per-node path below runs unchanged.
     if crate::cell_doc::cell_merge_enabled() {
         let base_text = match base_state {
             Some(bytes) => CrdtDoc::decode_state(bytes)
@@ -1334,14 +1335,15 @@ impl MultiNodeState {
             return Ok((ours_text.to_string(), MultiNodeState::from_text(ours_text)?));
         }
 
-        // `#qcellmerge1` persistence-path seam (default OFF). When the flag is
-        // enabled, route through the SAME per-cell merge as the text path
-        // ([`merge_by_component`]) and rebuild the persisted per-node state from
-        // the cell-merged text via [`MultiNodeState::from_text`]. This keeps the
-        // returned text and the persisted base round-trip consistent (the
-        // persisted base reflects the cell-merge winner, not the legacy
-        // per-node winner). On `fell_back` (or flag OFF) the existing per-node
-        // path below runs byte-identically to pre-rung behavior.
+        // `#qcellmerge1` persistence-path seam (default ON, env kill-switch).
+        // Unless the flag is explicitly falsy, route through the SAME per-cell
+        // merge as the text path ([`merge_by_component`]) and rebuild the
+        // persisted per-node state from the cell-merged text via
+        // [`MultiNodeState::from_text`]. This keeps the returned text and the
+        // persisted base round-trip consistent (the persisted base reflects the
+        // cell-merge winner, not the legacy per-node winner). On `fell_back` (or
+        // the explicit kill-switch) the existing per-node path below runs
+        // byte-identically to legacy behavior.
         if crate::cell_doc::cell_merge_enabled() {
             let base_text = match base {
                 Some(b) => b.to_text().unwrap_or_default(),
@@ -3292,14 +3294,15 @@ Second answer line three.
 
     #[test]
     fn multinode_merge_flag_off_byte_identical_to_pre_rung() {
-        // Flag-OFF parity: with the flag explicitly absent, MultiNodeState::merge
+        // Flag-OFF parity: with the kill-switch explicitly set, MultiNodeState::merge
         // output must be byte-identical to the legacy per-node path (the seam is a
         // strict no-op). We compute the legacy result by constructing the same
-        // per-node merge the function would run without the seam.
+        // per-node merge the function would run without the seam. Per-cell merge is
+        // default-ON, so the legacy path is exercised via the explicit kill-switch.
         let _guard = crate::cell_doc::CELL_MERGE_ENV_LOCK.lock().unwrap();
         // SAFETY: serialized under the lock.
         unsafe {
-            std::env::remove_var(crate::cell_doc::CELL_MERGE_ENV);
+            std::env::set_var(crate::cell_doc::CELL_MERGE_ENV, "0");
         }
         assert!(!crate::cell_doc::cell_merge_enabled(), "must be OFF");
 
@@ -3323,6 +3326,13 @@ Second answer line three.
         // The legacy per-node path produced the expected isolated merge.
         assert!(off1.contains("### Re: existing"));
         assert!(off1.contains("[#b2]"));
+
+        // Restore the default (ON) so a leaked kill-switch can't poison sibling
+        // tests that read the master gate without holding the lock.
+        // SAFETY: still holding the lock.
+        unsafe {
+            std::env::remove_var(crate::cell_doc::CELL_MERGE_ENV);
+        }
     }
 
     #[test]

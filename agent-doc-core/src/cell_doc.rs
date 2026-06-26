@@ -44,10 +44,11 @@ use crate::component::{self, Component};
 use crate::crdt::{PREAMBLE_KEY, is_list_component, split_exchange_children, split_list_children};
 use crate::queue_item_lifecycle::QueueItemLifecycle;
 
-/// Environment variable that opts the live CRDT merge into the per-cell
+/// Environment variable that gates the live CRDT merge per-cell
 /// 3-way path ([`merge_3way`], routed from [`crate::crdt::merge_by_component`]).
-/// Absent / empty / `0` / `false` ⇒ the existing behavior is unchanged
-/// (default OFF). See [`cell_merge_enabled`].
+/// **Default ON** with an env kill-switch: per-cell merge is the production
+/// default. Only an explicit falsy value (`0`/`false`/`off`/`no`) turns it off;
+/// absent / empty / any other value ⇒ ON. See [`cell_merge_enabled`].
 pub const CELL_MERGE_ENV: &str = "AGENT_DOC_CELL_MERGE";
 
 /// Process-global serialization lock for tests that mutate the
@@ -60,66 +61,75 @@ pub(crate) static CELL_MERGE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::
 /// Environment variable that opts a same-cell *both-sides-changed* divergence
 /// into the op-level [`TextCrdt`] 3-way merge (`#qcellmerge1` opcapture rung).
 ///
-/// **Sub-gate of [`CELL_MERGE_ENV`], default OFF.** Even with the per-cell merge
-/// seam ON ([`cell_merge_enabled`]), the `(both changed)` branch still applies
-/// [`ConflictPolicy`] (today's behavior) unless this is *also* truthy. When ON,
-/// that branch first attempts a deterministic character-granular 3-way merge: two
+/// **Sub-gate of [`CELL_MERGE_ENV`], default ON** with an env kill-switch. With
+/// the per-cell merge seam ON ([`cell_merge_enabled`]), the `(both changed)`
+/// branch first attempts a deterministic character-granular 3-way merge: two
 /// edits to DISJOINT regions of one cell converge with BOTH preserved and NO
 /// conflict; a true same-region overlap still records a [`CellConflict`] and
-/// applies the policy. See [`cell_merge_opcapture_enabled`] / [`op_level_merge`].
+/// applies the policy. An explicit falsy value (`0`/`false`/`off`/`no`) restores
+/// the legacy policy-only behavior. Forced OFF when the master switch is
+/// explicitly disabled. See [`cell_merge_opcapture_enabled`] / [`op_level_merge`].
 pub const CELL_MERGE_OPCAPTURE_ENV: &str = "AGENT_DOC_CELL_MERGE_OPCAPTURE";
 
 /// Environment variable that opts a recorded same-region [`CellConflict`] into an
 /// **operator-visible in-band conflict marker** in the merged document
 /// (`#qcellconflict` conflict-surfacing rung).
 ///
-/// **Sub-gate of [`CELL_MERGE_ENV`], default OFF.** With the per-cell merge seam
-/// ON but this OFF, a genuine same-region content conflict is still resolved
-/// ours-wins and only logged to stderr ([`log_conflicts`]) — the operator never
-/// sees the losing side in the document. When this is *also* truthy, each such
-/// conflict additionally appends a deterministic, framing-safe HTML-comment
-/// conflict block to the conflicted node's value, surfacing BOTH versions
-/// verbatim while keeping ours as the active/structural text (never a fabricated
-/// blend). A lawful lifecycle join is never a conflict and never marked. See
-/// [`surface_conflict_markers`] / [`conflict_marker`].
+/// **Sub-gate of [`CELL_MERGE_ENV`], default ON** with an env kill-switch. With
+/// the per-cell merge seam ON, each genuine same-region content conflict appends
+/// a deterministic, framing-safe HTML-comment conflict block to the conflicted
+/// node's value, surfacing BOTH versions verbatim while keeping ours as the
+/// active/structural text (never a fabricated blend). An explicit falsy value
+/// (`0`/`false`/`off`/`no`) restores the legacy behavior: the conflict is
+/// resolved ours-wins and only logged to stderr ([`log_conflicts`]) — the
+/// operator never sees the losing side in the document. Forced OFF when the
+/// master switch is explicitly disabled. A lawful lifecycle join is never a
+/// conflict and never marked. See [`surface_conflict_markers`] / [`conflict_marker`].
 pub const CELL_MERGE_CONFLICT_MARKERS_ENV: &str = "AGENT_DOC_CELL_MERGE_CONFLICT_MARKERS";
 
-/// Parse a truthy on/off env value (`1`/`true`/`on`/`yes`, case/space-insensitive).
-fn env_truthy(name: &str) -> bool {
+/// Parse an *explicitly* falsy on/off env value (`0`/`false`/`off`/`no`,
+/// case/space-insensitive). The kill-switch counterpart for the default-ON
+/// per-cell merge gates: an absent var, an empty value, or any unrecognized
+/// value is NOT falsy — only the recognized kill-switch tokens disable a gate.
+fn env_falsy(name: &str) -> bool {
     match std::env::var(name) {
         Ok(v) => {
             let v = v.trim().to_ascii_lowercase();
-            matches!(v.as_str(), "1" | "true" | "on" | "yes")
+            matches!(v.as_str(), "0" | "false" | "off" | "no")
         }
         Err(_) => false,
     }
 }
 
-/// Whether the per-cell 3-way merge routing seam is enabled. Default OFF: only
-/// an explicit truthy `AGENT_DOC_CELL_MERGE` (`1`/`true`/`on`/`yes`) turns it on.
+/// Whether the per-cell 3-way merge routing seam is enabled. **Default ON** with
+/// an env kill-switch: per-cell merge is the production default and only an
+/// explicit falsy `AGENT_DOC_CELL_MERGE` (`0`/`false`/`off`/`no`, case/space-
+/// insensitive) turns it off. Absent / empty / any non-falsy value ⇒ ON.
 pub fn cell_merge_enabled() -> bool {
-    env_truthy(CELL_MERGE_ENV)
+    !env_falsy(CELL_MERGE_ENV)
 }
 
 /// Whether the op-level [`TextCrdt`] 3-way merge for same-cell both-sides edits is
-/// enabled (`#qcellmerge1` opcapture). Default OFF: only an explicit truthy
-/// `AGENT_DOC_CELL_MERGE_OPCAPTURE` turns it on. Independent of
-/// [`cell_merge_enabled`] gating (the `(both changed)` branch is only reachable
-/// from the per-cell merge path, which the seam already gates), so this purely
-/// chooses whether that branch attempts op-level convergence before policy.
+/// enabled (`#qcellmerge1` opcapture). **Default ON** with an env kill-switch:
+/// only an explicit falsy `AGENT_DOC_CELL_MERGE_OPCAPTURE` turns it off. As a
+/// sub-feature of the per-cell merge stack, it is also forced OFF whenever the
+/// master switch [`cell_merge_enabled`] is explicitly disabled — disabling the
+/// master kills the whole stack regardless of the sub-gate value.
 pub fn cell_merge_opcapture_enabled() -> bool {
-    env_truthy(CELL_MERGE_OPCAPTURE_ENV)
+    cell_merge_enabled() && !env_falsy(CELL_MERGE_OPCAPTURE_ENV)
 }
 
 /// Whether recorded same-region [`CellConflict`]s are surfaced as operator-visible
-/// in-band conflict markers (`#qcellconflict`). Default OFF: only an explicit
-/// truthy `AGENT_DOC_CELL_MERGE_CONFLICT_MARKERS` turns it on. Independent of
-/// [`cell_merge_opcapture_enabled`] (opcapture *reduces* the conflict set by
-/// cleanly merging disjoint edits; this *surfaces* the irreducible same-region
-/// remainder), so the two sub-gates compose freely. With this OFF the merged text
-/// is byte-identical to today (ours-wins, conflict only on stderr).
+/// in-band conflict markers (`#qcellconflict`). **Default ON** with an env
+/// kill-switch: only an explicit falsy `AGENT_DOC_CELL_MERGE_CONFLICT_MARKERS`
+/// turns it off. As a sub-feature of the per-cell merge stack, it is also forced
+/// OFF whenever the master switch [`cell_merge_enabled`] is explicitly disabled —
+/// disabling the master kills the whole stack regardless of the sub-gate value.
+/// Independent of [`cell_merge_opcapture_enabled`] otherwise (opcapture *reduces*
+/// the conflict set by cleanly merging disjoint edits; this *surfaces* the
+/// irreducible same-region remainder), so the two sub-gates compose freely.
 pub fn cell_merge_conflict_markers_enabled() -> bool {
-    env_truthy(CELL_MERGE_CONFLICT_MARKERS_ENV)
+    cell_merge_enabled() && !env_falsy(CELL_MERGE_CONFLICT_MARKERS_ENV)
 }
 
 /// The stable per-item identity: `component:occurrence:item-id:index`, matching
@@ -687,12 +697,13 @@ fn resolve_content_divergence(
         (true, false) => o.clone(),
         // Only theirs changed → take theirs.
         (false, true) => t.clone(),
-        // Both changed to different text at the same lifecycle level. By default
-        // (today's behavior) this is a REAL content conflict resolved by the
-        // deterministic policy. With the opcapture sub-gate ON, first attempt a
-        // real op-level 3-way merge: if the two sides edited DISJOINT regions of
-        // the cell, that converges cleanly with both edits preserved and is NOT a
-        // conflict. Only a genuine same-region overlap falls through to policy.
+        // Both changed to different text at the same lifecycle level. With the
+        // opcapture sub-gate ON (the default), first attempt a real op-level
+        // 3-way merge: if the two sides edited DISJOINT regions of the cell, that
+        // converges cleanly with both edits preserved and is NOT a conflict. Only
+        // a genuine same-region overlap falls through to policy. With opcapture
+        // explicitly OFF (the legacy behavior), every both-changed cell is a REAL
+        // content conflict resolved by the deterministic policy.
         (true, true) => {
             if cell_merge_opcapture_enabled()
                 && let Some(base) = base_value
@@ -938,6 +949,23 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
         }
     }
 
+    // Collect base interstitials positionally so the per-cell merge can do a
+    // 3-way merge of the structural text AROUND components (not just whitespace —
+    // it can carry operator scratch comments / late tail edits). Only valid when
+    // base has the SAME top-level component-name sequence as ours/theirs; on any
+    // structural divergence we leave it empty and fall back to ours-wins.
+    let base_interstitials: Vec<&str> = if component_name_sequence(&base_nodes) == ours_names {
+        base_nodes
+            .iter()
+            .filter_map(|n| match n {
+                DocNode::Interstitial(s) => Some(s.as_str()),
+                DocNode::Component { .. } => None,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     // Walk ours/theirs in lockstep (same component-name sequence ⇒ same shape).
     let policy = ConflictPolicy::default();
     let mut out = String::new();
@@ -949,14 +977,24 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
     };
 
     let mut theirs_iter = theirs_nodes.iter();
+    let mut interstitial_index = 0usize;
     for ours_node in &ours_nodes {
         let theirs_node = theirs_iter.next().expect("node sequences aligned");
         match (ours_node, theirs_node) {
-            (DocNode::Interstitial(o), DocNode::Interstitial(_)) => {
-                // Interstitial framing: keep ours (the live/snapshot side). These
-                // are structural whitespace around components; a per-cell merge
-                // does not splice them.
-                out.push_str(o);
+            (DocNode::Interstitial(o), DocNode::Interstitial(t)) => {
+                // Interstitial framing (whitespace + operator scratch text around
+                // components). 3-way merge it so a one-sided addition (e.g. a
+                // scratch comment or late tail edit on the live/disk side only) is
+                // preserved instead of being clobbered by the other side. Base is
+                // aligned positionally; absent base ⇒ legacy ours-wins.
+                let base = base_interstitials.get(interstitial_index).copied();
+                let chosen = match base {
+                    Some(b) if *o == b => t.as_str(),     // only theirs diverged
+                    Some(b) if t == b => o.as_str(),      // only ours diverged
+                    _ => o.as_str(),                      // both diverged / no base ⇒ ours-wins
+                };
+                out.push_str(chosen);
+                interstitial_index += 1;
             }
             (
                 DocNode::Component {
@@ -987,10 +1025,11 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
                         Some(r) => r,
                         None => return CellMergeOutcome::fallback(),
                     };
-                // `#qcellconflict` (default OFF): surface each recorded same-region
-                // content conflict as an operator-visible in-band marker after the
-                // conflicted node's (active, ours) value. OFF ⇒ no mutation, so the
-                // body is byte-identical to today's ours-wins output.
+                // `#qcellconflict` (default ON, env kill-switch): surface each
+                // recorded same-region content conflict as an operator-visible
+                // in-band marker after the conflicted node's (active, ours) value.
+                // Explicitly OFF ⇒ no mutation, so the body is byte-identical to
+                // the legacy ours-wins output.
                 if cell_merge_conflict_markers_enabled() {
                     surface_conflict_markers(&mut merged_items, &conflicts);
                 }
@@ -1560,11 +1599,12 @@ prior response.
     #[test]
     fn same_item_edited_both_sides_surfaces_conflict() {
         // Both sides edit beta to DIFFERENT text → a real conflict, not a blend.
-        // Serialize against marker-toggling tests + assert the conflict-marker
-        // sub-gate is OFF so the "theirs absent" assertion is deterministic.
+        // Serialize against marker-toggling tests + explicitly disable the
+        // conflict-marker sub-gate (default-ON kill-switch) so the "theirs absent"
+        // assertion is deterministic and exercises the legacy ours-wins path.
         let _guard = ENV_LOCK.lock().unwrap();
         unsafe {
-            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
+            std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, "0");
         }
         let ours = BASE3.replace(
             "- do [#beta] second task\n",
@@ -1589,6 +1629,10 @@ prior response.
             !out.merged_text.contains("THEIRS-VERSION"),
             "no fabricated blend: theirs value must not also appear"
         );
+        // SAFETY: still holding the lock — restore the default (ON).
+        unsafe {
+            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
+        }
     }
 
     #[test]
@@ -1656,8 +1700,10 @@ agent_doc_format: template
 
     #[test]
     fn flag_off_byte_identical_to_legacy() {
-        // For representative inputs the flag-OFF crdt::merge_by_component output
-        // must be byte-identical to running with the flag explicitly absent.
+        // For representative inputs the kill-switched crdt::merge_by_component
+        // output is deterministic and exercises the legacy whole-doc path. Per-cell
+        // merge is default-ON, so the legacy path is reached via the explicit
+        // kill-switch.
         let ours = BASE3.replace(
             "- do [#alpha] first task\n",
             "- do [#alpha] first task OURS\n",
@@ -1669,42 +1715,80 @@ agent_doc_format: template
         let base_state = crate::crdt::CrdtDoc::from_text(BASE3).encode_state();
 
         let _guard = ENV_LOCK.lock().unwrap();
-        // Flag explicitly OFF.
+        // Flag explicitly OFF via the kill-switch.
         unsafe {
-            std::env::remove_var(CELL_MERGE_ENV);
+            std::env::set_var(CELL_MERGE_ENV, "0");
         }
         let off = crate::crdt::merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
 
         // Re-run, still OFF — deterministic, identical.
         let off2 = crate::crdt::merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
         assert_eq!(off, off2, "legacy path is deterministic with the flag off");
-        assert!(!cell_merge_enabled(), "default must be OFF");
+        assert!(!cell_merge_enabled(), "kill-switch must disable");
         // The legacy path produced a valid merged doc.
         assert!(off.contains("first task OURS"));
         assert!(off.contains("third task THEIRS"));
+        // SAFETY: still holding the lock — restore the default (ON).
+        unsafe {
+            std::env::remove_var(CELL_MERGE_ENV);
+        }
     }
 
     #[test]
-    fn cell_merge_enabled_default_off_and_truthy_parsing() {
+    fn cell_merge_enabled_default_on_with_kill_switch() {
         let _guard = ENV_LOCK.lock().unwrap();
+        // Default-ON: absent var ⇒ enabled.
         unsafe {
             std::env::remove_var(CELL_MERGE_ENV);
         }
-        assert!(!cell_merge_enabled());
-        for v in ["1", "true", "on", "yes", "TRUE", " On "] {
+        assert!(cell_merge_enabled(), "absent ⇒ default ON");
+        // Empty / truthy / any unrecognized value ⇒ still ON.
+        for v in ["1", "true", "on", "yes", "TRUE", " On ", "", "maybe"] {
             unsafe {
                 std::env::set_var(CELL_MERGE_ENV, v);
             }
-            assert!(cell_merge_enabled(), "{v:?} should enable");
+            assert!(cell_merge_enabled(), "{v:?} should stay ON");
         }
-        for v in ["0", "false", "off", "no", ""] {
+        // Only an explicit falsy kill-switch turns it off.
+        for v in ["0", "false", "off", "no", "FALSE", " Off "] {
             unsafe {
                 std::env::set_var(CELL_MERGE_ENV, v);
             }
-            assert!(!cell_merge_enabled(), "{v:?} should NOT enable");
+            assert!(!cell_merge_enabled(), "{v:?} should kill (OFF)");
         }
         unsafe {
             std::env::remove_var(CELL_MERGE_ENV);
+        }
+    }
+
+    #[test]
+    fn cell_merge_opcapture_default_on_and_master_kill_switch_gates_it() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        // Default-ON: both vars absent ⇒ opcapture enabled.
+        unsafe {
+            std::env::remove_var(CELL_MERGE_ENV);
+            std::env::remove_var(CELL_MERGE_OPCAPTURE_ENV);
+        }
+        assert!(cell_merge_opcapture_enabled(), "absent ⇒ default ON");
+        // Explicit opcapture kill-switch turns the sub-feature off.
+        for v in ["0", "false", "off", "no"] {
+            unsafe {
+                std::env::set_var(CELL_MERGE_OPCAPTURE_ENV, v);
+            }
+            assert!(!cell_merge_opcapture_enabled(), "{v:?} should kill");
+        }
+        // Master kill-switch forces the sub-feature OFF regardless of its value.
+        unsafe {
+            std::env::set_var(CELL_MERGE_OPCAPTURE_ENV, "1");
+            std::env::set_var(CELL_MERGE_ENV, "0");
+        }
+        assert!(
+            !cell_merge_opcapture_enabled(),
+            "master kill-switch must force the sub-feature OFF"
+        );
+        unsafe {
+            std::env::remove_var(CELL_MERGE_ENV);
+            std::env::remove_var(CELL_MERGE_OPCAPTURE_ENV);
         }
     }
 
@@ -1913,8 +1997,10 @@ working on it
     #[test]
     fn genuine_same_level_content_conflict_is_recorded() {
         let _guard = ENV_LOCK.lock().unwrap();
+        // Conflict-marker surfacing is default-ON; explicitly disable it via the
+        // kill-switch so the legacy "theirs absent in-band" assertion is exercised.
         unsafe {
-            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
+            std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, "0");
         }
         let base = "<!-- agent:queue -->\n- do [#beta] orig\n<!-- /agent:queue -->\n";
         let ours = "<!-- agent:queue -->\n- do [#beta] OURS-VERSION\n<!-- /agent:queue -->\n";
@@ -1936,6 +2022,10 @@ working on it
             "no fabricated blend: theirs value must not also appear:\n{}",
             out.merged_text
         );
+        // SAFETY: still holding the lock — restore the default (ON).
+        unsafe {
+            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
+        }
     }
 
     /// Both sides struck the SAME head to DIFFERENT text (e.g. an operator note
@@ -1944,8 +2034,10 @@ working on it
     #[test]
     fn both_sides_struck_different_text_is_a_content_conflict() {
         let _guard = ENV_LOCK.lock().unwrap();
+        // Conflict-marker surfacing is default-ON; explicitly disable it via the
+        // kill-switch so the legacy "theirs absent in-band" assertion is exercised.
         unsafe {
-            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
+            std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, "0");
         }
         let base = "<!-- agent:queue -->\n- do [#k] live\n<!-- /agent:queue -->\n";
         let ours = "<!-- agent:queue -->\n- ~~do [#k] struck OURS~~\n<!-- /agent:queue -->\n";
@@ -1962,6 +2054,10 @@ working on it
         assert_eq!(out.conflicts[0].kind, ConflictKind::Content);
         assert!(out.merged_text.contains("struck OURS"));
         assert!(!out.merged_text.contains("struck THEIRS"));
+        // SAFETY: still holding the lock — restore the default (ON).
+        unsafe {
+            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
+        }
     }
 
     // ----- op-level TextCrdt 3-way merge (`#qcellmerge1` opcapture) ----------
@@ -2064,14 +2160,16 @@ working on it
         let theirs = "<!-- agent:queue -->\n- do [#beta] THEIRS-ONLY\n<!-- /agent:queue -->\n";
 
         // SAFETY: single-threaded under ENV_LOCK; restored before unlock. The
-        // conflict-marker sub-gate stays OFF so "theirs absent" is deterministic.
+        // conflict-marker sub-gate is explicitly killed (it is default-ON) so
+        // "theirs absent in-band" is deterministic.
         unsafe {
             std::env::set_var(CELL_MERGE_OPCAPTURE_ENV, "1");
-            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
+            std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, "0");
         }
         let out = merge_3way(base, ours, theirs);
         unsafe {
             std::env::remove_var(CELL_MERGE_OPCAPTURE_ENV);
+            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
         }
 
         assert!(!out.fell_back);
@@ -2090,27 +2188,31 @@ working on it
         );
     }
 
-    /// (c) Gate OFF (default) reproduces today's ours-wins behavior unchanged:
+    /// (c) Gate explicitly OFF reproduces the legacy ours-wins behavior unchanged:
     /// even DISJOINT same-cell edits record a conflict and drop theirs.
     #[test]
-    fn opcapture_off_default_ours_wins_unchanged() {
+    fn opcapture_off_legacy_ours_wins_unchanged() {
         let _guard = ENV_LOCK.lock().unwrap();
         let base = "<!-- agent:queue -->\n- do [#beta] the original answer body here\n<!-- /agent:queue -->\n";
         let ours = "<!-- agent:queue -->\n- do [#beta] the EDITED answer body here\n<!-- /agent:queue -->\n";
         let theirs = "<!-- agent:queue -->\n- do [#beta] the original answer body THERE!\n<!-- /agent:queue -->\n";
 
-        // SAFETY: ensure the sub-gate is OFF (its default) under the lock.
+        // SAFETY: opcapture is default-ON, so explicitly engage its kill-switch to
+        // exercise the legacy policy-only path. Also disable conflict-marker
+        // surfacing (also default-ON) so the "theirs absent in-band" assertion is
+        // deterministic.
         unsafe {
-            std::env::remove_var(CELL_MERGE_OPCAPTURE_ENV);
+            std::env::set_var(CELL_MERGE_OPCAPTURE_ENV, "0");
+            std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, "0");
         }
-        assert!(!cell_merge_opcapture_enabled(), "opcapture default OFF");
+        assert!(!cell_merge_opcapture_enabled(), "opcapture kill-switch off");
 
         let out = merge_3way(base, ours, theirs);
         assert!(!out.fell_back);
         assert_eq!(
             out.conflicts.len(),
             1,
-            "OFF: disjoint same-cell edits are a conflict (today's behavior): {:?}",
+            "OFF: disjoint same-cell edits are a conflict (legacy behavior): {:?}",
             out.conflicts
         );
         assert!(out.merged_text.contains("EDITED"), "ours-wins keeps ours");
@@ -2119,6 +2221,11 @@ working on it
             "OFF: theirs disjoint edit is dropped (no op-merge): {}",
             out.merged_text
         );
+        // SAFETY: still holding the lock — restore the defaults (ON).
+        unsafe {
+            std::env::remove_var(CELL_MERGE_OPCAPTURE_ENV);
+            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
+        }
     }
 
     // ----- conflict surfacing (`#qcellconflict`) ----------------------------
@@ -2285,23 +2392,18 @@ working on it
         assert!(body.contains("~~do [#abcd] x~~"), "{body}");
     }
 
-    /// (d) Gate OFF (default): byte-identical to today — ours-wins, conflict only
-    /// on stderr, NO in-band marker.
+    /// (d) Gate explicitly OFF (kill-switch): byte-identical to the legacy
+    /// behavior — ours-wins, conflict only on stderr, NO in-band marker. The
+    /// default (absent) is now ON and DOES surface the marker, proving the gate
+    /// flipped to default-ON-with-kill-switch.
     #[test]
-    fn conflict_markers_off_byte_identical_to_today() {
+    fn conflict_markers_off_byte_identical_to_legacy() {
         let base = "<!-- agent:queue -->\n- do [#beta] original\n<!-- /agent:queue -->\n";
         let ours = "<!-- agent:queue -->\n- do [#beta] OURS-VERSION\n<!-- /agent:queue -->\n";
         let theirs = "<!-- agent:queue -->\n- do [#beta] THEIRS-VERSION\n<!-- /agent:queue -->\n";
 
-        // Explicitly OFF, and the no-marker baseline (flag absent) — must be equal.
+        // Explicit kill-switch ("0") ⇒ legacy ours-wins, no in-band marker.
         let off = merge_with_markers(Some("0"), base, ours, theirs);
-        let absent = merge_with_markers(None, base, ours, theirs);
-        assert!(!cell_merge_conflict_markers_enabled(), "default OFF");
-        assert_eq!(
-            off.merged_text, absent.merged_text,
-            "OFF and absent must be byte-identical"
-        );
-        // Today's behavior: ours-wins, theirs not present, no marker.
         assert!(off.merged_text.contains("OURS-VERSION"));
         assert!(
             !off.merged_text.contains("THEIRS-VERSION"),
@@ -2313,34 +2415,66 @@ working on it
             "OFF: no conflict marker: {}",
             off.merged_text
         );
-        // And the conflict is still RECORDED (stderr surface) regardless of gate.
+        // The conflict is still RECORDED (stderr surface) regardless of gate.
         assert_eq!(off.conflicts.len(), 1, "conflict still recorded OFF");
+
+        // Default (absent) is now ON: the same overlap DOES surface the marker.
+        let absent = merge_with_markers(None, base, ours, theirs);
+        assert!(
+            absent.merged_text.contains("THEIRS-VERSION") && absent.merged_text.contains("<<<<<<<"),
+            "default-ON must surface both versions in-band: {}",
+            absent.merged_text
+        );
+        // The OFF path must NOT be byte-identical to the new default — the
+        // kill-switch genuinely changes behavior.
+        assert_ne!(
+            off.merged_text, absent.merged_text,
+            "kill-switch must diverge from the default-ON marker output"
+        );
     }
 
-    /// Sub-gate truthy parsing + default-off, mirroring the sibling gate tests.
+    /// Sub-gate default-ON + kill-switch + master-gate parsing, mirroring the
+    /// sibling gate tests.
     #[test]
-    fn conflict_markers_gate_default_off_and_truthy_parsing() {
+    fn conflict_markers_gate_default_on_with_kill_switch() {
         let _guard = ENV_LOCK.lock().unwrap();
+        // Master stays default-ON (absent) throughout the sub-gate checks.
         unsafe {
+            std::env::remove_var(CELL_MERGE_ENV);
             std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
         }
-        assert!(!cell_merge_conflict_markers_enabled());
-        for v in ["1", "true", "on", "yes", "TRUE", " On "] {
+        assert!(cell_merge_conflict_markers_enabled(), "absent ⇒ default ON");
+        // Empty / truthy / unrecognized ⇒ still ON.
+        for v in ["1", "true", "on", "yes", "TRUE", " On ", "", "maybe"] {
             unsafe {
                 std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, v);
             }
-            assert!(cell_merge_conflict_markers_enabled(), "{v:?} should enable");
+            assert!(
+                cell_merge_conflict_markers_enabled(),
+                "{v:?} should stay ON"
+            );
         }
-        for v in ["0", "false", "off", "no", ""] {
+        // Explicit falsy kill-switch turns it off.
+        for v in ["0", "false", "off", "no", "FALSE", " Off "] {
             unsafe {
                 std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, v);
             }
             assert!(
                 !cell_merge_conflict_markers_enabled(),
-                "{v:?} should NOT enable"
+                "{v:?} should kill (OFF)"
             );
         }
+        // Master kill-switch forces the sub-feature OFF regardless of its value.
         unsafe {
+            std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, "1");
+            std::env::set_var(CELL_MERGE_ENV, "0");
+        }
+        assert!(
+            !cell_merge_conflict_markers_enabled(),
+            "master kill-switch must force the sub-feature OFF"
+        );
+        unsafe {
+            std::env::remove_var(CELL_MERGE_ENV);
             std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
         }
     }

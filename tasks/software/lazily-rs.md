@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -637,7 +637,29 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=socket_ack_content patch_id=5581cff5-36e3-4463-944e-7b7d8a980374 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=75481 candidate_hash=072f68298d0dd45f807770d153137b582fb7aca866991b5fb729f7deaf75b310 content_ours_len=76515 content_ours_hash=c9eb2c442944de4283c519a943e02118b96c52b26a62a4c213b3b5b66631cf25 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782436902148
 ```
-<!-- agent:boundary:7eee60a5 -->
+
+### Re: @lazily scope taken — renamed to @lazily-hub/js — opus-4-8
+
+> **Queue prompt:** @lazily was taken on npmjs. I took @lazily-hub.
+
+Done — renamed the js package scope and re-pointed the release. `@lazily-hub/js` is free on npm (404), so the first publish is clear once you authenticate.
+
+**Changes (lazily-js `ac97122`, pushed):**
+- `package.json` name `@lazily/js` → **`@lazily-hub/js`**
+- `src/state-projection.js` JSDoc import example updated to the new scope
+- `package-lock.json` regenerated (untracked, as before)
+- `npm test` → **28/28 green**; `npm run build` clean
+
+**Release re-pointed:** force-moved tag `v0.1.0` to `ac97122` + updated the GitHub release notes to reference `@lazily-hub/js` (safe — js was never npm-published). Superproject submodule pointer committed (`d9a0547`).
+
+**Remaining (operator 2FA, `#lzjsnpmpub` / `#z0hq`):** npm is E401 (not logged in) and btakita 2FA is browser/passkey, so I can't publish headlessly:
+```
+! npm login                                        # approve passkey/2FA in browser
+cd src/lazily-js && npm publish --access public     # @lazily-hub/js, first scoped publish
+```
+
+That's the last step of "publish all" — py/zig/kt are live; js is fully prepped under the correct scope and waits only on your login. (Exchange is large at 606 lines / 33 sections — `/agent-doc compact` whenever you want a lighter session.)
+<!-- agent:boundary:6c471c3a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -646,7 +668,6 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/l
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- 🚧 @lazily was taken on npmjs. I took @lazily-hub.
 <!-- /agent:queue -->
 
 ## Backlog

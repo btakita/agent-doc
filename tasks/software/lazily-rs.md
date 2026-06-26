@@ -82,7 +82,40 @@ The closeout is stuck because the route-owned supervisor is running a stale `age
 `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md`
 
 That recycle is queued, but it cannot take effect until this busy Codex pane reaches idle.
-<!-- agent:boundary:b8dd7e48 -->
+
+### Re: #lzsmstress state-machine hardening — gpt-5
+
+> **Queue prompt:** [#lzsmstress]
+
+`#lzsmstress` is complete.
+
+Changed paths in `src/lazily-rs`:
+
+- `tests/state_machine.rs`
+- `tests/thread_safe_state_machine.rs`
+- `tests/async_state_machine.rs`
+
+Coverage added:
+
+- Single-threaded `StateMachine`: dynamic branch dependency cleanup and observer dispose/recreate lifecycle.
+- `ThreadSafeStateMachine`: the same stale-dependency and observer lifecycle coverage, plus concurrent send/read stress over cloned machines.
+- `AsyncStateMachine`: async `memo_async` stale-dependency cleanup, async observer dispose/recreate lifecycle, and concurrent Tokio send/read stress.
+
+Verification:
+
+- `cargo fmt`
+- `cargo test --test state_machine --test thread_safe_state_machine`
+- `cargo test --features async --test async_state_machine`
+- `make check` via `tsift`/`rtk` digest runner, artifact `tart-b520b6cec8`, exit 0.
+- Latest GitHub Actions `CI` before this push was green: run `28219001643` on `main`.
+
+Commits:
+
+- lazily-rs submodule: `1e50084 test: harden state machine regressions`, pushed to `lazily-hub/lazily-rs main`.
+- parent gitlink: `e4a354bdd lazily-rs: harden state machine tests`.
+
+I left the pre-existing dirty lazily-rs files `src/lib.rs` and `src/reconcile.rs` unstaged and uncommitted. Confidence: high; this was test-only hardening and the full local suite passed. Escalation: none.
+<!-- agent:boundary:b1708864 -->
 <!-- /agent:exchange -->
 ###
 <!--

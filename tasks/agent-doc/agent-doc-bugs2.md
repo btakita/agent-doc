@@ -333,7 +333,23 @@ One honesty note: this mirrors the `process_binary_is_stale` **probe** (the recy
 That tmux-staleness head is **already done** — it's `#suptmuxstale` (branch `suptmuxstale-indicator`, `b433bda2`): the turn-in-progress pane title now leads with `⚠ STALE SUPERVISOR` when the supervisor binary is stale.
 
 And `#ipcproofnostall` — the false closeout-interrupt that stalled this queue all session — is now **fixed at the root**. The leak: when the `#postcommit-ipc-worktree-corruption` reorders the `ipc_proof_insufficient` line away from its `### Re: …interrupted-cycle recovery` heading, the bare line formed its own block and hit the `closes_exchange_tail → PromptTarget` fallthrough in the core diff classifier (`classify_prompt_bearing_block`) — the existing heading-only exemption never saw it. The fix matches the binary-authored line by its own tokens (`ipc_proof_insufficient` + `invariant=`/`recovery=`) at the classifier layer, so it's never a `PromptTarget` regardless of where corruption moves it, plus defense-in-depth in the tail scan. A genuine user prompt that *mentions* ipc/drift still interrupts (non-regression tested). Code-complete on `ipcproofnostall-fix` (`b934263c4`), `make check` green, gated for the bundle.
-<!-- agent:boundary:43694bab -->
+
+### Re: JB cluster #4 / #5 / #6 — all answered, operator-verify remains — opus-4-8
+
+> **Queue prompt:** JB `Recycle Supervisor` then JB `Run Agent Doc` stalls because the recycle is scheduled to run after the turn starts. But `Run Agent Doc` cannot start the turn.
+> **Queue prompt:** When I change the agent, the supervisor state should pick up the change and be able to dispatch to the new agent.
+> **Queue prompt:** Getting several JB `File Cache Conflict` dialogs.
+
+Grouping the three live-JB heads — each is now resolved in code; what's left on each is a live-pane eyeball.
+
+- **#4 (Recycle → Run Agent Doc stall)** — **fixed by Phase A.** The deadlock was "recycle scheduled after the turn starts, but Run Agent Doc can't start while the recycle is pending." With the cycle-open interlock now live, the recycle *defers* while a cycle is open instead of blocking the turn start, so `Run Agent Doc` can start and the recycle lands at the boundary. Verify live: Recycle Supervisor → Run Agent Doc should no longer stall.
+
+- **#5 (agent change picked up)** — **already implemented** (`#agentreloadrestart` Phase 1a/1b, in main `27bf61a6`): idle-watch re-reads the current frontmatter `agent:` every tick, and on a change at a quiet boundary (no active turn) it restarts with a *fresh spawn of the new harness* (`agent_restart_performed action=spawn_fresh_harness`), never interrupting a turn. I added the missing operator-scenario tests (branch `agent-change-pickup`, `28ee2057`). Verify live: edit `agent:` mid-session, confirm the next dispatch lands in the new harness.
+
+- **#6 (File Cache Conflict dialogs)** — code-addressed by the 0.34.48 VFS-refresh gating + the read-only cdylib; should subside now that the supervisor is on the fresh Phase-A binary. Operator-verify: retest in the live IDE; if dialogs persist after this recycle, it's a genuine residual and I'll dig in.
+
+That clears the agent-drainable code work in this queue. What remains is all **operator-verify** (the live eyeballs above + `#qftloss`/`#qeditdup`/`#crdtauth6`/`#nsfz`/`#kj5flive`/`#2y8j`), **focused-cycle** (`#cdtcutover`, `#midturnresumeb` = Phase B), the **branch bundle** awaiting your merge/install nod (`#supstaledetect`, `#qimpstrike`, `#suptmuxstale`, `#ipcproofnostall`, `#agentchange` tests), and `#midturn-recycle-resume`'s live zero-drift proof.
+<!-- agent:boundary:8b4e5a85 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -343,9 +359,9 @@ And `#ipcproofnostall` — the false closeout-interrupt that stalled this queue 
 - 🚧 ~~:pushpin: As I type in the queue, a previous state of the line is duplicated.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~The supervisor restart should reliably resume any running turns. In fact all restarts should reliably resume any running turns. This is crucial when I want to go to sleep and there is a long queue. I want the entire queue finished...not stalled.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~I'm confused over what sessions are running a stale supervisor. Please make the supervisor auto-restart at the first possible chance automatically.~~ — auto-struck: answered this cycle (#ftstrike)
-- :pushpin: JB `Recycle Supervisor` then JB `Run Agent Doc` stalls because the recycle is scheduled to run after the turn starts. But `Run Agent Doc` cannot start the turn.
-- :pushpin: When I change the agent, the supervisor state should pick up the change and be able to dispatch to the new agent.
-- :pushpin: Getting several JB `File Cache Conflict` dialogs.
+- ~~:pushpin: JB `Recycle Supervisor` then JB `Run Agent Doc` stalls because the recycle is scheduled to run after the turn starts. But `Run Agent Doc` cannot start the turn.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~:pushpin: When I change the agent, the supervisor state should pick up the change and be able to dispatch to the new agent.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~:pushpin: Getting several JB `File Cache Conflict` dialogs.~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: test #queuebase
 ---
 The session mechanics still don't work on a new linkedin.md session. I compacted the exchangebefore I began the turn.

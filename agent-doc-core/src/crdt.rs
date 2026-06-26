@@ -177,6 +177,42 @@ fn merge_inner(
     };
     let mut base_text = base_doc.to_text();
 
+    // `#qcellmerge1` op-capture rung (default ON; kill-switch via
+    // `AGENT_DOC_CELL_MERGE=0`). When the cell-merge master gate is enabled (the
+    // production default) AND the live (theirs) side carries real captured editor
+    // ops, route each op to the cell whose span contains it and replay it there,
+    // then run the per-cell 3-way join. Ops are absolute offsets against the
+    // merge base, so this happens BEFORE any stale-base / prefix-advancement
+    // mutation of `base_text`. The op-routed join delegates to `merge_3way`, so
+    // it inherits this branch's disjoint-edit `op_level_merge` and
+    // conflict-surfacing. On any boundary-crossing / framing op (or stale ops)
+    // the cell path signals `fell_back` and we drop through to the existing merge
+    // unchanged — where the text-diff `op_level_merge` serves as the degraded
+    // fallback. Master-gate explicitly OFF (`=0`) or ops-absent is byte-identical
+    // to the legacy path.
+    if let Some(ops) = theirs_editor_ops
+        && !ops.is_empty()
+        && crate::cell_doc::cell_merge_enabled()
+    {
+        let outcome = crate::cell_doc::merge_3way_with_ops(&base_text, ours_text, theirs_text, ops);
+        if !outcome.fell_back {
+            if !outcome.conflicts.is_empty() {
+                eprintln!(
+                    "[crdt] cell_merge(op-routed): {} conflict(s) surfaced (policy=ours-wins)",
+                    outcome.conflicts.len()
+                );
+            }
+            eprintln!(
+                "[crdt] cell_merge(op-routed): {} captured op(s) routed to cells and replayed",
+                ops.len()
+            );
+            return Ok(outcome.merged_text);
+        }
+        eprintln!(
+            "[crdt] cell_merge(op-routed): fell back to legacy merge_inner path (boundary-crossing/framing/stale ops)"
+        );
+    }
+
     eprintln!(
         "[crdt] merge: base_len={} ours_len={} theirs_len={}",
         base_text.len(),

@@ -41,7 +41,10 @@
 use lazily::{CellMap, CellTree, Context, DiffOp, TextCrdt, reconcile};
 
 use crate::component::{self, Component};
-use crate::crdt::{PREAMBLE_KEY, is_list_component, split_exchange_children, split_list_children};
+use crate::crdt::{
+    EditorOp, PREAMBLE_KEY, is_list_component, replay_editor_ops, split_exchange_children,
+    split_list_children,
+};
 use crate::queue_item_lifecycle::QueueItemLifecycle;
 
 /// Environment variable that gates the live CRDT merge per-cell
@@ -266,6 +269,124 @@ fn project_component(doc: &str, comp: &Component, occurrence: usize) -> Componen
         occurrence,
         items,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Op-capture rung (`#qcellmerge1` op routing): span-aware projection.
+//
+// `project_document` exposes `(NodeKey, ItemValue)` without byte spans, so a
+// captured absolute-offset [`EditorOp`] cannot be located in a cell. This rung
+// adds a parallel *span-aware* projection ([`project_document_spans`]) that, for
+// each keyed item, records its **byte span** `(start, end)` in the FULL source
+// document. A component body sits at `&doc[comp.open_end..comp.close_start]`
+// (see `component::Component::content`), and the splitters are lossless
+// (`children.map(text).collect() == body`), so each item's full-doc span is
+// `comp.open_end + accumulated_child_len .. + item_len`. An absolute op offset
+// then resolves to the unique containing item — or to none (structural framing /
+// boundary-crossing), which forces a conservative fallback.
+// ---------------------------------------------------------------------------
+
+/// A half-open byte span `[start, end)` into the full source document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ByteSpan {
+    /// Inclusive start byte offset in the full document.
+    pub start: usize,
+    /// Exclusive end byte offset in the full document.
+    pub end: usize,
+}
+
+impl ByteSpan {
+    /// True when `offset` lies within `[start, end)`.
+    fn contains_offset(&self, offset: usize) -> bool {
+        offset >= self.start && offset < self.end
+    }
+
+    /// True when the whole half-open range `[lo, hi)` lies within this span
+    /// (`lo == hi` permitted at any in-span boundary — an empty edit point).
+    fn contains_range(&self, lo: usize, hi: usize) -> bool {
+        lo >= self.start && hi <= self.end && lo <= hi
+    }
+}
+
+/// One projected item plus its full-document byte span. `node_key` /  `value`
+/// mirror [`ComponentOccurrence::items`]; `span` is the lossless source range of
+/// `value` in the full document (so concatenating an occurrence's spans in order
+/// reproduces its body, and the spans tile the body with no gaps).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemSpan {
+    /// Component name (`queue`, `exchange`, …).
+    pub component: String,
+    /// 0-based occurrence index of that component name.
+    pub occurrence: usize,
+    /// Full `component:occurrence:item-id:index` node key.
+    pub node_key: NodeKey,
+    /// Reorder-stable identity (`component:occurrence:item-id`).
+    pub identity: String,
+    /// The item's exact source text.
+    pub value: ItemValue,
+    /// The item's byte span in the FULL document.
+    pub span: ByteSpan,
+}
+
+/// Project a document into span-aware items, one entry per keyed item across all
+/// component occurrences, in document order. Back-compatible companion to
+/// [`project_document`] (which the 26 existing callers/tests keep using).
+///
+/// Only the **item interiors** are projected: the component open/close markers,
+/// frontmatter, and any inter-component interstitial text are deliberately NOT
+/// covered, so an op landing in that structural framing resolves to no item and
+/// forces the conservative fallback in [`route_ops_to_cells`].
+///
+/// Returns `None` on a parse error (caller falls back).
+pub fn project_document_spans(doc: &str) -> Option<Vec<ItemSpan>> {
+    let components = component::parse(doc).ok()?;
+    // Top-level components only (mirror `parse_doc_nodes` / `segment_into_nodes`).
+    let top: Vec<&Component> = components
+        .iter()
+        .filter(|c| {
+            !components.iter().any(|o| {
+                !std::ptr::eq(o, *c) && o.open_start <= c.open_start && c.close_end <= o.close_end
+            })
+        })
+        .collect();
+    let mut top = top;
+    top.sort_by_key(|c| c.open_start);
+
+    let mut occurrence_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    let mut out = Vec::new();
+    for comp in top {
+        let occ = occurrence_counts.entry(comp.name.clone()).or_insert(0);
+        let occurrence = *occ;
+        *occ += 1;
+        // Body sits at [open_end, close_start); each item span is body-relative
+        // offset translated by `open_end` into the full document.
+        let body_start = comp.open_end;
+        let body = comp.content(doc);
+        let occ_proj = project_component(doc, comp, occurrence);
+        let mut cursor = body_start;
+        for (node_key, value) in occ_proj.items {
+            let start = cursor;
+            let end = start + value.len();
+            cursor = end;
+            out.push(ItemSpan {
+                component: comp.name.clone(),
+                occurrence,
+                identity: node_key_identity(&node_key).to_string(),
+                node_key,
+                value,
+                span: ByteSpan { start, end },
+            });
+        }
+        // Lossless invariant: the item spans must exactly tile the body. If the
+        // splitter ever drifted from `content`, decline (caller falls back) — we
+        // never want an op routed against a mis-tiled body.
+        debug_assert_eq!(cursor, body_start + body.len(), "item spans must tile body");
+        if cursor != body_start + body.len() {
+            return None;
+        }
+    }
+    Some(out)
 }
 
 /// Split a component body into `(item_key, text)` pairs reusing the crdt module's
@@ -1000,9 +1121,9 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
                 // aligned positionally; absent base ⇒ legacy ours-wins.
                 let base = base_interstitials.get(interstitial_index).copied();
                 let chosen = match base {
-                    Some(b) if *o == b => t.as_str(),     // only theirs diverged
-                    Some(b) if t == b => o.as_str(),      // only ours diverged
-                    _ => o.as_str(),                      // both diverged / no base ⇒ ours-wins
+                    Some(b) if *o == b => t.as_str(), // only theirs diverged
+                    Some(b) if t == b => o.as_str(),  // only ours diverged
+                    _ => o.as_str(),                  // both diverged / no base ⇒ ours-wins
                 };
                 out.push_str(chosen);
                 interstitial_index += 1;
@@ -1200,6 +1321,188 @@ fn log_conflicts(conflicts: &[CellConflict]) {
             c.chosen == c.ours,
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Op-capture rung (`#qcellmerge1` op routing): route captured editor ops to the
+// cell whose span contains them, replay per cell, then run the SAME per-cell
+// 3-way join as `merge_3way` — true per-cell op isolation instead of a text-diff
+// guess.
+//
+// Scope boundary (NOT built here): if the SAME cell is changed by BOTH ours and
+// theirs (ours edited it AND theirs has routed ops for it), this rung does NOT
+// character-level interleave — that is plan Phase 6 `#lztextcrdt`. The reused
+// `merge_3way` join treats such a cell via the existing same-level conflict
+// policy (ours-wins, recorded as a conflict; surfaced as an in-band conflict
+// marker when conflict-surfacing is enabled). The win here is: ops in DIFFERENT
+// cells are perfectly isolated and intention-preserved via real replay, and a
+// single-sided same-cell op replays exactly — and because the join delegates to
+// `merge_3way`, the disjoint-edit `op_level_merge` and conflict-surfacing
+// additions on this branch are inherited automatically by the op-routed path.
+// ---------------------------------------------------------------------------
+
+/// Route captured editor ops to the cell (item span) that contains each one,
+/// translating each op's absolute offset to a **cell-local** offset
+/// (`op.offset - span.start`).
+///
+/// Returns `None` (the conservative bail — caller falls back to the text-diff
+/// path) if ANY op:
+/// - lands in structural framing (a component open/close marker, frontmatter, or
+///   inter-item / inter-component interstitial text), i.e. is covered by no item
+///   span;
+/// - crosses a cell boundary (for a `Delete`, the whole `[offset, offset+len)`
+///   range must lie within ONE item span);
+/// - cannot be unambiguously placed (out-of-bounds, or the document failed to
+///   project into spans).
+///
+/// Insert ops use `[offset, offset]` (a point), so an insert exactly at a cell's
+/// trailing boundary is attributed to that cell only when the point is `< end`;
+/// an insert at the very end of an item (== next item's start) attributes to the
+/// next item, matching the editor's left-gravity-free absolute offset.
+pub fn route_ops_to_cells(
+    doc: &str,
+    ops: &[EditorOp],
+) -> Option<std::collections::HashMap<NodeKey, Vec<EditorOp>>> {
+    if ops.is_empty() {
+        return Some(std::collections::HashMap::new());
+    }
+    let spans = project_document_spans(doc)?;
+    let mut routed: std::collections::HashMap<NodeKey, Vec<EditorOp>> =
+        std::collections::HashMap::new();
+    for op in ops {
+        let (node_key, span) = match op {
+            EditorOp::Insert { offset, .. } => {
+                // A point edit: the containing item is the one whose half-open
+                // span includes `offset`. An offset at the document's end, or in
+                // framing, is covered by no item span → bail.
+                let found = spans
+                    .iter()
+                    .find(|s| s.span.contains_offset(*offset))
+                    .or_else(|| {
+                        // Allow an insert exactly at an item's exclusive end only
+                        // when no later item starts there (i.e. it is the trailing
+                        // edge of the last item body). This keeps an append at the
+                        // end of a cell body inside that cell rather than bailing.
+                        spans.iter().find(|s| {
+                            s.span.end == *offset && !spans.iter().any(|o| o.span.start == *offset)
+                        })
+                    });
+                match found {
+                    Some(s) => (s.node_key.clone(), s.span),
+                    None => return None,
+                }
+            }
+            EditorOp::Delete { offset, len } => {
+                let hi = offset.checked_add(*len)?;
+                // The WHOLE delete range must lie within one item span.
+                let found = spans.iter().find(|s| s.span.contains_range(*offset, hi));
+                match found {
+                    Some(s) => (s.node_key.clone(), s.span),
+                    None => return None,
+                }
+            }
+        };
+        let local = translate_to_cell_local(op, span.start)?;
+        routed.entry(node_key).or_default().push(local);
+    }
+    Some(routed)
+}
+
+/// Translate an absolute-offset op into a cell-local op by subtracting the
+/// containing span's start. `None` if the offset is below the span start
+/// (should not happen once routed, but a conservative guard).
+fn translate_to_cell_local(op: &EditorOp, span_start: usize) -> Option<EditorOp> {
+    match op {
+        EditorOp::Insert { offset, text } => Some(EditorOp::Insert {
+            offset: offset.checked_sub(span_start)?,
+            text: text.clone(),
+        }),
+        EditorOp::Delete { offset, len } => Some(EditorOp::Delete {
+            offset: offset.checked_sub(span_start)?,
+            len: *len,
+        }),
+    }
+}
+
+/// Op-aware 3-way per-cell merge: build the `theirs` side per cell by **replaying
+/// the real captured ops** routed to that cell (not a text-diff guess), then run
+/// the SAME per-cell 3-way join as [`merge_3way`].
+///
+/// When routing succeeds, every cell that received ops is reconstructed via
+/// `replay_editor_ops(base_cell_text, routed_ops)`; cells with no routed ops keep
+/// their base text. The reconstructed bodies are reassembled into a synthetic
+/// `theirs` document inside the base framing, and the merge delegates to
+/// [`merge_3way`] (base, ours, theirs-from-ops) so the lifecycle `Live<Struck`
+/// join, the disjoint-edit `op_level_merge`, and honest conflict recording (plus
+/// conflict-surfacing when enabled) all apply unchanged — the real-op path
+/// inherits every engine addition on this branch.
+///
+/// If routing returns `None` (an op crossed a boundary or hit framing), the
+/// outcome has `fell_back = true` and the caller uses the text-diff / legacy
+/// path. A reconstructed `theirs` whose per-cell replay fails (stale ops) also
+/// falls back.
+pub fn merge_3way_with_ops(
+    base: &str,
+    ours: &str,
+    theirs: &str,
+    theirs_ops: &[EditorOp],
+) -> CellMergeOutcome {
+    // Route the live (theirs) ops against the BASE document — the captured ops
+    // are absolute offsets into the document the editor mutated FROM, which is
+    // the merge base.
+    let routed = match route_ops_to_cells(base, theirs_ops) {
+        Some(r) => r,
+        None => return CellMergeOutcome::fallback(),
+    };
+
+    // Reconstruct theirs per cell from the base, replaying routed ops in place,
+    // then reframe losslessly. We rebuild the full theirs text and delegate to
+    // `merge_3way` so the per-cell join is the single shared implementation.
+    let reconstructed_theirs = match reconstruct_theirs_from_ops(base, &routed) {
+        Some(t) => t,
+        None => return CellMergeOutcome::fallback(),
+    };
+
+    // Safety gate (mirrors the crdt op-replay invariant): the per-cell replay
+    // must reproduce the editor-observed `theirs` byte-for-byte. If it does not,
+    // the ops were captured against a divergent base (missed event / stale) — do
+    // not trust them; fall back so the result is never worse than the diff path.
+    if reconstructed_theirs != theirs {
+        eprintln!(
+            "[cell_merge] op-routing replay != theirs (stale/misaligned ops) — falling back to text-diff path"
+        );
+        return CellMergeOutcome::fallback();
+    }
+
+    merge_3way(base, ours, &reconstructed_theirs)
+}
+
+/// Rebuild a full document from `base`, replacing each routed cell's body slice
+/// with its op-replayed text. Cells with no routed ops keep base text. Returns
+/// `None` if the base fails to project into spans or any cell's replay is
+/// out-of-bounds (stale ops).
+fn reconstruct_theirs_from_ops(
+    base: &str,
+    routed: &std::collections::HashMap<NodeKey, Vec<EditorOp>>,
+) -> Option<String> {
+    let spans = project_document_spans(base)?;
+    // Rebuild the document by walking the base bytes and substituting each item
+    // span's text with its op-replayed value. Item spans tile each component body
+    // with no gaps; framing between/around them is copied verbatim from base.
+    let mut out = String::new();
+    let mut cursor = 0usize;
+    for item in &spans {
+        // Copy verbatim framing before this item (markers, frontmatter, gaps).
+        out.push_str(&base[cursor..item.span.start]);
+        let cell_text = match routed.get(&item.node_key) {
+            Some(ops) => replay_editor_ops(&item.value, ops)?,
+            None => item.value.clone(),
+        };
+        out.push_str(&cell_text);
+        cursor = item.span.end;
+    }
+    out.push_str(&base[cursor..]);
+    Some(out)
 }
 
 /// A reactive, per-item representation of a document: a [`CellTree`] root whose
@@ -2593,5 +2896,275 @@ working on it
         );
         // Ours-wins still holds.
         assert!(out.merged_text.contains("OURS-VERSION"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Op-capture front-end (`#qcellmerge1` op routing): span projection,
+    // op routing, op-replayed `theirs`, and composition with the engine.
+    // -----------------------------------------------------------------------
+
+    /// A simple single-component base used by the op-routing tests. Each queue
+    /// item sits on its own line; the item span includes the trailing newline
+    /// (the keyed-child splitter is lossless line-by-line).
+    const OPDOC: &str = "\
+<!-- agent:queue -->
+- do [#alpha] first task
+- do [#beta] second task
+- do [#gamma] third task
+<!-- /agent:queue -->
+";
+
+    /// `project_document_spans` tiles each component body losslessly: the item
+    /// spans, concatenated in order, exactly reproduce the body text, and each
+    /// span's slice equals its projected value.
+    #[test]
+    fn project_document_spans_tiles_body_losslessly() {
+        let spans = project_document_spans(OPDOC).expect("spans project");
+        assert_eq!(spans.len(), 3, "three queue items: {spans:?}");
+        // Each span slices to its own value.
+        for s in &spans {
+            assert_eq!(&OPDOC[s.span.start..s.span.end], s.value.as_str());
+        }
+        // Spans are contiguous and tile the queue body with no gaps/overlap.
+        for w in spans.windows(2) {
+            assert_eq!(w[0].span.end, w[1].span.start, "spans must be contiguous");
+        }
+        // The concatenation reproduces the body between the open/close markers.
+        let body_start = OPDOC.find("first task").unwrap() - "- do [#alpha] ".len();
+        let body_end = OPDOC.find("<!-- /agent:queue -->").unwrap();
+        let reassembled: String = spans.iter().map(|s| s.value.clone()).collect();
+        assert_eq!(reassembled, &OPDOC[body_start..body_end]);
+        // Identities are the durable reorder-stable keys.
+        assert_eq!(spans[0].identity, "queue:0:id:alpha");
+        assert_eq!(spans[2].identity, "queue:0:id:gamma");
+    }
+
+    /// An op landing wholly inside one cell routes to that cell with a
+    /// cell-local offset; a delete that crosses a cell boundary forces the
+    /// conservative `None` bail (caller falls back).
+    #[test]
+    fn route_ops_to_cells_places_by_span_and_bails_on_boundary_cross() {
+        let spans = project_document_spans(OPDOC).unwrap();
+        let beta = spans
+            .iter()
+            .find(|s| s.identity == "queue:0:id:beta")
+            .unwrap();
+        // Insert " THEIRS" just before beta's trailing newline (inside beta).
+        let abs = OPDOC.find("second task").unwrap() + "second task".len();
+        assert!(beta.span.contains_offset(abs), "offset must be in beta");
+        let ops = vec![EditorOp::Insert {
+            offset: abs,
+            text: " THEIRS".to_string(),
+        }];
+        let routed = route_ops_to_cells(OPDOC, &ops).expect("routes");
+        assert_eq!(routed.len(), 1, "exactly one cell touched");
+        let (key, cell_ops) = routed.iter().next().unwrap();
+        assert_eq!(node_key_identity(key), "queue:0:id:beta");
+        // The op's offset is translated to cell-local (offset - span.start).
+        match &cell_ops[0] {
+            EditorOp::Insert { offset, text } => {
+                assert_eq!(*offset, abs - beta.span.start, "cell-local offset");
+                assert_eq!(text, " THEIRS");
+            }
+            other => panic!("expected insert, got {other:?}"),
+        }
+
+        // A delete spanning from inside beta into gamma crosses a boundary → bail.
+        let gamma = spans
+            .iter()
+            .find(|s| s.identity == "queue:0:id:gamma")
+            .unwrap();
+        let cross_len = gamma.span.start + 1 - beta.span.start;
+        let crossing = vec![EditorOp::Delete {
+            offset: beta.span.start,
+            len: cross_len,
+        }];
+        assert!(
+            route_ops_to_cells(OPDOC, &crossing).is_none(),
+            "boundary-crossing delete must bail to None"
+        );
+
+        // An op in structural framing (the open marker) is covered by no item
+        // span → bail.
+        let framing = vec![EditorOp::Insert {
+            offset: 1,
+            text: "x".to_string(),
+        }];
+        assert!(
+            route_ops_to_cells(OPDOC, &framing).is_none(),
+            "framing op must bail to None"
+        );
+    }
+
+    /// The real-op path reconstructs `theirs` from captured ops and merges via
+    /// `merge_3way`: a single-sided op in one cell lands, untouched cells stay.
+    #[test]
+    fn merge_3way_with_ops_replays_real_ops_and_merges() {
+        // theirs edits beta via a real insert; ours is unchanged from base.
+        let abs = OPDOC.find("second task").unwrap() + "second task".len();
+        let ops = vec![EditorOp::Insert {
+            offset: abs,
+            text: " THEIRS".to_string(),
+        }];
+        let theirs = OPDOC.replace(
+            "- do [#beta] second task\n",
+            "- do [#beta] second task THEIRS\n",
+        );
+        let out = merge_3way_with_ops(OPDOC, OPDOC, &theirs, &ops);
+        assert!(!out.fell_back, "real-op path should merge, not fall back");
+        assert!(out.conflicts.is_empty(), "single-sided: no conflict");
+        assert!(out.merged_text.contains("second task THEIRS"));
+        // Untouched cells preserved.
+        assert!(out.merged_text.contains("- do [#alpha] first task\n"));
+        assert!(out.merged_text.contains("- do [#gamma] third task\n"));
+    }
+
+    /// The byte-for-byte safety gate: if the routed-op replay does NOT reproduce
+    /// the editor-observed `theirs` (stale / misaligned ops), the path declines
+    /// (`fell_back`) instead of trusting the ops.
+    #[test]
+    fn merge_3way_with_ops_safety_gate_falls_back_on_stale_ops() {
+        // Ops claim a " THEIRS" insert, but the supplied `theirs` text says
+        // something different (DIVERGENT) — replay(base, ops) != theirs.
+        let abs = OPDOC.find("second task").unwrap() + "second task".len();
+        let ops = vec![EditorOp::Insert {
+            offset: abs,
+            text: " THEIRS".to_string(),
+        }];
+        let divergent_theirs = OPDOC.replace(
+            "- do [#beta] second task\n",
+            "- do [#beta] second task DIVERGENT\n",
+        );
+        let out = merge_3way_with_ops(OPDOC, OPDOC, &divergent_theirs, &ops);
+        assert!(
+            out.fell_back,
+            "stale/misaligned ops must trip the byte-for-byte safety gate"
+        );
+    }
+
+    /// A boundary-crossing op makes routing return `None`, so the op-aware path
+    /// declines and the caller uses the text-diff fallback.
+    #[test]
+    fn merge_3way_with_ops_falls_back_on_framing_op() {
+        // An op in the open-marker framing routes to no cell → fall back.
+        let ops = vec![EditorOp::Insert {
+            offset: 1,
+            text: "x".to_string(),
+        }];
+        // theirs text is irrelevant here (routing bails before the safety gate).
+        let out = merge_3way_with_ops(OPDOC, OPDOC, OPDOC, &ops);
+        assert!(out.fell_back, "framing op must fall back");
+    }
+
+    /// COMPOSITION: the op-routed path delegates to `merge_3way`, so a same-cell
+    /// concurrent edit (ours edits beta, theirs has a routed op for beta) still
+    /// gets the engine's conflict-surfacing — the real-op front-end inherits the
+    /// branch's engine additions.
+    #[test]
+    fn op_routed_same_cell_inherits_conflict_surfacing() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        // Force the conflict-marker sub-gate ON deterministically.
+        unsafe {
+            std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, "1");
+        }
+        // ours edits beta one way; theirs' real op edits beta a DIFFERENT way to
+        // the SAME region → a genuine same-cell conflict after delegation.
+        let ours = OPDOC.replace(
+            "- do [#beta] second task\n",
+            "- do [#beta] second task OURS-VERSION\n",
+        );
+        let abs = OPDOC.find("second task").unwrap() + "second task".len();
+        let ops = vec![EditorOp::Insert {
+            offset: abs,
+            text: " THEIRS-VERSION".to_string(),
+        }];
+        let theirs = OPDOC.replace(
+            "- do [#beta] second task\n",
+            "- do [#beta] second task THEIRS-VERSION\n",
+        );
+        let out = merge_3way_with_ops(OPDOC, &ours, &theirs, &ops);
+        unsafe {
+            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
+        }
+        assert!(!out.fell_back, "real-op path should merge: {out:?}");
+        assert_eq!(
+            out.conflicts.len(),
+            1,
+            "same-cell divergence surfaces a conflict via merge_3way: {:?}",
+            out.conflicts
+        );
+        let c = &out.conflicts[0];
+        assert_eq!(c.identity, "queue:0:id:beta");
+        assert!(c.ours.contains("OURS-VERSION"));
+        assert!(c.theirs.contains("THEIRS-VERSION"));
+        // Conflict-surfacing (engine addition) reached the op-routed result:
+        // both versions appear in-band via the surfaced marker block.
+        assert!(
+            out.merged_text.contains("OURS-VERSION") && out.merged_text.contains("THEIRS-VERSION"),
+            "op-routed path must inherit in-band conflict-surfacing: {}",
+            out.merged_text
+        );
+    }
+
+    /// COMPOSITION: the op-routed path also inherits the disjoint-edit
+    /// `op_level_merge` — two real ops in DIFFERENT regions of the SAME cell
+    /// converge with BOTH preserved and NO conflict.
+    #[test]
+    fn op_routed_disjoint_same_cell_edits_inherit_op_level_merge() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        // Ensure the opcapture sub-gate is at its default-ON behavior.
+        unsafe {
+            std::env::remove_var(CELL_MERGE_OPCAPTURE_ENV);
+        }
+        // ours appends to the END of beta's text; theirs' real op inserts at the
+        // START of beta's content — disjoint regions of the same cell.
+        let ours = OPDOC.replace(
+            "- do [#beta] second task\n",
+            "- do [#beta] second task OURS_TAIL\n",
+        );
+        // theirs op: insert "THEIRS_HEAD " right after "[#beta] ".
+        let head_abs = OPDOC.find("second task").unwrap();
+        let ops = vec![EditorOp::Insert {
+            offset: head_abs,
+            text: "THEIRS_HEAD ".to_string(),
+        }];
+        let theirs = OPDOC.replace(
+            "- do [#beta] second task\n",
+            "- do [#beta] THEIRS_HEAD second task\n",
+        );
+        let out = merge_3way_with_ops(OPDOC, &ours, &theirs, &ops);
+        assert!(!out.fell_back, "real-op path should merge: {out:?}");
+        assert!(
+            out.conflicts.is_empty(),
+            "disjoint same-cell edits must converge with no conflict: {:?}",
+            out.conflicts
+        );
+        assert!(
+            out.merged_text.contains("THEIRS_HEAD") && out.merged_text.contains("OURS_TAIL"),
+            "both disjoint edits must survive (op_level_merge): {}",
+            out.merged_text
+        );
+    }
+
+    /// When ops are ABSENT, the merge takes the existing text-diff path
+    /// (`merge_3way`), proving the op front-end is purely additive — nothing is
+    /// wasted in the degraded (no-capture) mode.
+    #[test]
+    fn ops_absent_uses_text_diff_path() {
+        // ours edits alpha, theirs edits gamma — different cells, no ops.
+        let ours = OPDOC.replace(
+            "- do [#alpha] first task\n",
+            "- do [#alpha] first task OURS\n",
+        );
+        let theirs = OPDOC.replace(
+            "- do [#gamma] third task\n",
+            "- do [#gamma] third task THEIRS\n",
+        );
+        // Direct text-diff engine call (the path merge_inner uses when ops==None).
+        let out = merge_3way(OPDOC, &ours, &theirs);
+        assert!(!out.fell_back);
+        assert!(out.conflicts.is_empty());
+        assert!(out.merged_text.contains("first task OURS"));
+        assert!(out.merged_text.contains("third task THEIRS"));
     }
 }

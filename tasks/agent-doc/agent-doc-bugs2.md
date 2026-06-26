@@ -181,7 +181,19 @@ Before flipping default-ON I found **pre-existing uncommitted real-editor-op-cap
 **Verification (independently re-run):** `make check` **5364 passed, 0 failed**; `cargo build --release` green.
 
 **Status:** merged to agent-doc `main`; **installing as the closing step** of this turn (supervisor recycles onto the new binary at its idle boundary — `AGENT_DOC_CELL_MERGE=0` is the instant rollback if any live regression shows). The earlier IPC-blocked `#qcellconflict` reap also resolved (now archived). Remaining = your live eyeball that per-cell merge behaves on a real edit-during-finalize (the `#qcm1verify` proof), now that it's the live default.
-<!-- agent:boundary:1f71935a -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=bc1d42f6-ab84-4e6c-8e56-876061a84715 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=28499 candidate_hash=101e5e61f825b0f338cdd6b5a7c0e8c2638417c79ffd744fa1670250ea550fcd content_ours_len=30100 content_ours_hash=159480f8e917df915bb0bb88aee500bd6d53012b2450deccf9fc8cb30afe1300 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782451457938
+```
+<!-- agent:boundary:83085672 -->
 <!-- /agent:exchange -->
 
 ## Queue

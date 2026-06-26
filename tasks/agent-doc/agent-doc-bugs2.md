@@ -51,7 +51,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=5763e16d-7cf8-4d26-9f7d-56ec49a3f151 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=111311 candidate_hash=5a7016ec672a4c0a0af21dd22a762e2da41c94e3a575a6fda749fe3c8227af29 content_ours_len=113340 content_ours_hash=f10b4b17efc726dd885def872cb187fe4c9984817b96c0bc57c2cc6c2d834ce8 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782513543058
 ```
-<!-- agent:boundary:b17ff264 -->
+<!-- agent:boundary:0a943b14 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -59,14 +59,13 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 [#syncbarrier] [#qheadstrikeauto] [#actorprune] [#suprestassoc]
 - [#2y8j] [#cdtcutover] [#qeditdup] [#crdtauth6] [#nsfz] [#kj5flive]
-- :pushpin: do [#qheadstrikeauto]
-- :pushpin: do [#actorprune]
-- :pushpin: do [#suprestassoc]
-- do [#cdtcutover]
-- do [#qeditdup]
-- do [#crdtauth6]
-- do [#nsfz]
-- do [#kj5flive]
+- I deleted items from the queue but they reappeared
+- When auto-adding queue items, verify that the item is not already in the queue. Do not add duplicates.
+- JB `Run Agent Doc` flooded the prompt with duplicate `agent-doc .../agent-doc-bugs2.md` dispatch prompts. Please fix the root cause.
+- do [#q9w3]
+- do [#f693]
+- do [#fpyh]
+- do [#818s]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -93,6 +92,10 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#q9w3] provauth2=#agent-doc-bug operator queue deletes resurrected + auto-add duplicates. sync_backlog_into_queue (Append/Sync) re-adds any active queue-attr backlog id absent from the queue, so an operator delete is undone next preflight; multi-id/manual lines also defeat the existing-id dedup. Fix: record operator-origin deletes of do-id lines (snapshot vs working-tree) as a session tombstone the mirror honors, and dedup against ALL ids on a line + existing entries so auto-add never duplicates. Smallest standalone win. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
+- [ ] [#f693] provauth1=#agent-doc-feature CRDT transaction-origin tagging: tag every yrs transaction in crdt.rs/crdt_sync.rs as Operator (editor DocumentListener delta over IPC, the crdtauth seam) / Binary (finalize/write/preflight writeback) / Mirror (backlog-queue auto-sync); persist origin per delta so any span author survives restart. Foundation for provenance authority. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
+- [ ] [#fpyh] provauth3=#agent-doc-bug replace content-based recovery heuristics (content_ours / manual-cleanup / stale-editor resurrection guards) with origin checks where origin is known: an Operator-origin working-tree change IS the authoritative prompt and is never reset or treated as suspicious cleanup; content heuristics remain only as the unknown-origin fallback. Depends on provauth1. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
+- [ ] [#818s] provauth4=#agent-doc-feature per-cell provenance riding qcellmerge per-cell merge isolation so agent console/response content can never splice into an operator-authored cell (queue). Live proof captured: a console line appeared as a queue item. Depends on provauth1 + qcellmerge. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#syncbarrier] #agent-doc-feature Phase 1 (editor-sync barrier) — epoch handshake so the binary DEFERS dangerous ops (snapshot reset / disk reconcile / merge-base rebuild) while an editor edit is in flight, bounded wait, fail-OPEN to the editor buffer (never a held lock, never snapshot-discard). Poll-check = yrs StateVector exchange, not text compare. Needs JB/VSCode edit_epoch + StateVector over IPC (extend State method). Phase 0 #ipctruncrecover shipped (0.34.53). Plan: tasks/agent-doc/plan-editor-sync-barrier.md
 - [ ] [#qheadstrikeauto] #agent-doc-feature auto-strike answered free-text head WITHOUT requiring the agent to quote it as a > **Queue prompt:** blockquote — operator: "the binary should do this automatically...not the agent". Today strike_answered_free_text_queue_heads (queue_consume.rs) only fires on a blockquote/prose-prefix match, so a head answered in plain prose is never struck. Key the strike off the binary drain-target / in-progress (the marker) head identity for the cycle instead of agent prose formatting. Plan: tasks/agent-doc/plan-freetext-queue-head-autostrike.md
 - [ ] [#actorprune] #agent-doc-feature auto-prune dead actor records: `admin list` shows 251 actors, ~all `(dead) closed pid=? session=session-clear`; gc only closes `Starting` actors (project_controller.rs:1716), nothing removes long-dead `Closed` records so they accumulate unbounded. Add prune_dead_actors (lease-guarded) + wire into gc + one-shot prune for the current backlog. Plan: tasks/agent-doc/plan-prune-dead-actors.md

@@ -50,7 +50,36 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=f9eedbbe-320d-4720-9bca-2856e0b7378a invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782446080826
 ```
-<!-- agent:boundary:1e73abeb -->
+
+### Re: contextual lender chat — holding for the complete spec — opus-4-8
+
+> **Queue prompt:**
+>
+> In the lender portal, make the chat contextual. So if a lender is viewing an available deal or a interested in deal, show the thread releating to that deal. Outgoing email threads will have the property as the subject.
+
+
+Recovered the session first: the doc had just been compacted (archive `…-20260626-040603.md`), so the snapshot/CRDT still held the full pre-compact exchange (37KB) while the visible file was the 20KB compacted version — `reset --from-current --preserve-session` re-aligned the sidecars and the compaction is now cleanly committed to HEAD.
+
+I'm **holding** rather than building, because the queue spec is still being written:
+
+1. `🚧` **In the lender portal, make the chat contextual** — when a lender is viewing an available deal or an interested-in deal, show the thread relating to that deal; outgoing email threads use the property as the subject. *(held by your 🚧 marker)*
+2. **"If the lender does not have a deal open, show all communication. Full screen message dialog wi…"** — this line is cut off mid-word, so the fallback/full-screen behavior isn't fully specified yet.
+3. `deploy`
+
+What I've got so far: deal-scoped thread when a deal is open, property name as the email subject, and an all-communication view with a full-screen message dialog when no deal is open. Finish item 2 (and clear the `🚧` on item 1 when you're ready) and I'll build it under the `#spec-test-commit-push` preset. I did **not** auto-drain — the head is explicitly held and the spec is incomplete.
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=3ae68396-d61c-4583-b743-3b1b227962af invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782446978966
+```
+<!-- agent:boundary:5c38fbf7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,8 +99,10 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- 🚧 In the lender portal, make the chat contextual. So if a lender is viewing an available deal or a interested in deal, show the thread releating to that deal. Outgoing email threads will have the property as the subject.
-- If the lender does not have a deal open, show all communication. 
+- ~~In the lender portal, make the chat contextual. So if a lender is viewing an available deal or a interested in deal, show the thread releating to that deal. Outgoing email threads will have the property as the subject.~~
+- If the lender does not have a deal open, show all communication. Full screen message dialog with each thread as a tab.
+- If the lender has a deal open, show all threads but select the property thread. If there are no messages in the thread, show it for the deal. If the lender does not express interest, the deal thread should not show up unless the lender sent a message or expressed interest.
+- The general thread is for all other correspondence with EFS. Such as general questions, help with the Accredation process, etc. This general thread should be the first tab in the Messages dialog.
 - deploy
 <!-- /agent:queue -->
 

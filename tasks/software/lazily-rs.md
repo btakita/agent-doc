@@ -56,7 +56,30 @@ Compacted content:
 So the **compressed library payload is ~6.4 KB gzipped (6,433 bytes)** / ~5.8 KB brotli (5,779 bytes) — that's the JS a consumer actually imports and runs (koffi, the one runtime dependency, is separate and not counted here).
 
 For contrast, the **published npm tarball** (`npm pack`) is **16,355 bytes** gzipped (68,695 unpacked, 15 files) — but that figure is inflated because the package has no `files`/`.npmignore`, so it also packs the test suite (`test/ipc.test.js` + `test/state-projection.test.js` ≈ 21 KB raw), the conformance JSON fixtures, `AGENTS.md`, and the `.d.ts` type stubs. None of that runs in a consumer; adding `"files": ["src/*.js", "src/*.d.ts"]` would drop the tarball to roughly the runtime + types (~3–4 KB packed). Flagging as an observation — not changing packaging unprompted.
-<!-- agent:boundary:ae407c06 -->
+
+### Re: Does lazily-rs benchmark well at 10M-cell recalc vs. other reactive libraries? — opus-4-8
+
+> **Queue prompt:** Does lazily-rs benchmark well with the 10M cell recalc compared to other reactive libraries?
+
+Short version: lazily-rs's **own** 10M numbers are strong, but there is **no apples-to-apples head-to-head in this repo** — `src/lazily-rs/benches/` only holds lazily's own benchmarks (`scale.rs` is the 10M one), and `BENCHMARKS.md` has no SolidJS / MobX / Preact-Signals / Reactively comparison. So a literal "beats library X at 10M" claim isn't backed by existing data. Here's what the data + architecture do support.
+
+**Measured at Google-Sheets scale (10M cells = 5M inputs + 5M formulas, single criterion run, 186 GB host):**
+
+| case | mean | per cell |
+|---|---:|---:|
+| `build` (10M cells) | ~706 ms | ~71 ns |
+| `cold_full_recalc` (5M) | ~518 ms | ~104 ns |
+| `full_recalc_invalidate_all` (5M) | ~329 ms | ~66 ns |
+| `viewport_recalc` (1k) | **~11.4 µs** | ~11 ns |
+
+So it backs a full-capacity Google Sheets workbook: build < 1 s, full recompute ~0.5 s.
+
+**Why that's favorable against the broad reactive-library landscape:**
+1. **It's lazy / pull-based (demand-driven).** The headline isn't the 0.5 s full recompute — it's that `viewport_recalc` is **~11 µs and independent of sheet size** (also ~11.5 µs at 1M). Editing one input and reading a 1k-cell viewport leaves every off-viewport formula dirty and never recomputes it → cost is O(cells you read), not O(sheet). Eager / push (or hybrid) signal systems — Solid, Preact Signals, MobX — do more work per edit at this scale. The design family lazily actually competes in is the lazy memo-based one (**Reactively / milomg**, **S.js**); lazily matches that demand-driven property in native Rust.
+2. **Flat per-node cost + sparse arena.** ~70–100 ns/cell held ~constant from 1M → 10M (linear, no degradation at capacity), and storage is a sparse `Vec<Option<Node>>` arena (~216 B/node), so only populated cells allocate. The standard cross-library reactivity benchmarks (js-reactivity-benchmark, cellx) measure *propagation through small/medium graphs* — diamond/fan-in shapes, thousands of nodes — not a dense 10M-node graph (which is memory-prohibitive in a JS heap and outside what those libs are built/measured for). At 10M, lazily isn't really racing them; it's in Rust-native, spreadsheet-scale territory most reactive libraries are neither designed nor benchmarked to enter.
+
+**Honest caveat:** because no 10M head-to-head exists, the defensible statement is "lazily backs a full-capacity Google Sheets workbook with microsecond viewport edits — something most reactive libraries are not benchmarked to do," **not** a ranked "faster than X." If you want a genuine comparison I'd port the `scale` graph shape (N inputs + N formulas, `formula[i] = input[i] + input[i-1]`) into a harness running **Reactively** and/or a Rust reactive lib (`leptos_reactive` / `futures-signals`) at matched N and add a comparison table to `BENCHMARKS.md`. That's a real piece of work, not a doc tweak — say the word (e.g. queue `#lzscalecompare`) and I'll build it; I'm not auto-filing it into this go-queue so it doesn't silently start.
+<!-- agent:boundary:e5eb270d -->
 <!-- /agent:exchange -->
 ###
 <!--

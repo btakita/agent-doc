@@ -1923,6 +1923,19 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
             }
         }
     }
+    // `#ipctruncrecover`: a degraded editor-IPC write can leave the on-disk working
+    // tree TRUNCATED below HEAD while the live editor buffer still holds the
+    // authoritative content (operator edits + the last committed response). The
+    // generic `SnapshotDiffersFromHead` guard below would bail and force the operator
+    // / agent into `git stash`/`reset`/`checkout` recovery. Per operator directive,
+    // recover from the EDITOR BUFFER instead: flush it to disk (editor = source of
+    // truth) and reset the snapshot to HEAD so the editor's edits become the normal
+    // next-cycle prompt diff. Fail-OPEN: any missing listener / un-acked flush / a
+    // buffer that itself lost the committed response falls through to the bail+hint —
+    // never block typing, never auto-commit a response-less document.
+    if recover_ipc_truncated_worktree_from_editor_buffer(file, rc)? {
+        return Ok(());
+    }
     if let Some(message) =
         crate::session_check::detect_uncommitted_closeout_drift_with_context(file, rc)?
     {
@@ -1937,6 +1950,92 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
         anyhow::bail!("{}", message);
     }
     Ok(())
+}
+
+/// `#ipctruncrecover`: reconcile an IPC-truncated working tree from the live editor
+/// buffer instead of bailing the layout guard. See the call site for the rationale.
+///
+/// Returns `Ok(true)` only when it actually recovered (flushed the editor buffer to
+/// disk, verified it preserved HEAD's committed `exchange`, and reset the snapshot to
+/// HEAD). Returns `Ok(false)` — letting the caller fall through to the standard
+/// bail+hint — whenever recovery is not safely possible: not the truncation shape, an
+/// unstarted prompt-bearing diff (its own path owns it), no live IPC listener, an
+/// un-acked flush, or a flushed buffer that lost committed response content. Fail-open
+/// by construction: it never blocks and never commits a response-less document.
+fn recover_ipc_truncated_worktree_from_editor_buffer(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<bool> {
+    // Only the snapshot-vs-HEAD divergence shape that bails today.
+    if !matches!(
+        rc.snapshot_commit_status(),
+        crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
+    ) {
+        return Ok(false);
+    }
+    // An unstarted prompt-bearing diff has its own normal handling — don't interfere.
+    if crate::session_check::detect_unstarted_prompt_bearing_diff(file)?.is_some() {
+        return Ok(false);
+    }
+    // HEAD is the baseline we reset the snapshot to; without it we cannot recover.
+    let Some(head) = rc.head_content() else {
+        return Ok(false);
+    };
+    let Ok(canonical) = file.canonicalize() else {
+        return Ok(false);
+    };
+    let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
+    // The editor buffer is only authoritative when a live editor is attached.
+    if !crate::ipc_socket::is_listener_active(&project_root) {
+        return Ok(false);
+    }
+
+    // Flush the live editor buffer to disk (editor = source of truth). Fail-open: an
+    // error or absent ack means we cannot trust disk == buffer, so fall through.
+    let patch_id = uuid::Uuid::new_v4().to_string();
+    let path_str = canonical.to_string_lossy().to_string();
+    match crate::ipc_socket::send_save_document(&project_root, &path_str, &patch_id) {
+        Ok(true) => {}
+        Ok(false) | Err(_) => return Ok(false),
+    }
+
+    // Re-read disk (now the flushed editor buffer) and refuse to trust a buffer that
+    // itself dropped the committed response — that case falls through to the safe bail
+    // rather than auto-committing a response-less document.
+    let flushed = std::fs::read_to_string(&canonical)
+        .with_context(|| format!("ipc-truncation recover: re-read failed {}", canonical.display()))?;
+    if !crate::write::editor_buffer_preserved_head_exchange(&flushed, &head) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "ipc_truncation_recover_rejected file={} reason=editor_buffer_lost_committed_exchange flushed_len={} head_len={}",
+                file.display(),
+                flushed.len(),
+                head.len()
+            ),
+        );
+        return Ok(false);
+    }
+
+    // Reset the snapshot to HEAD: the editor's uncommitted edits now read as the
+    // normal next-cycle prompt diff (editor-on-disk vs snapshot=HEAD).
+    crate::snapshot::save(file, &head)?;
+    rc.invalidate_snapshot_content();
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_truncation_recovered_from_editor_buffer file={} flushed_len={} head_len={} patch_id={}",
+            file.display(),
+            flushed.len(),
+            head.len(),
+            patch_id
+        ),
+    );
+    eprintln!(
+        "[preflight] #ipctruncrecover: reconciled IPC-truncated working tree from the live editor buffer for {} (no git recovery needed)",
+        file.display()
+    );
+    Ok(true)
 }
 
 fn recover_route_queue_snapshot_commit_boundary(

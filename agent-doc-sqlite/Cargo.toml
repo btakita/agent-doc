@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-sqlite"
-version = "0.34.52"
+version = "0.34.53"
 edition = "2024"
 description = "SQLite-backed persistence layer for agent-doc (archive index, controller state store) — isolates the bundled-SQLite C build from agent-doc-orchestration recompiles"
 license = "MIT"

@@ -811,7 +811,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // +1 (`reason=struck_items_below_close_marker`): queue-escape repair logs
         // when it removed struck queue items displaced below the closing marker
         // (#queue-completed-items-escape-below-component).
-        ("agent-doc-orchestration/src/preflight.rs", "reason=") => 2,
+        // +1 (`reason=editor_buffer_lost_committed_exchange`): #ipctruncrecover —
+        // the layout-guard editor-buffer-as-truth recovery logs when it REFUSED to
+        // trust a flushed editor buffer that itself dropped the committed `exchange`
+        // response, falling through to the safe bail instead of auto-committing a
+        // response-less document.
+        ("agent-doc-orchestration/src/preflight.rs", "reason=") => 3,
         ("agent-doc-orchestration/src/preflight/run.rs", "reason=") => 1,
         // 1 -> 2 (`reason=clean_session|operator_verify`): the go-mode
         // backlog→queue sync skips agent-undrainable heads and logs

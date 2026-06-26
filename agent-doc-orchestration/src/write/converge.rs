@@ -793,6 +793,45 @@ pub fn reconcile_postcommit_exchange_to_head(working: &str, head: &str) -> Optio
     Some(out)
 }
 
+/// `#ipctruncrecover` — true when a flushed editor buffer (`flushed`) preserved every
+/// committed `exchange` (response) line from `head`. The agent owns `exchange`, so a
+/// trustworthy editor buffer may add editor-owned content (queue/backlog edits) and may
+/// drop nothing HEAD committed in the response component. Used by the preflight
+/// editor-buffer-as-truth recovery to refuse trusting an editor buffer that *itself* lost
+/// the committed response (e.g. a doubly-truncated buffer) — that case falls through to the
+/// safe bail instead of auto-reconciling to a response-less document. Line-set containment
+/// over normalized bodies so `(HEAD)` / boundary markers do not perturb the comparison.
+/// Conservatively returns `false` when either side fails to parse or lacks an `exchange`
+/// component, so an unparseable flush is never silently trusted.
+pub fn editor_buffer_preserved_head_exchange(flushed: &str, head: &str) -> bool {
+    let (Ok(flushed_comps), Ok(head_comps)) =
+        (crate::component::parse(flushed), crate::component::parse(head))
+    else {
+        return false;
+    };
+    let (Some(head_exchange), Some(flushed_exchange)) = (
+        head_comps.iter().find(|c| c.name == AGENT_RESPONSE_COMPONENT),
+        flushed_comps
+            .iter()
+            .find(|c| c.name == AGENT_RESPONSE_COMPONENT),
+    ) else {
+        return false;
+    };
+    let norm = |t: &str| crate::git::normalize_transient_agent_doc_markers(t);
+    let head_norm = norm(head_exchange.content(head));
+    let flushed_norm = norm(flushed_exchange.content(flushed));
+    let flushed_lines: HashSet<&str> = flushed_norm
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    head_norm
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .all(|l| flushed_lines.contains(l))
+}
+
 /// `#pzjy` — repair a stale live editor buffer that resurrected queue prompts
 /// HEAD already committed as completed. This is deliberately directional:
 /// HEAD-completed + working-active is repaired, while HEAD-active +
@@ -3290,5 +3329,48 @@ mod core_tests {
             result.is_ok(),
             "minor snapshot/file size drift should not block writes"
         );
+    }
+
+    // `#ipctruncrecover`: the containment guard the preflight editor-buffer recovery
+    // uses to refuse trusting an editor buffer that itself lost the committed response.
+    fn doc_with_exchange(exchange_body: &str, queue_body: &str) -> String {
+        format!(
+            "---\nagent_doc_format: template\n---\n<!-- agent:exchange -->\n{exchange_body}\n<!-- /agent:exchange -->\n## Queue\n<!-- agent:queue -->\n{queue_body}\n<!-- /agent:queue -->\n"
+        )
+    }
+
+    #[test]
+    fn editor_buffer_preserved_head_exchange_accepts_buffer_with_head_response_plus_editor_edits() {
+        // HEAD committed a response; the flushed editor buffer keeps that whole response
+        // and adds an editor-owned queue edit. The response was not lost → trust it.
+        let head = doc_with_exchange("### Re: topic\n\nThe committed answer.", "- do [#a]");
+        let flushed = doc_with_exchange(
+            "### Re: topic\n\nThe committed answer.",
+            "- do [#a]\n- a new operator queue line",
+        );
+        assert!(editor_buffer_preserved_head_exchange(&flushed, &head));
+    }
+
+    #[test]
+    fn editor_buffer_preserved_head_exchange_rejects_buffer_that_dropped_committed_response() {
+        // The flushed buffer is itself truncated — it lost a committed response line.
+        // Recovery must refuse and fall through to the safe bail.
+        let head = doc_with_exchange(
+            "### Re: topic\n\nThe committed answer.\n\nA second committed paragraph.",
+            "- do [#a]",
+        );
+        let flushed = doc_with_exchange("### Re: topic\n\nThe committed answer.", "- do [#a]");
+        assert!(!editor_buffer_preserved_head_exchange(&flushed, &head));
+    }
+
+    #[test]
+    fn editor_buffer_preserved_head_exchange_ignores_boundary_markers() {
+        // A `(HEAD)` boundary annotation on the flushed side must not perturb the match.
+        let head = doc_with_exchange("### Re: topic\n\nThe committed answer.", "- do [#a]");
+        let flushed = doc_with_exchange(
+            "### Re: topic (HEAD)\n\nThe committed answer.",
+            "- do [#a]",
+        );
+        assert!(editor_buffer_preserved_head_exchange(&flushed, &head));
     }
 }

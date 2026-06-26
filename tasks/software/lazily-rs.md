@@ -152,7 +152,28 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=b33bef9b-a012-4fc9-b867-f6c1e33a66b7 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=19301 candidate_hash=a9c42396835a162182af3e3e7c5864235ee2218b4177322dcf38b348aacd2419 content_ours_len=19262 content_ours_hash=b4ccff96ad64b71cef90c33efa7443a52738abc5d13182b26d64ef0a15e1cebf doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782448077745
 ```
-<!-- agent:boundary:9da3c298 -->
+
+### Re: go lzcrdtplane5b — opus-4-8
+
+Done — **`#lzcrdtplane5b` (FINAL phase of `#lzcrdtplane`)** is implemented, `make check`-green, committed, and pushed. This completes Phase 5 / the whole distributed CRDT plane.
+
+**What landed** (lazily-rs `920c786`, superproject gitlink `c83159653`):
+
+- **`src/crdt_plane.rs` — `CrdtPlaneRuntime`** (gated `distributed` + `webrtc`), the live glue between the plane primitives and a reactive graph's `merge: crdt` root cells:
+  - **Registry** of `ReplicatedCell` root cells addressed by `NodeId` + optional wire-stable `NodeKey` (producer projection, `#lzwirekey`).
+  - **`local_update`** — ticks the plane `Hlc`, mutates the typed cell, records the converged state in the `OpLog`, returns the `CrdtOp` to broadcast.
+  - **`ingest`** — folds each not-yet-seen `CrdtOp` into its target replica via `ReplicatedCell::merge_remote` (driving downstream derived slots) and advances the clock + stamp frontier so the watermark + Seq/Text GC stay sound; idempotent (the `OpLog` dedups by stamp).
+  - **`sync_frame` / `sync_frame_since` / `sync_reply`** — stamp-frontier-advertised anti-entropy frames shipping only the ops a peer is missing.
+- **`src/crdt.rs`** — lossless `HlcStamp ↔ WireStamp` conversion (the `distributed`+`ipc` boundary 5a deferred here) + `StampFrontier::iter`.
+- **`src/bridge.rs`** — `BridgeHub::poll` now fans `CrdtSync` frames out to the other peers, re-filtered to each target's read allowlist (frontier advertisement retained), beside the existing single-writer `Delta` routing.
+- **`tests/crdt_plane.rs`** — end-to-end **two-replica convergence over the real `webrtc` `IpcSink`/`IpcSource` transport**: concurrent LWW writes converge to the higher-stamp value, a derived slot on the receiver recomputes (proving the remote op drives the reactive graph), the stability watermark arms once both peers are observed, and re-delivery is a no-op.
+- **`Makefile` + `.github/workflows/ci.yml`** — new `test-crdt-plane` target (`--features "distributed webrtc"`), a combo no existing target exercised.
+- **`SPEC.md` §Distributed** — documents the runtime-integration layer.
+
+**Verification:** `make check` green — `fmt`, `clippy --all-features -D warnings`, every test suite (incl. the new `test-crdt-plane` with 332 passing under the combo), the Lean formal model, and `benchmark-check`. CI run `28219001643` is in progress; closing on local evidence.
+
+All four backlog deliverables are covered: plane↔`merge:crdt` cell wiring, `NodeKey` producer projection, `BridgeHub` CrdtSync fan-out, and the two-replica-over-transport convergence test. The remaining `agent:review` items are operator-gated publishes (queue stays paused).
+<!-- agent:boundary:a9a2894e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -164,13 +185,12 @@ ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_conten
 - ~~do [#6qtj]~~
 - ~~do [#pw1c]~~
 - ~~do [#g638]~~
-- do [#te9j]
+- ~~do [#te9j]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#te9j] lzcrdtplane5b (distributed CRDT plane Phase 5b, FINAL — runtime integration; completes Phase 5). 5a DONE (CrdtSync wire transport + protocol.md/SPEC.md §Distributed + Lean convergence/stability obligation; lazily-rs 57765dc, lazily-spec f44a9c6). Remaining: connect CrdtPlane/OpLog to live merge:crdt root cells (local edits -> CrdtOp; remote CrdtOp -> ReplicatedCell::merge_remote ingress driving the reactive graph + Seq/Text GC) + NodeKey producer projection (#lzwirekey) + BridgeHub fan-out of CrdtSync + an end-to-end two-replica-over-transport convergence test. Plan: tasks/software/plan-lazily-distributed-crdt-plane.md.
 <!-- /agent:backlog -->
 
 ## Review

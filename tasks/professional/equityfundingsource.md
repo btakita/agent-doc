@@ -120,7 +120,19 @@ Fixed. Root cause was purely client-side: `/api/investor/deals` (the `/lenders` 
 **Deploy held** per your standing gate (preset is `#spec-test-commit-push`, no deploy) — it's ready via `bun run deploy:worker` whenever you give the go, same as last time. Say the word (or queue `deploy`) and I'll push it live.
 
 > **Queue prompt:** The deal cards in https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard should show the deal photos. All deal cards should show the deal photos.
-<!-- agent:boundary:ea377058 -->
+
+### Re: deploy — opus-4-8
+
+Deployed. The lender-dashboard deal-photo fix (`46d6f78`, pushed) is now live.
+
+Ran `bun run deploy:worker`:
+- **Worker upload:** uploaded `equityfundingsource` (7.13 s), all bindings intact.
+- **Live:** https://equityfundingsource.brian-takita.workers.dev — Current Version ID `0409cb59-b9c9-4f12-af4e-093168e03078`, hourly schedule intact.
+
+The `/lenders/dashboard` Available Deals and Deals I'm Interested In cards now render the shared deal-photo carousel (house placeholder on empty deals) in production.
+
+> **Queue prompt:** deploy
+<!-- agent:boundary:18e4748b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -139,7 +151,7 @@ After 20:30
 - TMO Syncs
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Backlog

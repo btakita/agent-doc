@@ -663,7 +663,19 @@ The shipped `#qheadstrike` strike only fires when my response quotes the head as
 **Why no mid-session install.** `#crdtsvdom` rewrites the live overlay-merge classifier and `#qheadstrikeauto` the live strike path. Recompiling + recycling those against the session you're actively losing keystrokes in is how more drift happens — and it's your standing process. `#crdtsvdom` is the highest-priority next focused cycle: say go and I'll run it against a quiesced session (or after a supervisor restart), `#crdtedgetests` matrix red-first.
 
 **Queue.** This head is struck. `#actorprune` / `#suprestassoc` / `#crdtsvdom` / `#qheadstrikeauto` are all build+install+recycle focused-cycle items — I'm not auto-looping them into this actively-corrupting session.
-<!-- agent:boundary:5ff89e50 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=6ed40d2d-3e24-4914-b1dd-f798caf58565 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=100812 candidate_hash=d04c4718e1766afcf0c8bbe2e53c5a48109eb31fc4bc45416e2c6e327b01b141 content_ours_len=103384 content_ours_hash=161f5ca5f3a08fa6de7c4e6060e355754731ab6adf5e0e3324a627de550d0219 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782506876152
+```
+<!-- agent:boundary:b27318b2 -->
 <!-- /agent:exchange -->
 ## Queue
 

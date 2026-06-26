@@ -24,6 +24,7 @@ queue: stop
 
 <!-- agent:status -->
 
+🔴 (restart/recycle your supervisor)
 - [x] Phase 1: Research & design
 - [x] Phase 2: Core signal primitives
 - [x] Phase 3: Derived/computed signals
@@ -192,7 +193,7 @@ Applied "ten thousand" everywhere the line appears (not just the draft you edite
 - **Blog post** intro `src/.../2026-06-26-lazily-cell-family-spreadsheet-scale.md` had the *same* "or ten" phrasing — fixed it too for consistency (a reader following the teaser link would otherwise hit the rejected wording). `briantakita.me c901b7a` → `briantakita.me-dev c901b7a` → superproject `e3aa3c6a5`. Built clean; the push redeploys Cloudflare Pages so the live post updates.
 
 If you'd rather the blog read "ten million" (the actual upper benchmark point) instead of "ten thousand," say the word — but "ten thousand" makes the stronger size-independence point (it holds even on a small sheet), so I matched your draft.
-<!-- agent:boundary:076705b0 -->
+<!-- agent:boundary:33a2741d -->
 <!-- /agent:exchange -->
 ###
 <!--

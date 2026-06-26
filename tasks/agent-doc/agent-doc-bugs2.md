@@ -26,6 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -560,21 +561,39 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=bad94b29-08b8-41b5-be6d-352ed7b3447f invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=85349 candidate_hash=028f8f6c983586d8f8f5300f0cb73fa07c337ebe52d565a4ff5f42c3681bfbf9 content_ours_len=87499 content_ours_hash=667d403741a664d655722f509315cfb6a7ad4db91d86c645a00665bc6fc2f544 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782498507592
 ```
-<!-- agent:boundary:32ba83cb -->
+
+### Re: do [#5e8k] [#fma0] [#v6b3] [#2y8j] — opus-4-8
+
+Drained the bundle. Two of the three code items were already landed by a prior supervisor `/clear`+re-dispatch (I checked git before re-doing them, per the "already-landed re-pin" rule); the third I built, shipped, and installed this cycle.
+
+- **#5e8k `crdtlivedrop`** — **already done** in `agent-doc` `078ae2d0` (shipped 0.34.50). `crdt_merge_base_state` now distinguishes overlay-ahead (live keystrokes → preserve the sidecar) from overlay-behind (stale → discard + log `overlay_discarded_bytes`) by line-multiset containment, with the 8-case `#crdtedgetests` matrix. Verified in the installed binary; marking `--done`.
+- **#fma0 `crdtedgetests`** — **already done**, same commit `078ae2d0`: the 8-row SimWorld/unit matrix (overlay ahead-by-1-char, ahead-by-frontmatter-block, strictly-behind+logged, concurrent-divergent, empty-doc-first-keystroke, rapid-burst, decode-error, frontmatter-edit-during-convergence). Marking `--done`.
+- **#v6b3 `suprecyclespin`** — **built + shipped this cycle** (`agent-doc` `10b89a3c`, **0.34.51**, pushed + tagged `v0.34.51` + `make install-full`). Root cause: the `#midturn-recycle-resume` `DeferCycleOpen` interlock refused to `execve`-recycle while a cycle is open, but `cycle_open` at the `idle_watch` call site was computed purely from `CycleState::is_open()`, which stays `true` forever for an *abandoned older* turn that a newer cycle already superseded → `supervisor_recycle_deferred_cycle_open` spun ~2/sec and the stale supervisor never hot-reloaded. Fix (`#midturnresumeb` Phase B): at a turn boundary, an open cycle with **no IPC inflight** and **untouched > 45s** (`STALLED_CYCLE_RESOLVE_SECS`) is force-closed to `abandoned` (`mark_abandoned`, logged `supervisor_cycle_stale_resolved`) so the gate clears and the recycle fires; a live cycle is never touched (`updated_at` ticks per phase, finalize holds inflight). New pure `CycleState::open_stalled()` + unit test `open_stalled_resolves_only_abandoned_older_turns`. `make check` green (5412). Marking `--done`.
+- **#2y8j** — `[operator-verify]` typing-burst proof; stays open for your live eyeball.
+
+**Release ceremony:** bump/`VERSIONS.md`/commit/push/tag/`install-full` done (the established 0.34.x flow); the registry **publish** (crates.io / PyPI / `gh release`) stays **skipped** per your standing release-pause directive — PyPI is still at 0.33.3, consistent with every 0.34.x.
+
+### Re: "deleted queue items reappear / writing duplicates a line from an old snapshot" — opus-4-8
+
+That is the **stale route-owned supervisor replaying its old in-memory CRDT** (the `#qeditdup` class) — and I just made it worse: `make install-full` put **0.34.51** on disk while the supervisor driving this session is still on the older binary, so it's now **binary-stale** as well as CRDT-stale. `admin inspect`/the controller socket timed out and this cycle's preflight already showed `live_prompt_drift_after_preflight`, which is the same wedge. The deletes-reappear + duplicate-from-old-snapshot is exactly the symptom: the supervisor's lagging whole-document CRDT re-emits the pre-edit queue shape every convergence.
+
+**Remedy is a supervisor recycle onto the fresh binary**, not more queue edits (each edit just re-collides with the stale projection). I'm ending the turn after this closeout so the supervisor can recycle at its idle boundary; if it doesn't self-heal, `agent-doc admin recycle tasks/agent-doc/agent-doc-bugs2.md` (or restart the IDE session) brings it onto 0.34.51 with a clean CRDT. The `#v6b3` fix I just shipped is precisely what stops this stale supervisor from spinning forever instead of recycling — but it only takes effect **after** the recycle promotes 0.34.51.
+<!-- agent:boundary:0e3a3aa8 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 do [#5e8k] [#fma0] [#v6b3] [#2y8j]
-- :pushpin: do [#fma0]
-- :pushpin: do [#v6b3]
-- :pushpin: do [#2y8j]
+- When I delete queue items, they still reappear. And writing into the queue duplicates the line from an old snapshot.
 - :pushpin: do [#cdtcutover]
-- do [#qeditdup]
-- do [#crdtauth6]
-- do [#nsfz]
-- do [#kj5flive]
+- :pushpin: do [#qeditdup]
+- :pushpin: do [#crdtauth6]
+- :pushpin: do [#nsfz]
+- :pushpin: do [#kj5flive]
+- do [#fma0]
+- do [#v6b3]
+- do [#2y8j]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -601,9 +620,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#5e8k] crdtlivedrop=#agent-doc-bug LIVE DATA LOSS (alex-lee.md 2026-06-26): CRDT overlay-stale rebuild DISCARDS live keystrokes. crdt_merge_base_state (snapshot.rs:1138-1173) classifies any overlay whose markdown projection != cycle baseline as "stale" and rebuilds it from baseline (FallbackOverlayProjectionMismatch), dropping unsynced keystrokes — string inequality cannot distinguish overlay-AHEAD (live keystrokes, preserve) from overlay-BEHIND (stale, discard). Causes frontmatter loss + 1-char deletes while typing. Distinct from shipped #qbasehashmemo (that was lag, not loss). Log evidence 18:16:07Z: crdt_merge_base_overlay_stale→rebuilt→editor_op_recorded delete/insert offset=2342 (#qnodemerge4wire). Fix: causal AHEAD/BEHIND detection + 3-way CRDT merge on ahead + log discarded bytes. Plan: tasks/agent-doc/plan-crdt-overlay-live-keystroke-preservation.md. Relates [[qcellmerge1]].
-- [ ] [#fma0] crdtedgetests=#agent-doc-bug dogfood-loop improvement: add CRDT edge-case SimWorld/unit test matrix (overlay ahead-by-1-char, ahead-by-frontmatter-block, strictly-behind, concurrent-divergent, empty-doc-first-keystroke, rapid-burst-during-convergence, decode-error, frontmatter-edit-during-exchange-convergence) for crdt_merge_base_state + sim_world CRDT coverage. 8-row matrix in tasks/agent-doc/plan-crdt-overlay-live-keystroke-preservation.md. Gates the #crdtlivedrop fix.
-- [ ] [#v6b3] suprecyclespin=#agent-doc-bug supervisor recycle spin-loop: supervisor_recycle_deferred_cycle_open fires ~2/sec forever (idle_watch.rs:1508 / decisions.rs:563 cycle_open arm) because in-memory cycle_open stays true for an OLD turn (cycle-1782497652506) after a NEWER cycle (synthetic-1782497767123) committed. Recycle never reaches its boundary; supervisor never hot-reloads. This is unbuilt #midturnresumeb Phase B: a stalled cycle with inflight=0 past a deadline must be resolved (resume/force-close), not deferred forever. Live on alex-lee.md supervisor pid 999966. Fix in plan-crdt-overlay-live-keystroke-preservation.md §spin-loop.
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
 - [ ] [#qeditdup] [operator-verify] Queue items duplicated + manually-struck/deleted items resurrected when the operator edits the queue during an active turn. #queuestatemachine idempotent convergence + the Live<Struck lattice (merged, 0.34.48) should resolve this — VERIFY on the recycled binary; if it persists live, a deeper editor-edit-during-cycle guard is needed. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md

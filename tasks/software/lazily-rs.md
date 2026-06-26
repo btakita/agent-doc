@@ -97,6 +97,11 @@ Landed **Phase 3 (`#lzcrdtplane3`)** of the distributed CRDT cell plane — the 
 - `record(stamp, op)` stores a locally originated op and advances the per-peer `StampFrontier`.
 - `missing_since(&StampFrontier)` ships every op a requester hasn't observed (stamp `>` its per-peer entry), in causal order — the responder side of anti-entropy.
 - `apply_remote(ops, apply)` folds each not-yet-seen op into the application CRDT via a closure **exactly once, in causal stamp order**, skipping duplicates (idempotent re-delivery, even within a batch).
+- **Causal-stability safety:** a tombstone the plane marks collectable (delete stamp ≤ the min-over-membership frontier) is ≤ **every** member's observation — observed by every replica, so GC can never lose an edit (`collectable_implies_observed_everywhere`). This is the formal soundness of the `is_collectable`/`gc_seq`/`gc_text` watermark.
+- **Convergence:** the stamp join is a commutative/associative/idempotent semilattice (`stampJoin_{comm,assoc,idem}`).
+- **`CrdtSync { frontier, ops }`** — a stamp-frontier advertisement + op batch (anti-entropy; bounded, idempotent, resumable). Round-trips JSON/MessagePack/postcard; classified by the FFI kind (`CrdtSync = 3`); `filter_readable` drops non-readable ops (omission, not redaction) while retaining the frontier metadata.
+- **`CrdtOp { node, key: Option<NodeKey>, stamp, state }`** — one state-based (CvRDT) op: converged register/seq/text state + the optional wire-stable `NodeKey` (`#lzwirekey`).
+- **`WireStamp { wall_time, logical, peer }`** — a plain-integer mirror of `HlcStamp`, so the wire format is codec-stable and usable whether or not a peer compiles the `distributed` feature in.
 
 **The anti-entropy protocol:** requester advertises its frontier → responder `missing_since` → requester `apply_remote`. `Op` is application-defined (a register write, a `SeqCrdt`/`TextCrdt` edit). Convergence holds because every CRDT this drives is itself commutative/associative/idempotent, so out-of-order, duplicated, or batched delivery all self-heal.
 
@@ -136,25 +141,18 @@ Landed **Phase 4b (`#lzcrdtplane4b`)** of the distributed CRDT cell plane — th
 
 **Plane status:** with Phase 4 + 4b, frontier-driven GC now covers **both** the sequence and text CRDTs. The only remaining phase is **`#lzcrdtplane5`** (`[#te9j]`, FINAL) — plane↔runtime wiring + `IpcMessage` transport + SPEC/PROTOCOL + Lean obligation. Give the go when you want it.
 
-### Re: do lzcrdtplane5 — Phase 5 (FINAL), drained as 5a — opus-4-8
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
-Phase 5 is the FINAL phase and bundles four large clauses (runtime wiring + IPC transport + SPEC/PROTOCOL + Lean obligation). Per the plan's own mandate ("do **not** attempt the whole plane in one cycle") and the Phase 4→4/4b precedent, I drained it as focused sub-phases and landed **5a** this cycle — three of the four clauses. lazily-rs `57765dc`, lazily-spec `f44a9c6`, superproject `b2f173e78` (pushed to both submodule origins); `make check` green (fmt + clippy `--all-features` + every feature-test suite + Lean model + benchmarks). CI in progress at closeout (Phases 4/4b passed).
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
 
-**1. Wire transport — `IpcMessage::CrdtSync` (the "thread ops through the IpcMessage transport" clause).** A third message variant beside `Snapshot`/`Delta` (the single-producer mirror is untouched):
-- **`WireStamp { wall_time, logical, peer }`** — a plain-integer mirror of `HlcStamp`, so the wire format is codec-stable and usable whether or not a peer compiles the `distributed` feature in.
-- **`CrdtOp { node, key: Option<NodeKey>, stamp, state }`** — one state-based (CvRDT) op: converged register/seq/text state + the optional wire-stable `NodeKey` (`#lzwirekey`).
-- **`CrdtSync { frontier, ops }`** — a stamp-frontier advertisement + op batch (anti-entropy; bounded, idempotent, resumable). Round-trips JSON/MessagePack/postcard; classified by the FFI kind (`CrdtSync = 3`); `filter_readable` drops non-readable ops (omission, not redaction) while retaining the frontier metadata.
-
-**2. SPEC/PROTOCOL.** `protocol.md` §Distributed gains the `CrdtSync` wire format, stamp-frontier exchange, and watermark/GC contract; `SPEC.md` §Distributed wire transport documents the Rust surface and resolves the "delta-state vs op-based encoding" prototype gate in favour of state-based sync.
-
-**3. Lean obligation — `LazilyFormal/CRDT.lean` (proofs complete, no `sorry`).** Two formally-verified properties backing the plane:
-- **Convergence:** the stamp join is a commutative/associative/idempotent semilattice (`stampJoin_{comm,assoc,idem}`).
-- **Causal-stability safety:** a tombstone the plane marks collectable (delete stamp ≤ the min-over-membership frontier) is ≤ **every** member's observation — observed by every replica, so GC can never lose an edit (`collectable_implies_observed_everywhere`). This is the formal soundness of the `is_collectable`/`gc_seq`/`gc_text` watermark.
-
-**4 tests** (serde + postcard round-trips, per-peer filtering, FFI kind classification) + the Lean build are wired into `make check`.
-
-**Remaining — `#lzcrdtplane5b` (runtime integration, the 4th clause).** The one clause I deliberately deferred to its own focused cycle (highest-risk, touches the live reactive graph): connect `CrdtPlane`/`OpLog` to live `merge: crdt` root cells (local edits → `CrdtOp`s; remote `CrdtOp`s → `ReplicatedCell::merge_remote` ingress driving the reactive graph + Seq/Text GC) + the `NodeKey` producer projection + `BridgeHub` fan-out of `CrdtSync` + an end-to-end two-replica-over-transport convergence test. The backlog `#te9j` item is now narrowed to exactly this. Give the go when you want it.
-<!-- agent:boundary:43ab64fb -->
+ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=b33bef9b-a012-4fc9-b867-f6c1e33a66b7 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=19301 candidate_hash=a9c42396835a162182af3e3e7c5864235ee2218b4177322dcf38b348aacd2419 content_ours_len=19262 content_ours_hash=b4ccff96ad64b71cef90c33efa7443a52738abc5d13182b26d64ef0a15e1cebf doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782448077745
+```
+<!-- agent:boundary:9da3c298 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -162,8 +160,11 @@ Phase 5 is the FINAL phase and bundles four large clauses (runtime wiring + IPC 
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- 🚧 do [#6qtj]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- ~~do [#6qtj]~~
+- ~~do [#pw1c]~~
+- ~~do [#g638]~~
+- do [#te9j]
 <!-- /agent:queue -->
 
 ## Backlog

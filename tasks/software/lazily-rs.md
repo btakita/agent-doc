@@ -183,7 +183,23 @@ Evidence:
 - Verification: `make check` in `src/lazily-spec` passed (`lake build`, 7 jobs).
 
 Changed paths: none in `src/lazily-spec`; this was a verification and queue-strike cycle. Confidence: high. The next non-operator head is `lazily-kt parity`; release/publish work remains operator-gated.
-<!-- agent:boundary:af69e8af -->
+
+### Re: lazily-kt parity — gpt-5
+
+> **Queue prompt:** lazily-kt parity
+
+`lazily-kt parity` is complete and now published.
+
+What I verified:
+
+- Parent `agent-loop` already pointed `src/lazily-kt` at `49dc5476f2ab22a978f5742a623c78aa66b2d4d9`.
+- That commit is the Kotlin parity slice: `feat: StateGraphMirror + agent_doc_state_subscribe delta path (#lazilystatesync3)`, adding `StateGraphMirror`, subscription support in `LazilyFFI` / `StateProjectionClient`, and mirror/client tests.
+- `src/lazily-kt` was clean but ahead of `origin/main` by one commit; I pushed it to `lazily-hub/lazily-kt` (`1500bea..49dc547`). `origin/main` now resolves to `49dc5476f2ab22a978f5742a623c78aa66b2d4d9`.
+- Verification: `make check` passed in `src/lazily-kt` via `tsift`/`rtk`, artifact `tart-0986e4cba3`, exit 0.
+- GitHub Actions: this repo has no `.github` directory and `gh workflow list` returned no workflows, so there was no CI run to inspect.
+
+Changed paths: no new source edits in this cycle; the required action was publishing the already-referenced submodule commit. No new actionable follow-up item was discovered, so I am not adding backlog. Confidence: high. The remaining non-operator queue heads include JS/Zig/Py parity items; release/publish actions remain operator-gated.
+<!-- agent:boundary:fc11812d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -196,7 +212,7 @@ Changed paths: none in `src/lazily-spec`; this was a verification and queue-stri
 - ~~[#lzsmstress]~~
 - ~~[#lzcrdtperms]~~
 - ~~lazily-spec parity~~
-- lazily-kt parity
+- ~~lazily-kt parity~~
 - ~~release + publish — auto-struck: completed by #45rh (#qftbklgstrike)~~
 - lazily-js parity + release + publish
 - lazily-zig parity + release + publish

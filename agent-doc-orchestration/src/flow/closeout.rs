@@ -107,6 +107,10 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
     let _barrier_ready = crate::crdt_relay_host::commit_barrier_for_file(file);
 
     let mut did_commit = crate::git::commit(file)?;
+    // `#staleinmem` — record the just-committed on-disk content as the hub baseline
+    // so a later out-of-band disk correction is detectable at the next commit
+    // barrier (no-op under the Detached / headless path).
+    crate::crdt_relay_host::record_committed_baseline_for_file(file);
     rc.invalidate_head_content();
     timer.mark("git_commit");
     ensure_cycle_committed(file)?;

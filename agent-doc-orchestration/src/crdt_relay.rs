@@ -84,6 +84,13 @@ pub struct RelayHub {
     canonical_id: u64,
     members: HashMap<u64, Member>,
     awareness: AwarenessChannel,
+    /// The document text this hub last committed to disk (`#staleinmem`). `None`
+    /// until the first commit is recorded via [`Self::record_committed_baseline`].
+    /// Used by [`Self::reconcile_canonical_against_baseline`] to detect an
+    /// out-of-band disk correction (a `git checkout HEAD` / `reset` recovery the
+    /// hub did not author) so the stale canonical can be rebuilt from the
+    /// correction instead of re-committing the discarded content forever.
+    last_committed_text: Option<String>,
 }
 
 impl RelayHub {
@@ -95,6 +102,7 @@ impl RelayHub {
             canonical_id,
             members: HashMap::new(),
             awareness: AwarenessChannel::new(),
+            last_committed_text: None,
         }
     }
 
@@ -109,6 +117,7 @@ impl RelayHub {
             canonical_id,
             members: HashMap::new(),
             awareness: AwarenessChannel::new(),
+            last_committed_text: None,
         })
     }
 
@@ -423,6 +432,83 @@ impl RelayHub {
         let before = self.canonical.text();
         self.canonical.apply_update(projection)?;
         Ok(self.canonical.text() != before)
+    }
+
+    // --- Out-of-band baseline reconcile (`#staleinmem`) -----------------------
+
+    /// Record the document text this hub just committed to disk, so a later
+    /// out-of-band disk correction is detectable at the next commit barrier
+    /// ([`Self::reconcile_canonical_against_baseline`]). Called after a successful
+    /// git commit. This is the in-memory-wins path's only notion of "what we last
+    /// authored on disk".
+    pub fn record_committed_baseline(&mut self, committed: &str) {
+        self.last_committed_text = Some(committed.to_string());
+    }
+
+    /// Reconcile the canonical replica against the current on-disk baseline,
+    /// rebuilding it when the document was corrected **out of band** since this
+    /// hub last committed (`#staleinmem`).
+    ///
+    /// The disk-demotion contract ([`Self::reconcile_disk_projection`]) is
+    /// *additive*: it can only fold in ops the live replica lost (a crash gap), so
+    /// a correction that *removes* content — a `git checkout HEAD` /
+    /// `reset --from-current` recovery that drops a corrupt response block — can
+    /// never displace the stale canonical ops. The stale canonical then re-commits
+    /// the discarded content on every cycle ("`git checkout HEAD` won't hold"), and
+    /// only a supervisor restart (which clears the process-global hub registry)
+    /// recovers it. This is the live-session analogue of the headless
+    /// [`crate::snapshot::crdt_merge_base_state`] projection-mismatch rebuild.
+    ///
+    /// Rebuild fires only when ALL hold:
+    /// - a commit baseline has been recorded (we have something to compare), AND
+    /// - `on_disk` differs from that recorded baseline (the document changed since
+    ///   our last commit and we did not author it — a hub-authored change advances
+    ///   `last_committed_text`), AND
+    /// - `on_disk` differs from the canonical's current text (the canonical does
+    ///   not already reflect the correction).
+    ///
+    /// On rebuild the canonical replica is reseeded from `on_disk` and every member
+    /// mirror is reseeded from it, so a stale editor mirror cannot re-introduce the
+    /// discarded ops at the next flush. Returns whether a rebuild happened.
+    pub fn reconcile_canonical_against_baseline(&mut self, on_disk: &str) -> Result<bool> {
+        let last = match self.last_committed_text.as_deref() {
+            Some(t) => t,
+            // No commit recorded yet → no baseline to diverge from; the normal
+            // in-memory-wins path stands.
+            None => return Ok(false),
+        };
+        if on_disk == last {
+            // Disk is unchanged since our last commit → nothing out of band.
+            return Ok(false);
+        }
+        if on_disk == self.canonical.text() {
+            // The canonical already agrees with the corrected disk; no rebuild
+            // needed, just advance the recorded baseline so we do not re-detect it.
+            self.last_committed_text = Some(on_disk.to_string());
+            return Ok(false);
+        }
+        // Out-of-band correction: rebuild the canonical from the corrected baseline.
+        let fresh = ReplicaState::new(self.canonical_id);
+        if !on_disk.is_empty() {
+            fresh.apply_local_edit(0, 0, on_disk);
+        }
+        let bootstrap = fresh.encode_state();
+        self.canonical = fresh;
+        let ids: Vec<u64> = self.members.keys().copied().collect();
+        for id in ids {
+            let replica = ReplicaState::from_encoded(id, &bootstrap)?;
+            if let Some(member) = self.members.get_mut(&id) {
+                member.replica = replica;
+            }
+        }
+        self.last_committed_text = Some(on_disk.to_string());
+        Ok(true)
+    }
+
+    /// The text this hub last recorded as committed to disk (test introspection).
+    #[cfg(test)]
+    pub fn last_committed_text_for_test(&self) -> Option<&str> {
+        self.last_committed_text.as_deref()
     }
 }
 
@@ -764,5 +850,98 @@ mod tests {
             !headless.canonical_text().contains("ignored"),
             "the git-authoritative barrier does not flush live replicas"
         );
+    }
+
+    // --- Out-of-band baseline reconcile (`#staleinmem`) -----------------------
+
+    #[test]
+    fn baseline_reconcile_is_noop_until_a_commit_is_recorded() {
+        // With no recorded commit baseline there is nothing to diverge from, so a
+        // differing on-disk text must NOT rebuild (the normal in-memory-wins path).
+        let mut hub = RelayHub::new(1);
+        hub.canonical.apply_local_edit(0, 0, "live content");
+        assert!(
+            !hub
+                .reconcile_canonical_against_baseline("anything else")
+                .unwrap(),
+            "no rebuild before a commit baseline exists"
+        );
+        assert_eq!(hub.canonical_text(), "live content");
+    }
+
+    #[test]
+    fn baseline_reconcile_is_noop_when_disk_matches_last_commit() {
+        // Disk unchanged since our last commit → nothing out of band, no rebuild,
+        // and any un-flushed live ops on the canonical are preserved.
+        let mut hub = RelayHub::new(1);
+        hub.canonical.apply_local_edit(0, 0, "committed body");
+        hub.record_committed_baseline("committed body");
+        // An editor typed more since the commit; canonical is ahead of disk.
+        hub.canonical.apply_local_edit(0, 0, "PREFIX ");
+        assert!(
+            !hub
+                .reconcile_canonical_against_baseline("committed body")
+                .unwrap(),
+            "disk == last commit → no rebuild"
+        );
+        assert_eq!(
+            hub.canonical_text(),
+            "PREFIX committed body",
+            "the un-flushed live op survives the no-op reconcile"
+        );
+    }
+
+    #[test]
+    fn baseline_reconcile_rebuilds_canonical_from_out_of_band_correction() {
+        // The core bug fix: after a corrupt commit, an out-of-band disk correction
+        // (e.g. `git checkout HEAD`) must REBUILD the stale canonical from the
+        // correction so the discarded content cannot re-commit on the next cycle.
+        let mut hub = RelayHub::new(1);
+        let editor = mint_client_id("intellij:rebuild-test");
+        hub.register(editor).unwrap();
+        // Canonical + the editor mirror hold the "corrupt" committed state.
+        hub.apply_local(editor, 0, 0, "GOOD\nCORRUPT-RESPONSE\n").unwrap();
+        hub.record_committed_baseline("GOOD\nCORRUPT-RESPONSE\n");
+        assert!(hub.canonical_text().contains("CORRUPT-RESPONSE"));
+
+        // Operator corrects disk out of band (drops the corrupt block).
+        let rebuilt = hub
+            .reconcile_canonical_against_baseline("GOOD\n")
+            .unwrap();
+        assert!(rebuilt, "an out-of-band correction rebuilds the canonical");
+        assert_eq!(hub.canonical_text(), "GOOD\n", "disk wins on rebuild");
+        assert!(
+            !hub.canonical_text().contains("CORRUPT-RESPONSE"),
+            "the discarded corrupt op is gone from the canonical"
+        );
+        // The editor mirror is reseeded from the corrected canonical, so a flush
+        // cannot re-introduce the corruption.
+        assert_eq!(hub.member_text(editor).as_deref(), Some("GOOD\n"));
+        assert!(
+            hub.commit_barrier_under_authority(CrdtAuthority::MultiReplica)
+                .unwrap()
+        );
+        assert_eq!(
+            hub.canonical_text(),
+            "GOOD\n",
+            "the post-rebuild commit barrier holds the correction, not the corruption"
+        );
+        assert_eq!(hub.last_committed_text_for_test(), Some("GOOD\n"));
+    }
+
+    #[test]
+    fn baseline_reconcile_advances_marker_when_canonical_already_agrees() {
+        // Disk diverged from the last recorded commit but the canonical already
+        // reflects the new content (a normal hub-authored advance that simply was
+        // not re-recorded) → no rebuild, but the marker advances so it is not
+        // re-detected as out-of-band next time.
+        let mut hub = RelayHub::new(1);
+        hub.canonical.apply_local_edit(0, 0, "v2 body");
+        hub.record_committed_baseline("v1 body");
+        assert!(
+            !hub.reconcile_canonical_against_baseline("v2 body").unwrap(),
+            "canonical already agrees with disk → no rebuild"
+        );
+        assert_eq!(hub.last_committed_text_for_test(), Some("v2 body"));
     }
 }

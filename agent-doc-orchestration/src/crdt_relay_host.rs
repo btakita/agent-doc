@@ -321,6 +321,43 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
         // unchanged.
         return true;
     }
+    // `#staleinmem` — out-of-band baseline reconcile, BEFORE flushing live editors
+    // into the canonical for the commit cut. If the document was corrected out of
+    // band on disk since this hub's last commit (a `git checkout HEAD` /
+    // `reset --from-current` recovery), the additive in-memory-wins reconcile can
+    // never displace the stale canonical ops, so the stale canonical otherwise
+    // re-commits the discarded content every cycle until a supervisor restart
+    // clears the process-global hub. Rebuilding the canonical from the corrected
+    // disk baseline makes the correction stick without a restart.
+    if let Ok(on_disk) = std::fs::read_to_string(file) {
+        match with_hub(file, |hub| hub.reconcile_canonical_against_baseline(&on_disk)) {
+            Ok(Ok(true)) => crate::ops_log::log_op(
+                file,
+                &format!(
+                    "crdt_canonical_rebuilt_from_baseline file={} authority=multi_replica disk_len={}",
+                    file.display(),
+                    on_disk.len()
+                ),
+            ),
+            Ok(Ok(false)) => {}
+            Ok(Err(e)) => crate::ops_log::log_op(
+                file,
+                &format!(
+                    "crdt_canonical_baseline_reconcile_error file={} error={}",
+                    file.display(),
+                    e
+                ),
+            ),
+            Err(e) => crate::ops_log::log_op(
+                file,
+                &format!(
+                    "crdt_canonical_baseline_reconcile_registry_error file={} error={}",
+                    file.display(),
+                    e
+                ),
+            ),
+        }
+    }
     match with_hub(file, |hub| hub.commit_barrier_under_authority(authority)) {
         Ok(Ok(ready)) => {
             crate::ops_log::log_op(
@@ -358,6 +395,62 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
             );
             true
         }
+    }
+}
+
+/// Record the just-committed on-disk content as this document's hub baseline so a
+/// later out-of-band disk correction (a `git checkout HEAD` / `reset` recovery the
+/// hub did not author) is detectable at the next commit barrier (`#staleinmem`).
+/// Call right after a successful git commit.
+///
+/// - [`CrdtAuthority::GitAuthoritative`] (**Detached**): no-op — there is no live
+///   canonical replica / hub to mark, and no hub is allocated.
+/// - [`CrdtAuthority::MultiReplica`] (**EditorAttached**): records the baseline on
+///   an already-allocated hub. Does NOT allocate a hub — a document that never
+///   engaged the multi-replica path is left untouched.
+pub fn record_committed_baseline_for_file(file: &Path) {
+    let authority = authority_for_file(&file.display().to_string());
+    if !authority.editor_attached() {
+        return;
+    }
+    let on_disk = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(e) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "crdt_record_committed_baseline_read_error file={} error={}",
+                    file.display(),
+                    e
+                ),
+            );
+            return;
+        }
+    };
+    let hash = match crate::snapshot::doc_hash(file) {
+        Ok(h) => h,
+        Err(e) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "crdt_record_committed_baseline_hash_error file={} error={}",
+                    file.display(),
+                    e
+                ),
+            );
+            return;
+        }
+    };
+    match hub_registry().lock() {
+        Ok(mut registry) => {
+            if let Some(hub) = registry.get_mut(&hash) {
+                hub.record_committed_baseline(&on_disk);
+            }
+        }
+        Err(e) => crate::ops_log::log_op(
+            file,
+            &format!("crdt_record_committed_baseline_registry_error file={} error={}", file.display(), e),
+        ),
     }
 }
 
@@ -531,6 +624,83 @@ mod tests {
         assert_eq!(changed, Some(false), "a stale disk projection adds no ops");
         with_hub(&doc, |hub| {
             assert_eq!(hub.canonical_text(), "v1 v2", "in-memory replica wins");
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn commit_barrier_rebuilds_canonical_after_out_of_band_disk_correction() {
+        // `#staleinmem`: after a corrupt commit, an out-of-band disk correction
+        // (e.g. `git checkout HEAD` / `reset --from-current`) must rebuild the stale
+        // canonical at the NEXT commit barrier so the discarded content cannot
+        // re-commit. This is the process-global-hub bug ("git checkout HEAD won't
+        // hold; only a supervisor restart clears the in-memory CRDT") fixed in-place
+        // without a restart.
+        let (_dir, doc) = temp_doc("oob-correction.md");
+        let editor = mint_client_id("intellij:oob");
+        let corrupt = "GOOD\nCORRUPT-RESPONSE\n";
+        with_hub(&doc, |hub| {
+            hub.register(editor).unwrap();
+            hub.apply_local(editor, 0, 0, corrupt).unwrap();
+            // Mark this as the state we last committed to disk.
+            hub.record_committed_baseline(corrupt);
+        })
+        .unwrap();
+
+        // Operator corrects the document out of band (drops the corrupt block).
+        let good = "GOOD\n";
+        std::fs::write(&doc, good).unwrap();
+
+        // The next commit barrier reconciles against the corrected disk first.
+        assert!(commit_barrier_for_file_with_authority(
+            &doc,
+            CrdtAuthority::MultiReplica
+        ));
+        with_hub(&doc, |hub| {
+            assert_eq!(
+                hub.canonical_text(),
+                good,
+                "the barrier rebuilt the canonical from the corrected disk"
+            );
+            assert!(
+                !hub.canonical_text().contains("CORRUPT-RESPONSE"),
+                "the discarded out-of-band content is gone from the canonical"
+            );
+            assert_eq!(
+                hub.member_text(editor).as_deref(),
+                Some(good),
+                "the editor mirror was reseeded so a flush cannot reintroduce the corruption"
+            );
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn commit_barrier_keeps_in_memory_when_disk_matches_last_commit() {
+        // The normal path: disk unchanged since the last commit → no rebuild, and a
+        // live editor's un-flushed op is still flushed into the cut (in-memory wins).
+        let (_dir, doc) = temp_doc("no-oob.md");
+        let editor = mint_client_id("intellij:no-oob");
+        let committed = "# no-oob.md\n\nbody\n";
+        std::fs::write(&doc, committed).unwrap();
+        with_hub(&doc, |hub| {
+            hub.register(editor).unwrap();
+            hub.apply_local(editor, 0, 0, committed).unwrap();
+            hub.record_committed_baseline(committed);
+            // Editor types more locally AFTER the commit (canonical ahead of disk).
+            hub.local_edit(editor, 0, 0, "NEW ").unwrap();
+        })
+        .unwrap();
+
+        assert!(commit_barrier_for_file_with_authority(
+            &doc,
+            CrdtAuthority::MultiReplica
+        ));
+        with_hub(&doc, |hub| {
+            assert!(
+                hub.canonical_text().starts_with("NEW "),
+                "disk == last commit → no rebuild; the new live op flushes into the cut"
+            );
         })
         .unwrap();
     }

@@ -2272,8 +2272,11 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
                 // No-op under `GitAuthoritative` (Detached); under `MultiReplica`
                 // flushes live editor replicas to a consistent cut before commit.
                 let _barrier_ready = crate::crdt_relay_host::commit_barrier_for_file(file);
-                if let Err(e) = crate::git::commit(file) {
-                    eprintln!("[commit] warning: {}", e);
+                match crate::git::commit(file) {
+                    // `#staleinmem` — record what we just committed so a later
+                    // out-of-band disk correction is detectable at the next barrier.
+                    Ok(_) => crate::crdt_relay_host::record_committed_baseline_for_file(file),
+                    Err(e) => eprintln!("[commit] warning: {}", e),
                 }
                 crate::session_check::enforce_clean_closeout(file)?;
             } else {

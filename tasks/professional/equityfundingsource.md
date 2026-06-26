@@ -152,7 +152,20 @@ Done (EFS `7fade6c`, pushed to `origin/main`). This closes the one deviation fro
 **Verification:** I re-ran `bun run check` myself — **1310 pass, 0 fail**, browser + worker builds clean. Reviewed the download handler + predicate directly before pushing.
 
 **Deploy:** still held per `#spec-test-commit-push` — the full contextual lender chat (threads + tabs + property-subject emails + attachments) is ready via `bun run deploy:worker` on your go.
-<!-- agent:boundary:e338fb3e -->
+
+### Re: deploy — contextual lender chat live — opus-4-8
+
+> **Queue prompt:** deploy
+
+Deployed to production (you confirmed the held `🚧 deploy`). The full contextual lender chat is now **live**.
+
+Ran `bun run deploy:worker` on `7fade6c` (`origin/main`, working tree clean):
+- **Worker upload:** `equityfundingsource` uploaded (6.69 s), all bindings intact (D1, R2, Durable Objects, message-email vars).
+- **D1 migrations:** none to apply — the feature rides the existing unified `messages` / `message_attachments` tables.
+- **Live:** https://equityfundingsource.brian-takita.workers.dev — Current Version ID `ae98ab33-8c3a-4c49-a91b-5e8b50a4d1af`, hourly schedule intact.
+
+Lenders now get the tabbed Messages dialog (General first + per-deal property threads), deal-open auto-select, property-as-subject outgoing emails, and deal-tab attachments (upload + lender-scoped download) in production.
+<!-- agent:boundary:487a2804 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -578,21 +578,21 @@ Drained the bundle. Two of the three code items were already landed by a prior s
 That is the **stale route-owned supervisor replaying its old in-memory CRDT** (the `#qeditdup` class) — and I just made it worse: `make install-full` put **0.34.51** on disk while the supervisor driving this session is still on the older binary, so it's now **binary-stale** as well as CRDT-stale. `admin inspect`/the controller socket timed out and this cycle's preflight already showed `live_prompt_drift_after_preflight`, which is the same wedge. The deletes-reappear + duplicate-from-old-snapshot is exactly the symptom: the supervisor's lagging whole-document CRDT re-emits the pre-edit queue shape every convergence.
 
 **Remedy is a supervisor recycle onto the fresh binary**, not more queue edits (each edit just re-collides with the stale projection). I'm ending the turn after this closeout so the supervisor can recycle at its idle boundary; if it doesn't self-heal, `agent-doc admin recycle tasks/agent-doc/agent-doc-bugs2.md` (or restart the IDE session) brings it onto 0.34.51 with a clean CRDT. The `#v6b3` fix I just shipped is precisely what stops this stale supervisor from spinning forever instead of recycling — but it only takes effect **after** the recycle promotes 0.34.51.
-<!-- agent:boundary:0e3a3aa8 -->
+<!-- agent:boundary:bcb0c399 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#5e8k] [#fma0] [#v6b3] [#2y8j]
-- When I delete queue items, they still reappear. And writing into the queue duplicates the line from an old snapshot.
+- ~~do [#5e8k] [#fma0] [#v6b3] [#2y8j]~~
+- 🚧 When I delete queue items, they still reappear. And writing into the queue duplicates the line from an old snapshot.
 - :pushpin: do [#cdtcutover]
 - :pushpin: do [#qeditdup]
 - :pushpin: do [#crdtauth6]
 - :pushpin: do [#nsfz]
 - :pushpin: do [#kj5flive]
-- do [#fma0]
-- do [#v6b3]
+- ~~do [#fma0]~~
+- ~~do [#v6b3]~~
 - do [#2y8j]
 <!-- /agent:queue -->
 <!--

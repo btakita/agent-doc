@@ -192,7 +192,30 @@ The lender Messages launcher dialog (`lib/ui--browser--efs/portal/investor/messa
 - `bun run build` + `bun run build:worker` — both green.
 
 **Deploy.** Pushed `c195847` to `btakita/equityfundingsource-dev` and deployed worker version `846d09a3-5f15-46dc-9edd-41f79ba4cba6`, live at https://equityfundingsource.brian-takita.workers.dev. Live-eyeball: open the Messages launcher (the chat FAB) with the search box empty → the cursor should land in the compose textarea ready to type.
-<!-- agent:boundary:e0e6d7d2 -->
+
+### Re: Message dialog must focus the textarea on ALL portals — opus-4-8
+
+> **Queue prompt:** On the borrower, broker, lender portals, opening the message dialog should automatically focus on the message textarea. Your last attempt did not fix the issue.
+
+You're right — the last attempt was broken two ways, both now fixed across all portals.
+
+**Why the last attempt failed:**
+1. **Wrong layer.** It only patched the lender `messages_launcher.tsx`. The **borrower and broker** portals mount the shared `PortalMessages` launcher directly (`placement="launcher"`), so they were never touched.
+2. **Queried a not-yet-rendered textarea.** `PortalMessages` does `if (loading) return null` (renders nothing while the first message fetch is in flight). My `panel_ref.querySelector('textarea.msg-input')` ran on `open`, but the textarea wasn't in the DOM yet, so `focus()` had nothing to target.
+
+**The fix (moved focus ownership into the shared component):**
+- `PortalMessages` now holds a real `compose_ref` on the textarea and a focus effect **gated on `!loading`** — so it re-runs the moment loading clears and the textarea actually exists.
+- `launcher` placement (borrower + broker, and the admin lender-card launchers) focuses whenever the dialog is `open`.
+- `inline` placement focuses only when the parent passes `auto_focus` — the lender launcher passes `auto_focus={!searching}`, so the textarea gets focus on open but the **search box keeps focus while you're searching**. Persistent inline cards (admin deal/pipeline) default `auto_focus=false`, so no page-load focus theft.
+- A `requestAnimationFrame` defers the `.focus()` until after paint so the element is reliably focusable.
+
+**Verification:**
+- Updated `#msg-dialog-focus` test in `tests/lender-contextual-chat.test.ts` asserts the shared-component ref/effect, the `!loading`/launcher/inline gating, that borrower + broker shells use `placement="launcher"`, and that the lender launcher passes `auto_focus={!searching}`.
+- `bun test` — 1329 pass / 0 fail.
+- `bun run build` + `bun run build:worker` — both green.
+
+**Deploy.** Pushed `3f43335` to `btakita/equityfundingsource-dev`; deployed worker version `aeaa693a-84b7-45f7-9faa-4a1f917751b2`, live at https://equityfundingsource.brian-takita.workers.dev. Live-eyeball on each portal (borrower / broker / lender): open the Messages dialog (chat FAB) → the cursor should land in the compose textarea ready to type. On the lender portal, typing in the search box still keeps focus there.
+<!-- agent:boundary:7fb502c2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -212,6 +235,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- ~~On the borrower, broker, lender portals, opening the message dialog should automatically focus on the message textarea. Your last attempt did not fix the issue.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

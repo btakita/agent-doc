@@ -317,7 +317,7 @@ fn run_pending_maintenance_with_options(
         snapshot_mutated = true;
     }
 
-    // `#staleshow` — surface "🔴 (old supervisor)" in the upper status area when the
+    // `#staleshow` — surface "🔴 (restart/recycle your supervisor)" in the upper status area when the
     // live route-owned supervisor/controller serving this document is mapping a STALE
     // agent-doc binary (a newer build is installed but the running process never
     // recycled onto it). Reuse the existing recycle-staleness signal
@@ -4958,15 +4958,15 @@ mod tests {
     fn pending_maintenance_clears_stale_supervisor_marker_when_fresh() {
         // `#staleshow`: with no live route-owned supervisor in the test environment,
         // `stale_supervisor_warning_for_doc` reads NOT stale, so a pre-seeded
-        // "🔴 (old supervisor)" marker must be removed from the status component
-        // (file + snapshot) by the preflight maintenance pass.
+        // "🔴 (restart/recycle your supervisor)" marker must be removed from the status
+        // component (file + snapshot) by the preflight maintenance pass.
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
             "## Status\n\n",
             "<!-- agent:status patch=replace -->\n",
-            "🔴 (old supervisor)\n",
+            "🔴 (restart/recycle your supervisor)\n",
             "Session ready.\n",
             "<!-- /agent:status -->\n\n",
             "## Backlog\n\n",

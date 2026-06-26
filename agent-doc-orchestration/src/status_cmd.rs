@@ -17,7 +17,7 @@ use crate::component::{is_backlog_component, is_tracked_work_component};
 /// it and paint the status line red. Keep this constant the single source of the
 /// marker text so insert/remove stay symmetric and the editor matcher never
 /// drifts from what the binary writes.
-pub const STALE_SUPERVISOR_STATUS_MARKER: &str = "🔴 (old supervisor)";
+pub const STALE_SUPERVISOR_STATUS_MARKER: &str = "🔴 (restart/recycle your supervisor)";
 
 fn find_status_component(file: &Path) -> Result<(String, component::Component)> {
     let content = std::fs::read_to_string(file).context("failed to read document")?;

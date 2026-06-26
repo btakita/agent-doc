@@ -557,10 +557,31 @@ pub fn supervisor_recycle_action(
     // (preflight taken, finalize not committed) or an IPC ack connection is in
     // flight. Tearing the in-flight IPC listener down mid-cycle severs the
     // ack-content round-trip and drives `live_prompt_drift_after_preflight` against
-    // the pre-recycle preflight baseline. Defer until the cycle closes — this wins
-    // over every stale recycle arm (admin/wedge/reexec-failed included) because none
-    // of them may interrupt a live finalize.
-    if cycle_open {
+    // the pre-recycle preflight baseline. Defer until the cycle closes.
+    //
+    // `#recycledeadlock`: the defer above assumed the open cycle closes "sub-second"
+    // once finalize commits. That is only true when the binary CAN commit it. When
+    // the supervisor is running a STALE binary AND that staleness is the thing
+    // blocking the commit, deferring forever is the classic recycle deadlock: every
+    // finalize re-fails the editor-IPC proof on the same bad binary
+    // (`supervisor_binary_stale` / `missing_response_probe` / `retry_without_disk_write`),
+    // so the cycle never closes, so `DeferCycleOpen` fires ~2/sec forever and the
+    // fresh binary never hot-reloads — the commit needs the fresh binary, the recycle
+    // needs the cycle closed. Three facts each PROVE the running binary cannot commit
+    // the open cycle, so "wait for it to close" is an infinite wait, not a sub-second
+    // one: an operator/agent explicitly asked to recycle it (`explicit_admin` — the
+    // gentle fix the closeout path itself recommends), the write/converge path proved
+    // it bad (`write_wedged`), or a prior in-place re-exec already failed
+    // (`reexec_failed`). When the binary is stale AND any of those hold, do NOT defer —
+    // fall through to the stale recycle arms so the deadlock breaks. The caller
+    // force-abandons the wedged cycle before the `execve` and the fresh supervisor
+    // re-dispatches its queue head (the restart-interrupted-task contract). A healthy
+    // open cycle — binary current enough to commit, or no admin/wedge/reexec proof of
+    // a bad binary — still defers, preserving the `#midturn-recycle-resume` and
+    // `#wd40` (fresh-binary state flush) guarantees.
+    let cycle_wedged_on_stale_binary =
+        stale && (explicit_admin || write_wedged || reexec_failed);
+    if cycle_open && !cycle_wedged_on_stale_binary {
         return SupervisorRecycleAction::DeferCycleOpen;
     }
     if stale {
@@ -1180,47 +1201,55 @@ mod tests {
     fn supervisor_recycle_action_defers_while_agent_doc_cycle_open() {
         use SupervisorRecycleAction::*;
         // `#midturn-recycle-resume`: even when the harness reports a turn boundary,
-        // an OPEN agent-doc cycle (preflight taken, finalize not committed, or an IPC
-        // ack connection in flight) must DEFER the `execve` recycle. Firing it
+        // a HEALTHY open agent-doc cycle (preflight taken, finalize not committed, or
+        // an IPC ack connection in flight) must DEFER the `execve` recycle. Firing it
         // mid-cycle severs the in-flight IPC listener and drives the next finalize
         // into `live_prompt_drift_after_preflight` against the pre-recycle preflight
-        // baseline (the root of the `content_ours` wedge). The deferral wins over
-        // EVERY recycle arm — admin, wedge, and reexec-failed escalation included —
-        // because none of those may interrupt a live finalize.
+        // baseline (the root of the `content_ours` wedge).
         // (args: stale, auto_recycle, turn_boundary, head_pending, explicit_admin,
         //  write_wedged, reexec_failed, cycle_open)
 
-        // Stale + auto + head pending — would be RecycleImmediate; cycle_open defers.
+        // Stale + auto + head pending, no admin/wedge/reexec proof the binary is bad —
+        // would be RecycleImmediate; a healthy cycle still defers (closes sub-second).
         assert_eq!(
             supervisor_recycle_action(true, true, true, true, false, false, false, true),
             DeferCycleOpen
         );
-        // Stale + auto + no head — would be RecycleDebounced; cycle_open defers.
+        // Stale + auto + no head — would be RecycleDebounced; healthy cycle defers.
         assert_eq!(
             supervisor_recycle_action(true, true, true, false, false, false, false, true),
             DeferCycleOpen
         );
-        // Explicit admin override — would be RecycleImmediate; cycle_open still defers.
-        assert_eq!(
-            supervisor_recycle_action(true, false, true, false, true, false, false, true),
-            DeferCycleOpen
-        );
-        // Write-wedge override — would be RecycleImmediate; cycle_open still defers.
-        assert_eq!(
-            supervisor_recycle_action(true, false, true, false, false, true, false, true),
-            DeferCycleOpen
-        );
-        // Reexec-failure escalation — would be EscalateKillRelaunch; cycle_open defers
-        // (a mid-finalize kill+relaunch is exactly what must not happen).
-        assert_eq!(
-            supervisor_recycle_action(true, true, true, true, false, false, true, true),
-            DeferCycleOpen
-        );
-        // `#wd40` explicit-admin flush on a FRESH binary — would be RecycleImmediate;
-        // cycle_open still defers (no process flush mid-finalize).
+        // `#wd40` explicit-admin flush on a FRESH binary — the binary CAN commit, so
+        // the open cycle still defers (no process flush mid-finalize). Only a STALE
+        // binary makes the cycle un-committable, so a fresh-binary admin flush is not
+        // a deadlock.
         assert_eq!(
             supervisor_recycle_action(false, false, true, false, true, false, false, true),
             DeferCycleOpen
+        );
+
+        // `#recycledeadlock`: when the binary is STALE *and* a fact proves it cannot
+        // commit the open cycle (explicit admin recycle, a write wedge, or a failed
+        // re-exec), the defer would be an INFINITE wait — the finalize keeps failing
+        // the IPC proof on the same bad binary, so the cycle never closes. Break the
+        // deadlock: fall through to the stale recycle arms (the caller force-abandons
+        // the wedged cycle + the fresh supervisor re-dispatches its head).
+        // Explicit admin recycle on a stale binary, cycle open → recycle now.
+        assert_eq!(
+            supervisor_recycle_action(true, false, true, false, true, false, false, true),
+            RecycleImmediate
+        );
+        // Write-wedge on a stale binary, cycle open → recycle now.
+        assert_eq!(
+            supervisor_recycle_action(true, false, true, false, false, true, false, true),
+            RecycleImmediate
+        );
+        // Reexec-failure on a stale binary, cycle open → escalate kill+relaunch (a
+        // doomed re-exec cannot converge; the open cycle is reclaimed deterministically).
+        assert_eq!(
+            supervisor_recycle_action(true, true, true, true, false, false, true, true),
+            EscalateKillRelaunch
         );
 
         // CONVERSE: with the SAME inputs but cycle_open=false, the normal matrix is

@@ -472,6 +472,46 @@ fn idle_queue_resubmit_pending_payload(
     }
 }
 
+/// `#recycledeadlock` Part B (restart the interrupted task) — force-abandon the
+/// agent-doc cycle that a wedged-on-stale recycle is about to interrupt.
+///
+/// Called only when [`super::decisions::supervisor_recycle_action`] decided to fire
+/// a recycle WHILE a cycle was still open. Per Part A that decision is reachable only
+/// when the supervisor is stale AND a fact proves the running binary cannot commit
+/// the cycle (`explicit_admin` / `write_wedged` / `reexec_failed`), so the open cycle
+/// is genuinely un-committable on this binary. Abandoning it here means the imminent
+/// `execve` / kill+relaunch does not carry a stuck `response_captured` / `write_applied`
+/// cycle across the hot-reload: the fresh (no-longer-stale) supervisor sees a clean
+/// slate and re-dispatches the still-unanswered `agent:queue` head that drove the
+/// interrupted turn, restarting the task on the fresh binary. Best-effort — a failure
+/// is logged (never swallowed) and the recycle still proceeds; the fresh supervisor's
+/// `#suprecyclespin` stalled-cycle resolver is the backstop.
+fn abandon_wedged_cycle_for_recycle(path: &std::path::Path, pane: &str) {
+    match crate::cycle_state::mark_abandoned(
+        path,
+        "recycledeadlock_recycle_restart_interrupted_task",
+        None,
+        None,
+    ) {
+        Ok(_) => crate::ops_log::log_op(
+            path,
+            &format!(
+                "supervisor_recycle_wedged_cycle_abandoned file={} pane={} reason=restart_interrupted_task_on_fresh_binary (#recycledeadlock)",
+                path.display(),
+                pane,
+            ),
+        ),
+        Err(err) => crate::ops_log::log_op(
+            path,
+            &format!(
+                "supervisor_recycle_wedged_cycle_abandon_failed file={} pane={} err={err:#} (#recycledeadlock)",
+                path.display(),
+                pane,
+            ),
+        ),
+    }
+}
+
 pub(super) fn spawn_idle_queue_watch_thread(
     shared: Arc<SupervisorShared>,
     stop: Arc<AtomicBool>,
@@ -1688,6 +1728,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         reexec_escalation_attempts,
                         MAX_REEXEC_ESCALATIONS,
                     ) {
+                        // `#recycledeadlock` Part B: if this kill+relaunch was
+                        // unblocked past an open cycle, that cycle is wedged on the
+                        // stale binary — abandon it so the relaunched supervisor
+                        // re-dispatches its queue head instead of inheriting a stuck
+                        // cycle.
+                        if cycle_open {
+                            abandon_wedged_cycle_for_recycle(
+                                &path,
+                                shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                            );
+                        }
                         reexec_escalation_attempts += 1;
                         shared.restart_reexec.store(false, Ordering::Relaxed);
                         shared.restart_requested.store(true, Ordering::Relaxed);
@@ -1784,6 +1835,18 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         _ => false,
                     };
                 if do_recycle {
+                    // `#recycledeadlock` Part B: a recycle that fired while a cycle was
+                    // still open only reached here because the cycle is wedged on the
+                    // stale binary (Part A). Abandon it before the `execve` so the fresh
+                    // supervisor re-dispatches the still-unanswered queue head (restart
+                    // the interrupted task) instead of carrying a stuck cycle across the
+                    // hot-reload.
+                    if cycle_open {
+                        abandon_wedged_cycle_for_recycle(
+                            &path,
+                            shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                        );
+                    }
                     // `#ctlrecycle` R3 — hot-reload onto the fresh binary IN PLACE via
                     // `execve`, preserving the live harness child + tmux pane. Falls
                     // back to a clean exit (child restarts) if the in-place swap cannot

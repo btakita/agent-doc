@@ -1174,17 +1174,18 @@ pub(crate) fn host_supervisor_is_stale(
 }
 
 /// `#fccsupwarn3` — user-facing warning for a stale route-owned host supervisor.
-/// Keep the routine stale-binary refresh path non-destructive: idle-boundary recycle
-/// or normal file-scoped restart. Force/interrupt-clear hatches are for genuinely
-/// wedged owners, not for picking up a freshly-installed binary.
+/// Point at the routine non-destructive refresh: idle-boundary recycle or normal
+/// file-scoped restart. (`#recycledeadlock`: the prior "avoid force/discard recovery
+/// for stale-binary refresh" sentence was dropped — the recycle now self-heals the
+/// open-cycle deadlock that used to make force/discard the only escape, so a blanket
+/// warning against it was both unnecessary and misleading.)
 pub(crate) fn host_supervisor_stale_warning_message(supervisor_pid: u32) -> String {
     format!(
         "the route-owned host supervisor (pid {supervisor_pid}) serving this document is mapping \
          a STALE agent-doc binary while a newer build is installed, so it can keep producing File \
          Cache Conflict / IPC-drift dialogs (#fcc0/#ipcdrift). Refresh it without discarding the \
          live turn: `agent-doc admin recycle` (recycles at the next idle boundary) or \
-         `agent-doc session restart-supervisor <FILE>` (refuses busy panes). Avoid force/discard \
-         recovery for stale-binary refresh; those paths are only for wedged owners."
+         `agent-doc session restart-supervisor <FILE>` (refuses busy panes)."
     )
 }
 

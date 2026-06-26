@@ -3354,6 +3354,14 @@ pub fn tracked_modified_paths(file: &Path) -> Result<Vec<String>> {
         return Ok(Vec::new());
     }
 
+    // #side-effect-exclude-submodules: a dirty submodule gitlink (e.g. an unrelated
+    // sibling project sharing this superproject) is NEVER an agent-doc cycle
+    // side-effect — the cycle writes the session document and its own snapshot/repo
+    // files, not another submodule's pointer. Excluding submodule paths keeps the
+    // "tracked side-effect edits" closeout diagnostic accurate instead of listing
+    // unrelated dirty submodules as if the cycle touched them.
+    let submodules = submodule_paths(&git_root);
+
     let mut paths = Vec::new();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         if line.len() < 4 {
@@ -3366,13 +3374,41 @@ pub fn tracked_modified_paths(file: &Path) -> Result<Vec<String>> {
         if let Some((_, renamed_to)) = path.rsplit_once(" -> ") {
             path = renamed_to.trim().to_string();
         }
-        if !path.is_empty() {
-            paths.push(path);
+        if path.is_empty() || submodules.contains(&path) {
+            continue;
         }
+        paths.push(path);
     }
     paths.sort();
     paths.dedup();
     Ok(paths)
+}
+
+/// Paths registered as git submodules under `git_root` (from `git submodule
+/// status`). Best-effort — a failed/absent submodule listing yields an empty set,
+/// so the caller simply does not exclude anything. Used to keep submodule gitlink
+/// changes out of agent-doc cycle "side-effect" accounting
+/// (#side-effect-exclude-submodules).
+fn submodule_paths(git_root: &Path) -> std::collections::HashSet<String> {
+    let mut set = std::collections::HashSet::new();
+    let Ok(output) = Command::new("git")
+        .current_dir(git_root)
+        .args(["submodule", "status"])
+        .output()
+    else {
+        return set;
+    };
+    if !output.status.success() {
+        return set;
+    }
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        // ` <sha> <path> (<describe>)` / `+<sha> <path>` / `-<sha> <path>` /
+        // `U<sha> <path>` — the path is the second whitespace-separated field.
+        if let Some(path) = line.trim_start_matches(['+', '-', 'U', ' ']).split_whitespace().nth(1) {
+            set.insert(path.to_string());
+        }
+    }
+    set
 }
 
 /// Check whether the parent repo's committed submodule pointer is current for a file in a submodule.

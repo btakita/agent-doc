@@ -238,6 +238,18 @@ enum SimCommand {
     /// `execve` cannot sever the in-flight finalize IPC listener mid-cycle and drive
     /// the next finalize into `live_prompt_drift_after_preflight`.
     SetAgentDocCycleOpen(bool),
+    /// `#midturn-recycle-resume` Phase B: the harness child dies across the recycle
+    /// window (it crashed/was killed, or an escalation forced the recycle over a
+    /// wedged never-closing cycle). The next recycle-boot reading the still-open
+    /// `#durablerecycle` checkpoint must re-dispatch the interrupted turn (keyed off
+    /// the checkpoint) instead of adopting a dead surviving child.
+    MarkHarnessChildDiedAcrossRecycle,
+    /// `#midturn-recycle-resume` Phase B: model a fresh supervisor BOOT from an
+    /// `execve` recycle. Drives the pure `boot_resume_action` over the modeled
+    /// open-cycle / child-survived / consumed state and applies the outcome —
+    /// re-dispatching the interrupted turn (and latching the consume) only when the
+    /// cycle is open AND the child died AND it was not already consumed.
+    SupervisorRecycleBoot,
     /// `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`): the editor-IPC write
     /// path is wedged — the converge closeout has refused repeated writes against a
     /// nominally-active JB listener (the de-wedge latch tripped `degraded`). The
@@ -735,6 +747,23 @@ struct RecycleClearModel {
     /// listener mid-cycle and drive the next finalize into
     /// `live_prompt_drift_after_preflight`.
     cycle_open: bool,
+    /// `#midturn-recycle-resume` Phase B: consecutive idle ticks the recycle has been
+    /// deferred for an open cycle at a turn boundary (mirrors idle_watch.rs's
+    /// `cycle_open_defer_streak`). Once it reaches `MAX_CYCLE_OPEN_DEFER_TICKS` the
+    /// watch ESCALATES and forces the recycle, so a never-closing / wedged cycle
+    /// cannot starve the stale-binary self-recycle indefinitely.
+    cycle_open_defer_streak: u32,
+    /// `#midturn-recycle-resume` Phase B: the harness child has died across the
+    /// recycle window (it crashed/was killed, or an escalation forced the recycle
+    /// over a wedged cycle). A boot reading the still-open `#durablerecycle`
+    /// checkpoint must actively re-dispatch the interrupted turn instead of adopting
+    /// a (dead) surviving child. Default false: the child normally survives the
+    /// `execve` recycle and owns its own resume.
+    recycle_child_died: bool,
+    /// `#midturn-recycle-resume` Phase B: a prior boot already re-dispatched this
+    /// open checkpoint's interrupted turn (mirrors the persisted
+    /// `recycle_resume_consumed` latch). A second boot must not re-dispatch again.
+    recycle_resume_consumed: bool,
     /// The head the idle-queue watch last injected a trigger for (drain dedup).
     last_dispatched: Option<String>,
     /// `#qflood2`: the watch sent its OWN `/clear` (an opt-in context reset or a
@@ -872,6 +901,18 @@ struct Coverage {
     /// (operator `admin recycle` or the `supervisor_recycle_action` predicate),
     /// preserving the live pane via `execve`.
     supervisor_recycles: usize,
+    /// `#midturn-recycle-resume` Phase B: a never-closing / wedged open cycle deferred
+    /// the recycle past `MAX_CYCLE_OPEN_DEFER_TICKS`, so the watch ESCALATED and forced
+    /// the recycle (the open cycle can no longer starve a stale-binary self-recycle).
+    cycle_open_defer_escalations: usize,
+    /// `#midturn-recycle-resume` Phase B: a fresh supervisor boot re-dispatched a
+    /// genuinely-interrupted turn from the still-open `#durablerecycle` checkpoint
+    /// (the harness child died across the recycle).
+    recycle_resume_redispatches: usize,
+    /// `#midturn-recycle-resume` Phase B: a fresh supervisor boot adopted a SURVIVING
+    /// harness child without re-dispatching (the common case — idempotency: the child
+    /// is still running the interrupted turn).
+    recycle_resume_adopt_surviving: usize,
     /// `#suprecyclestall`: a self-`execve` recycle failed and the watch fell back to
     /// continuing on the current binary (never `process::exit`, so the pane survives).
     supervisor_recycle_failures: usize,
@@ -3199,6 +3240,119 @@ fn open_agent_doc_cycle_defers_self_recycle_until_finalize_commits() {
     assert!(
         !world.recycle_clear.binary_stale,
         "the recycle promoted the freshly-installed binary"
+    );
+}
+
+#[test]
+fn never_closing_cycle_escalates_recycle_then_boot_redispatches_interrupted_turn() {
+    // `#midturn-recycle-resume` Phase B: Phase A defers a stale-binary self-recycle
+    // while a cycle is open, but a cycle that NEVER closes (a wedged finalize, a
+    // stranded preflight) must not starve the recycle forever. Past
+    // `MAX_CYCLE_OPEN_DEFER_TICKS` consecutive boundary deferrals the watch ESCALATES
+    // and forces the recycle. The forced `execve` severs the wedged cycle, so the
+    // harness child dies — and the fresh supervisor boot re-dispatches the
+    // genuinely-interrupted turn from the still-open `#durablerecycle` checkpoint
+    // (idempotently: a second boot does not re-dispatch again).
+    use agent_doc_orchestration::start::decisions::MAX_CYCLE_OPEN_DEFER_TICKS;
+
+    let mut world = SimWorld::new(9_191);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    // Stale binary + auto-recycle ON, but a cycle that never closes.
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world
+        .apply(SimCommand::EnableSupervisorAutoRecycle)
+        .unwrap();
+    world
+        .apply(SimCommand::SetAgentDocCycleOpen(true))
+        .unwrap();
+
+    // Tick just under the threshold: every tick DEFERS, no recycle, no escalation.
+    for _ in 0..(MAX_CYCLE_OPEN_DEFER_TICKS - 1) {
+        world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    }
+    assert_eq!(
+        world.coverage.supervisor_recycles, 0,
+        "an open cycle defers the recycle below the escalation threshold"
+    );
+    assert_eq!(
+        world.coverage.cycle_open_defer_escalations, 0,
+        "no escalation before the threshold"
+    );
+    assert!(
+        world.recycle_clear.binary_stale,
+        "the stale binary stays pending while the cycle is open"
+    );
+
+    // The threshold tick ESCALATES and forces the recycle even though the cycle is
+    // STILL open — proving a never-closing cycle cannot starve the recycle.
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.cycle_open_defer_escalations, 1,
+        "the threshold tick escalates the deferred recycle"
+    );
+    assert_eq!(
+        world.coverage.supervisor_recycles, 1,
+        "the escalation forces the recycle over the never-closing cycle"
+    );
+    assert!(
+        !world.recycle_clear.binary_stale,
+        "the forced recycle promoted the fresh binary"
+    );
+    assert!(
+        world.recycle_clear.cycle_open,
+        "the cycle was still open when the recycle was forced (it never closed)"
+    );
+    assert!(
+        world.recycle_clear.recycle_child_died,
+        "the forced execve over a wedged cycle severs/kills the harness child"
+    );
+
+    // The fresh supervisor boots: the child died across the recycle, so it
+    // re-dispatches the interrupted turn from the still-open checkpoint.
+    world.apply(SimCommand::SupervisorRecycleBoot).unwrap();
+    assert_eq!(
+        world.coverage.recycle_resume_redispatches, 1,
+        "the boot re-dispatches the genuinely-interrupted turn"
+    );
+    assert_eq!(
+        world.coverage.recycle_resume_adopt_surviving, 0,
+        "no surviving child to adopt — the child died across the recycle"
+    );
+
+    // IDEMPOTENCY: a second boot over the same still-open + consumed checkpoint must
+    // NOT re-dispatch the turn again.
+    world.apply(SimCommand::SupervisorRecycleBoot).unwrap();
+    assert_eq!(
+        world.coverage.recycle_resume_redispatches, 1,
+        "a second boot must not re-dispatch the already-consumed turn"
+    );
+}
+
+#[test]
+fn recycle_boot_with_surviving_child_adopts_without_redispatch() {
+    // `#midturn-recycle-resume` Phase B idempotency: the common Phase-A steady state —
+    // the harness child SURVIVED the `execve` recycle and is still running the
+    // interrupted turn. The fresh boot must ADOPT it without re-dispatching (a
+    // re-dispatch would double-run the turn).
+    let mut world = SimWorld::new(5_005);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    // Cycle open, child survived (the default — no MarkHarnessChildDiedAcrossRecycle).
+    world
+        .apply(SimCommand::SetAgentDocCycleOpen(true))
+        .unwrap();
+    world.apply(SimCommand::SupervisorRecycleBoot).unwrap();
+
+    assert_eq!(
+        world.coverage.recycle_resume_adopt_surviving, 1,
+        "a surviving child is adopted on boot"
+    );
+    assert_eq!(
+        world.coverage.recycle_resume_redispatches, 0,
+        "a surviving child must NOT trigger a re-dispatch (no double-run)"
     );
 }
 

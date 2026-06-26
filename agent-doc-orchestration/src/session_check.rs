@@ -78,6 +78,25 @@ pub use detect::*;
 mod partial_staging;
 pub(crate) use partial_staging::*;
 
+/// True when the flagged response `marker` heading (a `### Re:` line, or
+/// `## Assistant`) is present in the document's committed HEAD content — proof the
+/// binary's `finalize` write/commit path ran for it, so the snapshot-vs-working-tree
+/// "direct response patchback" heuristic is a false positive. Transient `(HEAD)` /
+/// boundary markers are normalized before the line-containment check so a preserved
+/// `(HEAD)` annotation does not defeat the match. (#patchback-head-tolerant)
+fn response_marker_committed_in_head(file: &std::path::Path, marker: &str) -> anyhow::Result<bool> {
+    let Some(head) = crate::git::show_head(file)? else {
+        return Ok(false);
+    };
+    let needle = crate::git::normalize_transient_agent_doc_markers(marker);
+    let needle = needle.trim();
+    if needle.is_empty() {
+        return Ok(false);
+    }
+    let head_norm = crate::git::normalize_transient_agent_doc_markers(&head);
+    Ok(head_norm.lines().any(|line| line.trim() == needle))
+}
+
 /// Event name prefix emitted by `preflight::run` that indicates a cycle
 /// started but may have been abandoned. If this is the final entry in
 /// ops.log, the previous cycle did not complete.
@@ -781,12 +800,33 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                     reason
                 )));
             }
-            return Ok(SessionCheckStatus::Interrupted(format!(
-                "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}{} {}",
-                marker,
-                tracked_side_effect_note(file)?,
-                closeout_recovery_hint(file)
-            )));
+            // #patchback-head-tolerant: the patchback heuristic compares the
+            // snapshot against the working tree, never against HEAD — so a response
+            // that WAS committed through `finalize` (it reached HEAD) but whose
+            // snapshot sidecar is stale, or whose working tree was re-drifted by the
+            // post-commit IPC listener (#postcommit-ipc-worktree-corruption), trips a
+            // FALSE "direct response patchback without agent-doc cycle". If the flagged
+            // `### Re:` heading is present in HEAD, the binary's write/commit path DID
+            // run for it — it is not a bypassed patchback. Do not interrupt; fall
+            // through to the remaining guards (post-commit drift etc.) which catch a
+            // genuine working-tree problem without the false closeout-violation.
+            if response_marker_committed_in_head(file, &marker)? {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "session_check_patchback_tolerated_head_committed file={} marker={:?} (#patchback-head-tolerant)",
+                        file.display(),
+                        marker.chars().take(80).collect::<String>(),
+                    ),
+                );
+            } else {
+                return Ok(SessionCheckStatus::Interrupted(format!(
+                    "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}{} {}",
+                    marker,
+                    tracked_side_effect_note(file)?,
+                    closeout_recovery_hint(file)
+                )));
+            }
         }
         if let Some(marker) = detect_active_session_post_commit_drift(file)? {
             return Ok(SessionCheckStatus::Interrupted(format!(
@@ -1428,6 +1468,36 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+    #[test]
+    fn response_marker_committed_in_head_is_head_tolerant() {
+        // #patchback-head-tolerant: a `### Re:` heading committed to HEAD is proof the
+        // finalize write path ran, so the patchback heuristic must not interrupt even
+        // when the snapshot is stale / the working tree was post-commit-drifted.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        partial_staging_git(root, &["init"]);
+        partial_staging_git(root, &["config", "user.email", "t@t.com"]);
+        partial_staging_git(root, &["config", "user.name", "T"]);
+        let doc = root.join("session.md");
+        let committed = "<!-- agent:exchange -->\n❯ q\n\n### Re: shipped the fix — opus-4-8\n\nDone.\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, committed).unwrap();
+        partial_staging_git(root, &["add", "session.md"]);
+        partial_staging_git(root, &["commit", "-m", "commit response"]);
+
+        // The committed heading IS in HEAD → tolerated (true), even with a preserved
+        // transient `(HEAD)` marker on the queried heading.
+        assert!(
+            response_marker_committed_in_head(&doc, "### Re: shipped the fix — opus-4-8 (HEAD)")
+                .unwrap(),
+            "a response heading committed to HEAD must be recognized (markers normalized)"
+        );
+        // A heading NOT in HEAD → not tolerated (false) — a genuine uncommitted
+        // patchback still trips the guard.
+        assert!(
+            !response_marker_committed_in_head(&doc, "### Re: never committed — opus-4-8").unwrap()
+        );
+    }
+
     fn setup_partial_staging_repo(root: &std::path::Path) -> std::path::PathBuf {
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
         fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();

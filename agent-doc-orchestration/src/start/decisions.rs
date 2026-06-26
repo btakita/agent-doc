@@ -477,6 +477,105 @@ pub fn reexec_escalation_within_bound(attempts: u32, max: u32) -> bool {
     attempts < max
 }
 
+/// `#midturn-recycle-resume` Phase B — how many CONSECUTIVE idle-watch ticks a
+/// recycle may be deferred for an open agent-doc cycle (`DeferCycleOpen`) before
+/// the watch escalates and forces the recycle anyway.
+///
+/// Phase A made a mid-cycle `execve` impossible by deferring every recycle arm
+/// while a cycle is open. That deferral is correct for the common case (the cycle
+/// commits sub-second and the recycle fires at the next boundary), but a cycle that
+/// NEVER closes — a wedged finalize, a stranded `preflight_started` whose harness
+/// child died, a leaked in-flight IPC handler — would otherwise starve the recycle
+/// forever, leaving the supervisor stuck on a stale binary or unable to honor an
+/// operator restart.
+///
+/// The idle-watch poll interval is `AUTO_TRIGGER_POLL_INTERVAL` (500ms), so the
+/// default `40` ticks is ~20 seconds of a continuously-open cycle. A healthy
+/// finalize closes its cycle in well under a second (a couple of ticks), so a
+/// legitimate cycle never reaches the bound; 20s is long enough that only a
+/// genuinely-wedged cycle escalates. The escalation then forces the recycle (drops
+/// the interlock for this tick) so a never-closing cycle cannot indefinitely block
+/// a stale-binary self-recycle or an operator restart — the open cycle's
+/// `#durablerecycle` checkpoint is still on disk, so the genuinely-interrupted turn
+/// is re-dispatched on the fresh boot (see [`boot_resume_action`]).
+pub const MAX_CYCLE_OPEN_DEFER_TICKS: u32 = 40;
+
+/// `#midturn-recycle-resume` Phase B — whether a consecutive run of cycle-open
+/// recycle deferrals has reached the escalation bound. Pure so the threshold is
+/// unit-testable without the live idle-watch loop; the caller tracks the streak
+/// (incrementing on each `DeferCycleOpen` tick, resetting to 0 on any non-defer
+/// tick) and forces the recycle once this returns true.
+pub fn cycle_open_defer_escalates(consecutive_defers: u32, max: u32) -> bool {
+    consecutive_defers >= max
+}
+
+/// `#midturn-recycle-resume` Phase B — what a fresh supervisor image (born from an
+/// `execve` recycle) should do with the `#durablerecycle` turn checkpoint on boot.
+///
+/// Phase A guarantees a recycle cannot `execve` mid-cycle, so in the steady state a
+/// fresh boot's checkpoint is either committed (nothing to resume) or open with a
+/// SURVIVING adopted harness child that is still running the turn (do not
+/// re-trigger — the child resumes itself). Phase B handles the residual case Phase A
+/// cannot prevent: the harness child died across the recycle window (it crashed, was
+/// killed, or the recycle escalated past `MAX_CYCLE_OPEN_DEFER_TICKS` and forced the
+/// `execve` over a wedged cycle). Then the surviving-child resume never happens and
+/// the interrupted turn must be actively re-dispatched from the checkpoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BootResumeAction {
+    /// Not a recycle boot (no `ReexecState` in env), or the checkpoint is absent /
+    /// committed / abandoned / already consumed by a prior boot. Nothing to resume.
+    None,
+    /// The adopted harness child survived the recycle and the cycle is still open —
+    /// the child is itself still running the interrupted turn. Adopt it WITHOUT
+    /// re-triggering (the existing `#ctlrecycle` behavior); the surviving child owns
+    /// the resume. This is the idempotency guard against double-running a turn.
+    AdoptSurvivingChild,
+    /// The cycle is open but the harness child did NOT survive the recycle — the
+    /// turn was genuinely interrupted and no surviving child will resume it. Spawn a
+    /// fresh child and re-dispatch the SAME turn (keyed off the checkpoint's
+    /// `queue_task_id` / `prompt_targets`), then mark the checkpoint consumed so a
+    /// second boot cannot re-dispatch again.
+    RedispatchInterruptedTurn,
+}
+
+/// `#midturn-recycle-resume` Phase B — pure boot-resume policy. Decides what a fresh
+/// supervisor image should do with the durable turn checkpoint, given:
+/// - `is_recycle_boot`: this image was launched by a supervisor self-`execve`
+///   (`ReexecState::from_env().is_some()`).
+/// - `cycle_open`: the loaded `#durablerecycle` checkpoint is still open
+///   (`CycleState::is_open()` — not Committed/Abandoned).
+/// - `child_survived`: the harness child PID handed across the `execve` still names
+///   a live (non-zombie) process the fresh image can adopt.
+/// - `already_consumed`: a prior boot already re-dispatched this checkpoint
+///   (`recycle_resume_consumed` latch), so this boot must not re-dispatch again.
+///
+/// Idempotency is layered: a committed cycle is never open (so `None`); a surviving
+/// child adopts without re-trigger (so the turn is not double-run); and an
+/// already-consumed checkpoint never re-dispatches a second time even if the child
+/// is still absent. Only an open + child-died + not-yet-consumed checkpoint
+/// re-dispatches.
+pub fn boot_resume_action(
+    is_recycle_boot: bool,
+    cycle_open: bool,
+    child_survived: bool,
+    already_consumed: bool,
+) -> BootResumeAction {
+    if !is_recycle_boot || !cycle_open {
+        return BootResumeAction::None;
+    }
+    if child_survived {
+        // The common Phase-A steady-state: the child is still running the turn.
+        // Adopt it as-is; re-dispatching would double-run the turn.
+        return BootResumeAction::AdoptSurvivingChild;
+    }
+    if already_consumed {
+        // A prior boot already re-dispatched this exact checkpoint; do not stack a
+        // second re-dispatch of the same turn.
+        return BootResumeAction::None;
+    }
+    BootResumeAction::RedispatchInterruptedTurn
+}
+
 /// `#ctlrecycle` R3 / `#suprecyclequeue` / `#supselfheal` — pure recycle policy for the
 /// `start` supervisor. On unix the recycle is a blue/green `execve`-preserve-child
 /// hot-reload that keeps the live agent child + pane, so it is safe enough to default ON
@@ -1055,6 +1154,37 @@ impl ReexecState {
         )
     }
 
+    /// `#midturn-recycle-resume` Phase B — whether the harness child handed across
+    /// the `execve` recycle still names a LIVE (non-zombie) process the fresh image
+    /// can adopt. `kill(pid, 0)` succeeding (`Ok`) or failing with `EPERM` (the PID
+    /// exists but is owned by another user — impossible here, but treat as alive to
+    /// stay fail-safe toward adoption) means the child survived; `ESRCH` means it
+    /// died across the recycle window and the interrupted turn must be re-dispatched.
+    ///
+    /// NB: a child that exited but is still an UNREAPED zombie also answers `kill 0`
+    /// as alive. That is acceptable here: this image has not yet adopted/`waitpid`'d
+    /// the child, and the `PtySession::adopt` + first read/`try_wait` immediately
+    /// after will observe the EOF/exit and drive the normal child-exit path, so a
+    /// transient zombie does not wrongly suppress a needed re-dispatch for long.
+    #[cfg(unix)]
+    pub(crate) fn child_survived(self) -> bool {
+        let ret = unsafe { libc::kill(self.child_pid as libc::pid_t, 0) };
+        if ret == 0 {
+            return true;
+        }
+        // EPERM: process exists, just not signalable by us — treat as alive.
+        std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+
+    #[cfg(not(unix))]
+    pub(crate) fn child_survived(self) -> bool {
+        // No `execve` child-preserving recycle on non-unix; the adopt path is never
+        // taken, so a recycle boot always spawns fresh. Report "survived" so the
+        // boot-resume policy adopts the (non-existent) child path as a no-op rather
+        // than re-dispatching on a platform that never severs a child mid-cycle.
+        true
+    }
+
     /// `(key, value)` env pairs to set before `execve` so the new image re-adopts.
     pub(crate) fn to_env(self) -> [(String, String); 2] {
         [
@@ -1269,6 +1399,81 @@ mod tests {
         assert_eq!(
             supervisor_recycle_action(true, true, false, true, false, false, false, true),
             None
+        );
+    }
+
+    #[test]
+    fn cycle_open_defer_escalates_after_threshold_only() {
+        // `#midturn-recycle-resume` Phase B: the streak escalates only once it REACHES
+        // the bound, so a healthy cycle (a couple of ticks) never forces a recycle.
+        assert!(!cycle_open_defer_escalates(0, MAX_CYCLE_OPEN_DEFER_TICKS));
+        assert!(!cycle_open_defer_escalates(1, MAX_CYCLE_OPEN_DEFER_TICKS));
+        assert!(!cycle_open_defer_escalates(
+            MAX_CYCLE_OPEN_DEFER_TICKS - 1,
+            MAX_CYCLE_OPEN_DEFER_TICKS
+        ));
+        // At and past the bound: escalate (force the recycle over a never-closing cycle).
+        assert!(cycle_open_defer_escalates(
+            MAX_CYCLE_OPEN_DEFER_TICKS,
+            MAX_CYCLE_OPEN_DEFER_TICKS
+        ));
+        assert!(cycle_open_defer_escalates(
+            MAX_CYCLE_OPEN_DEFER_TICKS + 5,
+            MAX_CYCLE_OPEN_DEFER_TICKS
+        ));
+        // Small explicit bound for clarity.
+        assert!(!cycle_open_defer_escalates(2, 3));
+        assert!(cycle_open_defer_escalates(3, 3));
+    }
+
+    #[test]
+    fn boot_resume_action_redispatches_only_when_cycle_open_and_child_died() {
+        use BootResumeAction::*;
+        // `#midturn-recycle-resume` Phase B truth table.
+        // (args: is_recycle_boot, cycle_open, child_survived, already_consumed)
+
+        // Not a recycle boot → never resume, regardless of cycle/child state.
+        assert_eq!(boot_resume_action(false, true, false, false), None);
+        assert_eq!(boot_resume_action(false, true, true, false), None);
+
+        // Recycle boot, cycle COMMITTED/closed (cycle_open=false) → nothing to resume.
+        assert_eq!(boot_resume_action(true, false, false, false), None);
+        assert_eq!(boot_resume_action(true, false, true, false), None);
+
+        // Recycle boot, cycle OPEN, child SURVIVED → adopt without re-trigger
+        // (idempotency: the surviving child is still running the turn).
+        assert_eq!(boot_resume_action(true, true, true, false), AdoptSurvivingChild);
+        // The surviving-child adopt wins even if a prior consume latched — a live
+        // child must never be double-run by re-dispatch.
+        assert_eq!(boot_resume_action(true, true, true, true), AdoptSurvivingChild);
+
+        // Recycle boot, cycle OPEN, child DIED, NOT yet consumed → re-dispatch the
+        // genuinely-interrupted turn. The ONLY arm that re-dispatches.
+        assert_eq!(
+            boot_resume_action(true, true, false, false),
+            RedispatchInterruptedTurn
+        );
+
+        // Recycle boot, cycle OPEN, child DIED, but ALREADY consumed by a prior boot
+        // → do not re-dispatch again (idempotency against a second boot).
+        assert_eq!(boot_resume_action(true, true, false, true), None);
+    }
+
+    #[test]
+    fn supervisor_recycle_action_clearing_cycle_open_restores_recycle_for_escalation() {
+        use SupervisorRecycleAction::*;
+        // `#midturn-recycle-resume` Phase B: when the idle-watch escalation fires it
+        // recomputes the recycle action with `effective_cycle_open=false`, so the
+        // recycle that the open cycle had been deferring fires. Prove the converse the
+        // escalation relies on: the SAME stale+auto+head inputs that DeferCycleOpen
+        // with cycle_open=true return RecycleImmediate with cycle_open=false.
+        assert_eq!(
+            supervisor_recycle_action(true, true, true, true, false, false, false, true),
+            DeferCycleOpen
+        );
+        assert_eq!(
+            supervisor_recycle_action(true, true, true, true, false, false, false, false),
+            RecycleImmediate
         );
     }
 
@@ -1704,6 +1909,37 @@ mod tests {
         assert_eq!(env[1].1, "7");
         // Marshaled values parse back to the same state.
         assert_eq!(ReexecState::parse(&env[0].1, &env[1].1), Some(state));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reexec_state_child_survived_distinguishes_live_from_dead_pid() {
+        // `#midturn-recycle-resume` Phase B: a live PID (this test process) reports
+        // survived; a PID that cannot exist reports dead, driving a re-dispatch.
+        let live = ReexecState {
+            child_pid: std::process::id(),
+            master_fd: 7,
+        };
+        assert!(
+            live.child_survived(),
+            "the current process pid must read as a surviving child"
+        );
+
+        // Spawn a child, reap it, and confirm the now-dead pid reads as not-survived.
+        // (A reaped pid answers `kill(pid, 0)` with ESRCH.)
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn a short-lived child");
+        let dead_pid = child.id();
+        child.wait().expect("reap the child");
+        let dead = ReexecState {
+            child_pid: dead_pid,
+            master_fd: 7,
+        };
+        assert!(
+            !dead.child_survived(),
+            "a reaped child pid must read as not-survived so the turn is re-dispatched"
+        );
     }
 
     // #jb-run-agent-doc-busy-queue-dispatch-deadlock: the supervisor idle-queue

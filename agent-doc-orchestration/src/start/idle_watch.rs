@@ -633,6 +633,19 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // The request file is refreshed every tick while the condition holds;
             // the log line fires once so the watch loop stays quiet.
             let mut recycle_yield_requested_logged = false;
+            // `#midturn-recycle-resume` Phase B: consecutive idle-watch boundary ticks
+            // the recycle has been deferred for an open agent-doc cycle. The landed
+            // `#suprecyclespin` stalled-cycle-resolve (below) clears the gate for an
+            // abandoned-older superseded cycle, but a cycle that never closes for some
+            // OTHER reason (intermittent IPC inflight, a wedged finalize that keeps
+            // ticking `updated_at`) would still starve the recycle. Once this streak
+            // reaches `MAX_CYCLE_OPEN_DEFER_TICKS` the watch ESCALATES — it forces the
+            // recycle DECISION (`effective_cycle_open=false`) as a backstop layered on
+            // top of the stalled-resolve. The forced `execve` severs the wedged cycle,
+            // but its open `#durablerecycle` checkpoint survives so the fresh boot
+            // re-dispatches the genuinely-interrupted turn (see `boot_resume_action`).
+            let mut cycle_open_defer_streak: u32 = 0;
+            let mut cycle_open_defer_escalated_logged = false;
             loop {
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
@@ -1472,6 +1485,50 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                     _ => inflight > 0,
                 };
+                // `#midturn-recycle-resume` Phase B escalation backstop (layered on the
+                // `#suprecyclespin` stalled-resolve above): count consecutive cycle-open
+                // recycle deferrals at a `turn_boundary` (the only place a recycle would
+                // otherwise fire); once the streak reaches `MAX_CYCLE_OPEN_DEFER_TICKS`,
+                // force the recycle DECISION for this tick via `effective_cycle_open`.
+                // Off a boundary the recycle never fires, so an open cycle there is not
+                // starving anything and must not accrue the streak.
+                if cycle_open && turn_boundary {
+                    cycle_open_defer_streak = cycle_open_defer_streak.saturating_add(1);
+                } else {
+                    cycle_open_defer_streak = 0;
+                    cycle_open_defer_escalated_logged = false;
+                }
+                let escalate_cycle_open = crate::start::decisions::cycle_open_defer_escalates(
+                    cycle_open_defer_streak,
+                    crate::start::decisions::MAX_CYCLE_OPEN_DEFER_TICKS,
+                );
+                if escalate_cycle_open && !cycle_open_defer_escalated_logged {
+                    cycle_open_defer_escalated_logged = true;
+                    crate::ops_log::log_op(
+                        &path,
+                        &format!(
+                            "supervisor_recycle_cycle_open_escalated file={} pane={} streak={} threshold={} inflight={} action=force_recycle reason=cycle_never_closed (#midturn-recycle-resume)",
+                            path.display(),
+                            shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                            cycle_open_defer_streak,
+                            crate::start::decisions::MAX_CYCLE_OPEN_DEFER_TICKS,
+                            inflight,
+                        ),
+                    );
+                    log_event(
+                        &mut session_log,
+                        &format!(
+                            "supervisor_recycle_cycle_open_escalated streak={} threshold={} action=force_recycle reason=cycle_never_closed",
+                            cycle_open_defer_streak,
+                            crate::start::decisions::MAX_CYCLE_OPEN_DEFER_TICKS,
+                        ),
+                    );
+                }
+                // The recycle DECISION the escalation gates (the operator-restart reexec
+                // gate keeps the plain `cycle_open` — it has its own `#recycledeadlock`
+                // path; the post-decision `abandon_wedged_cycle_for_recycle` calls keep
+                // `cycle_open` so a forced recycle still abandons the open cycle).
+                let effective_cycle_open = cycle_open && !escalate_cycle_open;
                 let restart_action = supervisor_restart_action(
                     shared.restart_requested.load(Ordering::Relaxed),
                     shared.restart_reexec.load(Ordering::Relaxed),
@@ -1589,7 +1646,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     explicit_admin_recycle,
                     write_wedged,
                     reexec_failed,
-                    cycle_open,
+                    // `#midturn-recycle-resume` Phase B: the escalation backstop forces
+                    // the recycle past a never-closing cycle (`effective_cycle_open`),
+                    // layered on the `#suprecyclespin` stalled-resolve that already
+                    // cleared `cycle_open` for abandoned-older superseded cycles.
+                    effective_cycle_open,
                 );
                 if matches!(recycle_action, SupervisorRecycleAction::DeferCycleOpen) {
                     crate::ops_log::log_op(

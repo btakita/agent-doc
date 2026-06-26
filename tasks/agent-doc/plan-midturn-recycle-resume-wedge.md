@@ -83,9 +83,36 @@ When the `execve` severs the in-flight IPC listener, the ack-content sidecar nev
 
 3. Emit a `supervisor_recycle_deferred_cycle_open` ops-log line so the deferral is diagnosable (mirrors the existing `supervisor_binary_stale_detected` provenance).
 
-### Phase B (follow-up, NOT this cycle)
+### Phase B (IMPLEMENTED — 0.34.50)
 
-Actively CONSUME the `#durablerecycle` checkpoint on a fresh supervisor boot to re-dispatch a turn that was genuinely interrupted (child died across the recycle), instead of relying solely on the surviving child. This is the "restart should *reliably* restart the turn" half. It is larger (needs a re-dispatch path keyed off `queue_task_id`/`prompt_targets` + idempotency vs the surviving-child path) and should be a focused follow-up; Phase A already removes the wedge by making the mid-cycle severing impossible.
+Actively CONSUME the `#durablerecycle` checkpoint on a fresh supervisor boot to re-dispatch a turn that was genuinely interrupted (child died across the recycle), instead of relying solely on the surviving child. This is the "restart should *reliably* restart the turn" half. Phase A removed the wedge by making the mid-cycle severing impossible; Phase B makes the residual genuinely-interrupted case (the child does NOT survive the recycle) reliably re-dispatch.
+
+**Mechanism (the FIRST checkpoint consumer that resumes):**
+
+1. **Boot-resume path** (`start/run.rs`, right after `ReexecState::from_env()`). A fresh supervisor image born from an `execve` recycle (`pending_adopt.is_some()`) loads the `#durablerecycle` checkpoint and routes through the pure `boot_resume_action(is_recycle_boot, cycle_open, child_survived, already_consumed)`:
+   - **`RedispatchInterruptedTurn`** — cycle open AND child died AND not yet consumed: drop the dead-pid adopt (`pending_adopt = None`), set `auto_trigger_next_launch = true` so the first iteration spawns a fresh child and re-submits `agent-doc <FILE>` (re-running preflight against the still-open checkpoint, which re-drains the same `queue_task_id` / `prompt_targets` head), and latch `recycle_resume_consumed`.
+   - **`AdoptSurvivingChild`** — cycle open AND child survived (the common case): adopt the live child WITHOUT re-triggering. The surviving child is still running the turn; re-dispatching would double-run it. This is the idempotency guard.
+   - **`None`** — not a recycle boot, or a closed (committed/abandoned) / already-consumed checkpoint: resume nothing.
+
+2. **"Child survived?" determination** (`ReexecState::child_survived()`, `start/decisions.rs`). The recycle marshals the harness child PID across the `execve` (env handoff). On boot the fresh image probes it with `kill(pid, 0)`: `Ok` (or `EPERM`) ⇒ the PID still names a live process ⇒ the child survived ⇒ adopt; `ESRCH` ⇒ it died across the recycle window ⇒ re-dispatch. (A transient unreaped zombie answers alive, but the immediate adopt + first read/`try_wait` observes the EOF/exit and drives the normal child-exit path, so it does not durably suppress a needed re-dispatch.) On non-unix there is no child-preserving recycle, so `child_survived()` is `true` (the adopt path is a no-op and nothing is ever severed mid-cycle).
+
+3. **Idempotency.** Layered: a committed cycle is never open (so `boot_resume_action` returns `None`); a surviving child adopts without re-trigger (never double-runs); and the persisted `recycle_resume_consumed` latch (`cycle_state::mark_recycle_resume_consumed`) stops a SECOND boot reading the same still-open-but-child-dead checkpoint from re-dispatching the turn again.
+
+4. **Deferred-too-long escalation counter** (`idle_watch.rs` + `cycle_open_defer_escalates` / `MAX_CYCLE_OPEN_DEFER_TICKS` in `decisions.rs`). The idle-watch tracks `cycle_open_defer_streak` — consecutive ticks the recycle has been deferred for an open cycle AT a turn boundary (off a boundary the recycle never fires, so an open cycle there is not starving anything and does not accrue the streak). Past `MAX_CYCLE_OPEN_DEFER_TICKS` (40 ticks ≈ 20s at the 500ms poll) the watch ESCALATES: it recomputes the recycle action with `effective_cycle_open = cycle_open && !escalate` = false, forcing the deferred recycle. The forced `execve` severs the never-closing/wedged cycle — but the open `#durablerecycle` checkpoint survives on disk, so the boot-resume path above re-dispatches the genuinely-interrupted turn. This guarantees a never-closing cycle cannot starve a stale-binary self-recycle or an operator restart indefinitely. Ops-log provenance: per-tick `supervisor_recycle_deferred_cycle_open ... defer_streak=N/M` and the one-shot `supervisor_recycle_cycle_open_escalated ... action=force_recycle reason=cycle_never_closed`.
+
+**Test coverage (Phase B):**
+
+- `decisions.rs` unit: `boot_resume_action` full truth table (re-dispatches ONLY when cycle open AND child died AND not consumed; adopts on surviving child; `None` on committed / not-recycle-boot / already-consumed); `cycle_open_defer_escalates` threshold (no escalation below the bound, escalates at/past it); `ReexecState::child_survived` distinguishes a live pid (self) from a reaped-child pid; the converse that clearing `cycle_open` restores `RecycleImmediate` (what the escalation relies on).
+- `cycle_state.rs` unit: `mark_recycle_resume_consumed` latches once, is idempotent, does not close the cycle, and is `Ok(None)` with no state.
+- SimWorld: `never_closing_cycle_escalates_recycle_then_boot_redispatches_interrupted_turn` (defers below the threshold, escalates + forces the recycle at the threshold even though the cycle never closed, child dies, boot re-dispatches once, a second boot does NOT re-dispatch) and `recycle_boot_with_surviving_child_adopts_without_redispatch` (the surviving-child idempotency path adopts without re-dispatching).
+
+**Files (Phase B):**
+
+- `agent-doc-orchestration/src/start/decisions.rs` — `BootResumeAction` + `boot_resume_action`, `MAX_CYCLE_OPEN_DEFER_TICKS` + `cycle_open_defer_escalates`, `ReexecState::child_survived`.
+- `agent-doc-orchestration/src/cycle_state.rs` — `recycle_resume_consumed` field + `mark_recycle_resume_consumed`.
+- `agent-doc-orchestration/src/start/run.rs` — the boot-resume path.
+- `agent-doc-orchestration/src/start/idle_watch.rs` — the `cycle_open_defer_streak` escalation counter + `effective_cycle_open` gating + ops-log lines.
+- `src/sim_world.rs` / `src/sim_world/engine.rs` — the never-closing-cycle escalation → boot re-dispatch + surviving-child adopt model and coverage.
 
 ## Test coverage (Phase A)
 

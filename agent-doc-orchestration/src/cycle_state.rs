@@ -134,6 +134,16 @@ pub struct CycleState {
     pub queue_task_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
+    /// `#midturn-recycle-resume` Phase B: latched true once a fresh supervisor boot
+    /// has re-dispatched this exact open cycle's interrupted turn from the
+    /// `#durablerecycle` checkpoint (the harness child died across the `execve`
+    /// recycle). The idempotency guard: a SECOND boot reading the same still-open
+    /// checkpoint must not re-dispatch the turn again (it would double-run it). A
+    /// committed cycle is never open so it never re-dispatches regardless of this
+    /// flag; this flag covers the rarer case where two boots both observe the same
+    /// open-but-child-dead checkpoint before the re-dispatched turn commits.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub recycle_resume_consumed: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_done_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -419,6 +429,7 @@ pub fn start_preflight_with_task(
         prompt_targets: Vec::new(),
         queue_task_id: queue_task_id.map(|s| s.to_string()),
         turn_id: turn_id.map(|s| s.to_string()),
+        recycle_resume_consumed: false,
         pending_done_ids: Vec::new(),
         pending_kept_open_ids: Vec::new(),
         reaped_pending_ids: Vec::new(),
@@ -550,6 +561,25 @@ pub fn record_turn_checkpoint(
     }
 
     if changed {
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// `#midturn-recycle-resume` Phase B: latch that a fresh supervisor boot has
+/// re-dispatched this open cycle's interrupted turn from the `#durablerecycle`
+/// checkpoint (the harness child died across the `execve` recycle). Idempotency
+/// guard for the boot-resume path — a later boot reading the same still-open
+/// checkpoint sees the latch and does NOT re-dispatch the turn again. A committed
+/// cycle is never open so this is a no-op there. Returns the (possibly updated)
+/// state, or `Ok(None)` when no cycle state exists.
+pub fn mark_recycle_resume_consumed(file: &Path) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if !state.recycle_resume_consumed {
+        state.recycle_resume_consumed = true;
         state.updated_at = now_secs();
         save(file, &state)?;
     }
@@ -1303,6 +1333,7 @@ fn synthetic_state_with_id(
         prompt_targets: Vec::new(),
         queue_task_id: None,
         turn_id: None,
+        recycle_resume_consumed: false,
         pending_done_ids: Vec::new(),
         pending_kept_open_ids: Vec::new(),
         reaped_pending_ids: Vec::new(),
@@ -1346,6 +1377,10 @@ pub fn is_noop_commit_event(event: &str) -> bool {
 
 fn is_zero(value: &usize) -> bool {
     *value == 0
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn normalized_content_hash(content: &str) -> String {
@@ -1866,6 +1901,37 @@ mod tests {
         let state = mark_committed(&doc, "commit", Some("new"), Some("new")).unwrap();
         assert_eq!(state.phase, CyclePhase::Committed);
         assert!(!state.is_open());
+    }
+
+    #[test]
+    fn mark_recycle_resume_consumed_latches_and_is_idempotent() {
+        // `#midturn-recycle-resume` Phase B: the boot-resume consume latch flips once
+        // and stays latched, so a second boot reading the same still-open checkpoint
+        // does not re-dispatch the interrupted turn again.
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        // Fresh open cycle: not yet consumed.
+        let opened = load(&doc).unwrap().unwrap();
+        assert!(opened.is_open());
+        assert!(!opened.recycle_resume_consumed);
+
+        let consumed = mark_recycle_resume_consumed(&doc).unwrap().unwrap();
+        assert!(consumed.recycle_resume_consumed);
+        assert!(consumed.is_open(), "consuming does not close the cycle");
+        // Persisted.
+        assert!(load(&doc).unwrap().unwrap().recycle_resume_consumed);
+
+        // Idempotent: a second consume keeps the latch set (no panic, no reset).
+        let again = mark_recycle_resume_consumed(&doc).unwrap().unwrap();
+        assert!(again.recycle_resume_consumed);
+
+        // No cycle state → Ok(None), never an error.
+        let other = dir.path().join("other.md");
+        fs::write(&other, "x").unwrap();
+        assert!(mark_recycle_resume_consumed(&other).unwrap().is_none());
     }
 
     #[test]

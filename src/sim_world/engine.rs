@@ -490,6 +490,17 @@ impl SimWorld {
             }
             SimCommand::SetAgentDocCycleOpen(open) => {
                 self.recycle_clear.cycle_open = open;
+                if !open {
+                    // The cycle closed — the deferral streak resets, exactly as the
+                    // idle-watch resets `cycle_open_defer_streak` on a non-defer tick.
+                    self.recycle_clear.cycle_open_defer_streak = 0;
+                }
+            }
+            SimCommand::MarkHarnessChildDiedAcrossRecycle => {
+                self.recycle_clear.recycle_child_died = true;
+            }
+            SimCommand::SupervisorRecycleBoot => {
+                self.supervisor_recycle_boot();
             }
             SimCommand::MarkWriteWedged => {
                 self.recycle_clear.write_wedged = true;
@@ -1219,6 +1230,41 @@ impl SimWorld {
         // The `#supselfheal` Phase 1 explicit-admin override is unit-tested in
         // `decisions.rs`; its SimWorld integration lands with the admin→supervisor IPC
         // adapter (`#supselfheal-adminwire`).
+        // `#midturn-recycle-resume` Phase B: track the consecutive cycle-open recycle
+        // deferrals at a turn boundary and ESCALATE past `MAX_CYCLE_OPEN_DEFER_TICKS`,
+        // forcing the recycle so a never-closing / wedged cycle cannot starve the
+        // stale-binary self-recycle forever (mirrors idle_watch.rs's
+        // `cycle_open_defer_streak` / `effective_cycle_open`).
+        use agent_doc_orchestration::start::decisions::{
+            MAX_CYCLE_OPEN_DEFER_TICKS, cycle_open_defer_escalates,
+        };
+        if self.recycle_clear.cycle_open && turn_boundary {
+            self.recycle_clear.cycle_open_defer_streak = self
+                .recycle_clear
+                .cycle_open_defer_streak
+                .saturating_add(1);
+        } else {
+            self.recycle_clear.cycle_open_defer_streak = 0;
+        }
+        let escalate_cycle_open = cycle_open_defer_escalates(
+            self.recycle_clear.cycle_open_defer_streak,
+            MAX_CYCLE_OPEN_DEFER_TICKS,
+        );
+        if escalate_cycle_open {
+            // The escalation forces the recycle over a wedged cycle. The forced execve
+            // severs the never-closing cycle, but its open `#durablerecycle` checkpoint
+            // survives, so the harness child is reported dead and the fresh boot
+            // re-dispatches the interrupted turn. Count the escalation once it fires.
+            if self.recycle_clear.cycle_open_defer_streak == MAX_CYCLE_OPEN_DEFER_TICKS {
+                self.coverage.cycle_open_defer_escalations += 1;
+                self.recycle_clear.recycle_child_died = true;
+                self.record_ops_proof(format!(
+                    "supervisor_recycle_cycle_open_escalated streak={}/{} action=force_recycle reason=cycle_never_closed",
+                    self.recycle_clear.cycle_open_defer_streak, MAX_CYCLE_OPEN_DEFER_TICKS,
+                ));
+            }
+        }
+        let effective_cycle_open = self.recycle_clear.cycle_open && !escalate_cycle_open;
         let recycle_action = supervisor_recycle_action(
             self.recycle_clear.binary_stale,
             self.recycle_clear.auto_recycle,
@@ -1228,8 +1274,9 @@ impl SimWorld {
             self.recycle_clear.write_wedged,
             self.recycle_clear.reexec_failed,
             // `#midturn-recycle-resume`: an open agent-doc cycle defers the recycle so
-            // the `execve` cannot sever the in-flight finalize IPC connection.
-            self.recycle_clear.cycle_open,
+            // the `execve` cannot sever the in-flight finalize IPC connection — UNLESS
+            // the escalation has fired for a never-closing cycle.
+            effective_cycle_open,
         );
         // `#supselfheal` Phase 3: a stale supervisor whose in-place execve already
         // failed escalates to a bounded kill+relaunch instead of recycling onto the
@@ -1452,6 +1499,39 @@ impl SimWorld {
     /// in-place recycle PRESERVES the live pane and session and only advances the
     /// generation, leaving a fresh dispatch-ready idle prompt. The preserved-pane
     /// invariant is what distinguishes a recycle from a cold rebind.
+    /// `#midturn-recycle-resume` Phase B — model a fresh supervisor BOOT from an
+    /// `execve` recycle deciding what to do with the durable turn checkpoint, via the
+    /// pure `boot_resume_action`. A recycle boot reading a still-open checkpoint:
+    /// adopts a surviving child without re-trigger (idempotency), or re-dispatches the
+    /// interrupted turn keyed off the checkpoint when the child died (and latches the
+    /// consume so a second boot does not re-dispatch again).
+    fn supervisor_recycle_boot(&mut self) {
+        use agent_doc_orchestration::start::decisions::{BootResumeAction, boot_resume_action};
+        let action = boot_resume_action(
+            // A boot here always models a recycle boot (the test drives it explicitly).
+            true,
+            self.recycle_clear.cycle_open,
+            !self.recycle_clear.recycle_child_died,
+            self.recycle_clear.recycle_resume_consumed,
+        );
+        match action {
+            BootResumeAction::RedispatchInterruptedTurn => {
+                self.recycle_clear.recycle_resume_consumed = true;
+                self.coverage.recycle_resume_redispatches += 1;
+                self.record_ops_proof(
+                    "supervisor_recycle_resume_redispatch reason=harness_child_died_across_recycle action=spawn_fresh_and_retrigger",
+                );
+            }
+            BootResumeAction::AdoptSurvivingChild => {
+                self.coverage.recycle_resume_adopt_surviving += 1;
+                self.record_ops_proof(
+                    "supervisor_recycle_resume_adopt_surviving_child reason=child_alive_owns_resume",
+                );
+            }
+            BootResumeAction::None => {}
+        }
+    }
+
     fn recycle_supervisor_in_place(&mut self) {
         let preserved_pane = self.route.durable.pane_id.clone();
         let preserved_session = self.route.durable.session_id.clone();

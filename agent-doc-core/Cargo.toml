@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-core"
-version = "0.34.55"
+version = "0.34.56"
 edition = "2024"
 description = "Pure document data layer for agent-doc (component parsing, frontmatter, template, CRDT, pending, diff classification, model tier)"
 license = "MIT"

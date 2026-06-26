@@ -863,6 +863,92 @@ pub fn run_with_reap_policy(
     }
     let mut first_run = true;
     let mut auto_trigger_next_launch = false;
+
+    // `#midturn-recycle-resume` Phase B — actively resume a turn that was genuinely
+    // INTERRUPTED across the recycle. Phase A makes a mid-cycle `execve` impossible
+    // in the steady state, but a child can still die across the recycle window (it
+    // crashed/was killed, or the escalation forced the recycle over a never-closing
+    // wedged cycle). In that case the surviving-child resume never happens, so the
+    // fresh image must re-dispatch the interrupted turn from the `#durablerecycle`
+    // checkpoint keyed off `queue_task_id` / `prompt_targets`. When the child DID
+    // survive (the common case) we do NOT re-dispatch — the adopted child is still
+    // running the turn (idempotency). A committed/abandoned (closed) checkpoint, an
+    // already-consumed checkpoint, or a non-recycle boot all resume nothing.
+    {
+        let is_recycle_boot = pending_adopt.is_some();
+        let cycle_open = crate::cycle_state::load(file)
+            .ok()
+            .flatten()
+            .map(|state| state.is_open())
+            .unwrap_or(false);
+        let already_consumed = crate::cycle_state::load(file)
+            .ok()
+            .flatten()
+            .map(|state| state.recycle_resume_consumed)
+            .unwrap_or(false);
+        let child_survived = pending_adopt.map(|state| state.child_survived()).unwrap_or(false);
+        let resume_action = crate::start::decisions::boot_resume_action(
+            is_recycle_boot,
+            cycle_open,
+            child_survived,
+            already_consumed,
+        );
+        match resume_action {
+            crate::start::decisions::BootResumeAction::RedispatchInterruptedTurn => {
+                // The harness child died across the recycle — the interrupted turn
+                // has no surviving owner. Spawn a FRESH child (drop the dead-pid
+                // adopt) and re-trigger the same turn on the first iteration. Mark the
+                // checkpoint consumed so a second boot reading the same still-open
+                // checkpoint cannot re-dispatch the turn again (idempotency).
+                let checkpoint = crate::cycle_state::load(file).ok().flatten();
+                let target = checkpoint
+                    .as_ref()
+                    .and_then(|s| {
+                        s.queue_task_id
+                            .as_deref()
+                            .or_else(|| s.prompt_targets.first().map(String::as_str))
+                    })
+                    .unwrap_or("<none>")
+                    .to_string();
+                let cycle_id = checkpoint
+                    .as_ref()
+                    .map(|s| s.cycle_id.clone())
+                    .unwrap_or_default();
+                pending_adopt = None;
+                auto_trigger_next_launch = true;
+                if let Err(err) = crate::cycle_state::mark_recycle_resume_consumed(file) {
+                    eprintln!(
+                        "[agent-doc] warning: failed to mark #durablerecycle checkpoint consumed for {} ({err:#}) — continuing; the re-dispatch may repeat on a second boot",
+                        file.display()
+                    );
+                }
+                log_event(
+                    &mut session_log,
+                    &format!(
+                        "supervisor_recycle_resume_redispatch cycle={cycle_id} target={target} reason=harness_child_died_across_recycle"
+                    ),
+                );
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "supervisor_recycle_resume_redispatch file={} cycle={cycle_id} target={target} reason=harness_child_died_across_recycle action=spawn_fresh_and_retrigger (#midturn-recycle-resume)",
+                        file.display(),
+                    ),
+                );
+            }
+            crate::start::decisions::BootResumeAction::AdoptSurvivingChild => {
+                // The common Phase-A steady state: the adopted child is still running
+                // the interrupted turn. Adopt it as-is (the existing `#ctlrecycle`
+                // path below) without re-triggering — re-dispatching would double-run
+                // the turn.
+                log_event(
+                    &mut session_log,
+                    "supervisor_recycle_resume_adopt_surviving_child reason=child_alive_owns_resume",
+                );
+            }
+            crate::start::decisions::BootResumeAction::None => {}
+        }
+    }
     let mut restart_count: u32 = 0;
     let mut resize_watcher: Option<resize::ResizeWatcher> = None;
     let mut failed_resume_tracker = FailedResumeTracker::default();

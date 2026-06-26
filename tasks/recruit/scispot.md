@@ -80,9 +80,49 @@ AI-native lab informatics platform that replaces the fragmented stack of disconn
 **Homework before the call**
 - Skim Scispot's blog/YC launches on their instrument agents (universal lab-instrument agent, multi-well-plate "Plato" agent) so you can reference the product direction by name.
 - Be ready to articulate one concrete system you built where you normalized messy inputs into a structured model that downstream automation/AI consumed — that's the through-line they'll recognize.
+- **Heterogeneous integration** — Plato harmonizes 4+ instrument formats (their GLUE story). If you've normalized disparate input formats/protocols, frame it as the same harmonization problem.
+- **Automated QC / never-corrupt** — Plato flags well anomalies in real time; agent-doc's CRDT merge guarantees a human edit is never silently dropped and every cycle is traceable in git. That maps straight onto their **traceability / QMS** value and Satya's "loved by humans *and* AI agents" line.
+- **Messy input → structured substrate → agent-actionable** — their exact thesis; agent-doc is your end-to-end proof you've built it.
+- **Command surface over a live artifact** — Plato: backslash over a plate; agent-doc: slash over a document. Same "the artifact *is* the UI" instinct.
+- **Interface** — "**backslash commands**" to open/adjust layouts, set rows & columns, and color-code wells by sample type, plus **Python scripts** for custom analysis.
+- **Run** — real-time monitoring with **predictive error detection / automated QC** flagging anomalies (out-of-range fluorescence / absorbance / Ct values).
+- **Integrate** — automated data flow from the major plate instruments: **BMG Labtech Clariostar, Tecan Fluent, Hamilton Microlab STAR, Applied Biosystems qPCR**.
+- **Load** — AI-driven sample assignment with "balanced distribution of samples and precise control placements."
+- **Design** — generates custom plate layouts (96/384-well) for specific assays (ELISA, qPCR, cytotoxicity, cell-viability), with duplicate/triplicate wells and randomized configs.
 
 I've captured the company + interviewer profiles above. I filed a recommended follow-up to create a Corky contact for Satya (matching the Royce Stewart / Greenlight Guru pattern) if you want CRM tracking.
-<!-- agent:boundary:59c6f4c4 -->
+❯ Tell me more about the "Plato" agent. agent-doc is one concrete system where I'm normalizing messy inputs into a structured model that downstream automation/AI consumes.
+
+
+### Re: The "Plato" agent — verified details + your agent-doc bridge — opus-4-8
+
+Pulled from Scispot's own Plato page + YC launch so you can name real capabilities, not hand-wave.
+
+**What Plato is:** Scispot's **multi-well-plate agent** (part of the Scibot AI-agent family). It lets a wet-lab scientist **design → load → integrate → run** microplate workflows in natural language instead of wrangling spreadsheets:
+
+- **Design** — generates custom plate layouts (96/384-well) for specific assays (ELISA, qPCR, cytotoxicity, cell-viability), with duplicate/triplicate wells and randomized configs.
+- **Load** — AI-driven sample assignment with "balanced distribution of samples and precise control placements."
+- **Integrate** — automated data flow from the major plate instruments: **BMG Labtech Clariostar, Tecan Fluent, Hamilton Microlab STAR, Applied Biosystems qPCR**.
+- **Run** — real-time monitoring with **predictive error detection / automated QC** flagging anomalies (out-of-range fluorescence / absorbance / Ct values).
+- **Interface** — "**backslash commands**" to open/adjust layouts, set rows & columns, and color-code wells by sample type, plus **Python scripts** for custom analysis.
+
+**One accuracy note for the room:** the Plato page itself does *not* claim 21 CFR Part 11 (some secondary blurbs imply it). Compliance lives at the platform layer (alt-QMS / LabOS), not necessarily in Plato — so say "Scispot's platform is compliance-oriented" rather than pinning Part 11 on Plato. Satya will know the difference, and it signals you actually read the product.
+
+**Your agent-doc bridge — and it's uncanny; lead with this.** Plato and agent-doc are the *same architecture*, almost line-for-line:
+
+> "Plato turns a scientist's intent and messy instrument output into a structured plate model the platform and AI can act on — driven by backslash commands over a live layout. agent-doc is the same shape: it turns a person's messy, free-form markdown edits into a typed, conflict-free structured model — components, a work queue, an exchange log — that downstream agents drain and act on, driven by slash commands over a live document, with every change git-committed for provenance."
+
+Parallels that will land with a product + platform co-founder:
+
+- **Command surface over a live artifact** — Plato: backslash over a plate; agent-doc: slash over a document. Same "the artifact *is* the UI" instinct.
+- **Messy input → structured substrate → agent-actionable** — their exact thesis; agent-doc is your end-to-end proof you've built it.
+- **Automated QC / never-corrupt** — Plato flags well anomalies in real time; agent-doc's CRDT merge guarantees a human edit is never silently dropped and every cycle is traceable in git. That maps straight onto their **traceability / QMS** value and Satya's "loved by humans *and* AI agents" line.
+- **Heterogeneous integration** — Plato harmonizes 4+ instrument formats (their GLUE story). If you've normalized disparate input formats/protocols, frame it as the same harmonization problem.
+
+Net: open with the *pattern* — messy → structured → agent-actionable, command-driven, traceable — then drop agent-doc as the concrete system where you built it. Plato gives you their vocabulary; agent-doc gives you your proof.
+
+Sources: [scispot.com/plato](https://www.scispot.com/plato) · [YC launch: Plato](https://www.ycombinator.com/launches/MBx-plato-scispot-s-multi-well-plate-agent)
+<!-- agent:boundary:6b20ddde -->
 <!-- /agent:exchange -->
 
 ## Queue

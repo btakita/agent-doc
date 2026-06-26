@@ -103,7 +103,24 @@ Ran `bun run deploy:worker`:
 All four portals now serve the deal-photo carousel (house placeholder on empty deals) through their auth-scoped download routes in production.
 
 > **Queue prompt:** deploy
-<!-- agent:boundary:5c012f25 -->
+
+### Re: lender dashboard deal cards should show deal photos — opus-4-8
+
+Fixed. Root cause was purely client-side: `/api/investor/deals` (the `/lenders` portal feed) **already returns per-deal `photos`** (the available-deals page renders them), but the dashboard's local `dashboard_available_deal_api_T` type didn't declare the field and the preview cards rendered text only.
+
+**Change** (`lib/ui--browser--efs/portal/investor/dashboard.tsx`):
+- Added `photos?: CarouselPhoto[]` to the dashboard deal type and imported the shared `DealPhotoCarousel`.
+- New `DealCardThumb` helper renders the carousel (house placeholder on empty deals) bleeding to the card edges with rounded top corners.
+- Rendered it at the top of **both** deal-card grids — **Available Deals** and **Deals I'm Interested In** — so every deal card shows photos.
+
+**Verify:** `bun run check` green — **1243 tests pass** (added 2 e2e assertions: dashboard renders the carousel in both grids; the marketplace list endpoint keeps emitting `photos`). Build + `build:worker` green.
+
+**Shipped:** committed `46d6f78` and pushed to `origin/main`.
+
+**Deploy held** per your standing gate (preset is `#spec-test-commit-push`, no deploy) — it's ready via `bun run deploy:worker` whenever you give the go, same as last time. Say the word (or queue `deploy`) and I'll push it live.
+
+> **Queue prompt:** The deal cards in https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard should show the deal photos. All deal cards should show the deal photos.
+<!-- agent:boundary:ea377058 -->
 <!-- /agent:exchange -->
 ###
 <!--

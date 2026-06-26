@@ -975,6 +975,14 @@ pub(crate) fn unresolved_exchange_prompt_in_content(content: &str) -> Option<Str
                 && !line.starts_with("<!--")
                 && !line.starts_with("-->")
                 && !is_exchange_response_heading(line)
+                // `#ipcproofnostall`: a binary-authored interrupted-cycle
+                // IPC-proof recovery diagnostic line (the structured
+                // `ipc_proof_insufficient ... invariant=... recovery=...` event or
+                // its literal self-description) is not a user prompt, even when a
+                // post-commit worktree corruption strips its `### Re:` heading and
+                // fence and leaves the bare line in the exchange tail. Match is
+                // token-specific so a real prompt mentioning IPC/drift is kept.
+                && !crate::diff::line_is_binary_authored_ipc_proof_diagnostic(line)
         })
         .map(normalized_prompt_for_match)
         .filter(|line| !line.is_empty())

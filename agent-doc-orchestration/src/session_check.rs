@@ -6986,6 +6986,46 @@ Body\n\
             "a free-text prompt followed only by a queue-continuation response must stay unresolved"
         );
     }
+    // `#ipcproofnostall`: a post-commit worktree corruption can strip the
+    // `### Re:` heading and fence from the binary-authored interrupted-cycle
+    // recovery diagnostic, leaving the bare `ipc_proof_insufficient ...` event
+    // line in the exchange tail after the boundary. That binary-authored line is
+    // NOT a user prompt and must not register as an unresolved exchange prompt
+    // (which falsely INTERRUPTs session-check / finalize and stalls the queue).
+    #[test]
+    fn unresolved_exchange_prompt_ignores_separated_ipc_proof_diagnostic_line() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ earlier\n### Re: earlier — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        assert_eq!(
+            unresolved_exchange_prompt_in_content(content),
+            None,
+            "a bare binary-authored ipc_proof_insufficient line is not an unresolved user prompt"
+        );
+    }
+    // Non-regression: a real user prompt mentioning ipc/drift in the tail stays
+    // unresolved — the exemption is token-specific, not keyword-broad.
+    #[test]
+    fn unresolved_exchange_prompt_keeps_real_prompt_mentioning_ipc_drift() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ earlier\n### Re: earlier — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "The IPC drift keeps breaking finalize — please diagnose and fix the root cause.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        assert_eq!(
+            unresolved_exchange_prompt_in_content(content).as_deref(),
+            Some("The IPC drift keeps breaking finalize — please diagnose and fix the root cause."),
+            "a real user prompt mentioning ipc/drift must stay unresolved"
+        );
+    }
     #[test]
     fn is_queue_continuation_response_heading_distinguishes_directive_topics() {
         assert!(is_queue_continuation_response_heading("### Re: do [#6cmx]"));

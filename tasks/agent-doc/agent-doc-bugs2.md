@@ -414,7 +414,19 @@ This is the `#qeditdup` class every prior turn pinned on the **stale supervisor 
 3. If it **survives a restarted IDE on the fresh cdylib**, it's a genuine residual per-cell merge bug, not staleness — tell me and I'll profile the convergence/merge path in a focused cycle (this is the deeper `#qcellmerge1` per-cell-isolation territory).
 
 I'm keeping this short so I'm not writing to your live buffer while you may be typing. Marking `#qeditdup` as code-complete / awaiting-live-verify rather than done, since only the eyeball is left.
-<!-- agent:boundary:c75a77ec -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=5f12e152-b6aa-432f-bd3d-5e1c434f6f3e invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=68491 candidate_hash=53c82d38d003486591e0965af2a15b3738924999da58704bfe4474e4e71789f6 content_ours_len=69753 content_ours_hash=651242d3f0a2d86983ddf39fd04b812c36532574cb9e6009f2d483505a94f45f doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782495199717
+```
+<!-- agent:boundary:1810416e -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -434,7 +446,7 @@ The session mechanics still don't work on a new linkedin.md session. I compacted
   and complete.
 ```
 ---- 
-- :pushpin: do [#qftloss]
+- 🚧 :pushpin: do [#qftloss]
 - :pushpin: do [#qeditdup]
 - :pushpin: do [#crdtauth6]
 - :pushpin: do [#nsfz]

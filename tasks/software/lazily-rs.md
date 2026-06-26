@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -53,6 +53,13 @@ I added three prioritized backlog items. The top item is not another speculative
 - `AsyncContext` has the recycled-`SlotId` generation guard and abort/recycle ordering for `#lzasyncdispose2`.
 - Circular dependency detection now has regression coverage instead of overflowing.
 - WebSocket inbound queue bounding and dropped-frame accounting are present.
+- Transport queue/backpressure candidates (`#lzstr0mframe`, `#lzstr0mnetinbox`, `#lzwsunbounded`, `#lzwsinboundunbounded`, `#lzstr0mnetacceptanswer`) have current code coverage for bounded queues, drop counters/backpressure, frame requeue, and answer-application diagnostics.
+- Circular dependency detection (`#lzcycledetect`) is implemented in `Context` and covered by cycle panic/regression tests.
+- Async disposal/rerun candidates (`#lzasyncdispose2`, `#lzasyncrerunabort`) are covered by current generation guards, in-flight abort logic, and async regression tests.
+- Benchmark drift candidates (`#lzbenchstale`, `#lzbmcheckdrift`, `#lzbenchbudget`) do not reproduce under current `make check`; `benchmark-check` is green.
+- The local lazily-rs tree was already dirty before this triage (`src/lib.rs`, `src/reconcile.rs`); I did not change those files.
+- Latest GitHub Actions `CI` run is green: `completed/success`, workflow `CI`, branch `main`, run `28219001643`, at `2026-06-26T05:23:55Z`.
+- `make check` passed in `src/lazily-rs` through `tsift`/`rtk` digest runner (`tart-35a34af73d`, exit 0).
 
 The highest engineering follow-up after that is `#lzsmstress`, focused on state-machine hardening across sync, thread-safe, and async machines. `#lzcrdtperms` is third because the distributed CRDT transport is the freshest complex surface and needs deterministic permission/fan-out/GC regressions.
 
@@ -61,7 +68,16 @@ I left the operator-gated review items in Review; they are not agent-drainable b
 ### Re: closeout repair — gpt-5
 
 No new user-edit diff was present in this invocation. I preserved the existing lazily-rs queue state and closed the session-document commit boundary through `agent-doc finalize`.
-<!-- agent:boundary:8dcbfcda -->
+Blocked at agent-doc closeout, not at lazily-rs triage.
+
+I completed `#lzbugtriage`: `make check` passed locally, latest GitHub Actions `CI` is green, and I found no archived bug candidates that still reproduce. I did not modify the lazily-rs code; existing dirty files `src/lib.rs` and `src/reconcile.rs` were already present.
+
+The closeout is stuck because the route-owned supervisor is running a stale `agent-doc` binary. IPC refuses to prove the write, so the cycle remains `response_captured`. I ran:
+
+`agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md`
+
+That recycle is queued, but it cannot take effect until this busy Codex pane reaches idle.
+<!-- agent:boundary:5a649f8d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,7 +86,7 @@ No new user-edit diff was present in this invocation. I preserved the existing l
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- [#lzbugtriage]
+- 🚧 [#lzbugtriage]
 - [#lzsmstress]
 - [#lzcrdtperms]
 <!-- /agent:queue -->
@@ -78,7 +94,7 @@ No new user-edit diff was present in this invocation. I preserved the existing l
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzbugtriage] #lzbugtriage=Run a focused lazily-rs bug triage cycle: run make check plus latest gh CI, then audit archived bug candidates against the current tree and reopen only failures that still reproduce. Current spot-check: benchmark-check passes; async dispose generation guard, circular dependency detection, and WebSocket inbound queue bounding are already present.
+- [x] [#lzbugtriage] #lzbugtriage=Run a focused lazily-rs bug triage cycle: run make check plus latest gh CI, then audit archived bug candidates against the current tree and reopen only failures that still reproduce. Current spot-check: benchmark-check passes; async dispose generation guard, circular dependency detection, and WebSocket inbound queue bounding are already present.
 - [ ] [#lzsmstress] [recommended] #lzsmstress=Add state-machine hardening tests for StateMachine, ThreadSafeStateMachine, and AsyncStateMachine: invalid transitions, transition callbacks, dynamic dependencies, eager signals, dispose/recreate, and concurrent set/get. Start with failing regressions that prove no stale transition, cleanup leak, or stale dependency edge survives.
 - [ ] [#lzcrdtperms] [recommended] #lzcrdtperms=Add CRDT runtime permission/regression coverage: CrdtSync BridgeHub fan-out with mixed readable/unreadable peers, duplicate delivery, partial-frontier tombstone GC, and NodeKey/NodeId churn so multi-writer transport bugs fail deterministically.
 <!-- /agent:backlog -->

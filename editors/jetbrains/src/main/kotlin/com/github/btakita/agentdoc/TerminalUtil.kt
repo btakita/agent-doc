@@ -64,6 +64,10 @@ object TerminalUtil {
         RegexOption.DOT_MATCHES_ALL,
     )
     private val ROUTE_QUEUE_PAUSED_STALE_PID_REGEX = Regex("""\bstale_pid=(\d+)""")
+    private val ROUTE_AGENT_SWITCH_DEFERRED_REGEX = Regex(
+        """authoritative actor record for (.+?) is running harness ([^,\s]+), but frontmatter now resolves to ([^;\s]+); deferring to boundary agent restart instead of replacing live pane""",
+        RegexOption.DOT_MATCHES_ALL,
+    )
     private val SESSION_STATUS_ACTOR_GENERATION_REGEX = Regex("""\bactor:\s+generation=(\d+)""")
     private val RESTART_TELEMETRY_EVENT_NAMES = listOf(
         "session_restart_force_used",
@@ -217,12 +221,21 @@ object TerminalUtil {
         val stalePid: String,
     )
 
+    internal data class RunAgentDocAgentSwitchDeferred(
+        val previousHarness: String,
+        val targetHarness: String,
+        val queuePaused: Boolean,
+        val forceRequired: Boolean,
+        val supervisorUnavailable: Boolean,
+    )
+
     internal enum class RunAgentDocRouteFailureKind {
         PERSISTENT,
         RETRYABLE_STARTING,
         BUSY_RUNNING,
         QUEUED_PENDING,
         QUEUE_PAUSED,
+        AGENT_SWITCH_DEFERRED,
         DISPATCH_START_UNPROVEN,
         PROTECTED_PROMPT_INPUT,
     }
@@ -511,6 +524,13 @@ object TerminalUtil {
                             clearPersistedRouteFailureOutput(cwd, relativePath)
                             notifyRunAgentDocQueuePaused(project, file, relativePath, output)
                             finalStage = "route_queue_paused"
+                            finalError = routeAttemptError(exitCode, failureKind, output)
+                            break
+                        } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.AGENT_SWITCH_DEFERRED) {
+                            LOG.warn("[route] agent switch deferred for $relativePath: $output")
+                            clearPersistedRouteFailureOutput(cwd, relativePath)
+                            notifyRunAgentDocAgentSwitchDeferred(project, file, relativePath, output)
+                            finalStage = "route_agent_switch_deferred"
                             finalError = routeAttemptError(exitCode, failureKind, output)
                             break
                         } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.DISPATCH_START_UNPROVEN) {
@@ -1653,6 +1673,7 @@ object TerminalUtil {
         return when {
             isRunAgentDocRouteQueued(output) -> RunAgentDocRouteFailureKind.QUEUED_PENDING
             parseRunAgentDocQueuePaused(output) != null -> RunAgentDocRouteFailureKind.QUEUE_PAUSED
+            parseRunAgentDocAgentSwitchDeferred(output) != null -> RunAgentDocRouteFailureKind.AGENT_SWITCH_DEFERRED
             isDispatchOnlyActiveTurnBlocked(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
             isDispatchOnlyBusyActorWaitTimeout(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
             isLatestRunStillBootingBusy(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
@@ -1737,6 +1758,21 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
             reason = reason,
             restartSupervisorRedirect = restartRedirect,
             stalePid = stalePid,
+        )
+    }
+
+    internal fun parseRunAgentDocAgentSwitchDeferred(output: String): RunAgentDocAgentSwitchDeferred? {
+        val match = ROUTE_AGENT_SWITCH_DEFERRED_REGEX.find(output) ?: return null
+        val lower = output.lowercase()
+        val forceRequired = lower.contains("restart-supervisor") && lower.contains("--force")
+        return RunAgentDocAgentSwitchDeferred(
+            previousHarness = match.groupValues.getOrNull(2).orEmpty(),
+            targetHarness = match.groupValues.getOrNull(3).orEmpty(),
+            queuePaused = lower.contains("queue is paused"),
+            forceRequired = forceRequired,
+            supervisorUnavailable = lower.contains("supervisor is unreachable") ||
+                lower.contains("supervisor is unhealthy") ||
+                lower.contains("supervisor is paused"),
         )
     }
 
@@ -2034,6 +2070,33 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         }
     }
 
+    internal fun buildRunAgentDocAgentSwitchDeferredMessage(
+        relativePath: String,
+        deferred: RunAgentDocAgentSwitchDeferred,
+    ): String = buildString {
+        append("Agent Doc did not switch harnesses for ")
+        append(relativePath)
+        append(".\nCurrent actor is ")
+        append(deferred.previousHarness.ifBlank { "the previous harness" })
+        append("; frontmatter now resolves to ")
+        append(deferred.targetHarness.ifBlank { "the new harness" })
+        append(". ")
+        when {
+            deferred.queuePaused -> {
+                append("The queue is paused, so the boundary restart will not fire. Restart Supervisor and resume the queue, then run Agent Doc again.")
+            }
+            deferred.forceRequired -> {
+                append("The pane is not at a dispatch-ready boundary. Use Interrupt and restart to force the harness switch.")
+            }
+            deferred.supervisorUnavailable -> {
+                append("The supervisor is not healthy enough to reach the boundary restart. Restart Supervisor, then run Agent Doc again.")
+            }
+            else -> {
+                append("The supervisor will switch at the next idle boundary. Use Restart Supervisor to switch now.")
+            }
+        }
+    }
+
     internal fun buildRunAgentDocDispatchUnprovenMessage(relativePath: String, routeOutput: String): String {
         val lines = routeOutput.lines()
         val attemptId = latestRegexValue(lines, ROUTE_EDITOR_ATTEMPT_REGEX)
@@ -2168,6 +2231,56 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
             notification.addAction(NotificationAction.createSimple("Copy details") {
                 CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
                 showHint(project, "Copied paused queue details for $relativePath")
+            })
+            notification.notify(project)
+        } catch (_: Exception) {
+            System.err.println("[agent-doc] $summary")
+        }
+    }
+
+    private fun notifyRunAgentDocAgentSwitchDeferred(
+        project: Project,
+        file: VirtualFile,
+        relativePath: String,
+        routeOutput: String,
+    ) {
+        val deferred = parseRunAgentDocAgentSwitchDeferred(routeOutput)
+            ?: RunAgentDocAgentSwitchDeferred(
+                previousHarness = "",
+                targetHarness = "",
+                queuePaused = false,
+                forceRequired = false,
+                supervisorUnavailable = false,
+            )
+        val summary = buildRunAgentDocAgentSwitchDeferredMessage(relativePath, deferred)
+        try {
+            val notification = NotificationGroupManager.getInstance()
+                .getNotificationGroup("Agent Doc")
+                .createNotification(summary, if (deferred.forceRequired) NotificationType.WARNING else NotificationType.INFORMATION)
+            notification.isImportant = true
+            when {
+                deferred.queuePaused -> {
+                    notification.addAction(NotificationAction.createSimple("Restart Supervisor and resume") {
+                        restartSupervisorAndResumePausedQueue(project, file)
+                    })
+                }
+                deferred.forceRequired -> {
+                    notification.addAction(NotificationAction.createSimple("Interrupt and restart") {
+                        interruptAndRestartSession(project, file)
+                    })
+                }
+                else -> {
+                    notification.addAction(NotificationAction.createSimple("Restart Supervisor") {
+                        restartSession(project, file)
+                    })
+                }
+            }
+            notification.addAction(NotificationAction.createSimple("Show status") {
+                showSessionStatus(project, file)
+            })
+            notification.addAction(NotificationAction.createSimple("Copy details") {
+                CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
+                showHint(project, "Copied harness-switch route details for $relativePath")
             })
             notification.notify(project)
         } catch (_: Exception) {

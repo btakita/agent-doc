@@ -404,6 +404,47 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `actor-switch defer on paused queue offers restart supervisor and resume`() {
+        val relativePath = "tasks/agent-doc/agent-doc-bugs2.md"
+        val output = """
+            [route] target tmux session: 0
+            Error: authoritative actor record for $relativePath is running harness claude-code, but frontmatter now resolves to codex; deferring to boundary agent restart instead of replacing live pane. queue is paused — the boundary restart will not fire until it is healthy and resumed. Run: agent-doc session restart-supervisor $relativePath
+        """.trimIndent()
+
+        val deferred = TerminalUtil.parseRunAgentDocAgentSwitchDeferred(output)
+        val message = TerminalUtil.buildRunAgentDocAgentSwitchDeferredMessage(relativePath, deferred!!)
+
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.AGENT_SWITCH_DEFERRED, TerminalUtil.classifyRunAgentDocRouteFailure(output))
+        assertEquals("claude-code", deferred.previousHarness)
+        assertEquals("codex", deferred.targetHarness)
+        assertTrue(deferred.queuePaused)
+        assertFalse(deferred.forceRequired)
+        assertTrue(message.contains("Restart Supervisor and resume"))
+        assertFalse(message.contains("route failed"))
+        assertFalse(message.contains("Saved exact route output"))
+    }
+
+    @Test
+    fun `actor-switch defer on not-ready pane offers interrupt restart`() {
+        val relativePath = "tasks/professional/equityfundingsource.md"
+        val output = """
+            Error: authoritative actor record for $relativePath is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane. pane is busy (not dispatch-ready) — run: agent-doc session restart-supervisor $relativePath --force
+        """.trimIndent()
+
+        val deferred = TerminalUtil.parseRunAgentDocAgentSwitchDeferred(output)
+        val message = TerminalUtil.buildRunAgentDocAgentSwitchDeferredMessage(relativePath, deferred!!)
+
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.AGENT_SWITCH_DEFERRED, TerminalUtil.classifyRunAgentDocRouteFailure(output))
+        assertEquals("codex", deferred.previousHarness)
+        assertEquals("opencode", deferred.targetHarness)
+        assertFalse(deferred.queuePaused)
+        assertTrue(deferred.forceRequired)
+        assertTrue(message.contains("Interrupt and restart"))
+        assertFalse(message.contains("route failed"))
+        assertFalse(message.contains("Saved exact route output"))
+    }
+
+    @Test
     fun `paused queue resume action command carries observed generation and json receipt`() {
         assertEquals(
             listOf(

@@ -148,7 +148,22 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=0288dfb3-5700-47bb-8d81-983be32a77c7 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=19785 candidate_hash=e0a1156d3daa622417429816e572ab502db393f666aa74b052cb9dec02174803 content_ours_len=23327 content_ours_hash=2b8d6e14213d86766a15f142dfdda54f6f4034481389c3bba2700bd43a08c767 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782457384306
 ```
-<!-- agent:boundary:9c465cad -->
+
+### Re: Hard to type in the JB editor (performance / CRDT) — opus-4-8
+
+> **Queue prompt:** It is now very difficult to type in the JB editor. Seems there may be performance or CRDT issues.
+
+Most likely the **stale supervisor**, not a CRDT regression. Preflight flagged pid 328292 running 0.34.48 while a newer binary is installed, and a stale supervisor produces File Cache Conflict / IPC-drift convergence on every edit — which lands as input lag in the editor. **I already marked it to recycle** (`admin recycle`, recycles onto the fresh binary at the next idle boundary). My own finalize a moment ago hit exactly that wedge (`live_prompt_drift_after_preflight`) and auto-recovered — consistent with the supervisor, not your keystrokes, being the slow party.
+
+Keeping this response short on purpose so I'm not writing to the doc while you type (each finalize triggers a convergence pass on your live buffer).
+
+**Immediate mitigation if it's still laggy after the recycle lands:**
+- **Restart the JB plugin / IDE** — that hot-reloads the fresh cdylib and reconnects the editor to the recycled supervisor. If the plugin's IPC listener is wedged (dead socket), only an IDE restart clears it; the recycle alone fixes the supervisor side but not a dead editor listener.
+
+**What the logs say about the CRDT angle** (not the primary cause, but real): sync passes are running near budget — `sync_latency phase=safe_passive_total elapsed_ms=891 budget_ms=1000`. That's background sync, not per-keystroke, so it shouldn't gate typing on its own, but it's close enough to the ceiling to be worth watching. `live_buffer_classify` / `crdt_merge_base_overlay_stale` cadence is moderate (~20 over the last window), not a runaway per-keystroke whole-doc merge.
+
+If typing is **still** bad after a recycle + IDE restart, that points at a genuine per-cell-merge cost on the convergence path (whole-document `crdt::merge` re-running per edit), which is the deeper #qcellmerge1 per-cell-isolation fix — tell me and I'll profile the convergence path in a focused cycle. But try the recycle + restart first; I expect that clears it.
+<!-- agent:boundary:ef06b268 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -157,7 +172,7 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 [#cdtcutover]
 - ~~look in logs to see if we can verify [operator-verify] items in the backlog~~ — auto-struck: answered this cycle (#ftstrike)
-- It is now very difficult to type in the JB editor. Seems there may be performance or CRDT issues.
+- ~~It is now very difficult to type in the JB editor. Seems there may be performance or CRDT issues.~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#qftloss]
 - do [#qeditdup]
 - do [#crdtauth6]

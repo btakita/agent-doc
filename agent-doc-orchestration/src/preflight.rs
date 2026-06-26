@@ -2386,6 +2386,8 @@ pub use run::*;
 mod maintenance;
 pub use maintenance::*;
 
+mod queue_tombstone;
+
 /// Collect every `[#id]` hash present in the document's `agent:done` (and the
 /// legacy `agent:backlog-done` / `agent:pending-done`) components. When the
 /// component carries an `archive=<path>` attribute, also walk the referenced

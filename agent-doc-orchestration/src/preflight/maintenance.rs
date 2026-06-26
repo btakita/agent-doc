@@ -1373,6 +1373,65 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 );
             }
         }
+        // #provauth2: honor operator queue deletes. An id the operator deleted
+        // from the live queue (active in the committed snapshot, now entirely
+        // gone — not merely struck/consumed) is tombstoned so the backlog→queue
+        // mirror does not resurrect it ("I deleted items but they reappeared").
+        // The tombstone self-clears when the operator re-adds the id as an active
+        // head. This makes an operator delete authoritative, the same way #ynra
+        // keeps *completed* ids out — but for *operator-deleted* uncompleted ids.
+        {
+            let snapshot_active_ids: std::collections::HashSet<String> =
+                crate::snapshot::load(file)
+                    .ok()
+                    .flatten()
+                    .and_then(|snap| {
+                        let comps = crate::component::parse(&snap).ok()?;
+                        let q = comps.iter().find(|c| c.name == "queue")?;
+                        let body = &snap[q.open_end..q.close_start];
+                        let snap_entries = crate::queue::parse(body).ok()?;
+                        Some(
+                            snap_entries
+                                .iter()
+                                .filter(|e| matches!(e, crate::queue::QueueEntry::Prompt(_)))
+                                .filter_map(queue_entry_do_id)
+                                .collect(),
+                        )
+                    })
+                    .unwrap_or_default();
+            let current_all_ids: std::collections::HashSet<String> =
+                entries.iter().filter_map(queue_entry_do_id).collect();
+            let current_active_ids: std::collections::HashSet<String> = entries
+                .iter()
+                .filter(|e| matches!(e, crate::queue::QueueEntry::Prompt(_)))
+                .filter_map(queue_entry_do_id)
+                .collect();
+            let tombstones = super::queue_tombstone::reconcile(
+                file,
+                &snapshot_active_ids,
+                &current_all_ids,
+                &current_active_ids,
+            );
+            if !tombstones.is_empty() {
+                let before = backlog_ids.len();
+                backlog_ids.retain(|id| !tombstones.contains(&id.trim().to_ascii_lowercase()));
+                let suppressed = before - backlog_ids.len();
+                if suppressed > 0 {
+                    eprintln!(
+                        "[preflight] queue: suppressed {suppressed} operator-deleted id(s) \
+                         from backlog→queue mirror (#provauth2 tombstone)"
+                    );
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "queue_mirror_tombstone_suppressed file={} count={} (#provauth2)",
+                            file.display(),
+                            suppressed
+                        ),
+                    );
+                }
+            }
+        }
         // #goqueuestall: keep agent-undrainable heads out of the auto-drain queue
         // so a `go`-mode queue does not perpetually re-mirror items it cannot run
         // in the current session type. `[operator-verify]` items are always

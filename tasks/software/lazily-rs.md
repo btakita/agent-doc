@@ -212,7 +212,25 @@ No queue head is being answered by this recovery response. The next substantive 
 This is a binary-owned recovery write for the post-commit live-buffer drift reported after `73cc7ecd7`. It preserves the already-visible parity evidence and does not answer or consume the next queue head.
 
 No repository work was performed in this recovery write. Release/publish work remains operator-gated.
-<!-- agent:boundary:a64c6dfc -->
+
+### Re: lazily-zig parity + release + publish — gpt-5
+
+> **Queue prompt:** lazily-zig parity + release + publish
+
+`lazily-zig` parity is verified. I did not perform any release/publish action; public release steps remain operator-gated.
+
+Evidence:
+
+- Parent `agent-loop` points `src/lazily-zig` at `eacabb588343196ebdf05b427987219fa1e55017`.
+- `src/lazily-zig` `origin/main` also resolves to `eacabb588343196ebdf05b427987219fa1e55017`, so the parent gitlink is cloneable.
+- HEAD is tagged `v0.2.0` and `build.zig.zon` declares version `0.2.0`.
+- Recent parity/release commits are present: `c994783 feat: add ShmBlobArena host`, `288d788 test: ShmBlobArena conformance`, `db18dea refactor: rename .direct->.literal ... (#lzzigtodos)`, and `eacabb5 release: v0.2.0`.
+- Verification: `zig build test` passed from `src/lazily-zig`.
+- The first `tsift digest-runner` attempt failed before running Zig because the wrapper did not execute from the package root and reported `no build.zig file found`; the direct package-root command is the valid verification.
+- GitHub Actions: `gh workflow list` and `gh run list --limit 3` returned no workflows/runs for `lazily-zig`, so there was no CI run to inspect.
+
+Changed paths: none. Confidence: high for parity/readiness; release confidence is intentionally not claimed because public release/publish actions are operator-gated.
+<!-- agent:boundary:c03d7c1b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -228,7 +246,7 @@ No repository work was performed in this recovery write. Release/publish work re
 - ~~lazily-kt parity~~
 - ~~release + publish — auto-struck: completed by #45rh (#qftbklgstrike)~~
 - ~~lazily-js parity + release + publish~~
-- lazily-zig parity + release + publish
+- ~~lazily-zig parity + release + publish~~
 - lazily-py parity + release + publish
 <!-- /agent:queue -->
 

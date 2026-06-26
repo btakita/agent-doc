@@ -10,7 +10,6 @@ agent_doc_write: crdt
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 <!-- /agent:status -->
 
 ## Exchange
@@ -83,7 +82,7 @@ AI-native lab informatics platform that replaces the fragmented stack of disconn
 - Be ready to articulate one concrete system you built where you normalized messy inputs into a structured model that downstream automation/AI consumed — that's the through-line they'll recognize.
 
 I've captured the company + interviewer profiles above. I filed a recommended follow-up to create a Corky contact for Satya (matching the Royce Stewart / Greenlight Guru pattern) if you want CRM tracking.
-<!-- agent:boundary:4097bdd6 -->
+<!-- agent:boundary:59c6f4c4 -->
 <!-- /agent:exchange -->
 
 ## Queue

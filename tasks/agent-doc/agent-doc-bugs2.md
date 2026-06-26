@@ -293,7 +293,21 @@ You're right on both counts, and this session was a live reproduction of exactly
 2. **Make the restart resume the turn** — consume the `#durablerecycle` turn checkpoint (baseline + prompt-targets + queue/turn id are already persisted to disk; the gap is whether the restart path *reads* it) to reliably re-dispatch the in-flight turn, so a mid-turn restart restarts the turn instead of stalling.
 
 **What I've started:** a focused investigation+fix is running now in an isolated worktree (branch `midturn-recycle-resume`) — it root-causes which of (a) stale-CRDT-reload vs (b) unconsumed-checkpoint is the actual mechanism, implements the tightest fix that removes it, and adds SimWorld coverage proving a recycle in the preflight→finalize window no longer drifts. It lands **on a branch for your review**, deliberately *not* hot-patched onto the live supervisor running this very session — because changing the restart path under itself is how you turn a recoverable wedge into an unrecoverable one. I'll report what it found and the commit when it's done.
-<!-- agent:boundary:e16dfd9b -->
+
+### Re: Phase A merged + installed; Phase B queued — opus-4-8
+
+Done, per your call.
+
+**Phase A is live-bound.** Merged the cycle-open recycle interlock to agent-doc main (`27bf61a6`), `make check` green on the merged tree, built + installed. The running supervisor (pid 1777115) is **recycle-marked** — it re-execs onto the Phase-A binary at this turn's idle boundary, and from the next cycle on, a recycle can no longer fire mid `preflight→finalize`. That removes the wedge root cause: no mid-cycle `execve` → no severed finalize → no `live_prompt_drift_after_preflight`.
+
+One honest note on timing: *this* turn's finalize still ran on the pre-interlock supervisor (the interlock can't protect the very turn whose end activates it), so if this one wedged I'd recover it the usual way — but every cycle after the boundary is covered.
+
+**Phase B queued** as `#midturnresumeb` (focused follow-up): actively consume the `#durablerecycle` checkpoint to re-dispatch a genuinely-interrupted turn (the full "restart reliably restarts the turn"), plus a deferred-too-long escalation so a never-closing cycle can't starve the recycle. Phase A makes the wedge *impossible*; Phase B adds active turn-resume.
+
+The one thing only you can close on Phase A is the live zero-drift eyeball — drive a recycle in the `preflight→finalize` window on a live editor and confirm no `live_prompt_drift_after_preflight`. I gated `#midturn-recycle-resume` on exactly that.
+
+Still on its own branch, untouched: `#supstaledetect` (the false `stale_install` warning, `supstaledetect-mtimebasis` b983f144) — say the word and I'll bundle it into the next install.
+<!-- agent:boundary:b4ec8c63 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -319,7 +333,7 @@ You're right on both counts, and this session was a live reproduction of exactly
 - do [#supstaledetect]
 - do [#suptmuxstale]
 - do [#ipcproofnostall]
-- do [#midturn-recycle-resume]
+- ~~do [#midturn-recycle-resume]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -346,7 +360,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#midturn-recycle-resume] ROOT-CAUSE the overnight queue wedge: live_prompt_drift_after_preflight -> ipc_proof_insufficient -> finalize-refused -> force-disk -> direct_response_patchback. Operator hypothesis (likely correct): a mid-turn / near-turn-boundary supervisor recycle/restart leaves STALE in-memory CRDT in the recycled supervisor, so the next finalize ack drifts from the preflight snapshot. Fix: a recycled/re-exec supervisor must RELOAD its CRDT/live-buffer baseline from the committed doc on startup (make the drift impossible, not just recover), AND consume the #durablerecycle checkpoint to reliably re-dispatch/resume the in-flight turn so a mid-turn restart restarts the turn. Investigation + fix IN PROGRESS in isolated worktree (branch midturn-recycle-resume); plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md. CRITICAL live-supervisor restart path — lands on branch for operator review, NOT hot-patched mid-session.
+- [ ] [#midturnresumeb] Phase B (focused follow-up) — actively CONSUME the #durablerecycle turn checkpoint (cycle_state.rs:486, currently written but never read to resume) on a fresh supervisor boot to re-dispatch a turn that was genuinely interrupted (child died across the recycle), idempotent vs the surviving-child path. This is the full "restart reliably restarts the turn"; Phase A only makes the wedge impossible. Also add a deferred-too-long escalation counter so a never-closing cycle cannot starve the recycle indefinitely. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
 - [ ] [#ipcproofnostall] Overnight queue stalls on a FALSE closeout-interrupt: session-check INTERRUPTS on the binary-authored ipc_proof_insufficient diagnostic, classifying it as an "unresolved prompt-bearing user change" (hit 3x in session b26b9957 on 2026-06-26). An exemption already exists — is_binary_authored_recovery_diagnostic_heading (session_check/closeout_guards.rs:840) is meant to make the diff classifier treat the "### Re: ...interrupted-cycle recovery" block as a RecoveryArtifact, never a PromptTarget — but it has an edge-case HOLE: likely the postcommit CRDT corruption (#postcommit-ipc-worktree-corruption) separates the ipc_proof_insufficient line from its protective ### Re: heading so the bare line classifies as prompt-bearing, OR a stale cycle-state prompt_target from a prior cycle persists the line. Root-cause which, then close it in diff classify_prompt_bearing_changes / the cycle-state prompt_targets path. CRITICAL closeout gate (every session) — add regression tests proving a REAL unresolved user prompt is still caught. Serves the operator directive "all restarts should reliably resume running turns / finish the overnight queue, not stall."
 - [ ] [#supstaledetect] stale_install warning false-positives in the dogfood edit->build->install->commit flow: it compared artifact mtime to the HEAD commit timestamp (300s grace), but the binary is always built BEFORE its covering commit, so an ~11min build->commit gap (binary 03:16:22 vs commit 03:27:51) flagged a FRESH binary as stale — disagreeing with the auto-install signal, which uses newest source-FILE mtime and correctly saw it fresh. FIX CODE-COMPLETE on branch supstaledetect-mtimebasis (agent-doc commit b983f144, make check green): warning now uses newest_crate_source_mtime_secs (same basis as auto-install). Remaining: merge -> install -> verify the false warning is gone AND genuine staleness still flags.
 - [ ] [#suptmuxstale] Observability (operator request): surface supervisor-out-of-date status in the tmux pane — the upper "turn in progress" notification is a good spot — so the operator can see at a glance which sessions run a stale supervisor. Pairs with #supstaledetect for a reliable signal; the binary_stale probe is already published in idle_watch (process_binary_is_stale).
@@ -363,6 +377,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#midturn-recycle-resume] Phase A DONE — cycle-open recycle interlock: execve recycle/restart now defers every arm (auto/admin/wedge-escalation/fresh-binary-flush) while an agent-doc cycle is open or IPC is in-flight, so a recycle can no longer fire mid preflight->finalize and sever the in-flight finalize (the live_prompt_drift_after_preflight wedge root cause). Merged agent-doc main 27bf61a6, installed, supervisor recycle-marked. make check green + unit/SimWorld coverage. Remaining = operator live zero-drift eyeball: drive a recycle in the preflight->finalize window on a live editor, confirm NO live_prompt_drift_after_preflight. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

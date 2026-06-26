@@ -1254,6 +1254,70 @@ mod tests {
     }
 
     #[test]
+    fn from_context_picks_up_mid_session_agent_change_for_next_dispatch() {
+        // `#agentchange` — the operator's scenario, modelable WITHOUT a live pane:
+        // the supervisor re-reads CURRENT frontmatter at each restart/dispatch
+        // boundary, so editing `agent:` between turns makes the NEXT dispatch
+        // resolve the NEW harness. This is the single source of truth — the only
+        // input that changes is the frontmatter `agent:` value.
+        let config = Config::default();
+
+        // Turn N: frontmatter says `claude`.
+        let fm_turn_n = Frontmatter {
+            agent: Some("claude".into()),
+            ..Default::default()
+        };
+        let resolved_turn_n = HarnessConfig::from_context(&fm_turn_n, &config);
+        assert_eq!(resolved_turn_n.binary, "claude");
+
+        // Operator edits `agent:` to `codex` between turns.
+        let fm_turn_n_plus_1 = Frontmatter {
+            agent: Some("codex".into()),
+            ..Default::default()
+        };
+
+        // Turn N+1: re-resolution from the CURRENT frontmatter reflects the new
+        // agent (not the value cached at supervisor startup).
+        let resolved_turn_n_plus_1 = HarnessConfig::from_context(&fm_turn_n_plus_1, &config);
+        assert_eq!(
+            resolved_turn_n_plus_1.binary, "codex",
+            "next dispatch must resolve the NEW agent from current frontmatter"
+        );
+
+        // And the change forces a FRESH spawn of the new harness — the supervisor
+        // must not adopt the old (claude) child for the codex turn.
+        assert!(
+            crate::start::decisions::harness_change_forces_fresh_spawn(
+                &resolved_turn_n.binary,
+                &resolved_turn_n_plus_1.binary,
+            ),
+            "a real agent change must force a fresh spawn of the new harness"
+        );
+    }
+
+    #[test]
+    fn from_context_unchanged_agent_is_inert_across_turns() {
+        // INERTNESS guard: an unchanged `agent:` re-resolves to the SAME harness
+        // across turns and never forces a fresh spawn (the same-harness restart
+        // path stays byte-identical).
+        let config = Config::default();
+        let fm = Frontmatter {
+            agent: Some("claude".into()),
+            ..Default::default()
+        };
+        let turn_n = HarnessConfig::from_context(&fm, &config);
+        let turn_n_plus_1 = HarnessConfig::from_context(&fm, &config);
+        assert_eq!(turn_n.binary, turn_n_plus_1.binary);
+        assert!(
+            !crate::start::decisions::harness_change_forces_fresh_spawn(
+                &turn_n.binary,
+                &turn_n_plus_1.binary,
+            ),
+            "an unchanged agent must NOT force a fresh spawn"
+        );
+    }
+
+    #[test]
     fn from_context_falls_back_to_config_default_agent() {
         let fm = Frontmatter::default();
         let config = Config {

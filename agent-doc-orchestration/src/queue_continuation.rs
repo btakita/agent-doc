@@ -894,6 +894,80 @@ const QUEUE_DIRECTIVE_VERBS: &[&str] = &[
     "deploy",
 ];
 
+/// Recurring **imperative command** verbs (`#qimpstrike`). These are executable
+/// directives that are valid *every* time they are queued — running `deploy`
+/// today does not retire a standing `deploy` directive queued tomorrow. They are
+/// therefore NOT one-time answerable tasks and must never be retired by the
+/// `#qftbklgstrike` lexical done/backlog matcher or the `#qheadresidue` residue
+/// guard (a single common verb like `deploy` is lexically close to many prior
+/// `commit + push + deploy` done items, and a response that echoes the head as a
+/// `> **Queue prompt:**` quote does not "answer" a standing command).
+///
+/// This is the single source of truth for the recurring-imperative subclass; both
+/// strike sites (`memory_cmd::semantic_queue_strike_matches` and
+/// `session_check::queue_head_provenance_guards`) call
+/// [`is_recurring_imperative_head`] rather than carrying their own verb list.
+///
+/// Distinct from [`QUEUE_DIRECTIVE_VERBS`] (the broad go-mode *drainability*
+/// signal, which deliberately includes `add`/`fix`/`update`/… — verbs that
+/// commonly *lead a one-time task* like "fix the lender email parity"). This
+/// narrower set is only the recurring deploy/release-cycle command verbs, so a
+/// multi-word prose head that merely *contains* one (`fix the deploy script`) is
+/// still a one-time task and can still be legitimately struck.
+const RECURRING_IMPERATIVE_COMMAND_VERBS: &[&str] = &[
+    "deploy", "commit", "push", "build", "install", "release", "test", "sync", "recycle",
+    "publish", "tag", "bump",
+];
+
+/// True when a queue head is a **recurring imperative command** (`#qimpstrike`):
+/// its normalized text is dominated by a known recurring-imperative command verb
+/// (see [`RECURRING_IMPERATIVE_COMMAND_VERBS`]) or is a recurring-command preset
+/// token (`#spec-test-commit-push`, `#commit-push`, …) whose id is built entirely
+/// from those verbs.
+///
+/// "Dominated by" = a short head (≤ 3 actionable words) whose *first* word is a
+/// recurring-imperative verb, e.g. `deploy`, `commit + push`,
+/// `push origin main`. A longer prose head that merely contains such a verb
+/// (`fix the deploy script so it retries`) is a one-time task, NOT a recurring
+/// command, so it returns false and stays eligible for the legitimate
+/// `#qftbklgstrike` restatement strike.
+pub(crate) fn is_recurring_imperative_head(text: &str) -> bool {
+    let normalized = normalize_queue_head_text(text);
+    if normalized.is_empty() {
+        return false;
+    }
+    // A recurring-command *preset token* (`#spec-test-commit-push`, `#commit-push`)
+    // is an executable directive: treat it as recurring when its id segments are
+    // all recurring-imperative verbs (ignore generic glue like `spec`).
+    if let Some(id) = extract_head_id(&normalized) {
+        let segments: Vec<&str> = id
+            .split(['-', '_'])
+            .filter(|s| !s.is_empty())
+            .collect();
+        let verb_segments = segments
+            .iter()
+            .filter(|s| RECURRING_IMPERATIVE_COMMAND_VERBS.contains(&s.to_ascii_lowercase().as_str()))
+            .count();
+        // A preset built from at least two recurring verbs (`commit-push`,
+        // `spec-test-commit-push`) is a recurring-command preset.
+        if verb_segments >= 2 {
+            return true;
+        }
+    }
+    let words: Vec<String> = normalized
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_ascii_lowercase())
+        .collect();
+    if words.is_empty() || words.len() > 3 {
+        return false;
+    }
+    // Dominated-by: the head LEADS with a recurring-imperative verb. `deploy`,
+    // `commit + push`, `push origin main` qualify; `the deploy failed` does not
+    // (leads with `the`).
+    RECURRING_IMPERATIVE_COMMAND_VERBS.contains(&words[0].as_str())
+}
+
 /// Strip a queue head's leading list bullet, emoji-shortcode tokens
 /// (`:pushpin:` / `:round_pushpin:`), and leading emoji glyphs / stray punctuation
 /// so the classifier sees the actionable text. Keeps `#` and `[` (an `#id` / `[#id]`
@@ -2348,6 +2422,59 @@ mod tests {
         assert!(is_drainable_queue_head(
             "Error: queue items are being struck without being worked on."
         ));
+    }
+
+    #[test]
+    fn recurring_imperative_head_classification() {
+        // #qimpstrike: recurring imperative command heads are executable
+        // directives, exempt from both strike sites.
+        for head in [
+            "deploy",
+            "- deploy",
+            ":pushpin: deploy",
+            "commit",
+            "push",
+            "build",
+            "install",
+            "release",
+            "test",
+            "sync",
+            "recycle",
+            "publish",
+            "commit + push",
+            "push origin main",
+            "#commit-push",
+            "#spec-test-commit-push",
+        ] {
+            assert!(
+                is_recurring_imperative_head(head),
+                "{head:?} should classify as a recurring-imperative head"
+            );
+            // And it stays drainable (dispatchable through convergence), never
+            // demoted to noise.
+            assert!(
+                is_drainable_queue_head(head),
+                "{head:?} must remain drainable"
+            );
+        }
+
+        // NOT recurring-imperative: multi-word prose tasks that merely mention a
+        // command verb, prose bug reports, questions, unrelated verbs. These stay
+        // eligible for the legitimate `#qftbklgstrike` restatement strike.
+        for head in [
+            "fix the deploy script so it retries on a transient 500",
+            "the deploy failed last night",
+            "investigate why the build is slow",
+            "add a dark mode toggle to the settings panel",
+            "why is the commit history squashed?",
+            "Queue items are being struck without being worked on.",
+            "#lender-card-msg-email",
+        ] {
+            assert!(
+                !is_recurring_imperative_head(head),
+                "{head:?} must NOT classify as a recurring-imperative head"
+            );
+        }
     }
 
     #[test]

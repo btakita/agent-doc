@@ -1011,7 +1011,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // regression test names proving answered free-text heads cannot remain
         // active queue residue.
         ("agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs", "guard_") => {
-            12
+            // 12 baseline + 2 (#qimpstrike) for the new `residue_guard_exempts_recurring_imperative_deploy_head`
+            // regression test name and its `free_text_queue_completed_residue_guard_fired`
+            // negative-assertion substring. Both are test-only `guard_` substrings, not
+            // new production flow guards: the residue guard reuses the existing
+            // `free_text_queue_completed_residue_guard_fired` event, only adding an
+            // early `is_recurring_imperative_head` exemption before it can fire.
+            14
         }
         ("agent-doc-orchestration/src/session_check/pending_guards.rs", "guard_") => 8,
         ("agent-doc-orchestration/src/session_check/queue_head_guards.rs", "guard_") => 2,

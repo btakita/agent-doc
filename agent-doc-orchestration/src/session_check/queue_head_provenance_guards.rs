@@ -357,6 +357,16 @@ pub(crate) fn check_free_text_queue_head_provenance(
         if normalized.is_empty() {
             continue;
         }
+        // `#qimpstrike`: a recurring imperative command head (`deploy`, `commit`,
+        // `push`, the `#spec-test-commit-push` preset, …) is an executable
+        // directive that is valid every time it is queued. A response that echoed
+        // it as a `> **Queue prompt:**` quote does NOT answer/retire a standing
+        // command, so the residue guard must leave it active/drainable rather than
+        // flag it as "completed queue residue." Only genuine one-time prompts are
+        // residue candidates.
+        if crate::queue_continuation::is_recurring_imperative_head(head) {
+            continue;
+        }
         let still_queued = committed_queue_contains_active_free_text_head(&content, head);
         if still_queued {
             if crate::write::free_text_head_answered_by_response(&exchange_text, head) {
@@ -759,6 +769,48 @@ mod tests {
 
     #[test]
     fn completed_free_text_queue_residue_guard_fires_for_answered_active_head() {
+        // A genuine ONE-TIME prompt head that the response answered, but which is
+        // still active in the committed queue, is completed residue and must fire
+        // the `#qheadresidue` guard. (A recurring-imperative command head is the
+        // exception — see the `#qimpstrike` test below.)
+        let tmp = tempfile::TempDir::new().unwrap();
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\npending_done_guard: warn\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: explain the queue churn -- gpt-5\n\n",
+            "> **Queue prompt:**\n>\n> explain the queue churn\n\n",
+            "The churn comes from stale convergence.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- explain the queue churn\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let doc = make_doc(tmp.path(), committed);
+        mark_cycle_committed(&doc, committed, committed);
+
+        let rc = run_context(&doc, committed);
+        match check_free_text_queue_head_provenance(&doc, &rc).unwrap() {
+            GuardResult::Error(message) => {
+                assert!(message.contains("completed free-text"), "got: {message}");
+                assert!(message.contains("#qheadresidue"), "got: {message}");
+                assert!(message.contains("explain the queue churn"), "got: {message}");
+            }
+            other => panic!("completed queue residue must interrupt, got {other:?}"),
+        }
+        let log = ops_log(tmp.path());
+        assert!(
+            log.contains("free_text_queue_completed_residue_guard_fired"),
+            "residue guard should log the proved completed head:\n{log}"
+        );
+    }
+
+    #[test]
+    fn residue_guard_exempts_recurring_imperative_deploy_head() {
+        // #qimpstrike: a recurring-imperative command head (`deploy`) is an
+        // executable directive that stays valid every cycle. A response that
+        // echoed it as a `> **Queue prompt:**` quote does NOT retire a standing
+        // `deploy` directive, so the `#qheadresidue` residue guard must NOT fire
+        // — the head remains active/drainable for the next dispatch.
         let tmp = tempfile::TempDir::new().unwrap();
         let committed = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\npending_done_guard: warn\n---\n\n",
@@ -775,18 +827,17 @@ mod tests {
         mark_cycle_committed(&doc, committed, committed);
 
         let rc = run_context(&doc, committed);
-        match check_free_text_queue_head_provenance(&doc, &rc).unwrap() {
-            GuardResult::Error(message) => {
-                assert!(message.contains("completed free-text"), "got: {message}");
-                assert!(message.contains("#qheadresidue"), "got: {message}");
-                assert!(message.contains("deploy"), "got: {message}");
-            }
-            other => panic!("completed queue residue must interrupt, got {other:?}"),
-        }
+        assert!(
+            matches!(
+                check_free_text_queue_head_provenance(&doc, &rc).unwrap(),
+                GuardResult::None
+            ),
+            "recurring-imperative `deploy` head must not be struck as completed residue"
+        );
         let log = ops_log(tmp.path());
         assert!(
-            log.contains("free_text_queue_completed_residue_guard_fired") && log.contains("deploy"),
-            "residue guard should log the proved completed head:\n{log}"
+            !log.contains("free_text_queue_completed_residue_guard_fired"),
+            "residue guard must not fire for a recurring-imperative head:\n{log}"
         );
     }
 }

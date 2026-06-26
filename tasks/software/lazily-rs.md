@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -35,185 +35,28 @@ queue: stop
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260626-071851.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260626-163523.md`*
 
 Compacted content:
-- Archived 8 response topic(s): next steps to fix lazily-rs bugs; closeout repair; IPC proof diagnostic (interrupted-cycle recovery); 5 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
+❯ - Archived 9 response topic(s): lazily-py parity + release + publish; IPC proof diagnostic (interrupted-cycle recovery); Blog post; 6 more
+❯ - Prior summary/context: prior compacted content: Archived 8 response topic(s): next steps to fix lazily-rs bugs; closeout repair; IPC proof d...
 
-### Re: lazily-py parity + release + publish — opus-4-8
+### Re: compressed lazily-js library payload size — opus-4-8
 
-> **Queue prompt:** lazily-py parity + release + publish
+> **Queue prompt:** 🚧 How many bytes is the compressed lazily-js library payload?
 
-Already complete — no auto-publish needed (matches the `#kb9b`/`#lzpypub011` semantic-completion candidate). Verified live this cycle:
+`@lazily-hub/js@0.1.0` is pure ESM (no bundler) — the runtime library is two files, `src/index.js` + `src/state-projection.js` (27,110 bytes raw uncompressed). Compressed:
 
-- **PyPI** — `lazily 0.11.0` is the latest live release (`pypi.org/pypi/lazily/json` → `info.version == 0.11.0`).
-- **Tag** — `v0.11.0` present on `origin` (`git ls-remote --tags`).
-- **GitHub release** — `v0.11.0` published (not draft, not prerelease).
-- **HEAD pushed** — local `c255482` == upstream.
-- **Parity** — ShmBlobArena host port + Signal→Slot `RecursionError` regression suite committed (`4a57eb2`, `26ef43e`, `c255482`).
+| Payload | gzip -9 | brotli -11 |
+|---|---|---|
+| `index.js` (17,641 B) | 3,299 B | 2,946 B |
+| `state-projection.js` (9,469 B) | 3,296 B | 2,898 B |
+| **Runtime library total** | **6,433 B (~6.3 KB)** | **5,779 B (~5.6 KB)** |
 
-The 2FA-gated publish the operator pause was guarding has already landed, so nothing remains to drain here. The remaining `agent:review` items (`#z0hq` npm publish, `#h6qb` WebRTC two-host e2e, `#xccx` Holons, LinkedIn comments) stay operator-gated.
+So the **compressed library payload is ~6.4 KB gzipped (6,433 bytes)** / ~5.8 KB brotli (5,779 bytes) — that's the JS a consumer actually imports and runs (koffi, the one runtime dependency, is separate and not counted here).
 
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=ipc_visible_repair patch_id=e96c04ed-8d14-43ec-b88d-e20b39873ef4 invariant=ipc_dedupe recovery=retry_without_disk_write redeliver_editor=true bad_len=7015 bad_hash=2bc945c3a6962688942cc5275c07a5bea387b49d0ee9a5964666291abf9c78db repaired_len=7554 repaired_hash=151b6980063abacfeabf6a33b253ebcbe4ec9889101bed421e68b049be1d433f doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782458551177
-```
-
-### Re: Blog post — lazily Cell Family + Google-Sheets-scale focused recompute — opus-4-8
-
-> **Queue prompt:** Please write a blog post for briantakit with diagrams about recent changes in lazily-rs...Cell Family, 5M spreadsheet benchmark...focusing on how lazy reactivity improves performance by only eagerly recomputing the focused cells.
-
-Written, built, committed, and pushed. New post: **"A Spreadsheet at Google-Sheets Scale: Cell Families and Focused Recompute in lazily-rs"** (`2026-06-26-lazily-cell-family-spreadsheet-scale.md`). This realizes icebox `#ppce` (blog-post half; LinkedIn teaser is the next queue head).
-
-**What it covers:**
-- **`CellMap` / `CellFamily`** — fine-grained keyed reactivity (each entry its own `CellHandle`, membership on a dedicated version cell) vs. the coarse one-`Cell<HashMap>` model that invalidates every reader on any edit. `CellFamily` = atomFamily-style lazy-mint-and-cache factory.
-- **10M-cell scale benchmark** — `LAZILY_SCALE_N=5000000` (5M inputs + 5M formulas = a full-capacity Google Sheets workbook): build ~706 ms, cold full recalc ~518 ms.
-- **The point: focused recompute** — editing one input + reading a 1,000-cell viewport costs **~11.4 µs and stays flat regardless of sheet size** (~5,000× cheaper than full recalc), because the lazy pull model leaves off-viewport cells dirty and never recomputes them. Sparse arena → ~216 B/node, capacity bounded by populated cells not grid size.
-
-**Diagrams:** 3 hand-authored inline SVG figures matching the house style (no mermaid dep on this site) — coarse-vs-fine-grained invalidation, the per-entry `CellMap` graph, and the dirty→pull focus flow.
-
-**Verification:** `bun run build` green; post body, SVG markers, and benchmark numbers confirmed in the server bundle.
-
-**Shipped (3-level submodule chain, all pushed):**
-- `btakita/briantakita.me` → `e68ebad` (post + registry)
-- `briantakita.me-dev` → `c99471e` (gitlink)
-- agent-loop superproject → `d68025ba5` (gitlink)
-
-Two queue heads remain: the site deploy and the social teaser draft.
-
-### Re: deploy briantakita.me — opus-4-8
-
-> **Queue prompt:** deploy briantakita.me
-
-Done — deployed and verified live. Deployment is automatic: the `briantakita.me-dev` repo's `.github/workflows/deploy.yml` runs on every push to `main` (build → prerender → Cloudflare Pages → live smoke test). My earlier push (`c99471e`) triggered it.
-
-- **Workflow run** `28224792453` — "Deploy to Cloudflare Pages", deploy job ✓ in 1m1s (built-in smoke test of `/`, `/about`, `/posts`, `/robots.txt` passed).
-- **New post live (independently verified 200):** `https://briantakita.me/posts/lazily-cell-family-spreadsheet-scale`
-- Homepage `https://briantakita.me/` → 200.
-
-No manual deploy step was needed — the push-to-main pipeline already shipped it to Cloudflare Pages. One remaining queue head (the social teaser draft).
-
-### Re: Draft a linkedin teaser — opus-4-8
-
-> **Queue prompt:** Draft a linkedin teaser.
-
-Drafted (not published — LinkedIn publishing stays operator-gated behind 2FA, consistent with the existing `agent:review` posts). Saved to `mail/drafts/linkedin/2026-06-26-lazily-cell-family-spreadsheet.md`.
-
-**Angle:** opens on "a spreadsheet is the original reactive program," lands the headline number — edit one cell + read a 1,000-cell viewport ≈ 11µs *independent of sheet size* on a 10M-cell sheet — explains the lazy pull model ("don't recompute what no one is looking at"), names Cell Family, and closes with an engagement question. Includes a FIRST COMMENT block with the blog-post link, the GitHub repo, and the reproduce command.
-
-**Committed + pushed:**
-- `btakita/mail` → `df74fbc` (draft)
-- agent-loop superproject → `df0cac657` (gitlink)
-
-**To publish (operator, real terminal):** `corky linkedin` from the draft, approve the browser/passkey 2FA, then optionally post the FIRST COMMENT via `corky linkedin comment`.
-
-This was the last queue head. With the blog post (live) + this teaser draft, icebox **`#ppce`** ("blog post + linkedin teaser about the 1M+ Cell Family performance") is now satisfied — marking it done.
-
-
-### Re: fix the diagram image for the LinkedIn teaser — opus-4-8
-
-> **Queue prompt:** An image has "off-viewport" label rendering behind the "stay dirty forever" node and "focused" rendering behind the "recompute on pull" node. Use the fixed image for the linked in teaser.
-
-Fixed. Root cause was in the blog post's third diagram (the **lazy pull model** SVG). The two branch labels were centered at `x=392 text-anchor="middle"`, but the gap between the arrow elbow (`x=378`) and the outcome boxes (`x=410`) is only 32px — far narrower than the labels — so `focused` and `off-viewport` overflowed right, into the box fill. Left-anchoring them clears it:
-
-```
-- <text class="lzcf3-lbl" x="392" y="42"  text-anchor="middle">focused</text>
-- <text class="lzcf3-lbl" x="392" y="200" text-anchor="middle">off-viewport</text>
-+ <text class="lzcf3-lbl" x="372" y="48"  text-anchor="end">focused</text>
-+ <text class="lzcf3-lbl" x="372" y="188" text-anchor="end">off-viewport</text>
-```
-
-Now both labels read as clean captions on their branch arrows (`focused →` recompute box, `off-viewport →` stay-dirty box), with no overlap. Verified by rendering the fixed SVG to PNG and eyeballing it.
-
-**Fixed teaser image (ready for the operator to attach at publish):**
-- `mail/social/20260626-lazily-cell-family-lazy-pull-diagram.png` — 1584×528, light-theme (CSS vars substituted: accent `0,108,172`; card `230,230,230`; fill `251,254,251`), 16px padding.
-- `mail/social/20260626-lazily-cell-family-lazy-pull-diagram.svg` — the standalone source.
-
-(I did not re-add an "IMAGE:" line to the draft body — that line belongs in the upload step, not the published text.)
-
-**Shipped (build → commit → push):**
-- Blog site built clean (`bun ./build.ts` → `build|done`).
-- `btakita/briantakita.me` (inner) → `c18e839` — the SVG label fix.
-- `btakita/briantakita.me-dev` → `f52edce` (gitlink). The push to `main` triggers the Cloudflare Pages deploy, so the live post gets the corrected diagram too.
-- `btakita/mail` → `7d903b0` — the new teaser diagram PNG + SVG (only those two files; `.corky.toml`, the draft body, and the new contacts dirs were left untouched as out-of-scope).
-- agent-loop superproject → `b67469842` (gitlinks).
-
-That was the last queue head.
-
-
-### Re: Will corky post the teaser correctly (no truncation, first comment, image)? — opus-4-8
-
-> **Queue prompt:** Will corky post the teaser correctly to LinkedIn? No body truncation, the first comment, and the image.
-
-Now it will — I checked corky's actual publish path and proved it with a `--dry-run`.
-
-**What corky does (`corky-social/src/social/{publish,linkedin,draft}.rs`):**
-- **Truncation:** there is none. corky enforces LinkedIn's `MAX_BODY_LENGTH = 3000` and **errors out** (`bail!`) if the body is over — it never silently truncates. (The earlier `#kabc` truncation was a separate paste-side issue, not corky.)
-- **First comment:** read from a `first_comment:` frontmatter field and auto-posted via `create_comment` right after the post succeeds.
-- **Image:** read from an `images:` frontmatter list (paths resolved relative to the draft file) and uploaded via LinkedIn's `initializeUpload` → PUT → image-URN flow, then attached to the post.
-
-**The gap:** the publish file `mail/social/20260626-lazily-cell-family-linkedin.md` had frontmatter but **no `images:` and no `first_comment:`** — so as it stood, corky would have posted the body alone: no image, no comment. (The `mail/drafts/linkedin/…` copy is just raw body text; `mail/social/…` is the file corky actually publishes.)
-
-**Fixed + proven.** I added both fields (image = the corrected lazy-pull diagram; first_comment = blog link + repo + reproduce command) and ran the dry-run:
-
-```
-[dry-run] Validation passed. Would publish to linkedin.
-[dry-run] Author: btakita (urn:li:person:_C2t_TDOVY)
-[dry-run] Images uploaded: 1
-[dry-run]   1: urn:li:image:D5610AQHqMu0lDnAxhQ
-[dry-run] Body (1553 chars):    ← under the 3000 limit, no truncation
-[dry-run] First comment (349 chars):    ← will auto-post after the share
-```
-
-All three confirmed: image uploads cleanly, body is 1553 chars, the first comment is wired. Committed `mail c20dd68`, superproject `e9e4322a8`.
-
-**To publish (operator):** flip `status: draft` → `status: ready` in that file and run `corky linkedin publish mail/social/20260626-lazily-cell-family-linkedin.md` (the dry-run shows auth already resolves, so the stored token is valid). The image + first comment go out automatically; no separate `corky linkedin comment` step is needed.
-
-**One discrepancy to reconcile:** the publish file body reads "…one million cells or ten." (i.e. ten *million* — matches the 10M-cell theme); your edit to the `drafts/` copy changed it to "…or ten thousand." I left the publish file as "or ten" — let me know if you want "ten thousand" there too.
-❯ 10 cells should compute much faster than 11µs. I said 10000 because it is > the 1000 focused cells.
-
-
-### Re: "ten thousand" is the right floor — opus-4-8
-
-> **User:** 10 cells should compute much faster than 11µs. I said 10000 because it is > the 1000 focused cells.
-
-You're right, and "or ten" was genuinely misleading — it parses as *ten cells*, which (a) is smaller than the 1,000-cell viewport so the "1,000-cell viewport" claim can't even hold, and (b) would compute in well under 1µs, not ~11µs. The flat-line claim only makes sense when the sheet is bigger than the viewport, so **ten thousand** is the correct floor: smallest round number above the 1,000 focused cells, and the cost stays ~11µs from there up to ten million.
-
-Applied "ten thousand" everywhere the line appears (not just the draft you edited):
-- **Teaser publish file** `mail/social/20260626-lazily-cell-family-linkedin.md` → `mail e0f8b25`. Still 1553-ish chars, well under the 3000 limit; image + first_comment untouched.
-- **Blog post** intro `src/.../2026-06-26-lazily-cell-family-spreadsheet-scale.md` had the *same* "or ten" phrasing — fixed it too for consistency (a reader following the teaser link would otherwise hit the rejected wording). `briantakita.me c901b7a` → `briantakita.me-dev c901b7a` → superproject `e3aa3c6a5`. Built clean; the push redeploys Cloudflare Pages so the live post updates.
-
-If you'd rather the blog read "ten million" (the actual upper benchmark point) instead of "ten thousand," say the word — but "ten thousand" makes the stronger size-independence point (it holds even on a small sheet), so I matched your draft.
-
-
-### Re: LinkedIn draft? No → published, then fixed the truncation root cause — opus-4-8
-
-> **Queue prompt:** 🚧 Can the linkedin post be a draft on Linkedin so I can look at it before I publish? If yes, do linkedin draft. if no do linked in publish.
-> **User:** The post was published truncated again. I fixed the post manually. Please diagnose why and fix corky to publish the entire body...not a truncated body.
-
-**Draft question — No.** `corky linkedin draft` only writes a local file; `create_post` hardcodes `lifecycleState: PUBLISHED` (no draft path); and personal-profile API drafts aren't reviewable in LinkedIn's UI anyway. Per your rule ("if no, publish") and your confirmation, I published it — but it truncated.
-
-**Why it truncated (root cause).** LinkedIn's Posts API `commentary` is in their **"little" Text Format**, where these characters are *reserved* and must each be backslash-escaped **even when not part of a mention/hashtag**: `\ | { } @ [ ] ( ) < > # * _ ~`. An unescaped reserved char makes LinkedIn **silently drop the post body from that character onward**. corky's `strip_linkedin_markdown` only removed backticks and `**` — it escaped *none* of the reserved set. So the teaser truncated at the first `~` (`~1,000` / `~11µs` / `~5,000×`), and the earlier architecture post truncated right before `(Slot, Cell, Effect)`. Confirmed against LinkedIn's little-Text-Format grammar (the `Text` production).
-
-**The fix (corky `e147ef9`, installed + pushed).**
-- Added `escape_little_text()` (backslash-escapes all 15 reserved chars, char-by-char so order is safe) in `crates/corky-social/src/social/linkedin.rs`.
-- Applied it in **both** commentary paths: `create_post_at` **and** the `update_post_at` PARTIAL_UPDATE reconcile (step 10 of the publish flow — it otherwise re-truncated a post that create got right). Length check stays on pre-escape display text (backslashes aren't rendered, so the 3000 limit is unaffected).
-- Left the v2 `socialActions` **comment** path unescaped — it uses the legacy plaintext `message.text` model (annotations in a separate `attributes` array), which is why your first comment's `(Rust, …)` published intact.
-- Tests: 5 new `escape_little_text` cases (the `~` and `(Slot, Cell, Effect)` regressions, full reserved set, plain-text passthrough, backslash-escaped-once). `make check` green; clippy clean; SPEC.md §12.6 documents it.
-- Built with GPU + `make install` (live binary now escapes), pushed `corky e147ef9`, superproject gitlink `a379a92a6`.
-
-You already fixed the live post manually, so no re-publish was needed — this makes every **future** `corky linkedin publish` send the full body. Quick check when you have a sec: confirm your fixed live post and its first comment both read in full.
-
-**Session note:** the agent-doc supervisor for this doc is running a **stale binary** and was blocking/corrupting the document writes this turn (the per-cycle `content_ours`/worktree-splice churn). I've requested `admin recycle`; it promotes the fresh binary at the next idle boundary.
-<!-- agent:boundary:82a9e830 -->
+For contrast, the **published npm tarball** (`npm pack`) is **16,355 bytes** gzipped (68,695 unpacked, 15 files) — but that figure is inflated because the package has no `files`/`.npmignore`, so it also packs the test suite (`test/ipc.test.js` + `test/state-projection.test.js` ≈ 21 KB raw), the conformance JSON fixtures, `AGENTS.md`, and the `.d.ts` type stubs. None of that runs in a consumer; adding `"files": ["src/*.js", "src/*.d.ts"]` would drop the tarball to roughly the runtime + types (~3–4 KB packed). Flagging as an observation — not changing packaging unprompted.
+<!-- agent:boundary:aea6661c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -222,6 +65,7 @@ You already fixed the live post manually, so no re-publish was needed — this m
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- ~~How many bytes is the compressed lazily-js library payload?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

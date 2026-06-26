@@ -24,7 +24,6 @@ queue: stop
 
 <!-- agent:status -->
 
-🔴 (restart/recycle your supervisor)
 - [x] Phase 1: Research & design
 - [x] Phase 2: Core signal primitives
 - [x] Phase 3: Derived/computed signals
@@ -214,7 +213,7 @@ If you'd rather the blog read "ten million" (the actual upper benchmark point) i
 You already fixed the live post manually, so no re-publish was needed — this makes every **future** `corky linkedin publish` send the full body. Quick check when you have a sec: confirm your fixed live post and its first comment both read in full.
 
 **Session note:** the agent-doc supervisor for this doc is running a **stale binary** and was blocking/corrupting the document writes this turn (the per-cycle `content_ours`/worktree-splice churn). I've requested `admin recycle`; it promotes the fresh binary at the next idle boundary.
-<!-- agent:boundary:a2e20c66 -->
+<!-- agent:boundary:82a9e830 -->
 <!-- /agent:exchange -->
 ###
 <!--

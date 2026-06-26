@@ -185,7 +185,7 @@ That `crdt_merge_base … len=26650` is a **full-document** CRDT rebuild, and it
 **Verified:** new eval `current_base_hash_is_memoized_until_base_changes` (cache-hit-during-burst + invalidate-on-base-change, via a process-isolated recompute counter); `make check` green (clippy + nextest + Lean formal build); release profile compiles clean at 0.34.49. Lockstep version bump committed.
 
 **What happens next:** the supervisor auto-installs 0.34.49 and recycles onto the fresh binary + cdylib at its idle boundary — no manual install needed (I deliberately did *not* rebuild the live binary mid-session to avoid `live_prompt_drift`). After it recycles, typing should be smooth across all documents. I filed an `[operator-verify]` item for the one thing I can't do from the CLI: the live eyeball — type a sustained burst in a large doc and confirm `crdt_merge_base` no longer fires per keystroke in `ops.log`.
-<!-- agent:boundary:86dde9ea -->
+<!-- agent:boundary:f09f4ca6 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -194,13 +194,21 @@ That `crdt_merge_base … len=26650` is a **full-document** CRDT rebuild, and it
 - 🚧 [#cdtcutover]
 - ~~look in logs to see if we can verify [operator-verify] items in the backlog~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~It is now very difficult to type in the JB editor. Seems there may be performance or CRDT issues.~~ — auto-struck: answered this cycle (#ftstrike)
-- All documents are difficult to type in.
+- You deleted my queue items.
+- all documents are difficult to type in. Idea is cpu thrashing.
+- As I type in the queue, a previous state of the line is duplicated.
+- JB `Recycle Supervisor` then JB `Run Agent Doc` stalls because the recycle is scheduled to run after the turn starts. But `Run Agent Doc` cannot start the turn.
+- When I change the agent, the supervisor state should pick up the change and be able to dispatch to the new agent.
+- Getting several JB `File Cache Conflict` dialogs.
+- test #queuebase
 - do [#qftloss]
 - do [#qeditdup]
 - do [#crdtauth6]
 - do [#nsfz]
 - do [#kj5flive]
 - In the tmux pane, show if the supervisor is out of date. In the upper notifiaction that shows "turn in progress" is a good place.
+- do [#qimpstrike]
+- do [#2y8j]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -227,8 +235,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#qimpstrike] Recurring imperative queue heads (deploy/commit/push/build/install/release) are auto-struck instead of processed: #qftbklgstrike (memory_cmd.rs) lexically matched a free-text `deploy` head to a done item (#do-id-closeout-open-backlog, 2.050) and struck it, and #qheadresidue (queue_head_provenance_guards.rs) struck it again from a Queue prompt echo — so the operator deploy directive was retired with no deploy run. Fix: classify recurring-imperative verbs as executable directives, exempt them from #qftbklgstrike done/backlog match AND the #qheadresidue residue guard, keep them drainable (dispatch via queue_dispatch.rs), and never auto-strike a short one-word head on a Done match. Plan: tasks/agent-doc/plan-queue-recurring-imperative-head-wrongly-struck.md
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
-- [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
+- [ ] 🚧 [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
 - [ ] [#qftloss] [operator-verify] Free-text prompt loss (mode-6) — CODE-COMPLETE on main (8b900bf4): binary now journals operator prompts from the plugin live-buffer sidecar (.agent-doc/live-buffer/<hash>) into the #qdurcrash store before any convergence/recovery can clobber the unsaved buffer, replayed if absent. Remaining: live IDE eyeball that an unsaved prompt typed during a concurrent finalize survives end-to-end. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#qeditdup] [operator-verify] Queue items duplicated + manually-struck/deleted items resurrected when the operator edits the queue during an active turn. #queuestatemachine idempotent convergence + the Live<Struck lattice (merged, 0.34.48) should resolve this — VERIFY on the recycled binary; if it persists live, a deeper editor-edit-during-cycle guard is needed. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#crdtauth6] [operator-verify] crdtauth5 live hookup: thin JB DocumentListener calling CrdtReplicaForwarder.forwardLocalDelta + a Kotlin Unix-socket ReplicaTransport client (writes NDJSON register/deregister/update, delivers inbound update_b64 to applyRemoteUpdate); plus the deferred VS Code koffi replica seam (editors/vscode/src/native.ts out-param marshaling). Rust fan-out + Kotlin seam already merged + tested. Plan: tasks/agent-doc/plan-crdt-authority-model.md

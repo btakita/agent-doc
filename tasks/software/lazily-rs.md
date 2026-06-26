@@ -54,7 +54,19 @@ Already complete — no auto-publish needed (matches the `#kb9b`/`#lzpypub011` s
 - **Parity** — ShmBlobArena host port + Signal→Slot `RecursionError` regression suite committed (`4a57eb2`, `26ef43e`, `c255482`).
 
 The 2FA-gated publish the operator pause was guarding has already landed, so nothing remains to drain here. The remaining `agent:review` items (`#z0hq` npm publish, `#h6qb` WebRTC two-host e2e, `#xccx` Holons, LinkedIn comments) stay operator-gated.
-<!-- agent:boundary:3fd56856 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=ipc_visible_repair patch_id=e96c04ed-8d14-43ec-b88d-e20b39873ef4 invariant=ipc_dedupe recovery=retry_without_disk_write redeliver_editor=true bad_len=7015 bad_hash=2bc945c3a6962688942cc5275c07a5bea387b49d0ee9a5964666291abf9c78db repaired_len=7554 repaired_hash=151b6980063abacfeabf6a33b253ebcbe4ec9889101bed421e68b049be1d433f doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782458551177
+```
+<!-- agent:boundary:7bc3d4a9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -65,7 +77,7 @@ The 2FA-gated publish the operator pause was guarding has already landed, so not
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - 🚧 Please write a blog post for briantakit with diagrams about recent changes in lazily-rs...Cell Family, 5M spreadsheet benchmark...focusing on how lazy reactivity improves performance by only eagerly recomputing the focused cells.
 - deploy briantakita.me
-- Draft a 
+- Draft a linkedin teaser.
 <!-- /agent:queue -->
 
 ## Backlog

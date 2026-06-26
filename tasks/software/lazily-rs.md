@@ -77,7 +77,7 @@ The closeout is stuck because the route-owned supervisor is running a stale `age
 `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md`
 
 That recycle is queued, but it cannot take effect until this busy Codex pane reaches idle.
-<!-- agent:boundary:5a649f8d -->
+<!-- agent:boundary:b25933aa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -94,7 +94,6 @@ That recycle is queued, but it cannot take effect until this busy Codex pane rea
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [x] [#lzbugtriage] #lzbugtriage=Run a focused lazily-rs bug triage cycle: run make check plus latest gh CI, then audit archived bug candidates against the current tree and reopen only failures that still reproduce. Current spot-check: benchmark-check passes; async dispose generation guard, circular dependency detection, and WebSocket inbound queue bounding are already present.
 - [ ] [#lzsmstress] [recommended] #lzsmstress=Add state-machine hardening tests for StateMachine, ThreadSafeStateMachine, and AsyncStateMachine: invalid transitions, transition callbacks, dynamic dependencies, eager signals, dispose/recreate, and concurrent set/get. Start with failing regressions that prove no stale transition, cleanup leak, or stale dependency edge survives.
 - [ ] [#lzcrdtperms] [recommended] #lzcrdtperms=Add CRDT runtime permission/regression coverage: CrdtSync BridgeHub fan-out with mixed readable/unreadable peers, duplicate delivery, partial-frontier tombstone GC, and NodeKey/NodeId churn so multi-writer transport bugs fail deterministically.
 <!-- /agent:backlog -->

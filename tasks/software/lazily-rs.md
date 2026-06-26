@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -535,7 +535,17 @@ flowchart LR
 ```
 
 **Net:** timing never breaks anything; intervening edits resolve at paste time with identity + value independent; and dissolving a keyed item into another's prose is the one case that *intentionally* drops lineage — because deleting the `- ` prefix deletes the identity.
-<!-- agent:boundary:5b966a90 -->
+
+### Re: do [#r86a] — blocked on #lzcrdtplane, gated (not stubbed) — opus-4-8
+
+> **Queue prompt:** do [#r86a]
+
+`#r86a` is the `#lztombgcwire` follow-up I filed earlier **this same cycle** — "wire `SeqCrdt::gc` / `TextCrdt::gc_with` into #lzcrdtplane's anti-entropy." The go-queue auto-mirrored it into a `do [#r86a]` head, but by its **own definition** it is not drainable yet: there is no anti-entropy loop to wire GC into.
+
+#lzcrdtplane — the distributed cell plane (HLC version-vector exchange, multi-peer Δ sync, the causal-stability-frontier computation) — is still `[/]` in review and **unbuilt**. Only the local primitives exist: `SeqCrdt`/`TextCrdt` plus the GC **mechanism** just shipped under #lztombgc. That split was the whole point of the #2ygp closeout: the *mechanism* lands now; the *policy source* (the all-replicas-aware watermark) is produced by the plane's anti-entropy, which doesn't exist yet.
+
+Wiring a consumer (`gc_with`) into a producer (the version-vector frontier) that hasn't been built isn't a task I can complete — and stubbing a fake watermark against a missing plane would be unsound (a single replica's clock is **not** a causal-stability frontier, as the GC docs state). So I'm **gating `#r86a`** (blocked on #lzcrdtplane), not implementing it. It ungates and becomes actionable the moment #lzcrdtplane ships its anti-entropy. No code this cycle.
+<!-- agent:boundary:86d29929 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -544,22 +554,17 @@ flowchart LR
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~I looked at Tombstones. Please address "In set CRDTs like the Two-Phase Set (2P-Set), a separate "tombstone set" tracks removed elements to ensure removals take precedence over additions during state merges." and "While tombstones solve the "TP2 puzzle" in operational transformation and ensure convergence without central coordination, they lead to memory bloat.  Some systems implement specialized garbage collection protocols to safely remove tombstones only when all replicas are confirmed to be aware of the deletion."~~
-- ~~How can cut + paste be handled? How is undo handled?~~
-- ~~do [#2ygp]~~
-- ~~Explain how a cut, long pause, paste is handled. Or cut, some other changes are made, then paste. How about cut a queue item, paste into another queue item then edit (delete `- ` prefix).~~
-- do [#r86a]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#r86a] [recommended] #lztombgcwire=Wire SeqCrdt::gc / TextCrdt::gc_with into #lzcrdtplane anti-entropy: have the plane compute the all-replicas-aware causal-stability frontier (version-vector minimum across peers) and drive periodic tombstone GC from it. Mechanism shipped under #lztombgc (lazily-rs a12bf19); this is the policy/transport half, lands with #lzcrdtplane.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#r86a] [recommended] #lztombgcwire=Wire SeqCrdt::gc / TextCrdt::gc_with into #lzcrdtplane anti-entropy: have the plane compute the all-replicas-aware causal-stability frontier (version-vector minimum across peers) and drive periodic tombstone GC from it. Mechanism shipped under #lztombgc (lazily-rs a12bf19); this is the policy/transport half, lands with #lzcrdtplane.
 - [/] [#lzwirekey] [recommended] [operator-go] Wire-stable keyed addressing for collection entries: add optional key/path field to NodeAdd + NodeSnapshot (key->NodeId registry) so CellFamily/CellMap entries survive NodeId churn. Depends on #lzcellfamily (DONE). PLAN COMPLETE: tasks/software/plan-lazily-wire-keyed-addressing.md — implementation gated on operator go (you scoped this plan-only).
 - [/] [#lzcrdtplane] [recommended] Implement the distributed CRDT cell plane (spec §Distributed). Decision: purpose-built HLC + LWW/MV/PN registers (matches lazily's lazy reactive graph + memo-equality invariants); do NOT adopt YRS/YJS document model (wrong replication unit). Keep IPC Snapshot/Delta as the single-producer mirror; CRDT merge lives only at the multi-writer distributed boundary. Optional later: borrow YRS binary anti-entropy sync engine as transport. Plan first: tasks/software/plan-lazily-distributed-crdt-plane.md.
 - [/] [#lilazilysmpost] [/] [operator-drive] lazily state-machine LinkedIn post PUBLISHED WITH IMAGE: https://www.linkedin.com/feed/update/urn:li:share:7475622100263923712 (mail/social/20260624-142530-linkedin.md @ mail bf4ab26). CyclePhase diagram rendered from blog post SVG (light theme colors) + uploaded via LinkedIn digitalmediaAsset API. Old text-only post (urn:li:share:7475617202893639680) deleted + replaced. Remaining operator follow-up: post first comment (link + GitHub source) via corky linkedin comment.

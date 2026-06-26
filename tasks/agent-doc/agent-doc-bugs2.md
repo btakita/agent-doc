@@ -69,7 +69,24 @@ Built per your "go". This is the root fix for the `#qftloss` / `#qeditdup` / `#q
 **9 tests, all green, prove the anti-corruption properties:** reorder→`Move`s (not replace), insert/remove→single op, single-item edit→one `Update` with siblings untouched, and cross-component isolation (a queue edit yields **zero** backlog ops — the splice that keeps corrupting these sessions). `make check` green: **5320 passed**, clippy clean. No install / push / recycle — the live supervisor is undisturbed; branch is ready for your review/merge.
 
 **Next phase (its own cycle):** the cutover. This is a 2-way diff; the live merge is 3-way — compose base→ours + base→theirs per-component diffs, resolve per-`node_key` conflicts (mirror `reconcile_component_body` in `crdt.rs`), then route `crdt::merge` through it behind a flag. Tracked in `tasks/software/plan-lazily-agent-doc-reactive-substrate.md`. Say "go" for the cutover and I'll take it in the same worktree.
-<!-- agent:boundary:8029cba2 -->
+
+### Re: CellTree cutover — flag-gated 3-way per-cell merge landed — opus-4-8
+
+"go cutover" done. The lazily per-cell merge now has a **3-way** path wired into `crdt::merge_by_component` behind a **default-OFF** flag — safe, reversible, zero production behavior change until you flip it.
+
+**Landed** — same worktree `src/agent-doc-celltree-wt`, branch `celltree-percell-merge`, commit `df0b330f`:
+
+- `cell_doc::merge_3way(base, ours, theirs) -> CellMergeOutcome` — composes `reconcile(base→ours)` + `reconcile(base→theirs)` per `node_key` into a merged item list. Different items / different components → both land, no splice. **Same item edited on both sides → a real conflict surfaced in `CellMergeOutcome.conflicts` (ours-wins policy), never a fabricated blend** (the `#qnodemerge5` safety property).
+- Flag-gated seam in `crdt.rs::merge_by_component` (L492) behind `AGENT_DOC_CELL_MERGE` (default OFF). Structural divergence → falls straight back to the legacy path. **Flag OFF ⇒ byte-identical to current behavior** (tested).
+- 17 module tests (9 new): different-item / different-component isolation, the console-in-queue splice repro blocked, same-item→conflict, reorder+edit compose, structural fallback, flag-OFF byte-identical. `make check` green: **5328 passed**, clippy clean.
+
+**Before the flag can flip in production** (honest gaps — all safe because the flag is OFF):
+- The 3-way base is **text-only** — it decodes the Yrs base to text and discards CRDT structure / `MultiNodeState` op-clocks.
+- The **`Live<Struck` anti-resurrection lifecycle** (`reconcile_list_item_lifecycle`) is **NOT yet mirrored** — a struck item could resurrect under the cell path. This is the #1 port needed before enabling.
+- Op-capture replay not wired (touched sets inferred from text diff); conflicts only logged to stderr (no editor surface yet); merged text not yet persisted through the snapshot/CRDT path.
+
+So: groundwork (`6c225edd`) + cutover (`df0b330f`) both on `celltree-percell-merge`, fully tested, **default-off and reversible** — two commits ready for your review/merge. To make it production-ready next: port the strike-lifecycle join + decide conflict UX, then a live zero-drift proof before flipping the default. Say the word for that rung.
+<!-- agent:boundary:18be66ce -->
 <!-- /agent:exchange -->
 
 ## Queue

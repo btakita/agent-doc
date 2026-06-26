@@ -484,7 +484,25 @@ flowchart LR
 **Single-producer note:** in a normal (one-writer) agent-doc session this is all the editor's native cut/paste/undo over the IPC Snapshot/Delta mirror — no CRDT involved. The op-inverse model above is the **multi-writer** (`distributed`) answer, where "undo" can't mean "revert" because someone else may have edited concurrently.
 
 **Re queued `do [#2ygp]` (`#lztombgc`, tombstone GC):** correctly gated, not drained this cycle — the queue is operator-paused and, more substantively, the agent-doable trigger for GC ("all replicas are aware") requires the **causal-stability watermark**, which needs the multi-replica anti-entropy/sync transport from **#lzcrdtplane** (still in review) to even know what each replica has observed. Without that transport there's no watermark to compute against. The agent-doable slice that *doesn't* need the plane is the **local compaction primitive** (given an externally-supplied stable watermark, drop retired `SeqCrdt` entries + compact stable `TextCrdt` RGA runs). Say the word and I'll build that watermark-driven compaction half now; the "all-replicas-aware" detection lands with #lzcrdtplane.
-<!-- agent:boundary:efddaf81 -->
+
+### Re: do [#2ygp] — tombstone GC shipped (#lztombgc) — opus-4-8
+
+> **Queue prompt:** How can cut + paste be handled? How is undo handled?
+
+(That free-text head is already answered in the **Cut + paste and undo** section above — echoing it here only to strike the residual queue head from last cycle.)
+
+Implemented the agent-doable slice of `#lztombgc` — the **local, stability-gated compaction primitive** for both distributed-plane tombstone CRDTs. Shipped + pushed: lazily-rs `a12bf19`, lazily-spec `e235034`, superproject `4dd1089c1`.
+
+**`SeqCrdt` (`seq_crdt.rs`).** `gc_with(is_stable)` + convenience `gc(watermark)` drop tombstoned entries the caller proves causally stable. Sound for free: the tombstone already carries an HLC stamp. Dropping a stable one is **observationally inert** (`order`/`contains` already skip tombstones) and **convergent** — an un-collected replica re-merges the entry back as a tombstone (still skipped), and a genuine resurrection carries a newer stamp so it wins by LWW regardless. Added `tombstone_count()` as the GC-pressure gauge.
+
+**`TextCrdt` (`text_crdt.rs`).** The real blocker: deletes were a bare `bool`, so there was no way to test whether the *deletion* (vs the original insertion) was stable. Changed `deleted: bool → Option<OpId>` so the delete carries its **own** id; merge stays sticky and now converges concurrent deletes to the smaller delete `OpId` (keeps commutative/associative). `gc_with(is_stable)` is deliberately conservative — it collects a stable deleted element **only when nothing references it as a left origin**, so removal can never orphan a surviving character; interior tombstones are reclaimed **bottom-up** as their descendants go. (Verified: deleting the middle of "abc" keeps 'b's tombstone while 'c' still points at it; delete 'c' too and one GC pass collects both.)
+
+**Policy stays plane-owned (why this is the right slice).** `is_stable` — the "every replica has observed the deletion" frontier — is **injected by the caller**, i.e. the version-vector minimum that #lzcrdtplane's anti-entropy maintains. So the *mechanism* lands now; the *policy source* is #lzcrdtplane's existing scope, not separate work. A single replica's local clock is explicitly **not** a sound watermark (cross-peer HLC order ≠ causal coverage), and the docs say so.
+
+**Verification:** 6 new tests (3 `SeqCrdt`, 3 `TextCrdt`); `make check` green — `fmt`, `clippy --all-targets --all-features -D warnings`, full feature matrix, Lean spec model, benchmark check, doctests. SPEC.md §Distributed + lazily-spec `cell-model.md` gained tombstone-GC conformance.
+
+**Closeout:** `#2ygp` → **done** (compaction mechanism complete, tested, shipped). Wiring `SeqCrdt::gc` / `TextCrdt::gc_with` into the live anti-entropy loop lands inside #lzcrdtplane when that plane is built — filed as `#lztombgcwire` `[recommended]`.
+<!-- agent:boundary:83048481 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -494,14 +512,16 @@ flowchart LR
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~I looked at Tombstones. Please address "In set CRDTs like the Two-Phase Set (2P-Set), a separate "tombstone set" tracks removed elements to ensure removals take precedence over additions during state merges." and "While tombstones solve the "TP2 puzzle" in operational transformation and ensure convergence without central coordination, they lead to memory bloat.  Some systems implement specialized garbage collection protocols to safely remove tombstones only when all replicas are confirmed to be aware of the deletion."~~
-- 🚧 How can cut + paste be handled? How is undo handled?
-- do [#2ygp]
+- ~~How can cut + paste be handled? How is undo handled?~~
+- ~~do [#2ygp]~~
+- Explain how a cut, long pause, paste is handled. Or cut, some other changes are made, then paste. How about cut a queue item, paste into another queue item then edit (delete `- ` prefix).
+- do [#r86a]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#2ygp] [recommended] #lztombgc=Tombstone garbage collection for the distributed CRDT plane (#lzcrdtplane). Add an HLC causal-stability watermark (min over replicas of highest observed stamp); a delete is collectable once its stamp <= watermark (all replicas aware). Then: drop SeqCrdt LWW tombstone entries only once the Id is provably retired (seq_crdt.rs entries map), and compact contiguous stable TextCrdt RGA tombstone runs, rewriting survivors left-origin to nearest live ancestor (text_crdt.rs). Bounded to the opt-in distributed feature; single-producer IPC Snapshot/Delta mirror accrues no tombstones. Depends on #lzcrdtplane.
+- [ ] [#r86a] [recommended] #lztombgcwire=Wire SeqCrdt::gc / TextCrdt::gc_with into #lzcrdtplane anti-entropy: have the plane compute the all-replicas-aware causal-stability frontier (version-vector minimum across peers) and drive periodic tombstone GC from it. Mechanism shipped under #lztombgc (lazily-rs a12bf19); this is the policy/transport half, lands with #lzcrdtplane.
 <!-- /agent:backlog -->
 
 ## Review

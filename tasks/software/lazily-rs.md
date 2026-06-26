@@ -23,6 +23,8 @@ queue: stop
 # lazily-rs: Reactive Signals Library
 
 <!-- agent:status -->
+
+🔴 (restart/recycle your supervisor)
 - [x] Phase 1: Research & design
 - [x] Phase 2: Core signal primitives
 - [x] Phase 3: Derived/computed signals
@@ -173,7 +175,7 @@ Done — **`#lzcrdtplane5b` (FINAL phase of `#lzcrdtplane`)** is implemented, `m
 **Verification:** `make check` green — `fmt`, `clippy --all-features -D warnings`, every test suite (incl. the new `test-crdt-plane` with 332 passing under the combo), the Lean formal model, and `benchmark-check`. CI run `28219001643` is in progress; closing on local evidence.
 
 All four backlog deliverables are covered: plane↔`merge:crdt` cell wiring, `NodeKey` producer projection, `BridgeHub` CrdtSync fan-out, and the two-replica-over-transport convergence test. The remaining `agent:review` items are operator-gated publishes (queue stays paused).
-<!-- agent:boundary:a9a2894e -->
+<!-- agent:boundary:983d0628 -->
 <!-- /agent:exchange -->
 ###
 <!--

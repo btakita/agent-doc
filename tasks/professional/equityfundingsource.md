@@ -167,7 +167,24 @@ Removed the `confirm_` block from `deal_detail.tsx` `select_interest_`, so click
 **Shipped:** EFS `main` `3d76f3c..f1df6dc` (pushed); worker **deployed** — version `60ac57f7-4cfa-4136-84cc-6d94354b77d8` at https://equityfundingsource.brian-takita.workers.dev. Superproject pointer `d7c308c41`.
 
 Live-eyeball: deal `4046fa5a` → loan tab → Select proposal on Brian's interest → it selects immediately (no dialog); the amber "Requirements: Not started" / "TMO account not linked" badges remain visible on the card.
-<!-- agent:boundary:07a2c4d0 -->
+
+### Re: One selected lender per Available Deal + swap-confirm — opus-4-8
+
+> **Request (chat):** An Available Deal should only have 1 lender selected. If selecting another lender, a confirmation dialog should ask if the admin wants to deselect the other lender. deploy.
+
+Done — implemented, tested, deployed.
+
+The deal selection model previously allowed **multiple** selected lenders (the server blended their rates into the deal sold-rate). Now an Available Deal has **at most one** selected lender:
+
+- **Server** (`admin_deal_interests_by_id_select_PUT_`): selecting a lender now deselects any other previously-selected lender on the same deal, atomically — before the blended-rate / `sold_rate` recompute — so the deal reflects only the new lender. This enforces the invariant for every caller, returning the full updated interest list.
+- **UI** (`deal_detail.tsx` `select_interest_`): when another lender is already selected and you click **Select proposal** on a different one, a confirm dialog appears — *"{Name} is already selected for this deal. A deal can have only one selected lender — deselect them and select {NewName} instead?"* with a **Deselect & select** button. Confirm → the server swaps the selection and the card updates (old one deselected, new one selected).
+
+**Verification:** `bun test` → **1329 pass / 0 fail** (added a pinned-source assertion for the deselect-others query). `bun run build` + `build:worker` clean. Updated `master-state-machine.md` §4 with the single-selection invariant.
+
+**Shipped:** EFS `main` `f1df6dc..fa657df` (pushed); worker **deployed** — version `e05a7880-cd2d-42cf-9162-c395daece8b0` at https://equityfundingsource.brian-takita.workers.dev. Superproject pointer `5724f3981`.
+
+Live-eyeball: deal `4046fa5a` → loan tab → select lender A → then click Select proposal on lender B → the swap-confirm dialog appears; confirm → A is deselected and B becomes the selected lender.
+<!-- agent:boundary:5eae57c5 -->
 <!-- /agent:exchange -->
 ###
 <!--

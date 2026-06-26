@@ -54,7 +54,7 @@ But your question caught a real **layering smell**: `CellDocTree::apply` current
 - `#cdtcutover` — **[FUTURE/SEPARATE]** wire the evented model into the live finalize/write path. Large, live-supervisor-critical, gated, own focused cycle — explicitly *out of scope* of this groundwork.
 
 Net of the layering: lazily owns all reactive machinery; `CellDocTree` becomes a genuinely thin document adapter. Plan + backlog only this turn — say the word to drain `#cdtdedup` first.
-<!-- agent:boundary:2f19b3d9 -->
+<!-- agent:boundary:4aa0e1c8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -87,10 +87,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#cdtdedup] #agent-doc-feature CellDocTree.apply delegates its map-half to lazily apply_to_map (remove the hand-rolled Remove/Insert/Move/Update match), keeping only CellTree structure maintenance on top. Additive, behavior-identical, no live-path change. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
-- [ ] [#lzapplytree] [lazily-rs] Add generic lazily::apply_to_tree(ctx, &CellTree, &[DiffOp]) companion to apply_to_map (the CellTree-half maintenance is generic, not document-specific) so CellDocTree.apply delegates BOTH halves and carries zero reconcile logic. Cross-repo: lands in src/lazily-rs (own make check/release+gating). Fast-follow to #cdtdedup. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
-- [ ] [#cdtupdate] #agent-doc-feature CellDocTree::update_to(ctx, old_doc, new_doc) — evented incremental update via diff_document + apply (the commit phase) instead of from_document rebuild; handle component add/remove + multi-component revisions. Depends on #cdtdedup. Acceptance: update_to-driven tree structurally == from_document(new). Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
-- [ ] [#cdtsem] #agent-doc-feature agent-doc semantic queries (drainable-head / unresolved-prompt identities per component, or per-component counts) as lazily SemTree memoized computeds over CellDocTree — subtree-scoped recompute. Depends on #cdtupdate. Acceptance: editing component A recomputes only A computed not B; memo-equality guard; value matches eager query. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
 - [ ] [#qftloss] [operator-verify] Free-text prompt loss (mode-6) — CODE-COMPLETE on main (8b900bf4): binary now journals operator prompts from the plugin live-buffer sidecar (.agent-doc/live-buffer/<hash>) into the #qdurcrash store before any convergence/recovery can clobber the unsaved buffer, replayed if absent. Remaining: live IDE eyeball that an unsaved prompt typed during a concurrent finalize survives end-to-end. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#qeditdup] [operator-verify] Queue items duplicated + manually-struck/deleted items resurrected when the operator edits the queue during an active turn. #queuestatemachine idempotent convergence + the Live<Struck lattice (merged, 0.34.48) should resolve this — VERIFY on the recycled binary; if it persists live, a deeper editor-edit-during-cycle guard is needed. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md

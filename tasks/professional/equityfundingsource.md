@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,24 +33,9 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-223548.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-232608.md`*
 
 Compacted content:
-- Archived 12 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); Full Application layout; IPC proof diagnostic (interrupted-cycle recovery); 9 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: mrh content — delete + purge from EFS — opus-4-8
-
-> **Queue prompt:** This is mrh. Delete + purge it from EFS.
-
-Done. The misrouted **monsterrodholders** sale-banner material (the "Limited Time Only" / "SHOP THE SALE!" / "ENDS JULY 4" exchange) is purged from the EFS document tree:
-
-- **Archive** `…-20260625-223548.md` — excised the `### Re: "Limited Time Only" vertical centering` section (the only mrh exchange that got compacted into EFS history). The legitimate EFS/mrh *account-disambiguation* notes in older archives (which Cloudflare account to use) are EFS context, not misrouted content — left intact.
-- **Image** `tasks/professional/img_38.png` (123 KB sale-banner screenshot dropped into the EFS task folder) — deleted. The unrelated `tasks/agent-doc/img_38.png` (different file) is untouched.
-
-The live EFS exchange had already been compacted to its Session Summary, so nothing mrh remained in the visible doc. Verified: no `shop the sale` / `limited time only` / `ends july` / `orders over $200` / `img_38` strings remain anywhere under the EFS doc or its archives. Both purged files were git-ignored, so this is local-only cleanup with no commit/history impact.
-
-If you want the banner centering actually fixed, it belongs in monsterrodholders (live WordPress via wp-cli/SSH) — point me at the page/template there and I'll do it in that session.
 
 ### Re: Deal image carousel across portals (house placeholder) — opus-4-8
 
@@ -69,7 +54,9 @@ Shipped the carousel **foundation + the lender and admin surfaces** this cycle (
 - `#dealcarousel-broker` — `broker/my_pipeline.tsx` `BrokerDeal.loan_id` → `investment_deal`; same pattern, broker-scoped.
 
 **`deploy` (next queue item):** held. This is a partial landing of a production feature; the EFS lender+admin increment is a clean, shippable change, but I did not auto-deploy. Say the word to `deploy` the increment now, or I'll deploy once the borrower + broker phases land.
-<!-- agent:boundary:8d77d4cb -->
+❯ - Archived 1 response topic(s): mrh content
+❯ - Prior summary/context: prior compacted content: Archived 12 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); Full Appli...
+<!-- agent:boundary:288f46dd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -89,6 +76,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~All deals in the borrower, broker, lender, and admin should have a carousel of uploaded images. If there is no image, then show a house placeholder.~~ — auto-struck: answered this cycle (#ftstrike)
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

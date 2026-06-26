@@ -26,6 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -96,7 +97,7 @@ Did it in an **isolated worktree** (`src/agent-doc-cdtcutover-wt`, branch `cdtcu
 **Deferred — write-side finalize hook (b):** the live merge seam (`crdt::merge`/`merge_3way`/`merge_by_component`) is stateless text-in/text-out per cycle, with no persistent `CellDocTree` threaded through finalize. Driving finalize through `update_to` needs a supervisor/process-lifetime cache + revision-hash invalidation against the supervisor's concurrent out-of-band writes + a `from_document` fallback — its own rung, filed below.
 
 **Remaining for `#cdtcutover` (operator-gated):** the branch is *not* merged/installed (worktree isolation). The live flip — merge `cdtcutover`, consume the accessor in the live drainable path, land the write-side, then the live editor/pane zero-regression proof — is the operator-gated step.
-<!-- agent:boundary:cd57dc24 -->
+<!-- agent:boundary:336fd63d -->
 <!-- /agent:exchange -->
 
 ## Queue

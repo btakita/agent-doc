@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -545,7 +545,7 @@ flowchart LR
 #lzcrdtplane — the distributed cell plane (HLC version-vector exchange, multi-peer Δ sync, the causal-stability-frontier computation) — is still `[/]` in review and **unbuilt**. Only the local primitives exist: `SeqCrdt`/`TextCrdt` plus the GC **mechanism** just shipped under #lztombgc. That split was the whole point of the #2ygp closeout: the *mechanism* lands now; the *policy source* (the all-replicas-aware watermark) is produced by the plane's anti-entropy, which doesn't exist yet.
 
 Wiring a consumer (`gc_with`) into a producer (the version-vector frontier) that hasn't been built isn't a task I can complete — and stubbing a fake watermark against a missing plane would be unsound (a single replica's clock is **not** a causal-stability frontier, as the GC docs state). So I'm **gating `#r86a`** (blocked on #lzcrdtplane), not implementing it. It ungates and becomes actionable the moment #lzcrdtplane ships its anti-entropy. No code this cycle.
-<!-- agent:boundary:f2fcfe70 -->
+<!-- agent:boundary:ffd074a5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -554,9 +554,9 @@ Wiring a consumer (`gc_with`) into a producer (the version-vector frontier) that
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- [#r86a]
-- update lazily-spec with latest changes
-- release + publish lazily-rs
+- ~~[#r86a]~~
+- 🚧 update lazily-spec with latest changes
+- ~~release + publish lazily-rs~~
 - lazily-kt parity. release + publish
 - lazily-js parity. release + publish
 - lazily-zig parity. release + publish
@@ -571,8 +571,7 @@ Wiring a consumer (`gc_with`) into a producer (the version-vector frontier) that
 ## Review
 
 <!-- agent:review -->
-- [/] [#lzwirekey] [recommended] [operator-go] Wire-stable keyed addressing for collection entries: add optional key/path field to NodeAdd + NodeSnapshot (key->NodeId registry) so CellFamily/CellMap entries survive NodeId churn. Depends on #lzcellfamily (DONE). PLAN COMPLETE: tasks/software/plan-lazily-wire-keyed-addressing.md — implementation gated on operator go (you scoped this plan-only).
-- [/] [#lzcrdtplane] [recommended] Implement the distributed CRDT cell plane (spec §Distributed). Decision: purpose-built HLC + LWW/MV/PN registers (matches lazily's lazy reactive graph + memo-equality invariants); do NOT adopt YRS/YJS document model (wrong replication unit). Keep IPC Snapshot/Delta as the single-producer mirror; CRDT merge lives only at the multi-writer distributed boundary. Optional later: borrow YRS binary anti-entropy sync engine as transport. Plan first: tasks/software/plan-lazily-distributed-crdt-plane.md.
+- [/] [#lzcrdtplane] [recommended] Implement the distributed CRDT cell plane (spec §Distributed). PLAN COMPLETE: tasks/software/plan-lazily-distributed-crdt-plane.md. Code audit found the local merge substrate already exists (LwwRegister/MvRegister/PnCounter, ReplicatedCell/CellCrdt, counter VersionVector); remaining gap is the network plane in 5 phases (#lzcrdtplane1 HlcStamp stability frontier, #lzcrdtplane2 expose registers via MergeMechanism, #lzcrdtplane3 op-log delta exchange, #lzcrdtplane4 frontier-driven GC closing #r86a, #lzcrdtplane5 runtime wiring + SPEC/PROTOCOL). Decision locked: purpose-built HLC, NOT YRS data model; IPC Snapshot/Delta stays the single-producer mirror. Implement per-phase in focused cycles.
 - [/] [#lilazilysmpost] [/] [operator-drive] lazily state-machine LinkedIn post PUBLISHED WITH IMAGE: https://www.linkedin.com/feed/update/urn:li:share:7475622100263923712 (mail/social/20260624-142530-linkedin.md @ mail bf4ab26). CyclePhase diagram rendered from blog post SVG (light theme colors) + uploaded via LinkedIn digitalmediaAsset API. Old text-only post (urn:li:share:7475617202893639680) deleted + replaced. Remaining operator follow-up: post first comment (link + GitHub source) via corky linkedin comment.
 - [/] [#kabc] #lipostlazilyarch=[operator-drive] Main LinkedIn post is published and repaired: Corky edit updated mail/social/20260616-lazily-architecture-linkedin.md / https://www.linkedin.com/feed/update/urn:li:share:7472666756810190848 with the full body after the public post truncated at "The core is small: three primitives". Local metadata is committed in mail commit 07a9ea1 and superproject gitlink e7e0b08c1. Remaining operator follow-up: post the first comment from mail/drafts/linkedin/2026-06-16-lazily-architecture.md via `corky linkedin comment <published-file> <comment-body>` if still desired.
 - [/] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet backend through the LIVE #yxjw signaling Worker (two real hosts / NAT). Agent-doable slice (#lzwebrtcwire) is DONE: src/webrtc_signaling.rs wires SignalingClient↔Str0mNet and tests/webrtc_signaling.rs covers the localhost handshake. Remaining: live two-host/NAT run via deployed Worker — operator-only.

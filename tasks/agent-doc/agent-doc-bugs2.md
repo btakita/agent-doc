@@ -26,7 +26,6 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -372,7 +371,7 @@ Done, and shipped. `agent-doc admin recycle` now has a real `--force` flag — *
 What `--force` does: overrides the cycle-open / in-flight-dispatch deferral so the recycle lands at the next serve-loop tick instead of waiting for idle (it still requires controller `Stable`, so it never strands a half-promoted handoff); and when no live controller answers, it escalates to a kill+cold-start (`session restart-supervisor`) instead of the old "nothing to recycle" no-op. Default (no `--force`) behavior is byte-for-byte unchanged.
 
 Per agent-doc's `#deploy-just-do-it`, I shipped it to **live**, and bundled the other ready branches into the same deploy — merged to agent-doc main (`e96beca1`), `make check` green, **installed + recycle-marked**: `#recycleforce`, `#supstaledetect`, `#qimpstrike`, `#suptmuxstale`, `#ipcproofnostall`, `#agentchange` tests, on top of Phase A. **`#ipcproofnostall` going live kills the false closeout-interrupt** that stalled this queue all session — once this supervisor recycles onto the bundle at this turn's boundary, the wedge dance stops. I held only the public release (push/tag/publish); the local install gives you every feature now.
-<!-- agent:boundary:ac0cafdc -->
+<!-- agent:boundary:824c9f50 -->
 <!-- /agent:exchange -->
 ## Queue
 

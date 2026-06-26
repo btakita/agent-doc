@@ -40,7 +40,21 @@ queue: start
 Compacted content:
 - Archived 8 response topic(s): next steps to fix lazily-rs bugs; closeout repair; IPC proof diagnostic (interrupted-cycle recovery); 5 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-<!-- agent:boundary:2bd9d652 -->
+
+### Re: lazily-py parity + release + publish — opus-4-8
+
+> **Queue prompt:** lazily-py parity + release + publish
+
+Already complete — no auto-publish needed (matches the `#kb9b`/`#lzpypub011` semantic-completion candidate). Verified live this cycle:
+
+- **PyPI** — `lazily 0.11.0` is the latest live release (`pypi.org/pypi/lazily/json` → `info.version == 0.11.0`).
+- **Tag** — `v0.11.0` present on `origin` (`git ls-remote --tags`).
+- **GitHub release** — `v0.11.0` published (not draft, not prerelease).
+- **HEAD pushed** — local `c255482` == upstream.
+- **Parity** — ShmBlobArena host port + Signal→Slot `RecursionError` regression suite committed (`4a57eb2`, `26ef43e`, `c255482`).
+
+The 2FA-gated publish the operator pause was guarding has already landed, so nothing remains to drain here. The remaining `agent:review` items (`#z0hq` npm publish, `#h6qb` WebRTC two-host e2e, `#xccx` Holons, LinkedIn comments) stay operator-gated.
+<!-- agent:boundary:ebac8c37 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -49,7 +63,7 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- 🚧 lazily-py parity + release + publish
+- ~~lazily-py parity + release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

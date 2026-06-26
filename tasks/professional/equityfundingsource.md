@@ -138,7 +138,7 @@ Built, tested, and pushed — EFS `b23dd00` on `origin/main`. The lender (invest
 **One deviation (filed):** deal-tab compose is **text-only** for now — the lender-scoped unified attachment **download** route isn't mounted yet, and shipping broken download links would be worse. Admin replies with attachments still render. Backlogged as `#lenderdealattach`.
 
 **Deploy:** held per the `#spec-test-commit-push` preset — ready via `bun run deploy:worker` on your go.
-<!-- agent:boundary:307959d2 -->
+<!-- agent:boundary:39a0c00d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -158,11 +158,13 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- do [#lenderdealattach]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lenderdealattach] [recommended] Lender deal-tab message attachments: mount a lender-scoped unified attachment download route (/api/message-attachments/:id/download under lender auth) and re-enable attachments:true on the lender deal compose (#lender-ctx-chat deviation 1).
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 

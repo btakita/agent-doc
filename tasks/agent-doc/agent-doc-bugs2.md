@@ -436,7 +436,19 @@ Already DONE + SHIPPED LIVE — git-verified, not aspirational:
 - The installed `agent-doc 0.34.49` exposes both flags: `admin recycle --force` (overrides cycle-open / in-flight-dispatch deferral, escalates to kill+cold-start when no live controller answers, with the self-ancestor guard) and `--all-projects`.
 
 Nothing left to build. Reaping the head via `--done`. This is also the operator's escape hatch for the `Recycle → Run Agent Doc` stall (#4 in your earlier list): `agent-doc admin recycle <FILE> --force` preempts instead of waiting for a turn that can't start.
-<!-- agent:boundary:010bedb8 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=ed744898-39bf-4c6c-97a9-295b878055ad invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=71100 candidate_hash=41e41a85d02c03e0f6f5e1c6f57cb0b3f05a82101d0baa903044d7b03b1a1f76 content_ours_len=71547 content_ours_hash=1089cecf58f3b867061a0b05b3eb0e479d8559f3e57467b9e05d56791f7c4228 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782495599943
+```
+<!-- agent:boundary:2bd45e9a -->
 <!-- /agent:exchange -->
 ## Queue
 

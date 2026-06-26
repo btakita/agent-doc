@@ -199,7 +199,15 @@ What I verified:
 - GitHub Actions: this repo has no `.github` directory and `gh workflow list` returned no workflows, so there was no CI run to inspect.
 
 Changed paths: no new source edits in this cycle; the required action was publishing the already-referenced submodule commit. No new actionable follow-up item was discovered, so I am not adding backlog. Confidence: high. The remaining non-operator queue heads include JS/Zig/Py parity items; release/publish actions remain operator-gated.
-<!-- agent:boundary:fc11812d -->
+
+### Re: live-buffer drift after Kotlin parity closeout — gpt-5
+
+The editor buffer drift after commit `91362b186` re-ordered already-committed `lazily-spec` and `lazily-kt` evidence into the visible response absorption area. I am preserving that visible content and closing it through the binary-owned write/commit path.
+
+The stale prompt target that starts "The current completed work remains..." is prior CRDT closeout evidence, not a new request. No additional repository work was required for this recovery note.
+
+No queue head is being answered by this recovery response. The next substantive queue head remains `lazily-js parity + release + publish`; publish/release actions remain operator-gated and were not performed.
+<!-- agent:boundary:caf492cc -->
 <!-- /agent:exchange -->
 ###
 <!--

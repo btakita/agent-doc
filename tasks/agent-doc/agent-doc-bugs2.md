@@ -548,33 +548,33 @@ Fixed and committed (agent-doc submodule `078ae2d0`, **0.34.49 → 0.34.50**, `m
 **One honest residual** (filing as `#crdtdelonly`): a pure-*deletion* live edit (removes a baseline line, adds nothing) racing a finalize is still classified "behind" and discarded — indistinguishable from staleness without shared CRDT causal history. Far rarer than additive typing; the conservative choice avoids ever resurrecting genuinely stale content. Tracked for a follow-up that threads real causal clocks (the `#qcellmerge1` per-cell substrate).
 
 **Next:** I'll `make install-full` 0.34.50 + `admin recycle` so your live editor gets the fix (doing it *after* this commit to avoid a finalize-time `live_prompt_drift`), then push to origin. `#suprecyclespin` (the recycle spin-loop code fix / `#midturnresumeb` Phase B) stays open — I cleared today's wedge operationally by killing the stuck supervisor, but auto-resolving a stalled `inflight=0` cycle is its own cycle.
-<!-- agent:boundary:2b69cb0c -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=bad94b29-08b8-41b5-be6d-352ed7b3447f invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=85349 candidate_hash=028f8f6c983586d8f8f5300f0cb73fa07c337ebe52d565a4ff5f42c3681bfbf9 content_ours_len=87499 content_ours_hash=667d403741a664d655722f509315cfb6a7ad4db91d86c645a00665bc6fc2f544 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782498507592
+```
+<!-- agent:boundary:5ed0e72f -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
----
-The session mechanics still don't work on a new linkedin.md session. I compacted the exchangebefore I began the turn.
-```
-  Heads-up on the session mechanics (no action needed, but worth knowing): this doc had been compacted out-of-band, so
-  the live supervisor's in-memory CRDT still held the full 39KB pre-compaction history. On first finalize it
-  re-injected that as content_ours and mangled my response on the fallback disk write. I recovered by rebuilding the
-  clean content on disk, doing a full reset --from-current (no --preserve-session) to drop the stale CRDT, and
-  committing directly — then clearing the answered queue head once the CRDT was clean. The committed result is correct
-  and complete.
-```
----- 
-- ~~:pushpin: do [#qftloss]~~
-- 🚧 :pushpin: do [#qeditdup]
-- :pushpin: do [#crdtauth6]
-- :pushpin: do [#nsfz]
-- :pushpin: do [#kj5flive]
+- 🚧 do [#5e8k] [#fma0] [#v6b3] [#2y8j]
+- :pushpin: do [#fma0]
+- :pushpin: do [#v6b3]
 - :pushpin: do [#2y8j]
-- do [#cdtcutover]
-- do [#5e8k]
-- do [#v6b3]
-- do [#fma0]
+- :pushpin: do [#cdtcutover]
+- do [#qeditdup]
+- do [#crdtauth6]
+- do [#nsfz]
+- do [#kj5flive]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

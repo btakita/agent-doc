@@ -56,7 +56,18 @@ Shipped the carousel **foundation + the lender and admin surfaces** this cycle (
 **`deploy` (next queue item):** held. This is a partial landing of a production feature; the EFS lender+admin increment is a clean, shippable change, but I did not auto-deploy. Say the word to `deploy` the increment now, or I'll deploy once the borrower + broker phases land.
 - Archived 1 response topic(s): mrh content
 - Prior summary/context: prior compacted content: Archived 12 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); Full Appli...
-<!-- agent:boundary:29e5b6cf -->
+
+### Re: do [#dealcarousel-borrower] — borrower portal carousel — opus-4-8
+
+Done (EFS `a525660`, pushed). The borrower loan-summary view now shows the deal photo carousel + house placeholder.
+
+- **Server:** `borrower/loans/index.ts` attaches a `photos` array (public photos of the loan's investment_deal(s)) to both loan-summary handlers (`by-id` + `by-number`), mapped to `{id,name,url}` with a borrower download URL. New route `GET /api/borrower/deal-photos/:id/download` (registered in `borrower/routes.ts`) serves a photo **only if** it's `visibility='public'` AND belongs to a deal on the borrower's own loan (`loans.user_id` ownership join) — mirrors the investor public-download route.
+- **Client:** `borrower/loan_summary.tsx` renders the shared `<DealPhotoCarousel>` (240px hero) under the loan header; empty deals show the house placeholder.
+- **Security rule** extracted as pure `borrower_deal_photo_download_allowed_` (public AND owned) and unit-tested in `tests/borrower-deal-photo-download.test.ts`.
+- **Verification:** `bun run check` green — 1237 tests pass (4 new), browser + worker build clean. No production deploy (deploy held per your decision).
+
+Next queue head: `do [#dealcarousel-broker]` — continuing the drain.
+<!-- agent:boundary:bf8fbf6b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,7 +89,7 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - 🚧 ~~All deals in the borrower, broker, lender, and admin should have a carousel of uploaded images. If there is no image, then show a house placeholder.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~deploy — auto-struck: completed by #do-id-closeout-open-backlog (#qftbklgstrike)~~
-- ~~do [#dealcarousel-borrower]~~
+- do [#dealcarousel-borrower]
 - do [#dealcarousel-broker]
 <!-- /agent:queue -->
 

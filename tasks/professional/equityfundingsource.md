@@ -215,7 +215,7 @@ You're right — the last attempt was broken two ways, both now fixed across all
 - `bun run build` + `bun run build:worker` — both green.
 
 **Deploy.** Pushed `3f43335` to `btakita/equityfundingsource-dev`; deployed worker version `aeaa693a-84b7-45f7-9faa-4a1f917751b2`, live at https://equityfundingsource.brian-takita.workers.dev. Live-eyeball on each portal (borrower / broker / lender): open the Messages dialog (chat FAB) → the cursor should land in the compose textarea ready to type. On the lender portal, typing in the search box still keeps focus there.
-<!-- agent:boundary:7fb502c2 -->
+<!-- agent:boundary:0ccb5227 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -235,8 +235,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~On the borrower, broker, lender portals, opening the message dialog should automatically focus on the message textarea. Your last attempt did not fix the issue.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

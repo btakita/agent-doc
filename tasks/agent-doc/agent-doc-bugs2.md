@@ -72,12 +72,13 @@ Yes — we can and should, and this is the **root of the whole bug class**, not 
 - **#provauth4**: per-cell provenance (rides #qcellmerge) so agent content can never land in an operator cell.
 
 I did **not** hand-clean the conflict markers / leaked line now — the IPC listener is active and manual queue edits race it. #provauth2 is the right place to fix it properly. Want me to take #provauth2 in a focused cycle next?
-<!-- agent:boundary:f8845873 -->
+<!-- agent:boundary:17caf4c7 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- [#f693] [#q9w3] [#fpyh] [#818s]
 - 🚧 [#syncbarrier] [#qheadstrikeauto] [#actorprune] [#suprestassoc]
 - [#2y8j] [#cdtcutover] [#qeditdup] [#crdtauth6] [#nsfz] [#kj5flive]
 - I deleted items from the queue but they reappeared
@@ -95,6 +96,7 @@ I did **not** hand-clean the conflict markers / leaked line now — the IPC list
 - do [#crdtauth6]
 - do [#nsfz]
 - do [#kj5flive]
+- do [#pcwcrt]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -121,8 +123,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#q9w3] provauth2=#agent-doc-bug operator queue deletes resurrected + auto-add duplicates. sync_backlog_into_queue (Append/Sync) re-adds any active queue-attr backlog id absent from the queue, so an operator delete is undone next preflight; multi-id/manual lines also defeat the existing-id dedup. Fix: record operator-origin deletes of do-id lines (snapshot vs working-tree) as a session tombstone the mirror honors, and dedup against ALL ids on a line + existing entries so auto-add never duplicates. Smallest standalone win. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
+- [ ] [#pcwcrt] #agent-doc-feature realtime cutover — gate/remove the post-commit working-tree reconcile + (HEAD) boundary reposition tower (git.rs reconcile_postcommit_worktree_to_head / #pcwc / #pcwcwarn / #pzjy / content_ours) when a live CRDT replica is attached. It is turn-based file-sync legacy: its value (keep editor buffer==HEAD after a commit, reposition the boundary, avoid the JB File Cache Conflict dialog, avoid #xbs3 disk-RMW racing the typist) is all subsumed by delta application in realtime — and re-deriving the buffer from a stale snapshot is the recurring #postcommit-ipc-worktree-corruption source. Keep the disk-write path ONLY for no-live-editor (pure-CLI #6b5h) sessions. Rides #provauth1 origin tagging + #crdtauth6 live replica + #cdtcutover. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#f693] provauth1=#agent-doc-feature CRDT transaction-origin tagging: tag every yrs transaction in crdt.rs/crdt_sync.rs as Operator (editor DocumentListener delta over IPC, the crdtauth seam) / Binary (finalize/write/preflight writeback) / Mirror (backlog-queue auto-sync); persist origin per delta so any span author survives restart. Foundation for provenance authority. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
+- [ ] [#q9w3] provauth2=#agent-doc-bug operator queue deletes resurrected + auto-add duplicates. sync_backlog_into_queue (Append/Sync) re-adds any active queue-attr backlog id absent from the queue, so an operator delete is undone next preflight; multi-id/manual lines also defeat the existing-id dedup. Fix: record operator-origin deletes of do-id lines (snapshot vs working-tree) as a session tombstone the mirror honors, and dedup against ALL ids on a line + existing entries so auto-add never duplicates. Smallest standalone win. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#fpyh] provauth3=#agent-doc-bug replace content-based recovery heuristics (content_ours / manual-cleanup / stale-editor resurrection guards) with origin checks where origin is known: an Operator-origin working-tree change IS the authoritative prompt and is never reset or treated as suspicious cleanup; content heuristics remain only as the unknown-origin fallback. Depends on provauth1. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#818s] provauth4=#agent-doc-feature per-cell provenance riding qcellmerge per-cell merge isolation so agent console/response content can never splice into an operator-authored cell (queue). Live proof captured: a console line appeared as a queue item. Depends on provauth1 + qcellmerge. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#syncbarrier] #agent-doc-feature Phase 1 (editor-sync barrier) — epoch handshake so the binary DEFERS dangerous ops (snapshot reset / disk reconcile / merge-base rebuild) while an editor edit is in flight, bounded wait, fail-OPEN to the editor buffer (never a held lock, never snapshot-discard). Poll-check = yrs StateVector exchange, not text compare. Needs JB/VSCode edit_epoch + StateVector over IPC (extend State method). Phase 0 #ipctruncrecover shipped (0.34.53). Plan: tasks/agent-doc/plan-editor-sync-barrier.md

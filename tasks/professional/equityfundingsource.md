@@ -97,7 +97,19 @@ The spec now reads complete and coherent. My consolidated understanding of the *
 - A **"General"** thread for all other EFS correspondence (general questions, accreditation help, etc.) is the **first tab** in the Messages dialog.
 
 The head is still **🚧-held**, so I have **not** started building. Clear the 🚧 (and correct anything above that's off) and I'll implement the whole feature as one unit under `#spec-test-commit-push` — build + tests + push, with `deploy` held for your separate go. I'm not auto-looping while the head is held.
-<!-- agent:boundary:026a1656 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=6d46759b-e939-44c3-a8e6-b94ce5457022 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782447206996
+```
+<!-- agent:boundary:3db4f22f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -119,7 +131,7 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~In the lender portal, make the chat contextual. So if a lender is viewing an available deal or a interested in deal, show the thread releating to that deal. Outgoing email threads will have the property as the subject.~~
 - ~~If the lender does not have a deal open, show all communication. Full screen message dialog with each thread as a tab.~~
-- If the lender has a deal open, show all threads but select the property thread. If there are no messages in the thread, show it for the deal. If the lender does not express interest, the deal thread should not show up unless the lender sent a message or expressed interest.
+- 🚧 If the lender has a deal open, show all threads but select the property thread. If there are no messages in the thread, show it for the deal. If the lender does not express interest, the deal thread should not show up unless the lender sent a message or expressed interest.
 - The general thread is for all other correspondence with EFS. Such as general questions, help with the Accredation process, etc. This general thread should be the first tab in the Messages dialog.
 - ~~deploy — auto-struck: completed by #do-id-closeout-open-backlog (#qftbklgstrike)~~
 <!-- /agent:queue -->

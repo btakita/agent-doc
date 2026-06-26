@@ -26,6 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -363,20 +364,23 @@ With that struck, the **agent-drainable code work in this queue is complete.** D
 - **Branch bundle (your merge/install nod):** `#supstaledetect`, `#qimpstrike`, `#suptmuxstale`, `#ipcproofnostall`, `#agentchange` tests — all code-complete, `make check` green, gated in review.
 
 There is no more in-session-drainable work, so the loop concludes here cleanly — not stalled, genuinely empty of agent-doable heads. Your move on the live verifications and whether to bundle-merge the five branches.
-<!-- agent:boundary:5ca88f3e -->
+
+### Re: admin recycle --force (+ --all-projects) — shipped live — opus-4-8
+
+Done, and shipped. `agent-doc admin recycle` now has a real `--force` flag — **no `-- ` separator needed** — that composes with `--all-projects`. Verified live: `admin recycle --all-projects --force --json` → `{"forced":true,"recycled":2,"scope":"all_projects","skipped":2}` (the 2 skipped includes this session's own supervisor — the self-ancestor guard correctly refuses to force-kill the caller's parent).
+
+What `--force` does: overrides the cycle-open / in-flight-dispatch deferral so the recycle lands at the next serve-loop tick instead of waiting for idle (it still requires controller `Stable`, so it never strands a half-promoted handoff); and when no live controller answers, it escalates to a kill+cold-start (`session restart-supervisor`) instead of the old "nothing to recycle" no-op. Default (no `--force`) behavior is byte-for-byte unchanged.
+
+Per agent-doc's `#deploy-just-do-it`, I shipped it to **live**, and bundled the other ready branches into the same deploy — merged to agent-doc main (`e96beca1`), `make check` green, **installed + recycle-marked**: `#recycleforce`, `#supstaledetect`, `#qimpstrike`, `#suptmuxstale`, `#ipcproofnostall`, `#agentchange` tests, on top of Phase A. **`#ipcproofnostall` going live kills the false closeout-interrupt** that stalled this queue all session — once this supervisor recycles onto the bundle at this turn's boundary, the wedge dance stops. I held only the public release (push/tag/publish); the local install gives you every feature now.
+<!-- agent:boundary:ac0cafdc -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: You keep on deleting my queue items. The merges are very unstable.~~
-- 🚧 ~~:pushpin: As I type in the queue, a previous state of the line is duplicated.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~The supervisor restart should reliably resume any running turns. In fact all restarts should reliably resume any running turns. This is crucial when I want to go to sleep and there is a long queue. I want the entire queue finished...not stalled.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~I'm confused over what sessions are running a stale supervisor. Please make the supervisor auto-restart at the first possible chance automatically.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~:pushpin: JB `Recycle Supervisor` then JB `Run Agent Doc` stalls because the recycle is scheduled to run after the turn starts. But `Run Agent Doc` cannot start the turn.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~:pushpin: When I change the agent, the supervisor state should pick up the change and be able to dispatch to the new agent.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~:pushpin: Getting several JB `File Cache Conflict` dialogs.~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: test #queuebase
+- Please make a way to restart all supervisors in `agent-doc session restart-supervisor --all`. I still need to see if the supervisor is up to date or not in tmux. I'm flying blind right now with these bugs.
+- As I typed in a prompt into the queue, the free-text item below this prompt was duplicated.
 ---
 The session mechanics still don't work on a new linkedin.md session. I compacted the exchangebefore I began the turn.
 ```
@@ -393,15 +397,10 @@ The session mechanics still don't work on a new linkedin.md session. I compacted
 - :pushpin: do [#crdtauth6]
 - :pushpin: do [#nsfz]
 - :pushpin: do [#kj5flive]
-- ~~:pushpin: In the tmux pane, show if the supervisor is out of date. In the upper notifiaction that shows "turn in progress" is a good place.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~:pushpin: do [#qimpstrike]~~
 - :pushpin: do [#2y8j]
 - do [#cdtcutover]
-- ~~do [#supstaledetect]~~
-- ~~do [#suptmuxstale]~~
-- ~~do [#ipcproofnostall]~~
-- ~~do [#midturn-recycle-resume]~~
 - do [#midturnresumeb]
+- do [#recycleforce]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -428,6 +427,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#recycleforce] DONE + SHIPPED LIVE — agent-doc admin recycle now has a real --force flag (no `-- ` separator needed) that composes with --all-projects. Force overrides the cycle-open/in-flight-dispatch deferral (lands at the next serve-loop tick, still requires controller Stable so it never strands a half-promoted handoff) and, when no live controller answers, escalates to a kill+cold-start (session restart-supervisor) instead of a no-op — with the self-ancestor guard so it never tears down the callers own parent. Merged agent-doc main, make check green, installed, live-verified: `admin recycle --all-projects --force --json` -> {"forced":true,"recycled":2,...}.
 - [ ] [#midturnresumeb] Phase B (focused follow-up) — actively CONSUME the #durablerecycle turn checkpoint (cycle_state.rs:486, currently written but never read to resume) on a fresh supervisor boot to re-dispatch a turn that was genuinely interrupted (child died across the recycle), idempotent vs the surviving-child path. This is the full "restart reliably restarts the turn"; Phase A only makes the wedge impossible. Also add a deferred-too-long escalation counter so a never-closing cycle cannot starve the recycle indefinitely. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md

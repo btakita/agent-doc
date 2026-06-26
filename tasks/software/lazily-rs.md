@@ -545,7 +545,30 @@ flowchart LR
 #lzcrdtplane — the distributed cell plane (HLC version-vector exchange, multi-peer Δ sync, the causal-stability-frontier computation) — is still `[/]` in review and **unbuilt**. Only the local primitives exist: `SeqCrdt`/`TextCrdt` plus the GC **mechanism** just shipped under #lztombgc. That split was the whole point of the #2ygp closeout: the *mechanism* lands now; the *policy source* (the all-replicas-aware watermark) is produced by the plane's anti-entropy, which doesn't exist yet.
 
 Wiring a consumer (`gc_with`) into a producer (the version-vector frontier) that hasn't been built isn't a task I can complete — and stubbing a fake watermark against a missing plane would be unsound (a single replica's clock is **not** a causal-stability frontier, as the GC docs state). So I'm **gating `#r86a`** (blocked on #lzcrdtplane), not implementing it. It ungates and becomes actionable the moment #lzcrdtplane ships its anti-entropy. No code this cycle.
-<!-- agent:boundary:ffd074a5 -->
+
+### Re: readd and implement [#lzwirekey] [#lzcrdtplane] — opus-4-8
+
+Honored the re-added `go [#lzwirekey] [#lzcrdtplane]` by doing the work, not just re-queuing it.
+
+**`#lzwirekey` — DONE, shipped (lazily-rs `6b16a83`, superproject `ee45f77b7`; `make check` green).** Wire-stable keyed addressing for collection entries:
+
+- **`NodeKey`** — validated `/`-joined path newtype (`scores/alice`, `outer/k1/inner/k2`), bounds ≤1024 bytes / ≤32 segments, rejects empty/empty-segment paths on construction **and** on the wire (custom `Deserialize`). A multi-segment path addresses nested collections with no extra machinery.
+- **Optional `key` on `NodeSnapshot` + `DeltaOp::NodeAdd`** — additive; `NodeId` semantics unchanged.
+- **Format-aware serialization (the crux).** `skip_serializing_if` cleanly omits a `None` key in JSON but **breaks postcard** (positional, `DeserializeUnexpectedEnd`) — verified empirically. So `NodeSnapshot`/`DeltaOp` now have custom `Serialize`/`Deserialize`: self-describing codecs (JSON, MessagePack) **omit** a `None` key; positional Postcard always carries the discriminant. This keeps the cross-language conformance fixtures (`../lazily-spec/conformance`, shared with lazily-py/zig) **byte-identical** — zero churn, py/zig stay conformance-green. Old messages without `key` still decode (`#[serde(default)]`).
+- **`KeyIndex`** — bijective `NodeKey ↔ NodeId` consumer registry; `ingest_snapshot`/`apply_delta` keep a key resolvable across NodeId churn (`node_for_key`/`key_for_node`). Tested: remove + re-add under a fresh NodeId keeps the key valid.
+- Tests (all 3 codecs, omission, churn, bounds), PROTOCOL.md `NodeKey` wire type + schema/op updates, SPEC.md wire-keyed-addressing subsection.
+- **Producer wiring is staged**: threading `NodeKey` from `CellMap` through the runtime→IPC projection waits on a graph→snapshot producer that does not exist yet (today `NodeSnapshot`s are built only at the transport seam, not minted from a live `CellMap`).
+
+**`#lzcrdtplane` — planned, not blind-implemented.** The item mandated "plan first" and the plan file did not exist; I wrote `tasks/software/plan-lazily-distributed-crdt-plane.md`. A **code audit changed the picture**: the local merge substrate is **already built** in `crdt.rs` — `LwwRegister`/`MvRegister`/`PnCounter`, `ReplicatedCell`/`CellCrdt`, and a counter `VersionVector`. (I drafted a Phase-1 `crdt_plane.rs` then withdrew it once the audit showed my `VersionVector` would collide with the existing public one — shipping it would have built the wrong abstraction.) So the real remaining gap is the **network plane**, scoped as 5 phases:
+
+1. `#lzcrdtplane1` — `HlcStamp` stability frontier (the existing counter VV is private + counter-based; GC needs an HLC-stamp min).
+2. `#lzcrdtplane2` — expose registers via `MergeMechanism` (promote `Lww`).
+3. `#lzcrdtplane3` — op-log + delta exchange across ≥2 replicas.
+4. `#lzcrdtplane4` — frontier-driven GC (closes `#r86a`/`#lztombgcwire`).
+5. `#lzcrdtplane5` — runtime wiring + SPEC/PROTOCOL.
+
+Each phase is a focused cycle; say the word and I'll drain `#lzcrdtplane1` next. Review items updated: `#lzwirekey` → done; `#lzcrdtplane` repointed to the plan. (Exchange is large at 514 lines / 28 sections — `/agent-doc compact` available when you want a lighter session.)
+<!-- agent:boundary:29760481 -->
 <!-- /agent:exchange -->
 ###
 <!--

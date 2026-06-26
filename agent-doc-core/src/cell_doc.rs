@@ -43,6 +43,24 @@ use lazily::{CellMap, CellTree, Context, DiffOp, reconcile};
 use crate::component::{self, Component};
 use crate::crdt::{PREAMBLE_KEY, is_list_component, split_exchange_children, split_list_children};
 
+/// Environment variable that opts the live CRDT merge into the per-cell
+/// 3-way path ([`merge_3way`], routed from [`crate::crdt::merge_by_component`]).
+/// Absent / empty / `0` / `false` ⇒ the existing behavior is unchanged
+/// (default OFF). See [`cell_merge_enabled`].
+pub const CELL_MERGE_ENV: &str = "AGENT_DOC_CELL_MERGE";
+
+/// Whether the per-cell 3-way merge routing seam is enabled. Default OFF: only
+/// an explicit truthy `AGENT_DOC_CELL_MERGE` (`1`/`true`/`on`/`yes`) turns it on.
+pub fn cell_merge_enabled() -> bool {
+    match std::env::var(CELL_MERGE_ENV) {
+        Ok(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            matches!(v.as_str(), "1" | "true" | "on" | "yes")
+        }
+        Err(_) => false,
+    }
+}
+
 /// The stable per-item identity: `component:occurrence:item-id:index`, matching
 /// the node-key scheme used by `turn_scope`/`op_log` (e.g. `queue:0:beta:0`).
 ///
@@ -266,6 +284,460 @@ pub fn diff_document(old_doc: &str, new_doc: &str) -> Vec<ComponentDiff> {
     }
 
     diffs
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 (`#qcellmerge1` cutover): 3-way per-cell merge.
+//
+// `crdt::merge` is a *3-way* merge: `merge(base, ours, theirs)`. The 2-way
+// `diff_document` above projects/diffs two revisions; the cutover composes TWO
+// keyed diffs (base→ours and base→theirs) per component occurrence into one
+// merged item list, surfacing a real conflict when the SAME item is updated to
+// different text on both sides (`#qnodemerge5`: never fabricate a blend).
+// ---------------------------------------------------------------------------
+
+/// A surfaced 3-way conflict: the same keyed item was updated to different text
+/// on both sides. The merge applies a deterministic policy (ours-wins, see
+/// [`ConflictPolicy`]) and records the conflict here so callers never silently
+/// lose the losing side.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CellConflict {
+    /// Component name (`queue`, `exchange`, …) the conflict occurred in.
+    pub component: String,
+    /// 0-based occurrence index of that component.
+    pub occurrence: usize,
+    /// Reorder-stable item identity (`component:occurrence:item-id`).
+    pub identity: String,
+    /// The value chosen by the merge policy (kept in `merged_text`).
+    pub chosen: ItemValue,
+    /// `ours` side's value (the agent / committed-snapshot side).
+    pub ours: ItemValue,
+    /// `theirs` side's value (the live editor / disk side).
+    pub theirs: ItemValue,
+}
+
+/// How a same-item-both-sides conflict is resolved deterministically. Recorded
+/// in the outcome regardless; the chosen value lands in `merged_text`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ConflictPolicy {
+    /// Keep `ours` (the agent / committed-snapshot side). Default — mirrors the
+    /// `exchange` committed-history spine in `reconcile_component_body`.
+    #[default]
+    OursWins,
+    /// Keep `theirs` (the live editor / disk side).
+    TheirsWins,
+}
+
+/// Outcome of a 3-way per-cell merge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CellMergeOutcome {
+    /// The merged document text. When `fell_back` is true this is empty and the
+    /// caller must run the legacy whole-doc / `merge_by_component` path instead.
+    pub merged_text: String,
+    /// Real conflicts surfaced (never silently dropped). Empty for a clean merge.
+    pub conflicts: Vec<CellConflict>,
+    /// True when the per-cell merge declined (structural divergence, duplicate
+    /// keys, unsplittable framing). The caller falls back; `merged_text` is empty.
+    pub fell_back: bool,
+}
+
+impl CellMergeOutcome {
+    fn fallback() -> Self {
+        CellMergeOutcome {
+            merged_text: String::new(),
+            conflicts: Vec::new(),
+            fell_back: true,
+        }
+    }
+}
+
+/// One top-level node of a document: an interstitial text slot or a component
+/// occurrence (framing + projected keyed items).
+enum DocNode {
+    Interstitial(String),
+    Component {
+        framing: ComponentFraming,
+        occurrence: ComponentOccurrence,
+    },
+}
+
+/// A component occurrence's exact open/close marker slices, so a merged body can
+/// be reframed losslessly (`open + merged_body + close`).
+struct ComponentFraming {
+    open: String,
+    close: String,
+}
+
+/// Parse a document into ordered top-level [`DocNode`]s: interstitials around
+/// each top-level component, with each component projected into keyed items.
+/// `None` on a parse error (caller falls back).
+fn parse_doc_nodes(doc: &str) -> Option<Vec<DocNode>> {
+    let comps = component::parse(doc).ok()?;
+    // Top-level components only (mirror `crdt::segment_into_nodes`).
+    let mut top: Vec<&Component> = comps
+        .iter()
+        .filter(|c| {
+            !comps.iter().any(|o| {
+                !std::ptr::eq(o, *c) && o.open_start <= c.open_start && c.close_end <= o.close_end
+            })
+        })
+        .collect();
+    top.sort_by_key(|c| c.open_start);
+
+    let mut occurrence_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    let mut nodes = Vec::with_capacity(top.len() * 2 + 1);
+    let mut cursor = 0usize;
+    for c in top {
+        nodes.push(DocNode::Interstitial(doc[cursor..c.open_start].to_string()));
+        let occ_idx = occurrence_counts.entry(c.name.clone()).or_insert(0);
+        let occurrence = *occ_idx;
+        *occ_idx += 1;
+        let framing = ComponentFraming {
+            open: doc[c.open_start..c.open_end].to_string(),
+            close: doc[c.close_start..c.close_end].to_string(),
+        };
+        nodes.push(DocNode::Component {
+            framing,
+            occurrence: project_component(doc, c, occurrence),
+        });
+        cursor = c.close_end;
+    }
+    nodes.push(DocNode::Interstitial(doc[cursor..].to_string()));
+    Some(nodes)
+}
+
+/// The ordered component-name sequence of a node list (for structural pairing).
+fn component_name_sequence(nodes: &[DocNode]) -> Vec<&str> {
+    nodes
+        .iter()
+        .filter_map(|n| match n {
+            DocNode::Component { occurrence, .. } => Some(occurrence.component.as_str()),
+            DocNode::Interstitial(_) => None,
+        })
+        .collect()
+}
+
+/// True for an item-structured component occurrence whose keys are unique. The
+/// whole-body fallback occurrence (single `…:body` item) is treated as
+/// item-structured too — its single keyed item still composes cleanly.
+fn keys_unique(occ: &ComponentOccurrence) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    occ.items
+        .iter()
+        .all(|(k, _)| seen.insert(node_key_identity(k).to_string()))
+}
+
+/// The result of composing one occurrence: the merged ordered `(identity,
+/// value)` item list plus any conflicts surfaced.
+type ComposedOccurrence = (Vec<(String, ItemValue)>, Vec<CellConflict>);
+
+/// Compose the base→ours and base→theirs keyed item lists for one component
+/// occurrence into a merged ordered `(identity, value)` list, recording any
+/// same-item-both-sides conflicts.
+///
+/// Ordering policy mirrors `reconcile_component_body`: list components
+/// (`queue`/`backlog`/`review`/`done`) use `theirs` (the live/operator side) as
+/// the order spine; `exchange` uses `ours` (append-only committed history) as
+/// the spine. Items present on only one side weave in after their nearest placed
+/// predecessor.
+fn compose_occurrence(
+    base: &ComponentOccurrence,
+    ours: &ComponentOccurrence,
+    theirs: &ComponentOccurrence,
+    policy: ConflictPolicy,
+) -> Option<ComposedOccurrence> {
+    // The two keyed op sets the cutover composes: base→ours and base→theirs,
+    // each via the lazily LIS keyed `reconcile`. From each we read which item
+    // identities that side *touched* (Insert/Update/Move) and which it *removed*.
+    // The per-key resolution below composes the two op streams: an identity
+    // touched on one side but not the other takes that side; an identity updated
+    // on BOTH sides to different text is a real conflict; an identity removed on
+    // one side and untouched on the other is dropped.
+    let base_to_ours = reconcile(&base.keyed_for_diff(), &ours.keyed_for_diff());
+    let base_to_theirs = reconcile(&base.keyed_for_diff(), &theirs.keyed_for_diff());
+    let ours_removed = removed_keys(&base_to_ours);
+    let theirs_removed = removed_keys(&base_to_theirs);
+    let ours_updated = updated_keys(&base_to_ours);
+    let theirs_updated = updated_keys(&base_to_theirs);
+
+    // Reorder-stable identity → value, for each side.
+    let to_map = |occ: &ComponentOccurrence| -> std::collections::HashMap<String, ItemValue> {
+        occ.items
+            .iter()
+            .map(|(k, v)| (node_key_identity(k).to_string(), v.clone()))
+            .collect()
+    };
+    let base_map = to_map(base);
+    let ours_map = to_map(ours);
+    let theirs_map = to_map(theirs);
+
+    let identity_seq = |occ: &ComponentOccurrence| -> Vec<String> {
+        occ.items
+            .iter()
+            .map(|(k, _)| node_key_identity(k).to_string())
+            .collect()
+    };
+
+    let is_exchange = ours.component == "exchange";
+    // Order spine: theirs (live) for list components, ours (history) for exchange.
+    let (spine, weave) = if is_exchange {
+        (identity_seq(ours), identity_seq(theirs))
+    } else {
+        (identity_seq(theirs), identity_seq(ours))
+    };
+    let order = weave_order(&spine, &weave);
+
+    let mut merged: Vec<(String, ItemValue)> = Vec::with_capacity(order.len());
+    let mut conflicts = Vec::new();
+    for id in &order {
+        let in_b = base_map.contains_key(id);
+        let in_o = ours_map.get(id);
+        let in_t = theirs_map.get(id);
+        let resolved: Option<ItemValue> = match (in_o, in_t) {
+            (Some(o), Some(t)) => {
+                if o == t {
+                    Some(o.clone())
+                } else {
+                    // Both sides present and differ. Each side's change is read
+                    // from its reconcile op set (Update/Insert).
+                    let o_changed = ours_updated.contains(id) || !in_b;
+                    let t_changed = theirs_updated.contains(id) || !in_b;
+                    match (o_changed, t_changed) {
+                        // Only ours changed → take ours.
+                        (true, false) => Some(o.clone()),
+                        // Only theirs changed → take theirs.
+                        (false, true) => Some(t.clone()),
+                        // Both changed to different text → a REAL conflict.
+                        // Apply the deterministic policy, record it.
+                        (true, true) => {
+                            let chosen = match policy {
+                                ConflictPolicy::OursWins => o.clone(),
+                                ConflictPolicy::TheirsWins => t.clone(),
+                            };
+                            conflicts.push(CellConflict {
+                                component: ours.component.clone(),
+                                occurrence: ours.occurrence,
+                                identity: id.clone(),
+                                chosen: chosen.clone(),
+                                ours: o.clone(),
+                                theirs: t.clone(),
+                            });
+                            Some(chosen)
+                        }
+                        // Neither side changed vs base but o != t — impossible
+                        // (both equal base ⇒ o == t). Defensive: take ours.
+                        (false, false) => Some(o.clone()),
+                    }
+                }
+            }
+            // Present only in ours: ours kept/edited it, or theirs removed it.
+            // Honor theirs' removal only if ours did NOT touch it (and it is not
+            // protected append-only `exchange` history).
+            (Some(o), None) => {
+                if theirs_removed.contains(id) && !ours_updated.contains(id) && !is_exchange {
+                    None
+                } else {
+                    Some(o.clone())
+                }
+            }
+            // Present only in theirs: symmetric.
+            (None, Some(t)) => {
+                if ours_removed.contains(id) && !theirs_updated.contains(id) && !is_exchange {
+                    None
+                } else {
+                    Some(t.clone())
+                }
+            }
+            (None, None) => None,
+        };
+        if let Some(v) = resolved {
+            merged.push((id.clone(), v));
+        }
+    }
+    Some((merged, conflicts))
+}
+
+/// Identities the side `Remove`d relative to base.
+fn removed_keys(ops: &[DiffOp<String, ItemValue>]) -> std::collections::HashSet<String> {
+    ops.iter()
+        .filter_map(|op| match op {
+            DiffOp::Remove { key } => Some(key.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Identities the side `Update`d (changed value) relative to base.
+fn updated_keys(ops: &[DiffOp<String, ItemValue>]) -> std::collections::HashSet<String> {
+    ops.iter()
+        .filter_map(|op| match op {
+            DiffOp::Update { key, .. } => Some(key.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Weave `weave`-only keys into the `spine` order: keep the spine order, then
+/// insert each weave-only key after its nearest preceding already-placed weave
+/// key (mirrors `crdt::order_union`).
+fn weave_order(spine: &[String], weave: &[String]) -> Vec<String> {
+    let spine_set: std::collections::HashSet<&str> = spine.iter().map(|s| s.as_str()).collect();
+    let mut result: Vec<String> = spine.to_vec();
+    for (i, k) in weave.iter().enumerate() {
+        if spine_set.contains(k.as_str()) || result.iter().any(|r| r == k) {
+            continue;
+        }
+        let mut insert_pos = 0usize;
+        for j in (0..i).rev() {
+            if let Some(p) = result.iter().position(|r| r == &weave[j]) {
+                insert_pos = p + 1;
+                break;
+            }
+        }
+        result.insert(insert_pos, k.clone());
+    }
+    result
+}
+
+/// 3-way per-cell merge (`#qcellmerge1` cutover): the lazily-`reconcile`-based
+/// counterpart of [`crate::crdt::merge`].
+///
+/// For each top-level component occurrence (keyed by `node_key_identity`), the
+/// base→ours and base→theirs op sets ([`reconcile`]) are composed into one merged
+/// item list:
+/// - an item changed on only one side → that side's value/position,
+/// - an item removed on one side and untouched on the other → removed,
+/// - the **same item updated on BOTH sides to different text → a real conflict**
+///   ([`CellConflict`]) resolved by [`ConflictPolicy`] (default ours-wins),
+///   never a fabricated blend.
+///
+/// List components order by `theirs` (operator/live order wins); `exchange`
+/// stays append-only (ordered by `ours`, base blocks protected from deletion).
+/// Merged components are recombined in document order inside ours' framing /
+/// interstitials.
+///
+/// On any **structural divergence** — unequal component-name sequences, a
+/// duplicate key, or an unsplittable component — the outcome signals `fell_back`
+/// and the caller runs the existing whole-doc / `merge_by_component` path. The
+/// merge never emits malformed framing.
+pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMergeOutcome {
+    if ours_doc == theirs_doc {
+        return CellMergeOutcome {
+            merged_text: ours_doc.to_string(),
+            conflicts: Vec::new(),
+            fell_back: false,
+        };
+    }
+
+    let ours_nodes = match parse_doc_nodes(ours_doc) {
+        Some(n) => n,
+        None => return CellMergeOutcome::fallback(),
+    };
+    let theirs_nodes = match parse_doc_nodes(theirs_doc) {
+        Some(n) => n,
+        None => return CellMergeOutcome::fallback(),
+    };
+    let base_nodes = parse_doc_nodes(base_doc).unwrap_or_default();
+
+    let ours_names = component_name_sequence(&ours_nodes);
+    let theirs_names = component_name_sequence(&theirs_nodes);
+    // Structural divergence in the component set/order → fall back.
+    if ours_names != theirs_names {
+        return CellMergeOutcome::fallback();
+    }
+    // Inline-mode doc (no components): per-cell merge has nothing to isolate.
+    if ours_names.is_empty() {
+        return CellMergeOutcome::fallback();
+    }
+
+    // Index base occurrences by (component, occurrence) for per-cell base resolution.
+    let mut base_by_key: std::collections::HashMap<(String, usize), &ComponentOccurrence> =
+        std::collections::HashMap::new();
+    for n in &base_nodes {
+        if let DocNode::Component { occurrence, .. } = n {
+            base_by_key.insert(
+                (occurrence.component.clone(), occurrence.occurrence),
+                occurrence,
+            );
+        }
+    }
+
+    // Walk ours/theirs in lockstep (same component-name sequence ⇒ same shape).
+    let policy = ConflictPolicy::default();
+    let mut out = String::new();
+    let mut all_conflicts = Vec::new();
+    let empty_occurrence = |o: &ComponentOccurrence| ComponentOccurrence {
+        component: o.component.clone(),
+        occurrence: o.occurrence,
+        items: Vec::new(),
+    };
+
+    let mut theirs_iter = theirs_nodes.iter();
+    for ours_node in &ours_nodes {
+        let theirs_node = theirs_iter.next().expect("node sequences aligned");
+        match (ours_node, theirs_node) {
+            (DocNode::Interstitial(o), DocNode::Interstitial(_)) => {
+                // Interstitial framing: keep ours (the live/snapshot side). These
+                // are structural whitespace around components; a per-cell merge
+                // does not splice them.
+                out.push_str(o);
+            }
+            (
+                DocNode::Component {
+                    framing: o_framing,
+                    occurrence: o_occ,
+                },
+                DocNode::Component {
+                    occurrence: t_occ, ..
+                },
+            ) => {
+                let base_occ = base_by_key
+                    .get(&(o_occ.component.clone(), o_occ.occurrence))
+                    .copied();
+                let base_holder;
+                let base_ref = match base_occ {
+                    Some(b) => b,
+                    None => {
+                        base_holder = empty_occurrence(o_occ);
+                        &base_holder
+                    }
+                };
+                // Duplicate keys ⇒ keyed reconciliation unsound ⇒ fall back whole-doc.
+                if !keys_unique(o_occ) || !keys_unique(t_occ) || !keys_unique(base_ref) {
+                    return CellMergeOutcome::fallback();
+                }
+                let (merged_items, conflicts) =
+                    match compose_occurrence(base_ref, o_occ, t_occ, policy) {
+                        Some(r) => r,
+                        None => return CellMergeOutcome::fallback(),
+                    };
+                all_conflicts.extend(conflicts);
+                // Recombine the body losslessly from the merged item values, then
+                // reframe inside ours' open/close markers.
+                let body: String = merged_items.iter().map(|(_, v)| v.as_str()).collect();
+                out.push_str(&o_framing.open);
+                out.push_str(&body);
+                out.push_str(&o_framing.close);
+            }
+            // Shape mismatch despite equal name sequences (interstitial vs
+            // component): structural — fall back.
+            _ => return CellMergeOutcome::fallback(),
+        }
+    }
+
+    // Structural safety net: the recombined document must re-segment to the same
+    // top-level component name sequence (never emit malformed framing).
+    match parse_doc_nodes(&out) {
+        Some(merged_nodes) if component_name_sequence(&merged_nodes) == ours_names => {
+            CellMergeOutcome {
+                merged_text: out,
+                conflicts: all_conflicts,
+                fell_back: false,
+            }
+        }
+        _ => CellMergeOutcome::fallback(),
+    }
 }
 
 /// A reactive, per-item representation of a document: a [`CellTree`] root whose
@@ -614,6 +1086,234 @@ agent_doc_format: template
             "a pure reorder must not invalidate the membership-count reader"
         );
         assert_eq!(ctx.get(&len_view), 3);
+    }
+
+    // ----- 3-way per-cell merge (`merge_3way`) -----------------------------
+
+    /// Serialize the env-var-mutating tests: `AGENT_DOC_CELL_MERGE` is
+    /// process-global, so parallel tests that set/remove it would race.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    const BASE3: &str = "\
+---
+agent_doc_format: template
+---
+<!-- agent:queue -->
+- do [#alpha] first task
+- do [#beta] second task
+- do [#gamma] third task
+<!-- /agent:queue -->
+<!-- agent:exchange -->
+### Re: earlier
+prior response.
+<!-- /agent:exchange -->
+";
+
+    #[test]
+    fn concurrent_edits_to_different_items_both_land_no_conflict() {
+        // ours edits alpha, theirs edits gamma — different items, same component.
+        let ours = BASE3.replace(
+            "- do [#alpha] first task\n",
+            "- do [#alpha] first task OURS\n",
+        );
+        let theirs = BASE3.replace(
+            "- do [#gamma] third task\n",
+            "- do [#gamma] third task THEIRS\n",
+        );
+        let out = merge_3way(BASE3, &ours, &theirs);
+        assert!(!out.fell_back, "should not fall back");
+        assert!(out.conflicts.is_empty(), "no conflict: {:?}", out.conflicts);
+        assert!(out.merged_text.contains("first task OURS"));
+        assert!(out.merged_text.contains("third task THEIRS"));
+        // beta untouched, no splice.
+        assert!(out.merged_text.contains("- do [#beta] second task\n"));
+    }
+
+    #[test]
+    fn concurrent_edits_to_different_components_both_land() {
+        // ours edits the queue, theirs edits the exchange — zero cross-component.
+        let ours = BASE3.replace(
+            "- do [#beta] second task\n",
+            "- do [#beta] second task OURS\n",
+        );
+        let theirs = BASE3.replace("prior response.", "prior response. THEIRS");
+        let out = merge_3way(BASE3, &ours, &theirs);
+        assert!(!out.fell_back);
+        assert!(out.conflicts.is_empty());
+        assert!(out.merged_text.contains("second task OURS"));
+        assert!(out.merged_text.contains("prior response. THEIRS"));
+    }
+
+    #[test]
+    fn exchange_response_does_not_splice_into_queue() {
+        // The classic corruption repro: one side appends a `### Re:` response,
+        // the other edits a queue item. The response must NOT land inside queue.
+        let with_response = BASE3.replace(
+            "### Re: earlier\nprior response.\n",
+            "### Re: earlier\nprior response.\n### Re: new prompt\nbrand new agent response.\n",
+        );
+        let edited_queue = BASE3.replace(
+            "- do [#beta] second task\n",
+            "- do [#beta] second task EDITED\n",
+        );
+        let out = merge_3way(BASE3, &with_response, &edited_queue);
+        assert!(!out.fell_back, "should per-cell merge");
+        // Locate the queue component body and assert the response is not in it.
+        let q_open = out.merged_text.find("<!-- agent:queue -->").unwrap();
+        let q_close = out.merged_text.find("<!-- /agent:queue -->").unwrap();
+        let queue_body = &out.merged_text[q_open..q_close];
+        assert!(
+            !queue_body.contains("### Re:"),
+            "exchange response spliced into queue body: {queue_body}"
+        );
+        // Both edits landed in their own components.
+        assert!(out.merged_text.contains("brand new agent response."));
+        assert!(out.merged_text.contains("second task EDITED"));
+    }
+
+    #[test]
+    fn same_item_edited_both_sides_surfaces_conflict() {
+        // Both sides edit beta to DIFFERENT text → a real conflict, not a blend.
+        let ours = BASE3.replace(
+            "- do [#beta] second task\n",
+            "- do [#beta] second task OURS-VERSION\n",
+        );
+        let theirs = BASE3.replace(
+            "- do [#beta] second task\n",
+            "- do [#beta] second task THEIRS-VERSION\n",
+        );
+        let out = merge_3way(BASE3, &ours, &theirs);
+        assert!(!out.fell_back);
+        assert_eq!(out.conflicts.len(), 1, "one conflict: {:?}", out.conflicts);
+        let c = &out.conflicts[0];
+        assert_eq!(c.component, "queue");
+        assert_eq!(c.identity, "queue:0:id:beta");
+        assert!(c.ours.contains("OURS-VERSION"));
+        assert!(c.theirs.contains("THEIRS-VERSION"));
+        // Default policy is ours-wins; the chosen value lands and is NOT a blend.
+        assert!(c.chosen.contains("OURS-VERSION"));
+        assert!(out.merged_text.contains("OURS-VERSION"));
+        assert!(
+            !out.merged_text.contains("THEIRS-VERSION"),
+            "no fabricated blend: theirs value must not also appear"
+        );
+    }
+
+    #[test]
+    fn reorder_one_side_edit_other_side_compose() {
+        // ours reorders (gamma to top), theirs edits alpha's text.
+        let ours = BASE3.replace(
+            "- do [#alpha] first task\n- do [#beta] second task\n- do [#gamma] third task\n",
+            "- do [#gamma] third task\n- do [#alpha] first task\n- do [#beta] second task\n",
+        );
+        let theirs = BASE3.replace(
+            "- do [#alpha] first task\n",
+            "- do [#alpha] first task ALPHA-EDIT\n",
+        );
+        let out = merge_3way(BASE3, &ours, &theirs);
+        assert!(!out.fell_back);
+        assert!(out.conflicts.is_empty(), "reorder+edit compose cleanly");
+        // The edit landed…
+        assert!(out.merged_text.contains("first task ALPHA-EDIT"));
+        // …and the order spine is theirs (live side) for a list component:
+        // theirs kept base order alpha,beta,gamma, so the merged queue follows it.
+        let q_open = out.merged_text.find("<!-- agent:queue -->").unwrap();
+        let q_close = out.merged_text.find("<!-- /agent:queue -->").unwrap();
+        let body = &out.merged_text[q_open..q_close];
+        let pa = body.find("ALPHA-EDIT").unwrap();
+        let pg = body.find("[#gamma]").unwrap();
+        assert!(
+            pa < pg,
+            "theirs (live) order is the spine: alpha before gamma"
+        );
+    }
+
+    #[test]
+    fn structural_divergence_falls_back() {
+        // theirs drops the exchange component entirely → unequal component set.
+        let theirs = "\
+---
+agent_doc_format: template
+---
+<!-- agent:queue -->
+- do [#alpha] first task
+- do [#beta] second task
+- do [#gamma] third task
+<!-- /agent:queue -->
+";
+        let ours = BASE3.replace("- do [#alpha] first task\n", "- do [#alpha] first task X\n");
+        let out = merge_3way(BASE3, &ours, theirs);
+        assert!(out.fell_back, "structural divergence must fall back");
+        assert!(out.merged_text.is_empty());
+
+        let _guard = ENV_LOCK.lock().unwrap();
+        // And with the flag ON, the legacy crdt::merge path still returns a valid
+        // doc for that input (the seam falls through transparently).
+        // SAFETY: single-threaded test, restored immediately.
+        unsafe {
+            std::env::set_var(CELL_MERGE_ENV, "1");
+        }
+        let base_state = crate::crdt::CrdtDoc::from_text(BASE3).encode_state();
+        let legacy = crate::crdt::merge_by_component(Some(&base_state), &ours, theirs).unwrap();
+        unsafe {
+            std::env::remove_var(CELL_MERGE_ENV);
+        }
+        assert!(legacy.contains("<!-- agent:queue -->"));
+        assert!(legacy.contains("first task X"));
+    }
+
+    #[test]
+    fn flag_off_byte_identical_to_legacy() {
+        // For representative inputs the flag-OFF crdt::merge_by_component output
+        // must be byte-identical to running with the flag explicitly absent.
+        let ours = BASE3.replace(
+            "- do [#alpha] first task\n",
+            "- do [#alpha] first task OURS\n",
+        );
+        let theirs = BASE3.replace(
+            "- do [#gamma] third task\n",
+            "- do [#gamma] third task THEIRS\n",
+        );
+        let base_state = crate::crdt::CrdtDoc::from_text(BASE3).encode_state();
+
+        let _guard = ENV_LOCK.lock().unwrap();
+        // Flag explicitly OFF.
+        unsafe {
+            std::env::remove_var(CELL_MERGE_ENV);
+        }
+        let off = crate::crdt::merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+
+        // Re-run, still OFF — deterministic, identical.
+        let off2 = crate::crdt::merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert_eq!(off, off2, "legacy path is deterministic with the flag off");
+        assert!(!cell_merge_enabled(), "default must be OFF");
+        // The legacy path produced a valid merged doc.
+        assert!(off.contains("first task OURS"));
+        assert!(off.contains("third task THEIRS"));
+    }
+
+    #[test]
+    fn cell_merge_enabled_default_off_and_truthy_parsing() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::remove_var(CELL_MERGE_ENV);
+        }
+        assert!(!cell_merge_enabled());
+        for v in ["1", "true", "on", "yes", "TRUE", " On "] {
+            unsafe {
+                std::env::set_var(CELL_MERGE_ENV, v);
+            }
+            assert!(cell_merge_enabled(), "{v:?} should enable");
+        }
+        for v in ["0", "false", "off", "no", ""] {
+            unsafe {
+                std::env::set_var(CELL_MERGE_ENV, v);
+            }
+            assert!(!cell_merge_enabled(), "{v:?} should NOT enable");
+        }
+        unsafe {
+            std::env::remove_var(CELL_MERGE_ENV);
+        }
     }
 
     #[test]

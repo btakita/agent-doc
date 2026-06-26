@@ -489,6 +489,30 @@ pub fn merge_by_component(
         return Ok(ours_text.to_string());
     }
 
+    // `#qcellmerge1` cutover seam (default OFF). When `AGENT_DOC_CELL_MERGE` is
+    // enabled, attempt the lazily-`reconcile`-based per-cell 3-way merge first.
+    // It signals `fell_back` for any structural divergence; on fallback (or flag
+    // OFF) the existing whole-doc / per-node path below runs unchanged.
+    if crate::cell_doc::cell_merge_enabled() {
+        let base_text = match base_state {
+            Some(bytes) => CrdtDoc::decode_state(bytes)
+                .map(|d| d.to_text())
+                .unwrap_or_default(),
+            None => String::new(),
+        };
+        let outcome = crate::cell_doc::merge_3way(&base_text, ours_text, theirs_text);
+        if !outcome.fell_back {
+            if !outcome.conflicts.is_empty() {
+                eprintln!(
+                    "[crdt] cell_merge: {} conflict(s) surfaced (policy=ours-wins)",
+                    outcome.conflicts.len()
+                );
+            }
+            return Ok(outcome.merged_text);
+        }
+        eprintln!("[crdt] cell_merge: fell back to legacy merge_by_component path");
+    }
+
     let ours_nodes = match segment_into_nodes(ours_text) {
         Ok(c) => c,
         Err(e) => {
@@ -3340,8 +3364,7 @@ Second answer line three.
         let live_occurrences = queue_body
             .lines()
             .filter(|l| {
-                l.contains("Still getting JB File Cache Conflict dialogs.")
-                    && !l.contains("~~")
+                l.contains("Still getting JB File Cache Conflict dialogs.") && !l.contains("~~")
             })
             .count();
         assert_eq!(
@@ -3471,8 +3494,8 @@ Second answer line three.
     #[test]
     fn merge_by_component_struck_head_stable_across_cycles_no_churn() {
         // Cycle 0 starts from a struck base.
-        let mut base = "<!-- agent:queue -->\n- ~~do [#abcd] answered~~\n<!-- /agent:queue -->\n"
-            .to_string();
+        let mut base =
+            "<!-- agent:queue -->\n- ~~do [#abcd] answered~~\n<!-- /agent:queue -->\n".to_string();
         for cycle in 0..3 {
             let base_state = CrdtDoc::from_text(&base).encode_state();
             // Agent side keeps regenerating the head LIVE (stale un-strike).
@@ -3544,8 +3567,10 @@ Second answer line three.
         {
             let base = doc_with_exchange_queue("Q.", "- operator typing");
             let base_state = CrdtDoc::from_text(&base).encode_state();
-            let ours =
-                doc_with_exchange_queue(&format!("Q.\n\n### Re: q — opus\n\n{console}"), "- operator typing");
+            let ours = doc_with_exchange_queue(
+                &format!("Q.\n\n### Re: q — opus\n\n{console}"),
+                "- operator typing",
+            );
             let theirs = doc_with_exchange_queue("Q.", "- operator typing more");
 
             let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
@@ -3573,7 +3598,8 @@ Second answer line three.
             let queue_paste = "- here is my log:\n  ```\n  panic at line 9000\n  ```";
             let base = doc_with_exchange_queue("Q.", "- placeholder");
             let base_state = CrdtDoc::from_text(&base).encode_state();
-            let ours = doc_with_exchange_queue("Q.\n\n### Re: q — opus\n\nAgent answer.", "- placeholder");
+            let ours =
+                doc_with_exchange_queue("Q.\n\n### Re: q — opus\n\nAgent answer.", "- placeholder");
             let theirs = doc_with_exchange_queue("Q.", queue_paste);
 
             let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
@@ -3635,8 +3661,7 @@ Second answer line three.
                 "MULTI: foreign content spliced into status:\n{status_body}"
             );
             assert!(
-                !exchange_body.contains("OURS_STATUS")
-                    && !exchange_body.contains("[#THEIRS_ITEM]"),
+                !exchange_body.contains("OURS_STATUS") && !exchange_body.contains("[#THEIRS_ITEM]"),
                 "MULTI: foreign content spliced into exchange:\n{exchange_body}"
             );
             assert!(

@@ -103,7 +103,21 @@ Done. The two correctness gaps that gated flipping `AGENT_DOC_CELL_MERGE` are cl
 3. **Live zero-drift proof** — flag ON, edit-during-finalize, `ops.log` zero drift — needs your live editor (can't be agent-done).
 
 (1) and (2) are the next agent-doable rung; (3) is yours. Conflict editor surface stays nice-to-have (the list is honest; no UI consumes it yet). Say **"go persistence"** for the next rung.
-<!-- agent:boundary:b718ab42 -->
+
+### Re: Merged celltree-percell-merge into agent-doc main — opus-4-8
+
+Merged (fast-forward) — agent-doc submodule `main` now at `ec38a973`, all three commits landed:
+
+- `6c225edd` groundwork (projection + keyed diff)
+- `df0b330f` cutover (3-way merge + flag seam)
+- `ec38a973` production-ready (anti-resurrection + honest conflicts)
+
+`cell_doc.rs` + the flag-gated `crdt.rs` seam are on main. **Runtime behavior is unchanged** — `AGENT_DOC_CELL_MERGE` defaults OFF, so the legacy merge path stays authoritative until you flip the flag. Release build of `agent-doc-core` verified green (13.9s), so the supervisor's idle-boundary auto-install won't stall on it.
+
+**Not pushed, and the superproject pointer is not bumped** — both stay under your release/push gate ([[stop-cutting-releases]]). The agent-loop superproject now shows `src/agent-doc` as a modified gitlink (`16092173 → ec38a973`); bump + push it whenever you want it recorded. The worktree `src/agent-doc-celltree-wt` is left in place (`git worktree remove` it when done).
+
+**Still open before the flag can default-ON:** the persistence round-trip + Yrs op-clock/op-capture (next agent rung — say **"go persistence"**), then your live zero-drift proof with the flag ON. Until then this is safe, dormant infrastructure on main.
+<!-- agent:boundary:bf8b9acd -->
 <!-- /agent:exchange -->
 
 ## Queue

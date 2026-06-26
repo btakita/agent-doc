@@ -629,15 +629,29 @@ Both of your questions are real, distinct bugs. I diagnosed both and queued them
 **Leftover corruption (FYI, not blocking).** The wedge committed some CRDT-replay garble into HEAD before the recycle: cdtcutover fragments are reverse-spliced into the `### Re: #5e8k/#fma0/#v6b3` section, and the `### Re: do [#cdtcutover]` section mis-quotes the "prune dead actors" prompt (which is why that prompt was struck without a real answer — now answered above). It's cosmetic committed prose; I left HEAD history intact rather than rewrite it. Say the word and I'll clean those sections via a `write --commit` repair.
 
 Remaining explicit queue heads are all operator-verify / focused-cycle (`#qeditdup`/`#crdtauth6`/`#nsfz`/`#kj5flive`/`#2y8j`/`#cdtcutover`), so I'm not auto-looping — `#actorprune` and `#suprestassoc` are the new actionable work.
-<!-- agent:boundary:5207576c -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=31017729-037f-41d6-81c6-f182fd883e24 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=96600 candidate_hash=8f4a0204d3967030d37e8485c3c87856978ab7e9ad139f66a5e8f4936ba2d23a content_ours_len=95702 content_ours_hash=5a19e1328dc6605f387253ec992b75d839ad4d42d86cdc45eeb6af1d115be85a doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782505781797
+```
+<!-- agent:boundary:ff422871 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~I did `agent-doc admin list` and I see 60 actors...most of them dead. Can we automatically prune dead actors?~~
-- 🚧 When I restarted the equityfundingsource.md supervisor, equityfundingsource.md was re-associated with the agent-doc-bugs2.md claudesession.
-- :pushpin: do [#qeditdup]
+- ~~When I restarted the equityfundingsource.md supervisor, equityfundingsource.md was re-associated with the agent-doc-bugs2.md claudesession.~~
+- 🚧 :pushpin: do [#qeditdup]
+- "● Response committed (af759a5cf), but the answered free-text head wasn't auto-struck (the 🚧 prefix blocked the
+  exact-text match). session-check wants it struck. Let me find the strike flag and strike it.": The agent-doc binary should do this automatically...not the agent. As I was typing in this prompt, a 3-way merge occurred. I also have characters from a previous word I typed in deleted. Consistent CRDT issues.
 - :pushpin: do [#crdtauth6]
 - :pushpin: do [#nsfz]
 - :pushpin: do [#kj5flive]

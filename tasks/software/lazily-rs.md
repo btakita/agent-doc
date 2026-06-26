@@ -625,7 +625,7 @@ cd src/lazily-js && npm publish --access public
 (`--access public` is required for a scoped package's first publish.)
 
 **Parity note:** the only live cross-language gap is the optional additive `key` field from `#lzwirekey`; it's format-aware so all bindings stay conformance-green without it. The distributed CRDT plane (`#lzcrdtplane`) isn't built in lazily-rs yet, so there's no CRDT parity to port. All four `parity. release + publish` heads are drained; only the operator npm step remains. (Exchange is large — 565 lines / 31 sections; `/agent-doc compact` available when you want a lighter session.)
-<!-- agent:boundary:1836197d -->
+<!-- agent:boundary:0bef3c53 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -638,7 +638,7 @@ cd src/lazily-js && npm publish --access public
 - ~~update lazily-spec with latest changes~~
 - ~~release + publish lazily-rs~~
 - ~~lazily-kt parity. release + publish~~
-- ~~lazily-js parity. release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 ~~lazily-js parity. release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~lazily-zig parity. release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~lazily-py parity. release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~lazily-kt parity. release + publish~~ — auto-struck: answered this cycle (#ftstrike)

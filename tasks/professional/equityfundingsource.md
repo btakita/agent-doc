@@ -25,6 +25,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 complete
 <!-- /agent:status -->
 
@@ -178,7 +179,7 @@ Investigated against **production D1** — this is a data gap, not a render bug.
 **Optional follow-up (your call):** if you want property photos to populate **automatically** rather than per-deal manual upload — e.g. pulled from the TMO loan record or an MLS feed by address — that's a net-new ingestion feature. Say the word and I'll scope it; I did not queue it speculatively.
 
 > **Queue prompt:** The cards are not showing the property photos.
-<!-- agent:boundary:b1c65190 -->
+<!-- agent:boundary:4bccbb2d -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -77,7 +77,7 @@ The closeout is stuck because the route-owned supervisor is running a stale `age
 `agent-doc admin recycle /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md`
 
 That recycle is queued, but it cannot take effect until this busy Codex pane reaches idle.
-<!-- agent:boundary:b25933aa -->
+<!-- agent:boundary:9a8950dd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -86,7 +86,7 @@ That recycle is queued, but it cannot take effect until this busy Codex pane rea
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- 🚧 [#lzbugtriage]
+- ~~[#lzbugtriage]~~
 - [#lzsmstress]
 - [#lzcrdtperms]
 <!-- /agent:queue -->

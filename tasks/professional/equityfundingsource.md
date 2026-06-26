@@ -78,7 +78,7 @@ Done (EFS `aa05ac5`, pushed). The broker pipeline deal-detail card now shows the
 - **Verification:** `bun run check` green — 1241 tests pass (4 new), browser + worker build clean.
 
 **Feature complete (lender, admin, borrower, broker):** shared `DealPhotoCarousel` + house placeholder, each non-admin portal serving public photos via its own auth-scoped download route. `deploy` remains held per your decision — all four phases have now landed, so the full feature is ready to deploy whenever you give the go (`bun run deploy:worker`).
-<!-- agent:boundary:5ff89656 -->
+<!-- agent:boundary:5ab2fe5a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,7 +98,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~All deals in the borrower, broker, lender, and admin should have a carousel of uploaded images. If there is no image, then show a house placeholder.~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 ~~All deals in the borrower, broker, lender, and admin should have a carousel of uploaded images. If there is no image, then show a house placeholder.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~deploy — auto-struck: completed by #do-id-closeout-open-backlog (#qftbklgstrike)~~
 - ~~do [#dealcarousel-borrower]~~
 - ~~do [#dealcarousel-broker]~~

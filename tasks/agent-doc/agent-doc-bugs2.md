@@ -26,6 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -164,7 +165,7 @@ Done. The irreducible same-region overlap that opcapture leaves as silent ours-w
 This closes the agent-doable cell-path accuracy ladder: disjoint same-cell edits auto-merge (opcapture), and the genuine same-region remainder surfaces both versions instead of silently picking — the plan's "100% accuracy by refusing to guess."
 
 **Remaining = operator-gated only:** the whole cell-merge stack (`#qcellmerge1` opcapture + `#qcellconflict`, 7 commits on `celltree-percell-merge`) is default-OFF, not merged/installed. Flipping any gate to default-ON needs your live zero-drift proof + the merge-to-main/install decision (the `#qcm1verify` track, under the release-freeze). Higher layers can also echo `CellMergeOutcome.conflicts` into `agent:exchange` later if you want the conflict mirrored there too.
-<!-- agent:boundary:ae8030c2 -->
+<!-- agent:boundary:d397c191 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -206,7 +207,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#qcellconflict] #agent-doc-feature Cell-path conflict-surfacing rung (lazily #qcellmerge1 track, the lazily counterpart of archived Yrs #qnodemerge5) — for the irreducible same-region same-cell concurrent-edit remainder (currently ours-wins+logged after the opcapture disjoint TextCrdt merge), surface BOTH versions to the operator via an exchange note / conflict marker instead of silently picking one. Opcapture rung shipped default-off on celltree-percell-merge @e38a37e9 (gate AGENT_DOC_CELL_MERGE_OPCAPTURE). Say "go conflict". Plan: tasks/agent-doc/plan-percell-crdt-merge-isolation.md (Phase 5, cell path)
 - [ ] [#qftloss] [operator-verify] Free-text prompt loss (mode-6) — CODE-COMPLETE on main (8b900bf4): binary now journals operator prompts from the plugin live-buffer sidecar (.agent-doc/live-buffer/<hash>) into the #qdurcrash store before any convergence/recovery can clobber the unsaved buffer, replayed if absent. Remaining: live IDE eyeball that an unsaved prompt typed during a concurrent finalize survives end-to-end. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#qeditdup] [operator-verify] Queue items duplicated + manually-struck/deleted items resurrected when the operator edits the queue during an active turn. #queuestatemachine idempotent convergence + the Live<Struck lattice (merged, 0.34.48) should resolve this — VERIFY on the recycled binary; if it persists live, a deeper editor-edit-during-cycle guard is needed. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#crdtauth6] [operator-verify] crdtauth5 live hookup: thin JB DocumentListener calling CrdtReplicaForwarder.forwardLocalDelta + a Kotlin Unix-socket ReplicaTransport client (writes NDJSON register/deregister/update, delivers inbound update_b64 to applyRemoteUpdate); plus the deferred VS Code koffi replica seam (editors/vscode/src/native.ts out-param marshaling). Rust fan-out + Kotlin seam already merged + tested. Plan: tasks/agent-doc/plan-crdt-authority-model.md

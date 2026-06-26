@@ -425,7 +425,7 @@ Two layer-specific cautions:
 - **`SeqCrdt` (LWW):** because tombstones are revivable, drop an entry only once its `Id` is provably retired (stable + no future op will reuse the key) — otherwise a late re-add resurrects against a missing anchor.
 
 **Bottom line:** lazily already *uses* tombstones the way the quotes describe — split into LWW-revivable (sequence) and sticky-RGA (text), sidestepping OT/TP2 entirely. The unaddressed half is **GC**: it's deferred, bounded to the distributed plane, and the right protocol is an HLC causal-stability watermark + RGA run-compaction. Filing that as a recommended `#lztombgc` under #lzcrdtplane.
-<!-- agent:boundary:b871799c -->
+<!-- agent:boundary:90672b4e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -441,6 +441,7 @@ Two layer-specific cautions:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#2ygp] [recommended] #lztombgc=Tombstone garbage collection for the distributed CRDT plane (#lzcrdtplane). Add an HLC causal-stability watermark (min over replicas of highest observed stamp); a delete is collectable once its stamp <= watermark (all replicas aware). Then: drop SeqCrdt LWW tombstone entries only once the Id is provably retired (seq_crdt.rs entries map), and compact contiguous stable TextCrdt RGA tombstone runs, rewriting survivors left-origin to nearest live ancestor (text_crdt.rs). Bounded to the opt-in distributed feature; single-producer IPC Snapshot/Delta mirror accrues no tombstones. Depends on #lzcrdtplane.
 <!-- /agent:backlog -->
 
 ## Review

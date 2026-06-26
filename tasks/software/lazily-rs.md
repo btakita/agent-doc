@@ -568,7 +568,19 @@ Honored the re-added `go [#lzwirekey] [#lzcrdtplane]` by doing the work, not jus
 5. `#lzcrdtplane5` — runtime wiring + SPEC/PROTOCOL.
 
 Each phase is a focused cycle; say the word and I'll drain `#lzcrdtplane1` next. Review items updated: `#lzwirekey` → done; `#lzcrdtplane` repointed to the plan. (Exchange is large at 514 lines / 28 sections — `/agent-doc compact` available when you want a lighter session.)
-<!-- agent:boundary:29760481 -->
+
+### Re: update lazily-spec with latest changes — opus-4-8
+
+> **Queue prompt:** update lazily-spec with latest changes
+
+Drained. The one session change not yet reflected in the canonical cross-language spec was `#lzwirekey` (`#lztombgc` already landed in lazily-spec `e235034`; `#lzcrdtplane` is unimplemented, so nothing to sync). Mirrored the wire change into `src/lazily-spec/protocol.md` (lazily-spec `ba4d90c`, superproject `e3912d665`):
+
+- New **`NodeKey`** shared type — `/`-joined path, bounds ≤1024 bytes / ≤32 segments, additive optional addressing, format-aware (JSON/MessagePack omit when absent; Postcard positional).
+- Optional **`key`** field added to the `NodeSnapshot` table and the `NodeAdd` `DeltaOp` row.
+- Conformance fixtures (`src/lazily-spec/conformance/`) **unchanged** — the format-aware omission keeps them byte-identical, so lazily-py/zig/js/kt conformance stays green until each adds the optional nullable `key`.
+
+**Stopping at the remaining 4 queue heads — operator-gated.** They are `lazily-{kt,js,zig,py} parity. release + publish`: the publish half is exactly what your queue pause gates ("irreversible public-registry publishes … 2FA … Do not auto-publish"), and the parity half is substantial per-language implementation (wirekey + CRDT primitives ported to each binding) that each deserves its own focused cycle, not an inline auto-drain. Give the go (and per-language scope) and I'll take them one at a time; I won't auto-publish.
+<!-- agent:boundary:63f2e2b4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -578,7 +590,7 @@ Each phase is a focused cycle; say the word and I'll drain `#lzcrdtplane1` next.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#r86a]~~
-- 🚧 update lazily-spec with latest changes
+- ~~update lazily-spec with latest changes~~
 - ~~release + publish lazily-rs~~
 - lazily-kt parity. release + publish
 - lazily-js parity. release + publish

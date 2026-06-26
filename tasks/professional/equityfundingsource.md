@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,199 +33,13 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260625-232608.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260626-040603.md`*
 
 Compacted content:
-
-### Re: Deal image carousel across portals (house placeholder) — opus-4-8
-
-> **Queue prompt:** All deals in the borrower, broker, lender, and admin should have a carousel of uploaded images. If there is no image, then show a house placeholder.
-
-Shipped the carousel **foundation + the lender and admin surfaces** this cycle (EFS `0a1c1e8`, pushed). The four-portal feature is decomposed because borrower/broker have no deal-photo data wired yet.
-
-**Done now (lender + admin):**
-- New shared component `portal/shared/deal_photo_carousel.tsx` — `DealPhotoCarousel` (animated slide track, prev/next + dot controls, gradient scrim) with a `HousePlaceholder` (inline SVG house) shown whenever a deal has **no images**. Pure helpers (`next_photo_index_`, `should_show_house_placeholder_`) unit-tested in `tests/deal-photo-carousel.test.ts`.
-- **Lender (investor):** refactored the existing deal-card carousel in `investor/available_deals.tsx` onto the shared component — empty deals now show the house placeholder instead of a blank frame; added a hero carousel to `investor/deal_detail.tsx` above the photo gallery.
-- **Admin:** added a "Lender preview" carousel over the public photos in the deal **Photos** tab (`admin/deal_photos.tsx`).
-- Spec: `prds/deal-photo-carousel.md`. Verification: `bun run check` green (1233 tests pass, browser + worker build clean).
-
-**Queued as phases (need server-side public-photo attach + portal-scoped download routes):**
-- `#dealcarousel-borrower` — `borrower/loan_summary.tsx` already carries `deal_id`; attach public photos + borrower-scoped download route + render the shared carousel.
-- `#dealcarousel-broker` — `broker/my_pipeline.tsx` `BrokerDeal.loan_id` → `investment_deal`; same pattern, broker-scoped.
-
-**`deploy` (next queue item):** held. This is a partial landing of a production feature; the EFS lender+admin increment is a clean, shippable change, but I did not auto-deploy. Say the word to `deploy` the increment now, or I'll deploy once the borrower + broker phases land.
-- Archived 1 response topic(s): mrh content
-- Prior summary/context: prior compacted content: Archived 12 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); Full Appli...
-
-### Re: do [#dealcarousel-borrower] — borrower portal carousel — opus-4-8
-
-Done (EFS `a525660`, pushed). The borrower loan-summary view now shows the deal photo carousel + house placeholder.
-
-- **Server:** `borrower/loans/index.ts` attaches a `photos` array (public photos of the loan's investment_deal(s)) to both loan-summary handlers (`by-id` + `by-number`), mapped to `{id,name,url}` with a borrower download URL. New route `GET /api/borrower/deal-photos/:id/download` (registered in `borrower/routes.ts`) serves a photo **only if** it's `visibility='public'` AND belongs to a deal on the borrower's own loan (`loans.user_id` ownership join) — mirrors the investor public-download route.
-- **Client:** `borrower/loan_summary.tsx` renders the shared `<DealPhotoCarousel>` (240px hero) under the loan header; empty deals show the house placeholder.
-- **Security rule** extracted as pure `borrower_deal_photo_download_allowed_` (public AND owned) and unit-tested in `tests/borrower-deal-photo-download.test.ts`.
-- **Verification:** `bun run check` green — 1237 tests pass (4 new), browser + worker build clean. No production deploy (deploy held per your decision).
-
-Next queue head: `do [#dealcarousel-broker]` — continuing the drain.
-
-### Re: do [#dealcarousel-broker] — broker portal carousel — opus-4-8
-
-Done (EFS `aa05ac5`, pushed). The broker pipeline deal-detail card now shows the deal photo carousel + house placeholder. **All four portals are complete.**
-
-- **Server:** `broker/routes.ts` batches each pipeline deal's `loan_id` → `investment_deals` → public `deal_photos` and attaches a `photos` array. New route `GET /api/broker/deal-photos/:id/download` serves a photo **only if** `visibility='public'` AND it belongs to a deal on a loan the broker submitted (`broker_deals.broker_user_id` ownership join).
-- **Client:** `broker/my_pipeline.tsx` renders the shared `<DealPhotoCarousel>` (220px) in the deal-detail card.
-- **Security rule** pure `broker_deal_photo_download_allowed_`, unit-tested in `tests/broker-deal-photo-download.test.ts`.
-- **Verification:** `bun run check` green — 1241 tests pass (4 new), browser + worker build clean.
-
-**Feature complete (lender, admin, borrower, broker):** shared `DealPhotoCarousel` + house placeholder, each non-admin portal serving public photos via its own auth-scoped download route. `deploy` remains held per your decision — all four phases have now landed, so the full feature is ready to deploy whenever you give the go (`bun run deploy:worker`).
-
-### Re: deal image carousel — feature complete (all 4 portals) — opus-4-8
-
-> **Queue prompt:** All deals in the borrower, broker, lender, and admin should have a carousel of uploaded images. If there is no image, then show a house placeholder.
-
-Complete and pushed across all four portals — closing out this queue head (the borrower/broker phases it decomposed into are both done + archived).
-
-- **Lender** (investor) + **Admin** — `0a1c1e8`
-- **Borrower** — `a525660`
-- **Broker** — `aa05ac5`
-
-Shared `portal/shared/deal_photo_carousel.tsx` (`DealPhotoCarousel` + `HousePlaceholder`); empty deals show the house placeholder. Each non-admin portal serves **public** photos through its own auth-scoped download route (`/api/{investor,borrower,broker}/deal-photos/:id/download`), and each download rule is a unit-tested pure predicate. `bun run check` green (1241 tests). `deploy` held per your decision — ready via `bun run deploy:worker` when you give the go.
-
-### Re: deploy — opus-4-8
-
-Deployed. Your go-gate was met — the full 4-portal carousel landed together (borrower `a525660`, broker `aa05ac5`, plus the shared lender+admin `0a1c1e8`), all pushed (0/0 with `origin/main`), working tree clean, `bun run check` green (1241 tests) on these exact commits.
-
-Ran `bun run deploy:worker`:
-- **D1 migrations:** ✅ No migrations to apply (remote already current).
-- **Worker upload:** uploaded `equityfundingsource` (1 new static asset, 1369.48 KiB / 311.05 KiB gzip), startup 22 ms.
-- **Live:** https://equityfundingsource.brian-takita.workers.dev — Current Version ID `1d5f8d26-0e35-4240-8181-5d91f5ae5fdf`, hourly schedule intact.
-
-All four portals now serve the deal-photo carousel (house placeholder on empty deals) through their auth-scoped download routes in production.
-
-> **Queue prompt:** deploy
-
-### Re: lender dashboard deal cards should show deal photos — opus-4-8
-
-Fixed. Root cause was purely client-side: `/api/investor/deals` (the `/lenders` portal feed) **already returns per-deal `photos`** (the available-deals page renders them), but the dashboard's local `dashboard_available_deal_api_T` type didn't declare the field and the preview cards rendered text only.
-
-**Change** (`lib/ui--browser--efs/portal/investor/dashboard.tsx`):
-- Added `photos?: CarouselPhoto[]` to the dashboard deal type and imported the shared `DealPhotoCarousel`.
-- New `DealCardThumb` helper renders the carousel (house placeholder on empty deals) bleeding to the card edges with rounded top corners.
-- Rendered it at the top of **both** deal-card grids — **Available Deals** and **Deals I'm Interested In** — so every deal card shows photos.
-
-**Verify:** `bun run check` green — **1243 tests pass** (added 2 e2e assertions: dashboard renders the carousel in both grids; the marketplace list endpoint keeps emitting `photos`). Build + `build:worker` green.
-
-**Shipped:** committed `46d6f78` and pushed to `origin/main`.
-
-**Deploy held** per your standing gate (preset is `#spec-test-commit-push`, no deploy) — it's ready via `bun run deploy:worker` whenever you give the go, same as last time. Say the word (or queue `deploy`) and I'll push it live.
-
-> **Queue prompt:** The deal cards in https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard should show the deal photos. All deal cards should show the deal photos.
-
-### Re: deploy — opus-4-8
-
-Deployed. The lender-dashboard deal-photo fix (`46d6f78`, pushed) is now live.
-
-Ran `bun run deploy:worker`:
-- **Worker upload:** uploaded `equityfundingsource` (7.13 s), all bindings intact.
-- **Live:** https://equityfundingsource.brian-takita.workers.dev — Current Version ID `0409cb59-b9c9-4f12-af4e-093168e03078`, hourly schedule intact.
-
-The `/lenders/dashboard` Available Deals and Deals I'm Interested In cards now render the shared deal-photo carousel (house placeholder on empty deals) in production.
-
-> **Queue prompt:** deploy
+❯ - Archived 14 response topic(s): Deal image carousel across portals (house placeholder); do [#dealcarousel-borrower]; do [#dealcarousel-broker]; 11 more
+❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=d7a58066-72fe-44fe-b73d-ef7b8a71f984 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782441281204
-```
-
-### Re: deal dialog should use pushState so the URL is bookmarkable — opus-4-8
-
-Done (EFS `86035c0`, pushed). Opening a deal dialog from a dashboard card now reflects the deal in the URL.
-
-**Change** (`lib/ui--browser--efs/portal/investor/dashboard.tsx`, `#deal-dialog-url`):
-- On open, `history.pushState({ investor_deal_dialog: id }, '', investor_deal_dialog_url_(id))` → **`/lenders/deals/<id>`**. That path is a real server-rendered page, so a reload or bookmark of the open-dialog URL lands on the full deal detail.
-- Both card grids (**Available Deals** + **Deals I'm Interested In**) open through the shared `open_deal_` handler.
-- The dialog close button pops the pushed entry (`history.back()`) to restore the dashboard URL; a `popstate` listener closes the dialog on browser **Back/Forward** instead of navigating away from the dashboard.
-- Extracted the pure, exported `investor_deal_dialog_url_(id)` helper.
-
-**Spec + tests:** added Phase 7 to `prds/rpzm-investor-dashboard-rework.md`; new `tests/investor-deal-dialog-url.test.ts` (pure URL helper) + e2e pushState/popstate wiring assertions; updated the two stale dialog-wiring assertions. `bun run check` green — **1245 tests pass**, browser + worker build clean. Pushed to `origin/main` (deploy held per the `#spec-test-commit-push` preset).
-
-Note: I also recovered the session document first — your two prompts had landed below the `agent:done` block with the entire backlog/review tail duplicated (a CRDT merge artifact); I restored the clean structure and re-queued both prompts. Next up: the second queue head ("the cards are not showing the property photos").
-
-> **Queue prompt:** The deal dialog in https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard should use pushState to update the url so the page can be bookmarked.
-
-### Re: the cards are not showing the property photos — opus-4-8
-
-Investigated against **production D1** — this is a data gap, not a render bug. The card code is working correctly.
-
-**What I found:**
-- The `deal_photos` table is **empty in prod — 0 rows** across all 3 deals (1 funded, 2 published). So every card falls back to the house placeholder because there is literally nothing to show.
-- The dashboard card carousel (shipped + deployed) renders **public** photos when they exist and the house placeholder when they don't — verified the query path: `/api/investor/deals` returns `photos` filtered to `visibility='public'` (and uploads default to `public`), and the cards now render them. With zero photos, placeholder is the correct output.
-
-**How property photos get onto a deal:**
-- They are uploaded **manually by an admin**: admin portal → open a deal → **Photos** tab → drag-and-drop upload (`POST /api/admin/deal-photos`). The tab itself shows "No property photos uploaded yet." until you add some.
-- There is **no automatic photo source** — `investment_deals` has no image columns and nothing ingests photos from TMO/MLS/onboarding. Photos live only in `deal_photos` (R2-backed).
-
-**So:** upload photos to each deal in the admin Photos tab and they'll immediately appear on the lender dashboard cards, the available-deals cards, the deal detail hero, and the borrower/broker carousels (all share the same component + public-photo download routes).
-
-**Optional follow-up (your call):** if you want property photos to populate **automatically** rather than per-deal manual upload — e.g. pulled from the TMO loan record or an MLS feed by address — that's a net-new ingestion feature. Say the word and I'll scope it; I did not queue it speculatively.
-
-> **Queue prompt:** The cards are not showing the property photos.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=483d11b9-c333-42f4-abbb-5953691ff91e invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782444283594
-```
-
-### Re: the borrower also uploads photos — use the borrower uploaded photo too — opus-4-8
-
-Done (EFS `e468759`, pushed). Per your **auto-publish to public** choice, borrower-uploaded **Property Photos** now appear as public deal photos on every portal's cards/carousels, merged after the admin `deal_photos`.
-
-This is also the real reason your cards looked empty: prod has **2 borrower-uploaded `dt_photos` PNG property photos** but `deal_photos` (admin) is empty — the cards only pulled admin photos. Now they pull both, so those 2 will show once deployed.
-
-**What I built** (`#borrowerpropphotos`):
-- New shared `app/equityfundingsource/lib/borrower-property-photos.ts`: reads borrower **Property Photos** (`dt_photos`, **image files only**) from `loan_documents`, joined `investment_deals.loan_id = loan_documents.loan_id`. Photo ids namespaced `bp_<loan_document_id>` (disjoint from admin `deal_photos` ids) for download routing.
-- **Merged into** investor marketplace list + deal detail, borrower loan summary, broker pipeline `photos` (admin first, borrower appended).
-- **Download routes:** each portal's `/api/{investor,borrower,broker}/deal-photos/:id/download` branches `bp_` ids and serves R2 bytes **only when the portal owns the deal/loan** (investor: deal visible; borrower: `loans.user_id`; broker: `broker_deals.broker_user_id`) — pure unit-tested `borrower_property_photo_download_allowed_` (image AND owned).
-- **Image-only** enforced in SQL, JS re-check, and the download predicate; non-image / other-category docs never exposed.
-
-**Spec + tests:** `prds/deal-photo-carousel.md` updated; 17 pure unit + 6 portal-merge tests. `bun run check` green — **1268 tests pass**, builds clean. Pushed to `origin/main`.
-
-**Deploy:** held per your `🚧 deploy`. Ready via `bun run deploy:worker` — the 2 existing borrower PNGs appear once deployed. Accepted trade-off: every borrower Property Photo image is instantly public to anyone who can see the deal.
-
-> **Queue prompt:** The borrower also uploads photos. Use the borrower uploaded photo as well.
-
-### Re: deploy — opus-4-8
-
-Deployed. The borrower-property-photos feature (`e468759`) is now **live in production**.
-
-- Ran `bun run deploy:worker`: worker `equityfundingsource` uploaded (7.04 s), all bindings intact.
-- **Live:** https://equityfundingsource.brian-takita.workers.dev — Version ID `aad45b6d-aae8-454a-bb48-d4aa43d37da7`, hourly schedule intact.
-
-The **2 existing borrower-uploaded `dt_photos` PNG property photos** now appear as public deal photos on the lender dashboard/marketplace cards (and borrower/broker carousels) — closing the loop on "the cards are not showing the property photos." Going forward, any image a borrower files under **Property Photos** is auto-published as a public deal photo (the trade-off you chose).
-
-> **Queue prompt:** deploy
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-> **Queue prompt:**
->
-> ~~The borrower also uploads photos. Use the borrower uploaded photo as well.~~ — auto-struck: answered this cycle (#ftstrike)
-
 
 ```text
 **IPC proof issue dogfood log**
@@ -236,7 +50,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=f9eedbbe-320d-4720-9bca-2856e0b7378a invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782446080826
 ```
-<!-- agent:boundary:7bd84249 -->
+<!-- agent:boundary:1e73abeb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -256,6 +70,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- 🚧 In the lender portal, make the chat contextual. So if a lender is viewing an available deal or a interested in deal, show the thread releating to that deal. Outgoing email threads will have the property as the subject.
+- If the lender does not have a deal open, show all communication. 
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

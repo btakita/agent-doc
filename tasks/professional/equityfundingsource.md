@@ -192,7 +192,7 @@ The lender Messages launcher dialog (`lib/ui--browser--efs/portal/investor/messa
 - `bun run build` + `bun run build:worker` — both green.
 
 **Deploy.** Pushed `c195847` to `btakita/equityfundingsource-dev` and deployed worker version `846d09a3-5f15-46dc-9edd-41f79ba4cba6`, live at https://equityfundingsource.brian-takita.workers.dev. Live-eyeball: open the Messages launcher (the chat FAB) with the search box empty → the cursor should land in the compose textarea ready to type.
-<!-- agent:boundary:dae2f4fd -->
+<!-- agent:boundary:e0e6d7d2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -212,8 +212,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~When the message dialog is opened and there is no search, the focus should be the textarea.~~
-- deploy
 <!-- /agent:queue -->
 
 ## Backlog

@@ -596,7 +596,7 @@ There's no PyPI publish workflow in `.github/workflows/` (only `precommit.yml`),
 **Parity footnote:** the optional nullable `key` field from the recent `#lzwirekey` spec change is *not* in 0.11.0, but it's format-aware/additive so lazily-py conformance stays green without it. Full wirekey parity in the py binding is a small additive follow-up (separate from this release) — say the word.
 
 **Remaining queue (still operator-gated):** `lazily-{kt,js,zig}` parity+publish, plus a duplicate `lazily-kt` head from the earlier edit. Per your pause reason I'm not auto-publishing those — give per-language go when ready.
-<!-- agent:boundary:60f74916 -->
+<!-- agent:boundary:2970aebf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -623,6 +623,7 @@ There's no PyPI publish workflow in `.github/workflows/` (only `precommit.yml`),
 ## Review
 
 <!-- agent:review -->
+- [/] [#z0hq] #lzjsnpmpub=[operator-drive] npm publish @lazily/js v0.1.0 to npm (FIRST publish; scoped package). npm is currently E401 (not logged in) and the btakita npm 2FA is browser/passkey. Steps: in a real terminal type `! npm login` (approve passkey/2FA in browser), then from src/lazily-js run `npm publish --access public` (scoped first publish needs --access public). Tag v0.1.0 + GitHub release already done (https://github.com/lazily-hub/lazily-js/releases/tag/v0.1.0); tests 28/28 green.
 - [/] [#lzcrdtplane] [recommended] Implement the distributed CRDT cell plane (spec §Distributed). PLAN COMPLETE: tasks/software/plan-lazily-distributed-crdt-plane.md. Code audit found the local merge substrate already exists (LwwRegister/MvRegister/PnCounter, ReplicatedCell/CellCrdt, counter VersionVector); remaining gap is the network plane in 5 phases (#lzcrdtplane1 HlcStamp stability frontier, #lzcrdtplane2 expose registers via MergeMechanism, #lzcrdtplane3 op-log delta exchange, #lzcrdtplane4 frontier-driven GC closing #r86a, #lzcrdtplane5 runtime wiring + SPEC/PROTOCOL). Decision locked: purpose-built HLC, NOT YRS data model; IPC Snapshot/Delta stays the single-producer mirror. Implement per-phase in focused cycles.
 - [/] [#lilazilysmpost] [/] [operator-drive] lazily state-machine LinkedIn post PUBLISHED WITH IMAGE: https://www.linkedin.com/feed/update/urn:li:share:7475622100263923712 (mail/social/20260624-142530-linkedin.md @ mail bf4ab26). CyclePhase diagram rendered from blog post SVG (light theme colors) + uploaded via LinkedIn digitalmediaAsset API. Old text-only post (urn:li:share:7475617202893639680) deleted + replaced. Remaining operator follow-up: post first comment (link + GitHub source) via corky linkedin comment.
 - [/] [#kabc] #lipostlazilyarch=[operator-drive] Main LinkedIn post is published and repaired: Corky edit updated mail/social/20260616-lazily-architecture-linkedin.md / https://www.linkedin.com/feed/update/urn:li:share:7472666756810190848 with the full body after the public post truncated at "The core is small: three primitives". Local metadata is committed in mail commit 07a9ea1 and superproject gitlink e7e0b08c1. Remaining operator follow-up: post the first comment from mail/drafts/linkedin/2026-06-16-lazily-architecture.md via `corky linkedin comment <published-file> <comment-body>` if still desired.

@@ -74,7 +74,7 @@ No transport yet (that's `#lzcrdtplane3`); both types are gated behind `feature 
 **Next:** `#lzcrdtplane2` (expose registers via `MergeMechanism`) is queued in the backlog as the next actionable phase; `#lzcrdtplane` stays gated in review until the plane is complete.
 
 Note: I committed only `src/lazily-rs` and its gitlink — the unrelated dirty `src/agent-doc` submodule (`cell_doc.rs`/`crdt.rs`) belongs to a different active session, so I left it untouched.
-<!-- agent:boundary:9cba3699 -->
+<!-- agent:boundary:02a5dd56 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,14 +88,12 @@ Note: I committed only `src/lazily-rs` and its gitlink — the unrelated dirty `
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcrdtplane] lzcrdtplane2= Phase 2 — Expose registers via MergeMechanism. Promote MergeMechanism::Lww reserved->implemented; wire LwwRegister/MvRegister/PnCounter to the merge: selector + a ReplicatedCell constructor per mechanism. Property tests (commutative/associative/idempotent). Plan: tasks/software/plan-lazily-distributed-crdt-plane.md.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
 - [/] [#z0hq] #lzjsnpmpub=[operator-drive] npm publish @lazily-hub/js v0.1.0 (FIRST publish; scoped). The @lazily scope was taken on npmjs, so the package was renamed @lazily/js -> @lazily-hub/js (lazily-js ac97122 pushed; tag v0.1.0 + GitHub release moved to it; npm view @lazily-hub/js = 404/free; tests 28/28). npm is E401 (not logged in); btakita npm 2FA is browser/passkey. Steps: in a real terminal `! npm login` (approve 2FA), then `cd src/lazily-js && npm publish --access public`.
-- [/] [#lzcrdtplane] [recommended] Distributed CRDT cell plane (spec §Distributed). Plan: tasks/software/plan-lazily-distributed-crdt-plane.md. Phase 1 (#lzcrdtplane1) DONE (lazily-rs d7c7594 / superproject 16ee25ead): StampFrontier (per-peer HlcStamp max, frontier=min over membership / None until all seen, merge/dominates) + CrdtPlane skeleton (PeerId+Hlc+membership+frontier; tick/observe_remote; stability_frontier watermark) under feature=distributed, 10 unit tests. Remaining network plane, per-phase in focused cycles: #lzcrdtplane2 expose registers via MergeMechanism, #lzcrdtplane3 op-log delta exchange, #lzcrdtplane4 frontier-driven GC (closes #r86a), #lzcrdtplane5 runtime wiring + SPEC/PROTOCOL.
 - [/] [#lilazilysmpost] [/] [operator-drive] lazily state-machine LinkedIn post PUBLISHED WITH IMAGE: https://www.linkedin.com/feed/update/urn:li:share:7475622100263923712 (mail/social/20260624-142530-linkedin.md @ mail bf4ab26). CyclePhase diagram rendered from blog post SVG (light theme colors) + uploaded via LinkedIn digitalmediaAsset API. Old text-only post (urn:li:share:7475617202893639680) deleted + replaced. Remaining operator follow-up: post first comment (link + GitHub source) via corky linkedin comment.
 - [/] [#kabc] #lipostlazilyarch=[operator-drive] Main LinkedIn post is published and repaired: Corky edit updated mail/social/20260616-lazily-architecture-linkedin.md / https://www.linkedin.com/feed/update/urn:li:share:7472666756810190848 with the full body after the public post truncated at "The core is small: three primitives". Local metadata is committed in mail commit 07a9ea1 and superproject gitlink e7e0b08c1. Remaining operator follow-up: post the first comment from mail/drafts/linkedin/2026-06-16-lazily-architecture.md via `corky linkedin comment <published-file> <comment-body>` if still desired.
 - [/] [#h6qb] [recommended] [operator-drive] #lzwebrtcnet-e2e=End-to-end cross-host validation of the Str0mNet backend through the LIVE #yxjw signaling Worker (two real hosts / NAT). Agent-doable slice (#lzwebrtcwire) is DONE: src/webrtc_signaling.rs wires SignalingClient↔Str0mNet and tests/webrtc_signaling.rs covers the localhost handshake. Remaining: live two-host/NAT run via deployed Worker — operator-only.

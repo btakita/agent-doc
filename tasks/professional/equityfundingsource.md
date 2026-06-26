@@ -90,7 +90,7 @@ Complete and pushed across all four portals — closing out this queue head (the
 - **Broker** — `aa05ac5`
 
 Shared `portal/shared/deal_photo_carousel.tsx` (`DealPhotoCarousel` + `HousePlaceholder`); empty deals show the house placeholder. Each non-admin portal serves **public** photos through its own auth-scoped download route (`/api/{investor,borrower,broker}/deal-photos/:id/download`), and each download rule is a unit-tested pure predicate. `bun run check` green (1241 tests). `deploy` held per your decision — ready via `bun run deploy:worker` when you give the go.
-<!-- agent:boundary:76f7c1af -->
+<!-- agent:boundary:d3dff643 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -110,7 +110,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-- 🚧 ~~All deals in the borrower, broker, lender, and admin should have a carousel of uploaded images. If there is no image, then show a house placeholder.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~All deals in the borrower, broker, lender, and admin should have a carousel of uploaded images. If there is no image, then show a house placeholder.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~deploy — auto-struck: completed by #do-id-closeout-open-backlog (#qftbklgstrike)~~
 - ~~do [#dealcarousel-borrower]~~
 - ~~do [#dealcarousel-broker]~~

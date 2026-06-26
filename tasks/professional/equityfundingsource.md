@@ -25,6 +25,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 complete
 <!-- /agent:status -->
 
@@ -144,7 +145,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=d7a58066-72fe-44fe-b73d-ef7b8a71f984 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782441281204
 ```
-<!-- agent:boundary:7992ef0f -->
+<!-- agent:boundary:e4e97cbf -->
 <!-- /agent:exchange -->
 ###
 <!--

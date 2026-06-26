@@ -641,7 +641,29 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=31017729-037f-41d6-81c6-f182fd883e24 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=96600 candidate_hash=8f4a0204d3967030d37e8485c3c87856978ab7e9ad139f66a5e8f4936ba2d23a content_ours_len=95702 content_ours_hash=5a19e1328dc6605f387253ec992b75d839ad4d42d86cdc45eeb6af1d115be85a doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782505781797
 ```
-<!-- agent:boundary:b2a4de25 -->
+
+### Re: CRDT live-typing loss + "the binary should auto-strike, not the agent" — opus-4-8
+
+> **Queue prompt:** "● Response committed (af759a5cf), but the answered free-text head wasn't auto-struck (the 🚧 prefix blocked the exact-text match). session-check wants it struck. Let me find the strike flag and strike it.": The agent-doc binary should do this automatically...not the agent. As I was typing in this prompt, a 3-way merge occurred. I also have characters from a previous word I typed in deleted. Consistent CRDT issues.
+
+Both are real. I diagnosed each to code + ops.log evidence, filed them, and am **not** hot-patching either against this live session (your documented "log the bug this turn, fix it in a focused cycle" rule — and the merge path is exactly what's dropping your keystrokes right now).
+
+**1. The CRDT keystroke loss is the `#crdtlivedrop` residual — still live on 0.34.52, now evidenced.**
+
+First, my earlier "🚧 prefix blocked the exact-text match" claim was **wrong** — `strip_priority_markers` (`queue.rs:739`) already strips 🚧 before any match, so the emoji was never the cause. The thing you actually *felt* is the overlay-discard:
+
+- **ops.log proof** (`.agent-doc/logs/ops.log`, session `b26b9957`, during your typing burst): every `crdt_merge_base` cycle took `crdt_merge_base_overlay_rebuilt` (discard-to-baseline); `crdt_merge_base_overlay_ahead_preserved` **never** fired. The tell is `20:35:15` — overlay `96633 B` was **larger** than baseline `96632 B` (a genuine live edit) yet was still rebuilt/discarded.
+- **Root cause:** the 0.34.50 fix decides ahead-vs-behind by a markdown **line-string multiset** (`overlay_carries_unbaselined_content`, `snapshot.rs:1138`). It only sees "ahead" when the overlay holds a brand-new *distinct, non-empty* line. It is blind to (a) a **pure deletion** (overlay ⊆ baseline — the documented residual) and (b) an **additive within-line edit on a line that duplicates another baseline line** — and this queue is full of identical `do [#…]` / empty-bullet lines, so your +1 byte of live text reads as "behind" and the overlay gets rebuilt to baseline, eating the keystrokes. That's your "characters from a previous word deleted."
+- **Fix** (already specified in the plan, line 505): replace string equality with **yrs state-vector dominance** (overlay SV dominates → ahead/preserve; baseline dominates → behind/discard; neither → divergent/3-way-merge). Filed **`#crdtsvdom`** (HIGH); evidence + fix design appended to `plan-crdt-overlay-live-keystroke-preservation.md`.
+
+**2. Auto-strike — you're right, it shouldn't depend on me.**
+
+The shipped `#qheadstrike` strike only fires when my response quotes the head as a `> **Queue prompt:**` blockquote. Last cycle I answered both heads in prose under `**N. …**` headers, so nothing matched — which is exactly why you watched me reach for a manual strike flag. The strike should key off the binary's *own* drain-target / 🚧 in-progress head identity for the cycle, not my prose formatting. Filed **`#qheadstrikeauto`** (plan `plan-freetext-queue-head-autostrike.md`). I quoted this head as a blockquote above, so it auto-strikes this cycle — proof the mechanism works *when* the echo is present; the fix removes the "when."
+
+**Why no mid-session install.** `#crdtsvdom` rewrites the live overlay-merge classifier and `#qheadstrikeauto` the live strike path. Recompiling + recycling those against the session you're actively losing keystrokes in is how more drift happens — and it's your standing process. `#crdtsvdom` is the highest-priority next focused cycle: say go and I'll run it against a quiesced session (or after a supervisor restart), `#crdtedgetests` matrix red-first.
+
+**Queue.** This head is struck. `#actorprune` / `#suprestassoc` / `#crdtsvdom` / `#qheadstrikeauto` are all build+install+recycle focused-cycle items — I'm not auto-looping them into this actively-corrupting session.
+<!-- agent:boundary:5ff89e50 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -650,7 +672,7 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack
 - ~~I did `agent-doc admin list` and I see 60 actors...most of them dead. Can we automatically prune dead actors?~~
 - ~~When I restarted the equityfundingsource.md supervisor, equityfundingsource.md was re-associated with the agent-doc-bugs2.md claudesession.~~
 - 🚧 :pushpin: do [#qeditdup]
-- "● Response committed (af759a5cf), but the answered free-text head wasn't auto-struck (the 🚧 prefix blocked the
+- ~~"● Response committed (af759a5cf), but the answered free-text head wasn't auto-struck (the 🚧 prefix blocked the~~ — auto-struck: answered this cycle (#ftstrike)
   exact-text match). session-check wants it struck. Let me find the strike flag and strike it.": The agent-doc binary should do this automatically...not the agent. As I was typing in this prompt, a 3-way merge occurred. I also have characters from a previous word I typed in deleted. Consistent CRDT issues. Is this a lazily-rs issue?
 - :pushpin: do [#crdtauth6]
 - :pushpin: do [#nsfz]

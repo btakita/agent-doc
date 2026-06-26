@@ -134,7 +134,23 @@ Merged (fast-forward) — agent-doc submodule `main` now at `ec38a973`, all thre
 3. **Live zero-drift proof** — yours (live editor, flag ON, edit-during-finalize, `ops.log` zero drift).
 
 Persistence is now round-trip-consistent for the text-composition model. The op-capture reconciliation (1) + conflict UX (2) are the remaining agent-doable rungs, then your live proof (3). Five commits on the branch, all default-off. Say **"go opcapture"** for the next one.
-<!-- agent:boundary:365f4a5b -->
+
+### Re: opcapture rung — use lazily (local now, `#lzcrdtplane` plane later) — opus-4-8
+
+Decision: **Both — local substrate now, distributed plane later.** Landed the opcapture rung on lazily's already-shipped *local* op-history engine, not the still-unbuilt `#lzcrdtplane` wire plane.
+
+**Why lazily, not a bespoke Yrs op-capture:** `agent-doc-core` already depends on lazily and already merges per-cell via lazily's keyed `reconcile` — only the same-cell *value* merge still fell back to text-composition / ours-wins. And the honest-status framed the rung as "Yrs op-clock", which contradicts the locked `#lzcrdtplane` decision ("purpose-built HLC, **NOT** Yrs"). Pivoting to lazily's `TextCrdt` resolves that contradiction and reuses a hard, already-shipped substrate instead of growing a second CRDT engine.
+
+**Landed (`celltree-percell-merge` @ `e38a37e9`, default-off):**
+- `resolve_content_divergence`'s "both changed the same cell" branch now attempts an op-level 3-way merge via lazily `TextCrdt` (base→fork, replay ours char-span edit; base→fork, replay theirs; `merge`) **before** any ConflictPolicy fallback. Two edits to **disjoint** regions of one cell now converge with BOTH present and zero conflict; only a true **same-region** overlap still records a `CellConflict` + ours-wins.
+- Gate `AGENT_DOC_CELL_MERGE_OPCAPTURE` (default **OFF**; independent sub-gate of `AGENT_DOC_CELL_MERGE`). Gate-off path is byte-identical to today.
+- Deterministic: fixed peer ids (ours=1 / theirs=2), common-prefix/suffix char-span diff, no clocks/random.
+- 6 new tests; `cell_doc` **32/32** green; full `make check` green. No install/recycle/push (isolated worktree).
+
+**Scope split preserved:** local `TextCrdt`/`SeqCrdt` is the single-host editor↔agent op-merge engine; `#lzcrdtplane` (HLC op-log delta exchange over the wire) stays the future multi-writer-over-wire home as a separate lazily-rs review item — adopting it now would block this rung on 5 unimplemented network phases for zero single-host benefit.
+
+**Next rung — `#qnodemerge5` (conflict-surfacing):** the irreducible same-region overlap remainder is intentionally still ours-wins+logged. That safety-net rung surfaces *both* versions to the operator instead of silently picking one. Say **"go conflict"** for it. (Caveat carried: `char_span_edit` collapses each side's change to one contiguous span — fine for front-vs-back disjoint edits; a finer multi-run diff only matters if #qnodemerge5 wants tighter overlap granularity.)
+<!-- agent:boundary:082f1a03 -->
 <!-- /agent:exchange -->
 
 ## Queue

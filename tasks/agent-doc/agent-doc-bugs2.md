@@ -473,7 +473,24 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=2f587418-3481-4b18-a389-b86a086c3689 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=73450 candidate_hash=2b007613f76acc86bd803ea8c127cd2dfd6ae0a52bc3b1630bba4f676c93253f content_ours_len=74464 content_ours_hash=be90635f35edd89ddcf46e85435cd64643548a947c1b6e04ab591d39bdb0b3dc doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782496766130
 ```
-<!-- agent:boundary:1804286a -->
+
+### Re: do [#qftloss] — opus-4-8
+
+Verified the agent-side of `#qftloss` is fully shipped and live — there's no code/build/install/push sub-step left for me; only your live IDE eyeball remains.
+
+| Check | Result |
+|-------|--------|
+| Fix commit on main | `8b900bf4` (`fix(queue): durably capture operator free-text edits before first cycle observation (#qftloss mode-6)`) — ancestor of current submodule HEAD `06c84d99` |
+| In the installed binary | source HEAD `0.34.49` **==** installed `agent-doc 0.34.49` (binary rebuilt today 14:06); the journal code lives in `agent-doc-orchestration/src/write/queue_consume.rs` |
+| Proof marker present | `live_buffer_addition_authoritative` emitted from the journal path (per the prior audit it has fired **34×** in prod across real agent-doc-bugs2 / corky / lazily-rs cases) |
+| Supervisor binary | `admin inspect` → `controller:fresh, supervisor:fresh` (the stale pid 328292 flagged earlier was already recycled) — your repro runs against the fresh binary |
+
+So the binary now journals operator prompts from the plugin live-buffer sidecar (`.agent-doc/live-buffer/<hash>`) into the `#qdurcrash` store **before** any convergence/recovery can clobber the unsaved buffer, replaying it if absent — and that path is in the running binary against a fresh supervisor.
+
+**The only thing left is operator-gated** (`[operator-verify]`): type a free-text prompt into the live editor during a concurrent `finalize`, then I confirm from the log that it survived — success looks like a `live_buffer_addition_authoritative` (or `queue_consume_head_divergence_reconciled reason=live_buffer_addition_authoritative`) line for this document. I can't drive a live editor, so I'm leaving `#qftloss` open as your eyeball; I did **not** `--done` it.
+
+No agent-drainable heads remain (`queue_continuation_required=false`, `queue_drainable_head_count=0` — the rest are your live-test gated items), so the in-session loop stops here. (Exchange is large — 442 lines / 30 sections — but the queue is active, so I'm not pausing to compact.)
+<!-- agent:boundary:2693c145 -->
 <!-- /agent:exchange -->
 ## Queue
 

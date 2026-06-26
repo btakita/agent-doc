@@ -112,12 +112,17 @@ impl RelayHub {
     /// reconnect. The projection is a recovery input, never authority.
     pub fn recover_from_projection(canonical_id: u64, projection: &[u8]) -> Result<Self> {
         let canonical = ReplicaState::from_encoded(canonical_id, projection)?;
+        // Seed the committed baseline from the recovered text so the very first
+        // commit barrier after a restart can already detect an out-of-band disk
+        // correction / compaction (`#staleinmem`) instead of waiting for a finalize
+        // to record one.
+        let last_committed_text = Some(canonical.text());
         Ok(Self {
             canonical,
             canonical_id,
             members: HashMap::new(),
             awareness: AwarenessChannel::new(),
-            last_committed_text: None,
+            last_committed_text,
         })
     }
 
@@ -472,10 +477,16 @@ impl RelayHub {
     /// discarded ops at the next flush. Returns whether a rebuild happened.
     pub fn reconcile_canonical_against_baseline(&mut self, on_disk: &str) -> Result<bool> {
         let last = match self.last_committed_text.as_deref() {
-            Some(t) => t,
-            // No commit recorded yet → no baseline to diverge from; the normal
-            // in-memory-wins path stands.
-            None => return Ok(false),
+            Some(t) => t.to_string(),
+            // No baseline yet (a hub allocated mid-session before any commit was
+            // recorded). Adopt the current disk as the baseline WITHOUT rebuilding,
+            // so a later out-of-band correction / compaction is detectable — this
+            // is the seam that makes the guard engage even when a compact lands
+            // before this document's first finalize.
+            None => {
+                self.last_committed_text = Some(on_disk.to_string());
+                return Ok(false);
+            }
         };
         if on_disk == last {
             // Disk is unchanged since our last commit → nothing out of band.
@@ -855,18 +866,62 @@ mod tests {
     // --- Out-of-band baseline reconcile (`#staleinmem`) -----------------------
 
     #[test]
-    fn baseline_reconcile_is_noop_until_a_commit_is_recorded() {
-        // With no recorded commit baseline there is nothing to diverge from, so a
-        // differing on-disk text must NOT rebuild (the normal in-memory-wins path).
+    fn baseline_reconcile_seeds_baseline_on_first_contact_without_rebuilding() {
+        // With no recorded baseline, the first contact ADOPTS the current disk as
+        // the baseline without rebuilding (the live canonical is untouched), so a
+        // LATER out-of-band change is detectable.
         let mut hub = RelayHub::new(1);
         hub.canonical.apply_local_edit(0, 0, "live content");
         assert!(
             !hub
-                .reconcile_canonical_against_baseline("anything else")
+                .reconcile_canonical_against_baseline("disk content")
                 .unwrap(),
-            "no rebuild before a commit baseline exists"
+            "no rebuild on first contact"
         );
-        assert_eq!(hub.canonical_text(), "live content");
+        assert_eq!(hub.canonical_text(), "live content", "canonical untouched");
+        assert_eq!(
+            hub.last_committed_text_for_test(),
+            Some("disk content"),
+            "first contact seeds the baseline from disk"
+        );
+        // A subsequent divergence from that seeded baseline now rebuilds.
+        assert!(
+            hub.reconcile_canonical_against_baseline("corrected content")
+                .unwrap(),
+            "a change from the seeded baseline rebuilds"
+        );
+        assert_eq!(hub.canonical_text(), "corrected content");
+    }
+
+    #[test]
+    fn baseline_reconcile_adopts_a_compacted_shrink() {
+        // `compact exchange` archives + truncates the document on disk OUT OF BAND
+        // of the supervisor's in-memory canonical (compact runs in a separate
+        // process). The next commit barrier must adopt the smaller compacted text
+        // so the canonical does not re-expand the archived turns.
+        let mut hub = RelayHub::new(1);
+        let editor = mint_client_id("intellij:compact");
+        hub.register(editor).unwrap();
+        let full = "# doc\n\nturn 1\nturn 2\nturn 3\nturn 4 (kept)\n";
+        hub.apply_local(editor, 0, 0, full).unwrap();
+        hub.record_committed_baseline(full);
+
+        // compact rewrote disk: older turns archived, only the tail kept.
+        let compacted = "# doc\n\n*Compacted. 3 turns archived.*\nturn 4 (kept)\n";
+        assert!(
+            hub.reconcile_canonical_against_baseline(compacted).unwrap(),
+            "the compacted shrink is adopted"
+        );
+        assert_eq!(hub.canonical_text(), compacted);
+        assert!(
+            !hub.canonical_text().contains("turn 1"),
+            "archived turns do not survive in the canonical"
+        );
+        assert_eq!(
+            hub.member_text(editor).as_deref(),
+            Some(compacted),
+            "the editor mirror was reseeded to the compacted text"
+        );
     }
 
     #[test]

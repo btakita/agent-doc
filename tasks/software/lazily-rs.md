@@ -237,7 +237,17 @@ No queue head is being answered by this recovery response. The next substantive 
 This is a binary-owned recovery write for the post-commit live-buffer drift reported after `73cc7ecd7`. It preserves the already-visible parity evidence and does not answer or consume the next queue head.
 
 No repository work was performed in this recovery write. Release/publish work remains operator-gated.
-<!-- agent:boundary:f08dcceb -->
+
+### Re: restored lazily-py queue head — gpt-5
+
+> **Queue prompt:** lazily-py parity + release + publish
+
+This is the explicit recovery/consume proof for the Python queue head that the IPC drift guard reported as dropped.
+
+The work was completed in the immediately preceding Python parity response: `src/lazily-py` parent gitlink and `origin/main` both resolve to `c255482b0ff87c3ada4c0ac8124ac3e35186cc3f`, HEAD is tagged `v0.11.0`, `pyproject.toml` declares `0.11.0`, and `make check` passed via `tsift`/`rtk` artifact `tart-b7ecc8d0d3`. I did not perform PyPI/TestPyPI upload, create a GitHub release, or push tags; public release/publish actions remain operator-gated.
+
+Changed paths: no package source changes. This response only restores and consumes the dropped free-text queue head so the session-check queue guard has visible proof.
+<!-- agent:boundary:e28c1e8e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -246,6 +256,7 @@ No repository work was performed in this recovery write. Release/publish work re
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- 🚧 lazily-py parity + release + publish
 <!-- /agent:queue -->
 
 ## Backlog

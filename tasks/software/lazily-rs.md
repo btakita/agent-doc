@@ -53,7 +53,28 @@ The queue is **operator-paused** — the 6 review items are all `[operator-drive
 - **`#xccx`** — Holons↔lazily-rs mapping, blocked on Steve Melville's 7 open questions.
 
 Nothing for me to drain. Resume by clearing the pause / giving go on a specific publish step.
-<!-- agent:boundary:a8700eb5 -->
+
+### Re: go [#lzcrdtplane] — Phase 1 (HlcStamp stability frontier + CrdtPlane skeleton) — opus-4-8
+
+Started the distributed CRDT cell plane. Per the plan (`tasks/software/plan-lazily-distributed-crdt-plane.md`), the plane is multi-phase and drains per-phase in focused cycles — so this cycle lands **Phase 1 (`#lzcrdtplane1`)**, the GC watermark substrate. Shipped to `origin/main` (lazily-rs `d7c7594`, superproject `16ee25ead`); `make check` green.
+
+**`StampFrontier(BTreeMap<PeerId, HlcStamp>)`** — the per-peer `HlcStamp` frontier the tombstone GC needs, kept deliberately distinct from the existing counter-based `VersionVector` (which `MvRegister` uses and which has only private accessors / no public min):
+- `observe(peer, stamp)` — per-peer `max` of a totally-ordered stamp (out-of-order/duplicate safe; returns whether it advanced).
+- `merge(&other)` — commutative/associative/idempotent per-peer max.
+- `frontier(membership)` — the **minimum** stamp across every expected member, returning `None` until *all* members have been observed (an unseen member could still emit a causally-earlier op, so nothing is stable yet). This is the all-replicas-aware watermark; a single replica's local clock is explicitly not a sound one.
+- `dominates(&other)`, `get`, `len`, `is_empty`.
+
+**`CrdtPlane`** skeleton — owns `PeerId` + `Hlc` + expected `membership` + the `StampFrontier`:
+- `tick(now_micros)` stamps a local event (`Hlc::send`) and advances the self frontier entry.
+- `observe_remote(stamp, now_micros)` adds the origin peer to membership, folds the stamp into the frontier, and feeds `Hlc::recv` so the local clock dominates the observed causal past.
+- `stability_frontier()` exposes the min-over-membership watermark `#lzcrdtplane4` will drive `SeqCrdt::gc` / `TextCrdt::gc_with` from.
+
+No transport yet (that's `#lzcrdtplane3`); both types are gated behind `feature = "distributed"` and exported from the crate root. Added 10 unit tests (per-peer max, merge commutativity/idempotence, min-frontier + None-until-all-seen, dominance, plane tick monotonicity, frontier withheld until every member seen, and remote-observation advancing the local clock).
+
+**Next:** `#lzcrdtplane2` (expose registers via `MergeMechanism`) is queued in the backlog as the next actionable phase; `#lzcrdtplane` stays gated in review until the plane is complete.
+
+Note: I committed only `src/lazily-rs` and its gitlink — the unrelated dirty `src/agent-doc` submodule (`cell_doc.rs`/`crdt.rs`) belongs to a different active session, so I left it untouched.
+<!-- agent:boundary:eaa93f8d -->
 <!-- /agent:exchange -->
 ###
 <!--

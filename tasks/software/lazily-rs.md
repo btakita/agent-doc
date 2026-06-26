@@ -193,7 +193,28 @@ Applied "ten thousand" everywhere the line appears (not just the draft you edite
 - **Blog post** intro `src/.../2026-06-26-lazily-cell-family-spreadsheet-scale.md` had the *same* "or ten" phrasing — fixed it too for consistency (a reader following the teaser link would otherwise hit the rejected wording). `briantakita.me c901b7a` → `briantakita.me-dev c901b7a` → superproject `e3aa3c6a5`. Built clean; the push redeploys Cloudflare Pages so the live post updates.
 
 If you'd rather the blog read "ten million" (the actual upper benchmark point) instead of "ten thousand," say the word — but "ten thousand" makes the stronger size-independence point (it holds even on a small sheet), so I matched your draft.
-<!-- agent:boundary:33a2741d -->
+
+
+### Re: LinkedIn draft? No → published, then fixed the truncation root cause — opus-4-8
+
+> **Queue prompt:** 🚧 Can the linkedin post be a draft on Linkedin so I can look at it before I publish? If yes, do linkedin draft. if no do linked in publish.
+> **User:** The post was published truncated again. I fixed the post manually. Please diagnose why and fix corky to publish the entire body...not a truncated body.
+
+**Draft question — No.** `corky linkedin draft` only writes a local file; `create_post` hardcodes `lifecycleState: PUBLISHED` (no draft path); and personal-profile API drafts aren't reviewable in LinkedIn's UI anyway. Per your rule ("if no, publish") and your confirmation, I published it — but it truncated.
+
+**Why it truncated (root cause).** LinkedIn's Posts API `commentary` is in their **"little" Text Format**, where these characters are *reserved* and must each be backslash-escaped **even when not part of a mention/hashtag**: `\ | { } @ [ ] ( ) < > # * _ ~`. An unescaped reserved char makes LinkedIn **silently drop the post body from that character onward**. corky's `strip_linkedin_markdown` only removed backticks and `**` — it escaped *none* of the reserved set. So the teaser truncated at the first `~` (`~1,000` / `~11µs` / `~5,000×`), and the earlier architecture post truncated right before `(Slot, Cell, Effect)`. Confirmed against LinkedIn's little-Text-Format grammar (the `Text` production).
+
+**The fix (corky `e147ef9`, installed + pushed).**
+- Added `escape_little_text()` (backslash-escapes all 15 reserved chars, char-by-char so order is safe) in `crates/corky-social/src/social/linkedin.rs`.
+- Applied it in **both** commentary paths: `create_post_at` **and** the `update_post_at` PARTIAL_UPDATE reconcile (step 10 of the publish flow — it otherwise re-truncated a post that create got right). Length check stays on pre-escape display text (backslashes aren't rendered, so the 3000 limit is unaffected).
+- Left the v2 `socialActions` **comment** path unescaped — it uses the legacy plaintext `message.text` model (annotations in a separate `attributes` array), which is why your first comment's `(Rust, …)` published intact.
+- Tests: 5 new `escape_little_text` cases (the `~` and `(Slot, Cell, Effect)` regressions, full reserved set, plain-text passthrough, backslash-escaped-once). `make check` green; clippy clean; SPEC.md §12.6 documents it.
+- Built with GPU + `make install` (live binary now escapes), pushed `corky e147ef9`, superproject gitlink `a379a92a6`.
+
+You already fixed the live post manually, so no re-publish was needed — this makes every **future** `corky linkedin publish` send the full body. Quick check when you have a sec: confirm your fixed live post and its first comment both read in full.
+
+**Session note:** the agent-doc supervisor for this doc is running a **stale binary** and was blocking/corrupting the document writes this turn (the per-cycle `content_ours`/worktree-splice churn). I've requested `admin recycle`; it promotes the fresh binary at the next idle boundary.
+<!-- agent:boundary:a2e20c66 -->
 <!-- /agent:exchange -->
 ###
 <!--

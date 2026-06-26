@@ -163,9 +163,30 @@ Keeping this response short on purpose so I'm not writing to the doc while you t
 **What the logs say about the CRDT angle** (not the primary cause, but real): sync passes are running near budget — `sync_latency phase=safe_passive_total elapsed_ms=891 budget_ms=1000`. That's background sync, not per-keystroke, so it shouldn't gate typing on its own, but it's close enough to the ceiling to be worth watching. `live_buffer_classify` / `crdt_merge_base_overlay_stale` cadence is moderate (~20 over the last window), not a runaway per-keystroke whole-doc merge.
 
 If typing is **still** bad after a recycle + IDE restart, that points at a genuine per-cell-merge cost on the convergence path (whole-document `crdt::merge` re-running per edit), which is the deeper #qcellmerge1 per-cell-isolation fix — tell me and I'll profile the convergence path in a focused cycle. But try the recycle + restart first; I expect that clears it.
-<!-- agent:boundary:ef06b268 -->
-<!-- /agent:exchange -->
+❯ test the typing
 
+### Re: test the typing — opus-4-8
+
+Tested it via the live telemetry, and **"all documents are difficult to type in" is exactly right** — I found a global root cause and fixed it (`#qbasehashmemo`, shipped in 0.34.49).
+
+**What the logs proved.** `.agent-doc/logs/ops.log` shows a paired event for *every single keystroke*:
+
+```
+crdt_merge_base file=… source=overlay len=26650 …
+editor_op_recorded kind=insert offset=19146 insert_bytes=1 … #qnodemerge4wire
+```
+
+That `crdt_merge_base … len=26650` is a **full-document** CRDT rebuild, and it was firing **3–7× per second** during typing — **98,922** of them in this one session, across *every* active document (equityfundingsource 42,850 · agent-doc-bugs2 38,300 · lazily-rs 13,042 · corky · greenlightguru · …). That's why it's all documents, and why the big ones are worst: the cost scales with document size.
+
+**Root cause.** Each `DocumentEvent` (JB `TypingTracker.reportEditorOp`, and the VS Code path) calls `agent_doc_document_base_hash` → `op_capture::current_base_hash`, which rebuilt the whole-document CRDT merge base (`crdt_merge_base_state` → `CrdtDoc::from_text` over the entire markdown → decode → `to_text` → SHA256) **on every character**. But the base hash is a pure function of the committed snapshot + overlay CRDT sidecar, and *neither changes while you type* — so it was recomputing a constant at O(doc-size) per keystroke. This was **not** a stale supervisor/binary (the binary is fresh, newer than all source) and not the per-cell `#qcellmerge1` convergence cost; it's a hot-path that never should have run per keystroke.
+
+**The fix.** `current_base_hash` now memoizes on a cheap `(len, mtime)` fingerprint of the snapshot + overlay files. A typing burst is now an **O(1) cache hit**; any real write boundary (snapshot/overlay change) invalidates the memo. A stale fingerprint can only ever force a recompute — never return a wrong hash — and even a wrong hash would degrade to the existing diff-guess merge fallback, so it's safe under any mtime granularity. It's an FFI-layer (Shared Foundation) fix, so **both JetBrains and VS Code benefit with no plugin changes**.
+
+**Verified:** new eval `current_base_hash_is_memoized_until_base_changes` (cache-hit-during-burst + invalidate-on-base-change, via a process-isolated recompute counter); `make check` green (clippy + nextest + Lean formal build); release profile compiles clean at 0.34.49. Lockstep version bump committed.
+
+**What happens next:** the supervisor auto-installs 0.34.49 and recycles onto the fresh binary + cdylib at its idle boundary — no manual install needed (I deliberately did *not* rebuild the live binary mid-session to avoid `live_prompt_drift`). After it recycles, typing should be smooth across all documents. I filed an `[operator-verify]` item for the one thing I can't do from the CLI: the live eyeball — type a sustained burst in a large doc and confirm `crdt_merge_base` no longer fires per keystroke in `ops.log`.
+<!-- agent:boundary:86dde9ea -->
+<!-- /agent:exchange -->
 ## Queue
 
 
@@ -173,6 +194,7 @@ If typing is **still** bad after a recycle + IDE restart, that points at a genui
 - 🚧 [#cdtcutover]
 - ~~look in logs to see if we can verify [operator-verify] items in the backlog~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~It is now very difficult to type in the JB editor. Seems there may be performance or CRDT issues.~~ — auto-struck: answered this cycle (#ftstrike)
+- All documents are difficult to type in.
 - do [#qftloss]
 - do [#qeditdup]
 - do [#crdtauth6]
@@ -205,6 +227,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
 - [ ] [#qftloss] [operator-verify] Free-text prompt loss (mode-6) — CODE-COMPLETE on main (8b900bf4): binary now journals operator prompts from the plugin live-buffer sidecar (.agent-doc/live-buffer/<hash>) into the #qdurcrash store before any convergence/recovery can clobber the unsaved buffer, replayed if absent. Remaining: live IDE eyeball that an unsaved prompt typed during a concurrent finalize survives end-to-end. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#qeditdup] [operator-verify] Queue items duplicated + manually-struck/deleted items resurrected when the operator edits the queue during an active turn. #queuestatemachine idempotent convergence + the Live<Struck lattice (merged, 0.34.48) should resolve this — VERIFY on the recycled binary; if it persists live, a deeper editor-edit-during-cycle guard is needed. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md

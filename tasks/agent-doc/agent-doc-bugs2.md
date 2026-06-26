@@ -705,7 +705,21 @@ All three addressed; shipped 0.34.56 (`0a6b1301`, pushed, installed, recycle-mar
 **2. JB built-plugins directory.** Installed plugins are fine — `~/.local/share/JetBrains/{IntelliJIdea2025.3,PyCharm2025.3,IntelliJIdea2026.1}/agent-doc-jetbrains/`. The missing dir is the **build output** `editors/jetbrains/build/distributions/` (Gradle), absent because the plugin wasn't built in this checkout (or `gradlew clean` removed `build/`). Rebuild: `make bump-plugin` or `cd src/agent-doc/editors/jetbrains && ./gradlew buildPlugin`.
 
 **3. Wedged IPC — cause + guard tolerance.** Guard half shipped (0.34.56): `#patchback-head-tolerant` — no more false `INTERRUPT` when the flagged `### Re:` is already in HEAD (the heuristic only compared snapshot↔working-tree, never HEAD); `#side-effect-exclude-submodules` — the side-effect note no longer lists unrelated dirty submodules. Yes — the guard should have been more tolerant, and now is. The deeper root cause: the post-commit listener-aware path *skips the disk write* (to dodge the JB File-Cache-Conflict dialog) and trusts the editor to save, so an un-saved editor leaves the disk drifted from HEAD for the next cycle. That fix is a real tradeoff on the live IPC path and is filed as its own focused cycle; the guard tolerance stops it from wedging the session meanwhile.
-<!-- agent:boundary:ad96948a -->
+
+### Re: do [#qeditdup] — log check on the queue-edit-during-active-turn race — opus-4-8
+
+Per your standing directive ("I test, you check the logs"), here's the log read for `#qeditdup`. Short version: **clean on the fresh binary, and this very turn is a passing live datapoint.**
+
+**1. The stale-binary cause is gone.** `admin inspect` → `state=ready freshness=controller:fresh,supervisor:fresh`. Every prior turn pinned `#qeditdup` (queue typing duplicates a prior line / struck items resurrect) on the **route-owned supervisor replaying an old in-memory CRDT**. The supervisor is now on **0.34.56**, which carries the `#queuestatemachine` idempotent convergence + the Live<Struck lattice (0.34.48). So the documented root cause no longer applies.
+
+**2. Today's ops.log on this doc — zero resurrections.** Grepping `.agent-doc/logs/ops.log` for `2026-06-26`:
+- `stale_editor_queue_resurrection` / `postcommit_queue_reconciled` on `agent-doc-bugs2.md`: **0**.
+- The only reconcile event today is on `equityfundingsource.md` at 07:24 (`head=7a717dea7f30 tree_before=7a717dea7f30 reason=stale_editor_queue_resurrection transport=disk`) — i.e. the guard **actively catching and reconciling** a resurrection (`tree_before == head`, no net change emitted). That's the fix doing its job, not the bug surfacing.
+
+**3. This turn is itself the repro — and it passed.** You edited the queue *during an active turn* (added `:pushpin: do [#qeditdup]`). Preflight's convergence reconciled the live buffer (`auto=false, queue_active=true`) and the resulting diff was a **clean single-line addition** (`+:pushpin: do [#qeditdup]`) — the struck `~~do [#crdtsvdom] [#qheadstrikeauto] [#actorprune] [#suprestassoc]~~` line **stayed struck**, nothing duplicated, no item resurrected. That's exactly the scenario `#qeditdup` describes, exercised live, with no regression.
+
+**Net:** the markers prove/disprove the item as you asked, and they currently say **disproven on the fresh binary**. I'm leaving `#qeditdup` as `[operator-verify]` rather than `--done` — only your live eyeball during a sustained typing burst in the JB queue can close it. If you type into the queue mid-turn and see a prior line state reappear or a struck/deleted item come back, that's a genuine merge bug (no longer attributable to staleness) and I'll take it into a focused cycle; grep `postcommit_queue_reconciled reason=stale_editor_queue_resurrection` on this doc to confirm whether the guard fired.
+<!-- agent:boundary:f2c28819 -->
 <!-- /agent:exchange -->
 ## Queue
 

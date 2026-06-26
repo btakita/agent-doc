@@ -69,6 +69,21 @@ pub(crate) static CELL_MERGE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::
 /// applies the policy. See [`cell_merge_opcapture_enabled`] / [`op_level_merge`].
 pub const CELL_MERGE_OPCAPTURE_ENV: &str = "AGENT_DOC_CELL_MERGE_OPCAPTURE";
 
+/// Environment variable that opts a recorded same-region [`CellConflict`] into an
+/// **operator-visible in-band conflict marker** in the merged document
+/// (`#qcellconflict` conflict-surfacing rung).
+///
+/// **Sub-gate of [`CELL_MERGE_ENV`], default OFF.** With the per-cell merge seam
+/// ON but this OFF, a genuine same-region content conflict is still resolved
+/// ours-wins and only logged to stderr ([`log_conflicts`]) — the operator never
+/// sees the losing side in the document. When this is *also* truthy, each such
+/// conflict additionally appends a deterministic, framing-safe HTML-comment
+/// conflict block to the conflicted node's value, surfacing BOTH versions
+/// verbatim while keeping ours as the active/structural text (never a fabricated
+/// blend). A lawful lifecycle join is never a conflict and never marked. See
+/// [`surface_conflict_markers`] / [`conflict_marker`].
+pub const CELL_MERGE_CONFLICT_MARKERS_ENV: &str = "AGENT_DOC_CELL_MERGE_CONFLICT_MARKERS";
+
 /// Parse a truthy on/off env value (`1`/`true`/`on`/`yes`, case/space-insensitive).
 fn env_truthy(name: &str) -> bool {
     match std::env::var(name) {
@@ -94,6 +109,17 @@ pub fn cell_merge_enabled() -> bool {
 /// chooses whether that branch attempts op-level convergence before policy.
 pub fn cell_merge_opcapture_enabled() -> bool {
     env_truthy(CELL_MERGE_OPCAPTURE_ENV)
+}
+
+/// Whether recorded same-region [`CellConflict`]s are surfaced as operator-visible
+/// in-band conflict markers (`#qcellconflict`). Default OFF: only an explicit
+/// truthy `AGENT_DOC_CELL_MERGE_CONFLICT_MARKERS` turns it on. Independent of
+/// [`cell_merge_opcapture_enabled`] (opcapture *reduces* the conflict set by
+/// cleanly merging disjoint edits; this *surfaces* the irreducible same-region
+/// remainder), so the two sub-gates compose freely. With this OFF the merged text
+/// is byte-identical to today (ours-wins, conflict only on stderr).
+pub fn cell_merge_conflict_markers_enabled() -> bool {
+    env_truthy(CELL_MERGE_CONFLICT_MARKERS_ENV)
 }
 
 /// The stable per-item identity: `component:occurrence:item-id:index`, matching
@@ -956,11 +982,18 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
                 if !keys_unique(o_occ) || !keys_unique(t_occ) || !keys_unique(base_ref) {
                     return CellMergeOutcome::fallback();
                 }
-                let (merged_items, conflicts) =
+                let (mut merged_items, conflicts) =
                     match compose_occurrence(base_ref, o_occ, t_occ, policy) {
                         Some(r) => r,
                         None => return CellMergeOutcome::fallback(),
                     };
+                // `#qcellconflict` (default OFF): surface each recorded same-region
+                // content conflict as an operator-visible in-band marker after the
+                // conflicted node's (active, ours) value. OFF ⇒ no mutation, so the
+                // body is byte-identical to today's ours-wins output.
+                if cell_merge_conflict_markers_enabled() {
+                    surface_conflict_markers(&mut merged_items, &conflicts);
+                }
                 all_conflicts.extend(conflicts);
                 // Recombine the body losslessly from the merged item values, then
                 // reframe inside ours' open/close markers.
@@ -987,6 +1020,92 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
             }
         }
         _ => CellMergeOutcome::fallback(),
+    }
+}
+
+/// Build the deterministic, framing-safe in-band conflict marker for one
+/// [`CellConflict`] (`#qcellconflict`).
+///
+/// The marker is a single **HTML comment** (`<!-- … -->`) — git-style
+/// `<<<<<<< / ======= / >>>>>>>` rails showing BOTH sides verbatim, with `ours`
+/// (the active/structural text already present in the body) named first. Its
+/// inner content begins with `cell-merge-conflict` (deliberately **not** an
+/// `agent:` / `/agent:` prefix), so [`crate::component::parse`] treats it as an
+/// ordinary comment and never as a component open/close marker. It is emitted as
+/// a comment specifically so it can never:
+/// - introduce a new top-level component (its inner text never starts with
+///   `agent:` / `/agent:`, and the verbatim sides are guarded by
+///   [`marker_is_framing_safe`]), so `component_name_sequence` is unchanged, and
+/// - create a new keyed list item or `### Re:` block (a comment line is neither a
+///   `- ` list line nor a `### Re:` heading), so item segmentation is unchanged.
+///
+/// The block always ends in `\n` and is appended *after* the conflicted node's
+/// verbatim value (which itself already ends in `\n`), so the body stays
+/// line-structured and round-trips. Fully deterministic: stable rail tokens,
+/// fixed ours-before-theirs ordering, no clocks/randomness.
+fn conflict_marker(conflict: &CellConflict) -> String {
+    let policy_chose_ours = conflict.chosen == conflict.ours;
+    let chosen_side = if policy_chose_ours { "ours" } else { "theirs" };
+    // Trim a single trailing newline from each side so the verbatim text sits on
+    // its own line(s) inside the rails without a spurious blank line; the rails
+    // themselves provide the line structure.
+    let ours = conflict.ours.strip_suffix('\n').unwrap_or(&conflict.ours);
+    let theirs = conflict
+        .theirs
+        .strip_suffix('\n')
+        .unwrap_or(&conflict.theirs);
+    format!(
+        "<!-- cell-merge-conflict component={} occurrence={} identity={} kind={:?} chosen={} (operator: resolve; ours kept active)\n\
+         <<<<<<< ours\n{ours}\n=======\n{theirs}\n>>>>>>> theirs\n-->\n",
+        conflict.component, conflict.occurrence, conflict.identity, conflict.kind, chosen_side,
+    )
+}
+
+/// Defensive guard: a conflict marker must not contain any agent component
+/// framing marker (`<!-- agent:NAME -->` / `<!-- /agent:NAME -->`), which would
+/// change the document's top-level component-name sequence. Verbatim side text is
+/// operator/agent content, so in principle a side could itself contain such a
+/// marker; if so we decline to surface that conflict in-band (it stays
+/// stderr-only) rather than risk corrupting framing. Returns true when safe.
+fn marker_is_framing_safe(conflict: &CellConflict) -> bool {
+    // The rails/comment scaffolding is fixed and safe; only the verbatim side
+    // text could carry framing. `component::parse` keys off `<!-- agent:` /
+    // `<!-- /agent:` openers, so reject either side carrying one.
+    let carries_framing =
+        |s: &str| s.contains("<!-- agent:") || s.contains("<!-- /agent:") || s.contains("-->");
+    !(carries_framing(&conflict.ours) || carries_framing(&conflict.theirs))
+}
+
+/// Append an operator-visible in-band conflict marker after each conflicted
+/// node's value in `merged_items` (`#qcellconflict`). The conflicted node keeps
+/// its active value (ours under the default policy); the marker surfaces BOTH
+/// versions verbatim so the operator can resolve. A conflict whose side text
+/// would itself perturb framing ([`marker_is_framing_safe`]) is skipped (left
+/// stderr-only). Mutates the merged item values in place; never reorders.
+fn surface_conflict_markers(merged_items: &mut [(String, ItemValue)], conflicts: &[CellConflict]) {
+    for conflict in conflicts {
+        if !marker_is_framing_safe(conflict) {
+            eprintln!(
+                "cell_merge conflict identity={} not surfaced in-band (side text carries framing); stderr-only",
+                conflict.identity,
+            );
+            continue;
+        }
+        // Find the conflicted node by identity and append the marker to its
+        // active value. The node's value is the chosen (active) side, already in
+        // the body; appending after it keeps it the structural text.
+        if let Some((_, value)) = merged_items
+            .iter_mut()
+            .find(|(id, _)| id == &conflict.identity)
+        {
+            // Keep the value line-terminated, then append the marker block. If the
+            // value somehow lacks a trailing newline (last item, no EOL), add one
+            // so the comment starts on its own line.
+            if !value.ends_with('\n') {
+                value.push('\n');
+            }
+            value.push_str(&conflict_marker(conflict));
+        }
     }
 }
 
@@ -1441,6 +1560,12 @@ prior response.
     #[test]
     fn same_item_edited_both_sides_surfaces_conflict() {
         // Both sides edit beta to DIFFERENT text → a real conflict, not a blend.
+        // Serialize against marker-toggling tests + assert the conflict-marker
+        // sub-gate is OFF so the "theirs absent" assertion is deterministic.
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
+        }
         let ours = BASE3.replace(
             "- do [#beta] second task\n",
             "- do [#beta] second task OURS-VERSION\n",
@@ -1787,6 +1912,10 @@ working on it
     /// recorded as exactly one `Content` conflict, ours-wins, theirs not present.
     #[test]
     fn genuine_same_level_content_conflict_is_recorded() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
+        }
         let base = "<!-- agent:queue -->\n- do [#beta] orig\n<!-- /agent:queue -->\n";
         let ours = "<!-- agent:queue -->\n- do [#beta] OURS-VERSION\n<!-- /agent:queue -->\n";
         let theirs = "<!-- agent:queue -->\n- do [#beta] THEIRS-VERSION\n<!-- /agent:queue -->\n";
@@ -1814,6 +1943,10 @@ working on it
     /// conflict, NOT silently dropped.
     #[test]
     fn both_sides_struck_different_text_is_a_content_conflict() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
+        }
         let base = "<!-- agent:queue -->\n- do [#k] live\n<!-- /agent:queue -->\n";
         let ours = "<!-- agent:queue -->\n- ~~do [#k] struck OURS~~\n<!-- /agent:queue -->\n";
         let theirs = "<!-- agent:queue -->\n- ~~do [#k] struck THEIRS~~\n<!-- /agent:queue -->\n";
@@ -1930,9 +2063,11 @@ working on it
         let ours = "<!-- agent:queue -->\n- do [#beta] OURS-ONLY\n<!-- /agent:queue -->\n";
         let theirs = "<!-- agent:queue -->\n- do [#beta] THEIRS-ONLY\n<!-- /agent:queue -->\n";
 
-        // SAFETY: single-threaded under ENV_LOCK; restored before unlock.
+        // SAFETY: single-threaded under ENV_LOCK; restored before unlock. The
+        // conflict-marker sub-gate stays OFF so "theirs absent" is deterministic.
         unsafe {
             std::env::set_var(CELL_MERGE_OPCAPTURE_ENV, "1");
+            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
         }
         let out = merge_3way(base, ours, theirs);
         unsafe {
@@ -1984,5 +2119,252 @@ working on it
             "OFF: theirs disjoint edit is dropped (no op-merge): {}",
             out.merged_text
         );
+    }
+
+    // ----- conflict surfacing (`#qcellconflict`) ----------------------------
+
+    /// Run `merge_3way` with the `AGENT_DOC_CELL_MERGE_CONFLICT_MARKERS` sub-gate
+    /// set to `value` for the duration, restoring it under the env lock.
+    fn merge_with_markers(
+        value: Option<&str>,
+        base: &str,
+        ours: &str,
+        theirs: &str,
+    ) -> CellMergeOutcome {
+        let _guard = ENV_LOCK.lock().unwrap();
+        // SAFETY: single-threaded under ENV_LOCK; restored before unlock.
+        unsafe {
+            match value {
+                Some(v) => std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, v),
+                None => std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV),
+            }
+        }
+        let out = merge_3way(base, ours, theirs);
+        unsafe {
+            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
+        }
+        out
+    }
+
+    /// (a) Gate ON: a true same-region same-cell overlap surfaces an
+    /// operator-visible conflict containing BOTH `ours` and `theirs` verbatim, and
+    /// the merged doc still round-trips (does NOT set `fell_back`).
+    #[test]
+    fn conflict_markers_on_surfaces_both_versions_and_round_trips() {
+        let base = "<!-- agent:queue -->\n- do [#beta] original\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- do [#beta] OURS-VERSION\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:queue -->\n- do [#beta] THEIRS-VERSION\n<!-- /agent:queue -->\n";
+
+        let out = merge_with_markers(Some("1"), base, ours, theirs);
+        assert!(!out.fell_back, "marker must not break round-trip: {out:?}");
+        assert_eq!(out.conflicts.len(), 1, "one conflict: {:?}", out.conflicts);
+
+        // BOTH versions appear verbatim in the operator-visible surface.
+        assert!(
+            out.merged_text.contains("OURS-VERSION"),
+            "ours verbatim: {}",
+            out.merged_text
+        );
+        assert!(
+            out.merged_text.contains("THEIRS-VERSION"),
+            "theirs surfaced for operator resolution: {}",
+            out.merged_text
+        );
+        // The git-style conflict rails are present.
+        assert!(
+            out.merged_text.contains("<<<<<<< ours"),
+            "{}",
+            out.merged_text
+        );
+        assert!(out.merged_text.contains("======="), "{}", out.merged_text);
+        assert!(
+            out.merged_text.contains(">>>>>>> theirs"),
+            "{}",
+            out.merged_text
+        );
+        // The active/structural list line is still ours (no fabricated blend):
+        // the literal `- do [#beta] OURS-VERSION` line is intact.
+        assert!(
+            out.merged_text.contains("- do [#beta] OURS-VERSION\n"),
+            "ours stays the active list line: {}",
+            out.merged_text
+        );
+        // The marker is an HTML comment (framing-safe), so re-parsing yields the
+        // SAME single top-level queue component.
+        let parsed = component::parse(&out.merged_text).expect("merged doc parses");
+        let top: Vec<&str> = parsed.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(top, vec!["queue"], "component sequence unchanged: {top:?}");
+    }
+
+    /// (b) Gate ON: disjoint-region edits (opcapture clean) and single-side edits
+    /// produce NO conflict marker — only a genuine same-region overlap does.
+    #[test]
+    fn conflict_markers_on_no_marker_for_nonconflicting_edits() {
+        // Single-side edit: ours edits beta, theirs untouched.
+        let base = "<!-- agent:queue -->\n- do [#a] one\n- do [#b] two\n- do [#c] three\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- do [#a] one\n- do [#b] two EDITED\n- do [#c] three\n<!-- /agent:queue -->\n";
+        let out = merge_with_markers(Some("1"), base, ours, base);
+        assert!(!out.fell_back);
+        assert!(out.conflicts.is_empty(), "single-side edit is no conflict");
+        assert!(
+            !out.merged_text.contains("<<<<<<<"),
+            "no conflict marker for a single-side edit: {}",
+            out.merged_text
+        );
+
+        // Disjoint edits to DIFFERENT items: ours edits a, theirs edits c.
+        let theirs = "<!-- agent:queue -->\n- do [#a] one\n- do [#b] two\n- do [#c] three EDITED-T\n<!-- /agent:queue -->\n";
+        let ours2 = "<!-- agent:queue -->\n- do [#a] one EDITED-O\n- do [#b] two\n- do [#c] three\n<!-- /agent:queue -->\n";
+        let out2 = merge_with_markers(Some("1"), base, &ours2, theirs);
+        assert!(!out2.fell_back);
+        assert!(
+            out2.conflicts.is_empty(),
+            "different-item edits never conflict"
+        );
+        assert!(
+            !out2.merged_text.contains("<<<<<<<"),
+            "no marker for disjoint different-item edits: {}",
+            out2.merged_text
+        );
+        assert!(out2.merged_text.contains("one EDITED-O"));
+        assert!(out2.merged_text.contains("three EDITED-T"));
+
+        // Disjoint same-cell edits with opcapture ON: clean op-merge, no conflict,
+        // so the conflict-marker gate has nothing to surface.
+        {
+            let _g = ENV_LOCK.lock().unwrap();
+            let dbase = "<!-- agent:queue -->\n- do [#beta] the original answer body here\n<!-- /agent:queue -->\n";
+            let dours = "<!-- agent:queue -->\n- do [#beta] the EDITED answer body here\n<!-- /agent:queue -->\n";
+            let dtheirs = "<!-- agent:queue -->\n- do [#beta] the original answer body THERE!\n<!-- /agent:queue -->\n";
+            // SAFETY: single-threaded under ENV_LOCK; both restored before unlock.
+            unsafe {
+                std::env::set_var(CELL_MERGE_OPCAPTURE_ENV, "1");
+                std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, "1");
+            }
+            let out3 = merge_3way(dbase, dours, dtheirs);
+            unsafe {
+                std::env::remove_var(CELL_MERGE_OPCAPTURE_ENV);
+                std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
+            }
+            assert!(!out3.fell_back);
+            assert!(
+                out3.conflicts.is_empty(),
+                "opcapture-clean disjoint edits are no conflict: {:?}",
+                out3.conflicts
+            );
+            assert!(
+                !out3.merged_text.contains("<<<<<<<"),
+                "no marker when opcapture cleanly merges: {}",
+                out3.merged_text
+            );
+        }
+    }
+
+    /// (c) Gate ON: a strike-vs-unstrike lifecycle join is a lawful join, NOT a
+    /// conflict, so it produces NO conflict marker.
+    #[test]
+    fn conflict_markers_on_no_marker_for_lifecycle_join() {
+        let base = "<!-- agent:queue -->\n- ~~do [#abcd] x~~\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- do [#abcd] x\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:queue -->\n- ~~do [#abcd] x~~\n<!-- /agent:queue -->\n";
+
+        let out = merge_with_markers(Some("1"), base, ours, theirs);
+        assert!(!out.fell_back);
+        assert!(
+            out.conflicts.is_empty(),
+            "lifecycle join is never a conflict: {:?}",
+            out.conflicts
+        );
+        assert!(
+            !out.merged_text.contains("<<<<<<<"),
+            "no conflict marker for a lawful lifecycle join: {}",
+            out.merged_text
+        );
+        // The struck side still wins (anti-resurrection), unchanged by this rung.
+        let body = component_body(&out.merged_text, "queue");
+        assert!(body.contains("~~do [#abcd] x~~"), "{body}");
+    }
+
+    /// (d) Gate OFF (default): byte-identical to today — ours-wins, conflict only
+    /// on stderr, NO in-band marker.
+    #[test]
+    fn conflict_markers_off_byte_identical_to_today() {
+        let base = "<!-- agent:queue -->\n- do [#beta] original\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- do [#beta] OURS-VERSION\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:queue -->\n- do [#beta] THEIRS-VERSION\n<!-- /agent:queue -->\n";
+
+        // Explicitly OFF, and the no-marker baseline (flag absent) — must be equal.
+        let off = merge_with_markers(Some("0"), base, ours, theirs);
+        let absent = merge_with_markers(None, base, ours, theirs);
+        assert!(!cell_merge_conflict_markers_enabled(), "default OFF");
+        assert_eq!(
+            off.merged_text, absent.merged_text,
+            "OFF and absent must be byte-identical"
+        );
+        // Today's behavior: ours-wins, theirs not present, no marker.
+        assert!(off.merged_text.contains("OURS-VERSION"));
+        assert!(
+            !off.merged_text.contains("THEIRS-VERSION"),
+            "OFF: theirs not surfaced in-band: {}",
+            off.merged_text
+        );
+        assert!(
+            !off.merged_text.contains("<<<<<<<"),
+            "OFF: no conflict marker: {}",
+            off.merged_text
+        );
+        // And the conflict is still RECORDED (stderr surface) regardless of gate.
+        assert_eq!(off.conflicts.len(), 1, "conflict still recorded OFF");
+    }
+
+    /// Sub-gate truthy parsing + default-off, mirroring the sibling gate tests.
+    #[test]
+    fn conflict_markers_gate_default_off_and_truthy_parsing() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
+        }
+        assert!(!cell_merge_conflict_markers_enabled());
+        for v in ["1", "true", "on", "yes", "TRUE", " On "] {
+            unsafe {
+                std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, v);
+            }
+            assert!(cell_merge_conflict_markers_enabled(), "{v:?} should enable");
+        }
+        for v in ["0", "false", "off", "no", ""] {
+            unsafe {
+                std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, v);
+            }
+            assert!(
+                !cell_merge_conflict_markers_enabled(),
+                "{v:?} should NOT enable"
+            );
+        }
+        unsafe {
+            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
+        }
+    }
+
+    /// A conflict whose side text would itself perturb framing is NOT surfaced
+    /// in-band (stays stderr-only), and the doc still round-trips.
+    #[test]
+    fn conflict_markers_on_skips_framing_unsafe_side_text() {
+        // theirs' value carries a `-->` that would prematurely close the marker
+        // comment, so the marker is declined for safety.
+        let base = "<!-- agent:queue -->\n- do [#beta] original\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- do [#beta] OURS-VERSION\n<!-- /agent:queue -->\n";
+        let theirs =
+            "<!-- agent:queue -->\n- do [#beta] THEIRS with --> inside\n<!-- /agent:queue -->\n";
+
+        let out = merge_with_markers(Some("1"), base, ours, theirs);
+        assert!(!out.fell_back, "must still round-trip: {out:?}");
+        assert_eq!(out.conflicts.len(), 1, "conflict still recorded");
+        assert!(
+            !out.merged_text.contains("<<<<<<<"),
+            "framing-unsafe side must not be surfaced in-band: {}",
+            out.merged_text
+        );
+        // Ours-wins still holds.
+        assert!(out.merged_text.contains("OURS-VERSION"));
     }
 }

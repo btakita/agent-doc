@@ -555,6 +555,39 @@ fn entry_do_id(entry: &QueueEntry) -> Option<String> {
     }
 }
 
+/// All backlog `#id`s referenced on a single queue entry's text. A manually
+/// authored multi-id line (`[#a] [#b] [#c]`) references several ids; the
+/// backlog→queue mirror must treat **every** one of them as already-present so
+/// `sync_backlog_into_queue` does not re-add the trailing ids as duplicate
+/// `do [#id]` lines (#provauth2 — operator-authored multi-id lines must not be
+/// duplicated by the auto-add path). `do_prompt_id` (singular) only sees the
+/// first `#id`, which is the dedup gap that proliferated duplicates.
+fn do_prompt_ids(text: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut rest = text;
+    while let Some(marker) = rest.find('#') {
+        let after = &rest[marker + 1..];
+        let id: String = after
+            .chars()
+            .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+            .collect();
+        if !id.is_empty() {
+            ids.push(id.to_ascii_lowercase());
+        }
+        rest = after;
+    }
+    ids
+}
+
+/// Every backlog `#id` referenced on a queue entry (multi-id aware). See
+/// [`do_prompt_ids`] (#provauth2).
+fn entry_do_ids(entry: &QueueEntry) -> Vec<String> {
+    match entry {
+        QueueEntry::Prompt(p) | QueueEntry::Completed(p) => do_prompt_ids(&p.text),
+        _ => Vec::new(),
+    }
+}
+
 /// Build a single-line `do [#id]` queue prompt entry.
 fn do_prompt_entry(id: &str) -> QueueEntry {
     QueueEntry::Prompt(QueuePrompt {
@@ -581,8 +614,11 @@ pub fn sync_backlog_into_queue(
         .filter(|id| !id.is_empty() && seen.insert(id.clone()))
         .collect();
 
+    // Multi-id aware (#provauth2): a manually-authored `[#a] [#b] [#c]` line
+    // marks a, b AND c as present so the mirror never re-adds the trailing ids
+    // as duplicate `do [#id]` lines.
     let existing_ids: std::collections::HashSet<String> =
-        entries.iter().filter_map(entry_do_id).collect();
+        entries.iter().flat_map(entry_do_ids).collect();
 
     let new_entries: Vec<QueueEntry> = match mode {
         BacklogQueueSyncMode::Sync => {
@@ -2628,6 +2664,39 @@ mod tests {
             sync_backlog_into_queue(&entries, &ids(&["a"]), BacklogQueueSyncMode::Append).is_none(),
             "struck id should count as present"
         );
+    }
+
+    #[test]
+    fn append_mode_treats_multi_id_line_as_all_present() {
+        // #provauth2: a manually-authored multi-id line `[#a] [#b] [#c]` must
+        // mark a, b AND c as already-present, so the backlog→queue mirror does
+        // NOT re-add the trailing ids as duplicate `do [#id]` lines. Before the
+        // multi-id fix, only `a` (the first `#id`) counted, so b and c
+        // proliferated as duplicates on every preflight.
+        let entries = parse("- [#a] [#b] [#c]\n").unwrap();
+        assert!(
+            sync_backlog_into_queue(
+                &entries,
+                &ids(&["a", "b", "c"]),
+                BacklogQueueSyncMode::Append
+            )
+            .is_none(),
+            "every id on a multi-id line must count as present (no duplicate re-add)"
+        );
+    }
+
+    #[test]
+    fn append_mode_adds_only_the_genuinely_missing_id_past_a_multi_id_line() {
+        // The multi-id line covers a/b/c; only `d` is genuinely absent and is
+        // the single item appended.
+        let entries = parse("- [#a] [#b] [#c]\n").unwrap();
+        let synced = sync_backlog_into_queue(
+            &entries,
+            &ids(&["a", "b", "c", "d"]),
+            BacklogQueueSyncMode::Append,
+        )
+        .expect("a genuinely missing id should append");
+        assert_eq!(render(&synced), "- [#a] [#b] [#c]\n- do [#d]\n");
     }
 
     #[test]

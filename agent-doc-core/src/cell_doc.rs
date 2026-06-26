@@ -38,7 +38,9 @@
 //! used throughout `turn_scope` / `op_log` (e.g. `queue:0:beta:0`), where
 //! `item-id` is the durable child key.
 
-use lazily::{CellMap, CellTree, Context, DiffOp, TextCrdt, reconcile};
+use lazily::{
+    CellMap, CellTree, Context, DiffOp, SemTree, TextCrdt, apply_to_map, apply_to_tree, reconcile,
+};
 
 use crate::component::{self, Component};
 use crate::crdt::{
@@ -1568,6 +1570,35 @@ impl CellDocTree {
             .unwrap_or_default()
     }
 
+    /// Incrementally update this tree from `old_doc` to `new_doc`, using the
+    /// document diff + apply path instead of rebuilding every occurrence.
+    pub fn update_to(&mut self, ctx: &Context, old_doc: &str, new_doc: &str) {
+        for diff in diff_document(old_doc, new_doc) {
+            self.apply(ctx, &diff);
+        }
+
+        let new_occurrences: std::collections::HashSet<(String, usize)> = project_document(new_doc)
+            .into_iter()
+            .map(|occ| (occ.component, occ.occurrence))
+            .collect();
+        let existing: Vec<(String, usize)> = self.occurrences.keys().cloned().collect();
+        for (component, occurrence) in existing {
+            if !new_occurrences.contains(&(component.clone(), occurrence)) {
+                self.occurrences.remove(&(component.clone(), occurrence));
+                self.root
+                    .remove_child(ctx, &format!("{component}:{occurrence}"));
+            }
+        }
+    }
+
+    /// A small agent-doc semantic query over the reactive tree: unresolved
+    /// prompt counts per subtree, memoized by lazily's `SemTree`.
+    pub fn unresolved_prompt_counts(&self, ctx: &Context) -> SemTree<String, usize> {
+        SemTree::build(ctx, &self.root, |value: &String, kids: &[usize]| {
+            unresolved_prompt_count(value) + kids.iter().sum::<usize>()
+        })
+    }
+
     /// Apply a component diff's minimal ops to the corresponding occurrence's
     /// item cells, driving the reactive tree to the new shape with minimal
     /// invalidation (stable items untouched, moves atomic, only changed values
@@ -1583,31 +1614,16 @@ impl CellDocTree {
             .occurrences
             .entry(occ_key)
             .or_insert_with(|| CellMap::new(ctx));
-        for op in &diff.ops {
-            match op {
-                DiffOp::Remove { key } => {
-                    map.remove(ctx, key);
-                    occ_node.remove_child(ctx, key);
-                }
-                DiffOp::Insert { key, value, index } => {
-                    map.entry(ctx, key.clone(), value.clone());
-                    map.move_to(ctx, key, *index);
-                    occ_node.insert_child(ctx, key.clone(), value.clone());
-                    occ_node.move_child(ctx, key, *index);
-                }
-                DiffOp::Move { key, to } => {
-                    map.move_to(ctx, key, *to);
-                    occ_node.move_child(ctx, key, *to);
-                }
-                DiffOp::Update { key, value } => {
-                    map.set(ctx, key.clone(), value.clone());
-                    if let Some(child) = occ_node.child(key) {
-                        child.set(ctx, value.clone());
-                    }
-                }
-            }
-        }
+        apply_to_map(ctx, map, &diff.ops);
+        apply_to_tree(ctx, &occ_node, &diff.ops);
     }
+}
+
+fn unresolved_prompt_count(value: &str) -> usize {
+    value
+        .lines()
+        .filter(|line| line.contains("[#") && !line.contains("~~"))
+        .count()
 }
 
 #[cfg(test)]
@@ -1851,6 +1867,169 @@ agent_doc_format: template
             "a pure reorder must not invalidate the membership-count reader"
         );
         assert_eq!(ctx.get(&len_view), 3);
+    }
+
+    fn tree_snapshot(
+        ctx: &Context,
+        tree: &CellDocTree,
+    ) -> Vec<(String, usize, Vec<(String, String)>)> {
+        let mut occurrences: Vec<(String, usize)> = tree.occurrences.keys().cloned().collect();
+        occurrences.sort();
+        occurrences
+            .into_iter()
+            .map(|(component, occurrence)| {
+                let map = tree
+                    .occurrences
+                    .get(&(component.clone(), occurrence))
+                    .expect("occurrence map present");
+                let map_items: Vec<(String, String)> = map
+                    .keys(ctx)
+                    .into_iter()
+                    .map(|id| {
+                        let value = map.get(ctx, &id).expect("mapped value present");
+                        (id, value)
+                    })
+                    .collect();
+                let occ_id = format!("{component}:{occurrence}");
+                let occ_node = tree.root().child(&occ_id).expect("occurrence node present");
+                assert_eq!(
+                    occ_node.child_ids(ctx),
+                    map_items
+                        .iter()
+                        .map(|(id, _)| id.clone())
+                        .collect::<Vec<_>>(),
+                    "CellTree child order must match CellMap order for {occ_id}"
+                );
+                for (id, value) in &map_items {
+                    assert_eq!(
+                        occ_node.child(id).expect("child present").get(ctx),
+                        *value,
+                        "CellTree child value must match CellMap value for {id}"
+                    );
+                }
+                (component, occurrence, map_items)
+            })
+            .collect()
+    }
+
+    fn assert_incremental_matches_rebuild(ctx: &Context, tree: &CellDocTree, doc: &str) {
+        let rebuilt = CellDocTree::from_document(ctx, doc);
+        assert_eq!(tree_snapshot(ctx, tree), tree_snapshot(ctx, &rebuilt));
+    }
+
+    fn eager_unresolved_prompt_count(doc: &str) -> usize {
+        project_document(doc)
+            .into_iter()
+            .flat_map(|occ| occ.items.into_iter().map(|(_, value)| value))
+            .map(|value| unresolved_prompt_count(&value))
+            .sum()
+    }
+
+    #[test]
+    fn update_to_matches_rebuild_across_revisions() {
+        let ctx = Context::new();
+        let mut tree = CellDocTree::from_document(&ctx, DOC);
+        let mut old = DOC.to_string();
+
+        let rev1 = old.replace(
+            "- do [#beta] second task\n",
+            "- do [#beta] second task EDITED\n",
+        );
+        let rev2 = rev1.replace(
+            "- do [#alpha] first task\n- do [#beta] second task EDITED\n- do [#gamma] third task\n",
+            "- do [#gamma] third task\n- do [#alpha] first task\n- do [#beta] second task EDITED\n",
+        );
+        let rev3 = format!(
+            "{rev2}<!-- agent:review -->\n- do [#review] inspect\n<!-- /agent:review -->\n"
+        );
+        let rev4 = rev3.replace(
+            "<!-- agent:backlog -->\n- [#one] backlog item one\n- [#two] backlog item two\n<!-- /agent:backlog -->\n",
+            "",
+        );
+        let rev5 = rev4
+            .replace(
+                "- do [#alpha] first task\n",
+                "- do [#alpha] first task CHANGED\n",
+            )
+            .replace(
+                "- do [#review] inspect\n",
+                "- do [#review] inspect EDITED\n",
+            );
+
+        for new_doc in [rev1, rev2, rev3, rev4, rev5] {
+            tree.update_to(&ctx, &old, &new_doc);
+            assert_incremental_matches_rebuild(&ctx, &tree, &new_doc);
+            old = new_doc;
+        }
+    }
+
+    #[test]
+    fn sem_tree_unresolved_prompt_counts_are_subtree_scoped() {
+        use std::cell::Cell as StdCell;
+        use std::rc::Rc;
+
+        let ctx = Context::new();
+        let mut tree = CellDocTree::from_document(&ctx, DOC);
+        let counts = tree.unresolved_prompt_counts(&ctx);
+        assert_eq!(counts.value(&ctx), eager_unresolved_prompt_count(DOC));
+        assert_eq!(counts.node_value(&ctx, &"queue:0".to_string()), Some(3));
+        assert_eq!(counts.node_value(&ctx, &"backlog:0".to_string()), Some(2));
+
+        let queue_alpha_calls = Rc::new(StdCell::new(0usize));
+        let backlog_one_calls = Rc::new(StdCell::new(0usize));
+        let probe = SemTree::build(&ctx, tree.root(), {
+            let queue_alpha_calls = Rc::clone(&queue_alpha_calls);
+            let backlog_one_calls = Rc::clone(&backlog_one_calls);
+            move |value: &String, kids: &[usize]| {
+                if value.contains("#alpha") {
+                    queue_alpha_calls.set(queue_alpha_calls.get() + 1);
+                }
+                if value.contains("#one") {
+                    backlog_one_calls.set(backlog_one_calls.get() + 1);
+                }
+                unresolved_prompt_count(value) + kids.iter().sum::<usize>()
+            }
+        });
+
+        assert_eq!(probe.value(&ctx), 5);
+        let queue_alpha_baseline = queue_alpha_calls.get();
+        let backlog_one_baseline = backlog_one_calls.get();
+        assert_eq!(probe.value(&ctx), 5);
+        assert_eq!(
+            queue_alpha_calls.get(),
+            queue_alpha_baseline,
+            "memoized re-read must not recompute queue leaf"
+        );
+        assert_eq!(
+            backlog_one_calls.get(),
+            backlog_one_baseline,
+            "memoized re-read must not recompute backlog leaf"
+        );
+
+        let backlog_slot = probe.node(&"backlog:0".to_string()).unwrap();
+        let edited = DOC.replace(
+            "- do [#alpha] first task\n",
+            "- ~~do [#alpha] first task~~\n",
+        );
+        tree.update_to(&ctx, DOC, &edited);
+        assert!(
+            ctx.is_set(&backlog_slot),
+            "editing queue must not invalidate the backlog semantic subtree"
+        );
+        assert_eq!(probe.node_value(&ctx, &"queue:0".to_string()), Some(2));
+        assert_eq!(probe.node_value(&ctx, &"backlog:0".to_string()), Some(2));
+        assert_eq!(queue_alpha_calls.get(), queue_alpha_baseline + 1);
+        assert_eq!(
+            backlog_one_calls.get(),
+            backlog_one_baseline,
+            "backlog semantic leaf must stay cached after a queue edit"
+        );
+
+        let updated_counts = tree.unresolved_prompt_counts(&ctx);
+        assert_eq!(
+            updated_counts.value(&ctx),
+            eager_unresolved_prompt_count(&edited)
+        );
     }
 
     // ----- 3-way per-cell merge (`merge_3way`) -----------------------------

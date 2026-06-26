@@ -60,6 +60,19 @@ I added three prioritized backlog items. The top item is not another speculative
 - The local lazily-rs tree was already dirty before this triage (`src/lib.rs`, `src/reconcile.rs`); I did not change those files.
 - Latest GitHub Actions `CI` run is green: `completed/success`, workflow `CI`, branch `main`, run `28219001643`, at `2026-06-26T05:23:55Z`.
 - `make check` passed in `src/lazily-rs` through `tsift`/`rtk` digest runner (`tart-35a34af73d`, exit 0).
+- parent gitlink: `e4a354bdd lazily-rs: harden state machine tests`.
+- lazily-rs submodule: `1e50084 test: harden state machine regressions`, pushed to `lazily-hub/lazily-rs main`.
+- Latest GitHub Actions `CI` before this push was green: run `28219001643` on `main`.
+- `make check` via `tsift`/`rtk` digest runner, artifact `tart-b520b6cec8`, exit 0.
+- `cargo test --features async --test async_state_machine`
+- `cargo test --test state_machine --test thread_safe_state_machine`
+- `cargo fmt`
+- `AsyncStateMachine`: async `memo_async` stale-dependency cleanup, async observer dispose/recreate lifecycle, and concurrent Tokio send/read stress.
+- `ThreadSafeStateMachine`: the same stale-dependency and observer lifecycle coverage, plus concurrent send/read stress over cloned machines.
+- Single-threaded `StateMachine`: dynamic branch dependency cleanup and observer dispose/recreate lifecycle.
+- `tests/async_state_machine.rs`
+- `tests/thread_safe_state_machine.rs`
+- `tests/state_machine.rs`
 
 The highest engineering follow-up after that is `#lzsmstress`, focused on state-machine hardening across sync, thread-safe, and async machines. `#lzcrdtperms` is third because the distributed CRDT transport is the freshest complex surface and needs deterministic permission/fan-out/GC regressions.
 
@@ -83,7 +96,24 @@ The closeout is stuck because the route-owned supervisor is running a stale `age
 
 That recycle is queued, but it cannot take effect until this busy Codex pane reaches idle.
 
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=socket_ack_content patch_id=fe06846a-0199-479c-81fa-c767289dcbd9 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=11336 candidate_hash=119ae6df8e9164b465cff21a77a20345eb9496bb4eb692e5e1e9ee30b9ea2ce4 content_ours_len=11683 content_ours_hash=74ab20ce7451b9635ae1e8200c9192cdfc37e1b56c2db672d9eeea70279cc696 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782454922599
+```
+
 ### Re: #lzsmstress state-machine hardening — gpt-5
+
+> **Queue prompt:**
+>
+> [#lzcrdtperms]
+
 
 > **Queue prompt:** [#lzsmstress]
 
@@ -113,95 +143,32 @@ Commits:
 
 - lazily-rs submodule: `1e50084 test: harden state machine regressions`, pushed to `lazily-hub/lazily-rs main`.
 - parent gitlink: `e4a354bdd lazily-rs: harden state machine tests`.
-
-I left the pre-existing dirty lazily-rs files `src/lib.rs` and `src/reconcile.rs` unstaged and uncommitted. Confidence: high; this was test-only hardening and the full local suite passed. Escalation: none.
-
-### Re: #lzsmstress state-machine hardening — gpt-5
-
-> **Queue prompt:** [#lzsmstress]
-
-`#lzsmstress` is complete.
-
-Changed paths in `src/lazily-rs`:
-
-- `tests/state_machine.rs`
-- `tests/thread_safe_state_machine.rs`
-- `tests/async_state_machine.rs`
-
-Coverage added:
-
-- Single-threaded `StateMachine`: dynamic branch dependency cleanup and observer dispose/recreate lifecycle.
-- `ThreadSafeStateMachine`: the same stale-dependency and observer lifecycle coverage, plus concurrent send/read stress over cloned machines.
-- `AsyncStateMachine`: async `memo_async` stale-dependency cleanup, async observer dispose/recreate lifecycle, and concurrent Tokio send/read stress.
-
-Verification:
-
-- `cargo fmt`
-- `cargo test --test state_machine --test thread_safe_state_machine`
-- `cargo test --features async --test async_state_machine`
-- `make check` via `tsift`/`rtk` digest runner, artifact `tart-b520b6cec8`, exit 0.
-- Latest GitHub Actions `CI` before this push was green: run `28219001643` on `main`.
-
-Commits:
-
-- lazily-rs submodule: `1e50084 test: harden state machine regressions`, pushed to `lazily-hub/lazily-rs main`.
-- parent gitlink: `e4a354bdd lazily-rs: harden state machine tests`.
+- The next real queue head is `#lzcrdtperms`; release/publish queue text is operator-gated public-registry work and must not be auto-published without explicit go.
+- `CrdtPlaneRuntime::ingest` now folds `CrdtSync` frontier advertisements, including frontier-only frames; `wire_frontier` now advertises the plane's observed frontier so heartbeat/catch-up progress can drive GC.
+- parent gitlink: `aef3a7f15 lazily-rs: harden crdt sync tests`, pushed to `btakita/agent-loop main`.
+- lazily-rs submodule: `bce1802 test: harden crdt sync regressions`, pushed to `lazily-hub/lazily-rs main`.
+- Latest GitHub Actions `CI` before this push was green: `28221062403` at `2026-06-26T06:21:06Z`.
+- `make check` via `tsift`/`rtk`, artifact `tart-bce23a7c27`, exit 0.
+- `cargo test --features "distributed webrtc" bridge::tests::crdt_sync_fans_out_to_readers_only`
+- `cargo test --features "distributed webrtc" --test crdt_plane`
+- Added CRDT integration regressions for duplicate sync delivery through `BridgeHub`, frontier-only `SeqCrdt` tombstone GC, and `NodeKey`/`NodeId` churn on runtime ingest.
+- `BridgeHub` CRDT sync coverage now verifies mixed readable/unreadable peer fan-out filters each target independently and preserves frontier metadata.
+- `CrdtPlaneRuntime::ingest` now folds `CrdtSync` frontier advertisements, including frontier-only frames; `wire_frontier` now advertises the plane's observed frontier so heartbeat/catch-up progress can drive GC.
+- `src/lazily-rs/tests/crdt_plane.rs`
+- `src/lazily-rs/src/bridge.rs`
+- `src/lazily-rs/src/crdt_plane.rs`
+- No additional repo files were changed in this repair cycle.
+- Verification evidence is unchanged: targeted state-machine tests passed, `make check` passed via `tsift`/`rtk` artifact `tart-b520b6cec8`, and CI run `28219001643` was green before the push.
+- `#lzsmstress` remains complete: lazily-rs submodule commit `1e50084` was pushed, and parent gitlink commit `e4a354bdd` records it.
 
 I left the pre-existing dirty lazily-rs files `src/lib.rs` and `src/reconcile.rs` unstaged and uncommitted. Confidence: high; this was test-only hardening and the full local suite passed. Escalation: editor IPC repeatedly failed to preserve the response body, so this repair used the binary-owned force-disk commit path.
-
-### Re: closeout repair — gpt-5
-
-This cycle is recovery bookkeeping from the previous `#lzsmstress` closeout, not a new implementation request.
-
-I did not dispatch the planner-orchestrate suggestion because it pointed at already completed verification bullets from `#lzsmstress`; re-running them as 13 separate tasks would duplicate committed work.
-
-Current state:
-
-- `#lzsmstress` remains complete: lazily-rs submodule commit `1e50084` was pushed, and parent gitlink commit `e4a354bdd` records it.
-- Verification evidence is unchanged: targeted state-machine tests passed, `make check` passed via `tsift`/`rtk` artifact `tart-b520b6cec8`, and CI run `28219001643` was green before the push.
-- No additional repo files were changed in this repair cycle.
-- The next real queue head is `#lzcrdtperms`; release/publish queue text is operator-gated public-registry work and must not be auto-published without explicit go.
-
-Confidence: high. Escalation: none.
-
-### Re: #lzcrdtperms CRDT permission/runtime regressions — gpt-5
-
-> **Queue prompt:** [#lzcrdtperms]
-
-`#lzcrdtperms` is complete.
-
-Changed paths:
-
-- `src/lazily-rs/src/crdt_plane.rs`
-- `src/lazily-rs/src/bridge.rs`
-- `src/lazily-rs/tests/crdt_plane.rs`
-
-What changed:
-
-- `CrdtPlaneRuntime::ingest` now folds `CrdtSync` frontier advertisements, including frontier-only frames; `wire_frontier` now advertises the plane's observed frontier so heartbeat/catch-up progress can drive GC.
-- `BridgeHub` CRDT sync coverage now verifies mixed readable/unreadable peer fan-out filters each target independently and preserves frontier metadata.
-- Added CRDT integration regressions for duplicate sync delivery through `BridgeHub`, frontier-only `SeqCrdt` tombstone GC, and `NodeKey`/`NodeId` churn on runtime ingest.
-
-Verification:
-
-- `cargo test --features "distributed webrtc" --test crdt_plane`
-- `cargo test --features "distributed webrtc" bridge::tests::crdt_sync_fans_out_to_readers_only`
-- `make check` via `tsift`/`rtk`, artifact `tart-bce23a7c27`, exit 0.
-- Latest GitHub Actions `CI` before this push was green: `28221062403` at `2026-06-26T06:21:06Z`.
-
-Commits:
-
-- lazily-rs submodule: `bce1802 test: harden crdt sync regressions`, pushed to `lazily-hub/lazily-rs main`.
-- parent gitlink: `aef3a7f15 lazily-rs: harden crdt sync tests`, pushed to `btakita/agent-loop main`.
-
-I also rebuilt the stale local `agent-doc` binary/cdylib with `make install` and queued controller recycle to address closeout drift. Confidence: high. Escalation: none.
 
 ### Re: visible response absorption — gpt-5
 
 Absorbing the already-visible `#lzsmstress` and `#lzcrdtperms` response content through the binary-owned snapshot/commit boundary. No additional repository changes were made in this absorption step.
 
 The current completed work remains: `#lzsmstress` committed in lazily-rs `1e50084` and parent `e4a354bdd`; `#lzcrdtperms` committed in lazily-rs `bce1802` and parent `aef3a7f15`; full `make check` for the CRDT work passed with artifact `tart-bce23a7c27`.
-<!-- agent:boundary:9dc848db -->
+<!-- agent:boundary:6326c535 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -211,13 +178,14 @@ The current completed work remains: `#lzsmstress` committed in lazily-rs `1e5008
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#lzbugtriage]~~
-- ~~🚧 [#lzsmstress]~~
-- [#lzcrdtperms]
+- ~~[#lzsmstress]~~
+- ~~🚧 [#lzcrdtperms]~~
 - lazily-spec parity
 - lazily-kt parity
-- lazily-js parity
-- lazily-zig parity
-- lazily-py parity
+- release + publish
+- lazily-js parity + release + publish
+- lazily-zig parity + release + publish
+- lazily-py parity + release + publish
 <!-- /agent:queue -->
 
 ## Backlog

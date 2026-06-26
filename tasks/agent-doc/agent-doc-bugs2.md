@@ -51,7 +51,28 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=5763e16d-7cf8-4d26-9f7d-56ec49a3f151 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=111311 candidate_hash=5a7016ec672a4c0a0af21dd22a762e2da41c94e3a575a6fda749fe3c8227af29 content_ours_len=113340 content_ours_hash=f10b4b17efc726dd885def872cb187fe4c9984817b96c0bc57c2cc6c2d834ce8 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782513543058
 ```
-<!-- agent:boundary:0a943b14 -->
+
+### Re: distinguishing operator vs agent-doc authorship — operator actions must be authoritative — opus-4-8
+
+Yes — we can and should, and this is the **root of the whole bug class**, not three separate bugs. Today agent-doc does **not** record provenance; it *infers* it from content: snapshot↔working-tree diffing, the IPC source of a writeback, and content heuristics (`content_ours`, "looks like a manual cleanup", the stale-editor resurrection guards). Inference from content is what mistreats your edits.
+
+**Why each symptom is the same gap:**
+- *"I deleted items and they reappeared"* — the backlog→queue mirror (`sync_backlog_into_queue`) re-adds any active `queue`-attr backlog id that's *absent* from the queue. Absence is ambiguous: it can't tell "never added" from "operator deleted it," so your delete is undone next preflight. No tombstone records that the delete was an authoritative operator act.
+- *manual edits treated as suspicious* — content-cleanup/resurrection heuristics fire on text shape, not author.
+- *agent text in your queue* — whole-document `crdt::merge` splices console/response content into `agent:queue` (a console line of mine landed as a queue item again this turn).
+
+**The principle, stated as an invariant:** operator-origin text is authoritative — **never reset, never resurrected-after-delete, never flagged suspicious.** Provenance must be a recorded per-edit fact, not a content guess.
+
+**It's partly working already.** This very cycle the per-cell merge (#qcellmerge) hit a conflict on your "don't add duplicates" line and resolved it `chosen=ours (operator: resolve; ours kept active)` — it kept *your* content. The gaps: it leaks raw `<<<<<<< ours` conflict markers into the live queue, and agent content still reaches the queue cell at all.
+
+**The mechanism** is CRDT transaction-origin tagging: tag every yrs transaction `Operator` (editor DocumentListener delta over the #crdtauth IPC seam) / `Binary` (finalize/write/preflight) / `Mirror` (auto-sync), persist origin per delta, then enforce the invariant at the two mis-classification sites (recovery heuristics; the mirror). I filed the consolidated design at **`tasks/agent-doc/plan-operator-provenance-authority.md`** and queued four phases:
+- **#provauth2** (smallest standalone win — closes *both* your reports this cycle): operator-delete tombstones the mirror honors + dedup against all ids on a line so auto-add never duplicates. Can ship from snapshot-vs-working-tree operator deletes without full origin tagging.
+- **#provauth1**: the origin enum + tagging foundation.
+- **#provauth3**: replace `content_ours`/manual-cleanup/resurrection heuristics with origin checks (operator-origin ⇒ authoritative; content heuristics become the unknown-origin fallback only).
+- **#provauth4**: per-cell provenance (rides #qcellmerge) so agent content can never land in an operator cell.
+
+I did **not** hand-clean the conflict markers / leaked line now — the IPC listener is active and manual queue edits race it. #provauth2 is the right place to fix it properly. Want me to take #provauth2 in a focused cycle next?
+<!-- agent:boundary:f8845873 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -66,6 +87,14 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack
 - do [#f693]
 - do [#fpyh]
 - do [#818s]
+- do [#qheadstrikeauto]
+- do [#actorprune]
+- do [#suprestassoc]
+- do [#cdtcutover]
+- do [#qeditdup]
+- do [#crdtauth6]
+- do [#nsfz]
+- do [#kj5flive]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

@@ -56,7 +56,7 @@ Shipped the carousel **foundation + the lender and admin surfaces** this cycle (
 **`deploy` (next queue item):** held. This is a partial landing of a production feature; the EFS lender+admin increment is a clean, shippable change, but I did not auto-deploy. Say the word to `deploy` the increment now, or I'll deploy once the borrower + broker phases land.
 - Archived 1 response topic(s): mrh content
 - Prior summary/context: prior compacted content: Archived 12 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); Full Appli...
-<!-- agent:boundary:4eac59c4 -->
+<!-- agent:boundary:29e5b6cf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -76,14 +76,15 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~All deals in the borrower, broker, lender, and admin should have a carousel of uploaded images. If there is no image, then show a house placeholder.~~ — auto-struck: answered this cycle (#ftstrike)
-- deploy
+- 🚧 ~~All deals in the borrower, broker, lender, and admin should have a carousel of uploaded images. If there is no image, then show a house placeholder.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~deploy — auto-struck: completed by #do-id-closeout-open-backlog (#qftbklgstrike)~~
+- ~~do [#dealcarousel-borrower]~~
+- do [#dealcarousel-broker]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#dealcarousel-borrower] Deal photo carousel — borrower portal. borrower/loan_summary.tsx already carries deal_id; attach deal_photos_R_({deal_id, visibility:public}) to the loan_summary payload, add a borrower-scoped public deal-photo download route (mirror GET /api/investor/deal-photos/:id/download; authorize the borrower owns the loan deal), and render the shared <DealPhotoCarousel>. Plan: src/equityfundingsource-dev/prds/deal-photo-carousel.md.
 - [ ] [#dealcarousel-broker] Deal photo carousel — broker portal. broker/my_pipeline.tsx BrokerDeal.loan_id resolves to an investment_deal; attach public photos to the broker pipeline payload, add a broker-scoped public deal-photo download route (authorize the broker represents the deal), and render the shared <DealPhotoCarousel>. Plan: src/equityfundingsource-dev/prds/deal-photo-carousel.md.
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->

@@ -641,7 +641,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=31017729-037f-41d6-81c6-f182fd883e24 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=96600 candidate_hash=8f4a0204d3967030d37e8485c3c87856978ab7e9ad139f66a5e8f4936ba2d23a content_ours_len=95702 content_ours_hash=5a19e1328dc6605f387253ec992b75d839ad4d42d86cdc45eeb6af1d115be85a doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782505781797
 ```
-<!-- agent:boundary:ff422871 -->
+<!-- agent:boundary:b2a4de25 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -651,7 +651,7 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack
 - ~~When I restarted the equityfundingsource.md supervisor, equityfundingsource.md was re-associated with the agent-doc-bugs2.md claudesession.~~
 - 🚧 :pushpin: do [#qeditdup]
 - "● Response committed (af759a5cf), but the answered free-text head wasn't auto-struck (the 🚧 prefix blocked the
-  exact-text match). session-check wants it struck. Let me find the strike flag and strike it.": The agent-doc binary should do this automatically...not the agent. As I was typing in this prompt, a 3-way merge occurred. I also have characters from a previous word I typed in deleted. Consistent CRDT issues.
+  exact-text match). session-check wants it struck. Let me find the strike flag and strike it.": The agent-doc binary should do this automatically...not the agent. As I was typing in this prompt, a 3-way merge occurred. I also have characters from a previous word I typed in deleted. Consistent CRDT issues. Is this a lazily-rs issue?
 - :pushpin: do [#crdtauth6]
 - :pushpin: do [#nsfz]
 - :pushpin: do [#kj5flive]
@@ -661,6 +661,8 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack
 - do [#cdtcutover]
 - do [#actorprune]
 - do [#suprestassoc]
+- do [#crdtsvdom]
+- do [#qheadstrikeauto]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -687,6 +689,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#crdtsvdom] #agent-doc-bug HIGH live-typing data-loss — the #crdtlivedrop residual is still live on 0.34.52. ops.log proof (session b26b9957): every cycle in the operator typing burst took crdt_merge_base_overlay_rebuilt (discard-to-baseline); overlay_ahead_preserved never fired, including 20:35:15 where overlay (96633B) was LARGER than baseline (96632B). overlay_carries_unbaselined_content (snapshot.rs:1138) classifies ahead/behind by markdown line-string multiset, so it misses pure deletions (overlay subset of baseline) AND additive within-line edits on lines that duplicate another baseline line. Replace with yrs state-vector dominance (plan line 505). Plan: tasks/agent-doc/plan-crdt-overlay-live-keystroke-preservation.md
+- [ ] [#qheadstrikeauto] #agent-doc-feature auto-strike answered free-text head WITHOUT requiring the agent to quote it as a > **Queue prompt:** blockquote — operator: "the binary should do this automatically...not the agent". Today strike_answered_free_text_queue_heads (queue_consume.rs) only fires on a blockquote/prose-prefix match, so a head answered in plain prose is never struck. Key the strike off the binary drain-target / in-progress (the marker) head identity for the cycle instead of agent prose formatting. Plan: tasks/agent-doc/plan-freetext-queue-head-autostrike.md
 - [ ] [#actorprune] #agent-doc-feature auto-prune dead actor records: `admin list` shows 251 actors, ~all `(dead) closed pid=? session=session-clear`; gc only closes `Starting` actors (project_controller.rs:1716), nothing removes long-dead `Closed` records so they accumulate unbounded. Add prune_dead_actors (lease-guarded) + wire into gc + one-shot prune for the current backlog. Plan: tasks/agent-doc/plan-prune-dead-actors.md
 - [ ] [#suprestassoc] #agent-doc-bug restart-supervisor re-associates the wrong doc: restarting the equityfundingsource.md supervisor re-bound EFS to the agent-doc-bugs2.md claude session. Actor re-register/lease-replace likely keys on pane/session not (document_id,generation) across the shared project controller. Needs live repro; fix = scope re-association to the restarted doc only + regression. Plan: tasks/agent-doc/plan-restart-supervisor-doc-reassociation.md
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.

@@ -25,6 +25,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 complete
 <!-- /agent:status -->
 
@@ -95,7 +96,27 @@ This head is **🚧 held**, so I did not drain it — the three gaps are filed a
 **lazily-js:** orthogonal to this task — these are Markdown diagrams. lazily only matters under path (b): runtime *reactive* FSM cells (state in a `lazily` cell, derived guards/UI as derived cells). For documenting states it adds nothing; for code, model a pure transition function first and layer lazily on the client as a deliberate, separate dep-add.
 
 **"deploy":** no-op — nothing code-bearing changed this cycle.
-<!-- agent:boundary:968f66e7 -->
+
+### Re: State machine(s) of lender deal states — gaps closed (doc-only) — opus-4-8
+
+Proceeded with the safe default (doc-only — my standing recommendation, and a prerequisite for any later FSM-code path). Closed the three lender-deal-state gaps in `src/equityfundingsource-dev/docs/master-state-machine.md §5`, each as a mermaid `stateDiagram-v2` + a status-model index row, cited to the migrations:
+
+1. **Funding commitment** — `funds.status` `pending → active` (lender commits amount+account+vesting → admin confirms wire → `AddLoanFunding` to TMO, stores `tmo_funding_rec_id`). `migrations/0044`.
+2. **Lender proposal sub-state** — `no_proposal → proposed → revised ⇄ read → borrower_selected`, derived from `proposal_submitted_at` / `proposal_updated_at` / `proposal_update_read_at` / `borrower_selected_at`. `migrations/0085` + `0094`. (Flags the `#proprate` "default rate must not persist as finalized" caveat.)
+3. **Lending group + allocation** — `lending_groups.status` (active/archived) and `lending_group_members.status` (invited/active/declined/removed); `lending_group_deal_allocations.allocation_bps` is a 0–10000 per-(group,deal,member) **share attribute**, not a state column (modeled accurately as such). `migrations/0090`.
+
+§4 (deal states) was already current — left as-is.
+
+**Shipped:** EFS `main` `362e1ae` (pushed; rebased over concurrent remote work), superproject pointer bumped `f98a45135`. Doc-only — no tests/build affected.
+
+### Re: deploy — no-op this cycle — opus-4-8
+
+> **Queue prompt:**
+>
+> deploy
+
+Nothing to deploy: the change is `docs/master-state-machine.md`, a documentation file that is **not** part of the deployed Worker bundle, so there is no worker behavior to ship. (The last code deploy remains the messages-focus fix.) If you want the lender state machines as **runtime FSM code** rather than docs — the path where `lazily-js` would actually apply — say so and I'll scope that as a separate, deployable change.
+<!-- agent:boundary:3fd03208 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,8 +137,8 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~Please create state machine(s) of all deal states.~~
-- ~~Please create state machine(s) of lender deal states.~~ — auto-struck: answered this cycle (#ftstrike)
-- deploy
+- 🚧 ~~Please create state machine(s) of lender deal states.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~deploy — auto-struck: completed by #do-id-closeout-open-backlog (#qftbklgstrike)~~
 <!-- /agent:queue -->
 
 ## Backlog

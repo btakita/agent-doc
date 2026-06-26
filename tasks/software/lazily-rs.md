@@ -74,7 +74,21 @@ No transport yet (that's `#lzcrdtplane3`); both types are gated behind `feature 
 **Next:** `#lzcrdtplane2` (expose registers via `MergeMechanism`) is queued in the backlog as the next actionable phase; `#lzcrdtplane` stays gated in review until the plane is complete.
 
 Note: I committed only `src/lazily-rs` and its gitlink — the unrelated dirty `src/agent-doc` submodule (`cell_doc.rs`/`crdt.rs`) belongs to a different active session, so I left it untouched.
-<!-- agent:boundary:9a02bc98 -->
+
+### Re: go [#lzcrdtplane] — Phase 2 (expose registers via MergeMechanism) — opus-4-8
+
+Landed **Phase 2 (`#lzcrdtplane2`)** of the distributed CRDT cell plane. Shipped to `origin/main` (lazily-rs `78185f2`, superproject `57808de9a`); `make check` green.
+
+**`MergeMechanism::Lww` promoted reserved → implemented.** `is_implemented`/`resolve` now accept both `Crdt` and `Lww`; `Ot`/`Lease`/`Custom` stay fail-closed.
+
+**New `RegisterCrdt: CellCrdt` trait** with `const MECHANISM`, mapping each register to the `merge:` selector: `LwwRegister` → `Lww`; `MvRegister`/`PnCounter` → `Crdt` (concurrency-retaining shapes are the general coordination-free mechanism).
+
+**`ReplicatedCell` is mechanism-aware** — its `MERGE` const derives from the backing register (`C::MECHANISM`) instead of a hardcoded `Crdt`, plus a `mechanism()` accessor and a constructor per mechanism: `ReplicatedCell::{lww, multi_value, counter}`.
+
+**Property tests (proptest)** prove LWW / PN-counter / `StampFrontier` merges are commutative, associative, idempotent semilattices. The LWW law required modeling the real invariant that a *stamp uniquely identifies a write* (equal stamps carry equal values) — the first run surfaced a false counterexample where two writes shared a stamp but differed in value (unrealizable); the value is now a function of the stamp. 11 new/updated tests.
+
+**`#lzcrdtplane3`** (op log + delta exchange) is queued in the backlog as the next actionable phase; canonical 5-phase tracker stays `tasks/software/plan-lazily-distributed-crdt-plane.md`. I also removed the `go` token from the queue marker so the plane isn't auto-drained — each phase runs on your `go`.
+<!-- agent:boundary:37cb18b3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -83,6 +97,7 @@ Note: I committed only `src/lazily-rs` and its gitlink — the unrelated dirty `
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- 🚧 do [#6qtj]
 <!-- /agent:queue -->
 
 ## Backlog

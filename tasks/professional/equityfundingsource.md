@@ -153,7 +153,21 @@ Done — all three, shipped and deployed.
 Note: the standalone `/admin/loans/:id` page has a second select surface (`loan_detail.tsx`) whose row type doesn't carry the requirements field and isn't wired to the confirm dialog — I scoped the warning to the deal dialog (the surface from your URL). If you want the same warning there too, say so and I'll thread the data + confirm through it.
 
 Live-eyeball: deal `4046fa5a` → loan tab → Select proposal on Brian's interest → the soft warning should appear; confirm → it selects.
-<!-- agent:boundary:ed9537d6 -->
+
+### Re: Make the Select-proposal warning passive (no dialog) — opus-4-8
+
+> **Request (chat):** Remove the "Lender requirements incomplete" dialog when selecting a proposal. The warning should be more passive. deploy.
+
+Done — dialog removed, passive warning kept, deployed.
+
+Removed the `confirm_` block from `deal_detail.tsx` `select_interest_`, so clicking **Select proposal** no longer pops a confirm. Selecting a lender with incomplete lender-pipeline steps stays non-blocking. The warning is now fully **passive** — the lender card already renders, right next to the Select action, amber badges: **"Requirements: {label}"** (turns amber when requirements are unmet) and **"TMO account not linked"**, plus the "Lender account: Not linked" field in amber. The admin sees the gap at a glance without any interruption. Readiness still gates funding/wire-confirm later.
+
+**Verification:** `bun test` → **1329 pass / 0 fail**; `bun run build` + `build:worker` clean.
+
+**Shipped:** EFS `main` `3d76f3c..f1df6dc` (pushed); worker **deployed** — version `60ac57f7-4cfa-4136-84cc-6d94354b77d8` at https://equityfundingsource.brian-takita.workers.dev. Superproject pointer `d7c308c41`.
+
+Live-eyeball: deal `4046fa5a` → loan tab → Select proposal on Brian's interest → it selects immediately (no dialog); the amber "Requirements: Not started" / "TMO account not linked" badges remain visible on the card.
+<!-- agent:boundary:07a2c4d0 -->
 <!-- /agent:exchange -->
 ###
 <!--

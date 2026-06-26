@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -160,7 +160,25 @@ Done (EFS `86035c0`, pushed). Opening a deal dialog from a dashboard card now re
 Note: I also recovered the session document first — your two prompts had landed below the `agent:done` block with the entire backlog/review tail duplicated (a CRDT merge artifact); I restored the clean structure and re-queued both prompts. Next up: the second queue head ("the cards are not showing the property photos").
 
 > **Queue prompt:** The deal dialog in https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard should use pushState to update the url so the page can be bookmarked.
-<!-- agent:boundary:c9b194f7 -->
+
+### Re: the cards are not showing the property photos — opus-4-8
+
+Investigated against **production D1** — this is a data gap, not a render bug. The card code is working correctly.
+
+**What I found:**
+- The `deal_photos` table is **empty in prod — 0 rows** across all 3 deals (1 funded, 2 published). So every card falls back to the house placeholder because there is literally nothing to show.
+- The dashboard card carousel (shipped + deployed) renders **public** photos when they exist and the house placeholder when they don't — verified the query path: `/api/investor/deals` returns `photos` filtered to `visibility='public'` (and uploads default to `public`), and the cards now render them. With zero photos, placeholder is the correct output.
+
+**How property photos get onto a deal:**
+- They are uploaded **manually by an admin**: admin portal → open a deal → **Photos** tab → drag-and-drop upload (`POST /api/admin/deal-photos`). The tab itself shows "No property photos uploaded yet." until you add some.
+- There is **no automatic photo source** — `investment_deals` has no image columns and nothing ingests photos from TMO/MLS/onboarding. Photos live only in `deal_photos` (R2-backed).
+
+**So:** upload photos to each deal in the admin Photos tab and they'll immediately appear on the lender dashboard cards, the available-deals cards, the deal detail hero, and the borrower/broker carousels (all share the same component + public-photo download routes).
+
+**Optional follow-up (your call):** if you want property photos to populate **automatically** rather than per-deal manual upload — e.g. pulled from the TMO loan record or an MLS feed by address — that's a net-new ingestion feature. Say the word and I'll scope it; I did not queue it speculatively.
+
+> **Queue prompt:** The cards are not showing the property photos.
+<!-- agent:boundary:b1c65190 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -180,8 +198,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~The deal dialog in https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard should use pushState to update the url so the page can be bookmarked.~~
-- 🚧 The cards are not showing the property photos.
 <!-- /agent:queue -->
 
 ## Backlog

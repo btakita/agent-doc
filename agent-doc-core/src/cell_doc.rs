@@ -151,6 +151,17 @@ fn make_node_key(component: &str, occurrence: usize, item_id: &str, index: usize
     format!("{component}:{occurrence}:{item_id}:{index}")
 }
 
+/// True when an occurrence projected to the reserved single whole-body item
+/// (unsplittable / non-item component — `split_keyed_children` returned `None`)
+/// rather than real keyed children. The keyed compose is only sound when ours
+/// and theirs agree on splittability; a body-only-vs-keyed mismatch mirrors the
+/// legacy `reconcile_component_body` `split(...)?` guard (either side
+/// unsplittable ⇒ whole-component leaf merge).
+fn is_body_only(occ: &ComponentOccurrence) -> bool {
+    occ.items.len() == 1
+        && occ.items[0].0 == make_node_key(&occ.component, occ.occurrence, "body", 0)
+}
+
 /// The reorder-stable identity of a node key: everything but the trailing
 /// `:index`. Two revisions of the same item (same component/occurrence/item-id)
 /// share this even if the item moved, so the keyed diff matches them.
@@ -1005,6 +1016,33 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
                     occurrence: t_occ, ..
                 },
             ) => {
+                // Splittability parity with the legacy `reconcile_component_body`
+                // (`#qcellmerge1` finalize-path parity): keyed reconciliation is
+                // only sound when ours AND theirs both project to real keyed
+                // children. When one side splits into keyed children (e.g. an
+                // `exchange` carrying a `### Re:` response on the agent/ours side)
+                // but the other projects to the reserved single whole-body item
+                // (no `### Re:` yet on the live/disk side), pairing a `body` item
+                // against `preamble`/`### Re:` items is unsound: the body item is
+                // present-only-on-one-side, so the weave keeps it verbatim ALONGSIDE
+                // the keyed side's items — duplicating the prompt and retaining the
+                // stale `<!-- agent:boundary:… -->` marker that ours replaced. A
+                // whitespace-only body item contributes nothing and is harmless
+                // (the keyed side wins cleanly — e.g. a fresh `### Re:` against an
+                // empty exchange), so only a body item carrying real content forces
+                // the fallback. The legacy `split(ours)? / split(theirs)?` guard
+                // leaf-merges the whole component here; mirror that by falling back
+                // so the caller runs the legacy whole-doc / per-node merge unchanged.
+                if is_body_only(o_occ) != is_body_only(t_occ) {
+                    let body_only_side = if is_body_only(o_occ) { o_occ } else { t_occ };
+                    let body_only_has_content = body_only_side
+                        .items
+                        .iter()
+                        .any(|(_, value)| !value.trim().is_empty());
+                    if body_only_has_content {
+                        return CellMergeOutcome::fallback();
+                    }
+                }
                 let base_occ = base_by_key
                     .get(&(o_occ.component.clone(), o_occ.occurrence))
                     .copied();
@@ -1696,6 +1734,61 @@ agent_doc_format: template
         }
         assert!(legacy.contains("<!-- agent:queue -->"));
         assert!(legacy.contains("first task X"));
+    }
+
+    /// `#qcellmerge1` finalize-path parity: when ours projects the `exchange`
+    /// into keyed `### Re:` children (the agent placed a response) but theirs is
+    /// still a single whole-body item carrying a live prompt + the stale boundary
+    /// (no `### Re:` yet), the keyed compose would weave theirs' body in verbatim
+    /// alongside ours' items — duplicating the prompt and keeping the stale
+    /// `<!-- agent:boundary:base1234 -->` marker that ours replaced. The
+    /// splittability-mismatch guard must fall back so the caller runs the legacy
+    /// whole-component leaf merge (which drops the stale boundary).
+    #[test]
+    fn keyed_exchange_vs_body_only_with_content_falls_back() {
+        let base = "<!-- agent:exchange -->\n\
+❯ Please reply\n\
+<!-- agent:boundary:base1234 -->\n\
+<!-- /agent:exchange -->\n";
+        // OURS: the agent's boundary-aware append replaced the boundary with a
+        // `### Re:` response + a fresh boundary (keyed children).
+        let ours = "<!-- agent:exchange -->\n\
+❯ Please reply\n\
+### Re: answer\n\nDone.\n\n\
+<!-- agent:boundary:fresh5678 -->\n\
+<!-- /agent:exchange -->\n";
+        // THEIRS: the operator typed another line before the old boundary; still
+        // no `### Re:`, so it projects to one whole-body item with real content.
+        let theirs = "<!-- agent:exchange -->\n\
+❯ Please reply\n\
+while I was typing the next queue item\n\
+<!-- agent:boundary:base1234 -->\n\
+<!-- /agent:exchange -->\n";
+
+        let out = merge_3way(base, ours, theirs);
+        assert!(
+            out.fell_back,
+            "keyed-vs-body-only-with-content exchange must fall back to the legacy leaf merge"
+        );
+        assert!(out.merged_text.is_empty());
+    }
+
+    /// Counterpart: a keyed-vs-body-only mismatch where the body-only side is
+    /// EMPTY (a fresh `### Re:` against an empty exchange) is harmless — the keyed
+    /// side wins cleanly, so the per-cell path must NOT fall back.
+    #[test]
+    fn keyed_exchange_vs_empty_body_only_does_not_fall_back() {
+        let base = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        let ours =
+            "<!-- agent:exchange -->\n### Re: answer\nResponse body.\n<!-- /agent:exchange -->\n";
+        let theirs = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+
+        let out = merge_3way(base, ours, theirs);
+        assert!(
+            !out.fell_back,
+            "an empty body-only exchange must stay on the per-cell path"
+        );
+        assert!(out.merged_text.contains("Response body."));
     }
 
     #[test]

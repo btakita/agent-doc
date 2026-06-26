@@ -178,7 +178,37 @@ Investigated against **production D1** — this is a data gap, not a render bug.
 **Optional follow-up (your call):** if you want property photos to populate **automatically** rather than per-deal manual upload — e.g. pulled from the TMO loan record or an MLS feed by address — that's a net-new ingestion feature. Say the word and I'll scope it; I did not queue it speculatively.
 
 > **Queue prompt:** The cards are not showing the property photos.
-<!-- agent:boundary:2a1bed48 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=483d11b9-c333-42f4-abbb-5953691ff91e invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782444283594
+```
+
+### Re: the borrower also uploads photos — use the borrower uploaded photo too — opus-4-8
+
+Done (EFS `e468759`, pushed). Per your **auto-publish to public** choice, borrower-uploaded **Property Photos** now appear as public deal photos on every portal's cards/carousels, merged after the admin `deal_photos`.
+
+This is also the real reason your cards looked empty: prod has **2 borrower-uploaded `dt_photos` PNG property photos** but `deal_photos` (admin) is empty — the cards only pulled admin photos. Now they pull both, so those 2 will show once deployed.
+
+**What I built** (`#borrowerpropphotos`):
+- New shared `app/equityfundingsource/lib/borrower-property-photos.ts`: reads borrower **Property Photos** (`dt_photos`, **image files only**) from `loan_documents`, joined `investment_deals.loan_id = loan_documents.loan_id`. Photo ids namespaced `bp_<loan_document_id>` (disjoint from admin `deal_photos` ids) for download routing.
+- **Merged into** investor marketplace list + deal detail, borrower loan summary, broker pipeline `photos` (admin first, borrower appended).
+- **Download routes:** each portal's `/api/{investor,borrower,broker}/deal-photos/:id/download` branches `bp_` ids and serves R2 bytes **only when the portal owns the deal/loan** (investor: deal visible; borrower: `loans.user_id`; broker: `broker_deals.broker_user_id`) — pure unit-tested `borrower_property_photo_download_allowed_` (image AND owned).
+- **Image-only** enforced in SQL, JS re-check, and the download predicate; non-image / other-category docs never exposed.
+
+**Spec + tests:** `prds/deal-photo-carousel.md` updated; 17 pure unit + 6 portal-merge tests. `bun run check` green — **1268 tests pass**, builds clean. Pushed to `origin/main`.
+
+**Deploy:** held per your `🚧 deploy`. Ready via `bun run deploy:worker` — the 2 existing borrower PNGs appear once deployed. Accepted trade-off: every borrower Property Photo image is instantly public to anyone who can see the deal.
+
+> **Queue prompt:** The borrower also uploads photos. Use the borrower uploaded photo as well.
+<!-- agent:boundary:357142c8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -198,9 +228,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- 🚧 deploy
-- The borrower also uploads photos. Use the borrower uploaded photo
-- The borrower also uploads photos. Use the borrower uploaded photo as well.
+- ~~deploy~~
+- ~~The borrower also uploads photos. Use the borrower uploaded photo as well.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

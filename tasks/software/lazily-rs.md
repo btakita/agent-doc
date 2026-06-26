@@ -502,7 +502,40 @@ Implemented the agent-doable slice of `#lztombgc` — the **local, stability-gat
 **Verification:** 6 new tests (3 `SeqCrdt`, 3 `TextCrdt`); `make check` green — `fmt`, `clippy --all-targets --all-features -D warnings`, full feature matrix, Lean spec model, benchmark check, doctests. SPEC.md §Distributed + lazily-spec `cell-model.md` gained tombstone-GC conformance.
 
 **Closeout:** `#2ygp` → **done** (compaction mechanism complete, tested, shipped). Wiring `SeqCrdt::gc` / `TextCrdt::gc_with` into the live anti-entropy loop lands inside #lzcrdtplane when that plane is built — filed as `#lztombgcwire` `[recommended]`.
-<!-- agent:boundary:83048481 -->
+
+### Re: Cut timing, intervening edits, and cross-item paste — opus-4-8
+
+> **Queue prompt:** Explain how a cut, long pause, paste is handled. Or cut, some other changes are made, then paste. How about cut a queue item, paste into another queue item then edit (delete `- ` prefix).
+
+Three cases, and they sharpen the same anchored-vs-free-text line.
+
+**1. Cut → long pause → paste.** Elapsed time is irrelevant to the CRDT — there is no clipboard TTL and no clock dependence on *how long* you wait. What matters is how the **editor** models "cut":
+
+- **Deferred-move model (identity-preserving):** "cut" parks the node's stable `Id` in the clipboard and emits **nothing** to the CRDT yet; "paste" emits a single atomic `Move` of that `Id` to the paste point. The node keeps value + dependents + lineage no matter the pause. This is the right model for keyed nodes, and it's what `#lzcellmove` exists to make possible.
+- **Delete-now / insert-later model:** "cut" tombstones immediately and "paste" re-inserts. During the pause the node is *gone* for every concurrent reader. On paste, `SeqCrdt`'s LWW-revivable tombstone lets it be an un-tombstone + move (identity kept); `TextCrdt`'s sticky tombstone cannot revive, so a text cut-then-paste is a fresh insert (new `OpId`s). So the pause is harmless; the identity question is the editor's cut representation, not the delay.
+
+**2. Cut → intervening edits → paste.** The paste position is resolved **at paste time against the current tree**. Move ops mint a fractional-index `Position` between whatever live neighbours bracket the paste point *now*, so intervening inserts/moves/deletes simply change which neighbours exist — the move still lands correctly (and if the chosen neighbour was deleted meanwhile, it resolves against the nearest survivors, exactly like a concurrent insert). Two independent guarantees hold: (a) the moved node's **identity** survives (it's a `Move` of the same `Id`, not delete+insert); (b) if the node *itself* was value-edited during the interim, the **position** register and the **value** register are independent LWW, so the move and the edit both apply. Robust by construction.
+
+**3. Cut a queue item → paste into another queue item → delete the `- ` prefix.** This is the agent-doc-specific case, and it deliberately **crosses the anchored→free-text boundary**:
+
+- While it's a list item, the cut item `A` is a keyed node (`component:occurrence:item-id:index` node_key) with lineage. Pasting *into* item `B` and deleting `A`'s `- ` marker **dissolves `A` as a keyed item** — its text becomes prose inside `B`.
+- Keyed reconciliation therefore sees `remove(A)` + `update(B)`: `A`'s key retires, `B`'s text now contains the pasted characters as **new `OpId`s** in `B`'s `TextCrdt`. `A`'s per-cell lineage **ends here — by design**: you erased the marker that gave `A` item-identity, so there is nothing left to preserve it by (the session's "it's text, identity isn't inherent" floor, made concrete).
+- Concurrency caveat: if another writer edited `A` while you absorbed it into `B`, those edits land on the now-retired `A` node and don't follow the text into `B` — unless the editor models the absorb as a **text-level move** (re-home `A`'s characters into `B`'s buffer), which is the heavier primitive. The default honest behaviour is: demoting a keyed item to prose is a structural rewrite at that node, and identity stops at the rewrite.
+
+```mermaid
+flowchart LR
+    subgraph Before
+      A["queue item A<br/>(keyed node, lineage)"]
+      B["queue item B<br/>(keyed node)"]
+    end
+    A -- "paste text into B" --> B2["B' text += A's chars<br/>(new OpIds in B's TextCrdt)"]
+    A -- "delete '- ' prefix" --> R["A's key retires<br/>remove(A)"]
+    B2 --> Out["reconcile: remove(A) + update(B)<br/>A's lineage ends; B absorbs prose"]
+    R --> Out
+```
+
+**Net:** timing never breaks anything; intervening edits resolve at paste time with identity + value independent; and dissolving a keyed item into another's prose is the one case that *intentionally* drops lineage — because deleting the `- ` prefix deletes the identity.
+<!-- agent:boundary:5b966a90 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -514,7 +547,7 @@ Implemented the agent-doable slice of `#lztombgc` — the **local, stability-gat
 - ~~I looked at Tombstones. Please address "In set CRDTs like the Two-Phase Set (2P-Set), a separate "tombstone set" tracks removed elements to ensure removals take precedence over additions during state merges." and "While tombstones solve the "TP2 puzzle" in operational transformation and ensure convergence without central coordination, they lead to memory bloat.  Some systems implement specialized garbage collection protocols to safely remove tombstones only when all replicas are confirmed to be aware of the deletion."~~
 - ~~How can cut + paste be handled? How is undo handled?~~
 - ~~do [#2ygp]~~
-- Explain how a cut, long pause, paste is handled. Or cut, some other changes are made, then paste. How about cut a queue item, paste into another queue item then edit (delete `- ` prefix).
+- ~~Explain how a cut, long pause, paste is handled. Or cut, some other changes are made, then paste. How about cut a queue item, paste into another queue item then edit (delete `- ` prefix).~~
 - do [#r86a]
 <!-- /agent:queue -->
 

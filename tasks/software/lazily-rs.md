@@ -87,8 +87,8 @@ Written, built, committed, and pushed. New post: **"A Spreadsheet at Google-Shee
 - `briantakita.me-dev` → `c99471e` (gitlink)
 - agent-loop superproject → `d68025ba5` (gitlink)
 
-Remaining queue heads: **deploy briantakita.me**, **draft a LinkedIn teaser**.
-<!-- agent:boundary:8f6675ab -->
+Two queue heads remain: the site deploy and the social teaser draft.
+<!-- agent:boundary:19e8605b -->
 <!-- /agent:exchange -->
 ###
 <!--

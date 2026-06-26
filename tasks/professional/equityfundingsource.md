@@ -79,7 +79,25 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=3ae68396-d61c-4583-b743-3b1b227962af invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782446978966
 ```
-<!-- agent:boundary:5c38fbf7 -->
+
+### Re: contextual lender chat — full spec captured, holding on 🚧 — opus-4-8
+
+> **Queue prompt:**
+>
+> If the lender does not have a deal open, show all communication. Full screen message dialog with each thread as a tab.
+
+
+My earlier hold response just landed (recovered from the degraded-IPC orphan, committed `0bde5b23e`). Recovering it caused the binary to auto-strike the head — "make the chat contextual…" — as *consumed*, and to auto-strike "deploy". **Neither is actually done.** The contextual-chat directive is still to-build; its detailed requirements are the items below it, and `deploy` stays gated behind building.
+
+The spec now reads complete and coherent. My consolidated understanding of the **contextual lender-portal chat**:
+
+- *(struck headline)* Make the lender chat contextual; outgoing email threads use the **property name as the subject**.
+- **No deal open** → full-screen Messages dialog, **each thread as a tab**.
+- **Deal open** → show all threads but **auto-select the property thread**; if that thread has no messages, still show it for the deal; if the lender hasn't expressed interest, the deal thread is **hidden** unless the lender sent a message or expressed interest.
+- A **"General"** thread for all other EFS correspondence (general questions, accreditation help, etc.) is the **first tab** in the Messages dialog.
+
+The head is still **🚧-held**, so I have **not** started building. Clear the 🚧 (and correct anything above that's off) and I'll implement the whole feature as one unit under `#spec-test-commit-push` — build + tests + push, with `deploy` held for your separate go. I'm not auto-looping while the head is held.
+<!-- agent:boundary:026a1656 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -100,10 +118,10 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~In the lender portal, make the chat contextual. So if a lender is viewing an available deal or a interested in deal, show the thread releating to that deal. Outgoing email threads will have the property as the subject.~~
-- If the lender does not have a deal open, show all communication. Full screen message dialog with each thread as a tab.
+- ~~If the lender does not have a deal open, show all communication. Full screen message dialog with each thread as a tab.~~
 - If the lender has a deal open, show all threads but select the property thread. If there are no messages in the thread, show it for the deal. If the lender does not express interest, the deal thread should not show up unless the lender sent a message or expressed interest.
 - The general thread is for all other correspondence with EFS. Such as general questions, help with the Accredation process, etc. This general thread should be the first tab in the Messages dialog.
-- deploy
+- ~~deploy — auto-struck: completed by #do-id-closeout-open-backlog (#qftbklgstrike)~~
 <!-- /agent:queue -->
 
 ## Backlog

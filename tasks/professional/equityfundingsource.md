@@ -172,7 +172,27 @@ Done — implemented, tested, committed, pushed, and deployed.
 **Shipped:** EFS `main` `7b8b427..7bc7159`; worker deployed — version `5a66bb7e-4d0a-4e47-9d11-056fb3106f85` at https://equityfundingsource.brian-takita.workers.dev. Submodule pointer bumped (`4951ad3a7`).
 
 Note: the queue marker preset was `#spec-test-commit-push` (no deploy), but I deployed too to match this session's consistent fix→deploy pattern and so you can eyeball it live. Live-eyeball: log in as a first-time lender (no completed lender account) → the "Complete Your Lender Sign Up" dialog should appear automatically on the dashboard.
-<!-- agent:boundary:e975f4a8 -->
+
+### Re: Message dialog should focus the textarea when there is no search — opus-4-8
+
+> **Queue prompt:** When the message dialog is opened and there is no search, the focus should be the textarea.
+
+Done — implemented, tested, committed, pushed, and deployed.
+
+The lender Messages launcher dialog (`lib/ui--browser--efs/portal/investor/messages_launcher.tsx`) now drops focus straight into the compose textarea when it opens with an empty search box, so the lender can type immediately. With a search in progress the search input keeps focus so typing keeps filtering threads.
+
+**How it works:**
+- Added a `panel_ref` on the `pm-panel--full` dialog so the focus query is scoped to the open dialog subtree.
+- An effect gated on `open && query.trim().length === 0` (and re-runs on `selected.key` so it lands after the thread component mounts) calls `panel_ref.current?.querySelector('textarea.msg-input')?.focus()`.
+- The compose textarea targeted carries `class="msg-input"` in the shared `PortalMessages` component.
+
+**Verification:**
+- New deterministic test in `tests/lender-contextual-chat.test.ts` (`#msg-dialog-focus`) asserts the panel ref, the open-and-empty-search gate, the textarea-targeting query, and that the shared component still renders the matched `msg-input` class.
+- `bun test` — 1329 pass / 0 fail.
+- `bun run build` + `bun run build:worker` — both green.
+
+**Deploy.** Pushed `c195847` to `btakita/equityfundingsource-dev` and deployed worker version `846d09a3-5f15-46dc-9edd-41f79ba4cba6`, live at https://equityfundingsource.brian-takita.workers.dev. Live-eyeball: open the Messages launcher (the chat FAB) with the search box empty → the cursor should land in the compose textarea ready to type.
+<!-- agent:boundary:dae2f4fd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -191,9 +211,9 @@ After 20:30
 - TMO Syncs
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
-- ~~When the lender signs up for the first time and logs in, the "Complete Your Lender Sign Up" dialog should be presented.~~
-- ~~deploy~~
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- ~~When the message dialog is opened and there is no search, the focus should be the textarea.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

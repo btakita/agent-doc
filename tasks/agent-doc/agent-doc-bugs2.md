@@ -531,7 +531,24 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=0567fc1f-b1dd-4530-83bb-66aefd690eda invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=80176 candidate_hash=6e09e32aaa2e802d7253ca954ce52d53f40523cd1012cf5132e8339b9bb71739 content_ours_len=83648 content_ours_hash=41d22d7da00cd61df41634cbc749cc49c05040894cb2c0f0125ba590d482a62e doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782498073183
 ```
-<!-- agent:boundary:a25c3b8f -->
+
+### Re: #crdtlivedrop — fix shipped — opus-4-8
+
+Fixed and committed (agent-doc submodule `078ae2d0`, **0.34.49 → 0.34.50**, `make check` = **5411 passed**). Built test-first in an isolated worktree, reviewed the diff myself, then applied to main.
+
+**Sharper root cause than first diagnosed:** the silent loss is *not* the downstream `merge()` — that already recovers keystrokes from `theirs` (the live buffer). The loss is `rebuild_overlay_crdt_locked(&path, fallback_markdown)` **wiping the live overlay sidecar down to baseline** (`snapshot.rs`). That sidecar feeds op-capture and the next cycle's merge base, so your just-typed `model: opus` lines vanished from it. Plain string inequality (`overlay != baseline`) conflated *overlay-behind* (older → correct to discard) with *overlay-ahead* (newer live keystrokes → dropping them is the bug).
+
+**The fix:**
+- New `overlay_carries_unbaselined_content` classifies ahead vs behind by **line-multiset containment** — the overlay is *ahead/concurrent-divergent* if it holds any non-empty line the baseline lacks.
+- **Ahead:** the live overlay sidecar is **left intact** (merge base stays the committed baseline — the true common ancestor of `ours`=response and `theirs`=live buffer, so both survive, no old-content replay). New `crdt_merge_base_overlay_ahead_preserved` marker + `OverlayAheadPreserved` source.
+- **Behind:** unchanged baseline-wins, but now logs `overlay_discarded_bytes file=… overlay_len=… baseline_len=… first_diff_offset=…` so a discard is **never silent again** (directly serves your "production bugs must be immediately visible" directive).
+
+**Dogfood loop / `#crdtedgetests`:** the 8-case matrix is in `snapshot::tests` (overlay ahead-by-1-char, ahead-by-frontmatter-block = your exact repro, strictly-behind+logged, concurrent-divergent, empty-doc-first-keystroke, rapid-burst, decode-error, frontmatter-edit-during-exchange-convergence). Cases 1–3 were **red before the fix, green after** — the regression class is now CI-gated.
+
+**One honest residual** (filing as `#crdtdelonly`): a pure-*deletion* live edit (removes a baseline line, adds nothing) racing a finalize is still classified "behind" and discarded — indistinguishable from staleness without shared CRDT causal history. Far rarer than additive typing; the conservative choice avoids ever resurrecting genuinely stale content. Tracked for a follow-up that threads real causal clocks (the `#qcellmerge1` per-cell substrate).
+
+**Next:** I'll `make install-full` 0.34.50 + `admin recycle` so your live editor gets the fix (doing it *after* this commit to avoid a finalize-time `live_prompt_drift`), then push to origin. `#suprecyclespin` (the recycle spin-loop code fix / `#midturnresumeb` Phase B) stays open — I cleared today's wedge operationally by killing the stuck supervisor, but auto-resolving a stalled `inflight=0` cycle is its own cycle.
+<!-- agent:boundary:fb249b06 -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -136,7 +136,7 @@ I audited `ops.log` (3.6M lines) + the `.agent-doc/state` markers against each o
 I did not file new backlog items or touch the queue (avoiding the edit-during-turn churn you flagged) — this is the log-side audit you asked for; the two recommendations above are yours to act on. No agent-drainable heads remain after this one (the other four are your live-test gated items), so the in-session loop stops here.
 
 > ⚠️ Note: preflight flagged the route-owned **supervisor (pid 328292) is running a STALE binary** (launched 0.34.48, newer installed) — it can keep producing File Cache Conflict / IPC-drift dialogs that would muddy your live #kj5flive / #qeditdup repros. I'll `admin recycle` it after this commit so you test against the fresh binary.
-<!-- agent:boundary:9901e3a5 -->
+<!-- agent:boundary:a6f4e556 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -145,6 +145,7 @@ I did not file new backlog items or touch the queue (avoiding the edit-during-tu
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 [#cdtcutover]
 - ~~look in logs to see if we can verify [operator-verify] items in the backlog~~ — auto-struck: answered this cycle (#ftstrike)
+- It is now very difficult to type in the JB editor. Seems there may be performance issues.
 - do [#qftloss]
 - do [#qeditdup]
 - do [#crdtauth6]

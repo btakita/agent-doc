@@ -150,7 +150,21 @@ Decision: **Both — local substrate now, distributed plane later.** Landed the 
 **Scope split preserved:** local `TextCrdt`/`SeqCrdt` is the single-host editor↔agent op-merge engine; `#lzcrdtplane` (HLC op-log delta exchange over the wire) stays the future multi-writer-over-wire home as a separate lazily-rs review item — adopting it now would block this rung on 5 unimplemented network phases for zero single-host benefit.
 
 **Next rung — `#qnodemerge5` (conflict-surfacing):** the irreducible same-region overlap remainder is intentionally still ours-wins+logged. That safety-net rung surfaces *both* versions to the operator instead of silently picking one. Say **"go conflict"** for it. (Caveat carried: `char_span_edit` collapses each side's change to one contiguous span — fine for front-vs-back disjoint edits; a finer multi-run diff only matters if #qnodemerge5 wants tighter overlap granularity.)
-<!-- agent:boundary:4555594c -->
+
+### Re: do [#qcellconflict] — conflict-surfacing rung landed — opus-4-8
+
+Done. The irreducible same-region overlap that opcapture leaves as silent ours-wins is now **operator-visible**, never a fabricated blend.
+
+**Landed** (`celltree-percell-merge` @ `46a5a76d`, default-off):
+- When the merge records a genuine same-region `Content` conflict (both sides edited the same span of one cell, same lifecycle level, `op_level_merge` returned `None`), it now surfaces **both versions verbatim** in an in-band HTML-comment marker appended after the conflicted node — `ours` stays the active/structural line, `theirs` shown for resolution (`<!-- cell-merge-conflict … <<<<<<< ours … ======= … >>>>>>> theirs -->`).
+- **Framing-safe by construction:** the marker's inner text starts with `cell-merge-conflict` (NOT an `agent:` prefix) so `component::parse` treats it as an ordinary comment — it can't change the component-name sequence or create a keyed item. Double backstop: a `marker_is_framing_safe` guard keeps any side-text containing `<!-- agent:`/`-->` stderr-only, and `merge_3way`'s existing re-parse net still sets `fell_back` if framing ever broke.
+- Gate `AGENT_DOC_CELL_MERGE_CONFLICT_MARKERS` (default **OFF**, sibling of the opcapture gate — opcapture *shrinks* the conflict set, this *surfaces* the remainder; they compose). Deterministic, ours-before-theirs, no clocks.
+- 6 new tests; `cell_doc` **38/38** + full `make check` **5353** green. No install/recycle/push.
+
+This closes the agent-doable cell-path accuracy ladder: disjoint same-cell edits auto-merge (opcapture), and the genuine same-region remainder surfaces both versions instead of silently picking — the plan's "100% accuracy by refusing to guess."
+
+**Remaining = operator-gated only:** the whole cell-merge stack (`#qcellmerge1` opcapture + `#qcellconflict`, 7 commits on `celltree-percell-merge`) is default-OFF, not merged/installed. Flipping any gate to default-ON needs your live zero-drift proof + the merge-to-main/install decision (the `#qcm1verify` track, under the release-freeze). Higher layers can also echo `CellMergeOutcome.conflicts` into `agent:exchange` later if you want the conflict mirrored there too.
+<!-- agent:boundary:ae8030c2 -->
 <!-- /agent:exchange -->
 
 ## Queue

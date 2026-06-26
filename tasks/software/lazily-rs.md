@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 3d9ff8e4-bafd-4e1f-b48d-550d3c976904
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -104,6 +104,16 @@ Landed **Phase 3 (`#lzcrdtplane3`)** of the distributed CRDT cell plane — the 
 - **`CrdtSync { frontier, ops }`** — a stamp-frontier advertisement + op batch (anti-entropy; bounded, idempotent, resumable). Round-trips JSON/MessagePack/postcard; classified by the FFI kind (`CrdtSync = 3`); `filter_readable` drops non-readable ops (omission, not redaction) while retaining the frontier metadata.
 - **`CrdtOp { node, key: Option<NodeKey>, stamp, state }`** — one state-based (CvRDT) op: converged register/seq/text state + the optional wire-stable `NodeKey` (`#lzwirekey`).
 - **`WireStamp { wall_time, logical, peer }`** — a plain-integer mirror of `HlcStamp`, so the wire format is codec-stable and usable whether or not a peer compiles the `distributed` feature in.
+- **`SPEC.md` §Distributed** — documents the runtime-integration layer.
+- **`Makefile` + `.github/workflows/ci.yml`** — new `test-crdt-plane` target (`--features "distributed webrtc"`), a combo no existing target exercised.
+- **`tests/crdt_plane.rs`** — end-to-end **two-replica convergence over the real `webrtc` `IpcSink`/`IpcSource` transport**: concurrent LWW writes converge to the higher-stamp value, a derived slot on the receiver recomputes (proving the remote op drives the reactive graph), the stability watermark arms once both peers are observed, and re-delivery is a no-op.
+- **`src/bridge.rs`** — `BridgeHub::poll` now fans `CrdtSync` frames out to the other peers, re-filtered to each target's read allowlist (frontier advertisement retained), beside the existing single-writer `Delta` routing.
+- **`src/crdt.rs`** — lossless `HlcStamp ↔ WireStamp` conversion (the `distributed`+`ipc` boundary 5a deferred here) + `StampFrontier::iter`.
+  - **`sync_frame` / `sync_frame_since` / `sync_reply`** — stamp-frontier-advertised anti-entropy frames shipping only the ops a peer is missing.
+  - **`ingest`** — folds each not-yet-seen `CrdtOp` into its target replica via `ReplicatedCell::merge_remote` (driving downstream derived slots) and advances the clock + stamp frontier so the watermark + Seq/Text GC stay sound; idempotent (the `OpLog` dedups by stamp).
+  - **`local_update`** — ticks the plane `Hlc`, mutates the typed cell, records the converged state in the `OpLog`, returns the `CrdtOp` to broadcast.
+  - **Registry** of `ReplicatedCell` root cells addressed by `NodeId` + optional wire-stable `NodeKey` (producer projection, `#lzwirekey`).
+- **`src/crdt_plane.rs` — `CrdtPlaneRuntime`** (gated `distributed` + `webrtc`), the live glue between the plane primitives and a reactive graph's `merge: crdt` root cells:
 
 **The anti-entropy protocol:** requester advertises its frontier → responder `missing_since` → requester `apply_remote`. `Op` is application-defined (a register write, a `SeqCrdt`/`TextCrdt` edit). Convergence holds because every CRDT this drives is itself commutative/associative/idempotent, so out-of-order, duplicated, or batched delivery all self-heal.
 
@@ -155,27 +165,14 @@ Affected component: editor IPC / writeback
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=b33bef9b-a012-4fc9-b867-f6c1e33a66b7 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=19301 candidate_hash=a9c42396835a162182af3e3e7c5864235ee2218b4177322dcf38b348aacd2419 content_ours_len=19262 content_ours_hash=b4ccff96ad64b71cef90c33efa7443a52738abc5d13182b26d64ef0a15e1cebf doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782448077745
 ```
 
-### Re: go lzcrdtplane5b — opus-4-8
+### Re: finish last turn on lazily-rs.md — gpt-5
 
-Done — **`#lzcrdtplane5b` (FINAL phase of `#lzcrdtplane`)** is implemented, `make check`-green, committed, and pushed. This completes Phase 5 / the whole distributed CRDT plane.
+Finished the interrupted closeout. The missing prior response was the `#lzcrdtplane5b` completion: lazily-rs commit `920c786` (`crdt: runtime integration of the distributed CRDT plane (#lzcrdtplane5b)`) is present on `main`, and the superproject gitlink commit `c83159653` is already in history. `src/lazily-rs` is clean from this cycle.
 
-**What landed** (lazily-rs `920c786`, superproject gitlink `c83159653`):
+I treated the recovered Phase 5 bullet list as closeout drift, not as a new ten-way orchestration request. No Rust code changed in this repair cycle. I also requested `agent-doc admin recycle tasks/software/lazily-rs.md` so the stale route-owned supervisor recycles at its next idle boundary instead of continuing to produce IPC/file-cache drift.
 
-- **`src/crdt_plane.rs` — `CrdtPlaneRuntime`** (gated `distributed` + `webrtc`), the live glue between the plane primitives and a reactive graph's `merge: crdt` root cells:
-  - **Registry** of `ReplicatedCell` root cells addressed by `NodeId` + optional wire-stable `NodeKey` (producer projection, `#lzwirekey`).
-  - **`local_update`** — ticks the plane `Hlc`, mutates the typed cell, records the converged state in the `OpLog`, returns the `CrdtOp` to broadcast.
-  - **`ingest`** — folds each not-yet-seen `CrdtOp` into its target replica via `ReplicatedCell::merge_remote` (driving downstream derived slots) and advances the clock + stamp frontier so the watermark + Seq/Text GC stay sound; idempotent (the `OpLog` dedups by stamp).
-  - **`sync_frame` / `sync_frame_since` / `sync_reply`** — stamp-frontier-advertised anti-entropy frames shipping only the ops a peer is missing.
-- **`src/crdt.rs`** — lossless `HlcStamp ↔ WireStamp` conversion (the `distributed`+`ipc` boundary 5a deferred here) + `StampFrontier::iter`.
-- **`src/bridge.rs`** — `BridgeHub::poll` now fans `CrdtSync` frames out to the other peers, re-filtered to each target's read allowlist (frontier advertisement retained), beside the existing single-writer `Delta` routing.
-- **`tests/crdt_plane.rs`** — end-to-end **two-replica convergence over the real `webrtc` `IpcSink`/`IpcSource` transport**: concurrent LWW writes converge to the higher-stamp value, a derived slot on the receiver recomputes (proving the remote op drives the reactive graph), the stability watermark arms once both peers are observed, and re-delivery is a no-op.
-- **`Makefile` + `.github/workflows/ci.yml`** — new `test-crdt-plane` target (`--features "distributed webrtc"`), a combo no existing target exercised.
-- **`SPEC.md` §Distributed** — documents the runtime-integration layer.
-
-**Verification:** `make check` green — `fmt`, `clippy --all-features -D warnings`, every test suite (incl. the new `test-crdt-plane` with 332 passing under the combo), the Lean formal model, and `benchmark-check`. CI run `28219001643` is in progress; closing on local evidence.
-
-All four backlog deliverables are covered: plane↔`merge:crdt` cell wiring, `NodeKey` producer projection, `BridgeHub` CrdtSync fan-out, and the two-replica-over-transport convergence test. The remaining `agent:review` items are operator-gated publishes (queue stays paused).
-<!-- agent:boundary:983d0628 -->
+The queue remains stopped/operator-gated on the publish/live-validation review items; there is no agent-drainable work left in this document.
+<!-- agent:boundary:542440b5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -184,10 +181,6 @@ All four backlog deliverables are covered: plane↔`merge:crdt` cell wiring, `No
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- ~~do [#6qtj]~~
-- ~~do [#pw1c]~~
-- ~~do [#g638]~~
-- ~~do [#te9j]~~
 <!-- /agent:queue -->
 
 ## Backlog

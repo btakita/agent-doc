@@ -154,7 +154,7 @@ Confirmed (code + deploy), live-eyeball is yours.
 **Deploy.** Already deployed — the address-label fix shipped in worker version `f2e6e59f-6dc6-4eed-9248-5d7f9c5d1073` (and the modal-context fix before it in `3337a6e1`), both live at https://equityfundingsource.brian-takita.workers.dev. No newer uncommitted code exists, so there is nothing further to push or deploy this cycle.
 
 The only remaining step is the live browser confirmation (operator-gated): open deal `866e1c5a` → Available Deal dialog → Messages FAB → the tab should read the full street address.
-<!-- agent:boundary:e4298555 -->
+<!-- agent:boundary:2c3b2e6b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -175,9 +175,9 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~This was not implemented or deployed: https://equityfundingsource.brian-takita.workers.dev/lenders/deals/866e1c5a-e428-4b35-bacb-a58f5d94b7da > Available Deal dialog > Messages should show + select the available deal conversation thread. Same with a Deal I'm Interested In.~~
-- ~~The message tab for the deal should show the entire address of the street.~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 ~~The message tab for the deal should show the entire address of the street.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~Confirming you are showing the property address in the message tab.~~ — auto-struck: answered this cycle (#ftstrike)
-- deploy
+- ~~deploy~~
 <!-- /agent:queue -->
 
 ## Backlog

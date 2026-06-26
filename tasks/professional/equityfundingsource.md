@@ -219,7 +219,19 @@ Deployed. The borrower-property-photos feature (`e468759`) is now **live in prod
 The **2 existing borrower-uploaded `dt_photos` PNG property photos** now appear as public deal photos on the lender dashboard/marketplace cards (and borrower/broker carousels) — closing the loop on "the cards are not showing the property photos." Going forward, any image a borrower files under **Property Photos** is auto-published as a public deal photo (the trade-off you chose).
 
 > **Queue prompt:** deploy
-<!-- agent:boundary:6a80483e -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=f9eedbbe-320d-4720-9bca-2856e0b7378a invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782446080826
+```
+<!-- agent:boundary:9f21b3b7 -->
 <!-- /agent:exchange -->
 ###
 <!--

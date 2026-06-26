@@ -609,14 +609,34 @@ Checked git before reciting a deferral (re-pin rule). The read-side code work is
 3. Live editor/pane zero-regression proof (FCC/IPC-drift watch).
 
 **Housekeeping this cycle:** the route-owned host supervisor (pid 124146, started 13:04) is mapping a **stale binary** vs the installed 0.34.51 (mtime 15:40) — confirmed by timestamps, matching the preflight `supervisor_binary_stale` warning. It will keep re-firing `[focused-cycle]` heads over the stale binary, so I'm issuing a non-disruptive `agent-doc admin recycle` after this finalize (idle-boundary re-exec onto the installed binary). Not looping — only `[focused-cycle]`/`[operator-verify]` heads remain.
-<!-- agent:boundary:555016bf -->
+
+### Re: dead-actor pruning + restart-supervisor re-association (post-recycle triage) — opus-4-8
+
+> **Queue prompt:**
+>
+> I did `agent-doc admin list` and I see 60 actors...most of them dead. Can we automatically prune dead actors?
+>
+> When I restarted the equityfundingsource.md supervisor, equityfundingsource.md was re-associated with the agent-doc-bugs2.md claudesession.
+
+**Session state first:** the recycle landed — pid 124146 `execve`'d in place onto `0.34.52` (`/proc/124146/exe` inode == installed inode, `supervisor:fresh`), so the `#recycledeadlock` fix is live and IPC is healthy again. This cycle committed cleanly through the socket, which is the proof.
+
+Both of your questions are real, distinct bugs. I diagnosed both and queued them as plan-backed items; I'm **not** building+installing them in this same turn, because another `make install-full` right after the recovery would re-stale the live supervisor (newer client vs running build) and risk re-wedging the session you just got back. They each get a focused cycle that can safely install.
+
+**1. Auto-prune dead actors — `#actorprune` (confirmed, worse than you saw).** `admin list` is now at **251** actors, essentially all `(dead) … closed pid=? session=session-clear`. Root cause: `gc.rs` only runs `close_stale_starting_actors` (`project_controller.rs:1716`) — it *transitions* `Starting` actors but never *removes* records already `Closed`/dead, so the store grows unbounded. Fix: a lease-guarded `prune_dead_actors` (never prunes a record with a fresh/alive supervisor lease), wired into `gc` + a one-shot to clear the current 251. Plan: `tasks/agent-doc/plan-prune-dead-actors.md`.
+
+**2. restart-supervisor re-associates the wrong doc — `#suprestassoc` (bug).** Restarting EFS's supervisor re-bound `equityfundingsource.md` to the `agent-doc-bugs2.md` claude session. Multiple docs share one project controller, and the actor re-register / lease-replace path (a newer register replacing a `Closed` actor "for the same pane", README §271) likely matches too broadly — keying re-association on pane/session instead of strictly `(document_id, generation)`. Needs a live repro under ops-log capture to confirm the binding key; fix = scope re-association to the restarted doc only + a regression. Plan: `tasks/agent-doc/plan-restart-supervisor-doc-reassociation.md`.
+
+**Leftover corruption (FYI, not blocking).** The wedge committed some CRDT-replay garble into HEAD before the recycle: cdtcutover fragments are reverse-spliced into the `### Re: #5e8k/#fma0/#v6b3` section, and the `### Re: do [#cdtcutover]` section mis-quotes the "prune dead actors" prompt (which is why that prompt was struck without a real answer — now answered above). It's cosmetic committed prose; I left HEAD history intact rather than rewrite it. Say the word and I'll clean those sections via a `write --commit` repair.
+
+Remaining explicit queue heads are all operator-verify / focused-cycle (`#qeditdup`/`#crdtauth6`/`#nsfz`/`#kj5flive`/`#2y8j`/`#cdtcutover`), so I'm not auto-looping — `#actorprune` and `#suprestassoc` are the new actionable work.
+<!-- agent:boundary:5207576c -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~I did `agent-doc admin list` and I see 60 actors...most of them dead. Can we automatically prune dead actors?~~
-- When I restarted the equityfundingsource.md supervisor, equityfundingsource.md was re-associated with the agent-doc-bugs2.md claudesession.
+- 🚧 When I restarted the equityfundingsource.md supervisor, equityfundingsource.md was re-associated with the agent-doc-bugs2.md claudesession.
 - :pushpin: do [#qeditdup]
 - :pushpin: do [#crdtauth6]
 - :pushpin: do [#nsfz]
@@ -624,6 +644,9 @@ Checked git before reciting a deferral (re-pin rule). The read-side code work is
 - ~~do [#fma0]~~
 - ~~do [#v6b3]~~
 - do [#2y8j]
+- do [#cdtcutover]
+- do [#actorprune]
+- do [#suprestassoc]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -650,6 +673,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#actorprune] #agent-doc-feature auto-prune dead actor records: `admin list` shows 251 actors, ~all `(dead) closed pid=? session=session-clear`; gc only closes `Starting` actors (project_controller.rs:1716), nothing removes long-dead `Closed` records so they accumulate unbounded. Add prune_dead_actors (lease-guarded) + wire into gc + one-shot prune for the current backlog. Plan: tasks/agent-doc/plan-prune-dead-actors.md
+- [ ] [#suprestassoc] #agent-doc-bug restart-supervisor re-associates the wrong doc: restarting the equityfundingsource.md supervisor re-bound EFS to the agent-doc-bugs2.md claude session. Actor re-register/lease-replace likely keys on pane/session not (document_id,generation) across the shared project controller. Needs live repro; fix = scope re-association to the restarted doc only + regression. Plan: tasks/agent-doc/plan-restart-supervisor-doc-reassociation.md
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
 - [ ] [#qeditdup] [operator-verify] Queue items duplicated + manually-struck/deleted items resurrected when the operator edits the queue during an active turn. #queuestatemachine idempotent convergence + the Live<Struck lattice (merged, 0.34.48) should resolve this — VERIFY on the recycled binary; if it persists live, a deeper editor-edit-during-cycle guard is needed. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md

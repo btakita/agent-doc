@@ -55,7 +55,21 @@ Your queue prompt — *use lazily Cell Family / CellGraph to reactively model th
 **Why I'm not landing it in this drain cycle:** it replaces agent-doc's live merge path, which is supervisor-critical — the established safe path is an isolated worktree + focused cycle, not a live edit to the merge core mid-session-drain. The plan sequences the remaining phases (`#lzseqcrdt` move-aware order, `#lzstableid` manufactured identity, `#lzsemtree` memoized semantic tree, `#lztextcrdt` free-text CRDT) each as its own plan-first / test / commit unit.
 
 **Concrete next step** (its own focused cycle): build the agent-doc `document → CellTree` projection keyed on the existing anchors + a `reconcile`-based per-item differ as an **additive** module (leaving `crdt::merge` in place behind it), with deterministic tests, in an `src/agent-doc-*-wt` worktree — no install/recycle/push. Say "go" and I'll kick that off in an isolated worktree.
-<!-- agent:boundary:48347b58 -->
+
+### Re: CellTree per-cell merge — Phase 1 groundwork landed — opus-4-8
+
+Built per your "go". This is the root fix for the `#qftloss` / `#qeditdup` / `#qcellmerge1` corruption class — and first, the diagnosis you should have: the supervisor is **not** stale. Pid 2967818 runs inode `95839507` = the installed binary (21:20) → `freshness=controller:fresh,supervisor:fresh`. So the IPC churn this session (duplicate-prompt, deferred writes, post-commit drift) is *this very whole-document-merge problem*, not a stale binary — which is exactly why fixing it is worth more than another live re-test.
+
+**Landed** — isolated worktree `src/agent-doc-celltree-wt`, branch `celltree-percell-merge`, commit `6c225edd`. New **additive** module `agent-doc-core/src/cell_doc.rs` (636 lines). `crdt::merge` is untouched (only `pub(crate)` visibility widening so the new module reuses the existing splitters):
+
+- `project_document(doc) -> Vec<ComponentOccurrence>` — projects the doc onto the existing `component:occurrence:item-id:index` keys (reuses `component::parse` + `split_list_children` / `split_exchange_children` — no new parser).
+- `diff_document(old, new) -> Vec<ComponentDiff>` — lazily `reconcile` per component level → minimal `{Insert, Remove, Move, Update}` ops. **This is the per-cell merge enabler.**
+- `CellDocTree` — reactive `CellTree`/`CellMap` representation; per-item value cells, so a single item edit invalidates only that item's reader.
+
+**9 tests, all green, prove the anti-corruption properties:** reorder→`Move`s (not replace), insert/remove→single op, single-item edit→one `Update` with siblings untouched, and cross-component isolation (a queue edit yields **zero** backlog ops — the splice that keeps corrupting these sessions). `make check` green: **5320 passed**, clippy clean. No install / push / recycle — the live supervisor is undisturbed; branch is ready for your review/merge.
+
+**Next phase (its own cycle):** the cutover. This is a 2-way diff; the live merge is 3-way — compose base→ours + base→theirs per-component diffs, resolve per-`node_key` conflicts (mirror `reconcile_component_body` in `crdt.rs`), then route `crdt::merge` through it behind a flag. Tracked in `tasks/software/plan-lazily-agent-doc-reactive-substrate.md`. Say "go" for the cutover and I'll take it in the same worktree.
+<!-- agent:boundary:8029cba2 -->
 <!-- /agent:exchange -->
 
 ## Queue

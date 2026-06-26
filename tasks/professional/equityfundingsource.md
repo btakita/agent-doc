@@ -51,7 +51,25 @@ Done. The misrouted **monsterrodholders** sale-banner material (the "Limited Tim
 The live EFS exchange had already been compacted to its Session Summary, so nothing mrh remained in the visible doc. Verified: no `shop the sale` / `limited time only` / `ends july` / `orders over $200` / `img_38` strings remain anywhere under the EFS doc or its archives. Both purged files were git-ignored, so this is local-only cleanup with no commit/history impact.
 
 If you want the banner centering actually fixed, it belongs in monsterrodholders (live WordPress via wp-cli/SSH) — point me at the page/template there and I'll do it in that session.
-<!-- agent:boundary:a5fa8f74 -->
+
+### Re: Deal image carousel across portals (house placeholder) — opus-4-8
+
+> **Queue prompt:** All deals in the borrower, broker, lender, and admin should have a carousel of uploaded images. If there is no image, then show a house placeholder.
+
+Shipped the carousel **foundation + the lender and admin surfaces** this cycle (EFS `0a1c1e8`, pushed). The four-portal feature is decomposed because borrower/broker have no deal-photo data wired yet.
+
+**Done now (lender + admin):**
+- New shared component `portal/shared/deal_photo_carousel.tsx` — `DealPhotoCarousel` (animated slide track, prev/next + dot controls, gradient scrim) with a `HousePlaceholder` (inline SVG house) shown whenever a deal has **no images**. Pure helpers (`next_photo_index_`, `should_show_house_placeholder_`) unit-tested in `tests/deal-photo-carousel.test.ts`.
+- **Lender (investor):** refactored the existing deal-card carousel in `investor/available_deals.tsx` onto the shared component — empty deals now show the house placeholder instead of a blank frame; added a hero carousel to `investor/deal_detail.tsx` above the photo gallery.
+- **Admin:** added a "Lender preview" carousel over the public photos in the deal **Photos** tab (`admin/deal_photos.tsx`).
+- Spec: `prds/deal-photo-carousel.md`. Verification: `bun run check` green (1233 tests pass, browser + worker build clean).
+
+**Queued as phases (need server-side public-photo attach + portal-scoped download routes):**
+- `#dealcarousel-borrower` — `borrower/loan_summary.tsx` already carries `deal_id`; attach public photos + borrower-scoped download route + render the shared carousel.
+- `#dealcarousel-broker` — `broker/my_pipeline.tsx` `BrokerDeal.loan_id` → `investment_deal`; same pattern, broker-scoped.
+
+**`deploy` (next queue item):** held. This is a partial landing of a production feature; the EFS lender+admin increment is a clean, shippable change, but I did not auto-deploy. Say the word to `deploy` the increment now, or I'll deploy once the borrower + broker phases land.
+<!-- agent:boundary:8d77d4cb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -76,6 +94,8 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#dealcarousel-borrower] Deal photo carousel — borrower portal. borrower/loan_summary.tsx already carries deal_id; attach deal_photos_R_({deal_id, visibility:public}) to the loan_summary payload, add a borrower-scoped public deal-photo download route (mirror GET /api/investor/deal-photos/:id/download; authorize the borrower owns the loan deal), and render the shared <DealPhotoCarousel>. Plan: src/equityfundingsource-dev/prds/deal-photo-carousel.md.
+- [ ] [#dealcarousel-broker] Deal photo carousel — broker portal. broker/my_pipeline.tsx BrokerDeal.loan_id resolves to an investment_deal; attach public photos to the broker pipeline payload, add a broker-scoped public deal-photo download route (authorize the broker represents the deal), and render the shared <DealPhotoCarousel>. Plan: src/equityfundingsource-dev/prds/deal-photo-carousel.md.
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 

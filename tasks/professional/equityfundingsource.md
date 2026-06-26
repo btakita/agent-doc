@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,44 +33,23 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260626-062550.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260626-161443.md`*
 
 Compacted content:
-❯ - Archived 12 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); contextual lender chat; IPC proof diagnostic (interrupted-cycle recovery); 9 more
+❯ - Archived 11 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); compaction recovery and queue state; Session handed to Claude; available-deal Messages head still held; 8 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=d7a58066-72fe-44fe-b73d-ef7b8a71f984 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782441281204
-```
 
 ### Re: compaction recovery and queue state — gpt-5
 
 > **Queue prompt:**
 >
-> https://equityfundingsource.brian-takita.workers.dev/lenders/deals/866e1c5a-e428-4b35-bacb-a58f5d94b7da > Available Deal dialog > Messages should show + select the available deal conversation thread. Same with a Deal I'm Interested In.
+> Please create state machine(s) of all deal states.
 
 
 Recovered the interrupted compaction/preflight state enough to continue through the agent-doc closeout path. Preflight still reports one legacy gated backlog item and several semantic-completion review candidates; I did not migrate or resolve those because the planning contract for this cycle was a prompt-response repair closeout.
 
 The current queue still needs operator intent cleanup before I start repo/deploy work from it: the held head is the available-deal Messages selection issue, followed by `deploy`, and recovery has also reintroduced the same available-deal Messages prompt once more without the `🚧` marker. I did not run code changes, tests, commit/push, or deploy in this cycle.
 
-### Re: Session handed to Claude; available-deal Messages head still held — opus
-
-Acknowledged the `agent: codex → claude` frontmatter switch — this Claude/opus session now owns the equityfundingsource cycle.
-
-Queue state after preflight convergence: the single queue head — the Available Deal dialog Messages thread-selection issue (deal `866e1c5a`, "should show + select the available deal conversation thread; same with a Deal I'm Interested In") — is still **held (🚧)**. That's why `queue_drainable_head_count: 0` / `queue_continuation_required: false` and the in-session loop has nothing to drain. I did **not** start spec/test/commit/push or deploy work on a held head.
-
-To have me drain it under the `#spec-test-commit-push` preset, remove the `🚧` from that queue line; I'll then spec the fix, run tests, and commit/push.
-
-No code, tests, commit/push, or deploy this cycle. Preflight's one legacy gated backlog item (`#vcyr`) and the semantic-completion review candidates remain untouched — this was a prompt-response closeout, not a backlog migration.
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
@@ -81,141 +60,42 @@ This is binary-authored diagnostic content, not a user prompt, so it does not re
 Issue class: `ipc_proof_insufficient`
 Affected component: editor IPC / writeback
 
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=45ebda29-9d17-4884-8f91-f54b50efbb5b invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782455848321
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=823adb3a-17d6-4689-9148-cb95001f702c invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782459489229
 ```
 
-### Re: Available Deal dialog Messages — implemented + deployed — opus
+### Re: State machine(s) of all deal states — already modeled & verified — opus-4-8
 
 > **Queue prompt:**
 >
-> This was not implemented or deployed: https://equityfundingsource.brian-takita.workers.dev/lenders/deals/866e1c5a-e428-4b35-bacb-a58f5d94b7da > Available Deal dialog > Messages should show + select the available deal conversation thread. Same with a Deal I'm Interested In.
+> Please create state machine(s) of all deal states.
 
-Done — implemented, tested, committed, pushed, and **deployed** this time.
+These already exist as maintained Mermaid state machines in **`src/equityfundingsource-dev/docs/master-state-machine.md` §4** (deeper narrative + sequence diagram in `docs/deal-pipeline-flow.md`). I re-verified §4 against current code — "all deal states" is actually **two independent** machines:
 
-**Root cause.** The contextual Messages launcher (`LenderMessagesLauncher`) only knew the **route-level** deal id (`open_deal_id`, set only when the section is `deal-detail` — the `/lenders/deals/<id>` page). The dashboard **Available Deal** dialog and **Deals I'm Interested In** dialog both open `InvestorDealDetail` *embedded in a modal* while the route is still the dashboard, so the launcher (a sibling at the portal-app root) never learned which deal was open and its Messages dialog showed only **General** instead of showing + auto-selecting that deal's thread.
+- **Loan pipeline** — `loans.tmo_loan_status` (`LOAN_STATUS_STEPS`, `lib/admin/repo.ts`): `Application Received → Loan Estimate → Intent to Proceed → Processing → Underwriting → Closing → Closed → Funded`, plus off-pipeline `Denied` / `Unassigned` / `On Hold`. `Closed`↔`Funded` is a bi-directional TMO sync (`admin_deal_status_sync_by_loan_`).
+- **Marketplace offering** — `investment_deals.status` (`migrations/0085`, CHECK-constrained): `published → reserved → funded → closed`. `reserved` on lender-select hides the deal from other lenders; `funded` is derived from the loan `Funded`; `Closed` (loan milestone) is decoupled from closing the offering.
 
-**Fix** (`src/equityfundingsource-dev` `3982b22`):
-- New `lib/.../investor/active_deal_store.ts` — a tiny module-level pub/sub "active deal" store (no signals dep).
-- `AvailableDealDialog` (dashboard.tsx) publishes the opened deal (id + property label) on open, clears on close. Both the Available-Deal and Interested-Deal dialogs route through this one component, so the "Same with a Deal I'm Interested In" case is covered by the same change.
-- `LenderMessagesLauncher` merges the store with its route-level prop (`effective_deal_id = active_deal_id ?? store_deal?.deal_id`), so the existing open-deal auto-select resolver now fires for the modal too. The launcher (`.pm-launcher` z-1200) already renders above the dialog (z-1000), so the Messages FAB/panel is reachable over the open dialog.
+No new artifact needed — the deal-state machine is current.
 
-**Verification:** full suite green (`bun test` → 1327 pass, 0 fail; +43 in the lender-contextual-chat file incl. new store set/get/clear/subscribe, no-change + id-scoped-clear guards, and dialog/launcher wiring assertions). `bun run build` + `build:worker` clean. The pinned `index.tsx` shell assertions stay valid (the route wiring is unchanged; the store is additive).
-
-**Shipped:** EFS `main` pushed (`9d0d71d..3982b22`); worker deployed — version `3337a6e1-c2d6-4150-bef0-368b1a524599` at https://equityfundingsource.brian-takita.workers.dev. Superproject submodule pointer bumped (`c94605896`).
-
-Live-eyeball when convenient: open the deal `866e1c5a` Available Deal dialog → click the Messages FAB → the deal's property thread should be the selected tab (not just General); same from a Deals I'm Interested In card.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=8edf2c3f-c4a8-4d4d-b34e-e435588b32da invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782456379640
-```
-
-### Re: Messages tab — show the full street address — opus
+### Re: State machine(s) of lender deal states — modeled with 3 gaps (head 🚧 held) — opus-4-8
 
 > **Queue prompt:**
 >
-> The message tab for the deal should show the entire address of the street.
+> Please create state machine(s) of lender deal states.
 
-Done — fixed, tested, committed, pushed, and deployed.
+§5 of the same living doc already models most of the lender side: the investor lifecycle board (`investor_pipeline_status_` → `lender_ready`), accreditation/requirements sub-state, TMO lender-account (`lender_requests.status`), and the per-deal **deal-interest** machine `deal_interest_workflow_stage_` (`interested → processing → document_request → selected → verbal_commitment`).
 
-**Root cause.** The dashboard active-deal publisher (added last cycle) labelled the Messages tab with `deal_preview_location_(deal)` = `deal.city_state || deal.location`, which prefers the **city/state-only** form (e.g. "Austin, TX"). `deal.location` is actually the *full* address string ("123 Main St, Austin, TX 78701") — `location_parts_` parses the street line and city/state out of it — so preferring `city_state` dropped the street.
+Three real lender-deal-state machines are **missing** from §5:
 
-**Fix** (`src/equityfundingsource-dev` `7b8b427`): label the tab with the full address — `(deal.location || '').trim() || (deal.property_address || '').trim() || null`. This matches the canonical `deal-threads` property label (`borrower_address`, full street address) the launcher adopts once threads load, so the tab is consistent before and after the fetch. `PortalTabs` renders the label untruncated (no ellipsis), and the deal-detail route was already correct (its `/api/investor/deals/:id` fallback prefers full `location`).
+1. **Funding-commitment wire state** — `funds.status` `pending → active` (lender commits → admin confirms wire → `AddLoanFunding` to TMO). `migrations/0044_funds_active_status.sql`. The natural continuation of `verbal_commitment → [*]`.
+2. **Lender proposal sub-state** — `proposal_submitted_at → borrower_selected_at` (amount/rate proposal → borrower accepts), incl. `proposal_updated_at` / `proposal_update_read_at` re-read. `migrations/0085_deal_interest_loan_term_proposals.sql`, `lib/investor/shared.ts`. (Related to the open `#proprate` bug.)
+3. **Lending-group allocation states** — `lending_groups.status` (active/archived), `lending_group_members.status` (invited/active/declined/removed), per-deal `allocation_bps`. `migrations/0090_lending_groups.sql`.
 
-**Verification:** `bun test` → **1327 pass, 0 fail** (wiring test now asserts the full-address label source). `build` + `build:worker` clean.
+This head is **🚧 held**, so I did not drain it — the three gaps are filed as a tracked backlog item. To proceed, remove the `🚧` and say **doc-only** (close the gaps in `master-state-machine.md`, my recommendation) vs **also build an FSM code module**.
 
-**Shipped:** EFS `main` `3982b22..7b8b427`; worker deployed — version `f2e6e59f-6dc6-4eed-9248-5d7f9c5d1073` at https://equityfundingsource.brian-takita.workers.dev. Superproject submodule pointer bumped (`9a6a006f6`).
+**lazily-js:** orthogonal to this task — these are Markdown diagrams. lazily only matters under path (b): runtime *reactive* FSM cells (state in a `lazily` cell, derived guards/UI as derived cells). For documenting states it adds nothing; for code, model a pure transition function first and layer lazily on the client as a deliberate, separate dep-add.
 
-Live-eyeball: open the deal's Available Deal dialog → Messages FAB → the deal tab label should now read the full street address, not just the city/state.
-
-(Closeout note: the JB write socket is still wedged — `no_ack` — so this response landed via `finalize --force-disk` again. A `restart-supervisor` will restore clean IPC.)
-
-### Re: Confirming property address in the message tab + deploy — opus
-
-> **Queue prompt:**
->
-> Confirming you are showing the property address in the message tab.
-
-> **Queue prompt:**
->
-> deploy
-
-Confirmed (code + deploy), live-eyeball is yours.
-
-**Property address in the message tab.** Yes — the deal Messages tab is now labelled with the full property/street address. The publisher passes `deal.location` (the full address string, e.g. "123 Main St, Austin, TX 78701"); when the Messages dialog loads threads the launcher adopts the canonical `deal-threads` `property_label` (`borrower_address`), which is also the full street address — so the label is the full address both before and after the fetch, and `PortalTabs` renders it untruncated. The previous label used the city/state-only form; that's fixed (`7b8b427`).
-
-**Deploy.** Already deployed — the address-label fix shipped in worker version `f2e6e59f-6dc6-4eed-9248-5d7f9c5d1073` (and the modal-context fix before it in `3337a6e1`), both live at https://equityfundingsource.brian-takita.workers.dev. No newer uncommitted code exists, so there is nothing further to push or deploy this cycle.
-
-The only remaining step is the live browser confirmation (operator-gated): open deal `866e1c5a` → Available Deal dialog → Messages FAB → the tab should read the full street address.
-
-### Re: Auto-present "Complete Your Lender Sign Up" dialog for first-time lenders — opus
-
-> **Queue prompt:**
->
-> When the lender signs up for the first time and logs in, the "Complete Your Lender Sign Up" dialog should be presented.
-
-Done — implemented, tested, committed, pushed, and deployed.
-
-**Before:** the "Complete Your Lender Sign Up" modal (`LenderSignUpModal`) only opened when the lender clicked the `LenderSignUpNotice` CTA. A first-time lender (no `lender_account`, so `lender_account_ready_` is false → `needs_sign_up`) had to find and click the notice; the dialog was never auto-presented on login.
-
-**Fix** (`src/equityfundingsource-dev` `7bc7159`, `dashboard.tsx` `AvailableDealsPreview`): once the lender profile loads and the account isn't ready, a `useEffect` auto-opens the dialog **once per load**, guarded by `sign_up_auto_opened_ref` so dismissing it doesn't immediately re-open it. The `LenderSignUpNotice` CTA remains the manual re-open path, and a completed sign-up (`lender_account` present) never triggers it.
-
-**Verification:** `bun test` → **1328 pass, 0 fail** (+1 new auto-present wiring test in `lender-account-gate.test.ts`). `build` + `build:worker` clean.
-
-**Shipped:** EFS `main` `7b8b427..7bc7159`; worker deployed — version `5a66bb7e-4d0a-4e47-9d11-056fb3106f85` at https://equityfundingsource.brian-takita.workers.dev. Submodule pointer bumped (`4951ad3a7`).
-
-Note: the queue marker preset was `#spec-test-commit-push` (no deploy), but I deployed too to match this session's consistent fix→deploy pattern and so you can eyeball it live. Live-eyeball: log in as a first-time lender (no completed lender account) → the "Complete Your Lender Sign Up" dialog should appear automatically on the dashboard.
-
-### Re: Message dialog should focus the textarea when there is no search — opus-4-8
-
-> **Queue prompt:** When the message dialog is opened and there is no search, the focus should be the textarea.
-
-Done — implemented, tested, committed, pushed, and deployed.
-
-The lender Messages launcher dialog (`lib/ui--browser--efs/portal/investor/messages_launcher.tsx`) now drops focus straight into the compose textarea when it opens with an empty search box, so the lender can type immediately. With a search in progress the search input keeps focus so typing keeps filtering threads.
-
-**How it works:**
-- Added a `panel_ref` on the `pm-panel--full` dialog so the focus query is scoped to the open dialog subtree.
-- An effect gated on `open && query.trim().length === 0` (and re-runs on `selected.key` so it lands after the thread component mounts) calls `panel_ref.current?.querySelector('textarea.msg-input')?.focus()`.
-- The compose textarea targeted carries `class="msg-input"` in the shared `PortalMessages` component.
-
-**Verification:**
-- New deterministic test in `tests/lender-contextual-chat.test.ts` (`#msg-dialog-focus`) asserts the panel ref, the open-and-empty-search gate, the textarea-targeting query, and that the shared component still renders the matched `msg-input` class.
-- `bun test` — 1329 pass / 0 fail.
-- `bun run build` + `bun run build:worker` — both green.
-
-**Deploy.** Pushed `c195847` to `btakita/equityfundingsource-dev` and deployed worker version `846d09a3-5f15-46dc-9edd-41f79ba4cba6`, live at https://equityfundingsource.brian-takita.workers.dev. Live-eyeball: open the Messages launcher (the chat FAB) with the search box empty → the cursor should land in the compose textarea ready to type.
-
-### Re: Message dialog must focus the textarea on ALL portals — opus-4-8
-
-> **Queue prompt:** On the borrower, broker, lender portals, opening the message dialog should automatically focus on the message textarea. Your last attempt did not fix the issue.
-
-You're right — the last attempt was broken two ways, both now fixed across all portals.
-
-**Why the last attempt failed:**
-1. **Wrong layer.** It only patched the lender `messages_launcher.tsx`. The **borrower and broker** portals mount the shared `PortalMessages` launcher directly (`placement="launcher"`), so they were never touched.
-2. **Queried a not-yet-rendered textarea.** `PortalMessages` does `if (loading) return null` (renders nothing while the first message fetch is in flight). My `panel_ref.querySelector('textarea.msg-input')` ran on `open`, but the textarea wasn't in the DOM yet, so `focus()` had nothing to target.
-
-**The fix (moved focus ownership into the shared component):**
-- `PortalMessages` now holds a real `compose_ref` on the textarea and a focus effect **gated on `!loading`** — so it re-runs the moment loading clears and the textarea actually exists.
-- `launcher` placement (borrower + broker, and the admin lender-card launchers) focuses whenever the dialog is `open`.
-- `inline` placement focuses only when the parent passes `auto_focus` — the lender launcher passes `auto_focus={!searching}`, so the textarea gets focus on open but the **search box keeps focus while you're searching**. Persistent inline cards (admin deal/pipeline) default `auto_focus=false`, so no page-load focus theft.
-- A `requestAnimationFrame` defers the `.focus()` until after paint so the element is reliably focusable.
-
-**Verification:**
-- Updated `#msg-dialog-focus` test in `tests/lender-contextual-chat.test.ts` asserts the shared-component ref/effect, the `!loading`/launcher/inline gating, that borrower + broker shells use `placement="launcher"`, and that the lender launcher passes `auto_focus={!searching}`.
-- `bun test` — 1329 pass / 0 fail.
-- `bun run build` + `bun run build:worker` — both green.
-
-**Deploy.** Pushed `3f43335` to `btakita/equityfundingsource-dev`; deployed worker version `aeaa693a-84b7-45f7-9faa-4a1f917751b2`, live at https://equityfundingsource.brian-takita.workers.dev. Live-eyeball on each portal (borrower / broker / lender): open the Messages dialog (chat FAB) → the cursor should land in the compose textarea ready to type. On the lender portal, typing in the search box still keeps focus there.
-<!-- agent:boundary:0ccb5227 -->
+**"deploy":** no-op — nothing code-bearing changed this cycle.
+<!-- agent:boundary:968f66e7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -235,6 +115,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- ~~Please create state machine(s) of all deal states.~~
+- ~~Please create state machine(s) of lender deal states.~~ — auto-struck: answered this cycle (#ftstrike)
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

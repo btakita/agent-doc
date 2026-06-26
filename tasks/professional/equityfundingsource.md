@@ -67,7 +67,7 @@ Done (EFS `a525660`, pushed). The borrower loan-summary view now shows the deal 
 - **Verification:** `bun run check` green — 1237 tests pass (4 new), browser + worker build clean. No production deploy (deploy held per your decision).
 
 Next queue head: `do [#dealcarousel-broker]` — continuing the drain.
-<!-- agent:boundary:bf8fbf6b -->
+<!-- agent:boundary:91929c94 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -90,13 +90,12 @@ After 20:30
 - 🚧 ~~All deals in the borrower, broker, lender, and admin should have a carousel of uploaded images. If there is no image, then show a house placeholder.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~deploy — auto-struck: completed by #do-id-closeout-open-backlog (#qftbklgstrike)~~
 - do [#dealcarousel-borrower]
-- do [#dealcarousel-broker]
+- ~~do [#dealcarousel-broker]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#dealcarousel-broker] Deal photo carousel — broker portal. broker/my_pipeline.tsx BrokerDeal.loan_id resolves to an investment_deal; attach public photos to the broker pipeline payload, add a broker-scoped public deal-photo download route (authorize the broker represents the deal), and render the shared <DealPhotoCarousel>. Plan: src/equityfundingsource-dev/prds/deal-photo-carousel.md.
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 

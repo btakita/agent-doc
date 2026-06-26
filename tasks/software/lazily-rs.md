@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 
@@ -425,7 +425,19 @@ Two layer-specific cautions:
 - **`SeqCrdt` (LWW):** because tombstones are revivable, drop an entry only once its `Id` is provably retired (stable + no future op will reuse the key) — otherwise a late re-add resurrects against a missing anchor.
 
 **Bottom line:** lazily already *uses* tombstones the way the quotes describe — split into LWW-revivable (sequence) and sticky-RGA (text), sidestepping OT/TP2 entirely. The unaddressed half is **GC**: it's deferred, bounded to the distributed plane, and the right protocol is an HLC causal-stability watermark + RGA run-compaction. Filing that as a recommended `#lztombgc` under #lzcrdtplane.
-<!-- agent:boundary:90672b4e -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=eecac5cf-d1fe-42f0-89e4-e9a76356161b invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=52508 candidate_hash=50519a874f590e86c54d3bd821dbb1a82b69836a4e5436803a1201c8825ff37e content_ours_len=55637 content_ours_hash=27e34887a4f29b337afd55cd2dc1dcf48424aa3b8d44c454201b36190b952183 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782431613856
+```
+<!-- agent:boundary:35fc5210 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -435,7 +447,8 @@ Two layer-specific cautions:
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~I looked at Tombstones. Please address "In set CRDTs like the Two-Phase Set (2P-Set), a separate "tombstone set" tracks removed elements to ensure removals take precedence over additions during state merges." and "While tombstones solve the "TP2 puzzle" in operational transformation and ensure convergence without central coordination, they lead to memory bloat.  Some systems implement specialized garbage collection protocols to safely remove tombstones only when all replicas are confirmed to be aware of the deletion."~~
-- How can cut + paste be handled?
+- 🚧 How can cut + paste be handled? How is undo handled?
+- do [#2ygp]
 <!-- /agent:queue -->
 
 ## Backlog

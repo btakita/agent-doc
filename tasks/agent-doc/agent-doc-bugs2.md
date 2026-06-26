@@ -86,7 +86,24 @@ Built per your "go". This is the root fix for the `#qftloss` / `#qeditdup` / `#q
 - Op-capture replay not wired (touched sets inferred from text diff); conflicts only logged to stderr (no editor surface yet); merged text not yet persisted through the snapshot/CRDT path.
 
 So: groundwork (`6c225edd`) + cutover (`df0b330f`) both on `celltree-percell-merge`, fully tested, **default-off and reversible** — two commits ready for your review/merge. To make it production-ready next: port the strike-lifecycle join + decide conflict UX, then a live zero-drift proof before flipping the default. Say the word for that rung.
-<!-- agent:boundary:18be66ce -->
+
+### Re: Production-ready rung — Live<Struck anti-resurrection ported into cell merge — opus-4-8
+
+Done. The two correctness gaps that gated flipping `AGENT_DOC_CELL_MERGE` are closed (commit `ec38a973`, branch `celltree-percell-merge`):
+
+- **Anti-resurrection lifecycle ported** — `merge_3way` now routes each both-sides list item through the SAME `QueueItemLifecycle::classify` / `join` lattice (`Live < Struck`) that `crdt::reconcile_list_item_lifecycle` uses (reused, not re-derived). For queue/backlog/review/done, if either side is `Struck` the struck text wins — a stale un-strike from the persisted base can no longer resurrect a struck/deleted head. `exchange` is excluded (not strike-bearing).
+- **Honest conflicts** — strike-vs-unstrike is a lawful lifecycle join (struck wins), **NOT** a conflict. Only a genuine same-level disagreement (both Live or both Struck, text differs vs base) is recorded in `CellMergeOutcome.conflicts` (now carries `ConflictKind` + structured per-conflict stderr log). The conflict list is the single honest source.
+- 9 new tests (cell_doc 17→26): id-backed + free-text struck heads not resurrected by a stale un-strike (both directions), multi-cycle no-churn (persist-struck-as-base), backlog/review parity, strike-vs-unstrike-not-a-conflict, genuine-conflict-recorded. **Full `make check` green: 5337 passed.**
+
+**Three commits now on `celltree-percell-merge`, all default-off + reversible:** `6c225edd` groundwork → `df0b330f` cutover (3-way + flag seam) → `ec38a973` production-ready (anti-resurrection + honest conflicts).
+
+**What still blocks flipping the default to ON:**
+1. **Persistence round-trip** — `merge_3way` is pure text→text; the seam must persist the merged `.yrs`/snapshot so the next cycle's base reflects the per-cell result. Multi-cycle convergence is proven at the fn level but not yet in the live snapshot path.
+2. **Yrs op-clock / op-capture** — the cell path composes text revisions via keyed LIS diff, not Yrs operation clocks; genuine concurrent op histories need reconciling against the existing CRDT substrate.
+3. **Live zero-drift proof** — flag ON, edit-during-finalize, `ops.log` zero drift — needs your live editor (can't be agent-done).
+
+(1) and (2) are the next agent-doable rung; (3) is yours. Conflict editor surface stays nice-to-have (the list is honest; no UI consumes it yet). Say **"go persistence"** for the next rung.
+<!-- agent:boundary:b718ab42 -->
 <!-- /agent:exchange -->
 
 ## Queue

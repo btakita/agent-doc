@@ -205,30 +205,40 @@ Triaging your list oldest-first. The headline: **the typing/CPU-thrash fix is al
 7. **"test #queuebase"** — Noted; queue persisted it fine.
 
 **The one action that unblocks 2/3/6 at once:** get the supervisor onto 0.34.49. Because the in-session recycle deadlocks (item 4), the clean path is an **IDE/session restart** (or `agent-doc admin recycle` from a non-deadlocked pane) so it re-execs onto `~/.cargo/bin/agent-doc` 0.34.49 + reloads the cdylib. I did **not** force a recycle from here because you have uncommitted prompts in the buffer and this is the route-owned parent supervisor — your call on when to restart. Items 4 and 5 are genuine separate bugs I'll take in focused cycles once we're on the fresh binary. I'm **not** auto-draining the queue this turn since these are live user prompts.
-<!-- agent:boundary:42cd5c2a -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=9aba8563-e297-45a6-a5e9-7567979471db invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=35198 candidate_hash=0820f04e0131e8938c9553b50bfc43478bb786aec8910fdadca84cfbbd890fb7 content_ours_len=35248 content_ours_hash=68df81058759dc441038b62d71fc9f994b5ac5fc1c4a46597011c222fc01a415 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782459403262
+```
+<!-- agent:boundary:a575ca3b -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#cdtcutover]
-- ~~look in logs to see if we can verify [operator-verify] items in the backlog~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~It is now very difficult to type in the JB editor. Seems there may be performance or CRDT issues.~~ — auto-struck: answered this cycle (#ftstrike)
-- You deleted my queue items.
-- all documents are difficult to type in. Idea is cpu thrashing.
-- As I type in the queue, a previous state of the line is duplicated.
-- JB `Recycle Supervisor` then JB `Run Agent Doc` stalls because the recycle is scheduled to run after the turn starts. But `Run Agent Doc` cannot start the turn.
-- When I change the agent, the supervisor state should pick up the change and be able to dispatch to the new agent.
-- Getting several JB `File Cache Conflict` dialogs.
-- test #queuebase
-- do [#qftloss]
-- do [#qeditdup]
-- do [#crdtauth6]
-- do [#nsfz]
-- do [#kj5flive]
-- In the tmux pane, show if the supervisor is out of date. In the upper notifiaction that shows "turn in progress" is a good place.
-- do [#qimpstrike]
-- do [#2y8j]
+- 🚧 :pushpin: You deleted my queue items.
+- :pushpin: all documents are difficult to type in. Idea is cpu thrashing.
+- :pushpin: As I type in the queue, a previous state of the line is duplicated.
+- :pushpin: JB `Recycle Supervisor` then JB `Run Agent Doc` stalls because the recycle is scheduled to run after the turn starts. But `Run Agent Doc` cannot start the turn.
+- :pushpin: When I change the agent, the supervisor state should pick up the change and be able to dispatch to the new agent.
+- :pushpin: Getting several JB `File Cache Conflict` dialogs.
+- :pushpin: test #queuebase
+- :pushpin: do [#qftloss]
+- :pushpin: do [#qeditdup]
+- :pushpin: do [#crdtauth6]
+- :pushpin: do [#nsfz]
+- :pushpin: do [#kj5flive]
+- :pushpin: In the tmux pane, show if the supervisor is out of date. In the upper notifiaction that shows "turn in progress" is a good place.
+- :pushpin: do [#qimpstrike]
+- :pushpin: do [#2y8j]
+- do [#cdtcutover]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

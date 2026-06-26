@@ -279,7 +279,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=640e5b9a-efc2-4962-8067-4a80122acce6 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=39542 candidate_hash=d1733d49e1657d98c02f2d8905bbada8604d0a4d6bc41f9b125054ddb35f346f content_ours_len=41498 content_ours_hash=d28ccf40bccb96dc1b227cce17614bf71f89a663a6367b998ee7a4466b1bd91e doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782460175499
 ```
-<!-- agent:boundary:a7d3a2d0 -->
+<!-- agent:boundary:bb3e0015 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -305,6 +305,7 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack
 - do [#supstaledetect]
 - do [#suptmuxstale]
 - do [#ipcproofnostall]
+- do [#midturn-recycle-resume]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -331,6 +332,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#midturn-recycle-resume] ROOT-CAUSE the overnight queue wedge: live_prompt_drift_after_preflight -> ipc_proof_insufficient -> finalize-refused -> force-disk -> direct_response_patchback. Operator hypothesis (likely correct): a mid-turn / near-turn-boundary supervisor recycle/restart leaves STALE in-memory CRDT in the recycled supervisor, so the next finalize ack drifts from the preflight snapshot. Fix: a recycled/re-exec supervisor must RELOAD its CRDT/live-buffer baseline from the committed doc on startup (make the drift impossible, not just recover), AND consume the #durablerecycle checkpoint to reliably re-dispatch/resume the in-flight turn so a mid-turn restart restarts the turn. Investigation + fix IN PROGRESS in isolated worktree (branch midturn-recycle-resume); plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md. CRITICAL live-supervisor restart path — lands on branch for operator review, NOT hot-patched mid-session.
 - [ ] [#ipcproofnostall] Overnight queue stalls on a FALSE closeout-interrupt: session-check INTERRUPTS on the binary-authored ipc_proof_insufficient diagnostic, classifying it as an "unresolved prompt-bearing user change" (hit 3x in session b26b9957 on 2026-06-26). An exemption already exists — is_binary_authored_recovery_diagnostic_heading (session_check/closeout_guards.rs:840) is meant to make the diff classifier treat the "### Re: ...interrupted-cycle recovery" block as a RecoveryArtifact, never a PromptTarget — but it has an edge-case HOLE: likely the postcommit CRDT corruption (#postcommit-ipc-worktree-corruption) separates the ipc_proof_insufficient line from its protective ### Re: heading so the bare line classifies as prompt-bearing, OR a stale cycle-state prompt_target from a prior cycle persists the line. Root-cause which, then close it in diff classify_prompt_bearing_changes / the cycle-state prompt_targets path. CRITICAL closeout gate (every session) — add regression tests proving a REAL unresolved user prompt is still caught. Serves the operator directive "all restarts should reliably resume running turns / finish the overnight queue, not stall."
 - [ ] [#supstaledetect] stale_install warning false-positives in the dogfood edit->build->install->commit flow: it compared artifact mtime to the HEAD commit timestamp (300s grace), but the binary is always built BEFORE its covering commit, so an ~11min build->commit gap (binary 03:16:22 vs commit 03:27:51) flagged a FRESH binary as stale — disagreeing with the auto-install signal, which uses newest source-FILE mtime and correctly saw it fresh. FIX CODE-COMPLETE on branch supstaledetect-mtimebasis (agent-doc commit b983f144, make check green): warning now uses newest_crate_source_mtime_secs (same basis as auto-install). Remaining: merge -> install -> verify the false warning is gone AND genuine staleness still flags.
 - [ ] [#suptmuxstale] Observability (operator request): surface supervisor-out-of-date status in the tmux pane — the upper "turn in progress" notification is a good spot — so the operator can see at a glance which sessions run a stale supervisor. Pairs with #supstaledetect for a reliable signal; the binary_stale probe is already published in idle_watch (process_binary_is_stale).

@@ -145,7 +145,23 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=d7a58066-72fe-44fe-b73d-ef7b8a71f984 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782441281204
 ```
-<!-- agent:boundary:e4e97cbf -->
+
+### Re: deal dialog should use pushState so the URL is bookmarkable — opus-4-8
+
+Done (EFS `86035c0`, pushed). Opening a deal dialog from a dashboard card now reflects the deal in the URL.
+
+**Change** (`lib/ui--browser--efs/portal/investor/dashboard.tsx`, `#deal-dialog-url`):
+- On open, `history.pushState({ investor_deal_dialog: id }, '', investor_deal_dialog_url_(id))` → **`/lenders/deals/<id>`**. That path is a real server-rendered page, so a reload or bookmark of the open-dialog URL lands on the full deal detail.
+- Both card grids (**Available Deals** + **Deals I'm Interested In**) open through the shared `open_deal_` handler.
+- The dialog close button pops the pushed entry (`history.back()`) to restore the dashboard URL; a `popstate` listener closes the dialog on browser **Back/Forward** instead of navigating away from the dashboard.
+- Extracted the pure, exported `investor_deal_dialog_url_(id)` helper.
+
+**Spec + tests:** added Phase 7 to `prds/rpzm-investor-dashboard-rework.md`; new `tests/investor-deal-dialog-url.test.ts` (pure URL helper) + e2e pushState/popstate wiring assertions; updated the two stale dialog-wiring assertions. `bun run check` green — **1245 tests pass**, browser + worker build clean. Pushed to `origin/main` (deploy held per the `#spec-test-commit-push` preset).
+
+Note: I also recovered the session document first — your two prompts had landed below the `agent:done` block with the entire backlog/review tail duplicated (a CRDT merge artifact); I restored the clean structure and re-queued both prompts. Next up: the second queue head ("the cards are not showing the property photos").
+
+> **Queue prompt:** The deal dialog in https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard should use pushState to update the url so the page can be bookmarked.
+<!-- agent:boundary:220dd52b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -165,7 +181,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- 🚧 The deal dialog in https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard should use pushState to update the url so the page can be bookmarked.
+- ~~The deal dialog in https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard should use pushState to update the url so the page can be bookmarked.~~
 - The cards are not showing the property photos.
 <!-- /agent:queue -->
 

@@ -164,6 +164,42 @@ fn is_known_subcommand(arg: &str) -> bool {
         .any(|sub| sub.get_name() == arg || sub.get_all_aliases().any(|alias| alias == arg))
 }
 
+/// `#recycleforce` — pure decision: should a forced single-project `admin recycle`
+/// escalate a dead supervisor to a kill+cold-start (`session restart-supervisor`)?
+///
+/// Only when ALL hold:
+/// - `force` was passed (default behavior — no escalation — is unchanged),
+/// - the controller recycle was a no-op (`recycled == false`, i.e. no live
+///   controller answered, which on a forced recycle is the dead-supervisor signal),
+/// - the operator passed a positional `target` that is a *document file* we can
+///   cold-start (`session restart-supervisor` needs a file, not a project root).
+///
+/// Side-effect free so the escalation gate is unit-testable without driving a real
+/// supervisor. The reused `session_actor_cmd::restart` carries its own
+/// self-ancestor guard, so this decision deliberately does NOT re-implement one.
+fn recycle_force_should_escalate_dead_supervisor(
+    force: bool,
+    recycled: bool,
+    target: Option<&Path>,
+) -> bool {
+    if !force || recycled {
+        return false;
+    }
+    match target {
+        // A document path the operator typed (`agent-doc admin recycle <FILE>
+        // --force`). Require an extension or an existing non-directory file so a
+        // bare project-root directory argument does not get fed to
+        // `session restart-supervisor`, which expects a session document.
+        Some(path) => {
+            if path.is_dir() {
+                return false;
+            }
+            path.is_file() || path.extension().is_some()
+        }
+        None => false,
+    }
+}
+
 fn is_bare_document_invocation(args: &[OsString]) -> bool {
     let Some(first) = args.get(1).and_then(|arg| arg.to_str()) else {
         return false;
@@ -1437,6 +1473,13 @@ enum AdminAction {
         /// Recycle the controller in every project root with a running controller
         #[arg(long)]
         all_projects: bool,
+        /// Force the recycle to take effect promptly: override the cycle-open /
+        /// in-flight-dispatch deferral (may interrupt an in-flight turn — that is
+        /// the point of `--force`), and, when no live controller answers, escalate
+        /// to a kill+cold-start (`session restart-supervisor`) instead of a no-op.
+        /// Composes with `--all-projects`.
+        #[arg(long)]
+        force: bool,
         /// Emit JSON instead of a human-readable report
         #[arg(long)]
         json: bool,
@@ -3214,6 +3257,7 @@ fn main() -> anyhow::Result<()> {
                 target,
                 project_root,
                 all_projects,
+                force,
                 json,
             } => {
                 if all_projects {
@@ -3223,15 +3267,21 @@ fn main() -> anyhow::Result<()> {
                         );
                     }
                     let (recycled, skipped) =
-                        agent_doc_orchestration::project_controller::recycle_controllers_all_projects()?;
+                        agent_doc_orchestration::project_controller::recycle_controllers_all_projects_force(force)?;
                     if json {
                         println!(
                             "{}",
-                            serde_json::json!({ "scope": "all_projects", "recycled": recycled, "skipped": skipped })
+                            serde_json::json!({ "scope": "all_projects", "recycled": recycled, "skipped": skipped, "forced": force })
                         );
                     } else {
+                        let boundary = if force {
+                            "now (forced, overriding the in-flight-dispatch deferral)"
+                        } else {
+                            "at next idle boundary"
+                        };
                         println!(
-                            "[admin] recycle (all projects): {recycled} controller(s) marked to recycle at next idle boundary, {skipped} skipped"
+                            "[admin] recycle (all projects{}): {recycled} controller(s) marked to recycle {boundary}, {skipped} skipped",
+                            if force { ", forced" } else { "" }
                         );
                     }
                 } else {
@@ -3245,18 +3295,40 @@ fn main() -> anyhow::Result<()> {
                         root_arg,
                     )?;
                     let recycled =
-                        agent_doc_orchestration::project_controller::recycle_controller(&root)?;
+                        agent_doc_orchestration::project_controller::recycle_controller_force(
+                            &root, force,
+                        )?;
+                    // `#recycleforce`: when the operator forced the recycle and NO live
+                    // controller answered, this is almost always an attempt to revive a
+                    // DEAD supervisor. Escalate to the kill+cold-start path
+                    // (`session restart-supervisor`) instead of a no-op — but ONLY when
+                    // the operator passed a document path we can cold-start, and only
+                    // under `--force` (default behavior is unchanged). The reused
+                    // `session_actor_cmd::restart` carries the same self-ancestor guard
+                    // `admin kill-supervisor` uses, so a forced escalation never tears
+                    // down the caller's own ancestor supervisor.
+                    let escalate = recycle_force_should_escalate_dead_supervisor(
+                        force,
+                        recycled,
+                        target.as_deref(),
+                    );
                     if json {
                         println!(
                             "{}",
-                            serde_json::json!({ "scope": "project", "project_root": root.display().to_string(), "recycled": recycled })
+                            serde_json::json!({ "scope": "project", "project_root": root.display().to_string(), "recycled": recycled, "forced": force, "escalated_cold_start": escalate })
                         );
                     } else if recycled {
+                        let boundary = if force {
+                            "now (forced, overriding the in-flight-dispatch deferral)"
+                        } else {
+                            "at next idle boundary"
+                        };
                         println!(
-                            "[admin] recycle: controller for {} marked to recycle at next idle boundary",
+                            "[admin] recycle{}: controller for {} marked to recycle {boundary}",
+                            if force { " (forced)" } else { "" },
                             root.display()
                         );
-                    } else {
+                    } else if !escalate {
                         // `#supdead-coldstart-fallback`: a no-op recycle here often
                         // means the operator is actually trying to revive a DEAD
                         // supervisor. `admin recycle` only re-execs a *live*
@@ -3264,9 +3336,24 @@ fn main() -> anyhow::Result<()> {
                         // dead supervisor. Point at the cold-start remedy instead of
                         // a bare "nothing to recycle".
                         println!(
-                            "[admin] recycle: no running controller for {} (nothing to recycle). If a supervisor is DEAD (stale socket), `admin recycle` cannot revive it — cold-start a fresh one with `agent-doc session restart-supervisor <FILE>` (JB \"Recycle Supervisor\") or `Run Agent Doc` on the document.",
+                            "[admin] recycle: no running controller for {} (nothing to recycle). If a supervisor is DEAD (stale socket), `admin recycle` cannot revive it — cold-start a fresh one with `agent-doc session restart-supervisor <FILE>` (JB \"Recycle Supervisor\") or `Run Agent Doc` on the document. Pass a document path with `--force` to escalate automatically.",
                             root.display()
                         );
+                    }
+                    if escalate {
+                        let file = target.as_deref().expect(
+                            "recycle_force_should_escalate_dead_supervisor guarantees a target",
+                        );
+                        eprintln!(
+                            "[admin] recycle --force: no live controller for {} — escalating to a kill+cold-start via `session restart-supervisor {}`",
+                            root.display(),
+                            file.display()
+                        );
+                        session_actor_cmd::restart(
+                            file,
+                            session_actor_cmd::RestartMode::Continue,
+                            force,
+                        )?;
                     }
                 }
                 Ok(())
@@ -3672,5 +3759,143 @@ fn main() -> anyhow::Result<()> {
                 agent_doc_orchestration::callback::cleanup_expired(&root_path, 300)
             }
         },
+    }
+}
+
+#[cfg(test)]
+mod recycle_force_tests {
+    use super::*;
+
+    /// `#recycleforce` — `--force` is a real flag (no `-- ` separator) and composes
+    /// with the single-project form and `--all-projects`.
+    ///
+    /// The full `Cli` clap tree is large enough that the derive-generated parser
+    /// overflows a test thread's default 2 MiB stack in a debug build (it parses
+    /// fine on `main`'s 8 MiB stack). Parse on an explicit large-stack thread so the
+    /// CLI-surface assertions are reliable.
+    fn parse(args: &[&str]) -> Commands {
+        let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(move || Cli::try_parse_from(&owned).expect("parse").command)
+            .expect("spawn parse thread")
+            .join()
+            .expect("parse thread")
+    }
+
+    #[test]
+    fn force_flag_parses_without_separator() {
+        // `agent-doc admin recycle --force` — directly, no `-- --force`.
+        let cmd = parse(&["agent-doc", "admin", "recycle", "--force"]);
+        match cmd {
+            Commands::Admin {
+                action:
+                    AdminAction::Recycle {
+                        force,
+                        all_projects,
+                        target,
+                        ..
+                    },
+            } => {
+                assert!(force, "--force must be honored directly");
+                assert!(!all_projects);
+                assert!(target.is_none());
+            }
+            _ => panic!("expected admin recycle subcommand"),
+        }
+    }
+
+    #[test]
+    fn force_composes_with_all_projects() {
+        let cmd = parse(&["agent-doc", "admin", "recycle", "--all-projects", "--force"]);
+        match cmd {
+            Commands::Admin {
+                action:
+                    AdminAction::Recycle {
+                        force,
+                        all_projects,
+                        ..
+                    },
+            } => {
+                assert!(force);
+                assert!(all_projects);
+            }
+            _ => panic!("expected admin recycle subcommand"),
+        }
+    }
+
+    #[test]
+    fn force_composes_with_target() {
+        let cmd = parse(&["agent-doc", "admin", "recycle", "plan.md", "--force"]);
+        match cmd {
+            Commands::Admin {
+                action:
+                    AdminAction::Recycle {
+                        force,
+                        target,
+                        all_projects,
+                        ..
+                    },
+            } => {
+                assert!(force);
+                assert!(!all_projects);
+                assert_eq!(target.as_deref(), Some(Path::new("plan.md")));
+            }
+            _ => panic!("expected admin recycle subcommand"),
+        }
+    }
+
+    #[test]
+    fn default_recycle_has_no_force() {
+        let cmd = parse(&["agent-doc", "admin", "recycle"]);
+        match cmd {
+            Commands::Admin {
+                action: AdminAction::Recycle { force, .. },
+            } => assert!(
+                !force,
+                "default must remain force=false (unchanged behavior)"
+            ),
+            _ => panic!("expected admin recycle subcommand"),
+        }
+    }
+
+    #[test]
+    fn escalation_requires_force_and_no_live_controller_and_a_document_path() {
+        let doc = Path::new("plan.md");
+        // Happy path: forced, no live controller, a document path with an extension.
+        assert!(recycle_force_should_escalate_dead_supervisor(
+            true,
+            false,
+            Some(doc)
+        ));
+        // Not forced → never escalate (default behavior unchanged).
+        assert!(!recycle_force_should_escalate_dead_supervisor(
+            false,
+            false,
+            Some(doc)
+        ));
+        // A live controller answered (recycled==true) → no escalation.
+        assert!(!recycle_force_should_escalate_dead_supervisor(
+            true,
+            true,
+            Some(doc)
+        ));
+        // No positional target (e.g. `--project-root` form) → cannot cold-start.
+        assert!(!recycle_force_should_escalate_dead_supervisor(
+            true, false, None
+        ));
+    }
+
+    #[test]
+    fn escalation_rejects_a_directory_target() {
+        // A bare project-root directory is not a session document; do not feed it to
+        // `session restart-supervisor`.
+        let dir = std::env::temp_dir();
+        assert!(dir.is_dir());
+        assert!(!recycle_force_should_escalate_dead_supervisor(
+            true,
+            false,
+            Some(dir.as_path())
+        ));
     }
 }

@@ -488,6 +488,9 @@ impl SimWorld {
             SimCommand::MarkSupervisorBinaryStale => {
                 self.recycle_clear.binary_stale = true;
             }
+            SimCommand::SetAgentDocCycleOpen(open) => {
+                self.recycle_clear.cycle_open = open;
+            }
             SimCommand::MarkWriteWedged => {
                 self.recycle_clear.write_wedged = true;
             }
@@ -1177,7 +1180,13 @@ impl SimWorld {
             turn_boundary,
         );
         match restart_action {
-            SupervisorRestartAction::ReexecInPlace if !self.recycle_clear.recycle_disabled => {
+            // `#midturn-recycle-resume`: an open agent-doc cycle defers the in-place
+            // reexec so the operator restart cannot sever a live finalize IPC
+            // connection mid-cycle. The restart request stays pending for the next
+            // tick, exactly as production gates `ReexecInPlace` on `!cycle_open`.
+            SupervisorRestartAction::ReexecInPlace
+                if !self.recycle_clear.recycle_disabled && !self.recycle_clear.cycle_open =>
+            {
                 self.recycle_clear.restart_requested = false;
                 if self.recycle_clear.reexec_will_fail {
                     // A failed `execve` clears the reexec intent and falls back to a
@@ -1218,6 +1227,9 @@ impl SimWorld {
             false,
             self.recycle_clear.write_wedged,
             self.recycle_clear.reexec_failed,
+            // `#midturn-recycle-resume`: an open agent-doc cycle defers the recycle so
+            // the `execve` cannot sever the in-flight finalize IPC connection.
+            self.recycle_clear.cycle_open,
         );
         // `#supselfheal` Phase 3: a stale supervisor whose in-place execve already
         // failed escalates to a bounded kill+relaunch instead of recycling onto the

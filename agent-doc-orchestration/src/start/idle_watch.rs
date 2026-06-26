@@ -1350,12 +1350,29 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // `generation closed` / stale-supervisor `#fcc0` case without dropping
                 // the live turn. Checked before the opt-in auto-recycle decision so a
                 // deliberate operator restart always supersedes (no env opt-in needed).
+                // `#midturn-recycle-resume`: the agent-doc-cycle interlock the coarse
+                // harness `turn_boundary` cannot provide. A recycle / restart-reexec is
+                // a true `execve` that tears down the in-flight IPC listener; firing it
+                // while an agent-doc cycle is still open (preflight taken, finalize not
+                // committed) or an IPC ack connection is in flight severs the
+                // ack-content round-trip mid-cycle and drives the next finalize into
+                // `live_prompt_drift_after_preflight` against the pre-recycle preflight
+                // baseline. Defer until the cycle commits and IPC drains. Gates BOTH the
+                // operator `restart_drain_reexec` path below and the `#supselfheal`
+                // auto-recycle decision further down.
+                let cycle_open = crate::cycle_state::load(&path)
+                    .ok()
+                    .flatten()
+                    .map(|state| state.is_open())
+                    .unwrap_or(false)
+                    || crate::ipc_socket::inflight_connection_handlers() > 0;
                 let restart_action = supervisor_restart_action(
                     shared.restart_requested.load(Ordering::Relaxed),
                     shared.restart_reexec.load(Ordering::Relaxed),
                     turn_boundary,
                 );
                 if !reexec_recycle_disabled
+                    && !cycle_open
                     && matches!(restart_action, SupervisorRestartAction::ReexecInPlace)
                 {
                     #[cfg(unix)]
@@ -1466,7 +1483,20 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     explicit_admin_recycle,
                     write_wedged,
                     reexec_failed,
+                    cycle_open,
                 );
+                if matches!(recycle_action, SupervisorRecycleAction::DeferCycleOpen) {
+                    crate::ops_log::log_op(
+                        &path,
+                        &format!(
+                            "supervisor_recycle_deferred_cycle_open file={} pane={} stale={} inflight={} reason=agent_doc_cycle_open (#midturn-recycle-resume)",
+                            path.display(),
+                            shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                            supervisor_stale,
+                            crate::ipc_socket::inflight_connection_handlers(),
+                        ),
+                    );
+                }
                 // `#wd40` / `#staleloop-recycle-restart`: automate the manual
                 // `make install` + `admin recycle` + end-turn the operator had to
                 // run to force a stale supervisor onto a fresh binary during a
@@ -1492,6 +1522,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     // boundary were reachable? A bare `Detect` (auto-recycle opted
                     // out, no admin/wedge) does NOT hot-reload, so yielding the loop
                     // for it would only stall the drain.
+                    // `#midturn-recycle-resume`: this is the stale-intent question
+                    // ("would a recycle EVER fire at a boundary?"), not the live-tick
+                    // gate, so pass `cycle_open=false`. A transiently-open cycle must
+                    // not suppress the yield request — the cycle closes momentarily and
+                    // then the deferred recycle fires; suppressing the yield here would
+                    // stall the drain for a stale binary that genuinely needs the loop
+                    // to yield a boundary.
                     let would_recycle_at_boundary = !matches!(
                         supervisor_recycle_action(
                             supervisor_stale,
@@ -1501,6 +1538,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             explicit_admin_recycle,
                             write_wedged,
                             reexec_failed,
+                            false,
                         ),
                         SupervisorRecycleAction::None | SupervisorRecycleAction::Detect
                     );
@@ -2687,6 +2725,84 @@ mod tests {
         assert!(fail.contains("failed") && fail.contains("current binary"));
         assert_ne!(started, ok);
         assert_ne!(ok, fail);
+    }
+
+    #[test]
+    fn open_agent_doc_cycle_defers_self_recycle_committed_cycle_allows_it() {
+        // `#midturn-recycle-resume` regression: a recycle in the preflight→finalize
+        // window must NOT fire (it would `execve` mid-cycle, sever the in-flight IPC
+        // ack connection, and drive the next finalize into
+        // `live_prompt_drift_after_preflight`). This exercises the EXACT `cycle_open`
+        // expression the idle-watch computes from live `cycle_state` and feeds into
+        // `supervisor_recycle_action`, proving the wiring — not just the pure policy.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "# plan\n").unwrap();
+
+        // Open a cycle on disk (preflight taken, finalize not committed). The
+        // production `cycle_open` reads this via `cycle_state::load(..).is_open()`.
+        let opened =
+            crate::cycle_state::start_preflight(&file, Some("# plan\n"), Some("# plan\n")).unwrap();
+        assert!(opened.is_open(), "fresh preflight cycle must be open");
+
+        let cycle_open_while_open = crate::cycle_state::load(&file)
+            .ok()
+            .flatten()
+            .map(|state| state.is_open())
+            .unwrap_or(false)
+            || crate::ipc_socket::inflight_connection_handlers() > 0;
+        assert!(
+            cycle_open_while_open,
+            "an open agent-doc cycle on disk must compute cycle_open=true"
+        );
+
+        // Stale binary + auto-recycle + a head pending at a harness turn boundary —
+        // the exact #supautoinstall self-recycle inputs — must DEFER while the cycle
+        // is open.
+        assert_eq!(
+            supervisor_recycle_action(
+                /* stale */ true,
+                /* auto_recycle */ true,
+                /* turn_boundary */ true,
+                /* head_pending */ true,
+                /* explicit_admin */ false,
+                /* write_wedged */ false,
+                /* reexec_failed */ false,
+                cycle_open_while_open,
+            ),
+            SupervisorRecycleAction::DeferCycleOpen,
+            "an open cycle must defer the execve recycle so it cannot sever the live finalize"
+        );
+
+        // Commit the cycle: now it is no longer open and (in this single-threaded
+        // test) no IPC handler is in flight, so cycle_open is false and the same
+        // inputs recycle — the deferred recycle fires at the true quiescent boundary.
+        crate::cycle_state::mark_committed(&file, "committed", Some("# plan\n"), Some("# plan\n"))
+            .unwrap();
+        let cycle_open_after_commit = crate::cycle_state::load(&file)
+            .ok()
+            .flatten()
+            .map(|state| state.is_open())
+            .unwrap_or(false)
+            || crate::ipc_socket::inflight_connection_handlers() > 0;
+        assert!(
+            !cycle_open_after_commit,
+            "a committed cycle with no in-flight IPC must compute cycle_open=false"
+        );
+        assert_eq!(
+            supervisor_recycle_action(
+                true,
+                true,
+                true,
+                true,
+                false,
+                false,
+                false,
+                cycle_open_after_commit,
+            ),
+            SupervisorRecycleAction::RecycleImmediate,
+            "once the cycle commits and IPC drains, the deferred recycle fires"
+        );
     }
 
     #[test]

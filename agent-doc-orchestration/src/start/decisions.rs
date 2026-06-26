@@ -443,6 +443,23 @@ pub enum SupervisorRecycleAction {
     /// (`MAX_REEXEC_ESCALATIONS`) kill+relaunch of the harness child so the wedge
     /// is reclaimed deterministically instead of sitting indefinitely.
     EscalateKillRelaunch,
+    /// `#midturn-recycle-resume`: the harness reports a turn boundary
+    /// (`prompt_visible && !turn_active`) but an agent-doc cycle is still OPEN —
+    /// `cycle_state.is_open()` (preflight taken, finalize not committed) or an IPC
+    /// ack connection is in flight. An `execve` recycle here would tear down the
+    /// in-flight IPC listener mid-cycle and sever the ack-content round-trip, so the
+    /// next finalize validates its candidate against the pre-recycle preflight
+    /// baseline → `live_prompt_drift_after_preflight` → the `content_ours`
+    /// next-cycle wedge + "no response exists to replay" refusal. Defer the recycle
+    /// (a no-op for this tick that re-evaluates next loop, exactly like
+    /// `!turn_boundary`) so the `execve` only fires at a TRUE quiescent boundary
+    /// once the cycle commits and IPC drains. The `#durablerecycle` checkpoint and
+    /// the in-flight cycle are preserved across the deferral. Wins over every stale
+    /// recycle arm — even `explicit_admin` / `write_wedged` / `reexec_failed` —
+    /// because none of those may `execve` mid-finalize; they wait one cycle boundary
+    /// (sub-second once finalize commits), mirroring the operator-restart
+    /// `AwaitDrain` contract.
+    DeferCycleOpen,
 }
 
 /// `#supselfheal` Phase 3 — maximum number of times a stale supervisor whose
@@ -502,6 +519,26 @@ pub fn reexec_escalation_within_bound(attempts: u32, max: u32) -> bool {
 /// (`EscalateKillRelaunch`) regardless of the opt-in/admin/wedge inputs — that is
 /// the deterministic recovery the wedge plan requires. It still respects
 /// `turn_boundary` and is a no-op when not stale.
+///
+/// `#midturn-recycle-resume`: `cycle_open` is the agent-doc-cycle interlock the
+/// coarse harness `turn_boundary` does not provide. `turn_boundary` keys off the
+/// whole-turn `turn_active` marker (`UserPromptSubmit`→`Stop`), but the agent-doc
+/// `preflight → finalize` cycle runs as sub-steps INSIDE one harness turn and owns
+/// an in-flight IPC ack connection. If the marker is stale/expired or any window
+/// reports a boundary while a cycle is still open, an `execve` recycle would sever
+/// that connection mid-cycle and produce `live_prompt_drift_after_preflight`
+/// against the pre-recycle preflight baseline (the root of the
+/// `content_ours_snapshot_next_cycle` wedge). When `cycle_open` is true, every
+/// recycle arm below is deferred (`DeferCycleOpen`) so the `execve` only fires at a
+/// TRUE quiescent boundary once the cycle commits and IPC drains. This wins over
+/// `explicit_admin` / `write_wedged` / `reexec_failed` too — none of those may
+/// `execve` mid-finalize; they wait the sub-second until the cycle closes.
+// Eight independent boundary facts gate this pure recycle policy (staleness,
+// opt-in, harness turn boundary, queue head, admin/wedge/reexec overrides, and the
+// `#midturn-recycle-resume` agent-doc-cycle interlock). Each is a distinct decision
+// input, not a struct's worth of related state, so a parameter object would only
+// obscure the truth table the unit tests assert against.
+#[allow(clippy::too_many_arguments)]
 pub fn supervisor_recycle_action(
     stale: bool,
     auto_recycle: bool,
@@ -510,10 +547,21 @@ pub fn supervisor_recycle_action(
     explicit_admin: bool,
     write_wedged: bool,
     reexec_failed: bool,
+    cycle_open: bool,
 ) -> SupervisorRecycleAction {
     // Never drop a live turn — every recycle arm below respects the boundary.
     if !turn_boundary {
         return SupervisorRecycleAction::None;
+    }
+    // `#midturn-recycle-resume`: never `execve` while an agent-doc cycle is open
+    // (preflight taken, finalize not committed) or an IPC ack connection is in
+    // flight. Tearing the in-flight IPC listener down mid-cycle severs the
+    // ack-content round-trip and drives `live_prompt_drift_after_preflight` against
+    // the pre-recycle preflight baseline. Defer until the cycle closes — this wins
+    // over every stale recycle arm (admin/wedge/reexec-failed included) because none
+    // of them may interrupt a live finalize.
+    if cycle_open {
+        return SupervisorRecycleAction::DeferCycleOpen;
     }
     if stale {
         if reexec_failed {
@@ -1089,42 +1137,109 @@ mod tests {
         //  write_wedged, reexec_failed)
         // Fresh binary → never act.
         assert_eq!(
-            supervisor_recycle_action(false, true, true, true, false, false, false),
+            supervisor_recycle_action(false, true, true, true, false, false, false, false),
             None
         );
         assert_eq!(
-            supervisor_recycle_action(false, true, true, false, false, false, false),
+            supervisor_recycle_action(false, true, true, false, false, false, false, false),
             None
         );
         // Stale but mid-turn (not at a boundary) → never act, even with the flag on.
         assert_eq!(
-            supervisor_recycle_action(true, true, false, true, false, false, false),
+            supervisor_recycle_action(true, true, false, true, false, false, false, false),
             None
         );
         assert_eq!(
-            supervisor_recycle_action(true, true, false, false, false, false, false),
+            supervisor_recycle_action(true, true, false, false, false, false, false, false),
             None
         );
         // Stale at a turn boundary, auto-recycle OFF → surface only, regardless of
         // whether a queue head is pending.
         assert_eq!(
-            supervisor_recycle_action(true, false, true, false, false, false, false),
+            supervisor_recycle_action(true, false, true, false, false, false, false, false),
             Detect
         );
         assert_eq!(
-            supervisor_recycle_action(true, false, true, true, false, false, false),
+            supervisor_recycle_action(true, false, true, true, false, false, false, false),
             Detect
         );
         // Stale + boundary + opt-in ON, a queue head waiting → recycle NOW so the next
         // queue item runs on the fresh binary (debounce bypassed).
         assert_eq!(
-            supervisor_recycle_action(true, true, true, true, false, false, false),
+            supervisor_recycle_action(true, true, true, true, false, false, false, false),
             RecycleImmediate
         );
         // Stale + boundary + opt-in ON, no head waiting → debounced recycle.
         assert_eq!(
-            supervisor_recycle_action(true, true, true, false, false, false, false),
+            supervisor_recycle_action(true, true, true, false, false, false, false, false),
             RecycleDebounced
+        );
+    }
+
+    #[test]
+    fn supervisor_recycle_action_defers_while_agent_doc_cycle_open() {
+        use SupervisorRecycleAction::*;
+        // `#midturn-recycle-resume`: even when the harness reports a turn boundary,
+        // an OPEN agent-doc cycle (preflight taken, finalize not committed, or an IPC
+        // ack connection in flight) must DEFER the `execve` recycle. Firing it
+        // mid-cycle severs the in-flight IPC listener and drives the next finalize
+        // into `live_prompt_drift_after_preflight` against the pre-recycle preflight
+        // baseline (the root of the `content_ours` wedge). The deferral wins over
+        // EVERY recycle arm — admin, wedge, and reexec-failed escalation included —
+        // because none of those may interrupt a live finalize.
+        // (args: stale, auto_recycle, turn_boundary, head_pending, explicit_admin,
+        //  write_wedged, reexec_failed, cycle_open)
+
+        // Stale + auto + head pending — would be RecycleImmediate; cycle_open defers.
+        assert_eq!(
+            supervisor_recycle_action(true, true, true, true, false, false, false, true),
+            DeferCycleOpen
+        );
+        // Stale + auto + no head — would be RecycleDebounced; cycle_open defers.
+        assert_eq!(
+            supervisor_recycle_action(true, true, true, false, false, false, false, true),
+            DeferCycleOpen
+        );
+        // Explicit admin override — would be RecycleImmediate; cycle_open still defers.
+        assert_eq!(
+            supervisor_recycle_action(true, false, true, false, true, false, false, true),
+            DeferCycleOpen
+        );
+        // Write-wedge override — would be RecycleImmediate; cycle_open still defers.
+        assert_eq!(
+            supervisor_recycle_action(true, false, true, false, false, true, false, true),
+            DeferCycleOpen
+        );
+        // Reexec-failure escalation — would be EscalateKillRelaunch; cycle_open defers
+        // (a mid-finalize kill+relaunch is exactly what must not happen).
+        assert_eq!(
+            supervisor_recycle_action(true, true, true, true, false, false, true, true),
+            DeferCycleOpen
+        );
+        // `#wd40` explicit-admin flush on a FRESH binary — would be RecycleImmediate;
+        // cycle_open still defers (no process flush mid-finalize).
+        assert_eq!(
+            supervisor_recycle_action(false, false, true, false, true, false, false, true),
+            DeferCycleOpen
+        );
+
+        // CONVERSE: with the SAME inputs but cycle_open=false, the normal matrix is
+        // restored — once the cycle commits and IPC drains the deferred recycle fires.
+        assert_eq!(
+            supervisor_recycle_action(true, true, true, true, false, false, false, false),
+            RecycleImmediate
+        );
+        assert_eq!(
+            supervisor_recycle_action(true, true, true, true, false, false, true, false),
+            EscalateKillRelaunch
+        );
+
+        // A still-running turn (no boundary) plus an open cycle stays None — the
+        // harness-boundary gate runs first and already defers; cycle_open does not
+        // change that.
+        assert_eq!(
+            supervisor_recycle_action(true, true, false, true, false, false, false, true),
+            None
         );
     }
 
@@ -1137,38 +1252,38 @@ mod tests {
         // Auto-recycle OFF + explicit admin → RecycleImmediate (overrides Detect),
         // regardless of whether a head is pending.
         assert_eq!(
-            supervisor_recycle_action(true, false, true, false, true, false, false),
+            supervisor_recycle_action(true, false, true, false, true, false, false, false),
             RecycleImmediate
         );
         assert_eq!(
-            supervisor_recycle_action(true, false, true, true, true, false, false),
+            supervisor_recycle_action(true, false, true, true, true, false, false, false),
             RecycleImmediate
         );
         // Auto-recycle ON + explicit admin → still immediate (no debounce wait).
         assert_eq!(
-            supervisor_recycle_action(true, true, true, false, true, false, false),
+            supervisor_recycle_action(true, true, true, false, true, false, false, false),
             RecycleImmediate
         );
         // Explicit admin NEVER drops a live turn: mid-turn (no boundary) stays None.
         assert_eq!(
-            supervisor_recycle_action(true, false, false, false, true, false, false),
+            supervisor_recycle_action(true, false, false, false, true, false, false, false),
             None
         );
         // `#wd40` state-flush: explicit admin on a FRESH binary now recycles the
         // process to flush stale in-memory state (e.g. a lagging CRDT projection),
         // rather than no-opping and leaving the operator unable to clear it.
         assert_eq!(
-            supervisor_recycle_action(false, false, true, false, true, false, false),
+            supervisor_recycle_action(false, false, true, false, true, false, false, false),
             RecycleImmediate
         );
         // ...but still never mid-turn (no boundary) on a fresh binary either.
         assert_eq!(
-            supervisor_recycle_action(false, false, false, false, true, false, false),
+            supervisor_recycle_action(false, false, false, false, true, false, false, false),
             None
         );
         // A fresh binary WITHOUT explicit admin stays None (no spurious flush).
         assert_eq!(
-            supervisor_recycle_action(false, true, true, true, false, false, false),
+            supervisor_recycle_action(false, true, true, true, false, false, false, false),
             None
         );
     }
@@ -1182,29 +1297,29 @@ mod tests {
         // and recycles immediately at the boundary — a wedge must never stay Detect.
         // Auto-recycle OFF + write_wedged → RecycleImmediate (overrides Detect).
         assert_eq!(
-            supervisor_recycle_action(true, false, true, false, false, true, false),
+            supervisor_recycle_action(true, false, true, false, false, true, false, false),
             RecycleImmediate
         );
         assert_eq!(
-            supervisor_recycle_action(true, false, true, true, false, true, false),
+            supervisor_recycle_action(true, false, true, true, false, true, false, false),
             RecycleImmediate
         );
         // Auto-recycle ON + write_wedged → immediate (no debounce wait, even with no
         // head pending — the wedge does not wait for an idle boundary that may never
         // come).
         assert_eq!(
-            supervisor_recycle_action(true, true, true, false, false, true, false),
+            supervisor_recycle_action(true, true, true, false, false, true, false, false),
             RecycleImmediate
         );
         // A wedge NEVER drops a live turn: mid-turn (no boundary) stays None.
         assert_eq!(
-            supervisor_recycle_action(true, false, false, false, false, true, false),
+            supervisor_recycle_action(true, false, false, false, false, true, false, false),
             None
         );
         // A wedge on a FRESH binary → nothing to recycle (the wedge is not a stale
         // binary; some other transient cause owns the converge retry).
         assert_eq!(
-            supervisor_recycle_action(false, false, true, false, false, true, false),
+            supervisor_recycle_action(false, false, true, false, false, true, false, false),
             None
         );
     }
@@ -1217,28 +1332,28 @@ mod tests {
         // escalate to a bounded kill+relaunch regardless of the opt-in/admin/wedge
         // inputs.
         assert_eq!(
-            supervisor_recycle_action(true, true, true, true, false, false, true),
+            supervisor_recycle_action(true, true, true, true, false, false, true, false),
             EscalateKillRelaunch
         );
         assert_eq!(
-            supervisor_recycle_action(true, false, true, false, false, false, true),
+            supervisor_recycle_action(true, false, true, false, false, false, true, false),
             EscalateKillRelaunch
         );
         // Escalation wins over the wedge/admin RecycleImmediate arms (re-trying the
         // failed execve would otherwise be chosen).
         assert_eq!(
-            supervisor_recycle_action(true, false, true, false, true, true, true),
+            supervisor_recycle_action(true, false, true, false, true, true, true, false),
             EscalateKillRelaunch
         );
         // Escalation still respects turn_boundary — a failed re-exec mid-turn must
         // not drop the live turn.
         assert_eq!(
-            supervisor_recycle_action(true, true, false, true, false, false, true),
+            supervisor_recycle_action(true, true, false, true, false, false, true, false),
             None
         );
         // A failed re-exec on a FRESH binary → nothing to escalate.
         assert_eq!(
-            supervisor_recycle_action(false, true, true, true, false, false, true),
+            supervisor_recycle_action(false, true, true, true, false, false, true, false),
             None
         );
     }
@@ -1291,7 +1406,7 @@ mod tests {
                 /* stale */ false, /* auto_recycle */ true,
                 /* turn_boundary */ true, /* head_pending */ false,
                 /* explicit_admin */ true, /* write_wedged */ false,
-                /* reexec_failed */ false,
+                /* reexec_failed */ false, /* cycle_open */ false,
             ),
             SupervisorRecycleAction::None | SupervisorRecycleAction::Detect
         );
@@ -1309,7 +1424,7 @@ mod tests {
         // Without the explicit admin, a fresh binary mid-drain never yields (no
         // spurious flush / churn).
         let no_admin_recycle = !matches!(
-            supervisor_recycle_action(false, true, true, false, false, false, false),
+            supervisor_recycle_action(false, true, true, false, false, false, false, false),
             SupervisorRecycleAction::None | SupervisorRecycleAction::Detect
         );
         assert!(!no_admin_recycle);

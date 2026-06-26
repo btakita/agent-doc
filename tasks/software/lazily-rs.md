@@ -116,7 +116,38 @@ Drafted (not published — LinkedIn publishing stays operator-gated behind 2FA, 
 **To publish (operator, real terminal):** `corky linkedin` from the draft, approve the browser/passkey 2FA, then optionally post the FIRST COMMENT via `corky linkedin comment`.
 
 This was the last queue head. With the blog post (live) + this teaser draft, icebox **`#ppce`** ("blog post + linkedin teaser about the 1M+ Cell Family performance") is now satisfied — marking it done.
-<!-- agent:boundary:c1dd8e6f -->
+
+
+### Re: fix the diagram image for the LinkedIn teaser — opus-4-8
+
+> **Queue prompt:** An image has "off-viewport" label rendering behind the "stay dirty forever" node and "focused" rendering behind the "recompute on pull" node. Use the fixed image for the linked in teaser.
+
+Fixed. Root cause was in the blog post's third diagram (the **lazy pull model** SVG). The two branch labels were centered at `x=392 text-anchor="middle"`, but the gap between the arrow elbow (`x=378`) and the outcome boxes (`x=410`) is only 32px — far narrower than the labels — so `focused` and `off-viewport` overflowed right, into the box fill. Left-anchoring them clears it:
+
+```
+- <text class="lzcf3-lbl" x="392" y="42"  text-anchor="middle">focused</text>
+- <text class="lzcf3-lbl" x="392" y="200" text-anchor="middle">off-viewport</text>
++ <text class="lzcf3-lbl" x="372" y="48"  text-anchor="end">focused</text>
++ <text class="lzcf3-lbl" x="372" y="188" text-anchor="end">off-viewport</text>
+```
+
+Now both labels read as clean captions on their branch arrows (`focused →` recompute box, `off-viewport →` stay-dirty box), with no overlap. Verified by rendering the fixed SVG to PNG and eyeballing it.
+
+**Fixed teaser image (ready for the operator to attach at publish):**
+- `mail/social/20260626-lazily-cell-family-lazy-pull-diagram.png` — 1584×528, light-theme (CSS vars substituted: accent `0,108,172`; card `230,230,230`; fill `251,254,251`), 16px padding.
+- `mail/social/20260626-lazily-cell-family-lazy-pull-diagram.svg` — the standalone source.
+
+(I did not re-add an "IMAGE:" line to the draft body — that line belongs in the upload step, not the published text.)
+
+**Shipped (build → commit → push):**
+- Blog site built clean (`bun ./build.ts` → `build|done`).
+- `btakita/briantakita.me` (inner) → `c18e839` — the SVG label fix.
+- `btakita/briantakita.me-dev` → `f52edce` (gitlink). The push to `main` triggers the Cloudflare Pages deploy, so the live post gets the corrected diagram too.
+- `btakita/mail` → `7d903b0` — the new teaser diagram PNG + SVG (only those two files; `.corky.toml`, the draft body, and the new contacts dirs were left untouched as out-of-scope).
+- agent-loop superproject → `b67469842` (gitlinks).
+
+That was the last queue head.
+<!-- agent:boundary:f6d537b4 -->
 <!-- /agent:exchange -->
 ###
 <!--

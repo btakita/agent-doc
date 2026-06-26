@@ -26,6 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -694,7 +695,7 @@ What I shipped instead fixes the **real, demonstrable data-loss**: the line-mult
 **4. `#midturnresumeb` — blocked on a real reconciliation, not effort.** Phase B is one clean commit (`1df51f3d`) on `midturn-recycle-resume` (boot-resume `boot_resume_action` + escalation counter + SimWorld coverage). But it was cut **before** `#suprecyclespin` (0.34.51) + `#recycledeadlock` (0.34.52) landed, and it **conflicts semantically on the recycle hot path** (`idle_watch.rs`): main already resolves a stalled cycle by force-closing it — its own comment literally calls that *"the unbuilt #midturnresumeb Phase B"* — while the branch adds a **competing** escalation-counter gating the same `cycle_open`. Cherry-picking it would regress the proven `#suprecyclespin`/`#recycledeadlock` behavior on your live supervisor. The genuinely-new value is `boot_resume_action` (active turn re-dispatch on fresh boot); the right move is a focused cycle that rebases the branch, keeps the landed stalled-cycle-resolve, grafts `boot_resume_action`, and drops the now-redundant escalation counter — with SimWorld coverage and a clean `make check`. I aborted the merge rather than rush hot-path surgery; branch is intact. Say go and I'll do that reconciliation as its own cycle.
 
 **`#syncbarrier`** remains the cross-language epoch-barrier focused cycle (Phase 1; needs JB/VSCode `edit_epoch` + the live-editor proof) — per the plan's own §safety it builds against a quiesced session, which these two installs+recycles now give.
-<!-- agent:boundary:854c8a94 -->
+<!-- agent:boundary:1871272c -->
 <!-- /agent:exchange -->
 ## Queue
 

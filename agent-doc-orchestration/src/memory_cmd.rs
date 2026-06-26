@@ -412,6 +412,16 @@ pub fn semantic_queue_strike_matches(
         let Some(candidate_index) = candidate_index else {
             continue;
         };
+        // `#qimpstrike`: a recurring imperative command head (`deploy`, `commit`,
+        // `push`, `commit + push`, the `#spec-test-commit-push` preset, …) is an
+        // executable directive, not a restatement of tracked work — it is valid
+        // every time it is queued. Never strike it as "already done"/backlog,
+        // even when a common verb is lexically close to many prior done items.
+        // It stays drainable and is retired only once actually dispatched this
+        // cycle (the answered-this-turn consume path), not by fuzzy matching.
+        if crate::queue_continuation::is_recurring_imperative_head(&candidate.text) {
+            continue;
+        }
         // Score against both corpora; keep the single best match across both,
         // preferring a completed (done) match on a tie since "already complete"
         // is the stronger statement than "tracked".
@@ -1261,6 +1271,103 @@ Shipped cache repair.
             matches.is_empty(),
             "id-backed head must be skipped by the free-text strike scorer: {matches:?}"
         );
+    }
+
+    #[test]
+    fn queue_strike_exempts_recurring_imperative_deploy_head() {
+        // #qimpstrike: a recurring imperative command head (`deploy`) is an
+        // executable directive, NOT a restatement of tracked work — it must not be
+        // auto-struck even when a lexically-close done item containing the word
+        // "deploy" exists above the strike threshold.
+        let tmp = tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("tasks.done.md"),
+            "- 2026-06-07 [#do-id-closeout-open-backlog] commit + push + deploy the worker\n",
+        )
+        .unwrap();
+        let doc = write_doc(
+            tmp.path(),
+            r#"
+<!-- agent:queue auto -->
+- deploy
+<!-- /agent:queue -->
+
+<!-- agent:done archive=tasks.done.md -->
+<!-- /agent:done -->
+"#,
+        );
+        let db = tmp.path().join(".tsift/memory.db");
+        let matches =
+            semantic_queue_strike_matches(&doc, Some(&db), QUEUE_STRIKE_THRESHOLD, 5).unwrap();
+        assert!(
+            matches.is_empty(),
+            "recurring-imperative `deploy` head must NOT be struck as done: {matches:?}"
+        );
+    }
+
+    #[test]
+    fn queue_strike_exempts_recurring_command_preset_token_head() {
+        // #qimpstrike: a recurring-command preset token (`#spec-test-commit-push`)
+        // is an executable directive and must not be struck by a lexically-close
+        // done item.
+        let tmp = tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("tasks.done.md"),
+            "- 2026-06-07 [#shiplast] spec test commit push the release\n",
+        )
+        .unwrap();
+        let doc = write_doc(
+            tmp.path(),
+            r#"
+<!-- agent:queue auto -->
+- #spec-test-commit-push
+<!-- /agent:queue -->
+
+<!-- agent:done archive=tasks.done.md -->
+<!-- /agent:done -->
+"#,
+        );
+        let db = tmp.path().join(".tsift/memory.db");
+        let matches =
+            semantic_queue_strike_matches(&doc, Some(&db), QUEUE_STRIKE_THRESHOLD, 5).unwrap();
+        assert!(
+            matches.is_empty(),
+            "recurring-command preset head must NOT be struck as done: {matches:?}"
+        );
+    }
+
+    #[test]
+    fn queue_strike_still_strikes_legitimate_restatement_with_deploy_word() {
+        // #qimpstrike non-regression: a multi-word free-text head that genuinely
+        // restates a specific completed tracked task STILL auto-strikes, even when
+        // it happens to contain a recurring-command verb. The exemption is for the
+        // recurring-imperative subclass (short, verb-led), not for any prose that
+        // mentions `deploy`/`commit`/`push`.
+        let tmp = tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("tasks.done.md"),
+            "- 2026-06-07 [#deployretry] fix the deploy script so it retries on a transient 500\n",
+        )
+        .unwrap();
+        let doc = write_doc(
+            tmp.path(),
+            r#"
+<!-- agent:queue auto -->
+- fix the deploy script so it retries on a transient 500
+<!-- /agent:queue -->
+
+<!-- agent:done archive=tasks.done.md -->
+<!-- /agent:done -->
+"#,
+        );
+        let db = tmp.path().join(".tsift/memory.db");
+        let matches =
+            semantic_queue_strike_matches(&doc, Some(&db), QUEUE_STRIKE_THRESHOLD, 5).unwrap();
+        let first = matches
+            .first()
+            .expect("legitimate multi-word restatement must still be struck");
+        assert_eq!(first.matched_kind, QueueStrikeMatchKind::Done);
+        assert_eq!(first.matched_id.as_deref(), Some("deployretry"));
     }
 
     #[test]

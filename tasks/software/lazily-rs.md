@@ -24,7 +24,6 @@ queue: start
 
 <!-- agent:status -->
 
-🔴 (restart/recycle your supervisor)
 - [x] Phase 1: Research & design
 - [x] Phase 2: Core signal primitives
 - [x] Phase 3: Derived/computed signals
@@ -41,7 +40,7 @@ queue: start
 Compacted content:
 - Archived 8 response topic(s): next steps to fix lazily-rs bugs; closeout repair; IPC proof diagnostic (interrupted-cycle recovery); 5 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-<!-- agent:boundary:b2e3aa53 -->
+<!-- agent:boundary:2bd9d652 -->
 <!-- /agent:exchange -->
 ###
 <!--

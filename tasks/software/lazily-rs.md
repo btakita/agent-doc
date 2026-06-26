@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -40,7 +40,24 @@ queue: start
 Compacted content:
 ❯ - Archived 8 response topic(s): Session compacted; go [#lzcrdtplane]; go [#lzcrdtplane]; 5 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4af...
-<!-- agent:boundary:50e76c4c -->
+
+### Re: next steps to fix lazily-rs bugs — gpt-5
+
+> **Queue prompt:** What are #next-steps to fix lazily-rs bugs?
+
+Top backlog item: `#lzbugtriage`.
+
+I added three prioritized backlog items. The top item is not another speculative fix; it is a current-proof triage pass, because the old archived candidates I spot-checked are already fixed or green in the current tree:
+
+- `make benchmark-check` passes now.
+- `AsyncContext` has the recycled-`SlotId` generation guard and abort/recycle ordering for `#lzasyncdispose2`.
+- Circular dependency detection now has regression coverage instead of overflowing.
+- WebSocket inbound queue bounding and dropped-frame accounting are present.
+
+The highest engineering follow-up after that is `#lzsmstress`, focused on state-machine hardening across sync, thread-safe, and async machines. `#lzcrdtperms` is third because the distributed CRDT transport is the freshest complex surface and needs deterministic permission/fan-out/GC regressions.
+
+I left the operator-gated review items in Review; they are not agent-drainable bug-fix work in this cycle.
+<!-- agent:boundary:579fabc8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -49,12 +66,14 @@ Compacted content:
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- 🚧 What are #next-steps to fix lazily-rs bugs?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzbugtriage] #lzbugtriage=Run a focused lazily-rs bug triage cycle: run make check plus latest gh CI, then audit archived bug candidates against the current tree and reopen only failures that still reproduce. Current spot-check: benchmark-check passes; async dispose generation guard, circular dependency detection, and WebSocket inbound queue bounding are already present.
+- [ ] [#lzsmstress] [recommended] #lzsmstress=Add state-machine hardening tests for StateMachine, ThreadSafeStateMachine, and AsyncStateMachine: invalid transitions, transition callbacks, dynamic dependencies, eager signals, dispose/recreate, and concurrent set/get. Start with failing regressions that prove no stale transition, cleanup leak, or stale dependency edge survives.
+- [ ] [#lzcrdtperms] [recommended] #lzcrdtperms=Add CRDT runtime permission/regression coverage: CrdtSync BridgeHub fan-out with mixed readable/unreadable peers, duplicate delivery, partial-frontier tombstone GC, and NodeKey/NodeId churn so multi-writer transport bugs fail deterministically.
 <!-- /agent:backlog -->
 
 ## Review

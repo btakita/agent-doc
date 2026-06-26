@@ -109,7 +109,18 @@ I'm treating this as the full provenance+commit-cutover program. It's deep core 
 **Why I'm not ramming the rest through now:** this session's in-memory CRDT is corrupting on nearly every write (live_prompt_drift + the conflict-marker splice — itself the #provauth4 evidence). The responsible path is: install `cd8f3522` + **recycle the supervisor** (clears the corrupt replica, picks up the new binary), then I drain #provauth2-slice-2 → #provauth1 → #pcwcrt → #provauth3 → #provauth4 against a clean supervisor. Also captured your new bug: **JB `Run Agent Doc` floods duplicate dispatch prompts** — it's the documented #vgat/#jbrundispatch no-submit-retry class (root-cause fix is a separate dispatch cycle).
 
 Recommend: recycle now, then I continue the program. Proceed?
-<!-- agent:boundary:901a15ae -->
+
+### Re: #provauth2 complete — operator queue authority (dedup + delete tombstone) — opus-4-8
+
+`#provauth2` (#q9w3) is **done**, both slices, on the fresh supervisor. `make check` green; 4 new tests.
+
+- **Slice 1 — multi-id dedup (`cd8f3522`, live):** the mirror deduped off only the first `#id` per line, so your manual `[#a] [#b] [#c]` line re-mirrored `#b`/`#c` as duplicates every preflight. Now `existing_ids` collects **every** id on every queue line → no duplicate adds.
+- **Slice 2 — operator-delete tombstone (`08df743c`):** new `preflight::queue_tombstone` module + a durable `.agent-doc/queue-tombstones/<hash>.json` sidecar. An id that was active in the committed snapshot queue and is now **entirely gone** (not merely struck/consumed) is recorded as an operator delete and the backlog→queue mirror skips re-adding it. It **self-clears** when you re-add the id as an active head. That's what closes "I deleted items but they reappeared" — your delete is now authoritative (the inverse of the `#ynra` *completed*-id exclusion).
+
+Closing `#q9w3`. Next in the program: **#provauth1** (CRDT transaction-origin tagging) — the foundation `#pcwcrt`/`#provauth3`/`#provauth4` all key off; it's a large core-CRDT change and gets its own focused cycle.
+
+I'll install `08df743c` + recycle so slice 2 goes live for your eyeball (delete a `do [#id]` mirror line mid-turn → it should stay gone; grep `queue_mirror_tombstone_suppressed #provauth2`), then the loop continues to `#provauth1` on the fresh binary.
+<!-- agent:boundary:32aa5589 -->
 <!-- /agent:exchange -->
 ## Queue
 

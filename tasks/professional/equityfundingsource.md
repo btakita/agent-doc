@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -90,7 +90,7 @@ Complete and pushed across all four portals — closing out this queue head (the
 - **Broker** — `aa05ac5`
 
 Shared `portal/shared/deal_photo_carousel.tsx` (`DealPhotoCarousel` + `HousePlaceholder`); empty deals show the house placeholder. Each non-admin portal serves **public** photos through its own auth-scoped download route (`/api/{investor,borrower,broker}/deal-photos/:id/download`), and each download rule is a unit-tested pure predicate. `bun run check` green (1241 tests). `deploy` held per your decision — ready via `bun run deploy:worker` when you give the go.
-<!-- agent:boundary:a50f35e3 -->
+<!-- agent:boundary:76f7c1af -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,7 +109,7 @@ After 20:30
 - TMO Syncs
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
 - 🚧 ~~All deals in the borrower, broker, lender, and admin should have a carousel of uploaded images. If there is no image, then show a house placeholder.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~deploy — auto-struck: completed by #do-id-closeout-open-backlog (#qftbklgstrike)~~
 - ~~do [#dealcarousel-borrower]~~

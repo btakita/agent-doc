@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -104,7 +104,7 @@ Done — implemented, tested, committed, pushed, and **deployed** this time.
 **Shipped:** EFS `main` pushed (`9d0d71d..3982b22`); worker deployed — version `3337a6e1-c2d6-4150-bef0-368b1a524599` at https://equityfundingsource.brian-takita.workers.dev. Superproject submodule pointer bumped (`c94605896`).
 
 Live-eyeball when convenient: open the deal `866e1c5a` Available Deal dialog → click the Messages FAB → the deal's property thread should be the selected tab (not just General); same from a Deals I'm Interested In card.
-<!-- agent:boundary:54d0a509 -->
+<!-- agent:boundary:24f3a6c0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -125,7 +125,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~This was not implemented or deployed: https://equityfundingsource.brian-takita.workers.dev/lenders/deals/866e1c5a-e428-4b35-bacb-a58f5d94b7da > Available Deal dialog > Messages should show + select the available deal conversation thread. Same with a Deal I'm Interested In.~~
-- deploy
+- 🚧 The message tab forthe
 <!-- /agent:queue -->
 
 ## Backlog

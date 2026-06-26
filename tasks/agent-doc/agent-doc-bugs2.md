@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -69,7 +69,19 @@ For the editor-side state/proof path: mostly yes.
 For the core `CellDocTree`/finalize cutover: no. `lazily-kt` is explicitly not a reactive-core port. It does not provide `CellTree`, `CellMap`, `reconcile`, `apply_to_map`, `apply_to_tree`, `SemTree`, or CRDT merge machinery. Those are in `lazily-rs`, and the current agent-doc core work depends on that Rust API.
 
 Also, `src/lazily-kt` is currently clean. There is nothing to commit there.
-<!-- agent:boundary:f1b80aed -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=797d9455-a794-43b0-a4b6-cf5022885e58 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=12484 candidate_hash=988b2f780fb6ce88728f57bdaac3a6ff07ed864c3d537c92cb9f4c11e292dfec content_ours_len=12487 content_ours_hash=fc18a34bd8fcea52b8906befe6df2d0582cc29be0fab6130e5cec1682f03410b doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782454481404
+```
+<!-- agent:boundary:08f3663b -->
 <!-- /agent:exchange -->
 
 ## Queue

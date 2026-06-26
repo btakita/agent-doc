@@ -160,45 +160,39 @@ Commits:
 - No additional repo files were changed in this repair cycle.
 - Verification evidence is unchanged: targeted state-machine tests passed, `make check` passed via `tsift`/`rtk` artifact `tart-b520b6cec8`, and CI run `28219001643` was green before the push.
 - `#lzsmstress` remains complete: lazily-rs submodule commit `1e50084` was pushed, and parent gitlink commit `e4a354bdd` records it.
+- Verification: `make check` in `src/lazily-spec` passed (`lake build`, 7 jobs).
+- GitHub Actions: this repo has no `.github` directory and `gh workflow list` returned no workflows, so there was no CI run to inspect.
+- GitHub Actions: `gh workflow list` and `gh run list --limit 3` returned no workflows/runs for `lazily-js`, so there was no CI run to inspect.
+- Verification: `make check` passed in `src/lazily-js` via `tsift`/`rtk`, artifact `tart-c0476e5b21`, exit 0.
+- Package identity is publish-ready but unpublished by me: `package.json` name `@lazily-hub/js`, version `0.1.0`, FFI state-projection consumer bindings, not a reactive-core port.
+- Recent JS parity commits are present: `f3c926a feat: add state projection parity helpers`, `6d38122 test(conformance): validate fixture assertions generically (parity with lazily-kt #lzktconf)`, and `ac97122 chore: rename npm scope @lazily/js -> @lazily-hub/js`.
+- `src/lazily-js` `origin/main` also resolves to `ac9712291b7723b26dafb84a6d678098f1cba2be`, so the parent gitlink is cloneable.
+- Parent `agent-loop` already points `src/lazily-js` at `ac9712291b7723b26dafb84a6d678098f1cba2be`.
+- Verification: `make check` passed in `src/lazily-kt` via `tsift`/`rtk`, artifact `tart-0986e4cba3`, exit 0.
+- `src/lazily-kt` was clean but ahead of `origin/main` by one commit; I pushed it to `lazily-hub/lazily-kt` (`1500bea..49dc547`). `origin/main` now resolves to `49dc5476f2ab22a978f5742a623c78aa66b2d4d9`.
+- That commit is the Kotlin parity slice: `feat: StateGraphMirror + agent_doc_state_subscribe delta path (#lazilystatesync3)`, adding `StateGraphMirror`, subscription support in `LazilyFFI` / `StateProjectionClient`, and mirror/client tests.
+- Parent `agent-loop` already pointed `src/lazily-kt` at `49dc5476f2ab22a978f5742a623c78aa66b2d4d9`.
+- The relevant commits are on the current `src/lazily-spec` branch: `9fbc669 feat(spec): add StateMachine.lean formal model` and `2506182 feat: add StateMachine→IPC cross-module proof (#hj5x)`. Current `src/lazily-spec` HEAD is `f44a9c6`, and the working tree is clean.
+- The plan's remaining lazily-spec TODO is also present in `StateMachineIPC.lean`: `send` to IPC delta ops, guard/self-transition no-op behavior, changed transitions emitting `DeltaOp.cellSet`, accepted delta/epoch behavior, and payload/state correspondence.
+- `StateMachine.lean` exists and models `send`/`sends` with guard rejection, accepted transitions, self-transitions, changed-transition emission checks, and transition preservation.
 
 I left the pre-existing dirty lazily-rs files `src/lib.rs` and `src/reconcile.rs` unstaged and uncommitted. Confidence: high; this was test-only hardening and the full local suite passed. Escalation: editor IPC repeatedly failed to preserve the response body, so this repair used the binary-owned force-disk commit path.
 
 ### Re: visible response absorption — gpt-5
 
+> **Queue prompt:**
+>
+> lazily-kt parity
+
+
+> **Queue prompt:**
+>
+> lazily-spec parity
+
+
 Absorbing the already-visible `#lzsmstress` and `#lzcrdtperms` response content through the binary-owned snapshot/commit boundary. No additional repository changes were made in this absorption step.
 
 The current completed work remains: `#lzsmstress` committed in lazily-rs `1e50084` and parent `e4a354bdd`; `#lzcrdtperms` committed in lazily-rs `bce1802` and parent `aef3a7f15`; full `make check` for the CRDT work passed with artifact `tart-bce23a7c27`.
-
-### Re: lazily-spec parity — gpt-5
-
-> **Queue prompt:** lazily-spec parity
-
-`lazily-spec parity` is already drained and verified, so I made no new spec-code edits this cycle.
-
-Evidence:
-
-- `StateMachine.lean` exists and models `send`/`sends` with guard rejection, accepted transitions, self-transitions, changed-transition emission checks, and transition preservation.
-- The plan's remaining lazily-spec TODO is also present in `StateMachineIPC.lean`: `send` to IPC delta ops, guard/self-transition no-op behavior, changed transitions emitting `DeltaOp.cellSet`, accepted delta/epoch behavior, and payload/state correspondence.
-- The relevant commits are on the current `src/lazily-spec` branch: `9fbc669 feat(spec): add StateMachine.lean formal model` and `2506182 feat: add StateMachine→IPC cross-module proof (#hj5x)`. Current `src/lazily-spec` HEAD is `f44a9c6`, and the working tree is clean.
-- Verification: `make check` in `src/lazily-spec` passed (`lake build`, 7 jobs).
-
-Changed paths: none in `src/lazily-spec`; this was a verification and queue-strike cycle. Confidence: high. The next non-operator head is `lazily-kt parity`; release/publish work remains operator-gated.
-
-### Re: lazily-kt parity — gpt-5
-
-> **Queue prompt:** lazily-kt parity
-
-`lazily-kt parity` is complete and now published.
-
-What I verified:
-
-- Parent `agent-loop` already pointed `src/lazily-kt` at `49dc5476f2ab22a978f5742a623c78aa66b2d4d9`.
-- That commit is the Kotlin parity slice: `feat: StateGraphMirror + agent_doc_state_subscribe delta path (#lazilystatesync3)`, adding `StateGraphMirror`, subscription support in `LazilyFFI` / `StateProjectionClient`, and mirror/client tests.
-- `src/lazily-kt` was clean but ahead of `origin/main` by one commit; I pushed it to `lazily-hub/lazily-kt` (`1500bea..49dc547`). `origin/main` now resolves to `49dc5476f2ab22a978f5742a623c78aa66b2d4d9`.
-- Verification: `make check` passed in `src/lazily-kt` via `tsift`/`rtk`, artifact `tart-0986e4cba3`, exit 0.
-- GitHub Actions: this repo has no `.github` directory and `gh workflow list` returned no workflows, so there was no CI run to inspect.
-
-Changed paths: no new source edits in this cycle; the required action was publishing the already-referenced submodule commit. No new actionable follow-up item was discovered, so I am not adding backlog. Confidence: high. The remaining non-operator queue heads include JS/Zig/Py parity items; release/publish actions remain operator-gated.
 
 ### Re: live-buffer drift after Kotlin parity closeout — gpt-5
 
@@ -210,27 +204,15 @@ No queue head is being answered by this recovery response. The next substantive 
 
 ### Re: closeout drift recovery — gpt-5
 
+> **Queue prompt:**
+>
+> lazily-js parity + release + publish
+
+
 This is a binary-owned recovery write for the post-commit live-buffer drift reported after `73cc7ecd7`. It preserves the already-visible parity evidence and does not answer or consume the next queue head.
 
 No repository work was performed in this recovery write. Release/publish work remains operator-gated.
-
-### Re: lazily-js parity + release + publish — gpt-5
-
-> **Queue prompt:** lazily-js parity + release + publish
-
-`lazily-js` parity is verified. I did not run `npm publish` or create a public release; that part remains operator-gated by the existing Review item `#z0hq`.
-
-Evidence:
-
-- Parent `agent-loop` already points `src/lazily-js` at `ac9712291b7723b26dafb84a6d678098f1cba2be`.
-- `src/lazily-js` `origin/main` also resolves to `ac9712291b7723b26dafb84a6d678098f1cba2be`, so the parent gitlink is cloneable.
-- Recent JS parity commits are present: `f3c926a feat: add state projection parity helpers`, `6d38122 test(conformance): validate fixture assertions generically (parity with lazily-kt #lzktconf)`, and `ac97122 chore: rename npm scope @lazily/js -> @lazily-hub/js`.
-- Package identity is publish-ready but unpublished by me: `package.json` name `@lazily-hub/js`, version `0.1.0`, FFI state-projection consumer bindings, not a reactive-core port.
-- Verification: `make check` passed in `src/lazily-js` via `tsift`/`rtk`, artifact `tart-c0476e5b21`, exit 0.
-- GitHub Actions: `gh workflow list` and `gh run list --limit 3` returned no workflows/runs for `lazily-js`, so there was no CI run to inspect.
-
-Changed paths: none. The pre-existing untracked `src/lazily-js/package-lock.json` remains untouched. Confidence: high for parity/readiness; publish confidence intentionally not claimed because registry publication is operator-gated.
-<!-- agent:boundary:dcff1a2f -->
+<!-- agent:boundary:a64c6dfc -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -1091,6 +1091,14 @@ pub enum CrdtMergeBaseSource {
     FallbackNoOverlay,
     FallbackOverlayDecodeError,
     FallbackOverlayProjectionMismatch,
+    /// `#crdtlivedrop`: the overlay projection diverged from the cycle baseline
+    /// **and** carried content the baseline lacks (live keystrokes the user just
+    /// typed, not yet committed). The merge base stays the committed baseline (the
+    /// common ancestor of the downstream merge's `ours`/`theirs`), but unlike the
+    /// stale path the live overlay sidecar is **left intact** instead of being
+    /// rebuilt from the baseline — so the user's keystrokes are never silently
+    /// discarded and survive for op-capture and the next cycle's base.
+    OverlayAheadPreserved,
 }
 
 impl CrdtMergeBaseSource {
@@ -1102,6 +1110,7 @@ impl CrdtMergeBaseSource {
             CrdtMergeBaseSource::FallbackOverlayProjectionMismatch => {
                 "fallback_overlay_projection_mismatch"
             }
+            CrdtMergeBaseSource::OverlayAheadPreserved => "overlay_ahead_preserved",
         }
     }
 }
@@ -1112,12 +1121,86 @@ pub struct CrdtMergeBase {
     pub source: CrdtMergeBaseSource,
 }
 
+/// Whether the overlay projection carries content the cycle baseline lacks
+/// (`#crdtlivedrop` ahead/behind classifier).
+///
+/// Both texts are independent `from_markdown` projections (no shared CRDT
+/// causal history across cycles), so causality is read from the *content*: the
+/// overlay is **ahead / concurrent-divergent** when at least one non-empty line
+/// it holds is absent from the baseline — i.e. it contains live keystrokes not
+/// yet committed. When every overlay line already appears in the baseline the
+/// overlay is **behind / stale** (an older subset the committed snapshot has
+/// since advanced past) and discarding it loses nothing live.
+///
+/// Line-multiset containment (not prefix length) is used so a divergence in an
+/// early region (e.g. a frontmatter edit) is not mistaken for staleness just
+/// because the tails still match.
+fn overlay_carries_unbaselined_content(overlay_md: &str, baseline: &str) -> bool {
+    use std::collections::HashMap;
+    let mut baseline_lines: HashMap<&str, usize> = HashMap::new();
+    for line in baseline.lines() {
+        *baseline_lines.entry(line).or_insert(0) += 1;
+    }
+    for line in overlay_md.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        match baseline_lines.get_mut(line) {
+            Some(count) if *count > 0 => *count -= 1,
+            _ => return true,
+        }
+    }
+    false
+}
+
+/// Rebuild the overlay sidecar from the cycle baseline (the stale/discard path).
+/// Best-effort: a rebuild failure is logged, never propagated, since the merge
+/// base itself is already resolved to the baseline.
+fn rebuild_overlay_to_baseline(doc: &Path, path: &Path, baseline: &str) {
+    match rebuild_overlay_crdt_locked(path, baseline) {
+        Ok(overlay_bytes) => crate::ops_log::log_op(
+            doc,
+            &format!(
+                "crdt_merge_base_overlay_rebuilt file={} fallback_len={} overlay_bytes={}",
+                doc.display(),
+                baseline.len(),
+                overlay_bytes
+            ),
+        ),
+        Err(err) => crate::ops_log::log_op(
+            doc,
+            &format!(
+                "crdt_merge_base_overlay_rebuild_failed file={} error={}",
+                doc.display(),
+                err
+            ),
+        ),
+    }
+}
+
 /// Build the CRDT merge base for a write cycle.
 ///
 /// The structured overlay sidecar is authoritative when it decodes and its
-/// markdown projection matches the explicit cycle baseline. If the overlay is
-/// absent or stale, use the known baseline text; using arbitrary stale CRDT
-/// sidecars here can replay old content as a fresh concurrent insertion.
+/// markdown projection matches the explicit cycle baseline. When the overlay
+/// projection *diverges* from the cycle baseline we must distinguish two
+/// opposite cases instead of conflating them by plain string inequality
+/// (`#crdtlivedrop`):
+///
+/// - **overlay-behind / stale**: the overlay holds *older* content than the
+///   baseline (the committed snapshot already advanced past it). Discarding it
+///   and using the baseline is correct, but the discarded bytes are now logged
+///   (`overlay_discarded_bytes`) so the loss is never silent.
+/// - **overlay-ahead / concurrent-divergent / live**: the overlay carries
+///   content the baseline lacks (keystrokes the user just typed, not yet
+///   committed). Discarding it would silently drop the user's edit. The merge
+///   base itself stays the committed baseline — it is the true common ancestor
+///   of the downstream merge's `ours` (agent response, built from this baseline)
+///   and `theirs` (the live editor buffer, which also carries the keystrokes),
+///   so the downstream CRDT merge keeps both the response and the live edit
+///   without replaying old content as a fresh insertion. The fix is that the
+///   live overlay **sidecar is left intact** rather than rebuilt from the
+///   baseline, so the keystrokes survive in the op-capture / next-cycle base
+///   instead of being wiped (`#crdtlivedrop`).
 pub fn crdt_merge_base_state(doc: &Path, fallback_markdown: &str) -> Result<CrdtMergeBase> {
     let path = overlay_crdt_path_for(doc)?;
     let _lock = acquire_crdt_lock(doc)?;
@@ -1138,47 +1221,76 @@ pub fn crdt_merge_base_state(doc: &Path, fallback_markdown: &str) -> Result<Crdt
             Ok(markdown) if markdown == fallback_markdown => {
                 (markdown, CrdtMergeBaseSource::Overlay)
             }
-            Ok(markdown) => {
+            Ok(overlay_md) => {
                 crate::ops_log::log_op(
                     doc,
                     &format!(
                         "crdt_merge_base_overlay_stale file={} overlay_len={} fallback_len={}",
                         doc.display(),
-                        markdown.len(),
+                        overlay_md.len(),
                         fallback_markdown.len()
                     ),
                 );
-                match rebuild_overlay_crdt_locked(&path, fallback_markdown) {
-                    Ok(overlay_bytes) => crate::ops_log::log_op(
+                if overlay_carries_unbaselined_content(&overlay_md, fallback_markdown) {
+                    // Overlay-ahead / concurrent-divergent: the overlay carries
+                    // live keystrokes not yet committed. The merge base must stay
+                    // the committed baseline — it is the common ancestor of the
+                    // downstream merge's `ours` (agent response, built from this
+                    // baseline) and `theirs` (the live editor buffer, which also
+                    // carries the keystrokes). Putting the live content into the
+                    // base would make the agent's response look like a *deletion*
+                    // of it and drop the keystrokes; with the baseline as the
+                    // common ancestor the downstream CRDT merge keeps both the
+                    // response and the live edit (anchored, no duplicate replay).
+                    //
+                    // The critical difference from the stale path: the live
+                    // overlay sidecar is **left intact** (not rebuilt from the
+                    // baseline), so the user's keystrokes survive for op-capture
+                    // and the next cycle's base instead of being silently wiped.
+                    crate::ops_log::log_op(
                         doc,
                         &format!(
-                            "crdt_merge_base_overlay_rebuilt file={} fallback_len={} overlay_bytes={}",
+                            "crdt_merge_base_overlay_ahead_preserved file={} overlay_len={} fallback_len={} first_diff_offset={:?}",
                             doc.display(),
+                            overlay_md.len(),
                             fallback_markdown.len(),
-                            overlay_bytes
+                            first_diff_byte(&overlay_md, fallback_markdown)
                         ),
-                    ),
-                    Err(err) => crate::ops_log::log_op(
+                    );
+                    (
+                        fallback_markdown.to_string(),
+                        CrdtMergeBaseSource::OverlayAheadPreserved,
+                    )
+                } else {
+                    // Overlay-behind / stale: the overlay adds nothing the baseline
+                    // lacks. Baseline-wins is correct; log the discarded bytes so
+                    // the loss is observable, then rebuild the overlay to baseline.
+                    crate::ops_log::log_op(
                         doc,
                         &format!(
-                            "crdt_merge_base_overlay_rebuild_failed file={} error={}",
+                            "overlay_discarded_bytes file={} overlay_len={} baseline_len={} first_diff_offset={:?}",
                             doc.display(),
-                            err
+                            overlay_md.len(),
+                            fallback_markdown.len(),
+                            first_diff_byte(&overlay_md, fallback_markdown)
                         ),
-                    ),
+                    );
+                    rebuild_overlay_to_baseline(doc, &path, fallback_markdown);
+                    (
+                        fallback_markdown.to_string(),
+                        CrdtMergeBaseSource::FallbackOverlayProjectionMismatch,
+                    )
                 }
-                (
-                    fallback_markdown.to_string(),
-                    CrdtMergeBaseSource::FallbackOverlayProjectionMismatch,
-                )
             }
             Err(err) => {
                 crate::ops_log::log_op(
                     doc,
                     &format!(
-                        "crdt_merge_base_overlay_decode_error file={} error={}",
+                        "crdt_merge_base_overlay_decode_error file={} error={} overlay_discarded_bytes file={} baseline_len={}",
                         doc.display(),
-                        err
+                        err,
+                        doc.display(),
+                        fallback_markdown.len()
                     ),
                 );
                 (
@@ -1604,16 +1716,19 @@ mod tests {
     fn crdt_merge_base_state_rebuilds_stale_overlay_after_first_fallback() {
         let (dir, doc) = setup();
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        // Baseline is NEWER: the agent committed `- do [#baseline]` into the queue.
         let baseline = concat!(
             "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
             "## Queue\n\n<!-- agent:queue -->\n",
             "- do [#baseline]\n",
             "<!-- /agent:queue -->\n"
         );
+        // Overlay-behind: a strict OLDER subset (empty queue, before the agent
+        // appended the item). Every overlay line is already in the baseline, so
+        // this is genuinely stale and is correctly discarded + rebuilt.
         let stale_overlay = concat!(
             "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
             "## Queue\n\n<!-- agent:queue -->\n",
-            "- do [#stale]\n",
             "<!-- /agent:queue -->\n"
         );
         let overlay_state =
@@ -1816,6 +1931,258 @@ Steps to take:
         assert!(
             merged.contains("do [#foreign-task]"),
             "foreign queue append lost under overlay base:\n{merged}"
+        );
+    }
+
+    // ---- #crdtedgetests: overlay-ahead vs overlay-behind data-loss matrix ----
+    //
+    // `crdt_merge_base_state` must distinguish a *stale* overlay (older content,
+    // correctly discarded) from a *live* overlay (newer keystrokes the user just
+    // typed, must be preserved through the base → `crdt::merge` flow). The
+    // historical bug (`#crdtlivedrop`) used plain string inequality, which
+    // discarded both cases identically and silently dropped live keystrokes.
+
+    /// Persist an overlay sidecar whose markdown projection is `overlay_md`
+    /// (simulating the live editor buffer the plugin pushed into the overlay).
+    fn save_overlay_md(doc: &Path, overlay_md: &str) {
+        let state =
+            agent_doc_markdown_ast::crdt::OverlayCrdtDoc::from_markdown(overlay_md).encode_state();
+        save_overlay_crdt(doc, &state).unwrap();
+    }
+
+    fn ops_log_for(dir: &Path) -> String {
+        let p = dir.join(".agent-doc/logs/ops.log");
+        if p.exists() {
+            fs::read_to_string(&p).unwrap()
+        } else {
+            String::new()
+        }
+    }
+
+    const FM_HEADER: &str = "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n";
+
+    /// Case 1: overlay ahead by a single inserted char during a concurrent
+    /// finalize. The char must survive the base → `crdt::merge` flow.
+    #[test]
+    fn overlay_ahead_single_char_preserved_through_merge() {
+        let (_dir, doc) = setup();
+        let baseline = format!("{FM_HEADER}model: opus\n");
+        // Live editor typed one extra char ("opusX") before the finalize snapshot.
+        let live = format!("{FM_HEADER}model: opusX\n");
+        save_overlay_md(&doc, &live);
+
+        let base = crdt_merge_base_state(&doc, &baseline).unwrap();
+
+        // The live overlay must NOT be silently wiped: an overlay-ahead sidecar
+        // holds the user's keystroke and is the op-capture / next-cycle base.
+        let overlay = load_overlay_crdt(&doc).unwrap().unwrap();
+        let overlay_md = agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state(&overlay)
+            .unwrap()
+            .to_markdown()
+            .unwrap();
+        assert!(
+            overlay_md.contains("model: opusX"),
+            "live overlay silently rebuilt from baseline, dropping the keystroke (source={}): overlay now={overlay_md:?}",
+            base.source.as_str()
+        );
+
+        // The agent response (ours) is built from the OLD baseline (no `X`).
+        // theirs == the live editor buffer carrying the keystroke.
+        let merged = crate::crdt::merge(Some(&base.state), &baseline, &live).unwrap();
+        assert!(
+            merged.contains("model: opusX"),
+            "single live keystroke dropped (source={}):\n{merged}",
+            base.source.as_str()
+        );
+    }
+
+    /// Case 2: the alex-lee repro — overlay ahead by a multi-line frontmatter
+    /// block. The whole block must survive.
+    #[test]
+    fn overlay_ahead_multiline_frontmatter_block_preserved() {
+        let (_dir, doc) = setup();
+        let baseline = format!("{FM_HEADER}## Body\n\nSome existing content.\n");
+        // User typed two frontmatter lines into the live buffer mid-finalize.
+        let live = "---\nagent_doc_format: template\nagent_doc_write: crdt\nmodel: opus\nclaude_model: opus\n---\n\n## Body\n\nSome existing content.\n";
+        save_overlay_md(&doc, live);
+
+        let base = crdt_merge_base_state(&doc, &baseline).unwrap();
+
+        // Overlay-ahead: the multi-line frontmatter block must not be wiped from
+        // the live overlay sidecar (the alex-lee silent-loss site).
+        let overlay = load_overlay_crdt(&doc).unwrap().unwrap();
+        let overlay_md = agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state(&overlay)
+            .unwrap()
+            .to_markdown()
+            .unwrap();
+        assert!(
+            overlay_md.contains("model: opus") && overlay_md.contains("claude_model: opus"),
+            "live overlay frontmatter block silently rebuilt away (source={}): overlay now={overlay_md:?}",
+            base.source.as_str()
+        );
+
+        let merged = crate::crdt::merge(Some(&base.state), &baseline, live).unwrap();
+        assert!(
+            merged.contains("model: opus"),
+            "live frontmatter `model: opus` dropped (source={}):\n{merged}",
+            base.source.as_str()
+        );
+        assert!(
+            merged.contains("claude_model: opus"),
+            "live frontmatter `claude_model: opus` dropped (source={}):\n{merged}",
+            base.source.as_str()
+        );
+    }
+
+    /// Case 3: overlay strictly behind (older content) — baseline wins, overlay
+    /// discarded, and the discard is logged with the bytes that were dropped.
+    #[test]
+    fn overlay_behind_is_discarded_and_logged() {
+        let (dir, doc) = setup();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        // Baseline is NEWER: the agent already committed an extra queue line.
+        let baseline = format!(
+            "{FM_HEADER}<!-- agent:queue -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n"
+        );
+        // Overlay holds the OLDER content (one item, before the agent appended #b).
+        let stale =
+            format!("{FM_HEADER}<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n");
+        save_overlay_md(&doc, &stale);
+
+        let base = crdt_merge_base_state(&doc, &baseline).unwrap();
+        assert_eq!(
+            crate::crdt::CrdtDoc::decode_state(&base.state)
+                .unwrap()
+                .to_text(),
+            baseline,
+            "stale overlay should yield the baseline as merge base"
+        );
+        let log = ops_log_for(dir.path());
+        assert!(
+            log.contains("overlay_discarded_bytes"),
+            "discarded overlay must be logged (no silent data loss):\n{log}"
+        );
+    }
+
+    /// Case 4: overlay concurrent-divergent — the user edited the same region the
+    /// agent did. Both survive after the merge, no duplication.
+    #[test]
+    fn overlay_concurrent_divergent_both_survive_no_dup() {
+        let (_dir, doc) = setup();
+        let baseline = format!("{FM_HEADER}## Notes\n\nshared line\n");
+        // Live buffer: user appended their own line after the shared region.
+        let live = format!("{FM_HEADER}## Notes\n\nshared line\nuser added this\n");
+        save_overlay_md(&doc, &live);
+
+        let base = crdt_merge_base_state(&doc, &baseline).unwrap();
+        // ours: agent appended a different line in the same region.
+        let ours = format!("{FM_HEADER}## Notes\n\nshared line\nagent added this\n");
+        let merged = crate::crdt::merge(Some(&base.state), &ours, &live).unwrap();
+        assert!(
+            merged.contains("user added this"),
+            "user's concurrent edit dropped:\n{merged}"
+        );
+        assert!(
+            merged.contains("agent added this"),
+            "agent's concurrent edit dropped:\n{merged}"
+        );
+        assert_eq!(
+            merged.matches("shared line").count(),
+            1,
+            "shared region duplicated under divergent merge:\n{merged}"
+        );
+    }
+
+    /// Case 5: empty doc + first keystroke before the first cycle observation.
+    /// The keystroke must be preserved (no baseline-wins wipe of a fresh buffer).
+    #[test]
+    fn empty_doc_first_keystroke_preserved() {
+        let (_dir, doc) = setup();
+        let baseline = FM_HEADER.to_string();
+        let live = format!("{FM_HEADER}A");
+        save_overlay_md(&doc, &live);
+
+        let base = crdt_merge_base_state(&doc, &baseline).unwrap();
+        let merged = crate::crdt::merge(Some(&base.state), &baseline, &live).unwrap();
+        assert!(
+            merged.ends_with('A'),
+            "first keystroke on a fresh doc dropped (source={}):\n{merged:?}",
+            base.source.as_str()
+        );
+    }
+
+    /// Case 6: a rapid burst — N keystrokes the live buffer accumulated must all
+    /// survive a convergence pass (no 1-char drop).
+    #[test]
+    fn rapid_keystroke_burst_all_survive() {
+        let (_dir, doc) = setup();
+        let baseline = format!("{FM_HEADER}prefix \n");
+        // The live buffer accumulated a burst: "prefix abcdef\n".
+        let live = format!("{FM_HEADER}prefix abcdef\n");
+        save_overlay_md(&doc, &live);
+
+        let base = crdt_merge_base_state(&doc, &baseline).unwrap();
+        let merged = crate::crdt::merge(Some(&base.state), &baseline, &live).unwrap();
+        assert!(
+            merged.contains("prefix abcdef"),
+            "burst content not fully preserved (source={}):\n{merged}",
+            base.source.as_str()
+        );
+    }
+
+    /// Case 7: overlay decode error — fall back to the baseline AND log the
+    /// discard so the loss is observable.
+    #[test]
+    fn overlay_decode_error_falls_back_and_logs() {
+        let (dir, doc) = setup();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let baseline = format!("{FM_HEADER}## Body\n\ncontent\n");
+        // Garbage bytes that are not a valid yrs update → decode error.
+        save_overlay_crdt(&doc, &[0xff, 0xfe, 0x00, 0x01, 0x02, 0x03]).unwrap();
+
+        let base = crdt_merge_base_state(&doc, &baseline).unwrap();
+        assert_eq!(base.source, CrdtMergeBaseSource::FallbackOverlayDecodeError);
+        assert_eq!(
+            crate::crdt::CrdtDoc::decode_state(&base.state)
+                .unwrap()
+                .to_text(),
+            baseline
+        );
+        let log = ops_log_for(dir.path());
+        assert!(
+            log.contains("crdt_merge_base_overlay_decode_error"),
+            "decode error must be logged:\n{log}"
+        );
+    }
+
+    /// Case 8: a frontmatter edit while exchange convergence runs — both the
+    /// frontmatter keystroke and the in-flight exchange response survive.
+    #[test]
+    fn frontmatter_edit_during_exchange_convergence_both_survive() {
+        let (_dir, doc) = setup();
+        let header = "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n";
+        let committed = "❯ a question\n";
+        let close = "<!-- /agent:exchange -->\n";
+        let baseline = format!("{header}{committed}{close}");
+        // Live buffer: user added a frontmatter line while the agent was answering.
+        let live_header = "---\nagent_doc_format: template\nagent_doc_write: crdt\nmodel: opus\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n";
+        let live = format!("{live_header}{committed}{close}");
+        save_overlay_md(&doc, &live);
+
+        let base = crdt_merge_base_state(&doc, &baseline).unwrap();
+        // ours: agent appended a `### Re:` response to the exchange.
+        let ours =
+            format!("{header}{committed}\n### Re: a question — opus-4-8\n\nThe answer.\n{close}");
+        let merged = crate::crdt::merge(Some(&base.state), &ours, &live).unwrap();
+        assert!(
+            merged.contains("model: opus"),
+            "frontmatter keystroke dropped during exchange convergence (source={}):\n{merged}",
+            base.source.as_str()
+        );
+        assert!(
+            merged.contains("### Re: a question"),
+            "in-flight exchange response dropped (source={}):\n{merged}",
+            base.source.as_str()
         );
     }
 

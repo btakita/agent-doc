@@ -136,7 +136,19 @@ I audited `ops.log` (3.6M lines) + the `.agent-doc/state` markers against each o
 I did not file new backlog items or touch the queue (avoiding the edit-during-turn churn you flagged) — this is the log-side audit you asked for; the two recommendations above are yours to act on. No agent-drainable heads remain after this one (the other four are your live-test gated items), so the in-session loop stops here.
 
 > ⚠️ Note: preflight flagged the route-owned **supervisor (pid 328292) is running a STALE binary** (launched 0.34.48, newer installed) — it can keep producing File Cache Conflict / IPC-drift dialogs that would muddy your live #kj5flive / #qeditdup repros. I'll `admin recycle` it after this commit so you test against the fresh binary.
-<!-- agent:boundary:a6f4e556 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=0288dfb3-5700-47bb-8d81-983be32a77c7 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=19785 candidate_hash=e0a1156d3daa622417429816e572ab502db393f666aa74b052cb9dec02174803 content_ours_len=23327 content_ours_hash=2b8d6e14213d86766a15f142dfdda54f6f4034481389c3bba2700bd43a08c767 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782457384306
+```
+<!-- agent:boundary:9c465cad -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -145,7 +157,7 @@ I did not file new backlog items or touch the queue (avoiding the edit-during-tu
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 [#cdtcutover]
 - ~~look in logs to see if we can verify [operator-verify] items in the backlog~~ — auto-struck: answered this cycle (#ftstrike)
-- It is now very difficult to type in the JB editor. Seems there may be performance issues.
+- It is now very difficult to type in the JB editor. Seems there may be performance or CRDT issues.
 - do [#qftloss]
 - do [#qeditdup]
 - do [#crdtauth6]

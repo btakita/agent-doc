@@ -119,7 +119,23 @@ Landed **Phase 4 (`#lzcrdtplane4`)** of the distributed CRDT cell plane — the 
 **Scope split — why `SeqCrdt` only, not `TextCrdt` this phase:** `SeqCrdt` keys deletes by `HlcStamp`, so the plane's frontier drives `SeqCrdt::gc` directly. `TextCrdt`, though, keys deletes by a Lamport `OpId` (`counter + peer`) — a *distinct clock* from the `HlcStamp` `StampFrontier`, so `TextCrdt::gc_with` can't be driven from this frontier without an OpId-keyed parallel frontier. Forcing that coupling would have been type-incorrect, so I scoped it out cleanly and filed **`#lzcrdtplane4b`** (TextCrdt OpId-frontier GC) as a focused follow-up.
 
 **Backlog:** `#lzcrdtplane4b` (TextCrdt GC) and **`#lzcrdtplane5`** (the FINAL phase — plane↔runtime wiring + `IpcMessage` transport + SPEC/PROTOCOL + Lean obligation) are queued. Give the go when you want either.
-<!-- agent:boundary:36659854 -->
+
+### Re: do #lzcrdtplane4b — Phase 4b (TextCrdt OpId-frontier tombstone GC) — opus-4-8
+
+Landed **Phase 4b (`#lzcrdtplane4b`)** of the distributed CRDT cell plane — the OpId-keyed GC frontier that completes the tombstone-GC layer started in Phase 4, closing the `TextCrdt` portion of `#r86a`/`#lztombgcwire`. lazily-rs `33ea98f` (pushed origin/main), superproject gitlink `6b2fa85e4`; `make check` green (fmt + clippy + all-feature tests + Lean model + benchmark checks). CI for `33ea98f` is in progress at closeout (Phase 4 `6b8b238` passed).
+
+**Why a parallel frontier (the scope split from Phase 4):** `SeqCrdt` keys deletes by `HlcStamp`, so the existing `StampFrontier` drives `SeqCrdt::gc` directly. `TextCrdt` keys deletes by a Lamport `OpId` (`counter + peer`) — a *distinct clock*. The Lamport counter is causally monotone in exactly the same way the HLC is (it jumps past everything observed on `merge`), so the same min-over-membership construction applies — just on the OpId clock instead of the HlcStamp one.
+
+**`OpIdFrontier`** — the `OpId` twin of `StampFrontier`: per-peer `max` `OpId`; `frontier(membership)` = the per-peer **minimum** over membership (`None` until every expected member is observed); `observe`/`merge`/`dominates`/`get`/`len`. Commutative, associative, idempotent (optional `serde`, mirroring `StampFrontier`).
+
+**`TextCrdt::clock()`** — this replica's current Lamport position as an `OpId` attributed to the local peer: the `OpId` analog of an HLC stamp. Plus `OpId::counter()`/`peer()` accessors (the frontier groups deletions by `OpId::peer`).
+
+**`CrdtPlane`** gains the OpId-clock counterparts of the Phase-4 HLC methods: `observe_op` (folds a replica's `clock()` into the OpId frontier, expanding membership like `observe_remote`), `op_stability_frontier`, `is_op_collectable`, and **`gc_text(&mut TextCrdt)`** — collects every text tombstone whose delete `OpId` is `<=` the all-replicas minimum, a no-op (`0`) until the full membership is observed, so a delete is **never** collected before every replica has provably seen it.
+
+**Tests (4):** `OpIdFrontier` per-peer max + membership-min (+ idempotent re-observe, sticky max); `is_op_collectable` tracking the frontier; a two-member `TextCrdt` whose trailing-leaf tombstone is collected **only once peer 2 merges past the delete** (a lagging member blocks GC, then unblocks it); and single-writer local GC.
+
+**Plane status:** with Phase 4 + 4b, frontier-driven GC now covers **both** the sequence and text CRDTs. The only remaining phase is **`#lzcrdtplane5`** (`[#te9j]`, FINAL) — plane↔runtime wiring + `IpcMessage` transport + SPEC/PROTOCOL + Lean obligation. Give the go when you want it.
+<!-- agent:boundary:86a5e92f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -134,7 +150,6 @@ Landed **Phase 4 (`#lzcrdtplane4`)** of the distributed CRDT cell plane — the 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#g638] lzcrdtplane4b — TextCrdt OpId-frontier tombstone GC (completes the GC layer started in Phase 4). TextCrdt keys deletes by a Lamport OpId (counter+peer), not HlcStamp, so it needs an OpId-keyed per-peer frontier (parallel to StampFrontier) for the plane to drive TextCrdt::gc_with from the all-replicas-aware minimum. Plan: tasks/software/plan-lazily-distributed-crdt-plane.md.
 - [ ] [#te9j] lzcrdtplane5 (distributed CRDT plane Phase 5, FINAL) — plane <-> runtime wiring + SPEC/PROTOCOL. Connect CrdtPlane/OpLog to merge:crdt root cells and the NodeKey producer projection (#lzwirekey); thread ops through the IpcMessage Snapshot/Delta transport (IpcSink/IpcSource); document the SPEC §Distributed wire additions, stamp-frontier exchange, watermark/GC contract; add a Lean/spec obligation for the convergence + stability invariants. Plan: tasks/software/plan-lazily-distributed-crdt-plane.md.
 <!-- /agent:backlog -->
 

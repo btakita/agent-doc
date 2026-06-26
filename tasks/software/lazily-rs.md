@@ -88,7 +88,24 @@ Landed **Phase 2 (`#lzcrdtplane2`)** of the distributed CRDT cell plane. Shipped
 **Property tests (proptest)** prove LWW / PN-counter / `StampFrontier` merges are commutative, associative, idempotent semilattices. The LWW law required modeling the real invariant that a *stamp uniquely identifies a write* (equal stamps carry equal values) — the first run surfaced a false counterexample where two writes shared a stamp but differed in value (unrealizable); the value is now a function of the stamp. 11 new/updated tests.
 
 **`#lzcrdtplane3`** (op log + delta exchange) is queued in the backlog as the next actionable phase; canonical 5-phase tracker stays `tasks/software/plan-lazily-distributed-crdt-plane.md`. I also removed the `go` token from the queue marker so the plane isn't auto-drained — each phase runs on your `go`.
-<!-- agent:boundary:37cb18b3 -->
+
+### Re: do [#6qtj] — Phase 3 (causal op log + anti-entropy delta exchange) — opus-4-8
+
+Landed **Phase 3 (`#lzcrdtplane3`)** of the distributed CRDT cell plane — the op-history substrate that reconciles two writers. Shipped to `origin/main` (lazily-rs `8df96c3`, superproject `68098f610`); `make check` green.
+
+**`OpLog<Op>`** — a causal op log keyed by `HlcStamp` (which embeds the peer, so every op has a unique total-ordered key):
+- `record(stamp, op)` stores a locally originated op and advances the per-peer `StampFrontier`.
+- `missing_since(&StampFrontier)` ships every op a requester hasn't observed (stamp `>` its per-peer entry), in causal order — the responder side of anti-entropy.
+- `apply_remote(ops, apply)` folds each not-yet-seen op into the application CRDT via a closure **exactly once, in causal stamp order**, skipping duplicates (idempotent re-delivery, even within a batch).
+
+**The anti-entropy protocol:** requester advertises its frontier → responder `missing_since` → requester `apply_remote`. `Op` is application-defined (a register write, a `SeqCrdt`/`TextCrdt` edit). Convergence holds because every CRDT this drives is itself commutative/associative/idempotent, so out-of-order, duplicated, or batched delivery all self-heal.
+
+**Tests (5):** record idempotency + frontier tracking; `missing_since` ordering/filtering; `apply_remote` causal-order + intra-batch dedup; a **two-replica LWW-register convergence** test driving the full bidirectional exchange (highest HLC stamp wins on both replicas, second round ships zero ops); and a **PN-counter convergence** test.
+
+**Scope note:** this phase exchanges `(stamp, op)` tuples over the protocol seam. Full op-log-over-`IpcMessage` wiring (extending `Snapshot`/`Delta`) is Phase 5 (`#lzcrdtplane5`) — the `IpcSink`/`IpcSource` traits carry `IpcMessage`, so threading ops through them is the runtime-wiring step, not this one.
+
+**Next:** `#lzcrdtplane4` (frontier-driven tombstone GC, closes `#r86a`) is queued in the backlog. Give the go when you want it.
+<!-- agent:boundary:7257dfd7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,7 +120,7 @@ Landed **Phase 2 (`#lzcrdtplane2`)** of the distributed CRDT cell plane. Shipped
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#6qtj] lzcrdtplane3=Phase 3 of the distributed CRDT plane (parent plan tasks/software/plan-lazily-distributed-crdt-plane.md): op log + delta exchange. A causal op log keyed by (PeerId, HlcStamp); missing_since(frontier) + apply_remote(ops) with idempotent re-apply, driving the registers + SeqCrdt/TextCrdt. Localhost two-replica integration test driving convergence through the existing IpcSink/IpcSource / webrtc / ws transport seam.
+- [ ] [#pw1c] lzcrdtplane4 (distributed CRDT plane Phase 4) — frontier-driven tombstone GC. Compute frontier = min(StampFrontier over CrdtPlane membership) and drive periodic SeqCrdt::gc / TextCrdt::gc_with from it; closes #r86a/#lztombgcwire. Test: two replicas, a delete becomes collectable only once BOTH have observed it. Plan: tasks/software/plan-lazily-distributed-crdt-plane.md.
 <!-- /agent:backlog -->
 
 ## Review

@@ -39,9 +39,44 @@ use agent_doc_core::crdt::EditorOp;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 const OP_CAPTURE_SUBDIR: &str = ".agent-doc/op-capture";
+
+/// Cheap (len, mtime-nanos) fingerprint of the two files that fully determine
+/// `current_base_hash` (the committed snapshot and the overlay CRDT sidecar).
+/// `None` when the file is absent — an absent file is itself a stable state, so
+/// it caches the empty-text hash until one of them appears.
+type BaseFingerprint = (Option<(u64, u128)>, Option<(u64, u128)>);
+
+fn file_fingerprint(path: &Path) -> Option<(u64, u128)> {
+    let meta = std::fs::metadata(path).ok()?;
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    Some((meta.len(), mtime))
+}
+
+/// Per-document memo of the last `current_base_hash` result, keyed by the
+/// snapshot + overlay fingerprint that produced it (`#qbasehashmemo`). The base
+/// hash is a pure function of those two files, and neither changes during a
+/// typing burst — without this memo every keystroke rebuilt the full-document
+/// CRDT merge base (`CrdtDoc::from_text` over the whole doc) just to recompute a
+/// constant, making large documents progressively harder to type in.
+#[allow(clippy::type_complexity)]
+fn base_hash_cache() -> &'static Mutex<HashMap<PathBuf, (BaseFingerprint, String)>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, (BaseFingerprint, String)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Count of full (cache-miss) base-hash recomputations, for memoization tests.
+pub(crate) static BASE_HASH_RECOMPUTES: AtomicU64 = AtomicU64::new(0);
 
 /// The per-document op-capture sidecar.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -133,12 +168,39 @@ pub fn record_editor_op(doc: &Path, base_hash: &str, op: EditorOp) -> Result<()>
 /// empty-text hash, matching the merge's `None => String::new()` base.
 pub fn current_base_hash(doc: &Path) -> Result<String> {
     let snapshot_path = crate::snapshot::path_for(doc)?;
+    let overlay_path = crate::snapshot::overlay_crdt_path_for(doc)?;
+
+    // The base hash depends only on the snapshot + overlay contents, and neither
+    // changes while the user is typing. Memoize on their fingerprints so a typing
+    // burst is an O(1) cache hit instead of a full-document CRDT round-trip per
+    // keystroke (`#qbasehashmemo`). A stale fingerprint only ever degrades to a
+    // recompute — never a wrong hash — and a wrong hash would itself just fall
+    // back to the diff-guess merge, so this is safe under any mtime granularity.
+    let fingerprint: BaseFingerprint = (
+        file_fingerprint(&snapshot_path),
+        file_fingerprint(&overlay_path),
+    );
+    let cache_key = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+
+    if let Ok(cache) = base_hash_cache().lock()
+        && let Some((cached_fp, cached_hash)) = cache.get(&cache_key)
+        && *cached_fp == fingerprint
+    {
+        return Ok(cached_hash.clone());
+    }
+
+    BASE_HASH_RECOMPUTES.fetch_add(1, Ordering::Relaxed);
     let baseline = read_optional_text(&snapshot_path)?.unwrap_or_default();
     let base = crate::snapshot::crdt_merge_base_state(doc, &baseline)?;
     let base_text = agent_doc_core::crdt::CrdtDoc::decode_state(&base.state)
         .map(|d| d.to_text())
         .unwrap_or_default();
-    Ok(content_hash(&base_text))
+    let hash = content_hash(&base_text);
+
+    if let Ok(mut cache) = base_hash_cache().lock() {
+        cache.insert(cache_key, (fingerprint, hash.clone()));
+    }
+    Ok(hash)
 }
 
 /// Return the captured ops for `doc` **only** when they were captured against a
@@ -291,6 +353,41 @@ mod tests {
         // `None => String::new()` base so a first-edit capture still aligns.
         let (_dir, doc) = setup_doc();
         assert_eq!(current_base_hash(&doc).unwrap(), content_hash(""));
+    }
+
+    #[test]
+    fn current_base_hash_is_memoized_until_base_changes() {
+        // `#qbasehashmemo`: a typing burst leaves the snapshot + overlay
+        // unchanged, so repeated `current_base_hash` calls (one per keystroke)
+        // must be served from the memo without rebuilding the full-document CRDT
+        // merge base. Process-isolated under nextest, so the global recompute
+        // counter measures exactly this test's calls.
+        let (_dir, doc) = setup_doc();
+        crate::snapshot::save(&doc, "# base\n\n## section\n").unwrap();
+
+        let before = BASE_HASH_RECOMPUTES.load(Ordering::Relaxed);
+        let h1 = current_base_hash(&doc).unwrap();
+        let after_first = BASE_HASH_RECOMPUTES.load(Ordering::Relaxed);
+        assert_eq!(after_first, before + 1, "first call must recompute once");
+
+        // Simulate a typing burst: many calls against the same unchanged base.
+        for _ in 0..50 {
+            assert_eq!(current_base_hash(&doc).unwrap(), h1);
+        }
+        assert_eq!(
+            BASE_HASH_RECOMPUTES.load(Ordering::Relaxed),
+            after_first,
+            "repeated calls against an unchanged base must be cache hits"
+        );
+
+        // Changing the base (a real write boundary) must invalidate the memo.
+        crate::snapshot::save(&doc, "# base\n\n## section\n\nmore\n").unwrap();
+        let h2 = current_base_hash(&doc).unwrap();
+        assert_ne!(h1, h2, "a changed snapshot must yield a fresh base hash");
+        assert!(
+            BASE_HASH_RECOMPUTES.load(Ordering::Relaxed) > after_first,
+            "a changed base must trigger a recompute"
+        );
     }
 
     #[test]

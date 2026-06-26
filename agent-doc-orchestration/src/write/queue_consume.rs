@@ -662,15 +662,19 @@ pub(crate) fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
     // test matched any `#id` mention and wrongly left such heads un-strikable,
     // hanging the auto-queue (they have no single id to `--done`).
     let normalized_head = normalize_queue_prompt_text(&queue_head);
-    if let Some(id) = queue_prompt_done_id(&normalized_head)
-        && topic_resolves_to_exact_id(&normalized_head, &id)
-    {
-        // #qpresetstrike: a head that resolves to exactly a registered
-        // `prompt_presets` token (and is not also a tracked backlog/review id) has
-        // no `--done` reap path — it is a synthetic prompt completed by being
+    // #qmultiidstrike: a head composed ENTIRELY of `do` + one or more id
+    // directives is id-backed regardless of id COUNT (`do [#a] [#b]` as much as
+    // `do [#a]`). It is struck only once every referenced id is reaped, never by
+    // the positional free-text heuristic.
+    if let Some(ids) = topic_resolves_to_only_id_directives(&normalized_head) {
+        // #qpresetstrike: a head whose ids are ALL registered `prompt_presets`
+        // tokens (no `--done` reap path) is a synthetic prompt completed by being
         // answered, so treat it as free text (strikeable by `queue consume` and the
         // free-text finalize heuristic) rather than wedging it as id-backed.
-        if head_id_is_registered_preset(content, &id) {
+        if ids
+            .iter()
+            .all(|id| head_id_is_registered_preset(content, id))
+        {
             return Ok(true);
         }
         return Ok(false);
@@ -688,13 +692,13 @@ pub(crate) fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
 /// queue, not only the active head.
 pub(crate) fn queue_prompt_text_is_free_text(content: &str, text: &str) -> bool {
     let normalized = normalize_queue_prompt_text(text);
-    if let Some(id) = queue_prompt_done_id(&normalized)
-        && topic_resolves_to_exact_id(&normalized, &id)
-    {
-        // Mirrors `queue_head_is_free_text_prompt`: a head resolving to exactly a
-        // registered preset token has no `--done` reap path, so it is free text;
-        // any other exact-id directive is id-backed.
-        return head_id_is_registered_preset(content, &id);
+    // #qmultiidstrike: mirror `queue_head_is_free_text_prompt` — a head composed
+    // solely of id directives is id-backed regardless of id count, unless every id
+    // is a registered preset (no reap path → synthetic free text).
+    if let Some(ids) = topic_resolves_to_only_id_directives(&normalized) {
+        return ids
+            .iter()
+            .all(|id| head_id_is_registered_preset(content, id));
     }
     !crate::diff::detect_queue_trigger(&normalized)
 }
@@ -1623,6 +1627,46 @@ pub(crate) fn topic_resolves_to_exact_id(topic: &str, head_id: &str) -> bool {
         .and_then(|rest| rest.strip_suffix(']'))
         .or_else(|| norm.strip_prefix('#'));
     matches!(inner, Some(id) if id.eq_ignore_ascii_case(head_id))
+}
+
+/// The `#id` directive tokens a head resolves to **when the entire head is
+/// composed of nothing but `do` + one or more id directives** (`[#id]` / `#id`,
+/// whitespace-separated; pin / `❯` / bullet markers already stripped by
+/// normalization). Returns `None` the moment any token is not a bare id — i.e.
+/// the head carries free-text prose (`do [#foo] then ship it`, `re [#id]`,
+/// `Approve [#shoptiers]. What next?`), which makes it a free-text head that
+/// completes on being answered rather than on reaping its ids.
+///
+/// `#qmultiidstrike`: the single-id `topic_resolves_to_exact_id` check missed
+/// **multi-id** directive heads (`do [#a] [#b]`): they resolve to more than one
+/// id, so the exact-id test failed and the head fell through to "free text",
+/// letting the positional repair strike (`strike_recovered_free_text_queue_head`)
+/// and the finalize blockquote-echo strike consume the head before its ids were
+/// ever done. A directive head is id-backed regardless of id *count* — it is
+/// struck only once every referenced id is reaped (`--done`/`--pending-gate`/
+/// `queue consume`).
+pub(crate) fn topic_resolves_to_only_id_directives(topic: &str) -> Option<Vec<String>> {
+    let norm = topic.trim().trim_start_matches('❯').trim();
+    let norm = norm.strip_prefix("do ").unwrap_or(norm).trim();
+    if norm.is_empty() {
+        return None;
+    }
+    let mut ids = Vec::new();
+    for token in norm.split_whitespace() {
+        let inner = token
+            .strip_prefix("[#")
+            .and_then(|rest| rest.strip_suffix(']'))
+            .or_else(|| token.strip_prefix('#'))?;
+        if inner.is_empty()
+            || !inner
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        {
+            return None;
+        }
+        ids.push(inner.to_ascii_lowercase());
+    }
+    Some(ids)
 }
 
 pub(crate) fn queue_prompt_done_id(text: &str) -> Option<String> {
@@ -4070,6 +4114,56 @@ Old.
         assert!(!topic_resolves_to_exact_id("#foo halt", "foo"));
         assert!(!topic_resolves_to_exact_id("#foo deferred", "foo"));
         assert!(!topic_resolves_to_exact_id("#other", "foo"));
+    }
+
+    #[test]
+    fn multi_id_directive_head_is_id_backed_not_free_text() {
+        // #qmultiidstrike: the incident — `do [#syncbarrier] [#crdtsvdom]` was
+        // struck by the positional repair strike because the single-id classifier
+        // missed multi-id directive heads, classifying them as free text. A head
+        // composed solely of id directives is id-backed regardless of id count.
+        assert_eq!(
+            topic_resolves_to_only_id_directives("do #syncbarrier #crdtsvdom"),
+            Some(vec!["syncbarrier".to_string(), "crdtsvdom".to_string()])
+        );
+        // Bracketed form (pre-normalization) and single-id stay recognized.
+        assert_eq!(
+            topic_resolves_to_only_id_directives("do [#a] [#b]"),
+            Some(vec!["a".to_string(), "b".to_string()])
+        );
+        assert_eq!(
+            topic_resolves_to_only_id_directives("#foo"),
+            Some(vec!["foo".to_string()])
+        );
+        // Any free-text prose token makes the head free text (returns None).
+        assert_eq!(topic_resolves_to_only_id_directives("do #foo then ship it"), None);
+        assert_eq!(topic_resolves_to_only_id_directives("re [#id]"), None);
+        assert_eq!(topic_resolves_to_only_id_directives("just prose"), None);
+        assert_eq!(topic_resolves_to_only_id_directives(""), None);
+
+        // End-to-end through both public classifiers. No `prompt_presets`
+        // frontmatter, so these ids have a `--done` reap path (not presets).
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#syncbarrier] [#crdtsvdom]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            !queue_head_is_free_text_prompt(content).unwrap(),
+            "multi-id `do [#a] [#b]` head must be id-backed (not strikeable by position)"
+        );
+        assert!(!queue_prompt_text_is_free_text(
+            content,
+            "do [#syncbarrier] [#crdtsvdom]"
+        ));
+        // Single-id head stays id-backed (unchanged behavior).
+        assert!(!queue_prompt_text_is_free_text(content, "do [#qeditdup]"));
+        // A head mixing an id with free-text prose stays free text.
+        assert!(queue_prompt_text_is_free_text(
+            content,
+            "Approve [#shoptiers] then ship it"
+        ));
     }
 
     #[test]

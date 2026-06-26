@@ -596,7 +596,36 @@ There's no PyPI publish workflow in `.github/workflows/` (only `precommit.yml`),
 **Parity footnote:** the optional nullable `key` field from the recent `#lzwirekey` spec change is *not* in 0.11.0, but it's format-aware/additive so lazily-py conformance stays green without it. Full wirekey parity in the py binding is a small additive follow-up (separate from this release) — say the word.
 
 **Remaining queue (still operator-gated):** `lazily-{kt,js,zig}` parity+publish, plus a duplicate `lazily-kt` head from the earlier edit. Per your pause reason I'm not auto-publishing those — give per-language go when ready.
-<!-- agent:boundary:2970aebf -->
+
+### Re: Publish all — opus-4-8
+
+> **Queue prompt:** 🚧 lazily-kt parity. release + publish
+> **Queue prompt:** lazily-js parity. release + publish
+> **Queue prompt:** lazily-zig parity. release + publish
+> **Queue prompt:** lazily-kt parity. release + publish
+
+Go received — published all remaining bindings. Two were already shipped; I completed the other two and surfaced the one step that needs your 2FA.
+
+| Binding | Target | Status |
+|---|---|---|
+| **lazily-py** | PyPI `lazily` | ✅ already live — v0.11.0 (tag + GitHub release + PyPI) |
+| **lazily-zig** | GitHub | ✅ already live — v0.2.0 (tag + GitHub release, 2026-06-25) |
+| **lazily-kt** | GitHub (no registry infra) | ✅ **published this cycle** — v0.1.0 |
+| **lazily-js** | npm `@lazily/js` | ◐ GitHub release done; **npm publish pending your 2FA** (`#lzjsnpmpub`) |
+
+**lazily-kt v0.1.0** — `./gradlew test` BUILD SUCCESSFUL; tagged `v0.1.0` (`49dc547`) + pushed; GitHub release → https://github.com/lazily-hub/lazily-kt/releases/tag/v0.1.0. No package-registry distribution exists for kt, so the GitHub release *is* the publish.
+
+**lazily-js v0.1.0** — `npm test` 28/28 green; tagged `v0.1.0` (`6d38122`) + pushed; GitHub release → https://github.com/lazily-hub/lazily-js/releases/tag/v0.1.0. The npm half is **blocked on interactive auth**: `npm whoami` returns E401 (not logged in) and `@lazily/js` is unpublished (first scoped publish), and the btakita npm 2FA is browser/passkey — I can't do it headlessly. Filed `#lzjsnpmpub`. To finish:
+
+```
+! npm login        # approve passkey/2FA in browser
+cd src/lazily-js && npm publish --access public
+```
+
+(`--access public` is required for a scoped package's first publish.)
+
+**Parity note:** the only live cross-language gap is the optional additive `key` field from `#lzwirekey`; it's format-aware so all bindings stay conformance-green without it. The distributed CRDT plane (`#lzcrdtplane`) isn't built in lazily-rs yet, so there's no CRDT parity to port. All four `parity. release + publish` heads are drained; only the operator npm step remains. (Exchange is large — 565 lines / 31 sections; `/agent-doc compact` available when you want a lighter session.)
+<!-- agent:boundary:1836197d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -608,11 +637,11 @@ There's no PyPI publish workflow in `.github/workflows/` (only `precommit.yml`),
 - ~~[#r86a]~~
 - ~~update lazily-spec with latest changes~~
 - ~~release + publish lazily-rs~~
-- 🚧 lazily-kt parity. release + publish
-- lazily-js parity. release + publish
-- lazily-zig parity. release + publish
+- ~~lazily-kt parity. release + publish~~
+- ~~lazily-js parity. release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~lazily-zig parity. release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~lazily-py parity. release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- lazily-kt parity. release + publish
+- ~~lazily-kt parity. release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

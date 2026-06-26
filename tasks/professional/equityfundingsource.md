@@ -25,7 +25,6 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 complete
 <!-- /agent:status -->
 
@@ -136,7 +135,25 @@ Done — implemented, tested, committed, pushed, and deployed.
 **Shipped:** EFS `main` `362e1ae..39e56c2` (pushed); worker **deployed** — version `7f861de2-c207-451f-9259-71dc82193496` at https://equityfundingsource.brian-takita.workers.dev. Superproject pointer `96b7113a5`.
 
 Live-eyeball: open the deal `4046fa5a` dialog → loan tab → **Select proposal** on Brian Takita's interest → it should now select (deal → reserved, loan → Loan Estimate) without the requirements 409.
-<!-- agent:boundary:48423cc4 -->
+
+### Re: Soft accreditation warning + test suite green + deploy — opus-4-8
+
+> **Request (chat):** Remove the hard accreditation gate. Leave a soft warning. Fix the test suite. deploy.
+
+Done — all three, shipped and deployed.
+
+**1. Hard gate → soft warning.** The hard accreditation/lender-pipeline gates were already removed from Select Proposal last change; this adds the **soft warning** in their place (`deal_detail.tsx` `select_interest_`). When an admin selects a lender whose annual requirements are unmet or who has no TMO lender account yet, a non-blocking confirm appears — e.g. *"Brian Takita: annual requirements are not started and no TMO lender account is on file yet. You can select this proposal anyway, but the lender must complete these before funding can be wired. Select anyway?"* — with a **Select anyway** button. The admin sees exactly what's incomplete and proceeds at their discretion; readiness still gates funding/wire-confirm.
+
+**2. Test suite fixed.** The 2 pre-existing `#doc-viewer` failures were stale pinned-source assertions (not behavior bugs): the PDF iframe had gained `align-self:stretch;`, and admin loan-detail now builds the document URL from `/api/admin/loans/:id/documents/:id/download` (the old test pinned `/api/dropbox/download?path=`). Updated both pins to the current source. Full suite now **1329 pass / 0 fail**.
+
+**3. Deploy.** `bun run build` + `build:worker` clean; worker **deployed** — version `b520702f-e9b1-4763-a8f6-bf96a66ddcbe` at https://equityfundingsource.brian-takita.workers.dev.
+
+**Shipped:** EFS `main` `39e56c2..3d76f3c` (pushed); superproject pointer `8909d5438`.
+
+Note: the standalone `/admin/loans/:id` page has a second select surface (`loan_detail.tsx`) whose row type doesn't carry the requirements field and isn't wired to the confirm dialog — I scoped the warning to the deal dialog (the surface from your URL). If you want the same warning there too, say so and I'll thread the data + confirm through it.
+
+Live-eyeball: deal `4046fa5a` → loan tab → Select proposal on Brian's interest → the soft warning should appear; confirm → it selects.
+<!-- agent:boundary:ed9537d6 -->
 <!-- /agent:exchange -->
 ###
 <!--

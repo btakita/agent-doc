@@ -72,14 +72,32 @@ Yes — we can and should, and this is the **root of the whole bug class**, not 
 - **#provauth4**: per-cell provenance (rides #qcellmerge) so agent content can never land in an operator cell.
 
 I did **not** hand-clean the conflict markers / leaked line now — the IPC listener is active and manual queue edits race it. #provauth2 is the right place to fix it properly. Want me to take #provauth2 in a focused cycle next?
-<!-- agent:boundary:17caf4c7 -->
+
+### Re: should we remove the post-commit IPC worktree reconcile? — yes, in realtime; keep only for headless — opus-4-8
+
+You're right to suspect it. The whole post-commit tower — `reconcile_postcommit_worktree_to_head` (#pcwc), the per-component exchange/queue reconciles (#pcwcwarn / #pzjy), `content_ours`, and the "skipping working-tree boundary reposition — IPC listener active" + reposition-signal dance — is **turn-based file-sync legacy**, and it is the direct source of the corruption you've seen recur every cycle this session.
+
+**What value it had (turn-based model):** the agent took a turn, committed a response, and the editor's on-disk buffer was now *stale* — it didn't know about the response and its `(HEAD)` boundary marker was in the wrong place. So the binary had to (1) get the response into the visible buffer, (2) reposition the boundary, (3) do it **without** an out-of-band disk write that pops the JB *File Cache Conflict* dialog, and (4) without a disk read-modify-write that races a typist and duplicates the structural tail (#xbs3). The reconcile-to-HEAD tower is how it kept `working-tree == HEAD` after a commit under those constraints. Real value — *when disk is the sync channel*.
+
+**Why it's harmful now (realtime CRDT model):** with a live CRDT replica (the #crdtauth seam), the editor already holds the converged state — the response arrived as `Binary`-origin deltas as it was written; the boundary is just part of the shared doc. The commit should be a **pure git persistence of the converged CRDT**, nothing more. The four constraints above all dissolve: there's no stale buffer to refresh (#1/#2 done by delta application), and there's no out-of-band disk write at all, so the FCC dialog (#3) and the #xbs3 race (#4) are *moot*. What the tower does instead is **re-derive the buffer from a stale snapshot and overwrite the live one** — exactly the splice/`<<<<<<< ours`/console-leak corruption I hit (and recovered from) repeatedly this turn.
+
+**So: don't rip it out unconditionally — make it bimodal on "is a live CRDT replica attached?"**
+- **Live replica (realtime):** commit = persist CRDT → git. Skip the entire post-commit reconcile/reposition/`content_ours` path. The corruption class disappears because nothing re-derives the buffer.
+- **No live editor (pure-CLI / headless, the #6b5h case):** keep the disk-write reconcile — there, disk genuinely *is* the only sync channel.
+
+This is the realtime cutover; I filed it as **#pcwcrt** and it rides #provauth1 (origin tagging — the signal that tells the commit which mode it's in), #crdtauth6 (the live replica), and #cdtcutover (per-node deltas at finalize instead of whole-tree reconcile). It belongs in the same series as the provenance work: once edits are origin-tagged, the binary *knows* the editor already converged and can stop guessing.
+
+**On the provauth ids you flagged:** correct — my `--pending-add 'provauth2=…'` was wrong; the id needs `#` (`[#provauth2] text`, or `id=provauth2 ` with a trailing space). They landed under auto-ids (#f693=1, #q9w3=2, #fpyh=3, #818s=4) with the intended tag in the text. I tried to re-key them but there's no backlog-remove flag and `--pending-edit` embeds `[#provauth2]` as text rather than re-keying, so I stopped rather than churn this buffer further — the plan (`plan-operator-provenance-authority.md`) maps phase→id. A clean rename needs `--pending-clear`+re-add (destroys all 10 backlog items) or a manual edit when the IPC listener is quiet.
+
+Given this session is corrupting on nearly every write (live_prompt_drift + postcommit splice each cycle — itself the #pcwcrt evidence), I recommend we **recycle the supervisor / start a fresh session** before more document work. Want me to take **#provauth2** (the smallest standalone win — closes the "deleted items reappear" + "no duplicate adds" reports) in a fresh focused cycle?
+<!-- agent:boundary:4dca889a -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- [#f693] [#q9w3] [#fpyh] [#818s]
-- 🚧 [#syncbarrier] [#qheadstrikeauto] [#actorprune] [#suprestassoc]
+- 🚧 [#f693] [#q9w3] [#fpyh] [#818s]
+- [#syncbarrier] [#qheadstrikeauto] [#actorprune] [#suprestassoc]
 - [#2y8j] [#cdtcutover] [#qeditdup] [#crdtauth6] [#nsfz] [#kj5flive]
 - I deleted items from the queue but they reappeared
 - When auto-adding queue items, verify that the item is not already in the queue. Do not add duplicates.

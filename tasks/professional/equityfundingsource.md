@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -61,7 +61,17 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/profession
 Recovered the interrupted compaction/preflight state enough to continue through the agent-doc closeout path. Preflight still reports one legacy gated backlog item and several semantic-completion review candidates; I did not migrate or resolve those because the planning contract for this cycle was a prompt-response repair closeout.
 
 The current queue still needs operator intent cleanup before I start repo/deploy work from it: the held head is the available-deal Messages selection issue, followed by `deploy`, and recovery has also reintroduced the same available-deal Messages prompt once more without the `🚧` marker. I did not run code changes, tests, commit/push, or deploy in this cycle.
-<!-- agent:boundary:1d10068f -->
+
+### Re: Session handed to Claude; available-deal Messages head still held — opus
+
+Acknowledged the `agent: codex → claude` frontmatter switch — this Claude/opus session now owns the equityfundingsource cycle.
+
+Queue state after preflight convergence: the single queue head — the Available Deal dialog Messages thread-selection issue (deal `866e1c5a`, "should show + select the available deal conversation thread; same with a Deal I'm Interested In") — is still **held (🚧)**. That's why `queue_drainable_head_count: 0` / `queue_continuation_required: false` and the in-session loop has nothing to drain. I did **not** start spec/test/commit/push or deploy work on a held head.
+
+To have me drain it under the `#spec-test-commit-push` preset, remove the `🚧` from that queue line; I'll then spec the fix, run tests, and commit/push.
+
+No code, tests, commit/push, or deploy this cycle. Preflight's one legacy gated backlog item (`#vcyr`) and the semantic-completion review candidates remain untouched — this was a prompt-response closeout, not a backlog migration.
+<!-- agent:boundary:038f9d61 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -81,6 +91,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- 🚧 https://equityfundingsource.brian-takita.workers.dev/lenders/deals/866e1c5a-e428-4b35-bacb-a58f5d94b7da > Available Deal dialog > Messages should show + select the available deal conversation thread. Same with a Deal I'm Interested In.
 <!-- /agent:queue -->
 
 ## Backlog

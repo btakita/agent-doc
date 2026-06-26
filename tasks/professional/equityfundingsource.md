@@ -104,7 +104,39 @@ Done — implemented, tested, committed, pushed, and **deployed** this time.
 **Shipped:** EFS `main` pushed (`9d0d71d..3982b22`); worker deployed — version `3337a6e1-c2d6-4150-bef0-368b1a524599` at https://equityfundingsource.brian-takita.workers.dev. Superproject submodule pointer bumped (`c94605896`).
 
 Live-eyeball when convenient: open the deal `866e1c5a` Available Deal dialog → click the Messages FAB → the deal's property thread should be the selected tab (not just General); same from a Deals I'm Interested In card.
-<!-- agent:boundary:24f3a6c0 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=8edf2c3f-c4a8-4d4d-b34e-e435588b32da invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782456379640
+```
+
+### Re: Messages tab — show the full street address — opus
+
+> **Queue prompt:**
+>
+> The message tab for the deal should show the entire address of the street.
+
+Done — fixed, tested, committed, pushed, and deployed.
+
+**Root cause.** The dashboard active-deal publisher (added last cycle) labelled the Messages tab with `deal_preview_location_(deal)` = `deal.city_state || deal.location`, which prefers the **city/state-only** form (e.g. "Austin, TX"). `deal.location` is actually the *full* address string ("123 Main St, Austin, TX 78701") — `location_parts_` parses the street line and city/state out of it — so preferring `city_state` dropped the street.
+
+**Fix** (`src/equityfundingsource-dev` `7b8b427`): label the tab with the full address — `(deal.location || '').trim() || (deal.property_address || '').trim() || null`. This matches the canonical `deal-threads` property label (`borrower_address`, full street address) the launcher adopts once threads load, so the tab is consistent before and after the fetch. `PortalTabs` renders the label untruncated (no ellipsis), and the deal-detail route was already correct (its `/api/investor/deals/:id` fallback prefers full `location`).
+
+**Verification:** `bun test` → **1327 pass, 0 fail** (wiring test now asserts the full-address label source). `build` + `build:worker` clean.
+
+**Shipped:** EFS `main` `3982b22..7b8b427`; worker deployed — version `f2e6e59f-6dc6-4eed-9248-5d7f9c5d1073` at https://equityfundingsource.brian-takita.workers.dev. Superproject submodule pointer bumped (`9a6a006f6`).
+
+Live-eyeball: open the deal's Available Deal dialog → Messages FAB → the deal tab label should now read the full street address, not just the city/state.
+
+(Closeout note: the JB write socket is still wedged — `no_ack` — so this response landed via `finalize --force-disk` again. A `restart-supervisor` will restore clean IPC.)
+<!-- agent:boundary:2d996848 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -125,7 +157,9 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~This was not implemented or deployed: https://equityfundingsource.brian-takita.workers.dev/lenders/deals/866e1c5a-e428-4b35-bacb-a58f5d94b7da > Available Deal dialog > Messages should show + select the available deal conversation thread. Same with a Deal I'm Interested In.~~
-- 🚧 The message tab forthe
+- ~~The message tab for the deal should show the entire address of the street.~~ — auto-struck: answered this cycle (#ftstrike)
+- Confirming you are showing the property address in the message tab.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

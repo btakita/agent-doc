@@ -213,7 +213,24 @@ No queue head is being answered by this recovery response. The next substantive 
 This is a binary-owned recovery write for the post-commit live-buffer drift reported after `73cc7ecd7`. It preserves the already-visible parity evidence and does not answer or consume the next queue head.
 
 No repository work was performed in this recovery write. Release/publish work remains operator-gated.
-<!-- agent:boundary:b1adee02 -->
+
+### Re: lazily-js parity + release + publish — gpt-5
+
+> **Queue prompt:** lazily-js parity + release + publish
+
+`lazily-js` parity is verified. I did not run `npm publish` or create a public release; that part remains operator-gated by the existing Review item `#z0hq`.
+
+Evidence:
+
+- Parent `agent-loop` already points `src/lazily-js` at `ac9712291b7723b26dafb84a6d678098f1cba2be`.
+- `src/lazily-js` `origin/main` also resolves to `ac9712291b7723b26dafb84a6d678098f1cba2be`, so the parent gitlink is cloneable.
+- Recent JS parity commits are present: `f3c926a feat: add state projection parity helpers`, `6d38122 test(conformance): validate fixture assertions generically (parity with lazily-kt #lzktconf)`, and `ac97122 chore: rename npm scope @lazily/js -> @lazily-hub/js`.
+- Package identity is publish-ready but unpublished by me: `package.json` name `@lazily-hub/js`, version `0.1.0`, FFI state-projection consumer bindings, not a reactive-core port.
+- Verification: `make check` passed in `src/lazily-js` via `tsift`/`rtk`, artifact `tart-c0476e5b21`, exit 0.
+- GitHub Actions: `gh workflow list` and `gh run list --limit 3` returned no workflows/runs for `lazily-js`, so there was no CI run to inspect.
+
+Changed paths: none. The pre-existing untracked `src/lazily-js/package-lock.json` remains untouched. Confidence: high for parity/readiness; publish confidence intentionally not claimed because registry publication is operator-gated.
+<!-- agent:boundary:dcff1a2f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -228,7 +245,7 @@ No repository work was performed in this recovery write. Release/publish work re
 - ~~lazily-spec parity~~
 - ~~lazily-kt parity~~
 - ~~release + publish — auto-struck: completed by #45rh (#qftbklgstrike)~~
-- lazily-js parity + release + publish
+- ~~lazily-js parity + release + publish~~
 - lazily-zig parity + release + publish
 - lazily-py parity + release + publish
 <!-- /agent:queue -->

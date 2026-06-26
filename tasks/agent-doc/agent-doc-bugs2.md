@@ -120,7 +120,7 @@ Recommend: recycle now, then I continue the program. Proceed?
 Closing `#q9w3`. Next in the program: **#provauth1** (CRDT transaction-origin tagging) — the foundation `#pcwcrt`/`#provauth3`/`#provauth4` all key off; it's a large core-CRDT change and gets its own focused cycle.
 
 I'll install `08df743c` + recycle so slice 2 goes live for your eyeball (delete a `do [#id]` mirror line mid-turn → it should stay gone; grep `queue_mirror_tombstone_suppressed #provauth2`), then the loop continues to `#provauth1` on the fresh binary.
-<!-- agent:boundary:32aa5589 -->
+<!-- agent:boundary:5c2ccf2c -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -132,7 +132,7 @@ I'll install `08df743c` + recycle so slice 2 goes live for your eyeball (delete 
 - I deleted items from the queue but they reappeared
 - When auto-adding queue items, verify that the item is not already in the queue. Do not add duplicates.
 - JB `Run Agent Doc` flooded the prompt with duplicate `agent-doc .../agent-doc-bugs2.md` dispatch prompts. Please fix the root cause.
-- do [#q9w3]
+- ~~do [#q9w3]~~
 - do [#f693]
 - do [#fpyh]
 - do [#818s]
@@ -173,7 +173,6 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue -->
 - [ ] [#pcwcrt] #agent-doc-feature realtime cutover — gate/remove the post-commit working-tree reconcile + (HEAD) boundary reposition tower (git.rs reconcile_postcommit_worktree_to_head / #pcwc / #pcwcwarn / #pzjy / content_ours) when a live CRDT replica is attached. It is turn-based file-sync legacy: its value (keep editor buffer==HEAD after a commit, reposition the boundary, avoid the JB File Cache Conflict dialog, avoid #xbs3 disk-RMW racing the typist) is all subsumed by delta application in realtime — and re-deriving the buffer from a stale snapshot is the recurring #postcommit-ipc-worktree-corruption source. Keep the disk-write path ONLY for no-live-editor (pure-CLI #6b5h) sessions. Rides #provauth1 origin tagging + #crdtauth6 live replica + #cdtcutover. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#f693] provauth1=#agent-doc-feature CRDT transaction-origin tagging: tag every yrs transaction in crdt.rs/crdt_sync.rs as Operator (editor DocumentListener delta over IPC, the crdtauth seam) / Binary (finalize/write/preflight writeback) / Mirror (backlog-queue auto-sync); persist origin per delta so any span author survives restart. Foundation for provenance authority. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
-- [ ] [#q9w3] provauth2=#agent-doc-bug operator queue deletes resurrected + auto-add duplicates. sync_backlog_into_queue (Append/Sync) re-adds any active queue-attr backlog id absent from the queue, so an operator delete is undone next preflight; multi-id/manual lines also defeat the existing-id dedup. Fix: record operator-origin deletes of do-id lines (snapshot vs working-tree) as a session tombstone the mirror honors, and dedup against ALL ids on a line + existing entries so auto-add never duplicates. Smallest standalone win. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#fpyh] provauth3=#agent-doc-bug replace content-based recovery heuristics (content_ours / manual-cleanup / stale-editor resurrection guards) with origin checks where origin is known: an Operator-origin working-tree change IS the authoritative prompt and is never reset or treated as suspicious cleanup; content heuristics remain only as the unknown-origin fallback. Depends on provauth1. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#818s] provauth4=#agent-doc-feature per-cell provenance riding qcellmerge per-cell merge isolation so agent console/response content can never splice into an operator-authored cell (queue). Live proof captured: a console line appeared as a queue item. Depends on provauth1 + qcellmerge. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#syncbarrier] #agent-doc-feature Phase 1 (editor-sync barrier) — epoch handshake so the binary DEFERS dangerous ops (snapshot reset / disk reconcile / merge-base rebuild) while an editor edit is in flight, bounded wait, fail-OPEN to the editor buffer (never a held lock, never snapshot-discard). Poll-check = yrs StateVector exchange, not text compare. Needs JB/VSCode edit_epoch + StateVector over IPC (extend State method). Phase 0 #ipctruncrecover shipped (0.34.53). Plan: tasks/agent-doc/plan-editor-sync-barrier.md

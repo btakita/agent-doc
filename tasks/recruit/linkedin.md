@@ -116,8 +116,9 @@ My recommendation: **Option B.** Recruiters and founders skim the first phrase a
 Two smaller notes:
 - Drop or fold in **"Reactive & event-driven systems"** — at the tail it reads as keyword-stuffing. If those terms matter for your target roles, work them into the Presence AI clause ("real-time, event-driven AI avatar pipeline") so they're load-bearing rather than tacked on.
 - Whatever you pick, get the differentiator into the **first 40 characters** so it survives truncation in feed/comment/search contexts.
-<!-- agent:boundary:30fd3858 -->
+<!-- agent:boundary:34ad6aea -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
+- "20+ years full-stack | Architected real-time multimodal AI avatar pipeline at Presence AI | Building agent tooling & context engineering for collaborative intelligence | Reactive & event-driven systems" is my short bio. Is 20+ years full-stack strong or too generic. Should I lead with something that can distinguish me more?
 <!-- /agent:queue -->

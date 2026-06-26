@@ -135,7 +135,26 @@ Landed **Phase 4b (`#lzcrdtplane4b`)** of the distributed CRDT cell plane — th
 **Tests (4):** `OpIdFrontier` per-peer max + membership-min (+ idempotent re-observe, sticky max); `is_op_collectable` tracking the frontier; a two-member `TextCrdt` whose trailing-leaf tombstone is collected **only once peer 2 merges past the delete** (a lagging member blocks GC, then unblocks it); and single-writer local GC.
 
 **Plane status:** with Phase 4 + 4b, frontier-driven GC now covers **both** the sequence and text CRDTs. The only remaining phase is **`#lzcrdtplane5`** (`[#te9j]`, FINAL) — plane↔runtime wiring + `IpcMessage` transport + SPEC/PROTOCOL + Lean obligation. Give the go when you want it.
-<!-- agent:boundary:86a5e92f -->
+
+### Re: do lzcrdtplane5 — Phase 5 (FINAL), drained as 5a — opus-4-8
+
+Phase 5 is the FINAL phase and bundles four large clauses (runtime wiring + IPC transport + SPEC/PROTOCOL + Lean obligation). Per the plan's own mandate ("do **not** attempt the whole plane in one cycle") and the Phase 4→4/4b precedent, I drained it as focused sub-phases and landed **5a** this cycle — three of the four clauses. lazily-rs `57765dc`, lazily-spec `f44a9c6`, superproject `b2f173e78` (pushed to both submodule origins); `make check` green (fmt + clippy `--all-features` + every feature-test suite + Lean model + benchmarks). CI in progress at closeout (Phases 4/4b passed).
+
+**1. Wire transport — `IpcMessage::CrdtSync` (the "thread ops through the IpcMessage transport" clause).** A third message variant beside `Snapshot`/`Delta` (the single-producer mirror is untouched):
+- **`WireStamp { wall_time, logical, peer }`** — a plain-integer mirror of `HlcStamp`, so the wire format is codec-stable and usable whether or not a peer compiles the `distributed` feature in.
+- **`CrdtOp { node, key: Option<NodeKey>, stamp, state }`** — one state-based (CvRDT) op: converged register/seq/text state + the optional wire-stable `NodeKey` (`#lzwirekey`).
+- **`CrdtSync { frontier, ops }`** — a stamp-frontier advertisement + op batch (anti-entropy; bounded, idempotent, resumable). Round-trips JSON/MessagePack/postcard; classified by the FFI kind (`CrdtSync = 3`); `filter_readable` drops non-readable ops (omission, not redaction) while retaining the frontier metadata.
+
+**2. SPEC/PROTOCOL.** `protocol.md` §Distributed gains the `CrdtSync` wire format, stamp-frontier exchange, and watermark/GC contract; `SPEC.md` §Distributed wire transport documents the Rust surface and resolves the "delta-state vs op-based encoding" prototype gate in favour of state-based sync.
+
+**3. Lean obligation — `LazilyFormal/CRDT.lean` (proofs complete, no `sorry`).** Two formally-verified properties backing the plane:
+- **Convergence:** the stamp join is a commutative/associative/idempotent semilattice (`stampJoin_{comm,assoc,idem}`).
+- **Causal-stability safety:** a tombstone the plane marks collectable (delete stamp ≤ the min-over-membership frontier) is ≤ **every** member's observation — observed by every replica, so GC can never lose an edit (`collectable_implies_observed_everywhere`). This is the formal soundness of the `is_collectable`/`gc_seq`/`gc_text` watermark.
+
+**4 tests** (serde + postcard round-trips, per-peer filtering, FFI kind classification) + the Lean build are wired into `make check`.
+
+**Remaining — `#lzcrdtplane5b` (runtime integration, the 4th clause).** The one clause I deliberately deferred to its own focused cycle (highest-risk, touches the live reactive graph): connect `CrdtPlane`/`OpLog` to live `merge: crdt` root cells (local edits → `CrdtOp`s; remote `CrdtOp`s → `ReplicatedCell::merge_remote` ingress driving the reactive graph + Seq/Text GC) + the `NodeKey` producer projection + `BridgeHub` fan-out of `CrdtSync` + an end-to-end two-replica-over-transport convergence test. The backlog `#te9j` item is now narrowed to exactly this. Give the go when you want it.
+<!-- agent:boundary:43ab64fb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -150,7 +169,7 @@ Landed **Phase 4b (`#lzcrdtplane4b`)** of the distributed CRDT cell plane — th
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#te9j] lzcrdtplane5 (distributed CRDT plane Phase 5, FINAL) — plane <-> runtime wiring + SPEC/PROTOCOL. Connect CrdtPlane/OpLog to merge:crdt root cells and the NodeKey producer projection (#lzwirekey); thread ops through the IpcMessage Snapshot/Delta transport (IpcSink/IpcSource); document the SPEC §Distributed wire additions, stamp-frontier exchange, watermark/GC contract; add a Lean/spec obligation for the convergence + stability invariants. Plan: tasks/software/plan-lazily-distributed-crdt-plane.md.
+- [ ] [#te9j] lzcrdtplane5b (distributed CRDT plane Phase 5b, FINAL — runtime integration; completes Phase 5). 5a DONE (CrdtSync wire transport + protocol.md/SPEC.md §Distributed + Lean convergence/stability obligation; lazily-rs 57765dc, lazily-spec f44a9c6). Remaining: connect CrdtPlane/OpLog to live merge:crdt root cells (local edits -> CrdtOp; remote CrdtOp -> ReplicatedCell::merge_remote ingress driving the reactive graph + Seq/Text GC) + NodeKey producer projection (#lzwirekey) + BridgeHub fan-out of CrdtSync + an end-to-end two-replica-over-transport convergence test. Plan: tasks/software/plan-lazily-distributed-crdt-plane.md.
 <!-- /agent:backlog -->
 
 ## Review

@@ -117,7 +117,24 @@ Merged (fast-forward) — agent-doc submodule `main` now at `ec38a973`, all thre
 **Not pushed, and the superproject pointer is not bumped** — both stay under your release/push gate ([[stop-cutting-releases]]). The agent-loop superproject now shows `src/agent-doc` as a modified gitlink (`16092173 → ec38a973`); bump + push it whenever you want it recorded. The worktree `src/agent-doc-celltree-wt` is left in place (`git worktree remove` it when done).
 
 **Still open before the flag can default-ON:** the persistence round-trip + Yrs op-clock/op-capture (next agent rung — say **"go persistence"**), then your live zero-drift proof with the flag ON. Until then this is safe, dormant infrastructure on main.
-<!-- agent:boundary:bf8b9acd -->
+
+### Re: Persistence round-trip rung landed — opus-4-8
+
+"go persistence" done — commit `00b07925` on `celltree-percell-merge` (now 1 ahead of merged main).
+
+**The gap it closed:** the cell seam lived only in `merge_by_component` (text path). The live persistence path merges through `MultiNodeState::merge`, which returns merged text **and** the per-node Yrs state persisted as next cycle's base. With the flag ON, `merge_by_component` returned cell-merged text but `MultiNodeState::merge` still persisted the **legacy** merge's state — so a conflict/strike could resolve one way in the doc and another in the persisted base → next-cycle drift.
+
+**Fix:** routed `MultiNodeState::merge` through the same cell path via a shared `try_cell_merge_text` helper both seams call (so they can't diverge), rebuilding the persisted state from the cell-merged text via `from_text`. Confirmed against `snapshot.rs::save_document_crdt` — next cycle's base = `from_text(returned_text)`, so returned text, persisted state, and next base are all the one cell-merged text. Default-OFF preserved (flag-OFF byte-identical, tested).
+
+**4 new tests:** conflict persists the cell winner (`state.to_text() == merged`), 3-cycle no-churn (strike stays struck across persisted bases, idempotent), flag-OFF parity, both seams produce identical text. Full `make check` green: **5341 passed**.
+
+**Honest status — this is NOT the last rung.** Before the flag can default-ON:
+1. **Yrs op-clock / op-capture (the real remaining code blocker)** — the cell path composes from a 3-way *text* diff then re-encodes deterministically; it doesn't replay genuine concurrent Yrs *op histories*. For true offline op streams (esp. interleaved char-level edits within one cell), the text-composition result can differ from an op-level merge. Reconciling the cell diff with real op capture is the next rung.
+2. **Conflict editor surface** — conflicts resolve ours-wins silently (logged only); a losing concurrent edit needs an operator-visible marker before default-ON.
+3. **Live zero-drift proof** — yours (live editor, flag ON, edit-during-finalize, `ops.log` zero drift).
+
+Persistence is now round-trip-consistent for the text-composition model. The op-capture reconciliation (1) + conflict UX (2) are the remaining agent-doable rungs, then your live proof (3). Five commits on the branch, all default-off. Say **"go opcapture"** for the next one.
+<!-- agent:boundary:365f4a5b -->
 <!-- /agent:exchange -->
 
 ## Queue

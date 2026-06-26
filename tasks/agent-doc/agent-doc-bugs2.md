@@ -473,15 +473,12 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=2f587418-3481-4b18-a389-b86a086c3689 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=73450 candidate_hash=2b007613f76acc86bd803ea8c127cd2dfd6ae0a52bc3b1630bba4f676c93253f content_ours_len=74464 content_ours_hash=be90635f35edd89ddcf46e85435cd64643548a947c1b6e04ab591d39bdb0b3dc doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782496766130
 ```
-<!-- agent:boundary:e93071cc -->
+<!-- agent:boundary:1804286a -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~:pushpin: test #queuebase~~
-- ~~Please make a way to restart all supervisors in `agent-doc session restart-supervisor --all`. I still need to see if the supervisor is up to date or not in tmux. I'm flying blind right now with these bugs.~~
-- ~~As I typed in a prompt into the queue, the free-text item below this prompt was duplicated.~~
 ---
 The session mechanics still don't work on a new linkedin.md session. I compacted the exchangebefore I began the turn.
 ```
@@ -500,8 +497,6 @@ The session mechanics still don't work on a new linkedin.md session. I compacted
 - :pushpin: do [#kj5flive]
 - :pushpin: do [#2y8j]
 - do [#cdtcutover]
-- ~~do [#midturnresumeb]~~
-- ~~do [#recycleforce]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

@@ -423,19 +423,42 @@ Re-echoing the two answered heads `session-check` flagged as residue so `#ftstri
 > **Queue prompt:** JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
 
 > **Queue prompt:** lazily-rs.md IPC error
-<!-- agent:boundary:ed372baf -->
+
+### Re: queue edits reverting/duplicating — root cause is a stale-BINARY supervisor — opus-4-8
+
+All three of these are the **same root cause**, and it's a sharp one I just confirmed from process state — not a code bug in the current binary:
+
+> **Queue prompt:** When I delete queue items, they reappear.
+
+> **Queue prompt:** When I add attributes to an element, the attributes disappear.
+
+> **Queue prompt:** When I type into the queue, an old duplicate appears above where I'm typing.
+
+**The live route-owned supervisor is running a stale binary.** Process `2967818` (`agent-doc start --route-owned …bugs2.md`) **started at 18:34:12**, but the installed binary `~/.cargo/bin/agent-doc` was rewritten at **18:49:44** — ~15 min later. The running supervisor still holds the *old* in-process CRDT code; the `#queuestatemachine` idempotent convergence + Live<Struck lattice + free-text journaling fixes (0.34.48) are in the **installed** binary but never got promoted into the **running** one. A stale-*binary* supervisor does **not** self-heal — drain-lease expiry won't replace its binary; only an explicit recycle does (`#supselfheal`/`#staleloop-recycle-restart`).
+
+That stale CRDT is exactly what you're seeing:
+- **Delete → reappears**: the old code replays the struck/deleted item from its stale in-memory CRDT instead of honoring your delete.
+- **Attributes disappear**: a component-attribute edit converges against the stale model and gets dropped.
+- **Type → old duplicate appears above the cursor**: the stale live-buffer↔CRDT merge re-inserts a prior copy above your insertion point (I watched this happen last cycle — your "Please look at lazily-rs…" line briefly duplicated, then vanished).
+
+**Fix applied this cycle:** recycling the supervisor onto the fresh binary via `agent-doc admin recycle` (non-disruptive in-place re-exec at the idle boundary — not the parent-killing `restart-supervisor`). Once it lands, re-test the three edits: deletes should stick, attributes should persist, and typing shouldn't duplicate. **If any still misbehave on the freshly-recycled binary**, that's the genuine `#qeditdup`/`#qftloss` deeper editor-edit-during-cycle guard — capture the before/after doc state and I'll fix the code, because then it's not just staleness.
+
+(Note: the matching `#qeditdup`/`#qftloss` backlog items stay `[operator-verify]` — this recycle + your re-test IS that verification.)
+<!-- agent:boundary:f7426948 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~When I delete queue items, they reappear.~~
+- ~~When I add attributes to an element, the attributes disappear.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~When I type into the queue, an old duplicate appears above where I'm typing.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~On a fresh lazily-rs.md tmux pane, `● State is racing between runs (live supervisor/editor writing concurrently). Let me look at the actual document to~~ — auto-struck: answered this cycle (#ftstrike)
   understand what's being asked rather than chase the shifting sidecar state.`
 - ~~Use lazily-rs recent addition of Cell Families for reactive document structures. Can we represent a tree structure using lazily-rs?~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~When I make a free text item in a queue, my text is duplicated.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~I deleted some items from the queue but they came back. It seems that operator edits are not propagating to the CRDT authority models.~~ — auto-struck: answered this cycle (#ftstrike)
----
+~~~done
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the new agent state.
 ```
 resync: pruned 2 stale session(s)
@@ -450,7 +473,7 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 [route] target tmux session: 
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
----
+~~~
 ---
 :pushpin: equityfundingsource.md turn has an IPC issue:
 `### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc`
@@ -465,7 +488,7 @@ Affected component: editor IPC / writeback
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=ca5b06f9-838b-4b60-9ce2-00519736fbb1 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782344406484
 ```
 ---
----
+~~~done
 :pushpin: lazily-rs.md IPC error
 ```text
 **IPC proof issue dogfood log**
@@ -476,7 +499,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8c56928442bd4b165543ab0aad264d681b41b8898551d10f196018cd15a37304 content_len=11944 content_hash=46b47fdfe5505fb37c9e63df4167cb923df6b4ffc997ecca9009a15979c29a5e doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782339826601
 ```
----
+~~~
 ---
 :pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
 ```

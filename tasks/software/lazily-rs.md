@@ -24,6 +24,7 @@ queue: stop
 
 <!-- agent:status -->
 
+🔴 (restart/recycle your supervisor)
 - [x] Phase 1: Research & design
 - [x] Phase 2: Core signal primitives
 - [x] Phase 3: Derived/computed signals
@@ -236,7 +237,7 @@ No queue head is being answered by this recovery response. The next substantive 
 This is a binary-owned recovery write for the post-commit live-buffer drift reported after `73cc7ecd7`. It preserves the already-visible parity evidence and does not answer or consume the next queue head.
 
 No repository work was performed in this recovery write. Release/publish work remains operator-gated.
-<!-- agent:boundary:28e5763d -->
+<!-- agent:boundary:f08dcceb -->
 <!-- /agent:exchange -->
 ###
 <!--

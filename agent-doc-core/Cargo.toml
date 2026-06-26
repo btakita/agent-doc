@@ -25,4 +25,4 @@ uuid = { version = "1", features = ["v4"] }
 pulldown-cmark = "0.13"
 yrs = "0.27"
 similar = "3"
-lazily = { path = "../../lazily-rs" }
+lazily = { path = "../../lazily-rs", version = "0.13.0" }

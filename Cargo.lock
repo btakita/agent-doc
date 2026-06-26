@@ -107,7 +107,7 @@ dependencies = [
  "indexmap",
  "instruction-files",
  "interprocess",
- "lazily 0.12.2",
+ "lazily 0.13.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc",
  "notify",
  "portable-pty",
@@ -1453,9 +1453,7 @@ dependencies = [
 
 [[package]]
 name = "lazily"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edbd2d8fe0b73abf557c55a249a9fb7215817d052ae1b7409e837f5f47246f7e"
+version = "0.13.0"
 dependencies = [
  "arc-swap",
  "parking_lot",
@@ -1465,6 +1463,8 @@ dependencies = [
 [[package]]
 name = "lazily"
 version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a49b464f2fb5262702f4ee3fa5b0f19de98dd77536678656e441f26c754313f1"
 dependencies = [
  "arc-swap",
  "parking_lot",

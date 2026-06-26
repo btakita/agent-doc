@@ -147,7 +147,38 @@ Now both labels read as clean captions on their branch arrows (`focused →` rec
 - agent-loop superproject → `b67469842` (gitlinks).
 
 That was the last queue head.
-<!-- agent:boundary:f6d537b4 -->
+
+
+### Re: Will corky post the teaser correctly (no truncation, first comment, image)? — opus-4-8
+
+> **Queue prompt:** Will corky post the teaser correctly to LinkedIn? No body truncation, the first comment, and the image.
+
+Now it will — I checked corky's actual publish path and proved it with a `--dry-run`.
+
+**What corky does (`corky-social/src/social/{publish,linkedin,draft}.rs`):**
+- **Truncation:** there is none. corky enforces LinkedIn's `MAX_BODY_LENGTH = 3000` and **errors out** (`bail!`) if the body is over — it never silently truncates. (The earlier `#kabc` truncation was a separate paste-side issue, not corky.)
+- **First comment:** read from a `first_comment:` frontmatter field and auto-posted via `create_comment` right after the post succeeds.
+- **Image:** read from an `images:` frontmatter list (paths resolved relative to the draft file) and uploaded via LinkedIn's `initializeUpload` → PUT → image-URN flow, then attached to the post.
+
+**The gap:** the publish file `mail/social/20260626-lazily-cell-family-linkedin.md` had frontmatter but **no `images:` and no `first_comment:`** — so as it stood, corky would have posted the body alone: no image, no comment. (The `mail/drafts/linkedin/…` copy is just raw body text; `mail/social/…` is the file corky actually publishes.)
+
+**Fixed + proven.** I added both fields (image = the corrected lazy-pull diagram; first_comment = blog link + repo + reproduce command) and ran the dry-run:
+
+```
+[dry-run] Validation passed. Would publish to linkedin.
+[dry-run] Author: btakita (urn:li:person:_C2t_TDOVY)
+[dry-run] Images uploaded: 1
+[dry-run]   1: urn:li:image:D5610AQHqMu0lDnAxhQ
+[dry-run] Body (1553 chars):    ← under the 3000 limit, no truncation
+[dry-run] First comment (349 chars):    ← will auto-post after the share
+```
+
+All three confirmed: image uploads cleanly, body is 1553 chars, the first comment is wired. Committed `mail c20dd68`, superproject `e9e4322a8`.
+
+**To publish (operator):** flip `status: draft` → `status: ready` in that file and run `corky linkedin publish mail/social/20260626-lazily-cell-family-linkedin.md` (the dry-run shows auth already resolves, so the stored token is valid). The image + first comment go out automatically; no separate `corky linkedin comment` step is needed.
+
+**One discrepancy to reconcile:** the publish file body reads "…one million cells or ten." (i.e. ten *million* — matches the 10M-cell theme); your edit to the `drafts/` copy changed it to "…or ten thousand." I left the publish file as "or ten" — let me know if you want "ten thousand" there too.
+<!-- agent:boundary:4e2bfe9d -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -38,7 +38,7 @@
 //! used throughout `turn_scope` / `op_log` (e.g. `queue:0:beta:0`), where
 //! `item-id` is the durable child key.
 
-use lazily::{CellMap, CellTree, Context, DiffOp, reconcile};
+use lazily::{CellMap, CellTree, Context, DiffOp, TextCrdt, reconcile};
 
 use crate::component::{self, Component};
 use crate::crdt::{PREAMBLE_KEY, is_list_component, split_exchange_children, split_list_children};
@@ -57,16 +57,43 @@ pub const CELL_MERGE_ENV: &str = "AGENT_DOC_CELL_MERGE";
 #[cfg(test)]
 pub(crate) static CELL_MERGE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Whether the per-cell 3-way merge routing seam is enabled. Default OFF: only
-/// an explicit truthy `AGENT_DOC_CELL_MERGE` (`1`/`true`/`on`/`yes`) turns it on.
-pub fn cell_merge_enabled() -> bool {
-    match std::env::var(CELL_MERGE_ENV) {
+/// Environment variable that opts a same-cell *both-sides-changed* divergence
+/// into the op-level [`TextCrdt`] 3-way merge (`#qcellmerge1` opcapture rung).
+///
+/// **Sub-gate of [`CELL_MERGE_ENV`], default OFF.** Even with the per-cell merge
+/// seam ON ([`cell_merge_enabled`]), the `(both changed)` branch still applies
+/// [`ConflictPolicy`] (today's behavior) unless this is *also* truthy. When ON,
+/// that branch first attempts a deterministic character-granular 3-way merge: two
+/// edits to DISJOINT regions of one cell converge with BOTH preserved and NO
+/// conflict; a true same-region overlap still records a [`CellConflict`] and
+/// applies the policy. See [`cell_merge_opcapture_enabled`] / [`op_level_merge`].
+pub const CELL_MERGE_OPCAPTURE_ENV: &str = "AGENT_DOC_CELL_MERGE_OPCAPTURE";
+
+/// Parse a truthy on/off env value (`1`/`true`/`on`/`yes`, case/space-insensitive).
+fn env_truthy(name: &str) -> bool {
+    match std::env::var(name) {
         Ok(v) => {
             let v = v.trim().to_ascii_lowercase();
             matches!(v.as_str(), "1" | "true" | "on" | "yes")
         }
         Err(_) => false,
     }
+}
+
+/// Whether the per-cell 3-way merge routing seam is enabled. Default OFF: only
+/// an explicit truthy `AGENT_DOC_CELL_MERGE` (`1`/`true`/`on`/`yes`) turns it on.
+pub fn cell_merge_enabled() -> bool {
+    env_truthy(CELL_MERGE_ENV)
+}
+
+/// Whether the op-level [`TextCrdt`] 3-way merge for same-cell both-sides edits is
+/// enabled (`#qcellmerge1` opcapture). Default OFF: only an explicit truthy
+/// `AGENT_DOC_CELL_MERGE_OPCAPTURE` turns it on. Independent of
+/// [`cell_merge_enabled`] gating (the `(both changed)` branch is only reachable
+/// from the per-cell merge path, which the seam already gates), so this purely
+/// chooses whether that branch attempts op-level convergence before policy.
+pub fn cell_merge_opcapture_enabled() -> bool {
+    env_truthy(CELL_MERGE_OPCAPTURE_ENV)
 }
 
 /// The stable per-item identity: `component:occurrence:item-id:index`, matching
@@ -557,6 +584,7 @@ fn compose_occurrence(
                             o,
                             t,
                             in_b,
+                            base_map.get(id),
                             &ours_updated,
                             &theirs_updated,
                             ours,
@@ -571,6 +599,7 @@ fn compose_occurrence(
                         o,
                         t,
                         in_b,
+                        base_map.get(id),
                         &ours_updated,
                         &theirs_updated,
                         ours,
@@ -617,6 +646,7 @@ fn resolve_content_divergence(
     o: &ItemValue,
     t: &ItemValue,
     in_b: bool,
+    base_value: Option<&ItemValue>,
     ours_updated: &std::collections::HashSet<String>,
     theirs_updated: &std::collections::HashSet<String>,
     occ: &ComponentOccurrence,
@@ -631,9 +661,21 @@ fn resolve_content_divergence(
         (true, false) => o.clone(),
         // Only theirs changed → take theirs.
         (false, true) => t.clone(),
-        // Both changed to different text at the same lifecycle level → a REAL
-        // content conflict. Apply the deterministic policy, record it.
+        // Both changed to different text at the same lifecycle level. By default
+        // (today's behavior) this is a REAL content conflict resolved by the
+        // deterministic policy. With the opcapture sub-gate ON, first attempt a
+        // real op-level 3-way merge: if the two sides edited DISJOINT regions of
+        // the cell, that converges cleanly with both edits preserved and is NOT a
+        // conflict. Only a genuine same-region overlap falls through to policy.
         (true, true) => {
+            if cell_merge_opcapture_enabled()
+                && let Some(base) = base_value
+                && let Some(merged) = op_level_merge(base, o, t)
+            {
+                // Disjoint edits converged op-by-op — no information was lost, so
+                // no conflict is recorded.
+                return merged;
+            }
             let chosen = match policy {
                 ConflictPolicy::OursWins => o.clone(),
                 ConflictPolicy::TheirsWins => t.clone(),
@@ -653,6 +695,116 @@ fn resolve_content_divergence(
         // o == t). Defensive: take ours.
         (false, false) => o.clone(),
     }
+}
+
+/// One contiguous character-range replacement of `base[start..end)` (char
+/// indices, half-open) by `replacement`, derived from a common-prefix /
+/// common-suffix diff. A pure insertion has `start == end`; a pure deletion has
+/// an empty `replacement`. This is the minimal single-span edit that turns base
+/// into the side.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CharSpanEdit {
+    /// First differing char index in base (inclusive).
+    start: usize,
+    /// One past the last replaced char index in base (exclusive).
+    end: usize,
+    /// The replacement characters inserted in `[start, end)`.
+    replacement: Vec<char>,
+}
+
+/// Compute the minimal single contiguous `base → side` character edit by peeling
+/// the shared prefix and suffix. Deterministic and allocation-light. Returns
+/// `None` when the strings are identical (no edit). The middle (between the
+/// common prefix and suffix) is treated as one replaced region — this is exactly
+/// the granularity the disjoint-region test needs, and matches how a localized
+/// human/agent edit shows up (one inserted/replaced run).
+fn char_span_edit(base: &[char], side: &[char]) -> Option<CharSpanEdit> {
+    if base == side {
+        return None;
+    }
+    // Common prefix length.
+    let mut start = 0usize;
+    let max_pre = base.len().min(side.len());
+    while start < max_pre && base[start] == side[start] {
+        start += 1;
+    }
+    // Common suffix length, not overlapping the already-matched prefix.
+    let mut suffix = 0usize;
+    let max_suf = (base.len() - start).min(side.len() - start);
+    while suffix < max_suf && base[base.len() - 1 - suffix] == side[side.len() - 1 - suffix] {
+        suffix += 1;
+    }
+    let end = base.len() - suffix;
+    let replacement = side[start..side.len() - suffix].to_vec();
+    Some(CharSpanEdit {
+        start,
+        end,
+        replacement,
+    })
+}
+
+/// Whether two base-relative replaced ranges overlap. Adjacent (touching but not
+/// crossing) ranges are treated as **overlapping** because two edits that meet at
+/// the same boundary are not information-theoretically independent — keep them on
+/// the conflict path. Empty ranges (pure insertions) at the *same* point also
+/// overlap (both sides inserted at one anchor); distinct insertion points do not.
+fn ranges_overlap(a: &CharSpanEdit, b: &CharSpanEdit) -> bool {
+    // Two pure insertions (empty range) collide only at the identical anchor.
+    if a.start == a.end && b.start == b.end {
+        return a.start == b.start;
+    }
+    // Otherwise overlap iff the half-open intervals intersect, treating a pure
+    // insertion as touching the char boundary it sits at (closed at that point).
+    let (a_lo, a_hi) = (a.start, a.end.max(a.start));
+    let (b_lo, b_hi) = (b.start, b.end.max(b.start));
+    a_lo < b_hi && b_lo < a_hi
+        // Insertion exactly inside the other side's replaced span boundary.
+        || (a.start == a.end && a.start > b_lo && a.start < b_hi)
+        || (b.start == b.end && b.start > a_lo && b.start < a_hi)
+}
+
+/// Apply one [`CharSpanEdit`] (a base-relative replace) to a forked [`TextCrdt`]
+/// via visible-index `delete`/`insert`. The fork still holds the base characters
+/// at base indices, so `start`/`end` are valid visible indices on it.
+fn apply_span_edit(crdt: &mut TextCrdt, edit: &CharSpanEdit) {
+    // Delete the replaced base chars (from the back so earlier indices stay valid).
+    for idx in (edit.start..edit.end).rev() {
+        crdt.delete(idx);
+    }
+    // Insert the replacement at the span start.
+    for (i, ch) in edit.replacement.iter().enumerate() {
+        crdt.insert(edit.start + i, *ch);
+    }
+}
+
+/// Op-level 3-way merge of one cell's text (`#qcellmerge1` opcapture).
+///
+/// Builds a base [`TextCrdt`], forks it to a deterministic "ours" peer (`1`) and
+/// "theirs" peer (`2`), replays each side's single-span char edit onto its fork,
+/// then merges. Returns `Some(merged_text)` ONLY when the two edits touch
+/// **disjoint** regions of the base (so the merge is unambiguous and preserves
+/// both edits); returns `None` for a true same-region overlap, leaving the caller
+/// on the conflict + [`ConflictPolicy`] path. Fully deterministic: fixed peer ids
+/// (ours-before-theirs), no clocks or randomness.
+fn op_level_merge(base: &str, ours: &str, theirs: &str) -> Option<String> {
+    let base_chars: Vec<char> = base.chars().collect();
+    let ours_edit = char_span_edit(&base_chars, &ours.chars().collect::<Vec<_>>())?;
+    let theirs_edit = char_span_edit(&base_chars, &theirs.chars().collect::<Vec<_>>())?;
+
+    // Overlapping edits are an irreducible same-region conflict (`#qnodemerge5`):
+    // do NOT op-merge them — fall through to the policy path.
+    if ranges_overlap(&ours_edit, &theirs_edit) {
+        return None;
+    }
+
+    // Deterministic peer ids: ours=1, theirs=2 (stable ordering, no time/random).
+    let base_crdt = TextCrdt::from_str(1, base);
+    let mut ours_fork = base_crdt.fork(1);
+    let mut theirs_fork = base_crdt.fork(2);
+    apply_span_edit(&mut ours_fork, &ours_edit);
+    apply_span_edit(&mut theirs_fork, &theirs_edit);
+    ours_fork.merge(&theirs_fork);
+    Some(ours_fork.text())
 }
 
 /// Identities the side `Remove`d relative to base.
@@ -1677,5 +1829,160 @@ working on it
         assert_eq!(out.conflicts[0].kind, ConflictKind::Content);
         assert!(out.merged_text.contains("struck OURS"));
         assert!(!out.merged_text.contains("struck THEIRS"));
+    }
+
+    // ----- op-level TextCrdt 3-way merge (`#qcellmerge1` opcapture) ----------
+
+    /// Unit-level proof of the disjoint-region detector + op-level merge,
+    /// independent of env gating. Two edits to non-overlapping spans of one base
+    /// string converge with BOTH preserved.
+    #[test]
+    fn op_level_merge_disjoint_edits_converge_both_present() {
+        let base = "do [#beta] the original task body";
+        // ours edits the FRONT ("the original" → "the EDITED original"); theirs
+        // edits the BACK ("task body" → "task BODY!!"). Disjoint regions.
+        let ours = "do [#beta] the EDITED original task body";
+        let theirs = "do [#beta] the original task BODY!!";
+        let merged = op_level_merge(base, ours, theirs).expect("disjoint edits merge");
+        assert!(merged.contains("EDITED"), "ours edit present: {merged}");
+        assert!(merged.contains("BODY!!"), "theirs edit present: {merged}");
+    }
+
+    /// A true SAME-region overlap returns `None` from the op-level merger, so the
+    /// caller stays on the conflict + policy path (the `#qnodemerge5` remainder).
+    #[test]
+    fn op_level_merge_same_region_overlap_is_none() {
+        let base = "do [#beta] original";
+        // Both sides replace the SAME trailing word with different text.
+        let ours = "do [#beta] OURS";
+        let theirs = "do [#beta] THEIRS";
+        assert!(
+            op_level_merge(base, ours, theirs).is_none(),
+            "overlapping same-region edits must NOT op-merge"
+        );
+    }
+
+    /// Span-edit / overlap unit checks: prefix/suffix peel, pure insert, overlap.
+    #[test]
+    fn char_span_edit_and_overlap_detection() {
+        let base: Vec<char> = "abcdef".chars().collect();
+        // Replace the middle "cd" with "XY".
+        let e = char_span_edit(&base, &"abXYef".chars().collect::<Vec<_>>()).unwrap();
+        assert_eq!((e.start, e.end), (2, 4));
+        assert_eq!(e.replacement, vec!['X', 'Y']);
+        // Identical → no edit.
+        assert!(char_span_edit(&base, &base).is_none());
+        // Disjoint spans do not overlap.
+        let front = char_span_edit(&base, &"aZcdef".chars().collect::<Vec<_>>()).unwrap();
+        let back = char_span_edit(&base, &"abcdeZ".chars().collect::<Vec<_>>()).unwrap();
+        assert!(!ranges_overlap(&front, &back), "front vs back disjoint");
+        // Same-region edits overlap.
+        let o = char_span_edit(&base, &"abXXef".chars().collect::<Vec<_>>()).unwrap();
+        let t = char_span_edit(&base, &"abYYef".chars().collect::<Vec<_>>()).unwrap();
+        assert!(ranges_overlap(&o, &t), "same middle region overlaps");
+    }
+
+    /// (a) End-to-end with the opcapture gate ON: two DISJOINT-region edits to the
+    /// SAME exchange item converge with BOTH present and NO conflict.
+    #[test]
+    fn opcapture_on_disjoint_same_cell_edits_both_land_no_conflict() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        // A stable `#id`-keyed queue item: the identity survives a text edit on
+        // EITHER side, so both edits land on the SAME item (the `(both changed)`
+        // branch). ours edits the FRONT, theirs the BACK — disjoint regions.
+        let base = "<!-- agent:queue -->\n- do [#beta] the original answer body here\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- do [#beta] the EDITED answer body here\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:queue -->\n- do [#beta] the original answer body THERE!\n<!-- /agent:queue -->\n";
+
+        // SAFETY: single-threaded under ENV_LOCK; restored before unlock.
+        unsafe {
+            std::env::set_var(CELL_MERGE_OPCAPTURE_ENV, "1");
+        }
+        let out = merge_3way(base, ours, theirs);
+        unsafe {
+            std::env::remove_var(CELL_MERGE_OPCAPTURE_ENV);
+        }
+
+        assert!(!out.fell_back, "should not fall back: {out:?}");
+        assert!(
+            out.conflicts.is_empty(),
+            "disjoint op-merge records NO conflict: {:?}",
+            out.conflicts
+        );
+        assert!(
+            out.merged_text.contains("EDITED"),
+            "ours edit: {}",
+            out.merged_text
+        );
+        assert!(
+            out.merged_text.contains("THERE!"),
+            "theirs edit: {}",
+            out.merged_text
+        );
+    }
+
+    /// (b) End-to-end with the gate ON but a TRUE same-region overlap: still a
+    /// recorded `Content` conflict, ours-wins, theirs absent.
+    #[test]
+    fn opcapture_on_same_region_overlap_still_conflicts() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let base = "<!-- agent:queue -->\n- do [#beta] original\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- do [#beta] OURS-ONLY\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:queue -->\n- do [#beta] THEIRS-ONLY\n<!-- /agent:queue -->\n";
+
+        // SAFETY: single-threaded under ENV_LOCK; restored before unlock.
+        unsafe {
+            std::env::set_var(CELL_MERGE_OPCAPTURE_ENV, "1");
+        }
+        let out = merge_3way(base, ours, theirs);
+        unsafe {
+            std::env::remove_var(CELL_MERGE_OPCAPTURE_ENV);
+        }
+
+        assert!(!out.fell_back);
+        assert_eq!(
+            out.conflicts.len(),
+            1,
+            "overlap still conflicts even with opcapture ON: {:?}",
+            out.conflicts
+        );
+        assert_eq!(out.conflicts[0].kind, ConflictKind::Content);
+        assert!(out.merged_text.contains("OURS-ONLY"), "ours-wins policy");
+        assert!(
+            !out.merged_text.contains("THEIRS-ONLY"),
+            "no blend on a real overlap: {}",
+            out.merged_text
+        );
+    }
+
+    /// (c) Gate OFF (default) reproduces today's ours-wins behavior unchanged:
+    /// even DISJOINT same-cell edits record a conflict and drop theirs.
+    #[test]
+    fn opcapture_off_default_ours_wins_unchanged() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let base = "<!-- agent:queue -->\n- do [#beta] the original answer body here\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- do [#beta] the EDITED answer body here\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:queue -->\n- do [#beta] the original answer body THERE!\n<!-- /agent:queue -->\n";
+
+        // SAFETY: ensure the sub-gate is OFF (its default) under the lock.
+        unsafe {
+            std::env::remove_var(CELL_MERGE_OPCAPTURE_ENV);
+        }
+        assert!(!cell_merge_opcapture_enabled(), "opcapture default OFF");
+
+        let out = merge_3way(base, ours, theirs);
+        assert!(!out.fell_back);
+        assert_eq!(
+            out.conflicts.len(),
+            1,
+            "OFF: disjoint same-cell edits are a conflict (today's behavior): {:?}",
+            out.conflicts
+        );
+        assert!(out.merged_text.contains("EDITED"), "ours-wins keeps ours");
+        assert!(
+            !out.merged_text.contains("THERE!"),
+            "OFF: theirs disjoint edit is dropped (no op-merge): {}",
+            out.merged_text
+        );
     }
 }

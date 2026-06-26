@@ -26,7 +26,6 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -676,7 +675,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=6ed40d2d-3e24-4914-b1dd-f798caf58565 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=100812 candidate_hash=d04c4718e1766afcf0c8bbe2e53c5a48109eb31fc4bc45416e2c6e327b01b141 content_ours_len=103384 content_ours_hash=161f5ca5f3a08fa6de7c4e6060e355754731ab6adf5e0e3324a627de550d0219 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782506876152
 ```
-<!-- agent:boundary:94e41bd5 -->
+<!-- agent:boundary:0d14a20a -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -692,6 +691,7 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack
 - do [#actorprune]
 - do [#suprestassoc]
 - do [#qheadstrikeauto]
+- do [#syncbarrier]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -718,6 +718,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#syncbarrier] #agent-doc-feature Phase 1 (editor-sync barrier) — epoch handshake so the binary DEFERS dangerous ops (snapshot reset / disk reconcile / merge-base rebuild) while an editor edit is in flight, bounded wait, fail-OPEN to the editor buffer (never a held lock, never snapshot-discard). Poll-check = yrs StateVector exchange, not text compare. Needs JB/VSCode edit_epoch + StateVector over IPC (extend State method). Phase 0 #ipctruncrecover shipped (0.34.53). Plan: tasks/agent-doc/plan-editor-sync-barrier.md
 - [ ] [#crdtsvdom] #agent-doc-bug HIGH live-typing data-loss — the #crdtlivedrop residual is still live on 0.34.52. ops.log proof (session b26b9957): every cycle in the operator typing burst took crdt_merge_base_overlay_rebuilt (discard-to-baseline); overlay_ahead_preserved never fired, including 20:35:15 where overlay (96633B) was LARGER than baseline (96632B). overlay_carries_unbaselined_content (snapshot.rs:1138) classifies ahead/behind by markdown line-string multiset, so it misses pure deletions (overlay subset of baseline) AND additive within-line edits on lines that duplicate another baseline line. Replace with yrs state-vector dominance (plan line 505). Plan: tasks/agent-doc/plan-crdt-overlay-live-keystroke-preservation.md
 - [ ] [#qheadstrikeauto] #agent-doc-feature auto-strike answered free-text head WITHOUT requiring the agent to quote it as a > **Queue prompt:** blockquote — operator: "the binary should do this automatically...not the agent". Today strike_answered_free_text_queue_heads (queue_consume.rs) only fires on a blockquote/prose-prefix match, so a head answered in plain prose is never struck. Key the strike off the binary drain-target / in-progress (the marker) head identity for the cycle instead of agent prose formatting. Plan: tasks/agent-doc/plan-freetext-queue-head-autostrike.md
 - [ ] [#actorprune] #agent-doc-feature auto-prune dead actor records: `admin list` shows 251 actors, ~all `(dead) closed pid=? session=session-clear`; gc only closes `Starting` actors (project_controller.rs:1716), nothing removes long-dead `Closed` records so they accumulate unbounded. Add prune_dead_actors (lease-guarded) + wire into gc + one-shot prune for the current backlog. Plan: tasks/agent-doc/plan-prune-dead-actors.md

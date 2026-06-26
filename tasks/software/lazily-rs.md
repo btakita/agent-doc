@@ -168,7 +168,22 @@ I left the pre-existing dirty lazily-rs files `src/lib.rs` and `src/reconcile.rs
 Absorbing the already-visible `#lzsmstress` and `#lzcrdtperms` response content through the binary-owned snapshot/commit boundary. No additional repository changes were made in this absorption step.
 
 The current completed work remains: `#lzsmstress` committed in lazily-rs `1e50084` and parent `e4a354bdd`; `#lzcrdtperms` committed in lazily-rs `bce1802` and parent `aef3a7f15`; full `make check` for the CRDT work passed with artifact `tart-bce23a7c27`.
-<!-- agent:boundary:6326c535 -->
+
+### Re: lazily-spec parity — gpt-5
+
+> **Queue prompt:** lazily-spec parity
+
+`lazily-spec parity` is already drained and verified, so I made no new spec-code edits this cycle.
+
+Evidence:
+
+- `StateMachine.lean` exists and models `send`/`sends` with guard rejection, accepted transitions, self-transitions, changed-transition emission checks, and transition preservation.
+- The plan's remaining lazily-spec TODO is also present in `StateMachineIPC.lean`: `send` to IPC delta ops, guard/self-transition no-op behavior, changed transitions emitting `DeltaOp.cellSet`, accepted delta/epoch behavior, and payload/state correspondence.
+- The relevant commits are on the current `src/lazily-spec` branch: `9fbc669 feat(spec): add StateMachine.lean formal model` and `2506182 feat: add StateMachine→IPC cross-module proof (#hj5x)`. Current `src/lazily-spec` HEAD is `f44a9c6`, and the working tree is clean.
+- Verification: `make check` in `src/lazily-spec` passed (`lake build`, 7 jobs).
+
+Changed paths: none in `src/lazily-spec`; this was a verification and queue-strike cycle. Confidence: high. The next non-operator head is `lazily-kt parity`; release/publish work remains operator-gated.
+<!-- agent:boundary:af69e8af -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -179,10 +194,10 @@ The current completed work remains: `#lzsmstress` committed in lazily-rs `1e5008
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~[#lzbugtriage]~~
 - ~~[#lzsmstress]~~
-- ~~🚧 [#lzcrdtperms]~~
-- lazily-spec parity
+- ~~[#lzcrdtperms]~~
+- ~~lazily-spec parity~~
 - lazily-kt parity
-- release + publish
+- ~~release + publish — auto-struck: completed by #45rh (#qftbklgstrike)~~
 - lazily-js parity + release + publish
 - lazily-zig parity + release + publish
 - lazily-py parity + release + publish

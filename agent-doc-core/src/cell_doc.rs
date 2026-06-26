@@ -50,6 +50,13 @@ use crate::queue_item_lifecycle::QueueItemLifecycle;
 /// (default OFF). See [`cell_merge_enabled`].
 pub const CELL_MERGE_ENV: &str = "AGENT_DOC_CELL_MERGE";
 
+/// Process-global serialization lock for tests that mutate the
+/// `AGENT_DOC_CELL_MERGE` env var. The env var is process-wide, so flag-toggling
+/// tests across modules (`cell_doc`, `crdt`) must serialize through this single
+/// lock to avoid racing each other. `pub(crate)` so sibling test modules share it.
+#[cfg(test)]
+pub(crate) static CELL_MERGE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Whether the per-cell 3-way merge routing seam is enabled. Default OFF: only
 /// an explicit truthy `AGENT_DOC_CELL_MERGE` (`1`/`true`/`on`/`yes`) turns it on.
 pub fn cell_merge_enabled() -> bool {
@@ -1198,8 +1205,9 @@ agent_doc_format: template
     // ----- 3-way per-cell merge (`merge_3way`) -----------------------------
 
     /// Serialize the env-var-mutating tests: `AGENT_DOC_CELL_MERGE` is
-    /// process-global, so parallel tests that set/remove it would race.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// process-global, so parallel tests that set/remove it would race. Reuses the
+    /// crate-wide lock so `crdt` flag tests serialize against these too.
+    use super::CELL_MERGE_ENV_LOCK as ENV_LOCK;
 
     const BASE3: &str = "\
 ---

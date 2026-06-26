@@ -465,6 +465,36 @@ fn segment_into_nodes(text: &str) -> Result<Vec<Node>> {
     Ok(nodes)
 }
 
+/// Shared `#qcellmerge1` cell-merge seam used by both the text path
+/// ([`merge_by_component`]) and the persistence path
+/// ([`MultiNodeState::merge`]) so the two entry points compute byte-identical
+/// merged text for the same inputs under the flag.
+///
+/// Returns `Some(merged_text)` when the per-cell 3-way merge succeeds (the
+/// caller should return that text and, on the persistence path, rebuild its
+/// advanced state from the SAME text). Returns `None` on `fell_back`, so the
+/// caller runs its existing legacy merge path unchanged. The caller is
+/// responsible for gating this behind [`cell_doc::cell_merge_enabled`].
+fn try_cell_merge_text(
+    base_text: &str,
+    ours_text: &str,
+    theirs_text: &str,
+    site: &str,
+) -> Option<String> {
+    let outcome = crate::cell_doc::merge_3way(base_text, ours_text, theirs_text);
+    if outcome.fell_back {
+        eprintln!("[crdt] cell_merge: fell back to legacy {site} path");
+        return None;
+    }
+    if !outcome.conflicts.is_empty() {
+        eprintln!(
+            "[crdt] cell_merge: {} conflict(s) surfaced (policy=ours-wins)",
+            outcome.conflicts.len()
+        );
+    }
+    Some(outcome.merged_text)
+}
+
 /// Component-scoped three-way CRDT merge (`#qcellmerge1`) — the anti-corruption rung.
 ///
 /// Instead of reconciling the whole document as one text blob (which lets
@@ -500,17 +530,11 @@ pub fn merge_by_component(
                 .unwrap_or_default(),
             None => String::new(),
         };
-        let outcome = crate::cell_doc::merge_3way(&base_text, ours_text, theirs_text);
-        if !outcome.fell_back {
-            if !outcome.conflicts.is_empty() {
-                eprintln!(
-                    "[crdt] cell_merge: {} conflict(s) surfaced (policy=ours-wins)",
-                    outcome.conflicts.len()
-                );
-            }
-            return Ok(outcome.merged_text);
+        if let Some(merged) =
+            try_cell_merge_text(&base_text, ours_text, theirs_text, "merge_by_component")
+        {
+            return Ok(merged);
         }
-        eprintln!("[crdt] cell_merge: fell back to legacy merge_by_component path");
     }
 
     let ours_nodes = match segment_into_nodes(ours_text) {
@@ -1308,6 +1332,27 @@ impl MultiNodeState {
 
         if ours_text == theirs_text {
             return Ok((ours_text.to_string(), MultiNodeState::from_text(ours_text)?));
+        }
+
+        // `#qcellmerge1` persistence-path seam (default OFF). When the flag is
+        // enabled, route through the SAME per-cell merge as the text path
+        // ([`merge_by_component`]) and rebuild the persisted per-node state from
+        // the cell-merged text via [`MultiNodeState::from_text`]. This keeps the
+        // returned text and the persisted base round-trip consistent (the
+        // persisted base reflects the cell-merge winner, not the legacy
+        // per-node winner). On `fell_back` (or flag OFF) the existing per-node
+        // path below runs byte-identically to pre-rung behavior.
+        if crate::cell_doc::cell_merge_enabled() {
+            let base_text = match base {
+                Some(b) => b.to_text().unwrap_or_default(),
+                None => String::new(),
+            };
+            if let Some(merged) =
+                try_cell_merge_text(&base_text, ours_text, theirs_text, "MultiNodeState::merge")
+            {
+                let state = MultiNodeState::from_text(&merged)?;
+                return Ok((merged, state));
+            }
         }
 
         let ours_nodes = match segment_into_nodes(ours_text) {
@@ -3104,6 +3149,209 @@ Second answer line three.
         assert!(merged.contains("Body."));
         assert!(merged.contains("[#b2]"));
         assert_eq!(state.to_text().unwrap(), merged);
+    }
+
+    // ---- #qcellmerge1 persistence round-trip: MultiNodeState::merge seam ----
+    //
+    // These prove the live-persistence path (`MultiNodeState::merge`, which
+    // returns BOTH the merged text AND the advanced per-node state persisted to
+    // `<hash>.nodes.yrs`) routes through the SAME per-cell merge as the text path
+    // (`merge_by_component`) under the flag, so the persisted base reflects the
+    // cell-merge winner and the round-trip is consistent across cycles.
+
+    /// Scoped guard: set `AGENT_DOC_CELL_MERGE=1` for the duration, restore on
+    /// drop. Serialized through the shared crate lock so it can't race the
+    /// `cell_doc` flag tests.
+    struct CellMergeFlagOn {
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+    impl CellMergeFlagOn {
+        fn on() -> Self {
+            let guard = crate::cell_doc::CELL_MERGE_ENV_LOCK.lock().unwrap();
+            // SAFETY: single-threaded under the lock; restored on drop.
+            unsafe {
+                std::env::set_var(crate::cell_doc::CELL_MERGE_ENV, "1");
+            }
+            assert!(crate::cell_doc::cell_merge_enabled());
+            CellMergeFlagOn { _guard: guard }
+        }
+    }
+    impl Drop for CellMergeFlagOn {
+        fn drop(&mut self) {
+            // SAFETY: still holding the lock.
+            unsafe {
+                std::env::remove_var(crate::cell_doc::CELL_MERGE_ENV);
+            }
+        }
+    }
+
+    #[test]
+    fn multinode_merge_conflict_persists_cell_winner_under_flag() {
+        // A same-item conflict (both sides edit the SAME queue line differently).
+        // With the flag ON, MultiNodeState::merge returns text T and state S; the
+        // persisted state S must re-encode to a doc whose queue component matches
+        // T (the persisted base reflects the cell-merge ours-wins winner, NOT a
+        // legacy per-node winner that could diverge from T).
+        let _flag = CellMergeFlagOn::on();
+
+        let base = doc_with_exchange_queue("Q.", "- do [#a1] original");
+        let base_state = MultiNodeState::from_text(&base).unwrap();
+        let ours = doc_with_exchange_queue("Q.", "- do [#a1] OURS edit");
+        let theirs = doc_with_exchange_queue("Q.", "- do [#a1] THEIRS edit");
+
+        let (merged, state) = MultiNodeState::merge(Some(&base_state), &ours, &theirs).unwrap();
+
+        // The persisted state must round-trip to the SAME text that was returned.
+        assert_eq!(
+            state.to_text().unwrap(),
+            merged,
+            "persisted state diverges from returned merged text under conflict"
+        );
+        // And the returned text reflects the cell-merge (ours-wins) winner.
+        assert!(
+            merged.contains("OURS edit"),
+            "cell-merge ours-wins winner lost:\n{merged}"
+        );
+        // The persisted queue component must hold the winner, not the legacy text.
+        let persisted = state.to_text().unwrap();
+        let queue_body = persisted
+            .split("<!-- agent:queue -->")
+            .nth(1)
+            .and_then(|s| s.split("<!-- /agent:queue -->").next())
+            .unwrap_or("");
+        assert!(
+            queue_body.contains("OURS edit"),
+            "persisted base lost the cell-merge winner:\n{queue_body}"
+        );
+    }
+
+    #[test]
+    fn multinode_merge_struck_head_stable_across_persistence_cycles() {
+        // Multi-cycle no-churn under persistence: a struck head must stay struck
+        // across cycles when the advanced MultiNodeState is carried forward as the
+        // next cycle's base AND a stale un-strike keeps arriving. The persisted
+        // state must not oscillate — a no-new-edit cycle is idempotent.
+        let _flag = CellMergeFlagOn::on();
+
+        // Cycle 0: strike lands (ours strikes, theirs is the pre-strike base).
+        let base0 = doc_with_exchange_queue("Q.", "- do [#z9] answered");
+        let base0_state = MultiNodeState::from_text(&base0).unwrap();
+        let ours0 = doc_with_exchange_queue("Q.", "- ~~do [#z9] answered~~");
+        let theirs0 = doc_with_exchange_queue("Q.", "- do [#z9] answered");
+        let (text0, state0) = MultiNodeState::merge(Some(&base0_state), &ours0, &theirs0).unwrap();
+        assert!(
+            text0.contains("~~do [#z9] answered~~"),
+            "strike lost:\n{text0}"
+        );
+        assert_eq!(
+            state0.to_text().unwrap(),
+            text0,
+            "cycle0 round-trip diverges"
+        );
+
+        // Cycle 1: carry state0 forward as base; a STALE un-strike side arrives.
+        // The struck head must stay struck (anti-resurrection), and the persisted
+        // state must round-trip the returned text.
+        let ours1 = doc_with_exchange_queue("Q.", "- do [#z9] answered"); // stale un-strike
+        let theirs1 = doc_with_exchange_queue("Q.", "- ~~do [#z9] answered~~");
+        let (text1, state1) = MultiNodeState::merge(Some(&state0), &ours1, &theirs1).unwrap();
+        assert!(
+            text1.contains("~~do [#z9] answered~~"),
+            "stale un-strike resurrected the head:\n{text1}"
+        );
+        let live1 = {
+            let body = text1
+                .split("<!-- agent:queue -->")
+                .nth(1)
+                .and_then(|s| s.split("<!-- /agent:queue -->").next())
+                .unwrap_or("");
+            body.lines()
+                .filter(|l| l.contains("do [#z9]") && !l.contains("~~"))
+                .count()
+        };
+        assert_eq!(
+            live1, 0,
+            "head resurrected LIVE across persistence:\n{text1}"
+        );
+        assert_eq!(
+            state1.to_text().unwrap(),
+            text1,
+            "cycle1 round-trip diverges"
+        );
+
+        // Cycle 2: NO new edits (ours == theirs == carried text). Must be
+        // idempotent — identical text AND identical persisted state to cycle 1.
+        let (text2, state2) = MultiNodeState::merge(Some(&state1), &text1, &text1).unwrap();
+        assert_eq!(text2, text1, "no-edit cycle oscillated the text");
+        assert_eq!(
+            state2.encode(),
+            state1.encode(),
+            "no-edit cycle oscillated the persisted state"
+        );
+    }
+
+    #[test]
+    fn multinode_merge_flag_off_byte_identical_to_pre_rung() {
+        // Flag-OFF parity: with the flag explicitly absent, MultiNodeState::merge
+        // output must be byte-identical to the legacy per-node path (the seam is a
+        // strict no-op). We compute the legacy result by constructing the same
+        // per-node merge the function would run without the seam.
+        let _guard = crate::cell_doc::CELL_MERGE_ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized under the lock.
+        unsafe {
+            std::env::remove_var(crate::cell_doc::CELL_MERGE_ENV);
+        }
+        assert!(!crate::cell_doc::cell_merge_enabled(), "must be OFF");
+
+        let base = doc_with_exchange_queue("Existing prompt.", "- do [#a1]");
+        let base_state = MultiNodeState::from_text(&base).unwrap();
+        let ours = doc_with_exchange_queue(
+            "Existing prompt.\n\n### Re: existing — opus\n\nAgent response body.",
+            "- do [#a1]",
+        );
+        let theirs = doc_with_exchange_queue("Existing prompt.", "- do [#a1]\n- do [#b2]");
+
+        // Two flag-OFF runs are deterministic and identical.
+        let (off1, off1_state) = MultiNodeState::merge(Some(&base_state), &ours, &theirs).unwrap();
+        let (off2, off2_state) = MultiNodeState::merge(Some(&base_state), &ours, &theirs).unwrap();
+        assert_eq!(off1, off2, "flag-OFF text not deterministic");
+        assert_eq!(
+            off1_state.encode(),
+            off2_state.encode(),
+            "flag-OFF state not deterministic"
+        );
+        // The legacy per-node path produced the expected isolated merge.
+        assert!(off1.contains("### Re: existing"));
+        assert!(off1.contains("[#b2]"));
+    }
+
+    #[test]
+    fn cell_seams_produce_identical_text_under_flag() {
+        // Round-trip equality: for a non-conflicting concurrent edit, the text
+        // from merge_by_component (flag ON) must equal the text from
+        // MultiNodeState::merge (flag ON) for the SAME inputs — the two seams
+        // agree, so the persisted base never diverges from the committed doc.
+        let _flag = CellMergeFlagOn::on();
+
+        let base = doc_with_exchange_queue("Existing prompt.", "- do [#a1]");
+        let ours = doc_with_exchange_queue(
+            "Existing prompt.\n\n### Re: existing — opus\n\nAgent response body.",
+            "- do [#a1]",
+        );
+        let theirs = doc_with_exchange_queue("Existing prompt.", "- do [#a1]\n- do [#b2]");
+
+        let text_seam = {
+            let base_state = CrdtDoc::from_text(&base).encode_state();
+            merge_by_component(Some(&base_state), &ours, &theirs).unwrap()
+        };
+        let (persist_seam, _state) = {
+            let base_state = MultiNodeState::from_text(&base).unwrap();
+            MultiNodeState::merge(Some(&base_state), &ours, &theirs).unwrap()
+        };
+        assert_eq!(
+            text_seam, persist_seam,
+            "the two cell-merge seams disagree on merged text:\n--- text path ---\n{text_seam}\n--- persist path ---\n{persist_seam}"
+        );
     }
 
     // ---- #qnodemerge3: recursive AST-node keyed reconciliation ------------

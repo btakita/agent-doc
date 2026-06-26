@@ -462,67 +462,33 @@ That stale CRDT is exactly what you're seeing:
 **Fix applied this cycle:** recycling the supervisor onto the fresh binary via `agent-doc admin recycle` (non-disruptive in-place re-exec at the idle boundary — not the parent-killing `restart-supervisor`). Once it lands, re-test the three edits: deletes should stick, attributes should persist, and typing shouldn't duplicate. **If any still misbehave on the freshly-recycled binary**, that's the genuine `#qeditdup`/`#qftloss` deeper editor-edit-during-cycle guard — capture the before/after doc state and I'll fix the code, because then it's not just staleness.
 
 (Note: the matching `#qeditdup`/`#qftloss` backlog items stay `[operator-verify]` — this recycle + your re-test IS that verification.)
-<!-- agent:boundary:90d8c8e8 -->
+
+### Re: Queue residue cleared — only operator-verify heads remain — opus-4-8
+
+Thanks — you removed the 4 un-strikable residue lines (the actor-switch report + the two `ipc_proof_insufficient` dogfood logs), which was exactly the durable fix the pause was waiting on (`#supselfheal recycle-drops-pause`). The queue now mirrors just the backlog: `#qftloss`, `#qeditdup`, `#crdtauth6`, `#nsfz`.
+
+**Nothing agent-drainable remains.** All four are `[operator-verify]`, code-complete on main (0.34.48), waiting solely on your live-editor / plugin eyeball:
+
+- `#qftloss` — free-text loss; binary now journals operator prompts from the live-buffer sidecar into the `#qdurcrash` store before any convergence/recovery can clobber the unsaved buffer (`8b900bf4`). Needs: an unsaved prompt typed during a concurrent finalize survives end-to-end.
+- `#qeditdup` — `#queuestatemachine` idempotent convergence + the Live<Struck lattice. Needs: re-test on the recycled binary that deletes stick and typing doesn't duplicate.
+- `#crdtauth6` — Rust fan-out + Kotlin seam already merged + tested; remaining is the live two-editor relay hookup (thin JB `DocumentListener` + Kotlin Unix-socket `ReplicaTransport`).
+- `#nsfz` — startup-deadline fail-closed; `make check` 5101 green, release green; needs a live hung-harness eyeball.
+
+So `queue_drainable_head_count: 0` / `queue_continuation_required: false` — I'm **not** auto-looping; that would just churn a no-op cycle. The `queue_paused` reason is now **stale** (its blocking residue is gone); I'm leaving the pause/resume to you, since draining these still requires your eyeball, not a re-derived drainability flip. Check `ops.log` as you test, and if you catch any of these failing in **HEAD** (committed, not just a live-buffer transient), capture that doc state and I'll add the deeper guard.
+<!-- agent:boundary:6751da26 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~If a supervisor is running an old binary, please show it in the upper status area. Make the color red and have (restart/recycle your supervisor).~~
----
-:pushpin: equityfundingsource.md turn has an IPC issue:
-`### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc`
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=ca5b06f9-838b-4b60-9ce2-00519736fbb1 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782344406484
-```
----
----
-:pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
-```
-resync: pruned 2 stale session(s)
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 
-Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
----
----
-:pushpin: JB `Run Agent Doc` on equityfundingsource.md after switching from codex to op. I have to kill + restart the tmux pane or recycle the supervisor for the opencode state to pick up. The supervisor should reactively pick up the agent state change.
-```
-resync: pruned 2 stale session(s)
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/professional/equityfundingsource.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 0
-Error: authoritative actor record for tasks/monsterrodholders.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
-```
-[route] target tmux session: 
-Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
-```
----
+- 🚧 go [#qftloss] [#qeditdup] [#crdtauth6] [#nsfz]
 - :pushpin: do [#qftloss]
 - :pushpin: do [#qeditdup]
-- do [#crdtauth6]
-- do [#nsfz]
-- ~~If a supervisor is running an old binary, please show it in the upper status area. Make the color red and have (restart/recycle your supervisor).~~ — auto-struck: answered this cycle (#ftstrike)
-- do [#qftloss]
-- do [#qeditdup]
+- :pushpin: do [#crdtauth6]
+- :pushpin: do [#nsfz]
+- :pushpin: do [#qftloss]
+- :pushpin: do [#qeditdup]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

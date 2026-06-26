@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -116,7 +116,7 @@ Proceeded with the safe default (doc-only — my standing recommendation, and a 
 > deploy
 
 Nothing to deploy: the change is `docs/master-state-machine.md`, a documentation file that is **not** part of the deployed Worker bundle, so there is no worker behavior to ship. (The last code deploy remains the messages-focus fix.) If you want the lender state machines as **runtime FSM code** rather than docs — the path where `lazily-js` would actually apply — say so and I'll scope that as a separate, deployable change.
-<!-- agent:boundary:3fd03208 -->
+<!-- agent:boundary:7fda5b2b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,7 +135,7 @@ After 20:30
 - TMO Syncs
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
 - ~~Please create state machine(s) of all deal states.~~
 - 🚧 ~~Please create state machine(s) of lender deal states.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~deploy — auto-struck: completed by #do-id-closeout-open-backlog (#qftbklgstrike)~~

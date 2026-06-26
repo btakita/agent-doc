@@ -54,7 +54,7 @@ Already complete — no auto-publish needed (matches the `#kb9b`/`#lzpypub011` s
 - **Parity** — ShmBlobArena host port + Signal→Slot `RecursionError` regression suite committed (`4a57eb2`, `26ef43e`, `c255482`).
 
 The 2FA-gated publish the operator pause was guarding has already landed, so nothing remains to drain here. The remaining `agent:review` items (`#z0hq` npm publish, `#h6qb` WebRTC two-host e2e, `#xccx` Holons, LinkedIn comments) stay operator-gated.
-<!-- agent:boundary:80cd06a3 -->
+<!-- agent:boundary:3cefc23c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,6 +63,9 @@ The 2FA-gated publish the operator pause was guarding has already landed, so not
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- Please write a blog post for briantakit with diagrams about recent changes in lazily-rs...Cell Family, 5M spreadsheet benchmark...focusing on how lazy reactivity improves performance by only eagerly recomputing the focused cells.
+- deploy briantakita.me
+- Draft a 
 <!-- /agent:queue -->
 
 ## Backlog

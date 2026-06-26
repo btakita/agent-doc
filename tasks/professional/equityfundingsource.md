@@ -184,7 +184,26 @@ The deal selection model previously allowed **multiple** selected lenders (the s
 **Shipped:** EFS `main` `f1df6dc..fa657df` (pushed); worker **deployed** — version `e05a7880-cd2d-42cf-9162-c395daece8b0` at https://equityfundingsource.brian-takita.workers.dev. Superproject pointer `5724f3981`.
 
 Live-eyeball: deal `4046fa5a` → loan tab → select lender A → then click Select proposal on lender B → the swap-confirm dialog appears; confirm → A is deselected and B becomes the selected lender.
-<!-- agent:boundary:5eae57c5 -->
+
+### Re: Deal Message dialog — participant tabs annotated + Messenger card removed — opus-4-8
+
+> **Request (chat):** The Message dialog should have a tab for the borrower and interested lenders; the selected lender's tab should have an icon annotation (checkmark) and the borrower tab should be annotated. Also: remove the Messenger card — the message dialog will handle communication. deploy.
+
+Done — both, shipped and deployed.
+
+**Participant tabs + annotations (`#deal-msg-participant-tabs`).** The deal Message dialog already opened a dedicated tab per participant (borrower + each interested lender) via `open_deal_participant_messages_`. Added the annotations: I flowed a `badge` field through `admin_messages_open_user_T → context_user_T → PortalTabs` (now renders an optional badge node), and:
+- The **selected lender's** tab shows a green **✓** checkmark (`badge: interest.selected_at ? 'selected' : null`).
+- The **borrower's** tab shows a small **"Borrower"** pill (`badge: 'borrower'`).
+- Other interested lenders are unannotated.
+
+**Removed the Messenger card.** Deleted the inline `DealInterestMessengerCard` (the dropdown messenger) from the interests tab. Communication now goes through the Message dialog (the loan-tab button, relabeled **"Message borrower" → "Messages"**) and the existing **Deal conversations** sub-tab. Deal borrower/lender threads still render through the shared `PortalMessages` component — now via `<AdminConversationTabs>` rather than the inline card, so the `#portalmsg2-dealthreads` "threads use the unified component" invariant is preserved. Dropped the now-unused `PortalMessages` import.
+
+**Verification:** `bun test` → **1329 pass / 0 fail**. Five tests were pinned to the old inline `<PortalMessages>` literal / the pre-badge tab strings; I updated each honestly to the new delegation (`<AdminConversationTabs>`) and the badge wiring — behavior preserved, verified the threads still render via PortalMessages. `bun run build` + `build:worker` clean.
+
+**Shipped:** EFS `main` `fa657df..7d2e366` (pushed); worker **deployed** — version `f3e9db2c-8161-423e-b0fa-7a928160eb3a` at https://equityfundingsource.brian-takita.workers.dev. Superproject pointer `352a861fa`.
+
+Live-eyeball: deal `4046fa5a` → interests tab → **Messages** button → the dialog shows a tab per participant; the borrower tab has a "Borrower" pill and the selected lender's tab has a green ✓. The inline Messenger card is gone.
+<!-- agent:boundary:f4e6b143 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -83,7 +83,28 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=45ebda29-9d17-4884-8f91-f54b50efbb5b invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782455848321
 ```
-<!-- agent:boundary:75c46d92 -->
+
+### Re: Available Deal dialog Messages — implemented + deployed — opus
+
+> **Queue prompt:**
+>
+> This was not implemented or deployed: https://equityfundingsource.brian-takita.workers.dev/lenders/deals/866e1c5a-e428-4b35-bacb-a58f5d94b7da > Available Deal dialog > Messages should show + select the available deal conversation thread. Same with a Deal I'm Interested In.
+
+Done — implemented, tested, committed, pushed, and **deployed** this time.
+
+**Root cause.** The contextual Messages launcher (`LenderMessagesLauncher`) only knew the **route-level** deal id (`open_deal_id`, set only when the section is `deal-detail` — the `/lenders/deals/<id>` page). The dashboard **Available Deal** dialog and **Deals I'm Interested In** dialog both open `InvestorDealDetail` *embedded in a modal* while the route is still the dashboard, so the launcher (a sibling at the portal-app root) never learned which deal was open and its Messages dialog showed only **General** instead of showing + auto-selecting that deal's thread.
+
+**Fix** (`src/equityfundingsource-dev` `3982b22`):
+- New `lib/.../investor/active_deal_store.ts` — a tiny module-level pub/sub "active deal" store (no signals dep).
+- `AvailableDealDialog` (dashboard.tsx) publishes the opened deal (id + property label) on open, clears on close. Both the Available-Deal and Interested-Deal dialogs route through this one component, so the "Same with a Deal I'm Interested In" case is covered by the same change.
+- `LenderMessagesLauncher` merges the store with its route-level prop (`effective_deal_id = active_deal_id ?? store_deal?.deal_id`), so the existing open-deal auto-select resolver now fires for the modal too. The launcher (`.pm-launcher` z-1200) already renders above the dialog (z-1000), so the Messages FAB/panel is reachable over the open dialog.
+
+**Verification:** full suite green (`bun test` → 1327 pass, 0 fail; +43 in the lender-contextual-chat file incl. new store set/get/clear/subscribe, no-change + id-scoped-clear guards, and dialog/launcher wiring assertions). `bun run build` + `build:worker` clean. The pinned `index.tsx` shell assertions stay valid (the route wiring is unchanged; the store is additive).
+
+**Shipped:** EFS `main` pushed (`9d0d71d..3982b22`); worker deployed — version `3337a6e1-c2d6-4150-bef0-368b1a524599` at https://equityfundingsource.brian-takita.workers.dev. Superproject submodule pointer bumped (`c94605896`).
+
+Live-eyeball when convenient: open the deal `866e1c5a` Available Deal dialog → click the Messages FAB → the deal's property thread should be the selected tab (not just General); same from a Deals I'm Interested In card.
+<!-- agent:boundary:54d0a509 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,6 +124,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- ~~This was not implemented or deployed: https://equityfundingsource.brian-takita.workers.dev/lenders/deals/866e1c5a-e428-4b35-bacb-a58f5d94b7da > Available Deal dialog > Messages should show + select the available deal conversation thread. Same with a Deal I'm Interested In.~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

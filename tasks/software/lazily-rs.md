@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -59,6 +59,11 @@ For contrast, the **published npm tarball** (`npm pack`) is **16,355 bytes** gzi
 
 ### Re: Does lazily-rs benchmark well at 10M-cell recalc vs. other reactive libraries? — opus-4-8
 
+> **Queue prompt:**
+>
+> ~~Does lazily-rs benchmark well with the 10M cell recalc compared to other reactive libraries?~~ — auto-struck: answered this cycle (#ftstrike)
+
+
 > **Queue prompt:** Does lazily-rs benchmark well with the 10M cell recalc compared to other reactive libraries?
 
 Short version: lazily-rs's **own** 10M numbers are strong, but there is **no apples-to-apples head-to-head in this repo** — `src/lazily-rs/benches/` only holds lazily's own benchmarks (`scale.rs` is the 10M one), and `BENCHMARKS.md` has no SolidJS / MobX / Preact-Signals / Reactively comparison. So a literal "beats library X at 10M" claim isn't backed by existing data. Here's what the data + architecture do support.
@@ -79,7 +84,7 @@ So it backs a full-capacity Google Sheets workbook: build < 1 s, full recompute 
 2. **Flat per-node cost + sparse arena.** ~70–100 ns/cell held ~constant from 1M → 10M (linear, no degradation at capacity), and storage is a sparse `Vec<Option<Node>>` arena (~216 B/node), so only populated cells allocate. The standard cross-library reactivity benchmarks (js-reactivity-benchmark, cellx) measure *propagation through small/medium graphs* — diamond/fan-in shapes, thousands of nodes — not a dense 10M-node graph (which is memory-prohibitive in a JS heap and outside what those libs are built/measured for). At 10M, lazily isn't really racing them; it's in Rust-native, spreadsheet-scale territory most reactive libraries are neither designed nor benchmarked to enter.
 
 **Honest caveat:** because no 10M head-to-head exists, the defensible statement is "lazily backs a full-capacity Google Sheets workbook with microsecond viewport edits — something most reactive libraries are not benchmarked to do," **not** a ranked "faster than X." If you want a genuine comparison I'd port the `scale` graph shape (N inputs + N formulas, `formula[i] = input[i] + input[i-1]`) into a harness running **Reactively** and/or a Rust reactive lib (`leptos_reactive` / `futures-signals`) at matched N and add a comparison table to `BENCHMARKS.md`. That's a real piece of work, not a doc tweak — say the word (e.g. queue `#lzscalecompare`) and I'll build it; I'm not auto-filing it into this go-queue so it doesn't silently start.
-<!-- agent:boundary:e5eb270d -->
+<!-- agent:boundary:a2815364 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,7 +93,6 @@ So it backs a full-capacity Google Sheets workbook: build < 1 s, full recompute 
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~Does lazily-rs benchmark well with the 10M cell recalc compared to other reactive libraries?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

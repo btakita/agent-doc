@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -165,7 +165,19 @@ Ran `bun run deploy:worker` on `7fade6c` (`origin/main`, working tree clean):
 - **Live:** https://equityfundingsource.brian-takita.workers.dev — Current Version ID `ae98ab33-8c3a-4c49-a91b-5e8b50a4d1af`, hourly schedule intact.
 
 Lenders now get the tabbed Messages dialog (General first + per-deal property threads), deal-open auto-select, property-as-subject outgoing emails, and deal-tab attachments (upload + lender-scoped download) in production.
-<!-- agent:boundary:487a2804 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=c8d242a8-6ad9-4642-9e45-44e690b10fa2 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782450652921
+```
+<!-- agent:boundary:bc37aa78 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -185,6 +197,10 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- 🚧 The Message dialog for https://equityfundingsource.brian-takita.workers.dev/lenders/deals/866e1c5a-e428-4b35-bacb-a58f5d94b7da does not show an open conversation for that property. It show and selects only the interested deal which is different. It should show the messages for the opened deal.
+- A lender may have many deals, so show the General tab, the subj
+- A lender may have many deals, so show the General tab, the subject as a tab, and a search box to go through all conversations.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

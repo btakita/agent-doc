@@ -105,7 +105,21 @@ Landed **Phase 3 (`#lzcrdtplane3`)** of the distributed CRDT cell plane — the 
 **Scope note:** this phase exchanges `(stamp, op)` tuples over the protocol seam. Full op-log-over-`IpcMessage` wiring (extending `Snapshot`/`Delta`) is Phase 5 (`#lzcrdtplane5`) — the `IpcSink`/`IpcSource` traits carry `IpcMessage`, so threading ops through them is the runtime-wiring step, not this one.
 
 **Next:** `#lzcrdtplane4` (frontier-driven tombstone GC, closes `#r86a`) is queued in the backlog. Give the go when you want it.
-<!-- agent:boundary:7257dfd7 -->
+
+### Re: do [#pw1c] — Phase 4 (frontier-driven tombstone GC) — opus-4-8
+
+Landed **Phase 4 (`#lzcrdtplane4`)** of the distributed CRDT cell plane — the GC watermark wiring that closes the `SeqCrdt` portion of `#r86a`/`#lztombgcwire`. Shipped to `origin/main` (lazily-rs `6b8b238`, superproject `085a9e48a`); `make check` green.
+
+**`CrdtPlane::is_collectable(stamp)`** — `true` iff `stamp <=` the causal-stability frontier (the `min` `HlcStamp` over membership), i.e. *every* replica has provably observed it; `false` until the full membership is seen.
+
+**`CrdtPlane::gc_seq(&mut SeqCrdt)`** — collects every tombstone whose delete stamp is `<=` the frontier, returning `0` (a no-op) until membership is complete. So a delete is **never** collected before every replica has seen it — exactly the safety the watermark exists to guarantee.
+
+**Tests (3):** `is_collectable` tracking the frontier; a two-member `SeqCrdt` whose tombstone is collected **only once peer 2 catches up past the delete** (a lagging member blocks GC, then unblocks it); and single-writer local GC.
+
+**Scope split — why `SeqCrdt` only, not `TextCrdt` this phase:** `SeqCrdt` keys deletes by `HlcStamp`, so the plane's frontier drives `SeqCrdt::gc` directly. `TextCrdt`, though, keys deletes by a Lamport `OpId` (`counter + peer`) — a *distinct clock* from the `HlcStamp` `StampFrontier`, so `TextCrdt::gc_with` can't be driven from this frontier without an OpId-keyed parallel frontier. Forcing that coupling would have been type-incorrect, so I scoped it out cleanly and filed **`#lzcrdtplane4b`** (TextCrdt OpId-frontier GC) as a focused follow-up.
+
+**Backlog:** `#lzcrdtplane4b` (TextCrdt GC) and **`#lzcrdtplane5`** (the FINAL phase — plane↔runtime wiring + `IpcMessage` transport + SPEC/PROTOCOL + Lean obligation) are queued. Give the go when you want either.
+<!-- agent:boundary:36659854 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -120,7 +134,8 @@ Landed **Phase 3 (`#lzcrdtplane3`)** of the distributed CRDT cell plane — the 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pw1c] lzcrdtplane4 (distributed CRDT plane Phase 4) — frontier-driven tombstone GC. Compute frontier = min(StampFrontier over CrdtPlane membership) and drive periodic SeqCrdt::gc / TextCrdt::gc_with from it; closes #r86a/#lztombgcwire. Test: two replicas, a delete becomes collectable only once BOTH have observed it. Plan: tasks/software/plan-lazily-distributed-crdt-plane.md.
+- [ ] [#g638] lzcrdtplane4b — TextCrdt OpId-frontier tombstone GC (completes the GC layer started in Phase 4). TextCrdt keys deletes by a Lamport OpId (counter+peer), not HlcStamp, so it needs an OpId-keyed per-peer frontier (parallel to StampFrontier) for the plane to drive TextCrdt::gc_with from the all-replicas-aware minimum. Plan: tasks/software/plan-lazily-distributed-crdt-plane.md.
+- [ ] [#te9j] lzcrdtplane5 (distributed CRDT plane Phase 5, FINAL) — plane <-> runtime wiring + SPEC/PROTOCOL. Connect CrdtPlane/OpLog to merge:crdt root cells and the NodeKey producer projection (#lzwirekey); thread ops through the IpcMessage Snapshot/Delta transport (IpcSink/IpcSource); document the SPEC §Distributed wire additions, stamp-frontier exchange, watermark/GC contract; add a Lean/spec obligation for the convergence + stability invariants. Plan: tasks/software/plan-lazily-distributed-crdt-plane.md.
 <!-- /agent:backlog -->
 
 ## Review

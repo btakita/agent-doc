@@ -232,6 +232,12 @@ enum SimCommand {
     FreshAgentDrainActiveHead,
     /// A later `cargo install` made the supervisor's launch binary stale.
     MarkSupervisorBinaryStale,
+    /// `#midturn-recycle-resume`: set whether an agent-doc cycle is OPEN — preflight
+    /// taken, finalize not yet committed, or an IPC ack connection in flight. While
+    /// open, every recycle / restart-reexec arm must DEFER (`DeferCycleOpen`) so the
+    /// `execve` cannot sever the in-flight finalize IPC listener mid-cycle and drive
+    /// the next finalize into `live_prompt_drift_after_preflight`.
+    SetAgentDocCycleOpen(bool),
     /// `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`): the editor-IPC write
     /// path is wedged — the converge closeout has refused repeated writes against a
     /// nominally-active JB listener (the de-wedge latch tripped `degraded`). The
@@ -721,6 +727,14 @@ struct RecycleClearModel {
     /// `#supselfheal` Phase 3: how many bounded kill+relaunch escalations have fired
     /// this supervisor lifetime (mirrors idle_watch.rs's `reexec_escalation_attempts`).
     reexec_escalation_attempts: u32,
+    /// `#midturn-recycle-resume`: an agent-doc cycle is OPEN — preflight taken,
+    /// finalize not yet committed, or an IPC ack connection in flight (mirrors
+    /// idle_watch.rs's `cycle_open` computed from `cycle_state::is_open()` +
+    /// `ipc_socket::inflight_connection_handlers()`). While true, every recycle /
+    /// restart-reexec arm must DEFER so the `execve` cannot sever the in-flight IPC
+    /// listener mid-cycle and drive the next finalize into
+    /// `live_prompt_drift_after_preflight`.
+    cycle_open: bool,
     /// The head the idle-queue watch last injected a trigger for (drain dedup).
     last_dispatched: Option<String>,
     /// `#qflood2`: the watch sent its OWN `/clear` (an opt-in context reset or a
@@ -3119,6 +3133,73 @@ fn recycle_clear_pipeline_resumes_go_mode_drain_as_a_step() {
     // A stuck head is not re-fired every tick (drain dedup).
     world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
     assert_eq!(world.coverage.go_drain_dispatches, 1);
+}
+
+#[test]
+fn open_agent_doc_cycle_defers_self_recycle_until_finalize_commits() {
+    // `#midturn-recycle-resume` regression: a stale-binary self-recycle (the
+    // #supautoinstall hot-reload) must NOT `execve` while an agent-doc cycle is open
+    // (preflight taken, finalize not yet committed) or an IPC ack connection is in
+    // flight. Firing the `execve` mid-cycle tears down the in-flight IPC listener and
+    // severs the ack-content round-trip, so the next finalize validates its candidate
+    // against the pre-recycle preflight baseline → `live_prompt_drift_after_preflight`
+    // → the `content_ours_snapshot_next_cycle` wedge + "no response exists to replay"
+    // refusal chain the operator hit live. The deferral preserves the live cycle; the
+    // recycle fires at the TRUE quiescent boundary once finalize commits.
+    let mut world = SimWorld::new(7_777);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    let gen_before = world.route.durable.generation;
+
+    // Stale binary + auto-recycle ON — the exact #supautoinstall self-recycle setup —
+    // but an agent-doc cycle is OPEN (the finalize has not committed yet).
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world
+        .apply(SimCommand::EnableSupervisorAutoRecycle)
+        .unwrap();
+    world
+        .apply(SimCommand::SetAgentDocCycleOpen(true))
+        .unwrap();
+
+    // Idle ticks at a harness turn boundary while the cycle is open must DEFER the
+    // recycle: no execve, generation unchanged, binary stays stale (pending).
+    for tick in 1..=3 {
+        world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+        assert_eq!(
+            world.coverage.supervisor_recycles, 0,
+            "an open agent-doc cycle must defer the execve recycle (tick {tick})"
+        );
+        assert_eq!(
+            world.route.durable.generation, gen_before,
+            "a deferred recycle must not advance the generation (tick {tick})"
+        );
+        assert!(
+            world.recycle_clear.binary_stale,
+            "the stale binary stays pending across the deferral (tick {tick})"
+        );
+    }
+
+    // The finalize commits — the cycle closes and IPC drains. The next idle tick now
+    // hot-reloads onto the fresh binary in place (execve), advancing the generation:
+    // the deferred recycle fired at the true quiescent boundary, never mid-finalize.
+    world
+        .apply(SimCommand::SetAgentDocCycleOpen(false))
+        .unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.supervisor_recycles, 1,
+        "once the cycle commits and IPC drains, the deferred recycle fires"
+    );
+    assert_eq!(
+        world.route.durable.generation,
+        gen_before + 1,
+        "the recycle advances the generation only after the cycle closed"
+    );
+    assert!(
+        !world.recycle_clear.binary_stale,
+        "the recycle promoted the freshly-installed binary"
+    );
 }
 
 #[test]

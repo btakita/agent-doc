@@ -138,7 +138,21 @@ Built, tested, and pushed — EFS `b23dd00` on `origin/main`. The lender (invest
 **One deviation (filed):** deal-tab compose is **text-only** for now — the lender-scoped unified attachment **download** route isn't mounted yet, and shipping broken download links would be worse. Admin replies with attachments still render. Backlogged as `#lenderdealattach`.
 
 **Deploy:** held per the `#spec-test-commit-push` preset — ready via `bun run deploy:worker` on your go.
-<!-- agent:boundary:39a0c00d -->
+
+### Re: do [#lenderdealattach] — lender deal-tab attachments shipped — opus-4-8
+
+> **Queue prompt:** do [#lenderdealattach]
+
+Done (EFS `7fade6c`, pushed to `origin/main`). This closes the one deviation from the contextual-chat build — deal-tab compose is no longer text-only.
+
+- **Upload:** `POST /api/investor/deals/:id/messages` now accepts multipart attachments (5 files / 3.6 MB), reusing the lender-account/borrower upload guards + R2 storage + document records.
+- **Download:** new `GET /api/investor/message-attachments/:id/download` (lender auth), gated by a pure, fail-closed predicate `lender_message_attachment_download_allowed_(message, lender_id, deal_visible)` — serves bytes only when the lender **owns** the message's thread OR it's a deal-scope message for a deal the lender **can view** (same `deal_message_visible_` gate as the POST). Wrong-lender / non-visible-deal both 404 (tested).
+- **Wiring:** the unified read path rewrites native lender→deal attachment `download_url`s to the lender route (no double-count); the deal tab flips to `attachments: true`.
+
+**Verification:** I re-ran `bun run check` myself — **1310 pass, 0 fail**, browser + worker builds clean. Reviewed the download handler + predicate directly before pushing.
+
+**Deploy:** still held per `#spec-test-commit-push` — the full contextual lender chat (threads + tabs + property-subject emails + attachments) is ready via `bun run deploy:worker` on your go.
+<!-- agent:boundary:e338fb3e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -158,13 +172,11 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- do [#lenderdealattach]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lenderdealattach] [recommended] Lender deal-tab message attachments: mount a lender-scoped unified attachment download route (/api/message-attachments/:id/download under lender auth) and re-enable attachments:true on the lender deal compose (#lender-ctx-chat deviation 1).
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 

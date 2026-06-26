@@ -39,22 +39,34 @@ done
 Compacted content:
 - Archived 47 response topic(s): Is CellDocTree too specific to lazily?; queue state and review cleanup; IPC proof diagnostic (interrupted-cycle recovery); 44 more
 - Prior summary/context: prior compacted content: Archived 10 response topic(s): lazily CellGraph reactive document substrate; CellTree per-ce...
-<!-- agent:boundary:74c2f191 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=5763e16d-7cf8-4d26-9f7d-56ec49a3f151 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=111311 candidate_hash=5a7016ec672a4c0a0af21dd22a762e2da41c94e3a575a6fda749fe3c8227af29 content_ours_len=113340 content_ours_hash=f10b4b17efc726dd885def872cb187fe4c9984817b96c0bc57c2cc6c2d834ce8 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782513543058
+```
+<!-- agent:boundary:b17ff264 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 :pushpin: do [#qeditdup]
-- do [#crdtauth6]: verified?
-- :pushpin: do [#nsfz]: verified?
-- :pushpin: do [#kj5flive]: verified?
-- do [#2y8j]
+- 🚧 [#syncbarrier] [#qheadstrikeauto] [#actorprune] [#suprestassoc]
+- [#2y8j] [#cdtcutover] [#qeditdup] [#crdtauth6] [#nsfz] [#kj5flive]
+- :pushpin: do [#qheadstrikeauto]
+- :pushpin: do [#actorprune]
+- :pushpin: do [#suprestassoc]
 - do [#cdtcutover]
-- do [#actorprune]
-- do [#suprestassoc]
-- do [#qheadstrikeauto]
-- do [#syncbarrier]
+- do [#qeditdup]
+- do [#crdtauth6]
+- do [#nsfz]
+- do [#kj5flive]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

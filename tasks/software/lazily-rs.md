@@ -74,7 +74,7 @@ No transport yet (that's `#lzcrdtplane3`); both types are gated behind `feature 
 **Next:** `#lzcrdtplane2` (expose registers via `MergeMechanism`) is queued in the backlog as the next actionable phase; `#lzcrdtplane` stays gated in review until the plane is complete.
 
 Note: I committed only `src/lazily-rs` and its gitlink — the unrelated dirty `src/agent-doc` submodule (`cell_doc.rs`/`crdt.rs`) belongs to a different active session, so I left it untouched.
-<!-- agent:boundary:eaa93f8d -->
+<!-- agent:boundary:64201e9d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -83,6 +83,7 @@ Note: I committed only `src/lazily-rs` and its gitlink — the unrelated dirty `
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- do [#lzcrdtplane]
 <!-- /agent:queue -->
 
 ## Backlog

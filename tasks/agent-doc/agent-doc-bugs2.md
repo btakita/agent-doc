@@ -490,7 +490,7 @@ So the binary now journals operator prompts from the plugin live-buffer sidecar 
 **The only thing left is operator-gated** (`[operator-verify]`): type a free-text prompt into the live editor during a concurrent `finalize`, then I confirm from the log that it survived — success looks like a `live_buffer_addition_authoritative` (or `queue_consume_head_divergence_reconciled reason=live_buffer_addition_authoritative`) line for this document. I can't drive a live editor, so I'm leaving `#qftloss` open as your eyeball; I did **not** `--done` it.
 
 No agent-drainable heads remain (`queue_continuation_required=false`, `queue_drainable_head_count=0` — the rest are your live-test gated items), so the in-session loop stops here. (Exchange is large — 442 lines / 30 sections — but the queue is active, so I'm not pausing to compact.)
-<!-- agent:boundary:fda6a159 -->
+<!-- agent:boundary:a7c779ef -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -507,13 +507,16 @@ The session mechanics still don't work on a new linkedin.md session. I compacted
   and complete.
 ```
 ---- 
-- 🚧 :pushpin: do [#qftloss]
-- :pushpin: do [#qeditdup]
+- ~~:pushpin: do [#qftloss]~~
+- 🚧 :pushpin: do [#qeditdup]
 - :pushpin: do [#crdtauth6]
 - :pushpin: do [#nsfz]
 - :pushpin: do [#kj5flive]
 - :pushpin: do [#2y8j]
 - do [#cdtcutover]
+- do [#5e8k]
+- do [#v6b3]
+- do [#fma0]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -540,6 +543,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#5e8k] crdtlivedrop=#agent-doc-bug LIVE DATA LOSS (alex-lee.md 2026-06-26): CRDT overlay-stale rebuild DISCARDS live keystrokes. crdt_merge_base_state (snapshot.rs:1138-1173) classifies any overlay whose markdown projection != cycle baseline as "stale" and rebuilds it from baseline (FallbackOverlayProjectionMismatch), dropping unsynced keystrokes — string inequality cannot distinguish overlay-AHEAD (live keystrokes, preserve) from overlay-BEHIND (stale, discard). Causes frontmatter loss + 1-char deletes while typing. Distinct from shipped #qbasehashmemo (that was lag, not loss). Log evidence 18:16:07Z: crdt_merge_base_overlay_stale→rebuilt→editor_op_recorded delete/insert offset=2342 (#qnodemerge4wire). Fix: causal AHEAD/BEHIND detection + 3-way CRDT merge on ahead + log discarded bytes. Plan: tasks/agent-doc/plan-crdt-overlay-live-keystroke-preservation.md. Relates [[qcellmerge1]].
+- [ ] [#v6b3] suprecyclespin=#agent-doc-bug supervisor recycle spin-loop: supervisor_recycle_deferred_cycle_open fires ~2/sec forever (idle_watch.rs:1508 / decisions.rs:563 cycle_open arm) because in-memory cycle_open stays true for an OLD turn (cycle-1782497652506) after a NEWER cycle (synthetic-1782497767123) committed. Recycle never reaches its boundary; supervisor never hot-reloads. This is unbuilt #midturnresumeb Phase B: a stalled cycle with inflight=0 past a deadline must be resolved (resume/force-close), not deferred forever. Live on alex-lee.md supervisor pid 999966. Fix in plan-crdt-overlay-live-keystroke-preservation.md §spin-loop.
+- [ ] [#fma0] crdtedgetests=#agent-doc-bug dogfood-loop improvement: add CRDT edge-case SimWorld/unit test matrix (overlay ahead-by-1-char, ahead-by-frontmatter-block, strictly-behind, concurrent-divergent, empty-doc-first-keystroke, rapid-burst-during-convergence, decode-error, frontmatter-edit-during-exchange-convergence) for crdt_merge_base_state + sim_world CRDT coverage. 8-row matrix in tasks/agent-doc/plan-crdt-overlay-live-keystroke-preservation.md. Gates the #crdtlivedrop fix.
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
 - [ ] [#qeditdup] [operator-verify] Queue items duplicated + manually-struck/deleted items resurrected when the operator edits the queue during an active turn. #queuestatemachine idempotent convergence + the Live<Struck lattice (merged, 0.34.48) should resolve this — VERIFY on the recycled binary; if it persists live, a deeper editor-edit-during-cycle guard is needed. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md

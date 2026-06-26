@@ -25,7 +25,6 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 complete
 <!-- /agent:status -->
 
@@ -116,7 +115,7 @@ Proceeded with the safe default (doc-only — my standing recommendation, and a 
 > deploy
 
 Nothing to deploy: the change is `docs/master-state-machine.md`, a documentation file that is **not** part of the deployed Worker bundle, so there is no worker behavior to ship. (The last code deploy remains the messages-focus fix.) If you want the lender state machines as **runtime FSM code** rather than docs — the path where `lazily-js` would actually apply — say so and I'll scope that as a separate, deployable change.
-<!-- agent:boundary:7fda5b2b -->
+<!-- agent:boundary:1620a5c4 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -8,6 +8,17 @@ use std::path::Path;
 use crate::component;
 use crate::component::{is_backlog_component, is_tracked_work_component};
 
+/// `#staleshow` — stable sentinel line inserted into the `<!-- agent:status -->`
+/// component whenever the live route-owned supervisor/controller serving the
+/// document is mapping a STALE agent-doc binary (an older build than the one
+/// currently installed). The leading red-circle glyph plus the parenthetical
+/// text is what an operator sees in the upper status area; the whole line is a
+/// stable, machine-detectable token so the JetBrains plugin (Phase 2) can match
+/// it and paint the status line red. Keep this constant the single source of the
+/// marker text so insert/remove stay symmetric and the editor matcher never
+/// drifts from what the binary writes.
+pub const STALE_SUPERVISOR_STATUS_MARKER: &str = "🔴 (old supervisor)";
+
 fn find_status_component(file: &Path) -> Result<(String, component::Component)> {
     let content = std::fs::read_to_string(file).context("failed to read document")?;
     let components = component::parse(&content).context("failed to parse components")?;
@@ -130,6 +141,67 @@ pub fn reconcile_top_backlog_status_content(content: &str) -> Result<Option<Stri
     Ok(Some(status.replace_content(content, &new_status)))
 }
 
+/// `#staleshow` — pure insert/remove of the [`STALE_SUPERVISOR_STATUS_MARKER`]
+/// line in the status component body, idempotently, given whether the live
+/// supervisor is currently running a stale binary.
+///
+/// When `is_stale` is true the marker line is added as the FIRST line of the
+/// status body (so the operator sees it at the top of the upper status area)
+/// unless it is already present; when false any existing marker line is removed.
+/// All other status content is preserved verbatim. Returns the new body only
+/// when it differs from the input so callers can treat `None` as "no change".
+pub fn apply_stale_supervisor_marker(status_body: &str, is_stale: bool) -> Option<String> {
+    let has_marker = status_body
+        .lines()
+        .any(|line| line.trim() == STALE_SUPERVISOR_STATUS_MARKER);
+
+    if is_stale {
+        if has_marker {
+            return None;
+        }
+        // Insert as the first non-empty status line. Preserve a single leading
+        // newline (the component body convention from `set`) so the marker sits
+        // on its own line above the existing content.
+        let trimmed = status_body.strip_prefix('\n').unwrap_or(status_body);
+        let new_body = format!("\n{STALE_SUPERVISOR_STATUS_MARKER}\n{trimmed}");
+        Some(new_body)
+    } else {
+        if !has_marker {
+            return None;
+        }
+        // Drop only the marker line(s); keep everything else byte-for-byte.
+        let mut new_body = String::new();
+        for segment in status_body.split_inclusive('\n') {
+            let line = segment.strip_suffix('\n').unwrap_or(segment);
+            if line.trim() == STALE_SUPERVISOR_STATUS_MARKER {
+                continue;
+            }
+            new_body.push_str(segment);
+        }
+        Some(new_body)
+    }
+}
+
+/// `#staleshow` — reconcile the stale-supervisor marker in the document's status
+/// component against the live staleness signal. Pure over `content` so it is
+/// unit-testable; `is_stale` is supplied by the caller (which resolves the live
+/// route-owned supervisor via the existing recycle-staleness signal). Returns
+/// the new full document only when the status body actually changed.
+pub fn reconcile_stale_supervisor_status_content(
+    content: &str,
+    is_stale: bool,
+) -> Result<Option<String>> {
+    let components = component::parse(content).context("failed to parse components")?;
+    let Some(status) = components.iter().find(|c| c.name == "status") else {
+        return Ok(None);
+    };
+    let status_body = status.content(content);
+    match apply_stale_supervisor_marker(status_body, is_stale) {
+        Some(new_body) => Ok(Some(status.replace_content(content, &new_body))),
+        None => Ok(None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,5 +288,94 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         assert!(reconcile_top_backlog_status_content(doc).unwrap().is_none());
+    }
+
+    // `#staleshow` — stale-supervisor status marker insert/remove idempotency.
+
+    #[test]
+    fn inserts_stale_supervisor_marker_when_stale() {
+        let body = "\nSession ready. Top backlog item: #live.\n";
+        let out = apply_stale_supervisor_marker(body, true)
+            .expect("marker should be inserted when stale");
+        assert!(out.contains(STALE_SUPERVISOR_STATUS_MARKER));
+        // Marker is the first content line so it shows at the top of the status area.
+        assert_eq!(
+            out.lines().find(|l| !l.trim().is_empty()),
+            Some(STALE_SUPERVISOR_STATUS_MARKER)
+        );
+        // Existing content is preserved.
+        assert!(out.contains("Session ready. Top backlog item: #live."));
+    }
+
+    #[test]
+    fn does_not_duplicate_stale_supervisor_marker_on_repeat() {
+        let body = "\nSession ready.\n";
+        let once = apply_stale_supervisor_marker(body, true).expect("first insert");
+        // Re-running while still stale must be a no-op (no duplicate).
+        assert!(
+            apply_stale_supervisor_marker(&once, true).is_none(),
+            "repeat insert must not change the body"
+        );
+        assert_eq!(
+            once.matches(STALE_SUPERVISOR_STATUS_MARKER).count(),
+            1,
+            "marker must appear exactly once"
+        );
+    }
+
+    #[test]
+    fn removes_stale_supervisor_marker_when_fresh() {
+        let body = format!("\n{STALE_SUPERVISOR_STATUS_MARKER}\nSession ready.\n");
+        let out = apply_stale_supervisor_marker(&body, false)
+            .expect("marker should be removed when fresh");
+        assert!(!out.contains(STALE_SUPERVISOR_STATUS_MARKER));
+        assert!(out.contains("Session ready."));
+    }
+
+    #[test]
+    fn no_change_removing_marker_when_already_fresh() {
+        let body = "\nSession ready.\n";
+        assert!(
+            apply_stale_supervisor_marker(body, false).is_none(),
+            "removing an absent marker must be a no-op"
+        );
+    }
+
+    #[test]
+    fn reconcile_inserts_and_removes_stale_supervisor_marker_in_document() {
+        let doc = concat!(
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Session ready.\n",
+            "<!-- /agent:status -->\n"
+        );
+        // Stale → marker present.
+        let stale = reconcile_stale_supervisor_status_content(doc, true)
+            .unwrap()
+            .expect("stale should insert marker");
+        assert!(stale.contains(STALE_SUPERVISOR_STATUS_MARKER));
+        assert!(stale.contains("Session ready."));
+        // Re-running while stale is a no-op.
+        assert!(
+            reconcile_stale_supervisor_status_content(&stale, true)
+                .unwrap()
+                .is_none()
+        );
+        // Fresh → marker cleared.
+        let fresh = reconcile_stale_supervisor_status_content(&stale, false)
+            .unwrap()
+            .expect("fresh should clear marker");
+        assert!(!fresh.contains(STALE_SUPERVISOR_STATUS_MARKER));
+        assert!(fresh.contains("Session ready."));
+    }
+
+    #[test]
+    fn reconcile_is_noop_without_status_component() {
+        let doc = "## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n";
+        assert!(
+            reconcile_stale_supervisor_status_content(doc, true)
+                .unwrap()
+                .is_none()
+        );
     }
 }

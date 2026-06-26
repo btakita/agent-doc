@@ -317,6 +317,37 @@ fn run_pending_maintenance_with_options(
         snapshot_mutated = true;
     }
 
+    // `#staleshow` — surface "🔴 (old supervisor)" in the upper status area when the
+    // live route-owned supervisor/controller serving this document is mapping a STALE
+    // agent-doc binary (a newer build is installed but the running process never
+    // recycled onto it). Reuse the existing recycle-staleness signal
+    // (`stale_supervisor_warning_for_doc`, the `#fccsupwarn`/`#fccsupwarn2` IO check)
+    // so there is one source of truth for "running supervisor is older than installed".
+    // Idempotent: the marker is inserted once when stale and removed when fresh.
+    let supervisor_binary_is_stale =
+        crate::project_controller::stale_supervisor_warning_for_doc(file).is_some();
+    if let Some(reconciled) = crate::status_cmd::reconcile_stale_supervisor_status_content(
+        &current_content,
+        supervisor_binary_is_stale,
+    )? {
+        if supervisor_binary_is_stale {
+            eprintln!("[preflight] status: surfaced stale-supervisor marker");
+        } else {
+            eprintln!("[preflight] status: cleared stale-supervisor marker");
+        }
+        current_content = reconciled;
+        mutated = true;
+    }
+    if let Some(ref mut snap_content) = snapshot_content
+        && let Some(reconciled) = crate::status_cmd::reconcile_stale_supervisor_status_content(
+            snap_content,
+            supervisor_binary_is_stale,
+        )?
+    {
+        *snap_content = reconciled;
+        snapshot_mutated = true;
+    }
+
     // 3. Persist any mutations to the working tree file and/or the snapshot.
     //    Writing to both (surgically, via component replace) keeps the two in
     //    sync so the upcoming step-2 `git::commit` stages the reaped+archived
@@ -4923,6 +4954,48 @@ mod tests {
         let after = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(before, after, "stable inactive queue must not be mutated");
     }
+    #[test]
+    fn pending_maintenance_clears_stale_supervisor_marker_when_fresh() {
+        // `#staleshow`: with no live route-owned supervisor in the test environment,
+        // `stale_supervisor_warning_for_doc` reads NOT stale, so a pre-seeded
+        // "🔴 (old supervisor)" marker must be removed from the status component
+        // (file + snapshot) by the preflight maintenance pass.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "🔴 (old supervisor)\n",
+            "Session ready.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run_pending_maintenance(&doc).unwrap();
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !file_after.contains(crate::status_cmd::STALE_SUPERVISOR_STATUS_MARKER),
+            "fresh supervisor must clear the stale marker from the file: {file_after}"
+        );
+        assert!(
+            file_after.contains("Session ready."),
+            "other status content must be preserved: {file_after}"
+        );
+
+        let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            !snapshot_after.contains(crate::status_cmd::STALE_SUPERVISOR_STATUS_MARKER),
+            "fresh supervisor must clear the stale marker from the snapshot: {snapshot_after}"
+        );
+    }
+
     #[test]
     fn pending_maintenance_reaps_completed_items_from_file_and_snapshot() {
         let dir = setup_project();

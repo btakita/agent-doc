@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -54,13 +54,26 @@ But your question caught a real **layering smell**: `CellDocTree::apply` current
 - `#cdtcutover` — **[FUTURE/SEPARATE]** wire the evented model into the live finalize/write path. Large, live-supervisor-critical, gated, own focused cycle — explicitly *out of scope* of this groundwork.
 
 Net of the layering: lazily owns all reactive machinery; `CellDocTree` becomes a genuinely thin document adapter. Plan + backlog only this turn — say the word to drain `#cdtdedup` first.
-<!-- agent:boundary:4aa0e1c8 -->
+
+### Re: queue state and review cleanup — gpt-5
+
+I picked up the Codex-owned cycle and ran preflight plus plan. `#cdtcutover` is now the visible queue head, but the binary reports the queue is paused with `queue_continuation_required=false` and `queue_drainable_head_count=0`, so I did not start the live finalize/write cutover work in this cycle.
+
+I converted the remaining gated review item `#kj5f` into an actionable backlog replacement, `#kj5flive`, and cleared it from review. That keeps the live JB/VSCode merge-state-machine proof available without leaving another gated review item behind.
+
+Preflight also flagged `#crdtauth6` as potentially semantically covered by completed `#crdtauth5`; I left that backlog item untouched because it still names live hookup/VS Code follow-through work and should be reconciled in a dedicated drain cycle or operator verification pass.
+<!-- agent:boundary:82439a65 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 [#cdtcutover]
+- do [#qftloss]
+- do [#qeditdup]
+- do [#crdtauth6]
+- do [#nsfz]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -92,12 +105,12 @@ What are #next-steps to fix bugs?
 - [ ] [#qeditdup] [operator-verify] Queue items duplicated + manually-struck/deleted items resurrected when the operator edits the queue during an active turn. #queuestatemachine idempotent convergence + the Live<Struck lattice (merged, 0.34.48) should resolve this — VERIFY on the recycled binary; if it persists live, a deeper editor-edit-during-cycle guard is needed. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#crdtauth6] [operator-verify] crdtauth5 live hookup: thin JB DocumentListener calling CrdtReplicaForwarder.forwardLocalDelta + a Kotlin Unix-socket ReplicaTransport client (writes NDJSON register/deregister/update, delivers inbound update_b64 to applyRemoteUpdate); plus the deferred VS Code koffi replica seam (editors/vscode/src/native.ts out-param marshaling). Rust fan-out + Kotlin seam already merged + tested. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
+- [ ] [#kj5flive] [operator-verify] #mergestatemachine3 live proof replacement for cleared review #kj5f: after the latest JB plugin update is installed, verify JB+VSCode attach/detach/ownership facts flow through the merge-ownership state machine via #lazilystatesync, then run live editor-attached/detached repros for File Cache Conflict and the #6b5h wedge with logs sufficient to prove/disprove the fix before filing follow-up bugs. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
-- [/] [#kj5f] [operator-verify] #mergestatemachine3 remaining: JB+VSCode thin reporters emit attach/detach/ownership facts through the merge-ownership SM (via #lazilystatesync) + live editor-attached/detached repro for File Cache Conflict + #6b5h wedge. DONE: SM core Phases 1-2 + deterministic scenario repros for both wedge classes (agent-doc 34d7023d). Remaining needs the operator-paused plugin install + a live editor to verify. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

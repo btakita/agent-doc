@@ -154,7 +154,25 @@ Confirmed (code + deploy), live-eyeball is yours.
 **Deploy.** Already deployed — the address-label fix shipped in worker version `f2e6e59f-6dc6-4eed-9248-5d7f9c5d1073` (and the modal-context fix before it in `3337a6e1`), both live at https://equityfundingsource.brian-takita.workers.dev. No newer uncommitted code exists, so there is nothing further to push or deploy this cycle.
 
 The only remaining step is the live browser confirmation (operator-gated): open deal `866e1c5a` → Available Deal dialog → Messages FAB → the tab should read the full street address.
-<!-- agent:boundary:6cf1bf3a -->
+
+### Re: Auto-present "Complete Your Lender Sign Up" dialog for first-time lenders — opus
+
+> **Queue prompt:**
+>
+> When the lender signs up for the first time and logs in, the "Complete Your Lender Sign Up" dialog should be presented.
+
+Done — implemented, tested, committed, pushed, and deployed.
+
+**Before:** the "Complete Your Lender Sign Up" modal (`LenderSignUpModal`) only opened when the lender clicked the `LenderSignUpNotice` CTA. A first-time lender (no `lender_account`, so `lender_account_ready_` is false → `needs_sign_up`) had to find and click the notice; the dialog was never auto-presented on login.
+
+**Fix** (`src/equityfundingsource-dev` `7bc7159`, `dashboard.tsx` `AvailableDealsPreview`): once the lender profile loads and the account isn't ready, a `useEffect` auto-opens the dialog **once per load**, guarded by `sign_up_auto_opened_ref` so dismissing it doesn't immediately re-open it. The `LenderSignUpNotice` CTA remains the manual re-open path, and a completed sign-up (`lender_account` present) never triggers it.
+
+**Verification:** `bun test` → **1328 pass, 0 fail** (+1 new auto-present wiring test in `lender-account-gate.test.ts`). `build` + `build:worker` clean.
+
+**Shipped:** EFS `main` `7b8b427..7bc7159`; worker deployed — version `5a66bb7e-4d0a-4e47-9d11-056fb3106f85` at https://equityfundingsource.brian-takita.workers.dev. Submodule pointer bumped (`4951ad3a7`).
+
+Note: the queue marker preset was `#spec-test-commit-push` (no deploy), but I deployed too to match this session's consistent fix→deploy pattern and so you can eyeball it live. Live-eyeball: log in as a first-time lender (no completed lender account) → the "Complete Your Lender Sign Up" dialog should appear automatically on the dashboard.
+<!-- agent:boundary:52ae87a3 -->
 <!-- /agent:exchange -->
 ###
 <!--

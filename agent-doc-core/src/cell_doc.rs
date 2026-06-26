@@ -42,6 +42,7 @@ use lazily::{CellMap, CellTree, Context, DiffOp, reconcile};
 
 use crate::component::{self, Component};
 use crate::crdt::{PREAMBLE_KEY, is_list_component, split_exchange_children, split_list_children};
+use crate::queue_item_lifecycle::QueueItemLifecycle;
 
 /// Environment variable that opts the live CRDT merge into the per-cell
 /// 3-way path ([`merge_3way`], routed from [`crate::crdt::merge_by_component`]).
@@ -296,10 +297,29 @@ pub fn diff_document(old_doc: &str, new_doc: &str) -> Vec<ComponentDiff> {
 // different text on both sides (`#qnodemerge5`: never fabricate a blend).
 // ---------------------------------------------------------------------------
 
+/// What kind of same-item-both-sides divergence produced a [`CellConflict`].
+///
+/// Only a [`ConflictKind::Content`] divergence is a *genuine* conflict — two
+/// sides edited the SAME item to different text at the SAME lawful lifecycle
+/// level (both `Live`, or both `Struck`), so neither side's intent subsumes the
+/// other and a deterministic [`ConflictPolicy`] must pick a winner. A
+/// strike-vs-unstrike is NOT a conflict (it is a lawful `Live < Struck`
+/// lifecycle join, struck wins) and is never recorded here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ConflictKind {
+    /// Both sides at the same lifecycle level edited the item to different text.
+    #[default]
+    Content,
+}
+
 /// A surfaced 3-way conflict: the same keyed item was updated to different text
-/// on both sides. The merge applies a deterministic policy (ours-wins, see
-/// [`ConflictPolicy`]) and records the conflict here so callers never silently
-/// lose the losing side.
+/// on both sides at the SAME lawful lifecycle level. The merge applies a
+/// deterministic policy (ours-wins, see [`ConflictPolicy`]) and records the
+/// conflict here so callers never silently lose the losing side.
+///
+/// Lifecycle joins (a strike vs. a stale un-strike) are *not* conflicts — they
+/// resolve deterministically to the struck side (`Live < Struck`) and are
+/// excluded from this list. Only genuine same-level content disagreements count.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CellConflict {
     /// Component name (`queue`, `exchange`, …) the conflict occurred in.
@@ -308,6 +328,9 @@ pub struct CellConflict {
     pub occurrence: usize,
     /// Reorder-stable item identity (`component:occurrence:item-id`).
     pub identity: String,
+    /// The kind of divergence (currently always [`ConflictKind::Content`]; a
+    /// lifecycle join is never recorded as a conflict).
+    pub kind: ConflictKind,
     /// The value chosen by the merge policy (kept in `merged_text`).
     pub chosen: ItemValue,
     /// `ours` side's value (the agent / committed-snapshot side).
@@ -480,6 +503,14 @@ fn compose_occurrence(
     };
 
     let is_exchange = ours.component == "exchange";
+    // `#queuestatemachine2`/`#qheadresidue`: list components (queue/backlog/
+    // review/done) carry per-item strike lifecycle, so a matched-but-different
+    // item is first routed through the `Live < Struck` join (anti-resurrection),
+    // mirroring `crdt::reconcile_list_item_lifecycle`. A struck side beats a stale
+    // un-strike from the persisted base/agent side regardless of the ours/theirs
+    // content policy. `exchange` blocks are not strike-bearing and keep the
+    // content-policy path.
+    let lifecycle_governed = is_list_component(&ours.component);
     // Order spine: theirs (live) for list components, ours (history) for exchange.
     let (spine, weave) = if is_exchange {
         (identity_seq(ours), identity_seq(theirs))
@@ -498,37 +529,47 @@ fn compose_occurrence(
             (Some(o), Some(t)) => {
                 if o == t {
                     Some(o.clone())
-                } else {
-                    // Both sides present and differ. Each side's change is read
-                    // from its reconcile op set (Update/Insert).
-                    let o_changed = ours_updated.contains(id) || !in_b;
-                    let t_changed = theirs_updated.contains(id) || !in_b;
-                    match (o_changed, t_changed) {
-                        // Only ours changed → take ours.
+                } else if lifecycle_governed {
+                    // Lifecycle-aware join (`Live < Struck`). Classify each side's
+                    // visible lifecycle and join: if exactly one side is at the
+                    // joined (higher-ranked) level, that side's text governs — a
+                    // struck side can never be resurrected by a stale un-strike,
+                    // and this is NOT a conflict (lawful lifecycle progression).
+                    let o_life = QueueItemLifecycle::classify(o);
+                    let t_life = QueueItemLifecycle::classify(t);
+                    let joined = o_life.join(t_life);
+                    match (o_life == joined, t_life == joined) {
+                        // Only ours is at the lawful level → ours' text governs.
                         (true, false) => Some(o.clone()),
-                        // Only theirs changed → take theirs.
+                        // Only theirs is at the lawful level → theirs' text governs.
                         (false, true) => Some(t.clone()),
-                        // Both changed to different text → a REAL conflict.
-                        // Apply the deterministic policy, record it.
-                        (true, true) => {
-                            let chosen = match policy {
-                                ConflictPolicy::OursWins => o.clone(),
-                                ConflictPolicy::TheirsWins => t.clone(),
-                            };
-                            conflicts.push(CellConflict {
-                                component: ours.component.clone(),
-                                occurrence: ours.occurrence,
-                                identity: id.clone(),
-                                chosen: chosen.clone(),
-                                ours: o.clone(),
-                                theirs: t.clone(),
-                            });
-                            Some(chosen)
-                        }
-                        // Neither side changed vs base but o != t — impossible
-                        // (both equal base ⇒ o == t). Defensive: take ours.
-                        (false, false) => Some(o.clone()),
+                        // Both at the same lifecycle level but text differs → fall
+                        // through to the content-conflict resolution below.
+                        _ => Some(resolve_content_divergence(
+                            id,
+                            o,
+                            t,
+                            in_b,
+                            &ours_updated,
+                            &theirs_updated,
+                            ours,
+                            policy,
+                            &mut conflicts,
+                        )),
                     }
+                } else {
+                    // Non-lifecycle component (exchange): content policy only.
+                    Some(resolve_content_divergence(
+                        id,
+                        o,
+                        t,
+                        in_b,
+                        &ours_updated,
+                        &theirs_updated,
+                        ours,
+                        policy,
+                        &mut conflicts,
+                    ))
                 }
             }
             // Present only in ours: ours kept/edited it, or theirs removed it.
@@ -556,6 +597,55 @@ fn compose_occurrence(
         }
     }
     Some((merged, conflicts))
+}
+
+/// Resolve a same-item-both-sides text divergence that is NOT subsumed by a
+/// lifecycle join (either a non-lifecycle component, or both sides at the same
+/// lifecycle level). Records a genuine [`ConflictKind::Content`] conflict when
+/// both sides changed the item vs base, applying the deterministic
+/// [`ConflictPolicy`]. Returns the chosen value.
+#[allow(clippy::too_many_arguments)]
+fn resolve_content_divergence(
+    id: &str,
+    o: &ItemValue,
+    t: &ItemValue,
+    in_b: bool,
+    ours_updated: &std::collections::HashSet<String>,
+    theirs_updated: &std::collections::HashSet<String>,
+    occ: &ComponentOccurrence,
+    policy: ConflictPolicy,
+    conflicts: &mut Vec<CellConflict>,
+) -> ItemValue {
+    // Each side's change is read from its reconcile op set (Update/Insert).
+    let o_changed = ours_updated.contains(id) || !in_b;
+    let t_changed = theirs_updated.contains(id) || !in_b;
+    match (o_changed, t_changed) {
+        // Only ours changed → take ours.
+        (true, false) => o.clone(),
+        // Only theirs changed → take theirs.
+        (false, true) => t.clone(),
+        // Both changed to different text at the same lifecycle level → a REAL
+        // content conflict. Apply the deterministic policy, record it.
+        (true, true) => {
+            let chosen = match policy {
+                ConflictPolicy::OursWins => o.clone(),
+                ConflictPolicy::TheirsWins => t.clone(),
+            };
+            conflicts.push(CellConflict {
+                component: occ.component.clone(),
+                occurrence: occ.occurrence,
+                identity: id.to_string(),
+                kind: ConflictKind::Content,
+                chosen: chosen.clone(),
+                ours: o.clone(),
+                theirs: t.clone(),
+            });
+            chosen
+        }
+        // Neither side changed vs base but o != t — impossible (both equal base ⇒
+        // o == t). Defensive: take ours.
+        (false, false) => o.clone(),
+    }
 }
 
 /// Identities the side `Remove`d relative to base.
@@ -730,6 +820,7 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
     // top-level component name sequence (never emit malformed framing).
     match parse_doc_nodes(&out) {
         Some(merged_nodes) if component_name_sequence(&merged_nodes) == ours_names => {
+            log_conflicts(&all_conflicts);
             CellMergeOutcome {
                 merged_text: out,
                 conflicts: all_conflicts,
@@ -737,6 +828,22 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
             }
         }
         _ => CellMergeOutcome::fallback(),
+    }
+}
+
+/// Emit one structured stderr line per surfaced conflict (honest operator-visible
+/// surface, beyond a bare count). Lifecycle joins are never in this list, so each
+/// line is a genuine same-level content disagreement that the policy resolved.
+fn log_conflicts(conflicts: &[CellConflict]) {
+    for c in conflicts {
+        eprintln!(
+            "cell_merge conflict kind={:?} component={} occurrence={} identity={} policy_chose_ours={}",
+            c.kind,
+            c.component,
+            c.occurrence,
+            c.identity,
+            c.chosen == c.ours,
+        );
     }
 }
 
@@ -1332,5 +1439,235 @@ working on it
             .expect("status diff");
         assert_eq!(s.ops.len(), 1);
         assert!(matches!(&s.ops[0], DiffOp::Update { key, .. } if key == "status:0:body"));
+    }
+
+    // ----- anti-resurrection lifecycle join (`#queuestatemachine2`/`#qheadresidue`)
+
+    /// Extract a component body from a merged doc.
+    fn component_body<'a>(merged: &'a str, name: &str) -> &'a str {
+        let open = format!("<!-- agent:{name} -->");
+        let close = format!("<!-- /agent:{name} -->");
+        merged
+            .split(&open)
+            .nth(1)
+            .and_then(|s| s.split(&close).next())
+            .unwrap_or("")
+    }
+
+    fn live_count(body: &str, needle: &str) -> usize {
+        body.lines()
+            .filter(|l| l.contains(needle) && !l.contains("~~"))
+            .count()
+    }
+
+    /// Mirror of `crdt::merge_by_component_struck_id_head_not_resurrected_by_stale_unstrike`.
+    /// BASE struck, OURS (agent) un-strikes, THEIRS (disk) stays struck → merged
+    /// stays struck. The lifecycle join (`Live < Struck`) overrides ours-wins.
+    #[test]
+    fn struck_id_head_not_resurrected_by_stale_unstrike_cell_path() {
+        let base = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n- ~~do [#abcd] fix the thing~~\n<!-- /agent:queue -->\n";
+        // OURS un-strikes (stale) AND appends an exchange response.
+        let ours = "<!-- agent:exchange -->\n### Re: topic\nAgent response body.\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n- do [#abcd] fix the thing\n<!-- /agent:queue -->\n";
+        // THEIRS correctly struck.
+        let theirs = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n- ~~do [#abcd] fix the thing~~\n<!-- /agent:queue -->\n";
+
+        let out = merge_3way(base, ours, theirs);
+        assert!(!out.fell_back, "should per-cell merge");
+        let body = component_body(&out.merged_text, "queue");
+        assert!(
+            body.contains("~~do [#abcd] fix the thing~~"),
+            "struck head must stay struck:\n{body}"
+        );
+        assert_eq!(
+            live_count(body, "do [#abcd]"),
+            0,
+            "stale un-strike resurrected the struck head LIVE:\n{body}"
+        );
+        // A strike-vs-unstrike is a lawful lifecycle join, NOT a conflict.
+        assert!(
+            out.conflicts.is_empty(),
+            "lifecycle join must not be a conflict: {:?}",
+            out.conflicts
+        );
+        // The agent's exchange response still landed (no cross-cell loss).
+        assert!(out.merged_text.contains("Agent response body."));
+    }
+
+    /// Free-text variant: the struck head is an operator free-text line (no `#id`).
+    #[test]
+    fn struck_free_text_head_not_resurrected_by_stale_unstrike_cell_path() {
+        let base = "<!-- agent:queue -->\n- ~~Still getting JB File Cache Conflict dialogs.~~\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- Still getting JB File Cache Conflict dialogs.\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:queue -->\n- ~~Still getting JB File Cache Conflict dialogs.~~\n<!-- /agent:queue -->\n";
+
+        let out = merge_3way(base, ours, theirs);
+        assert!(!out.fell_back);
+        let body = component_body(&out.merged_text, "queue");
+        assert!(
+            body.contains("~~Still getting JB File Cache Conflict dialogs.~~"),
+            "struck free-text head must stay struck:\n{body}"
+        );
+        assert_eq!(
+            live_count(body, "Still getting JB File Cache Conflict dialogs."),
+            0,
+            "stale un-strike resurrected the struck free-text head LIVE:\n{body}"
+        );
+        assert!(out.conflicts.is_empty());
+    }
+
+    /// Multi-cycle no-churn proof: strike → persist struck as next base → re-merge
+    /// with a stale un-strike side → stays struck across every cycle.
+    #[test]
+    fn struck_head_stable_across_cycles_no_churn_cell_path() {
+        let mut base =
+            "<!-- agent:queue -->\n- ~~do [#abcd] answered~~\n<!-- /agent:queue -->\n".to_string();
+        for cycle in 0..3 {
+            let ours = "<!-- agent:queue -->\n- do [#abcd] answered\n<!-- /agent:queue -->\n";
+            let theirs = "<!-- agent:queue -->\n- ~~do [#abcd] answered~~\n<!-- /agent:queue -->\n";
+            let out = merge_3way(&base, ours, theirs);
+            assert!(!out.fell_back, "cycle {cycle}: fell back");
+            let body = component_body(&out.merged_text, "queue");
+            assert_eq!(
+                live_count(body, "do [#abcd]"),
+                0,
+                "cycle {cycle}: head resurrected LIVE (churn):\n{body}"
+            );
+            assert!(
+                body.contains("~~do [#abcd] answered~~"),
+                "cycle {cycle}: struck head lost:\n{body}"
+            );
+            assert_eq!(
+                body.matches("do [#abcd] answered").count(),
+                1,
+                "cycle {cycle}: head duplicated:\n{body}"
+            );
+            assert!(out.conflicts.is_empty(), "cycle {cycle}: spurious conflict");
+            // Persist the lawful (struck) state as the next cycle's base.
+            base = out.merged_text;
+        }
+    }
+
+    /// Backlog component gets the same anti-resurrection treatment as queue.
+    #[test]
+    fn struck_backlog_head_not_resurrected_cell_path() {
+        let base =
+            "<!-- agent:backlog -->\n- ~~[#bk1] backlog answered~~\n<!-- /agent:backlog -->\n";
+        let ours = "<!-- agent:backlog -->\n- [#bk1] backlog answered\n<!-- /agent:backlog -->\n";
+        let theirs =
+            "<!-- agent:backlog -->\n- ~~[#bk1] backlog answered~~\n<!-- /agent:backlog -->\n";
+
+        let out = merge_3way(base, ours, theirs);
+        assert!(!out.fell_back);
+        let body = component_body(&out.merged_text, "backlog");
+        assert!(
+            body.contains("~~[#bk1] backlog answered~~"),
+            "struck backlog head must stay struck:\n{body}"
+        );
+        assert_eq!(
+            live_count(body, "[#bk1]"),
+            0,
+            "backlog head resurrected:\n{body}"
+        );
+        assert!(out.conflicts.is_empty());
+    }
+
+    /// Review component gets the same anti-resurrection treatment.
+    #[test]
+    fn struck_review_head_not_resurrected_cell_path() {
+        let base = "<!-- agent:review -->\n- ~~[#rv1] review item~~\n<!-- /agent:review -->\n";
+        let ours = "<!-- agent:review -->\n- [#rv1] review item\n<!-- /agent:review -->\n";
+        let theirs = "<!-- agent:review -->\n- ~~[#rv1] review item~~\n<!-- /agent:review -->\n";
+
+        let out = merge_3way(base, ours, theirs);
+        assert!(!out.fell_back);
+        let body = component_body(&out.merged_text, "review");
+        assert!(body.contains("~~[#rv1] review item~~"));
+        assert_eq!(live_count(body, "[#rv1]"), 0);
+        assert!(out.conflicts.is_empty());
+    }
+
+    /// The symmetric case: OURS struck, THEIRS un-strikes (stale) → still struck.
+    /// Anti-resurrection must hold regardless of which side carries the strike.
+    #[test]
+    fn struck_head_holds_when_theirs_is_the_stale_unstrike() {
+        let base = "<!-- agent:queue -->\n- ~~do [#zz] q~~\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- ~~do [#zz] q~~\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:queue -->\n- do [#zz] q\n<!-- /agent:queue -->\n";
+
+        let out = merge_3way(base, ours, theirs);
+        assert!(!out.fell_back);
+        let body = component_body(&out.merged_text, "queue");
+        assert!(
+            body.contains("~~do [#zz] q~~"),
+            "struck side must win:\n{body}"
+        );
+        assert_eq!(live_count(body, "do [#zz]"), 0);
+        assert!(out.conflicts.is_empty());
+    }
+
+    /// Strike-vs-unstrike is NOT recorded as a conflict (explicit honesty check).
+    #[test]
+    fn strike_vs_unstrike_is_not_a_conflict() {
+        let base = "<!-- agent:queue -->\n- ~~do [#abcd] x~~\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- do [#abcd] x\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:queue -->\n- ~~do [#abcd] x~~\n<!-- /agent:queue -->\n";
+        let out = merge_3way(base, ours, theirs);
+        assert!(!out.fell_back);
+        assert!(
+            out.conflicts.is_empty(),
+            "a lawful lifecycle join must never be a conflict: {:?}",
+            out.conflicts
+        );
+    }
+
+    /// A genuine same-level content conflict (both Live, different text) IS
+    /// recorded as exactly one `Content` conflict, ours-wins, theirs not present.
+    #[test]
+    fn genuine_same_level_content_conflict_is_recorded() {
+        let base = "<!-- agent:queue -->\n- do [#beta] orig\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- do [#beta] OURS-VERSION\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:queue -->\n- do [#beta] THEIRS-VERSION\n<!-- /agent:queue -->\n";
+
+        let out = merge_3way(base, ours, theirs);
+        assert!(!out.fell_back);
+        assert_eq!(out.conflicts.len(), 1, "one conflict: {:?}", out.conflicts);
+        let c = &out.conflicts[0];
+        assert_eq!(c.component, "queue");
+        assert_eq!(c.identity, "queue:0:id:beta");
+        assert_eq!(c.kind, ConflictKind::Content);
+        assert!(c.ours.contains("OURS-VERSION"));
+        assert!(c.theirs.contains("THEIRS-VERSION"));
+        assert!(c.chosen.contains("OURS-VERSION"), "default ours-wins");
+        assert!(out.merged_text.contains("OURS-VERSION"));
+        assert!(
+            !out.merged_text.contains("THEIRS-VERSION"),
+            "no fabricated blend: theirs value must not also appear:\n{}",
+            out.merged_text
+        );
+    }
+
+    /// Both sides struck the SAME head to DIFFERENT text (e.g. an operator note
+    /// appended on one struck copy) → both at `Struck` level → a genuine content
+    /// conflict, NOT silently dropped.
+    #[test]
+    fn both_sides_struck_different_text_is_a_content_conflict() {
+        let base = "<!-- agent:queue -->\n- do [#k] live\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- ~~do [#k] struck OURS~~\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:queue -->\n- ~~do [#k] struck THEIRS~~\n<!-- /agent:queue -->\n";
+
+        let out = merge_3way(base, ours, theirs);
+        assert!(!out.fell_back);
+        assert_eq!(
+            out.conflicts.len(),
+            1,
+            "both-struck-differ is a conflict: {:?}",
+            out.conflicts
+        );
+        assert_eq!(out.conflicts[0].kind, ConflictKind::Content);
+        assert!(out.merged_text.contains("struck OURS"));
+        assert!(!out.merged_text.contains("struck THEIRS"));
     }
 }

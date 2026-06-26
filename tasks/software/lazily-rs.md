@@ -66,7 +66,29 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md source=ipc_visible_repair patch_id=e96c04ed-8d14-43ec-b88d-e20b39873ef4 invariant=ipc_dedupe recovery=retry_without_disk_write redeliver_editor=true bad_len=7015 bad_hash=2bc945c3a6962688942cc5275c07a5bea387b49d0ee9a5964666291abf9c78db repaired_len=7554 repaired_hash=151b6980063abacfeabf6a33b253ebcbe4ec9889101bed421e68b049be1d433f doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782458551177
 ```
-<!-- agent:boundary:7bc3d4a9 -->
+
+### Re: Blog post — lazily Cell Family + Google-Sheets-scale focused recompute — opus-4-8
+
+> **Queue prompt:** Please write a blog post for briantakit with diagrams about recent changes in lazily-rs...Cell Family, 5M spreadsheet benchmark...focusing on how lazy reactivity improves performance by only eagerly recomputing the focused cells.
+
+Written, built, committed, and pushed. New post: **"A Spreadsheet at Google-Sheets Scale: Cell Families and Focused Recompute in lazily-rs"** (`2026-06-26-lazily-cell-family-spreadsheet-scale.md`). This realizes icebox `#ppce` (blog-post half; LinkedIn teaser is the next queue head).
+
+**What it covers:**
+- **`CellMap` / `CellFamily`** — fine-grained keyed reactivity (each entry its own `CellHandle`, membership on a dedicated version cell) vs. the coarse one-`Cell<HashMap>` model that invalidates every reader on any edit. `CellFamily` = atomFamily-style lazy-mint-and-cache factory.
+- **10M-cell scale benchmark** — `LAZILY_SCALE_N=5000000` (5M inputs + 5M formulas = a full-capacity Google Sheets workbook): build ~706 ms, cold full recalc ~518 ms.
+- **The point: focused recompute** — editing one input + reading a 1,000-cell viewport costs **~11.4 µs and stays flat regardless of sheet size** (~5,000× cheaper than full recalc), because the lazy pull model leaves off-viewport cells dirty and never recomputes them. Sparse arena → ~216 B/node, capacity bounded by populated cells not grid size.
+
+**Diagrams:** 3 hand-authored inline SVG figures matching the house style (no mermaid dep on this site) — coarse-vs-fine-grained invalidation, the per-entry `CellMap` graph, and the dirty→pull focus flow.
+
+**Verification:** `bun run build` green; post body, SVG markers, and benchmark numbers confirmed in the server bundle.
+
+**Shipped (3-level submodule chain, all pushed):**
+- `btakita/briantakita.me` → `e68ebad` (post + registry)
+- `briantakita.me-dev` → `c99471e` (gitlink)
+- agent-loop superproject → `d68025ba5` (gitlink)
+
+Remaining queue heads: **deploy briantakita.me**, **draft a LinkedIn teaser**.
+<!-- agent:boundary:8f6675ab -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -75,7 +97,7 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/software/l
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- 🚧 Please write a blog post for briantakit with diagrams about recent changes in lazily-rs...Cell Family, 5M spreadsheet benchmark...focusing on how lazy reactivity improves performance by only eagerly recomputing the focused cells.
+- ~~Please write a blog post for briantakit with diagrams about recent changes in lazily-rs...Cell Family, 5M spreadsheet benchmark...focusing on how lazy reactivity improves performance by only eagerly recomputing the focused cells.~~
 - deploy briantakita.me
 - Draft a linkedin teaser.
 <!-- /agent:queue -->

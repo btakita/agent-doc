@@ -163,7 +163,39 @@ Current state:
 - The next real queue head is `#lzcrdtperms`; release/publish queue text is operator-gated public-registry work and must not be auto-published without explicit go.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:556ece46 -->
+
+### Re: #lzcrdtperms CRDT permission/runtime regressions — gpt-5
+
+> **Queue prompt:** [#lzcrdtperms]
+
+`#lzcrdtperms` is complete.
+
+Changed paths:
+
+- `src/lazily-rs/src/crdt_plane.rs`
+- `src/lazily-rs/src/bridge.rs`
+- `src/lazily-rs/tests/crdt_plane.rs`
+
+What changed:
+
+- `CrdtPlaneRuntime::ingest` now folds `CrdtSync` frontier advertisements, including frontier-only frames; `wire_frontier` now advertises the plane's observed frontier so heartbeat/catch-up progress can drive GC.
+- `BridgeHub` CRDT sync coverage now verifies mixed readable/unreadable peer fan-out filters each target independently and preserves frontier metadata.
+- Added CRDT integration regressions for duplicate sync delivery through `BridgeHub`, frontier-only `SeqCrdt` tombstone GC, and `NodeKey`/`NodeId` churn on runtime ingest.
+
+Verification:
+
+- `cargo test --features "distributed webrtc" --test crdt_plane`
+- `cargo test --features "distributed webrtc" bridge::tests::crdt_sync_fans_out_to_readers_only`
+- `make check` via `tsift`/`rtk`, artifact `tart-bce23a7c27`, exit 0.
+- Latest GitHub Actions `CI` before this push was green: `28221062403` at `2026-06-26T06:21:06Z`.
+
+Commits:
+
+- lazily-rs submodule: `bce1802 test: harden crdt sync regressions`, pushed to `lazily-hub/lazily-rs main`.
+- parent gitlink: `aef3a7f15 lazily-rs: harden crdt sync tests`, pushed to `btakita/agent-loop main`.
+
+I also rebuilt the stale local `agent-doc` binary/cdylib with `make install` and queued controller recycle to address closeout drift. Confidence: high. Escalation: none.
+<!-- agent:boundary:b1bfda2f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -185,7 +217,6 @@ Confidence: high. Escalation: none.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcrdtperms] [recommended] #lzcrdtperms=Add CRDT runtime permission/regression coverage: CrdtSync BridgeHub fan-out with mixed readable/unreadable peers, duplicate delivery, partial-frontier tombstone GC, and NodeKey/NodeId churn so multi-writer transport bugs fail deterministically.
 <!-- /agent:backlog -->
 
 ## Review

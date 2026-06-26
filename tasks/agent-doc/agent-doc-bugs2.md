@@ -374,6 +374,11 @@ Per agent-doc's `#deploy-just-do-it`, I shipped it to **live**, and bundled the 
 
 ### Re: restart-supervisor --all + see which supervisors are stale — built on a branch — opus-4-8
 
+> **Queue prompt:**
+>
+> Please make a way to restart all supervisors in `agent-doc session restart-supervisor --all`. I still need to see if the supervisor is up to date or not in tmux. I'm flying blind right now with these bugs.
+
+
 Built the bulk-restart + staleness-visibility you asked for. Done in the isolated worktree `src/agent-doc-rsall-wt` (branch `restart-supervisor-all`, commit `8aa96bfd`), `make check` green (5413 test items). New surface:
 
 - `agent-doc session restart-supervisor --all` — restart **every** live supervisor on the machine (all projects).
@@ -388,14 +393,14 @@ Live smoke of `supervisor-status --all` (restarted nothing): every running super
 **Deliberately NOT installed/pushed from inside this session.** Installing (`make install-full`) recycles a supervisor; doing it now would recycle *this* live session's stale host mid-drain — the exact mid-cycle-recycle wedge. The safe sequence is operator-side: review/merge `restart-supervisor-all`, `make install-full`, then run the new `agent-doc session restart-supervisor --all` to recycle everything onto the fresh binary. After that the rest of this queue drains on a non-stale supervisor.
 
 Heads-up on the rest of the queue: it will keep firing over a stale supervisor (#qeditdup/#crdtauth6/#cdtcutover/#midturnresumeb/#recycleforce etc. are each separate deep supervisor tasks, several with their own in-flight worktrees). Recommend installing + recycling first, otherwise the stale binary over-consumes heads.
-<!-- agent:boundary:34b7629f -->
+<!-- agent:boundary:c1813967 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: test #queuebase~~
-- 🚧 Please make a way to restart all supervisors in `agent-doc session restart-supervisor --all`. I still need to see if the supervisor is up to date or not in tmux. I'm flying blind right now with these bugs.
+- ~~Please make a way to restart all supervisors in `agent-doc session restart-supervisor --all`. I still need to see if the supervisor is up to date or not in tmux. I'm flying blind right now with these bugs.~~
 - As I typed in a prompt into the queue, the free-text item below this prompt was duplicated.
 ---
 The session mechanics still don't work on a new linkedin.md session. I compacted the exchangebefore I began the turn.

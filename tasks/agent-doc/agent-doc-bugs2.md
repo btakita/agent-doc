@@ -317,7 +317,15 @@ The fix adds **one** canonical classifier — `is_recurring_imperative_head` in 
 Critically, the legitimate `#qftbklgstrike` behavior is preserved: a free-text head that *restates a specific completed tracked task* still strikes — proven by a dedicated non-regression test ("fix the deploy script so it retries…" still matches its done `#deployretry`).
 
 Code-complete on branch `qimpstrike-fix` (`ac466a74`), `make check` green (5375 passed). Gated pending your merge/install nod — I'll bundle it with `#supstaledetect` when you want them live (keeping installs off the live supervisor until you've verified Phase A).
-<!-- agent:boundary:874557b1 -->
+
+### Re: #suptmuxstale — tmux pane now shows stale-supervisor at a glance — opus-4-8
+
+Done. The tmux **turn-in-progress pane title** (`turn_status.rs`, the surface you named) now leads with `⚠ STALE SUPERVISOR` when the supervisor binary is stale, and clears when fresh — so you can see at a glance which panes are running stale code.
+
+Implementation note: the `turn-status` hook runs as a *separate process* from the supervisor that holds the `binary_stale` atomic, so it's bridged via a tiny on-disk marker (`.agent-doc/supervisor-stale`) written by idle_watch right next to the existing `binary_stale.store`. Pure `pane_title_for_status` helper + 5 unit tests; `make check` green.
+
+One honesty note: this mirrors the `process_binary_is_stale` **probe** (the recycle signal) — a *separate* path from the `#supstaledetect` preflight-warning false-positive fix. It's display-only and non-destructive, but if the probe itself ever false-positives, the pane warning would too. Code-complete on `suptmuxstale-indicator` (`b433bda2`), gated for the bundle merge/install.
+<!-- agent:boundary:76834ac8 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -348,11 +356,11 @@ The session mechanics still don't work on a new linkedin.md session. I compacted
 - :pushpin: do [#nsfz]
 - :pushpin: do [#kj5flive]
 - :pushpin: In the tmux pane, show if the supervisor is out of date. In the upper notifiaction that shows "turn in progress" is a good place.
-- :pushpin: do [#qimpstrike]
+- ~~:pushpin: do [#qimpstrike]~~
 - :pushpin: do [#2y8j]
 - do [#cdtcutover]
 - do [#supstaledetect]
-- do [#suptmuxstale]
+- ~~do [#suptmuxstale]~~
 - do [#ipcproofnostall]
 - ~~do [#midturn-recycle-resume]~~
 - do [#midturnresumeb]
@@ -385,7 +393,6 @@ What are #next-steps to fix bugs?
 - [ ] [#midturnresumeb] Phase B (focused follow-up) — actively CONSUME the #durablerecycle turn checkpoint (cycle_state.rs:486, currently written but never read to resume) on a fresh supervisor boot to re-dispatch a turn that was genuinely interrupted (child died across the recycle), idempotent vs the surviving-child path. This is the full "restart reliably restarts the turn"; Phase A only makes the wedge impossible. Also add a deferred-too-long escalation counter so a never-closing cycle cannot starve the recycle indefinitely. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
 - [ ] [#ipcproofnostall] Overnight queue stalls on a FALSE closeout-interrupt: session-check INTERRUPTS on the binary-authored ipc_proof_insufficient diagnostic, classifying it as an "unresolved prompt-bearing user change" (hit 3x in session b26b9957 on 2026-06-26). An exemption already exists — is_binary_authored_recovery_diagnostic_heading (session_check/closeout_guards.rs:840) is meant to make the diff classifier treat the "### Re: ...interrupted-cycle recovery" block as a RecoveryArtifact, never a PromptTarget — but it has an edge-case HOLE: likely the postcommit CRDT corruption (#postcommit-ipc-worktree-corruption) separates the ipc_proof_insufficient line from its protective ### Re: heading so the bare line classifies as prompt-bearing, OR a stale cycle-state prompt_target from a prior cycle persists the line. Root-cause which, then close it in diff classify_prompt_bearing_changes / the cycle-state prompt_targets path. CRITICAL closeout gate (every session) — add regression tests proving a REAL unresolved user prompt is still caught. Serves the operator directive "all restarts should reliably resume running turns / finish the overnight queue, not stall."
 - [ ] [#supstaledetect] stale_install warning false-positives in the dogfood edit->build->install->commit flow: it compared artifact mtime to the HEAD commit timestamp (300s grace), but the binary is always built BEFORE its covering commit, so an ~11min build->commit gap (binary 03:16:22 vs commit 03:27:51) flagged a FRESH binary as stale — disagreeing with the auto-install signal, which uses newest source-FILE mtime and correctly saw it fresh. FIX CODE-COMPLETE on branch supstaledetect-mtimebasis (agent-doc commit b983f144, make check green): warning now uses newest_crate_source_mtime_secs (same basis as auto-install). Remaining: merge -> install -> verify the false warning is gone AND genuine staleness still flags.
-- [ ] [#suptmuxstale] Observability (operator request): surface supervisor-out-of-date status in the tmux pane — the upper "turn in progress" notification is a good spot — so the operator can see at a glance which sessions run a stale supervisor. Pairs with #supstaledetect for a reliable signal; the binary_stale probe is already published in idle_watch (process_binary_is_stale).
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
 - [ ] [#qftloss] [operator-verify] Free-text prompt loss (mode-6) — CODE-COMPLETE on main (8b900bf4): binary now journals operator prompts from the plugin live-buffer sidecar (.agent-doc/live-buffer/<hash>) into the #qdurcrash store before any convergence/recovery can clobber the unsaved buffer, replayed if absent. Remaining: live IDE eyeball that an unsaved prompt typed during a concurrent finalize survives end-to-end. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
@@ -398,6 +405,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#suptmuxstale] DONE (code-complete, branch suptmuxstale-indicator b433bda2, make check green) — tmux pane now surfaces "⚠ STALE SUPERVISOR" in the turn-in-progress pane title (turn_status.rs) when the supervisor binary is stale, so the operator sees at a glance which sessions are stale. The turn-status hook is a separate process from the supervisor holding the binary_stale atomic, so it is bridged via an on-disk marker (.agent-doc/supervisor-stale) written by idle_watch next to the existing binary_stale.store. Pure pane_title_for_status helper + 5 unit tests. NOTE: mirrors the process_binary_is_stale PROBE (separate signal from the #supstaledetect preflight-warning fix); display-only, non-destructive. Remaining: merge -> install (bundle with #supstaledetect/#qimpstrike).
 - [/] [#qimpstrike] DONE (code-complete, branch qimpstrike-fix ac466a74, make check green 5375 tests) — recurring-imperative queue heads (deploy/commit/push/build/install/release/test/sync/recycle/publish + preset tokens) were auto-struck instead of dispatched. Fix: single canonical classifier is_recurring_imperative_head (queue_continuation.rs) wired into BOTH strike sites (#qftbklgstrike lexical scorer in memory_cmd.rs AND #qheadresidue residue guard) so they skip recurring-command heads; the head stays drainable + is dispatched through the normal command path, struck only once actually executed. Non-regression test proves a genuine restatement-of-tracked-work head still strikes. Remaining: merge -> install (operator nod; bundle with #supstaledetect). Plan: tasks/agent-doc/plan-queue-recurring-imperative-head-wrongly-struck.md
 - [/] [#midturn-recycle-resume] Phase A DONE — cycle-open recycle interlock: execve recycle/restart now defers every arm (auto/admin/wedge-escalation/fresh-binary-flush) while an agent-doc cycle is open or IPC is in-flight, so a recycle can no longer fire mid preflight->finalize and sever the in-flight finalize (the live_prompt_drift_after_preflight wedge root cause). Merged agent-doc main 27bf61a6, installed, supervisor recycle-marked. make check green + unit/SimWorld coverage. Remaining = operator live zero-drift eyeball: drive a recycle in the preflight->finalize window on a live editor, confirm NO live_prompt_drift_after_preflight. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
 <!-- /agent:review -->

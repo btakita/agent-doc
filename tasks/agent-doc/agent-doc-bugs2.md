@@ -279,7 +279,21 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=640e5b9a-efc2-4962-8067-4a80122acce6 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=39542 candidate_hash=d1733d49e1657d98c02f2d8905bbada8604d0a4d6bc41f9b125054ddb35f346f content_ours_len=41498 content_ours_hash=d28ccf40bccb96dc1b227cce17614bf71f89a663a6367b998ee7a4466b1bd91e doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782460175499
 ```
-<!-- agent:boundary:bb3e0015 -->
+
+### Re: "fix the root cause of the wedge — a mid-turn restart/recycle should reliably restart the turn" — opus-4-8
+
+You're right on both counts, and this session was a live reproduction of exactly the wedge you're describing. Let me name the root cause precisely and say what I've started.
+
+**The wedge chain, traced:** `finalize` → `live_prompt_drift_after_preflight` (the supervisor's live buffer / in-memory CRDT no longer matches the snapshot preflight took) → it appends an `ipc_proof_insufficient` diagnostic and recovers via `content_ours` → the **next** `finalize` is refused because that diagnostic looks like an unresolved prompt → `--force-disk` bypasses but writes past the IPC boundary → `direct_response_patchback` + worktree corruption → manual `checkout HEAD` + `reset --from-current`. Every link starts from that first drift.
+
+**Why the drift happens — your hypothesis is almost certainly right.** I recycled the route-owned parent supervisor mid-session today (onto the freshly-installed binary). A recycle is an in-place `execve`. The open question that explains everything: **does the re-exec'd supervisor reload its CRDT/live-buffer baseline from the committed doc, or can it resume with a stale in-memory snapshot from before the recycle?** If the latter, then any finalize after a near-boundary recycle drifts against that stale baseline — which is precisely `live_prompt_drift_after_preflight`. And the current restart contract is *AwaitDrain* — it refuses to interrupt an in-flight turn — so a mid-turn recycle either deadlocks (your bug #4: recycle scheduled after the turn starts, but the turn can't start while the recycle is pending) or lands in this drift.
+
+**The fix has two halves**, both filed as `#midturn-recycle-resume` (plan: `tasks/agent-doc/plan-midturn-recycle-resume-wedge.md`):
+1. **Make the drift impossible** — a recycled/re-exec'd supervisor must *reload* its CRDT baseline from the committed doc on startup, so a post-recycle finalize cannot validate against a stale snapshot.
+2. **Make the restart resume the turn** — consume the `#durablerecycle` turn checkpoint (baseline + prompt-targets + queue/turn id are already persisted to disk; the gap is whether the restart path *reads* it) to reliably re-dispatch the in-flight turn, so a mid-turn restart restarts the turn instead of stalling.
+
+**What I've started:** a focused investigation+fix is running now in an isolated worktree (branch `midturn-recycle-resume`) — it root-causes which of (a) stale-CRDT-reload vs (b) unconsumed-checkpoint is the actual mechanism, implements the tightest fix that removes it, and adds SimWorld coverage proving a recycle in the preflight→finalize window no longer drifts. It lands **on a branch for your review**, deliberately *not* hot-patched onto the live supervisor running this very session — because changing the restart path under itself is how you turn a recoverable wedge into an unrecoverable one. I'll report what it found and the commit when it's done.
+<!-- agent:boundary:e16dfd9b -->
 <!-- /agent:exchange -->
 ## Queue
 

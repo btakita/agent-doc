@@ -78,7 +78,19 @@ Done (EFS `aa05ac5`, pushed). The broker pipeline deal-detail card now shows the
 - **Verification:** `bun run check` green — 1241 tests pass (4 new), browser + worker build clean.
 
 **Feature complete (lender, admin, borrower, broker):** shared `DealPhotoCarousel` + house placeholder, each non-admin portal serving public photos via its own auth-scoped download route. `deploy` remains held per your decision — all four phases have now landed, so the full feature is ready to deploy whenever you give the go (`bun run deploy:worker`).
-<!-- agent:boundary:5ab2fe5a -->
+
+### Re: deal image carousel — feature complete (all 4 portals) — opus-4-8
+
+> **Queue prompt:** All deals in the borrower, broker, lender, and admin should have a carousel of uploaded images. If there is no image, then show a house placeholder.
+
+Complete and pushed across all four portals — closing out this queue head (the borrower/broker phases it decomposed into are both done + archived).
+
+- **Lender** (investor) + **Admin** — `0a1c1e8`
+- **Borrower** — `a525660`
+- **Broker** — `aa05ac5`
+
+Shared `portal/shared/deal_photo_carousel.tsx` (`DealPhotoCarousel` + `HousePlaceholder`); empty deals show the house placeholder. Each non-admin portal serves **public** photos through its own auth-scoped download route (`/api/{investor,borrower,broker}/deal-photos/:id/download`), and each download rule is a unit-tested pure predicate. `bun run check` green (1241 tests). `deploy` held per your decision — ready via `bun run deploy:worker` when you give the go.
+<!-- agent:boundary:a50f35e3 -->
 <!-- /agent:exchange -->
 ###
 <!--

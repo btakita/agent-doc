@@ -1376,12 +1376,62 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // baseline. Defer until the cycle commits and IPC drains. Gates BOTH the
                 // operator `restart_drain_reexec` path below and the `#supselfheal`
                 // auto-recycle decision further down.
-                let cycle_open = crate::cycle_state::load(&path)
-                    .ok()
-                    .flatten()
-                    .map(|state| state.is_open())
-                    .unwrap_or(false)
-                    || crate::ipc_socket::inflight_connection_handlers() > 0;
+                // `#suprecyclespin`: an open cycle whose harness turn has already
+                // ended (we are at `turn_boundary`) but that never reached
+                // `committed`/`abandoned` keeps `is_open()` true forever, so the
+                // recycle-defer arm (`DeferCycleOpen`) fires ~2/sec indefinitely and
+                // the stale supervisor never hot-reloads. This is the unbuilt
+                // `#midturnresumeb` Phase B: a stalled cycle (no IPC inflight,
+                // untouched past `STALLED_CYCLE_RESOLVE_SECS`) is an abandoned older
+                // turn that a newer cycle has superseded, so RESOLVE it (force-close
+                // to `abandoned`) instead of deferring the recycle forever. A live
+                // cycle still moving through phases or holding IPC inflight is never
+                // touched (its `updated_at` is fresh / `inflight > 0`).
+                let inflight = crate::ipc_socket::inflight_connection_handlers();
+                let cycle_open = match crate::cycle_state::load(&path).ok().flatten() {
+                    Some(state) if state.is_open() => {
+                        if state.open_stalled(
+                            inflight,
+                            current_epoch_secs(),
+                            crate::cycle_state::STALLED_CYCLE_RESOLVE_SECS,
+                        ) {
+                            let stalled_secs =
+                                current_epoch_secs().saturating_sub(state.updated_at);
+                            if let Err(err) = crate::cycle_state::mark_abandoned(
+                                &path,
+                                "suprecyclespin_stalled_cycle_resolved",
+                                None,
+                                None,
+                            ) {
+                                crate::ops_log::log_op(
+                                    &path,
+                                    &format!(
+                                        "supervisor_cycle_stale_resolve_failed file={} cycle={} err={err:#} (#suprecyclespin)",
+                                        path.display(),
+                                        state.cycle_id,
+                                    ),
+                                );
+                            }
+                            crate::ops_log::log_op(
+                                &path,
+                                &format!(
+                                    "supervisor_cycle_stale_resolved file={} cycle={} turn={} phase={} stalled_secs={} inflight={} reason=abandoned_older_turn_superseded (#suprecyclespin)",
+                                    path.display(),
+                                    state.cycle_id,
+                                    state.turn_id.as_deref().unwrap_or("<none>"),
+                                    crate::cycle_state::cycle_phase_label(state.phase),
+                                    stalled_secs,
+                                    inflight,
+                                ),
+                            );
+                            // Gate cleared — let the recycle proceed at this boundary.
+                            inflight > 0
+                        } else {
+                            true
+                        }
+                    }
+                    _ => inflight > 0,
+                };
                 let restart_action = supervisor_restart_action(
                     shared.restart_requested.load(Ordering::Relaxed),
                     shared.restart_reexec.load(Ordering::Relaxed),

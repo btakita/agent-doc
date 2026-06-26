@@ -296,9 +296,31 @@ fn leads_with_bare_id_directive(lower: &str) -> bool {
     }
 }
 
+/// `#suprecyclespin` — seconds an open cycle may sit untouched (no IPC ack
+/// connection in flight) at a harness turn boundary before the supervisor
+/// recycle/restart defer path force-closes it as abandoned. Generous enough never
+/// to abandon a live `preflight → finalize` cycle (each phase ticks `updated_at`
+/// and finalize holds IPC inflight), but bounded so a crashed/superseded older
+/// turn cannot wedge the recycle in `DeferCycleOpen` (~2/sec `cycle_open`
+/// spin-loop, `idle_watch.rs`) forever.
+pub const STALLED_CYCLE_RESOLVE_SECS: u64 = 45;
+
 impl CycleState {
     pub fn is_open(&self) -> bool {
         !matches!(self.phase, CyclePhase::Committed | CyclePhase::Abandoned)
+    }
+
+    /// `#suprecyclespin` — whether this open cycle has stalled past
+    /// `deadline_secs`: still open, no IPC ack connection in flight, and untouched
+    /// (`now_secs - updated_at > deadline_secs`). A stalled open cycle is an
+    /// abandoned older turn that a newer committed cycle has superseded; the
+    /// supervisor recycle-defer path force-closes such a cycle (`mark_abandoned`)
+    /// so the `execve` recycle reaches its boundary instead of deferring forever.
+    /// Pure so the deadline policy is unit-testable without the live idle watch.
+    pub fn open_stalled(&self, inflight: u64, now_secs: u64, deadline_secs: u64) -> bool {
+        self.is_open()
+            && inflight == 0
+            && now_secs.saturating_sub(self.updated_at) > deadline_secs
     }
 
     /// Derive the live finalize-pipeline view (`#fm-run-id-step` / `#fmrunid-wire`)
@@ -1297,7 +1319,7 @@ fn synthetic_state_with_id(
     }
 }
 
-fn cycle_phase_label(phase: CyclePhase) -> &'static str {
+pub fn cycle_phase_label(phase: CyclePhase) -> &'static str {
     match phase {
         CyclePhase::PreflightStarted => "preflight_started",
         CyclePhase::ResponseCaptured => "response_captured",
@@ -1403,6 +1425,29 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         dir
+    }
+
+    #[test]
+    fn open_stalled_resolves_only_abandoned_older_turns() {
+        // `#suprecyclespin`: the recycle-defer gate must distinguish a live cycle
+        // (keep deferring) from a stalled/superseded older turn (force-close).
+        let mut state = synthetic_state(Path::new("/tmp/doc.md"), CyclePhase::ResponseCaptured);
+        let deadline = STALLED_CYCLE_RESOLVE_SECS;
+        // updated_at far in the past, no IPC inflight → stalled (resolvable).
+        state.updated_at = 1_000;
+        assert!(state.open_stalled(0, 1_000 + deadline + 1, deadline));
+        // Exactly at the deadline is NOT yet stalled (strict `>`).
+        assert!(!state.open_stalled(0, 1_000 + deadline, deadline));
+        // Fresh `updated_at` → a live cycle, never force-closed.
+        state.updated_at = 1_000 + deadline + 1;
+        assert!(!state.open_stalled(0, 1_000 + deadline + 5, deadline));
+        // IPC ack connection in flight → finalize is live, never force-closed even
+        // if the cycle has been open a long time.
+        state.updated_at = 1_000;
+        assert!(!state.open_stalled(1, 1_000 + deadline + 100, deadline));
+        // A committed cycle is not open, so it is never "stalled".
+        let committed = synthetic_state(Path::new("/tmp/doc.md"), CyclePhase::Committed);
+        assert!(!committed.open_stalled(0, u64::MAX, deadline));
     }
 
     #[test]

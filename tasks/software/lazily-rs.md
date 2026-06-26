@@ -580,7 +580,7 @@ Drained. The one session change not yet reflected in the canonical cross-languag
 - Conformance fixtures (`src/lazily-spec/conformance/`) **unchanged** — the format-aware omission keeps them byte-identical, so lazily-py/zig/js/kt conformance stays green until each adds the optional nullable `key`.
 
 **Stopping at the remaining 4 queue heads — operator-gated.** They are `lazily-{kt,js,zig,py} parity. release + publish`: the publish half is exactly what your queue pause gates ("irreversible public-registry publishes … 2FA … Do not auto-publish"), and the parity half is substantial per-language implementation (wirekey + CRDT primitives ported to each binding) that each deserves its own focused cycle, not an inline auto-drain. Give the go (and per-language scope) and I'll take them one at a time; I won't auto-publish.
-<!-- agent:boundary:63f2e2b4 -->
+<!-- agent:boundary:1f87434f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -592,10 +592,11 @@ Drained. The one session change not yet reflected in the canonical cross-languag
 - ~~[#r86a]~~
 - ~~update lazily-spec with latest changes~~
 - ~~release + publish lazily-rs~~
-- lazily-kt parity. release + publish
+- 🚧 lazily-kt parity. release + publish
 - lazily-js parity. release + publish
 - lazily-zig parity. release + publish
 - lazily-py parity. release + publish
+- lazily-kt parity. release + publish
 <!-- /agent:queue -->
 
 ## Backlog

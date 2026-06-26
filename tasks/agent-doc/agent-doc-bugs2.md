@@ -426,6 +426,16 @@ Re-echoing the two answered heads `session-check` flagged as residue so `#ftstri
 
 ### Re: queue edits reverting/duplicating — root cause is a stale-BINARY supervisor — opus-4-8
 
+> **Queue prompt:**
+>
+> ~~When I type into the queue, an old duplicate appears above where I'm typing.~~ — auto-struck: answered this cycle (#ftstrike)
+
+
+> **Queue prompt:**
+>
+> ~~When I add attributes to an element, the attributes disappear.~~ — auto-struck: answered this cycle (#ftstrike)
+
+
 All three of these are the **same root cause**, and it's a sharp one I just confirmed from process state — not a code bug in the current binary:
 
 > **Queue prompt:** When I delete queue items, they reappear.
@@ -444,7 +454,7 @@ That stale CRDT is exactly what you're seeing:
 **Fix applied this cycle:** recycling the supervisor onto the fresh binary via `agent-doc admin recycle` (non-disruptive in-place re-exec at the idle boundary — not the parent-killing `restart-supervisor`). Once it lands, re-test the three edits: deletes should stick, attributes should persist, and typing shouldn't duplicate. **If any still misbehave on the freshly-recycled binary**, that's the genuine `#qeditdup`/`#qftloss` deeper editor-edit-during-cycle guard — capture the before/after doc state and I'll fix the code, because then it's not just staleness.
 
 (Note: the matching `#qeditdup`/`#qftloss` backlog items stay `[operator-verify]` — this recycle + your re-test IS that verification.)
-<!-- agent:boundary:f7426948 -->
+<!-- agent:boundary:41042182 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -452,9 +462,10 @@ That stale CRDT is exactly what you're seeing:
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~When I delete queue items, they reappear.~~
-- ~~When I add attributes to an element, the attributes disappear.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~~~When I add attributes to an element, the attributes disappear.~~ — auto-struck: answered this cycle (#ftstrike)~~
 - ~~When I type into the queue, an old duplicate appears above where I'm typing.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~On a fresh lazily-rs.md tmux pane, `● State is racing between runs (live supervisor/editor writing concurrently). Let me look at the actual document to~~ — auto-struck: answered this cycle (#ftstrike)
+---
   understand what's being asked rather than chase the shifting sidecar state.`
 - ~~Use lazily-rs recent addition of Cell Families for reactive document structures. Can we represent a tree structure using lazily-rs?~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~When I make a free text item in a queue, my text is duplicated.~~ — auto-struck: answered this cycle (#ftstrike)
@@ -474,6 +485,7 @@ Error: authoritative actor record for tasks/monsterrodholders.md is running harn
 Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane
 ```
 ~~~
+---
 ---
 :pushpin: equityfundingsource.md turn has an IPC issue:
 `### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc`
@@ -518,17 +530,17 @@ Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is runn
 ---
 - ~~:pushpin: do [#actorswitchdefer]~~
 - ~~:pushpin: do [#capproofbg]~~
-- :pushpin: do [#nsfz]
+- ~~:pushpin: do [#nsfz]~~
 - ~~:pushpin: do [#gghx]~~
 - ~~:pushpin: do [#8g9w]~~
 - ~~:pushpin: do [#6mjw]~~
 - ~~:pushpin: do [#spy9]~~
 - ~~:pushpin: Are the lazily-rs contexts distinct for each running agent document? I'm seeing sessions working on other open documents.~~
-- :pushpin: ~~Would a reactive state machine help to manage the supervisor document bindings?~~ — auto-struck: answered this cycle (#ftstrike)
-- :pushpin: ~~I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?~~ — auto-struck: answered this cycle (#ftstrike)
-- :pushpin: ~~I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~:pushpin: ~~Would a reactive state machine help to manage the supervisor document bindings?~~ — auto-struck: answered this cycle (#ftstrike)~~
+- ~~:pushpin: ~~I'm still seeing duplicate queue items added by agent-doc. Do we need to have state machine(s) represent queue activity to ensure these sort of issues don't happen?~~ — auto-struck: answered this cycle (#ftstrike)~~
+- ~~:pushpin: ~~I'm still seeing JB `File Cache Conflict` prompts. Do we need plugin/binary state machine(s) to control the merges to ensure disk writes don't happen while the editor/FFI plugin is running?~~ — auto-struck: answered this cycle (#ftstrike)~~
 - ~~do [#crdtauth1sv]~~
-- do [#crdtauth6]
+- ~~do [#crdtauth6]~~
 - do [#qftloss]
 - do [#qeditdup]
 <!-- /agent:queue -->

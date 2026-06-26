@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 
@@ -54,7 +54,26 @@ Already complete — no auto-publish needed (matches the `#kb9b`/`#lzpypub011` s
 - **Parity** — ShmBlobArena host port + Signal→Slot `RecursionError` regression suite committed (`4a57eb2`, `26ef43e`, `c255482`).
 
 The 2FA-gated publish the operator pause was guarding has already landed, so nothing remains to drain here. The remaining `agent:review` items (`#z0hq` npm publish, `#h6qb` WebRTC two-host e2e, `#xccx` Holons, LinkedIn comments) stay operator-gated.
-<!-- agent:boundary:ebac8c37 -->
+
+### Re: lazily-py parity + release + publish — opus-4-8
+
+> **Queue prompt:**
+>
+> ~~lazily-py parity + release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+
+
+> **Queue prompt:** lazily-py parity + release + publish
+
+Already complete — no auto-publish needed (matches the `#kb9b`/`#lzpypub011` semantic-completion candidate). Verified live this cycle:
+
+- **PyPI** — `lazily 0.11.0` is the latest live release (`pypi.org/pypi/lazily/json` → `info.version == 0.11.0`).
+- **Tag** — `v0.11.0` present on `origin` (`git ls-remote --tags`).
+- **GitHub release** — `v0.11.0` published (not draft, not prerelease).
+- **HEAD pushed** — local `c255482` == upstream.
+- **Parity** — ShmBlobArena host port + Signal→Slot `RecursionError` regression suite committed (`4a57eb2`, `26ef43e`, `c255482`).
+
+Striking the queue head. The 2FA-gated publish the operator pause was guarding has already landed, so nothing remains to drain here. The remaining `agent:review` items (`#z0hq` npm publish, `#h6qb` WebRTC two-host e2e, `#xccx` Holons, LinkedIn comments) stay operator-gated.
+<!-- agent:boundary:922f46d4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,7 +82,6 @@ The 2FA-gated publish the operator pause was guarding has already landed, so not
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~lazily-py parity + release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

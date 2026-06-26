@@ -461,7 +461,19 @@ Phase B (the "restart should *reliably* restart the turn" half) is implemented +
 - **Deferred-too-long escalation** (`idle_watch.rs`/`decisions.rs`): consecutive `DeferCycleOpen` ticks at a turn boundary are counted; past `MAX_CYCLE_OPEN_DEFER_TICKS=40` (~20s at 500ms poll) the recycle is forced — the `execve` severs the wedged cycle but the open checkpoint survives, so the interrupted turn re-dispatches on boot. A never-closing cycle can no longer starve the recycle. New ops-log lines: `supervisor_recycle_cycle_open_escalated`, `supervisor_recycle_resume_redispatch`, `supervisor_recycle_resume_adopt_surviving_child`, `defer_streak=N/M`.
 
 Held the install/merge/push (live-supervisor-critical, and installing recycles *this* session's host mid-drain). Gating `#midturnresumeb` as code-complete / awaiting **merge → `make install-full` → live proof** (drive a real mid-finalize recycle whose child dies and confirm the turn resumes once, second boot does not double-run). That live eyeball is inherently operator-gated.
-<!-- agent:boundary:11ee2b37 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=2f587418-3481-4b18-a389-b86a086c3689 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=73450 candidate_hash=2b007613f76acc86bd803ea8c127cd2dfd6ae0a52bc3b1630bba4f676c93253f content_ours_len=74464 content_ours_hash=be90635f35edd89ddcf46e85435cd64643548a947c1b6e04ab591d39bdb0b3dc doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782496766130
+```
+<!-- agent:boundary:e93071cc -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -490,7 +490,36 @@ So the binary now journals operator prompts from the plugin live-buffer sidecar 
 **The only thing left is operator-gated** (`[operator-verify]`): type a free-text prompt into the live editor during a concurrent `finalize`, then I confirm from the log that it survived — success looks like a `live_buffer_addition_authoritative` (or `queue_consume_head_divergence_reconciled reason=live_buffer_addition_authoritative`) line for this document. I can't drive a live editor, so I'm leaving `#qftloss` open as your eyeball; I did **not** `--done` it.
 
 No agent-drainable heads remain (`queue_continuation_required=false`, `queue_drainable_head_count=0` — the rest are your live-test gated items), so the in-session loop stops here. (Exchange is large — 442 lines / 30 sections — but the queue is active, so I'm not pausing to compact.)
-<!-- agent:boundary:a7c779ef -->
+
+### Re: CRDT deleted my frontmatter / 1-char deletes while typing — fix the CRDT issues — opus-4-8
+
+Found the root cause from the live `alex-lee.md` logs. This is a **data-loss** bug, and it's **distinct** from the typing-lag fix (`#qbasehashmemo`, 0.34.49) — that one only stopped the per-keystroke base-hash *recompute*; it never changed which content the merge keeps. So a fresh binary doesn't help here.
+
+**Mechanism (`crdt_merge_base_state`, `snapshot.rs:1138-1173`):** when your live-buffer **overlay** (where unsynced keystrokes live) projects to markdown that `!=` the cycle baseline, the code calls it *stale* and **rebuilds the overlay from baseline — discarding your keystrokes**. The problem: plain string inequality can't tell apart
+- **overlay-behind** (older content → correct to discard), from
+- **overlay-ahead** (newer keystrokes you just typed → discarding *drops your edit*).
+
+Typing `model: opus` into the frontmatter put those lines in the overlay-ahead state; a convergence pass rebuilt the base from the baseline that didn't have them yet → deleted. Same root for the 1-char deletes. Log proof @ `18:16:07Z`: `crdt_merge_base_overlay_stale` → `..._rebuilt` → `editor_op_recorded kind=delete offset=2342 delete_len=8` then `insert offset=2342` (`#qnodemerge4wire`).
+
+**Logged this turn (your "log production bugs in this doc immediately" directive):**
+- **`#crdtlivedrop`** — the overlay-stale discard above. Fix: causal *ahead/behind* detection (CRDT state-vector dominance, not string equality) → 3-way CRDT-merge the ahead case so live keystrokes survive; and **never discard silently** — log the dropped bytes.
+- **`#suprecyclespin`** — coupled second defect in the same incident: `supervisor_recycle_deferred_cycle_open` is firing ~2/sec **forever** on the `alex-lee.md` supervisor (pid 999966). Its in-memory `cycle_open` is stuck `true` for an *old* turn (`cycle-1782497652506`) even though a newer cycle committed, so it never reaches a recycle boundary. This is the unbuilt **`#midturnresumeb` Phase B** — a stalled cycle (`inflight=0`, past a deadline) must be *resolved*, not deferred indefinitely.
+- **`#crdtedgetests`** — the dogfood-loop answer below.
+
+**Plan:** `tasks/agent-doc/plan-crdt-overlay-live-keystroke-preservation.md` (root cause + fix design + 8-row edge-case test matrix + spin-loop fix).
+
+### Re: improve the dogfood loop / much more edge-case testing — opus-4-8
+
+Agreed, and filed as `#crdtedgetests`: an 8-row deterministic SimWorld/unit matrix that pins exactly the cases that string-equality misses — overlay ahead-by-1-char, ahead-by-a-frontmatter-block (your repro), strictly-behind, concurrent-divergent, empty-doc-first-keystroke, rapid-burst-during-convergence, decode-error, and frontmatter-edit-while-exchange-converges. These run with no live tmux/editor, so the regression class becomes CI-gated. The "log production bugs in this doc the same turn, with ops.log evidence + code location, then fix in a focused cycle" flow is now written into the plan as the standing template — this turn is the first instance of it.
+
+**Why I didn't hot-patch the merge path this turn (on purpose):** rewriting the live CRDT overlay-merge against an actively-edited session, with no test coverage yet, is exactly what produces more drift/loss — and it cuts against the "land CRDT changes only with SimWorld coverage" rule. The honest sequence is: edge-case matrix (red) → causal ahead/behind fix → matrix green → install + recycle. `#crdtlivedrop` + `#crdtedgetests` are the next focused cycle; say the word and I'll start it.
+
+### Re: document onboarding (noted) — opus-4-8
+
+Noted, not chasing it now per your steer. Quick flag for later: creating an empty `.md` then `Claim for Tmux Pane` is the path that produced this wedged-open first cycle, so a guided "new agent-doc document" onboarding (scaffold frontmatter + first claim atomically) is worth a follow-up — I'll file it when you want, separate from the CRDT track.
+
+**Your live session:** the `alex-lee.md` spin-loop won't fix itself (stale in-memory `cycle_open`, `#suprecyclespin`). Quickest recovery: `agent-doc restart-supervisor tasks/professional/alex-lee.md` (or close/reopen that pane) — it's harmless log-spam otherwise (deferred = no action), but it blocks that supervisor from hot-reloading. I didn't kill it from here since it's another pane's route-owned supervisor.
+<!-- agent:boundary:c4184685 -->
 <!-- /agent:exchange -->
 ## Queue
 

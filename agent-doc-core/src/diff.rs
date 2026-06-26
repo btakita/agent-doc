@@ -354,6 +354,45 @@ fn is_recovery_artifact_line(content: &str) -> bool {
         || trimmed == "## User"
         || trimmed.starts_with("<!-- patch:")
         || trimmed.starts_with("<!-- /patch:")
+        || line_is_binary_authored_ipc_proof_diagnostic(trimmed)
+}
+
+/// `#ipcproofnostall`: recognize a binary-authored interrupted-cycle IPC-proof
+/// recovery diagnostic by its OWN unambiguous tokens, independent of whether its
+/// `### Re:` heading is still adjacent.
+///
+/// `preflight::format_ipc_dogfood_note` appends a `### Re: ... (interrupted-cycle
+/// recovery)` heading plus a fenced block that ends with the structured
+/// `ipc_proof_insufficient file=... invariant=... recovery=...` event line. When
+/// the block is intact the heading already classifies it as a `RecoveryArtifact`.
+/// But a post-commit worktree corruption (`#postcommit-ipc-worktree-corruption`)
+/// can reorder/separate the structured line out of the fenced block; on its own
+/// it would otherwise fall through to a `PromptTarget` at the exchange tail and
+/// falsely INTERRUPT the next `session-check` / `finalize`, stalling the queue.
+///
+/// Match is intentionally narrow: it keys off the binary-authored event token
+/// shape (`ipc_proof_insufficient` + structured `invariant=`/`recovery=` fields)
+/// or the note's literal self-description line. A genuine user prompt that merely
+/// mentions "ipc" / "drift" in prose does NOT match.
+pub fn line_is_binary_authored_ipc_proof_diagnostic(line: &str) -> bool {
+    let trimmed = line.trim();
+    // The structured fail-closed event line emitted by
+    // `write::materialize` / recorded in ops.log and folded into the dogfood
+    // note. Require the leading event token AND both structured fields so an
+    // arbitrary user sentence containing the phrase cannot match.
+    if trimmed.starts_with("ipc_proof_insufficient")
+        && trimmed.contains("invariant=")
+        && trimmed.contains("recovery=")
+    {
+        return true;
+    }
+    // The note's literal binary-authored self-description line.
+    if trimmed
+        == "This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle."
+    {
+        return true;
+    }
+    false
 }
 
 fn is_exchange_close_marker_line(content: &str) -> bool {
@@ -786,6 +825,18 @@ fn classify_prompt_bearing_block(
     if non_blank
         .first()
         .is_some_and(|line| is_recovery_artifact_line(line))
+    {
+        return Some(PromptBearingChangeKind::RecoveryArtifact);
+    }
+    // `#ipcproofnostall`: a binary-authored IPC-proof recovery diagnostic line
+    // anywhere in the block (e.g. after a post-commit worktree corruption
+    // separated it from its `### Re:` heading) keeps the block a RecoveryArtifact
+    // so it is never an unresolved user PromptTarget at the exchange tail. The
+    // marker is keyed off the structured event/self-description tokens, so a real
+    // user prompt that only mentions IPC/drift in prose still classifies normally.
+    if non_blank
+        .iter()
+        .any(|line| line_is_binary_authored_ipc_proof_diagnostic(line))
     {
         return Some(PromptBearingChangeKind::RecoveryArtifact);
     }
@@ -3326,6 +3377,74 @@ Done.\n\
         assert_eq!(
             changes[0].text,
             "### Re: missed patchback — gpt-5\nPatched after the fact."
+        );
+    }
+
+    // `#ipcproofnostall`: the binary-authored interrupted-cycle IPC-proof
+    // recovery diagnostic (heading + fenced block) must classify as a
+    // RecoveryArtifact and never as an unresolved user PromptTarget.
+    #[test]
+    fn classify_prompt_bearing_changes_marks_ipc_proof_diagnostic_block_as_recovery_artifact() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,12 @@\n\
+            ctx\n\
+            +### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc\n\
+            +\n\
+            +```text\n\
+            +**IPC proof issue dogfood log**\n\
+            +This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.\n\
+            +Issue class: `ipc_proof_insufficient`\n\
+            +ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle\n\
+            +```\n\
+            <!-- /agent:exchange -->\n";
+        let changes = classify_prompt_bearing_changes(diff);
+        assert!(
+            !changes
+                .iter()
+                .any(|change| change.kind == PromptBearingChangeKind::PromptTarget),
+            "intact IPC-proof diagnostic must not classify as a PromptTarget: {changes:?}"
+        );
+    }
+
+    // The corruption case: a post-commit worktree corruption separated the
+    // `ipc_proof_insufficient` event line from its `### Re:` heading and fence,
+    // leaving the bare structured line at the exchange tail. It must STILL be a
+    // RecoveryArtifact, not the unresolved PromptTarget that stalls the queue.
+    #[test]
+    fn classify_prompt_bearing_changes_marks_separated_ipc_proof_line_as_recovery_artifact() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,5 @@\n\
+            ctx\n\
+            +ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle\n\
+            <!-- /agent:exchange -->\n";
+        let changes = classify_prompt_bearing_changes(diff);
+        assert!(
+            !changes
+                .iter()
+                .any(|change| change.kind == PromptBearingChangeKind::PromptTarget),
+            "a separated binary-authored ipc_proof_insufficient line must not be a PromptTarget: {changes:?}"
+        );
+        assert!(
+            changes
+                .iter()
+                .any(|change| change.kind == PromptBearingChangeKind::RecoveryArtifact),
+            "the separated diagnostic line must classify as a RecoveryArtifact: {changes:?}"
+        );
+    }
+
+    // Non-regression: a genuine unresolved user prompt at the exchange tail that
+    // happens to mention "ipc" and "drift" in prose must STILL be a PromptTarget.
+    // The exemption is token-specific, not keyword-broad.
+    #[test]
+    fn classify_prompt_bearing_changes_keeps_real_prompt_mentioning_ipc_as_prompt_target() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,5 @@\n\
+            ctx\n\
+            +The IPC drift keeps breaking my finalize — please diagnose the root cause and fix it.\n\
+            <!-- /agent:exchange -->\n";
+        let changes = classify_prompt_bearing_changes(diff);
+        assert!(
+            changes
+                .iter()
+                .any(|change| change.kind == PromptBearingChangeKind::PromptTarget),
+            "a real user prompt that mentions ipc/drift must remain a PromptTarget: {changes:?}"
         );
     }
 

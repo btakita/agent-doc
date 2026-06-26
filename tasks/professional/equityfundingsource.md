@@ -67,7 +67,18 @@ Done (EFS `a525660`, pushed). The borrower loan-summary view now shows the deal 
 - **Verification:** `bun run check` green — 1237 tests pass (4 new), browser + worker build clean. No production deploy (deploy held per your decision).
 
 Next queue head: `do [#dealcarousel-broker]` — continuing the drain.
-<!-- agent:boundary:91929c94 -->
+
+### Re: do [#dealcarousel-broker] — broker portal carousel — opus-4-8
+
+Done (EFS `aa05ac5`, pushed). The broker pipeline deal-detail card now shows the deal photo carousel + house placeholder. **All four portals are complete.**
+
+- **Server:** `broker/routes.ts` batches each pipeline deal's `loan_id` → `investment_deals` → public `deal_photos` and attaches a `photos` array. New route `GET /api/broker/deal-photos/:id/download` serves a photo **only if** `visibility='public'` AND it belongs to a deal on a loan the broker submitted (`broker_deals.broker_user_id` ownership join).
+- **Client:** `broker/my_pipeline.tsx` renders the shared `<DealPhotoCarousel>` (220px) in the deal-detail card.
+- **Security rule** pure `broker_deal_photo_download_allowed_`, unit-tested in `tests/broker-deal-photo-download.test.ts`.
+- **Verification:** `bun run check` green — 1241 tests pass (4 new), browser + worker build clean.
+
+**Feature complete (lender, admin, borrower, broker):** shared `DealPhotoCarousel` + house placeholder, each non-admin portal serving public photos via its own auth-scoped download route. `deploy` remains held per your decision — all four phases have now landed, so the full feature is ready to deploy whenever you give the go (`bun run deploy:worker`).
+<!-- agent:boundary:7d9090d2 -->
 <!-- /agent:exchange -->
 ###
 <!--

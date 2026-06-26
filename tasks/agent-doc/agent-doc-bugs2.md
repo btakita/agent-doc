@@ -267,7 +267,19 @@ Agreed, and this is the right thing to demand. Two parts — and the gap isn't w
 I filed **`#ipcproofnostall`** to root-cause + close it (it touches the critical closeout gate for *every* session, so it gets a careful focused cycle + regression tests proving a *real* unresolved user prompt is still caught — not an end-of-session rush). This pairs with the staleness fix I already landed this session (`#supstaledetect`, on branch). The broader "reliable unattended drain" theme already spans ~25 plan files (`plan-go-queue-stall*`, `plan-jb-run-agent-doc-stall*`, `plan-no-change-after-stalled-cycle`, …) — `#ipcproofnostall` is the specific contributor I can prove from this session's logs.
 
 Net: restarts *do* resume; the overnight stall is the **false closeout-interrupt**, and that's the lever.
-<!-- agent:boundary:f53d4962 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=640e5b9a-efc2-4962-8067-4a80122acce6 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=39542 candidate_hash=d1733d49e1657d98c02f2d8905bbada8604d0a4d6bc41f9b125054ddb35f346f content_ours_len=41498 content_ours_hash=d28ccf40bccb96dc1b227cce17614bf71f89a663a6367b998ee7a4466b1bd91e doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782460175499
+```
+<!-- agent:boundary:a7d3a2d0 -->
 <!-- /agent:exchange -->
 ## Queue
 

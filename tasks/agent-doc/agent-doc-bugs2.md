@@ -251,14 +251,14 @@ Why preflight was wrong: the dogfood flow is **edit → build → install → ve
 **The actual bug + fix (`#supstaledetect`):** I fixed the false positive by unifying the preflight warning onto the *same source-file-mtime basis the auto-install already uses*, so the two signals can never disagree again. **Code-complete, `make check` green**, committed in an isolated worktree as agent-doc `b983f144` on branch `supstaledetect-mtimebasis` (no install/recycle — I won't disrupt the live supervisor mid-drain). It adds a regression test locking in "binary built after the source edit but before the commit ⇒ NOT stale." Filed `#supstaledetect` (merge → install → verify) and `#suptmuxstale` (your other request: show supervisor-stale status in the tmux pane's "turn in progress" notification) to the backlog.
 
 Net: the auto-restart machinery was actually working (the supervisor recycled fine); the **signal that tells you whether you need to restart** was the broken part, and that's what I fixed.
-<!-- agent:boundary:c103e0b3 -->
+<!-- agent:boundary:a7df6480 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: You keep on deleting my queue items. The merges are very unstable.~~
-- ~~:pushpin: As I type in the queue, a previous state of the line is duplicated.~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 ~~:pushpin: As I type in the queue, a previous state of the line is duplicated.~~ — auto-struck: answered this cycle (#ftstrike)
 - The supervisor restart should reliably resume any running turns. In fact all restarts should reliably resume any running turns. This is crucial when I want to go to sleep and there is a long queue. I want the entire queue finished...not stalled.
 - ~~I'm confused over what sessions are running a stale supervisor. Please make the supervisor auto-restart at the first possible chance automatically.~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: JB `Recycle Supervisor` then JB `Run Agent Doc` stalls because the recycle is scheduled to run after the turn starts. But `Run Agent Doc` cannot start the turn.

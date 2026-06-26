@@ -81,7 +81,22 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=797d9455-a794-43b0-a4b6-cf5022885e58 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=12484 candidate_hash=988b2f780fb6ce88728f57bdaac3a6ff07ed864c3d537c92cb9f4c11e292dfec content_ours_len=12487 content_ours_hash=fc18a34bd8fcea52b8906befe6df2d0582cc29be0fab6130e5cec1682f03410b doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782454481404
 ```
-<!-- agent:boundary:f32330c2 -->
+
+### Re: do [#cdtcutover] — picking up after Codex — opus-4-8
+
+Codex finished the groundwork and restarted right *before* the cutover, so there was no WIP to recover: the submodule is clean at `80a65b60`, all four prerequisites (`#cdtdedup`/`#lzapplytree`/`#cdtupdate`/`#cdtsem`) are committed-done, and no `#cdtcutover` gate or wiring existed yet. So "picking up" = starting the cutover itself.
+
+Did it in an **isolated worktree** (`src/agent-doc-cdtcutover-wt`, branch `cdtcutover`, off `80a65b60`) to keep the live route-owned supervisor untouched — **no install / recycle / push**.
+
+**Landed — read-side, gated, default-OFF (commit `9ca8838c`):**
+- Gate `cell_doc_cutover_enabled()` → env `AGENT_DOC_CELLDOC_CUTOVER` (off ⇒ runtime byte-identical to HEAD).
+- `CellDocCutoverCache`: a doc-keyed persistent `CellDocTree` built once via `from_document`, then advanced with `update_to` **per-node deltas** on each revision, reading the memoized `unresolved_prompt_counts()` `SemTree` — the evented model, exposed at an orchestration wiring point (`queue_continuation.rs`) for the drainable/unresolved-prompt computation.
+- Parity tests prove the evented cache == eager total across Insert/Remove/Update/Move/multi-component sequences, document isolation, and gate-routing. `make check` + `cargo build --release` both green; additive only (no existing assertions changed).
+
+**Deferred — write-side finalize hook (b):** the live merge seam (`crdt::merge`/`merge_3way`/`merge_by_component`) is stateless text-in/text-out per cycle, with no persistent `CellDocTree` threaded through finalize. Driving finalize through `update_to` needs a supervisor/process-lifetime cache + revision-hash invalidation against the supervisor's concurrent out-of-band writes + a `from_document` fallback — its own rung, filed below.
+
+**Remaining for `#cdtcutover` (operator-gated):** the branch is *not* merged/installed (worktree isolation). The live flip — merge `cdtcutover`, consume the accessor in the live drainable path, land the write-side, then the live editor/pane zero-regression proof — is the operator-gated step.
+<!-- agent:boundary:cd57dc24 -->
 <!-- /agent:exchange -->
 
 ## Queue

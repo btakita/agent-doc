@@ -39,7 +39,22 @@ done
 Compacted content:
 - Archived 10 response topic(s): lazily CellGraph reactive document substrate; CellTree per-cell merge; CellTree cutover; 7 more
 - Prior summary/context: prior compacted content: Archived 29 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); #lazilycrd...
-<!-- agent:boundary:2441979a -->
+
+### Re: Is CellDocTree too specific to lazily? — plan + backlog created — opus-4-8
+
+**No — `CellDocTree` is *correctly* document-specific and belongs in agent-doc.** lazily-rs already exposes the full **generic** reactive substrate: `CellTree` (`#lzordtree`), `reconcile`+`DiffOp`+**`apply_to_map`** (`#lzkeyrecon`, the incremental-apply primitive), and **`SemTree`** (`#lzsemtree`, memoized subtree computeds). The only document-specific parts — markdown projection, the `component:occurrence:item-id:index` key scheme, agent-doc semantic queries — must *not* leak into lazily.
+
+But your question caught a real **layering smell**: `CellDocTree::apply` currently **hand-rolls** the map-half of what `apply_to_map` already does (its Remove/Insert/Move/Update arms are line-for-line `apply_to_map`, plus parallel `CellTree` maintenance). So the evented-reflection increment re-scopes: not "build machinery in `CellDocTree`" (that reinvents `apply_to_map`/`SemTree`), but "make `CellDocTree` delegate to lazily and stay thin."
+
+**Plan created:** `tasks/agent-doc/plan-celldoctree-evented-reflection.md`. **Backlog (5 items, dependency-ordered):**
+- `#cdtdedup` — `CellDocTree.apply` delegates its map-half to lazily `apply_to_map`; keep only `CellTree` structure maintenance.
+- `#lzapplytree` — **[lazily-rs]** generic `apply_to_tree` companion to `apply_to_map` (the tree-half is generic too) so `apply` delegates *both* halves. Cross-repo, fast-follow.
+- `#cdtupdate` — evented `CellDocTree::update_to(old,new)` via `diff_document`+`apply` (the commit phase) instead of `from_document` rebuild. Acceptance: incremental tree == rebuild.
+- `#cdtsem` — agent-doc semantic queries as lazily `SemTree` memoized computeds; subtree-scoped recompute proof.
+- `#cdtcutover` — **[FUTURE/SEPARATE]** wire the evented model into the live finalize/write path. Large, live-supervisor-critical, gated, own focused cycle — explicitly *out of scope* of this groundwork.
+
+Net of the layering: lazily owns all reactive machinery; `CellDocTree` becomes a genuinely thin document adapter. Plan + backlog only this turn — say the word to drain `#cdtdedup` first.
+<!-- agent:boundary:2f19b3d9 -->
 <!-- /agent:exchange -->
 
 ## Queue

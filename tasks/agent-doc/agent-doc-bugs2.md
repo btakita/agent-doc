@@ -307,7 +307,17 @@ One honest note on timing: *this* turn's finalize still ran on the pre-interlock
 The one thing only you can close on Phase A is the live zero-drift eyeball — drive a recycle in the `preflight→finalize` window on a live editor and confirm no `live_prompt_drift_after_preflight`. I gated `#midturn-recycle-resume` on exactly that.
 
 Still on its own branch, untouched: `#supstaledetect` (the false `stale_install` warning, `supstaledetect-mtimebasis` b983f144) — say the word and I'll bundle it into the next install.
-<!-- agent:boundary:b4ec8c63 -->
+
+### Re: do [#qimpstrike] — recurring-imperative heads no longer auto-struck — opus-4-8
+
+Fixed. The bug: a queued `deploy` (or `commit`/`push`/`build`/…) was silently `~~struck~~` instead of dispatched — two mechanisms retired it as "already done": the `#qftbklgstrike` lexical done-match (a lone common verb scores close to many prior done items) and the `#qheadresidue` residue guard (once a response echoed it).
+
+The fix adds **one** canonical classifier — `is_recurring_imperative_head` in `queue_continuation.rs` (the recurring deploy/release-cycle verb set + recurring-command preset tokens, "dominated by" a leading verb) — and wires **both** strike sites to it: the `#qftbklgstrike` scorer in `memory_cmd.rs` and the `#qheadresidue` guard in `queue_head_provenance_guards.rs` skip recurring-imperative heads entirely, so the head stays **drainable** and is dispatched through the normal command path, struck only once actually executed this cycle. Single source of truth — no divergent second verb list.
+
+Critically, the legitimate `#qftbklgstrike` behavior is preserved: a free-text head that *restates a specific completed tracked task* still strikes — proven by a dedicated non-regression test ("fix the deploy script so it retries…" still matches its done `#deployretry`).
+
+Code-complete on branch `qimpstrike-fix` (`ac466a74`), `make check` green (5375 passed). Gated pending your merge/install nod — I'll bundle it with `#supstaledetect` when you want them live (keeping installs off the live supervisor until you've verified Phase A).
+<!-- agent:boundary:874557b1 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -321,6 +331,17 @@ Still on its own branch, untouched: `#supstaledetect` (the false `stale_install`
 - :pushpin: When I change the agent, the supervisor state should pick up the change and be able to dispatch to the new agent.
 - :pushpin: Getting several JB `File Cache Conflict` dialogs.
 - :pushpin: test #queuebase
+---
+The session mechanics still don't work on a new linkedin.md session. I compacted the exchangebefore I began the turn.
+```
+  Heads-up on the session mechanics (no action needed, but worth knowing): this doc had been compacted out-of-band, so
+  the live supervisor's in-memory CRDT still held the full 39KB pre-compaction history. On first finalize it
+  re-injected that as content_ours and mangled my response on the fallback disk write. I recovered by rebuilding the
+  clean content on disk, doing a full reset --from-current (no --preserve-session) to drop the stale CRDT, and
+  committing directly — then clearing the answered queue head once the CRDT was clean. The committed result is correct
+  and complete.
+```
+---- 
 - :pushpin: do [#qftloss]
 - :pushpin: do [#qeditdup]
 - :pushpin: do [#crdtauth6]
@@ -334,6 +355,7 @@ Still on its own branch, untouched: `#supstaledetect` (the false `stale_install`
 - do [#suptmuxstale]
 - do [#ipcproofnostall]
 - ~~do [#midturn-recycle-resume]~~
+- do [#midturnresumeb]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -364,7 +386,6 @@ What are #next-steps to fix bugs?
 - [ ] [#ipcproofnostall] Overnight queue stalls on a FALSE closeout-interrupt: session-check INTERRUPTS on the binary-authored ipc_proof_insufficient diagnostic, classifying it as an "unresolved prompt-bearing user change" (hit 3x in session b26b9957 on 2026-06-26). An exemption already exists — is_binary_authored_recovery_diagnostic_heading (session_check/closeout_guards.rs:840) is meant to make the diff classifier treat the "### Re: ...interrupted-cycle recovery" block as a RecoveryArtifact, never a PromptTarget — but it has an edge-case HOLE: likely the postcommit CRDT corruption (#postcommit-ipc-worktree-corruption) separates the ipc_proof_insufficient line from its protective ### Re: heading so the bare line classifies as prompt-bearing, OR a stale cycle-state prompt_target from a prior cycle persists the line. Root-cause which, then close it in diff classify_prompt_bearing_changes / the cycle-state prompt_targets path. CRITICAL closeout gate (every session) — add regression tests proving a REAL unresolved user prompt is still caught. Serves the operator directive "all restarts should reliably resume running turns / finish the overnight queue, not stall."
 - [ ] [#supstaledetect] stale_install warning false-positives in the dogfood edit->build->install->commit flow: it compared artifact mtime to the HEAD commit timestamp (300s grace), but the binary is always built BEFORE its covering commit, so an ~11min build->commit gap (binary 03:16:22 vs commit 03:27:51) flagged a FRESH binary as stale — disagreeing with the auto-install signal, which uses newest source-FILE mtime and correctly saw it fresh. FIX CODE-COMPLETE on branch supstaledetect-mtimebasis (agent-doc commit b983f144, make check green): warning now uses newest_crate_source_mtime_secs (same basis as auto-install). Remaining: merge -> install -> verify the false warning is gone AND genuine staleness still flags.
 - [ ] [#suptmuxstale] Observability (operator request): surface supervisor-out-of-date status in the tmux pane — the upper "turn in progress" notification is a good spot — so the operator can see at a glance which sessions run a stale supervisor. Pairs with #supstaledetect for a reliable signal; the binary_stale probe is already published in idle_watch (process_binary_is_stale).
-- [ ] [#qimpstrike] Recurring imperative queue heads (deploy/commit/push/build/install/release) are auto-struck instead of processed: #qftbklgstrike (memory_cmd.rs) lexically matched a free-text `deploy` head to a done item (#do-id-closeout-open-backlog, 2.050) and struck it, and #qheadresidue (queue_head_provenance_guards.rs) struck it again from a Queue prompt echo — so the operator deploy directive was retired with no deploy run. Fix: classify recurring-imperative verbs as executable directives, exempt them from #qftbklgstrike done/backlog match AND the #qheadresidue residue guard, keep them drainable (dispatch via queue_dispatch.rs), and never auto-strike a short one-word head on a Done match. Plan: tasks/agent-doc/plan-queue-recurring-imperative-head-wrongly-struck.md
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
 - [ ] [#qftloss] [operator-verify] Free-text prompt loss (mode-6) — CODE-COMPLETE on main (8b900bf4): binary now journals operator prompts from the plugin live-buffer sidecar (.agent-doc/live-buffer/<hash>) into the #qdurcrash store before any convergence/recovery can clobber the unsaved buffer, replayed if absent. Remaining: live IDE eyeball that an unsaved prompt typed during a concurrent finalize survives end-to-end. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
@@ -377,6 +398,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#qimpstrike] DONE (code-complete, branch qimpstrike-fix ac466a74, make check green 5375 tests) — recurring-imperative queue heads (deploy/commit/push/build/install/release/test/sync/recycle/publish + preset tokens) were auto-struck instead of dispatched. Fix: single canonical classifier is_recurring_imperative_head (queue_continuation.rs) wired into BOTH strike sites (#qftbklgstrike lexical scorer in memory_cmd.rs AND #qheadresidue residue guard) so they skip recurring-command heads; the head stays drainable + is dispatched through the normal command path, struck only once actually executed. Non-regression test proves a genuine restatement-of-tracked-work head still strikes. Remaining: merge -> install (operator nod; bundle with #supstaledetect). Plan: tasks/agent-doc/plan-queue-recurring-imperative-head-wrongly-struck.md
 - [/] [#midturn-recycle-resume] Phase A DONE — cycle-open recycle interlock: execve recycle/restart now defers every arm (auto/admin/wedge-escalation/fresh-binary-flush) while an agent-doc cycle is open or IPC is in-flight, so a recycle can no longer fire mid preflight->finalize and sever the in-flight finalize (the live_prompt_drift_after_preflight wedge root cause). Merged agent-doc main 27bf61a6, installed, supervisor recycle-marked. make check green + unit/SimWorld coverage. Remaining = operator live zero-drift eyeball: drive a recycle in the preflight->finalize window on a live editor, confirm NO live_prompt_drift_after_preflight. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
 <!-- /agent:review -->
 

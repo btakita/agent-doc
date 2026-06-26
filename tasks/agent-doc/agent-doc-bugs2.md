@@ -26,7 +26,6 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -109,7 +108,35 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=78a48844-d557-490a-a7e2-a9295c7fcee2 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=15000 candidate_hash=bff254e41920db638676256c3d7f751c3494536bdeb47e4a4429e4ad25b89f12 content_ours_len=16399 content_ours_hash=2aa6f5042888ad737f237efdae7bb0bc022b4f7598518c7c8f494b07cd73fd91 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782455606328
 ```
-<!-- agent:boundary:01123345 -->
+
+### Re: Can we verify the [operator-verify] backlog items from logs? — opus-4-8
+
+> **Queue prompt:** look in logs to see if we can verify [operator-verify] items in the backlog
+
+I audited `ops.log` (3.6M lines) + the `.agent-doc/state` markers against each of the 5 `[operator-verify]` backlog items. The question that matters for your "I test, you check the logs" division of labor is: **does the binary already emit a marker adequate to prove/disprove each item from a log?** Verdict: **3 of 5 are log-verifiable now, 1 needs your live drive to populate an existing marker, 1 has a real logging gap.**
+
+| Item | Proof marker(s) the binary emits | Fired in prod? | Log-verifiable? |
+|------|----------------------------------|----------------|-----------------|
+| **#qftloss** | `live_buffer_addition_authoritative`, `queue_consume_head_divergence_reconciled reason=live_buffer_addition_authoritative`, `#qdurcrash` journal | **YES** — 34× incl. real agent-doc-bugs2 / corky / lazily-rs cases where an unsaved live-buffer prompt was preserved over the snapshot | ✅ **adequate** |
+| **#qeditdup** | `postcommit_queue_reconciled reason=stale_editor_queue_resurrection`, `free_text_head_struck` (79×), `auto_struck_answered` (79×) | **YES** — 6× resurrection-reconcile events (the fix actively catching + reconciling stale-editor queue resurrections) | ✅ **adequate** |
+| **#kj5flive** | `file_cache_conflict_detected source=… outcome=… surface=… document_stamp=… file_stamp=…`, `lazilystatesync` (34×) | **YES** — 1 structured FCC event (`source=jetbrains outcome=pending surface=editor_ipc_convergence`) + statesync traffic | ✅ **adequate** (drive attach/detach to populate `outcome=` resolutions) |
+| **#nsfz** | `startup_miss_recorded reason={no_prompt\|capability_proof\|clear_cooldown} deadline_secs=` + stderr `session did not become dispatch-ready in Ns` | **NO — 0×** | ⚠️ **verifiable once you drive it** — marker code is present (`start.rs::record_session_startup_miss`) but the deadline path has **never executed**; the 16 `did not become dispatch-ready` hits in the log are all the item's own description echoed in queue diffs, not real emissions |
+| **#crdtauth6** | *(none on the live JB→cdylib delta path)* | **NO** — grep for `replica_open` / `apply_local` / `forward_local_delta` / `register` returns zero live emissions | ❌ **logging GAP** — even a live test couldn't be checked from logs |
+
+### What this means for your test pass
+
+- **#qftloss, #qeditdup, #kj5flive — go ahead and test; I can verify from logs.** The markers already fire in production. When you type a prompt during a finalize and it survives → I look for `live_buffer_addition_authoritative`. When a struck/deleted queue item *doesn't* come back → `postcommit_queue_reconciled reason=stale_editor_queue_resurrection`. When the FCC dialog does/doesn't appear → `file_cache_conflict_detected … outcome=…` with the document/file stamps. These three satisfy your "adequate logging to prove/disprove" directive **today**.
+
+- **#nsfz — the logging is adequate, it just needs the live drive.** Drive a genuinely hung / auth-walled harness that never reaches a dispatch-ready prompt. Success looks like the stderr line `[agent-doc] session did not become dispatch-ready in 30s (no_prompt) …` **and** an ops.log `startup_miss_recorded reason=no_prompt deadline_secs=30` line within the deadline. Right now that marker has fired **zero** times, so the path is unproven only because it's never been exercised — not because it's missing. (Minor nicety, not blocking: the persisted `state/startup-miss/*.json` marker is written with `origin=FreshStart` for *both* ordinary starts and deadline fail-closes, so the distinguishing evidence lives only in the ops.log `startup_miss_recorded reason=…` line. A `StartupMissOrigin::StartupDeadline` variant would make the structured marker self-describing — optional.)
+
+- **#crdtauth6 — this is the one genuine logging-adequacy gap.** The Rust `RelayHub` / FFI fan-out (Phase 5/6) is SimWorld-proven, but the **live editor → cdylib delta path** (JB `DocumentListener` → `forwardLocalDelta` → Kotlin Unix-socket `ReplicaTransport` → `applyRemoteUpdate`) emits **no marker the binary logs**. So if you wire it live and test, there's nothing in the log to prove deltas actually flowed. That observability has to be added **as part of building that live binding** (register / deregister / forward-delta / apply-remote markers) — it can't be added ahead of the code that doesn't exist yet. Recommend folding "emit IPC delta-path markers" into the #crdtauth6 live-hookup focused cycle so the result is log-verifiable from the start.
+
+**Net:** your standing directive — "make sure all JB live-gate items have adequate logging to prove/disprove" — is **met for 4 of 5**. #qftloss / #qeditdup / #kj5flive have proven markers; #nsfz has the marker and just needs the live drive. **#crdtauth6 is the only item where I'd recommend adding instrumentation**, and that lands naturally with its live binding.
+
+I did not file new backlog items or touch the queue (avoiding the edit-during-turn churn you flagged) — this is the log-side audit you asked for; the two recommendations above are yours to act on. No agent-drainable heads remain after this one (the other four are your live-test gated items), so the in-session loop stops here.
+
+> ⚠️ Note: preflight flagged the route-owned **supervisor (pid 328292) is running a STALE binary** (launched 0.34.48, newer installed) — it can keep producing File Cache Conflict / IPC-drift dialogs that would muddy your live #kj5flive / #qeditdup repros. I'll `admin recycle` it after this commit so you test against the fresh binary.
+<!-- agent:boundary:9901e3a5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -117,12 +144,13 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 [#cdtcutover]
-- look in logs to see if we can verify [operator-verify] items in the backlog
+- ~~look in logs to see if we can verify [operator-verify] items in the backlog~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#qftloss]
 - do [#qeditdup]
 - do [#crdtauth6]
 - do [#nsfz]
 - do [#kj5flive]
+- In the tmux pane, show if the supervisor is out of date. In the upper notifiaction that shows "turn in progress" is a good place.
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -149,7 +177,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
+- [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
 - [ ] [#qftloss] [operator-verify] Free-text prompt loss (mode-6) — CODE-COMPLETE on main (8b900bf4): binary now journals operator prompts from the plugin live-buffer sidecar (.agent-doc/live-buffer/<hash>) into the #qdurcrash store before any convergence/recovery can clobber the unsaved buffer, replayed if absent. Remaining: live IDE eyeball that an unsaved prompt typed during a concurrent finalize survives end-to-end. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#qeditdup] [operator-verify] Queue items duplicated + manually-struck/deleted items resurrected when the operator edits the queue during an active turn. #queuestatemachine idempotent convergence + the Live<Struck lattice (merged, 0.34.48) should resolve this — VERIFY on the recycled binary; if it persists live, a deeper editor-edit-during-cycle guard is needed. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#crdtauth6] [operator-verify] crdtauth5 live hookup: thin JB DocumentListener calling CrdtReplicaForwarder.forwardLocalDelta + a Kotlin Unix-socket ReplicaTransport client (writes NDJSON register/deregister/update, delivers inbound update_b64 to applyRemoteUpdate); plus the deferred VS Code koffi replica seam (editors/vscode/src/native.ts out-param marshaling). Rust fan-out + Kotlin seam already merged + tested. Plan: tasks/agent-doc/plan-crdt-authority-model.md

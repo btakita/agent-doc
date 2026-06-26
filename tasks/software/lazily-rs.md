@@ -437,7 +437,54 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/software/lazily-rs.md source=socket_ack_content patch_id=eecac5cf-d1fe-42f0-89e4-e9a76356161b invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=52508 candidate_hash=50519a874f590e86c54d3bd821dbb1a82b69836a4e5436803a1201c8825ff37e content_ours_len=55637 content_ours_hash=27e34887a4f29b337afd55cd2dc1dcf48424aa3b8d44c454201b36190b952183 doc=lazily-rs session=3d9ff8e4-bafd-4e1f-b48d-550d3c976904 turn=cycle-1782431613856
 ```
-<!-- agent:boundary:35fc5210 -->
+
+### Re: Cut + paste and undo — opus-4-8
+
+Both fall straight out of the substrate already built — and undo is, pleasingly, the reason `SeqCrdt`'s tombstone is LWW-revivable rather than sticky (last cycle's tombstone answer).
+
+**Cut + paste.** Split by what's being moved, exactly as the identity discussion split anchored vs free:
+
+- **Cut + paste of a *node / subtree* (anchored, keyed)** is a **move**, not delete+insert. This is the whole reason `#lzcellmove` (atomic move) + the move-aware `#lzseqcrdt` exist: the cut node keeps its stable `Id`, value cell, dependents, and CRDT lineage; reconciliation emits a `Move` op (or `Move`+reparent across subtrees), not remove-all+insert-all. Represent it as delete+insert and you lose identity — the failure mode the substrate is designed around.
+  - **Concurrency is already verified:** two writers cut+paste the same node to different places → the position is an LWW register by HLC stamp, so the **later move wins, with no duplication** (`#lzseqcrdt` tests: `concurrent-move-later-wins`, `move-no-duplication`). A concurrent move + value-edit of the same node both apply (independent registers).
+- **Cut + paste of *free text* (a character run)** is, by default, **delete + insert**: in `TextCrdt` a char's identity *is* its `OpId` + left-origin, so you can't atomically relocate a run — the cut chars become tombstones and the paste mints **new** elements (new `OpId`s) at the paste point. Visually identical, new identity. If you want a text *run* to survive a move with lineage (rare), you'd add a run-level move primitive on top — a "re-home this span's origins" op analogous to `#lzcellmove`, but the honest default is: pasted text is new text.
+
+So same-doc structural cut+paste is cheap and lineage-preserving (one move op); text cut+paste is delete+insert by design. The dividing line is identity, same as everywhere else in this session.
+
+**Undo.** In a CRDT, undo is **not** "roll back to a prior snapshot" (undefined under concurrency) — it is **applying the inverse op as a brand-new op** with a fresh HLC stamp, which then merges like any other edit:
+
+| Op | Inverse (undo) |
+|---|---|
+| insert node | tombstone it |
+| delete node | **un-tombstone** it |
+| move A→B | move B→A |
+| set value v→w | set w→v |
+| insert char (text) | tombstone char |
+| delete char (text) | **re-insert** a new char at same origin |
+
+- **This is why `SeqCrdt.deleted` is an LWW `bool`, not sticky.** Undo of a structural delete must *un-tombstone* — set `deleted=false` with a later stamp. A 2P-Set sticky tombstone would make a structural delete **un-undoable**. So the LWW-revivable choice from last cycle isn't just for cut-and-re-paste; it's the enabling primitive for **undo of deletes**. (`TextCrdt`'s sticky tombstone can't un-delete, so text-undo re-inserts a new char — fine, identity isn't promised for prose.)
+- **Per-actor / selective undo works** because every op carries actor + `OpId`: "undo *my* last op" finds your op and applies *its* inverse, even if other writers edited in between (Yjs `UndoManager` does exactly this — scope the inverse to an origin). Redo = undo of the undo.
+- **Undo stays on the lazy-pull property:** an inverse op is just another minimal per-cell op, so only the undone node's cell + its dependents recompute — undo cost scales with what was undone, not the document.
+- **Undo of a move is a move back** — atomic, lineage-intact. If move were delete+insert, undo would resurrect the node with a *new* identity (broken dependents). One more reason `#lzcellmove` is the keystone.
+
+```mermaid
+flowchart LR
+    subgraph CutPaste["cut + paste"]
+      M["structural node<br/>= atomic Move (keeps Id)"]
+      X["free text run<br/>= delete + insert (new OpIds)"]
+    end
+    subgraph Undo["undo = inverse op, new HLC stamp"]
+      I["delete → un-tombstone<br/>(needs LWW-revivable SeqCrdt)"]
+      J["move A→B → move B→A"]
+      K["text delete → re-insert new char"]
+    end
+    M --> J
+    X --> K
+```
+
+**Single-producer note:** in a normal (one-writer) agent-doc session this is all the editor's native cut/paste/undo over the IPC Snapshot/Delta mirror — no CRDT involved. The op-inverse model above is the **multi-writer** (`distributed`) answer, where "undo" can't mean "revert" because someone else may have edited concurrently.
+
+**Re queued `do [#2ygp]` (`#lztombgc`, tombstone GC):** correctly gated, not drained this cycle — the queue is operator-paused and, more substantively, the agent-doable trigger for GC ("all replicas are aware") requires the **causal-stability watermark**, which needs the multi-replica anti-entropy/sync transport from **#lzcrdtplane** (still in review) to even know what each replica has observed. Without that transport there's no watermark to compute against. The agent-doable slice that *doesn't* need the plane is the **local compaction primitive** (given an externally-supplied stable watermark, drop retired `SeqCrdt` entries + compact stable `TextCrdt` RGA runs). Say the word and I'll build that watermark-driven compaction half now; the "all-replicas-aware" detection lands with #lzcrdtplane.
+<!-- agent:boundary:efddaf81 -->
 <!-- /agent:exchange -->
 ###
 <!--

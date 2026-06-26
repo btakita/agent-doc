@@ -232,15 +232,35 @@ After the recycle, **the typing-slowdown / line-duplication / queue-eating set (
 - **#6 (`File Cache Conflict` dialogs)** — should subside once the cdylib is read-only + on the fresh binary; verify after recycle.
 
 I finalized this diagnosis *before* installing so the write crossed the still-matched stale pair (no finalize drift); the install + recycle run immediately after.
-<!-- agent:boundary:50c4391e -->
+
+### Re: "make the supervisor auto-restart automatically / I'm confused which sessions are stale" — found the false-positive, fixed it — opus-4-8
+
+> **Queue prompt:** I'm confused over what sessions are running a stale supervisor. Please make the supervisor auto-restart at the first possible chance automatically.
+> **Queue prompt:** You keep on deleting my queue items. The merges are very unstable.
+> **Queue prompt:** As I type in the queue, a previous state of the line is duplicated.
+
+Your confusion was justified — **the staleness signal was lying.** Two checks in the codebase compute "is the binary stale?" on *different bases* and disagreed:
+
+- **Auto-install** (idle_watch) compares the newest source **file mtime** vs the binary mtime. It correctly saw the binary as fresh and stopped rebuilding.
+- **Preflight `stale_install` warning** compared the binary mtime vs the **HEAD commit timestamp** (5-min grace). It screamed "stale."
+
+Why preflight was wrong: the dogfood flow is **edit → build → install → verify → *then* commit**, so the binary is *always* built before the commit that covers it. This session: op_capture.rs written `03:14`, binary built `03:16:22`, but commit `28740e76` wasn't created until `03:27:51` — an **11-minute** build→commit gap that blew past the 300s grace. So preflight flagged a binary that **already contained the fix** as "predating commit 28740e76." `git commit` doesn't touch file mtimes, so the binary genuinely had the code; only the *commit object* was younger. My `make install` earlier just bumped the mtime past the commit time — it silenced the warning without changing a byte of behavior.
+
+**This session is now provably fresh:** the route-owned supervisor (pid 1777115) re-exec'd in place onto the installed binary — `/proc/1777115/exe` maps inode `95839507`, byte-identical to `~/.cargo/bin/agent-doc`. The recycle preserves the pid, which is why it *looked* unchanged. The `28740e76` per-keystroke memoize fix is live in the running supervisor, so **#2y8j is now ready for your typing-burst eyeball.**
+
+**The actual bug + fix (`#supstaledetect`):** I fixed the false positive by unifying the preflight warning onto the *same source-file-mtime basis the auto-install already uses*, so the two signals can never disagree again. **Code-complete, `make check` green**, committed in an isolated worktree as agent-doc `b983f144` on branch `supstaledetect-mtimebasis` (no install/recycle — I won't disrupt the live supervisor mid-drain). It adds a regression test locking in "binary built after the source edit but before the commit ⇒ NOT stale." Filed `#supstaledetect` (merge → install → verify) and `#suptmuxstale` (your other request: show supervisor-stale status in the tmux pane's "turn in progress" notification) to the backlog.
+
+Net: the auto-restart machinery was actually working (the supervisor recycled fine); the **signal that tells you whether you need to restart** was the broken part, and that's what I fixed.
+<!-- agent:boundary:c103e0b3 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 :pushpin: You keep on deleting my queue items. The merges are very unstable.
-- :pushpin: As I type in the queue, a previous state of the line is duplicated.
-- I'm confused over what sessions are running a stale supervisor. Please make the supervisor auto-restart at the first possible chance automatically.
+- ~~:pushpin: You keep on deleting my queue items. The merges are very unstable.~~
+- ~~:pushpin: As I type in the queue, a previous state of the line is duplicated.~~ — auto-struck: answered this cycle (#ftstrike)
+- The supervisor restart should reliably resume any running turns. In fact all restarts should reliably resume any running turns. This is crucial when I want to go to sleep and there is a long queue. I want the entire queue finished...not stalled.
+- ~~I'm confused over what sessions are running a stale supervisor. Please make the supervisor auto-restart at the first possible chance automatically.~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: JB `Recycle Supervisor` then JB `Run Agent Doc` stalls because the recycle is scheduled to run after the turn starts. But `Run Agent Doc` cannot start the turn.
 - :pushpin: When I change the agent, the supervisor state should pick up the change and be able to dispatch to the new agent.
 - :pushpin: Getting several JB `File Cache Conflict` dialogs.
@@ -254,6 +274,8 @@ I finalized this diagnosis *before* installing so the write crossed the still-ma
 - :pushpin: do [#qimpstrike]
 - :pushpin: do [#2y8j]
 - do [#cdtcutover]
+- do [#supstaledetect]
+- do [#suptmuxstale]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -280,6 +302,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#supstaledetect] stale_install warning false-positives in the dogfood edit->build->install->commit flow: it compared artifact mtime to the HEAD commit timestamp (300s grace), but the binary is always built BEFORE its covering commit, so an ~11min build->commit gap (binary 03:16:22 vs commit 03:27:51) flagged a FRESH binary as stale — disagreeing with the auto-install signal, which uses newest source-FILE mtime and correctly saw it fresh. FIX CODE-COMPLETE on branch supstaledetect-mtimebasis (agent-doc commit b983f144, make check green): warning now uses newest_crate_source_mtime_secs (same basis as auto-install). Remaining: merge -> install -> verify the false warning is gone AND genuine staleness still flags.
+- [ ] [#suptmuxstale] Observability (operator request): surface supervisor-out-of-date status in the tmux pane — the upper "turn in progress" notification is a good spot — so the operator can see at a glance which sessions run a stale supervisor. Pairs with #supstaledetect for a reliable signal; the binary_stale probe is already published in idle_watch (process_binary_is_stale).
 - [ ] [#qimpstrike] Recurring imperative queue heads (deploy/commit/push/build/install/release) are auto-struck instead of processed: #qftbklgstrike (memory_cmd.rs) lexically matched a free-text `deploy` head to a done item (#do-id-closeout-open-backlog, 2.050) and struck it, and #qheadresidue (queue_head_provenance_guards.rs) struck it again from a Queue prompt echo — so the operator deploy directive was retired with no deploy run. Fix: classify recurring-imperative verbs as executable directives, exempt them from #qftbklgstrike done/backlog match AND the #qheadresidue residue guard, keep them drainable (dispatch via queue_dispatch.rs), and never auto-strike a short one-word head on a Done match. Plan: tasks/agent-doc/plan-queue-recurring-imperative-head-wrongly-struck.md
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md

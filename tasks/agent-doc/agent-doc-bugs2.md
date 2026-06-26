@@ -393,7 +393,28 @@ Live smoke of `supervisor-status --all` (restarted nothing): every running super
 **Deliberately NOT installed/pushed from inside this session.** Installing (`make install-full`) recycles a supervisor; doing it now would recycle *this* live session's stale host mid-drain — the exact mid-cycle-recycle wedge. The safe sequence is operator-side: review/merge `restart-supervisor-all`, `make install-full`, then run the new `agent-doc session restart-supervisor --all` to recycle everything onto the fresh binary. After that the rest of this queue drains on a non-stale supervisor.
 
 Heads-up on the rest of the queue: it will keep firing over a stale supervisor (#qeditdup/#crdtauth6/#cdtcutover/#midturnresumeb/#recycleforce etc. are each separate deep supervisor tasks, several with their own in-flight worktrees). Recommend installing + recycling first, otherwise the stale binary over-consumes heads.
-<!-- agent:boundary:c1813967 -->
+
+### Re: queue typing duplicated the free-text item below it (#qeditdup) — supervisor is now fresh on the fix; needs your live eyeball — opus-4-8
+
+> **Queue prompt:**
+>
+> As I typed in a prompt into the queue, the free-text item below this prompt was duplicated.
+
+This is the `#qeditdup` class every prior turn pinned on the **stale supervisor replaying old in-memory CRDT** (the per-keystroke base-hash thrash `28740e76` + the stale-in-mem-replica rebuild `#staleinmem` `5b4d143f`/`06c84d99`). Those turns were all stuck *waiting for the supervisor to recycle onto the fix*. New this turn — **that recycle has landed**:
+
+- Installed `agent-doc 0.34.49` == source HEAD `06c84d99` (binary mtime 13:02:53 ≈ HEAD commit 13:02:39), so the installed binary carries every typing/duplication/CRDT fix.
+- The bugs2 route-owned supervisor (pid 124146) **started 13:04:44, after the install**, and `agent-doc admin inspect` reports `supervisor:fresh`. So the supervisor side is finally on the fixed code — not stale.
+
+(Correcting my own last-turn claim that "all supervisors are stale": that was a measurement artifact — I ran the new `supervisor-status` from the *worktree* debug build (0.34.50), so everything on the real installed binary looked older. Against the actual installed binary, this supervisor is fresh.)
+
+**So #qeditdup is code-complete and now live on the supervisor — what remains is your live eyeball**, which I can't do for you:
+
+1. Type a new free-text item into the queue and confirm the item below it no longer duplicates.
+2. **If it still duplicates:** the *editor* side is likely still stale — the JB cdylibs in `~/.cargo/bin` top out at `libagent_doc-0.33.16.so` while the binary is 0.34.49, so the plugin may not have hot-reloaded the fresh FFI. **Restart the IDE** (reloads the cdylib + reconnects the IPC listener — the supervisor recycle fixes the supervisor side but not a stale/dead editor listener), then retest.
+3. If it **survives a restarted IDE on the fresh cdylib**, it's a genuine residual per-cell merge bug, not staleness — tell me and I'll profile the convergence/merge path in a focused cycle (this is the deeper `#qcellmerge1` per-cell-isolation territory).
+
+I'm keeping this short so I'm not writing to your live buffer while you may be typing. Marking `#qeditdup` as code-complete / awaiting-live-verify rather than done, since only the eyeball is left.
+<!-- agent:boundary:c75a77ec -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -401,7 +422,7 @@ Heads-up on the rest of the queue: it will keep firing over a stale supervisor (
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~:pushpin: test #queuebase~~
 - ~~Please make a way to restart all supervisors in `agent-doc session restart-supervisor --all`. I still need to see if the supervisor is up to date or not in tmux. I'm flying blind right now with these bugs.~~
-- As I typed in a prompt into the queue, the free-text item below this prompt was duplicated.
+- ~~As I typed in a prompt into the queue, the free-text item below this prompt was duplicated.~~
 ---
 The session mechanics still don't work on a new linkedin.md session. I compacted the exchangebefore I began the turn.
 ```

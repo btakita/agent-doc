@@ -88,7 +88,19 @@ Written, built, committed, and pushed. New post: **"A Spreadsheet at Google-Shee
 - agent-loop superproject → `d68025ba5` (gitlink)
 
 Two queue heads remain: the site deploy and the social teaser draft.
-<!-- agent:boundary:19e8605b -->
+
+### Re: deploy briantakita.me — opus-4-8
+
+> **Queue prompt:** deploy briantakita.me
+
+Done — deployed and verified live. Deployment is automatic: the `briantakita.me-dev` repo's `.github/workflows/deploy.yml` runs on every push to `main` (build → prerender → Cloudflare Pages → live smoke test). My earlier push (`c99471e`) triggered it.
+
+- **Workflow run** `28224792453` — "Deploy to Cloudflare Pages", deploy job ✓ in 1m1s (built-in smoke test of `/`, `/about`, `/posts`, `/robots.txt` passed).
+- **New post live (independently verified 200):** `https://briantakita.me/posts/lazily-cell-family-spreadsheet-scale`
+- Homepage `https://briantakita.me/` → 200.
+
+No manual deploy step was needed — the push-to-main pipeline already shipped it to Cloudflare Pages. One remaining queue head (the social teaser draft).
+<!-- agent:boundary:4dec5d13 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,7 +110,7 @@ Two queue heads remain: the site deploy and the social teaser draft.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~Please write a blog post for briantakit with diagrams about recent changes in lazily-rs...Cell Family, 5M spreadsheet benchmark...focusing on how lazy reactivity improves performance by only eagerly recomputing the focused cells.~~
-- deploy briantakita.me
+- ~~deploy briantakita.me~~
 - Draft a linkedin teaser.
 <!-- /agent:queue -->
 

@@ -426,7 +426,17 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=5f12e152-b6aa-432f-bd3d-5e1c434f6f3e invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=68491 candidate_hash=53c82d38d003486591e0965af2a15b3738924999da58704bfe4474e4e71789f6 content_ours_len=69753 content_ours_hash=651242d3f0a2d86983ddf39fd04b812c36532574cb9e6009f2d483505a94f45f doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782495199717
 ```
-<!-- agent:boundary:1810416e -->
+
+### Re: do [#recycleforce] — verified already shipped, reaping — opus-4-8
+
+> **Queue prompt:** do [#recycleforce]
+
+Already DONE + SHIPPED LIVE — git-verified, not aspirational:
+- `f7a2b6e3` `feat(admin): add agent-doc admin recycle --force (composes with --all-projects)` is an ancestor of agent-doc `main` HEAD (merged).
+- The installed `agent-doc 0.34.49` exposes both flags: `admin recycle --force` (overrides cycle-open / in-flight-dispatch deferral, escalates to kill+cold-start when no live controller answers, with the self-ancestor guard) and `--all-projects`.
+
+Nothing left to build. Reaping the head via `--done`. This is also the operator's escape hatch for the `Recycle → Run Agent Doc` stall (#4 in your earlier list): `agent-doc admin recycle <FILE> --force` preempts instead of waiting for a turn that can't start.
+<!-- agent:boundary:010bedb8 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -454,7 +464,7 @@ The session mechanics still don't work on a new linkedin.md session. I compacted
 - :pushpin: do [#2y8j]
 - do [#cdtcutover]
 - do [#midturnresumeb]
-- do [#recycleforce]
+- ~~do [#recycleforce]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -481,7 +491,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#recycleforce] DONE + SHIPPED LIVE — agent-doc admin recycle now has a real --force flag (no `-- ` separator needed) that composes with --all-projects. Force overrides the cycle-open/in-flight-dispatch deferral (lands at the next serve-loop tick, still requires controller Stable so it never strands a half-promoted handoff) and, when no live controller answers, escalates to a kill+cold-start (session restart-supervisor) instead of a no-op — with the self-ancestor guard so it never tears down the callers own parent. Merged agent-doc main, make check green, installed, live-verified: `admin recycle --all-projects --force --json` -> {"forced":true,"recycled":2,...}.
 - [ ] [#midturnresumeb] Phase B (focused follow-up) — actively CONSUME the #durablerecycle turn checkpoint (cycle_state.rs:486, currently written but never read to resume) on a fresh supervisor boot to re-dispatch a turn that was genuinely interrupted (child died across the recycle), idempotent vs the surviving-child path. This is the full "restart reliably restarts the turn"; Phase A only makes the wedge impossible. Also add a deferred-too-long escalation counter so a never-closing cycle cannot starve the recycle indefinitely. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md

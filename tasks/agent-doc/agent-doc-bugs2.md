@@ -26,7 +26,6 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -695,7 +694,18 @@ What I shipped instead fixes the **real, demonstrable data-loss**: the line-mult
 **4. `#midturnresumeb` — blocked on a real reconciliation, not effort.** Phase B is one clean commit (`1df51f3d`) on `midturn-recycle-resume` (boot-resume `boot_resume_action` + escalation counter + SimWorld coverage). But it was cut **before** `#suprecyclespin` (0.34.51) + `#recycledeadlock` (0.34.52) landed, and it **conflicts semantically on the recycle hot path** (`idle_watch.rs`): main already resolves a stalled cycle by force-closing it — its own comment literally calls that *"the unbuilt #midturnresumeb Phase B"* — while the branch adds a **competing** escalation-counter gating the same `cycle_open`. Cherry-picking it would regress the proven `#suprecyclespin`/`#recycledeadlock` behavior on your live supervisor. The genuinely-new value is `boot_resume_action` (active turn re-dispatch on fresh boot); the right move is a focused cycle that rebases the branch, keeps the landed stalled-cycle-resolve, grafts `boot_resume_action`, and drops the now-redundant escalation counter — with SimWorld coverage and a clean `make check`. I aborted the merge rather than rush hot-path surgery; branch is intact. Say go and I'll do that reconciliation as its own cycle.
 
 **`#syncbarrier`** remains the cross-language epoch-barrier focused cycle (Phase 1; needs JB/VSCode `edit_epoch` + the live-editor proof) — per the plan's own §safety it builds against a quiesced session, which these two installs+recycles now give.
-<!-- agent:boundary:1871272c -->
+
+
+### Re: do the reconciliation + JB plugins dir + fix the wedged IPC / guard tolerance — opus-4-8
+
+All three addressed; shipped 0.34.56 (`0a6b1301`, pushed, installed, recycle-marked). This turn's preflight ran clean instead of the `direct response patchback` wedge — proof of the guard fix.
+
+**1. `#midturnresumeb` reconciliation — done.** Grafted `boot_resume_action` (active turn re-dispatch on a fresh recycle boot from the `#durablerecycle` checkpoint) onto current main, **layered** with the already-landed `#suprecyclespin` stalled-resolve + `#recycledeadlock` break the branch was cut before. I **kept** the escalation-counter as a layered backstop (gates only the `supervisor_recycle_action` decision via `effective_cycle_open`; the operator-restart gate + `abandon_wedged_cycle_for_recycle` keep plain `cycle_open`) rather than dropping it — the SimWorld only models recycle-past-open-cycle via escalation, so layering preserved all coverage and is the sounder end state. `make check` green (5425). Live mid-finalize-recycle proof stays `[operator-verify]`. The `midturn-recycle-resume` branch/worktree is superseded — safe to delete.
+
+**2. JB built-plugins directory.** Installed plugins are fine — `~/.local/share/JetBrains/{IntelliJIdea2025.3,PyCharm2025.3,IntelliJIdea2026.1}/agent-doc-jetbrains/`. The missing dir is the **build output** `editors/jetbrains/build/distributions/` (Gradle), absent because the plugin wasn't built in this checkout (or `gradlew clean` removed `build/`). Rebuild: `make bump-plugin` or `cd src/agent-doc/editors/jetbrains && ./gradlew buildPlugin`.
+
+**3. Wedged IPC — cause + guard tolerance.** Guard half shipped (0.34.56): `#patchback-head-tolerant` — no more false `INTERRUPT` when the flagged `### Re:` is already in HEAD (the heuristic only compared snapshot↔working-tree, never HEAD); `#side-effect-exclude-submodules` — the side-effect note no longer lists unrelated dirty submodules. Yes — the guard should have been more tolerant, and now is. The deeper root cause: the post-commit listener-aware path *skips the disk write* (to dodge the JB File-Cache-Conflict dialog) and trusts the editor to save, so an un-saved editor leaves the disk drifted from HEAD for the next cycle. That fix is a real tradeoff on the live IPC path and is filed as its own focused cycle; the guard tolerance stops it from wedging the session meanwhile.
+<!-- agent:boundary:ad96948a -->
 <!-- /agent:exchange -->
 ## Queue
 

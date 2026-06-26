@@ -1342,6 +1342,22 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 shared
                     .binary_stale
                     .store(supervisor_stale, Ordering::Relaxed);
+                // `#suptmuxstale` — publish the same staleness probe as an on-disk
+                // marker so the `turn-status` hook (a separate short-lived process in
+                // the agent pane that cannot read this in-memory atomic) can decorate
+                // the pane turn-in-progress title with a `⚠ STALE SUPERVISOR` warning.
+                // Best-effort display surface — never let a marker write fail the watch.
+                if let Some(base) = path
+                    .canonicalize()
+                    .ok()
+                    .map(|canonical| crate::write::resolve_ipc_project_root_pub(&canonical))
+                    && let Err(e) =
+                        crate::turn_status::set_supervisor_stale_marker(&base, supervisor_stale)
+                {
+                    eprintln!(
+                        "[idle-watch] warning: failed to update stale-supervisor marker: {e:#}"
+                    );
+                }
                 // `#supkill-bg` blue/green drain-and-supersede: an explicit
                 // `restart-supervisor` routed to the in-place reexec path
                 // (`restart_reexec`, stamped stale by the IPC handler) drains its

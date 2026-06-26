@@ -448,7 +448,20 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=ed744898-39bf-4c6c-97a9-295b878055ad invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=71100 candidate_hash=41e41a85d02c03e0f6f5e1c6f57cb0b3f05a82101d0baa903044d7b03b1a1f76 content_ours_len=71547 content_ours_hash=1089cecf58f3b867061a0b05b3eb0e479d8559f3e57467b9e05d56791f7c4228 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782495599943
 ```
-<!-- agent:boundary:2bd45e9a -->
+
+### Re: do [#midturnresumeb] — Phase B implemented on the branch (boot-resume + escalation counter); awaiting merge/install + live proof — opus-4-8
+
+> **Queue prompt:** do [#midturnresumeb]
+
+Phase B (the "restart should *reliably* restart the turn" half) is implemented + tested in the existing isolated worktree `src/agent-doc-midturn-recycle-wt` (branch `midturn-recycle-resume`, commit `1df51f3d` on top of Phase A `ed255d81`). `make check` green; 7 new tests pass. Per the plan, Phase A already made mid-cycle severing impossible; Phase B actively recovers a turn whose child genuinely died across an `execve` recycle:
+
+- **Boot-resume** (`start/run.rs`): a fresh supervisor image loads the `#durablerecycle` checkpoint and routes through a new pure `boot_resume_action` — **re-dispatch** (drop the dead-pid adopt, auto-trigger a fresh child that re-submits `agent-doc <FILE>` and re-drains the same `queue_task_id`/`prompt_targets`) only when the cycle is open AND the child died AND not-yet-consumed; **adopt-without-retrigger** when the child survived (the common Phase-A steady state); **None** for a closed/consumed checkpoint.
+- **Child survived vs died** (`ReexecState::child_survived`): the recycle already marshals the harness child PID across the `execve`; on boot `kill(pid, 0)` probes it — `ESRCH` ⇒ died ⇒ re-dispatch; alive ⇒ adopt. Non-unix has no child-preserving recycle, so it adopts (never severs).
+- **Idempotency**: committed cycle is never open; surviving child adopts without re-trigger; a new persisted `recycle_resume_consumed` latch (`cycle_state::mark_recycle_resume_consumed`) stops a second boot re-dispatching the same still-open checkpoint.
+- **Deferred-too-long escalation** (`idle_watch.rs`/`decisions.rs`): consecutive `DeferCycleOpen` ticks at a turn boundary are counted; past `MAX_CYCLE_OPEN_DEFER_TICKS=40` (~20s at 500ms poll) the recycle is forced — the `execve` severs the wedged cycle but the open checkpoint survives, so the interrupted turn re-dispatches on boot. A never-closing cycle can no longer starve the recycle. New ops-log lines: `supervisor_recycle_cycle_open_escalated`, `supervisor_recycle_resume_redispatch`, `supervisor_recycle_resume_adopt_surviving_child`, `defer_streak=N/M`.
+
+Held the install/merge/push (live-supervisor-critical, and installing recycles *this* session's host mid-drain). Gating `#midturnresumeb` as code-complete / awaiting **merge → `make install-full` → live proof** (drive a real mid-finalize recycle whose child dies and confirm the turn resumes once, second boot does not double-run). That live eyeball is inherently operator-gated.
+<!-- agent:boundary:11ee2b37 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -475,7 +488,7 @@ The session mechanics still don't work on a new linkedin.md session. I compacted
 - :pushpin: do [#kj5flive]
 - :pushpin: do [#2y8j]
 - do [#cdtcutover]
-- do [#midturnresumeb]
+- ~~do [#midturnresumeb]~~
 - ~~do [#recycleforce]~~
 <!-- /agent:queue -->
 <!--
@@ -503,7 +516,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#midturnresumeb] Phase B (focused follow-up) — actively CONSUME the #durablerecycle turn checkpoint (cycle_state.rs:486, currently written but never read to resume) on a fresh supervisor boot to re-dispatch a turn that was genuinely interrupted (child died across the recycle), idempotent vs the surviving-child path. This is the full "restart reliably restarts the turn"; Phase A only makes the wedge impossible. Also add a deferred-too-long escalation counter so a never-closing cycle cannot starve the recycle indefinitely. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
 - [ ] [#qftloss] [operator-verify] Free-text prompt loss (mode-6) — CODE-COMPLETE on main (8b900bf4): binary now journals operator prompts from the plugin live-buffer sidecar (.agent-doc/live-buffer/<hash>) into the #qdurcrash store before any convergence/recovery can clobber the unsaved buffer, replayed if absent. Remaining: live IDE eyeball that an unsaved prompt typed during a concurrent finalize survives end-to-end. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
@@ -516,6 +528,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#midturnresumeb] Phase B (focused follow-up) — actively CONSUME the #durablerecycle turn checkpoint (cycle_state.rs:486, currently written but never read to resume) on a fresh supervisor boot to re-dispatch a turn that was genuinely interrupted (child died across the recycle), idempotent vs the surviving-child path. This is the full "restart reliably restarts the turn"; Phase A only makes the wedge impossible. Also add a deferred-too-long escalation counter so a never-closing cycle cannot starve the recycle indefinitely. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
 - [/] [#supstaledetect] stale_install warning false-positives in the dogfood edit->build->install->commit flow: it compared artifact mtime to the HEAD commit timestamp (300s grace), but the binary is always built BEFORE its covering commit, so an ~11min build->commit gap (binary 03:16:22 vs commit 03:27:51) flagged a FRESH binary as stale — disagreeing with the auto-install signal, which uses newest source-FILE mtime and correctly saw it fresh. FIX CODE-COMPLETE on branch supstaledetect-mtimebasis (agent-doc commit b983f144, make check green): warning now uses newest_crate_source_mtime_secs (same basis as auto-install). Remaining: merge -> install -> verify the false warning is gone AND genuine staleness still flags.
 - [/] [#ipcproofnostall] DONE (code-complete, branch ipcproofnostall-fix b934263c4, make check green) — root cause: the binary-authored ipc_proof_insufficient recovery diagnostic, when #postcommit-ipc-worktree-corruption SEPARATES its structured line from the "### Re: ...interrupted-cycle recovery" heading, the bare line forms its own [user+] block and hits the closes_exchange_tail->PromptTarget fallthrough in classify_prompt_bearing_block (agent-doc-core/src/diff.rs) — the existing heading-only exemption missed it. Fix: token-specific line_is_binary_authored_ipc_proof_diagnostic (event token + invariant=/recovery= fields, or the self-description sentence) wired into the core classifier (regardless of heading adjacency) + defense-in-depth in unresolved_exchange_prompt_in_content. Non-regression tests prove a real ipc/drift-mentioning user prompt still flags. Remaining: merge -> install (bundle). This closes the false-INTERRUPT stall class.
 - [/] [#suptmuxstale] DONE (code-complete, branch suptmuxstale-indicator b433bda2, make check green) — tmux pane now surfaces "⚠ STALE SUPERVISOR" in the turn-in-progress pane title (turn_status.rs) when the supervisor binary is stale, so the operator sees at a glance which sessions are stale. The turn-status hook is a separate process from the supervisor holding the binary_stale atomic, so it is bridged via an on-disk marker (.agent-doc/supervisor-stale) written by idle_watch next to the existing binary_stale.store. Pure pane_title_for_status helper + 5 unit tests. NOTE: mirrors the process_binary_is_stale PROBE (separate signal from the #supstaledetect preflight-warning fix); display-only, non-destructive. Remaining: merge -> install (bundle with #supstaledetect/#qimpstrike).

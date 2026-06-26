@@ -207,7 +207,13 @@ The editor buffer drift after commit `91362b186` re-ordered already-committed `l
 The stale prompt target that starts "The current completed work remains..." is prior CRDT closeout evidence, not a new request. No additional repository work was required for this recovery note.
 
 No queue head is being answered by this recovery response. The next substantive queue head remains `lazily-js parity + release + publish`; publish/release actions remain operator-gated and were not performed.
-<!-- agent:boundary:caf492cc -->
+
+### Re: closeout drift recovery — gpt-5
+
+This is a binary-owned recovery write for the post-commit live-buffer drift reported after `73cc7ecd7`. It preserves the already-visible parity evidence and does not answer or consume the next queue head.
+
+No repository work was performed in this recovery write. Release/publish work remains operator-gated.
+<!-- agent:boundary:b1adee02 -->
 <!-- /agent:exchange -->
 ###
 <!--

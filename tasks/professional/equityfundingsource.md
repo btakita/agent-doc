@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -109,7 +109,36 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=6d46759b-e939-44c3-a8e6-b94ce5457022 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782447206996
 ```
-<!-- agent:boundary:3db4f22f -->
+
+### Re: contextual lender chat — shipped (all queue items) — opus-4-8
+
+> **Queue prompt:**
+>
+> The general thread is for all other correspondence with EFS. Such as general questions, help with the Accredation process, etc. This general thread should be the first tab in the Messages dialog.
+
+
+> **Queue prompt:**
+> If the lender has a deal open, show all threads but select the property thread. If there are no messages in the thread, show it for the deal. If the lender does not express interest, the deal thread should not show up unless the lender sent a message or expressed interest.
+
+> **Queue prompt:**
+> The general thread is for all other correspondence with EFS. Such as general questions, help with the Accreditation process, etc. This general thread should be the first tab in the Messages dialog.
+
+Built, tested, and pushed — EFS `b23dd00` on `origin/main`. The lender (investor) chat launcher is now a **full-screen tabbed Messages dialog** instead of a single thread.
+
+**What ships:**
+- **"General" tab, first** — all non-deal correspondence (onboarding, accreditation, general questions). Backed by the existing account-scope aggregate via `/api/investor/messages?scope=account`.
+- **One tab per deal thread**, labelled by the **property**. A deal tab is visible only when the lender **expressed interest** OR **sent a message** about it — exactly your rule.
+- **Deal open** (lender on a deal page) → that deal's property thread is **merged in even if absent** from their thread list (no interest, no messages yet) and **auto-selected**; an empty thread still shows so they can start chatting about the deal.
+- **Outgoing deal emails use the property as the subject** (`[EFS] {property}`), via a new native lender→deal message store (`party=lender, scope=deal`) that needs no investment-interest row — so "sent a message" and "expressed interest" stay distinct triggers, with no double-counting against the existing admin deal-interest thread (proven by test).
+
+**Server:** `GET /api/investor/messages?scope=account|deal&deal_id=` (no-scope response unchanged), `GET /api/investor/deal-threads`, `POST /api/investor/deals/:id/messages` (gated on deal visibility). All logic in pure unit-tested helpers.
+
+**Verification:** `bun run check` green — **1294 tests pass** (26 new), browser + worker build clean.
+
+**One deviation (filed):** deal-tab compose is **text-only** for now — the lender-scoped unified attachment **download** route isn't mounted yet, and shipping broken download links would be worse. Admin replies with attachments still render. Backlogged as `#lenderdealattach`.
+
+**Deploy:** held per the `#spec-test-commit-push` preset — ready via `bun run deploy:worker` on your go.
+<!-- agent:boundary:307959d2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,11 +158,6 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~In the lender portal, make the chat contextual. So if a lender is viewing an available deal or a interested in deal, show the thread releating to that deal. Outgoing email threads will have the property as the subject.~~
-- ~~If the lender does not have a deal open, show all communication. Full screen message dialog with each thread as a tab.~~
-- 🚧 If the lender has a deal open, show all threads but select the property thread. If there are no messages in the thread, show it for the deal. If the lender does not express interest, the deal thread should not show up unless the lender sent a message or expressed interest.
-- The general thread is for all other correspondence with EFS. Such as general questions, help with the Accredation process, etc. This general thread should be the first tab in the Messages dialog.
-- ~~deploy — auto-struck: completed by #do-id-closeout-open-backlog (#qftbklgstrike)~~
 <!-- /agent:queue -->
 
 ## Backlog

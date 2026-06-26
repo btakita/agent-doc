@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -33,10 +33,10 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260626-040603.md`*
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260626-062550.md`*
 
 Compacted content:
-❯ - Archived 14 response topic(s): Deal image carousel across portals (house placeholder); do [#dealcarousel-borrower]; do [#dealcarousel-broker]; 11 more
+❯ - Archived 12 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); contextual lender chat; IPC proof diagnostic (interrupted-cycle recovery); 9 more
 ❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
@@ -48,186 +48,21 @@ This is binary-authored diagnostic content, not a user prompt, so it does not re
 Issue class: `ipc_proof_insufficient`
 Affected component: editor IPC / writeback
 
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=f9eedbbe-320d-4720-9bca-2856e0b7378a invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782446080826
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=d7a58066-72fe-44fe-b73d-ef7b8a71f984 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782441281204
 ```
 
-### Re: contextual lender chat — holding for the complete spec — opus-4-8
+### Re: compaction recovery and queue state — gpt-5
 
 > **Queue prompt:**
 >
-> In the lender portal, make the chat contextual. So if a lender is viewing an available deal or a interested in deal, show the thread releating to that deal. Outgoing email threads will have the property as the subject.
+> https://equityfundingsource.brian-takita.workers.dev/lenders/deals/866e1c5a-e428-4b35-bacb-a58f5d94b7da > Available Deal dialog > Messages should show + select the available deal conversation thread. Same with a Deal I'm Interested In.
 
 
-Recovered the session first: the doc had just been compacted (archive `…-20260626-040603.md`), so the snapshot/CRDT still held the full pre-compact exchange (37KB) while the visible file was the 20KB compacted version — `reset --from-current --preserve-session` re-aligned the sidecars and the compaction is now cleanly committed to HEAD.
+Recovered the interrupted compaction/preflight state enough to continue through the agent-doc closeout path. Preflight still reports one legacy gated backlog item and several semantic-completion review candidates; I did not migrate or resolve those because the planning contract for this cycle was a prompt-response repair closeout.
 
-I'm **holding** rather than building, because the queue spec is still being written:
+The current queue still needs operator intent cleanup before I start repo/deploy work from it: the held head is the available-deal Messages selection issue, followed by `deploy`, and recovery has also reintroduced the same available-deal Messages prompt once more without the `🚧` marker. I did not run code changes, tests, commit/push, or deploy in this cycle.
 
-1. `🚧` **In the lender portal, make the chat contextual** — when a lender is viewing an available deal or an interested-in deal, show the thread relating to that deal; outgoing email threads use the property as the subject. *(held by your 🚧 marker)*
-2. **"If the lender does not have a deal open, show all communication. Full screen message dialog wi…"** — this line is cut off mid-word, so the fallback/full-screen behavior isn't fully specified yet.
-3. `deploy`
-
-What I've got so far: deal-scoped thread when a deal is open, property name as the email subject, and an all-communication view with a full-screen message dialog when no deal is open. Finish item 2 (and clear the `🚧` on item 1 when you're ready) and I'll build it under the `#spec-test-commit-push` preset. I did **not** auto-drain — the head is explicitly held and the spec is incomplete.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=3ae68396-d61c-4583-b743-3b1b227962af invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782446978966
-```
-
-### Re: contextual lender chat — full spec captured, holding on 🚧 — opus-4-8
-
-> **Queue prompt:**
->
-> If the lender does not have a deal open, show all communication. Full screen message dialog with each thread as a tab.
-
-
-My earlier hold response just landed (recovered from the degraded-IPC orphan, committed `0bde5b23e`). Recovering it caused the binary to auto-strike the head — "make the chat contextual…" — as *consumed*, and to auto-strike "deploy". **Neither is actually done.** The contextual-chat directive is still to-build; its detailed requirements are the items below it, and `deploy` stays gated behind building.
-
-The spec now reads complete and coherent. My consolidated understanding of the **contextual lender-portal chat**:
-
-- *(struck headline)* Make the lender chat contextual; outgoing email threads use the **property name as the subject**.
-- **No deal open** → full-screen Messages dialog, **each thread as a tab**.
-- **Deal open** → show all threads but **auto-select the property thread**; if that thread has no messages, still show it for the deal; if the lender hasn't expressed interest, the deal thread is **hidden** unless the lender sent a message or expressed interest.
-- A **"General"** thread for all other EFS correspondence (general questions, accreditation help, etc.) is the **first tab** in the Messages dialog.
-
-The head is still **🚧-held**, so I have **not** started building. Clear the 🚧 (and correct anything above that's off) and I'll implement the whole feature as one unit under `#spec-test-commit-push` — build + tests + push, with `deploy` held for your separate go. I'm not auto-looping while the head is held.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=6d46759b-e939-44c3-a8e6-b94ce5457022 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782447206996
-```
-
-### Re: contextual lender chat — shipped (all queue items) — opus-4-8
-
-> **Queue prompt:**
->
-> The general thread is for all other correspondence with EFS. Such as general questions, help with the Accredation process, etc. This general thread should be the first tab in the Messages dialog.
-
-
-> **Queue prompt:**
-> If the lender has a deal open, show all threads but select the property thread. If there are no messages in the thread, show it for the deal. If the lender does not express interest, the deal thread should not show up unless the lender sent a message or expressed interest.
-
-> **Queue prompt:**
-> The general thread is for all other correspondence with EFS. Such as general questions, help with the Accreditation process, etc. This general thread should be the first tab in the Messages dialog.
-
-Built, tested, and pushed — EFS `b23dd00` on `origin/main`. The lender (investor) chat launcher is now a **full-screen tabbed Messages dialog** instead of a single thread.
-
-**What ships:**
-- **"General" tab, first** — all non-deal correspondence (onboarding, accreditation, general questions). Backed by the existing account-scope aggregate via `/api/investor/messages?scope=account`.
-- **One tab per deal thread**, labelled by the **property**. A deal tab is visible only when the lender **expressed interest** OR **sent a message** about it — exactly your rule.
-- **Deal open** (lender on a deal page) → that deal's property thread is **merged in even if absent** from their thread list (no interest, no messages yet) and **auto-selected**; an empty thread still shows so they can start chatting about the deal.
-- **Outgoing deal emails use the property as the subject** (`[EFS] {property}`), via a new native lender→deal message store (`party=lender, scope=deal`) that needs no investment-interest row — so "sent a message" and "expressed interest" stay distinct triggers, with no double-counting against the existing admin deal-interest thread (proven by test).
-
-**Server:** `GET /api/investor/messages?scope=account|deal&deal_id=` (no-scope response unchanged), `GET /api/investor/deal-threads`, `POST /api/investor/deals/:id/messages` (gated on deal visibility). All logic in pure unit-tested helpers.
-
-**Verification:** `bun run check` green — **1294 tests pass** (26 new), browser + worker build clean.
-
-**One deviation (filed):** deal-tab compose is **text-only** for now — the lender-scoped unified attachment **download** route isn't mounted yet, and shipping broken download links would be worse. Admin replies with attachments still render. Backlogged as `#lenderdealattach`.
-
-**Deploy:** held per the `#spec-test-commit-push` preset — ready via `bun run deploy:worker` on your go.
-
-### Re: do [#lenderdealattach] — lender deal-tab attachments shipped — opus-4-8
-
-> **Queue prompt:** do [#lenderdealattach]
-
-Done (EFS `7fade6c`, pushed to `origin/main`). This closes the one deviation from the contextual-chat build — deal-tab compose is no longer text-only.
-
-- **Upload:** `POST /api/investor/deals/:id/messages` now accepts multipart attachments (5 files / 3.6 MB), reusing the lender-account/borrower upload guards + R2 storage + document records.
-- **Download:** new `GET /api/investor/message-attachments/:id/download` (lender auth), gated by a pure, fail-closed predicate `lender_message_attachment_download_allowed_(message, lender_id, deal_visible)` — serves bytes only when the lender **owns** the message's thread OR it's a deal-scope message for a deal the lender **can view** (same `deal_message_visible_` gate as the POST). Wrong-lender / non-visible-deal both 404 (tested).
-- **Wiring:** the unified read path rewrites native lender→deal attachment `download_url`s to the lender route (no double-count); the deal tab flips to `attachments: true`.
-
-**Verification:** I re-ran `bun run check` myself — **1310 pass, 0 fail**, browser + worker builds clean. Reviewed the download handler + predicate directly before pushing.
-
-**Deploy:** still held per `#spec-test-commit-push` — the full contextual lender chat (threads + tabs + property-subject emails + attachments) is ready via `bun run deploy:worker` on your go.
-
-### Re: deploy — contextual lender chat live — opus-4-8
-
-> **Queue prompt:** deploy
-
-Deployed to production (you confirmed the held `🚧 deploy`). The full contextual lender chat is now **live**.
-
-Ran `bun run deploy:worker` on `7fade6c` (`origin/main`, working tree clean):
-- **Worker upload:** `equityfundingsource` uploaded (6.69 s), all bindings intact (D1, R2, Durable Objects, message-email vars).
-- **D1 migrations:** none to apply — the feature rides the existing unified `messages` / `message_attachments` tables.
-- **Live:** https://equityfundingsource.brian-takita.workers.dev — Current Version ID `ae98ab33-8c3a-4c49-a91b-5e8b50a4d1af`, hourly schedule intact.
-
-Lenders now get the tabbed Messages dialog (General first + per-deal property threads), deal-open auto-select, property-as-subject outgoing emails, and deal-tab attachments (upload + lender-scoped download) in production.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=c8d242a8-6ad9-4642-9e45-44e690b10fa2 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782450652921
-```
-
-### Re: lender messages — open-deal fix + General/subject tabs + search — opus-4-8
-
-> **Queue prompt:** The Message dialog for https://equityfundingsource.brian-takita.workers.dev/lenders/deals/866e1c5a-e428-4b35-bacb-a58f5d94b7da does not show an open conversation for that property. It show and selects only the interested deal which is different. It should show the messages for the opened deal.
-
-> **Queue prompt:** A lender may have many deals, so show the General tab, the subj
-
-> **Queue prompt:** A lender may have many deals, so show the General tab, the subject as a tab, and a search box to go through all conversations.
-
-Done (EFS `9d0d71d`, pushed to `origin/main`). Both your points landed in one rework; the second/third lines are the same request (the second was a draft), so I built the complete version.
-
-**Bug — open-deal mis-select (fixed):** the dialog rendered **one tab per deal**, and the async `/api/investor/deal-threads` fetch reordered those tabs (sorted by property label); the "keep active tab valid" effect then reset the selection to `tabs[0]`, so it landed on a *different interested deal* instead of the opened one. Root-fixed by removing per-deal tabs entirely and adding a pure `lender_selected_conversation_` resolver where **the open deal always wins** as the default (a search pick overrides until cleared). The mis-select vector no longer exists.
-
-**Rework — scales to many deals:**
-- **Tabs:** now at most two — **General** (always first) + the **opened deal's property** tab (only when a deal is open). No more one-tab-per-deal.
-- **Search box:** searches across **all** your conversations (every deal thread by property + General); picking a result opens that thread (loads `scope=deal` + posts to the native deal endpoint, attachments enabled).
-
-**Verification:** I re-ran `bun run check` myself — **1320 pass, 0 fail**, browser + worker builds clean. Reviewed the selection resolver + tab/search helpers directly before pushing.
-
-**Deploy:** held per `#spec-test-commit-push`. Queue `deploy` when you want the open-deal fix + tab/search rework live (no D1 migrations).
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=19383b1c-c82a-482d-ab53-f79bc7842258 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782451332136
-```
-
-### Re: deploy — open-deal fix + tab/search rework live — opus-4-8
-
-> **Queue prompt:**
->
-> ~~A lender may have many deals, so show the General tab, the subject as a tab, and a search box to go through all conversations.~~ — auto-struck: answered this cycle (#ftstrike)
-
-
-> **Queue prompt:** A lender may have many deals, so show the General tab, the subject as a tab, and a search box to go through all conversations.
-
-Deployed to production (you confirmed). The open-deal mis-select **fix** and the **General + open-deal-subject tab + conversation search** rework are now live.
-
-Ran `bun run deploy:worker` on `9d0d71d` (`origin/main`, clean):
-- **Worker upload:** `equityfundingsource` uploaded (6.46 s), all bindings intact.
-- **D1 migrations:** none to apply.
-- **Live:** https://equityfundingsource.brian-takita.workers.dev — Current Version ID `59f2a8bc-d5de-4fc6-88bd-443fc507600f`, hourly schedule intact.
-
-Opening a lender deal now selects **that** deal's thread (not a different interested deal), the dialog shows just **General + the open deal's property tab**, and the **search box** finds any conversation. All queue items are done; the full contextual lender chat (threads, tabs, property-subject emails, attachments, search, open-deal fix) is in production.
-<!-- agent:boundary:f8d4bd9c -->
+<!-- agent:boundary:0a5bc466 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -247,6 +82,9 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- ~~https://equityfundingsource.brian-takita.workers.dev/lenders/deals/866e1c5a-e428-4b35-bacb-a58f5d94b7da > Available Deal dialog > Messages should show + select the available deal conversation thread. Same with a Deal I'm Interested In.~~
+- deploy
+- https://equityfundingsource.brian-takita.workers.dev/lenders/deals/866e1c5a-e428-4b35-bacb-a58f5d94b7da > Available Deal dialog > Messages should show + select the available deal conversation thread. Same with a Deal I'm Interested In.
 <!-- /agent:queue -->
 
 ## Backlog

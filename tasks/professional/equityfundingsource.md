@@ -90,7 +90,20 @@ Complete and pushed across all four portals — closing out this queue head (the
 - **Broker** — `aa05ac5`
 
 Shared `portal/shared/deal_photo_carousel.tsx` (`DealPhotoCarousel` + `HousePlaceholder`); empty deals show the house placeholder. Each non-admin portal serves **public** photos through its own auth-scoped download route (`/api/{investor,borrower,broker}/deal-photos/:id/download`), and each download rule is a unit-tested pure predicate. `bun run check` green (1241 tests). `deploy` held per your decision — ready via `bun run deploy:worker` when you give the go.
-<!-- agent:boundary:d3dff643 -->
+
+### Re: deploy — opus-4-8
+
+Deployed. Your go-gate was met — the full 4-portal carousel landed together (borrower `a525660`, broker `aa05ac5`, plus the shared lender+admin `0a1c1e8`), all pushed (0/0 with `origin/main`), working tree clean, `bun run check` green (1241 tests) on these exact commits.
+
+Ran `bun run deploy:worker`:
+- **D1 migrations:** ✅ No migrations to apply (remote already current).
+- **Worker upload:** uploaded `equityfundingsource` (1 new static asset, 1369.48 KiB / 311.05 KiB gzip), startup 22 ms.
+- **Live:** https://equityfundingsource.brian-takita.workers.dev — Current Version ID `1d5f8d26-0e35-4240-8181-5d91f5ae5fdf`, hourly schedule intact.
+
+All four portals now serve the deal-photo carousel (house placeholder on empty deals) through their auth-scoped download routes in production.
+
+> **Queue prompt:** deploy
+<!-- agent:boundary:1121ee00 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -110,10 +123,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-- ~~All deals in the borrower, broker, lender, and admin should have a carousel of uploaded images. If there is no image, then show a house placeholder.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~deploy — auto-struck: completed by #do-id-closeout-open-backlog (#qftbklgstrike)~~
-- ~~do [#dealcarousel-borrower]~~
-- ~~do [#dealcarousel-broker]~~
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

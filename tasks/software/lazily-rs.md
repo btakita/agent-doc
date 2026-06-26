@@ -104,7 +104,18 @@ Results at **N = 100,000** (200k nodes/lib; leptos is far heavier per node, so t
 **Landed:** `lazily-rs` `a1d6bf6` (bench + feature-gated dep + BENCHMARKS.md `### Cross-library comparison`), submodule pointer bumped (`6c963efe2`). clippy clean; all `make check` tests pass. No crates.io release (dev/bench-only, no library code change). Reproduce: `cargo bench --features scale-compare --bench scale_compare`.
 
 **One caveat:** `make check`'s `benchmark-check` step is red, but on a **pre-existing** criterion-data staleness — `--check` just compares the committed machine-specific numbers against whatever is in `target/criterion`, and it fails identically with my changes stashed (verified). My diff is additive-only and touches neither the generated results section nor any benched library code. Refresh it with `make benchmark-update` on an unloaded host when convenient.
-<!-- agent:boundary:c257a9de -->
+❯ Fix make check. Add benchmark Honest read to docs.
+
+### Re: Fix make check + add benchmark Honest read to docs — opus-4-8
+
+Both done; landed in `lazily-rs` `3d124e6` (gitlink `7d45c704c`).
+
+**1. Fixed `make check` (`benchmark-check`).** My earlier "pre-existing" read was wrong — the real cause was my own `cargo bench --features scale-compare` run: it wrote `scale_compare/*` estimates into `target/criterion`, and the results generator (`scripts/update-benchmark-results.py`) globbed **every** `**/new/estimates.json` group with no allowlist, so the comparison bench's numbers leaked into the auto-generated results table → it no longer matched the committed section → `--check` flagged stale. (Stashing the *source* didn't clear it because that doesn't remove the *criterion data* — which is what misled me.) Fix: the generator now skips `EXCLUDED_GROUPS = {"scale_compare"}` in `discover_results` — the cross-library head-to-head is documented in BENCHMARKS.md prose, not a tracked lazily benchmark, so running the comparison bench can never make `benchmark-check` stale again. Verified `python3 scripts/update-benchmark-results.py --check` exits 0 *with* the scale_compare criterion data present, and a full **`make check` is green (EXIT=0)**.
+
+**2. Added the "Honest read" to docs.** BENCHMARKS.md's Cross-library section now has a clearly-labeled **`Honest read:`** callout (was "Reading the result honestly"), with the fairness point made explicit: leptos *winning* the viewport case — and its 30 ms cold recalc proving its memos genuinely recompute — is the evidence the comparison isn't cherry-picked. The balanced claim stands: lazily has materially higher whole-graph throughput than a comparable native-Rust pull-based reactive system and matches it on incremental viewport reads — not "fastest reactive library."
+
+**⚠️ One thing I could NOT fix — a separate, unrelated blocker.** When I re-ran `make check` I hit a second failure that is **not mine**: an untracked `benches/ipc_transport.rs` (it was already `??` at session start, from concurrent/unmerged IPC work) fails `fmt` then `clippy`/`build` because it imports `lazily::{IpcTransport, InProcessIpcTransport, IpcControlFrame, IPC_DEFAULT_QUEUE_CAPACITY}` — symbols that **don't exist in this tree's source** (it's written against an unmerged IPC transport API). Since `clippy`/`build` use `--all-features --all-targets`, that `#![cfg(feature="ipc")]` bench is always built and can't compile here. I verified `make check` is green with it isolated, then **restored it untouched** (I won't complete or commit another session's WIP, and I won't silently hide it). To get `make check` fully green its owner needs to land the IPC transport API, or gate/remove the bench. No crates.io release (dev/docs/bench-tooling only).
+<!-- agent:boundary:559b57e7 -->
 <!-- /agent:exchange -->
 ###
 <!--

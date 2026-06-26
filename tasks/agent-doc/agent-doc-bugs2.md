@@ -519,7 +519,19 @@ Agreed, and filed as `#crdtedgetests`: an 8-row deterministic SimWorld/unit matr
 Noted, not chasing it now per your steer. Quick flag for later: creating an empty `.md` then `Claim for Tmux Pane` is the path that produced this wedged-open first cycle, so a guided "new agent-doc document" onboarding (scaffold frontmatter + first claim atomically) is worth a follow-up — I'll file it when you want, separate from the CRDT track.
 
 **Your live session:** the `alex-lee.md` spin-loop won't fix itself (stale in-memory `cycle_open`, `#suprecyclespin`). Quickest recovery: `agent-doc restart-supervisor tasks/professional/alex-lee.md` (or close/reopen that pane) — it's harmless log-spam otherwise (deferred = no action), but it blocks that supervisor from hot-reloading. I didn't kill it from here since it's another pane's route-owned supervisor.
-<!-- agent:boundary:c4184685 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=0567fc1f-b1dd-4530-83bb-66aefd690eda invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=80176 candidate_hash=6e09e32aaa2e802d7253ca954ce52d53f40523cd1012cf5132e8339b9bb71739 content_ours_len=83648 content_ours_hash=41d22d7da00cd61df41634cbc749cc49c05040894cb2c0f0125ba590d482a62e doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782498073183
+```
+<!-- agent:boundary:a25c3b8f -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -62,7 +62,14 @@ I picked up the Codex-owned cycle and ran preflight plus plan. `#cdtcutover` is 
 I converted the remaining gated review item `#kj5f` into an actionable backlog replacement, `#kj5flive`, and cleared it from review. That keeps the live JB/VSCode merge-state-machine proof available without leaving another gated review item behind.
 
 Preflight also flagged `#crdtauth6` as potentially semantically covered by completed `#crdtauth5`; I left that backlog item untouched because it still names live hookup/VS Code follow-through work and should be reconciled in a dedicated drain cycle or operator verification pass.
-<!-- agent:boundary:82439a65 -->
+For the editor-side state/proof path: mostly yes.
+
+`lazily-kt` is sufficient as the Kotlin-side projection/mirror contract: it has `StateProjectionClient`, `StateGraphMirror`, snapshot/delta decode, and FFI bindings for `agent_doc_state_projection`, `agent_doc_state_subscribe`, and `agent_doc_record_state_event`. That covers JB-style UI/status reads and reporting state facts back to Rust.
+
+For the core `CellDocTree`/finalize cutover: no. `lazily-kt` is explicitly not a reactive-core port. It does not provide `CellTree`, `CellMap`, `reconcile`, `apply_to_map`, `apply_to_tree`, `SemTree`, or CRDT merge machinery. Those are in `lazily-rs`, and the current agent-doc core work depends on that Rust API.
+
+Also, `src/lazily-kt` is currently clean. There is nothing to commit there.
+<!-- agent:boundary:f1b80aed -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -74,6 +81,7 @@ Preflight also flagged `#crdtauth6` as potentially semantically covered by compl
 - do [#qeditdup]
 - do [#crdtauth6]
 - do [#nsfz]
+- do [#kj5flive]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

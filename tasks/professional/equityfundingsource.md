@@ -197,7 +197,19 @@ Done (EFS `9d0d71d`, pushed to `origin/main`). Both your points landed in one re
 **Verification:** I re-ran `bun run check` myself — **1320 pass, 0 fail**, browser + worker builds clean. Reviewed the selection resolver + tab/search helpers directly before pushing.
 
 **Deploy:** held per `#spec-test-commit-push`. Queue `deploy` when you want the open-deal fix + tab/search rework live (no D1 migrations).
-<!-- agent:boundary:4ff5ba98 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=19383b1c-c82a-482d-ab53-f79bc7842258 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782451332136
+```
+<!-- agent:boundary:0dbdfff9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -219,7 +231,7 @@ After 20:30
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~The Message dialog for https://equityfundingsource.brian-takita.workers.dev/lenders/deals/866e1c5a-e428-4b35-bacb-a58f5d94b7da does not show an open conversation for that property. It show and selects only the interested deal which is different. It should show the messages for the opened deal.~~
 - ~~A lender may have many deals, so show the General tab, the subj~~
-- ~~A lender may have many deals, so show the General tab, the subject as a tab, and a search box to go through all conversations.~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 ~~A lender may have many deals, so show the General tab, the subject as a tab, and a search box to go through all conversations.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~deploy~~
 <!-- /agent:queue -->
 

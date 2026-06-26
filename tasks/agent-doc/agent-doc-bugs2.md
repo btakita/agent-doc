@@ -97,7 +97,19 @@ Did it in an **isolated worktree** (`src/agent-doc-cdtcutover-wt`, branch `cdtcu
 **Deferred — write-side finalize hook (b):** the live merge seam (`crdt::merge`/`merge_3way`/`merge_by_component`) is stateless text-in/text-out per cycle, with no persistent `CellDocTree` threaded through finalize. Driving finalize through `update_to` needs a supervisor/process-lifetime cache + revision-hash invalidation against the supervisor's concurrent out-of-band writes + a `from_document` fallback — its own rung, filed below.
 
 **Remaining for `#cdtcutover` (operator-gated):** the branch is *not* merged/installed (worktree isolation). The live flip — merge `cdtcutover`, consume the accessor in the live drainable path, land the write-side, then the live editor/pane zero-regression proof — is the operator-gated step.
-<!-- agent:boundary:336fd63d -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=78a48844-d557-490a-a7e2-a9295c7fcee2 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=15000 candidate_hash=bff254e41920db638676256c3d7f751c3494536bdeb47e4a4429e4ad25b89f12 content_ours_len=16399 content_ours_hash=2aa6f5042888ad737f237efdae7bb0bc022b4f7598518c7c8f494b07cd73fd91 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782455606328
+```
+<!-- agent:boundary:f0d82b66 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -105,6 +117,7 @@ Did it in an **isolated worktree** (`src/agent-doc-cdtcutover-wt`, branch `cdtcu
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 [#cdtcutover]
+- look in logs to see if we can verify [operator-verify] items in the backlog
 - do [#qftloss]
 - do [#qeditdup]
 - do [#crdtauth6]

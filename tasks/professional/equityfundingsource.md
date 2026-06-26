@@ -25,6 +25,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 complete
 <!-- /agent:status -->
 
@@ -115,7 +116,27 @@ Proceeded with the safe default (doc-only — my standing recommendation, and a 
 > deploy
 
 Nothing to deploy: the change is `docs/master-state-machine.md`, a documentation file that is **not** part of the deployed Worker bundle, so there is no worker behavior to ship. (The last code deploy remains the messages-focus fix.) If you want the lender state machines as **runtime FSM code** rather than docs — the path where `lazily-js` would actually apply — say so and I'll scope that as a separate, deployable change.
-<!-- agent:boundary:1620a5c4 -->
+
+### Re: Deal pipeline must not block on lender-pipeline steps — shipped + deployed — opus-4-8
+
+> **Request (chat):** The admin pipeline Select Proposal was blocked — "Brian Takita annual requirements are not started. Complete or approve the lender requirements before selecting this lender." We should not block selecting a proposal from lenders who haven't filled out paperwork. Make the deal pipeline not block at all based on lender-pipeline steps.
+
+Done — implemented, tested, committed, pushed, and deployed.
+
+**Root cause.** The Select Proposal action (`admin_deal_interests_by_id_select_PUT_`, `lib/admin/investor_management/index.ts`) returned `409` on **three lender-pipeline-step gates**: (1) lender annual requirements/accreditation (`investor_requirements_blocks_funding_`), (2) multi-lender-group member accreditation (`lending_group_unaccredited_members_R_`), and (3) TMO-lender-account linkage. The client button isn't disabled — it just surfaced the server 409 toast.
+
+**Fix** (`#deal-select-no-lender-pipeline-block`, EFS `39e56c2`): removed all three lender-pipeline gates from selection. They are now **visibility-only** — the `requirements_blocked` / `compliance_hold` flags and the lender-card "Requirements: …" / "No TMO lender account" badges all remain, so you still *see* the state and decide for yourself (your "more control + visibility" ask). The two **deal-side** prerequisites are kept: the loan must have a TMO loan number, and the commitment must fit the deal amount.
+
+**Visibility into deal pipeline states:** the §5 lender + §4 deal state machines in `docs/master-state-machine.md` are now accurate to this change (updated the requirements note to say it no longer blocks selection).
+
+**One thing to know (no action taken):** selection was the *only* hard accreditation enforcement point — there is no separate accreditation gate at funding/wire-confirm today. So accreditation is now never hard-blocked before funding. The flags/badges still show it. If you want a *soft* gate (warn, not block) or a real gate at the **funding** step specifically, say so and I'll add it — I did not, since you asked for no blocking.
+
+**Verification:** `bun test` → **1327 pass, 2 fail**; both failures are the pre-existing `#doc-viewer` PDF/loan-detail tests (confirmed failing on clean HEAD before my change — unrelated to the deal pipeline, untouched here). `bun run build` + `build:worker` clean.
+
+**Shipped:** EFS `main` `362e1ae..39e56c2` (pushed); worker **deployed** — version `7f861de2-c207-451f-9259-71dc82193496` at https://equityfundingsource.brian-takita.workers.dev. Superproject pointer `96b7113a5`.
+
+Live-eyeball: open the deal `4046fa5a` dialog → loan tab → **Select proposal** on Brian Takita's interest → it should now select (deal → reserved, loan → Loan Estimate) without the requirements 409.
+<!-- agent:boundary:48423cc4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -136,7 +157,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
 - ~~Please create state machine(s) of all deal states.~~
-- 🚧 ~~Please create state machine(s) of lender deal states.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Please create state machine(s) of lender deal states.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~deploy — auto-struck: completed by #do-id-closeout-open-backlog (#qftbklgstrike)~~
 <!-- /agent:queue -->
 

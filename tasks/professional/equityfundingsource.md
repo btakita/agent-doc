@@ -25,7 +25,6 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 complete
 <!-- /agent:status -->
 
@@ -161,7 +160,7 @@ Done (EFS `86035c0`, pushed). Opening a deal dialog from a dashboard card now re
 Note: I also recovered the session document first — your two prompts had landed below the `agent:done` block with the entire backlog/review tail duplicated (a CRDT merge artifact); I restored the clean structure and re-queued both prompts. Next up: the second queue head ("the cards are not showing the property photos").
 
 > **Queue prompt:** The deal dialog in https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard should use pushState to update the url so the page can be bookmarked.
-<!-- agent:boundary:3b0e81e1 -->
+<!-- agent:boundary:c9b194f7 -->
 <!-- /agent:exchange -->
 ###
 <!--

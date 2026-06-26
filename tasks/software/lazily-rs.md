@@ -57,7 +57,7 @@ I added three prioritized backlog items. The top item is not another speculative
 The highest engineering follow-up after that is `#lzsmstress`, focused on state-machine hardening across sync, thread-safe, and async machines. `#lzcrdtperms` is third because the distributed CRDT transport is the freshest complex surface and needs deterministic permission/fan-out/GC regressions.
 
 I left the operator-gated review items in Review; they are not agent-drainable bug-fix work in this cycle.
-<!-- agent:boundary:579fabc8 -->
+<!-- agent:boundary:d62d647d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,6 +66,9 @@ I left the operator-gated review items in Review; they are not agent-drainable b
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- [#lzbugtriage]
+- [#lzsmstress]
+- [#lzcrdtperms]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -545,7 +545,7 @@ flowchart LR
 #lzcrdtplane — the distributed cell plane (HLC version-vector exchange, multi-peer Δ sync, the causal-stability-frontier computation) — is still `[/]` in review and **unbuilt**. Only the local primitives exist: `SeqCrdt`/`TextCrdt` plus the GC **mechanism** just shipped under #lztombgc. That split was the whole point of the #2ygp closeout: the *mechanism* lands now; the *policy source* (the all-replicas-aware watermark) is produced by the plane's anti-entropy, which doesn't exist yet.
 
 Wiring a consumer (`gc_with`) into a producer (the version-vector frontier) that hasn't been built isn't a task I can complete — and stubbing a fake watermark against a missing plane would be unsound (a single replica's clock is **not** a causal-stability frontier, as the GC docs state). So I'm **gating `#r86a`** (blocked on #lzcrdtplane), not implementing it. It ungates and becomes actionable the moment #lzcrdtplane ships its anti-entropy. No code this cycle.
-<!-- agent:boundary:86d29929 -->
+<!-- agent:boundary:83fb5b66 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -564,7 +564,6 @@ Wiring a consumer (`gc_with`) into a producer (the version-vector frontier) that
 ## Review
 
 <!-- agent:review -->
-- [/] [#r86a] [recommended] #lztombgcwire=Wire SeqCrdt::gc / TextCrdt::gc_with into #lzcrdtplane anti-entropy: have the plane compute the all-replicas-aware causal-stability frontier (version-vector minimum across peers) and drive periodic tombstone GC from it. Mechanism shipped under #lztombgc (lazily-rs a12bf19); this is the policy/transport half, lands with #lzcrdtplane.
 - [/] [#lzwirekey] [recommended] [operator-go] Wire-stable keyed addressing for collection entries: add optional key/path field to NodeAdd + NodeSnapshot (key->NodeId registry) so CellFamily/CellMap entries survive NodeId churn. Depends on #lzcellfamily (DONE). PLAN COMPLETE: tasks/software/plan-lazily-wire-keyed-addressing.md — implementation gated on operator go (you scoped this plan-only).
 - [/] [#lzcrdtplane] [recommended] Implement the distributed CRDT cell plane (spec §Distributed). Decision: purpose-built HLC + LWW/MV/PN registers (matches lazily's lazy reactive graph + memo-equality invariants); do NOT adopt YRS/YJS document model (wrong replication unit). Keep IPC Snapshot/Delta as the single-producer mirror; CRDT merge lives only at the multi-writer distributed boundary. Optional later: borrow YRS binary anti-entropy sync engine as transport. Plan first: tasks/software/plan-lazily-distributed-crdt-plane.md.
 - [/] [#lilazilysmpost] [/] [operator-drive] lazily state-machine LinkedIn post PUBLISHED WITH IMAGE: https://www.linkedin.com/feed/update/urn:li:share:7475622100263923712 (mail/social/20260624-142530-linkedin.md @ mail bf4ab26). CyclePhase diagram rendered from blog post SVG (light theme colors) + uploaded via LinkedIn digitalmediaAsset API. Old text-only post (urn:li:share:7475617202893639680) deleted + replaced. Remaining operator follow-up: post first comment (link + GitHub source) via corky linkedin comment.

@@ -678,20 +678,20 @@ where
 /// Reserved key for the leading text inside a component body before its first
 /// keyed child (e.g. the blank line / preamble before the first list item or
 /// `### Re:` block). Matched positionally-by-key like any other child.
-const PREAMBLE_KEY: &str = "\u{0}::preamble";
+pub(crate) const PREAMBLE_KEY: &str = "\u{0}::preamble";
 
 /// True for component kinds whose body is a markdown list of keyed items
 /// (`queue`/`backlog`/`review`/`done`), reconciled per item in Phase 3.
-fn is_list_component(name: &str) -> bool {
+pub(crate) fn is_list_component(name: &str) -> bool {
     matches!(name, "queue" | "backlog" | "review" | "done")
 }
 
 /// One keyed child within a component body. `text` is the exact source slice so
 /// that `children.iter().map(|c| &c.text).collect::<String>() == body` (lossless
 /// segmentation); `key` is the child's durable identity within the component.
-struct KeyedChild {
-    key: String,
-    text: String,
+pub(crate) struct KeyedChild {
+    pub(crate) key: String,
+    pub(crate) text: String,
 }
 
 /// First `[#id]` token in `s` (e.g. `do [#qnodemerge3]` → `qnodemerge3`), the
@@ -764,7 +764,7 @@ fn exchange_heading_key(block: &str) -> String {
 /// (continuation lines attach to the preceding item; leading text becomes a
 /// [`PREAMBLE_KEY`] child). Returns `None` when the body has no list item, so
 /// the caller falls back to the flat whole-component merge.
-fn split_list_children(body: &str) -> Option<Vec<KeyedChild>> {
+pub(crate) fn split_list_children(body: &str) -> Option<Vec<KeyedChild>> {
     let mut starts = Vec::new();
     let mut pos = 0usize;
     for line in body.split_inclusive('\n') {
@@ -783,7 +783,7 @@ fn split_list_children(body: &str) -> Option<Vec<KeyedChild>> {
 /// Split an `exchange` component body into keyed children, one per `### Re:`
 /// block (leading text becomes a [`PREAMBLE_KEY`] child). `None` when there is
 /// no `### Re:` heading.
-fn split_exchange_children(body: &str) -> Option<Vec<KeyedChild>> {
+pub(crate) fn split_exchange_children(body: &str) -> Option<Vec<KeyedChild>> {
     let mut starts = Vec::new();
     let mut pos = 0usize;
     for line in body.split_inclusive('\n') {

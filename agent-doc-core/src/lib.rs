@@ -11,6 +11,7 @@
 //! convenience of a single move and may be split into orchestration wrappers
 //! in a follow-up tidy.
 
+pub mod cell_doc;
 pub mod component;
 pub mod crdt;
 pub mod crdt_sync;

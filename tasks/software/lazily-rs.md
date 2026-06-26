@@ -545,7 +545,7 @@ flowchart LR
 #lzcrdtplane — the distributed cell plane (HLC version-vector exchange, multi-peer Δ sync, the causal-stability-frontier computation) — is still `[/]` in review and **unbuilt**. Only the local primitives exist: `SeqCrdt`/`TextCrdt` plus the GC **mechanism** just shipped under #lztombgc. That split was the whole point of the #2ygp closeout: the *mechanism* lands now; the *policy source* (the all-replicas-aware watermark) is produced by the plane's anti-entropy, which doesn't exist yet.
 
 Wiring a consumer (`gc_with`) into a producer (the version-vector frontier) that hasn't been built isn't a task I can complete — and stubbing a fake watermark against a missing plane would be unsound (a single replica's clock is **not** a causal-stability frontier, as the GC docs state). So I'm **gating `#r86a`** (blocked on #lzcrdtplane), not implementing it. It ungates and becomes actionable the moment #lzcrdtplane ships its anti-entropy. No code this cycle.
-<!-- agent:boundary:83fb5b66 -->
+<!-- agent:boundary:f2fcfe70 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -554,6 +554,13 @@ Wiring a consumer (`gc_with`) into a producer (the version-vector frontier) that
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- [#r86a]
+- update lazily-spec with latest changes
+- release + publish lazily-rs
+- lazily-kt parity. release + publish
+- lazily-js parity. release + publish
+- lazily-zig parity. release + publish
+- lazily-py parity. release + publish
 <!-- /agent:queue -->
 
 ## Backlog

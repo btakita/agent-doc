@@ -56,7 +56,7 @@ Compacted content:
 So the **compressed library payload is ~6.4 KB gzipped (6,433 bytes)** / ~5.8 KB brotli (5,779 bytes) — that's the JS a consumer actually imports and runs (koffi, the one runtime dependency, is separate and not counted here).
 
 For contrast, the **published npm tarball** (`npm pack`) is **16,355 bytes** gzipped (68,695 unpacked, 15 files) — but that figure is inflated because the package has no `files`/`.npmignore`, so it also packs the test suite (`test/ipc.test.js` + `test/state-projection.test.js` ≈ 21 KB raw), the conformance JSON fixtures, `AGENTS.md`, and the `.d.ts` type stubs. None of that runs in a consumer; adding `"files": ["src/*.js", "src/*.d.ts"]` would drop the tarball to roughly the runtime + types (~3–4 KB packed). Flagging as an observation — not changing packaging unprompted.
-<!-- agent:boundary:27b5b57d -->
+<!-- agent:boundary:5a2afa80 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -65,6 +65,7 @@ For contrast, the **published npm tarball** (`npm pack`) is **16,355 bytes** gzi
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- Does lazily-rs benchmark well with the 10M cell recalc compared to other reactive libraries?
 <!-- /agent:queue -->
 
 ## Backlog

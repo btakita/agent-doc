@@ -208,7 +208,18 @@ This is also the real reason your cards looked empty: prod has **2 borrower-uplo
 **Deploy:** held per your `🚧 deploy`. Ready via `bun run deploy:worker` — the 2 existing borrower PNGs appear once deployed. Accepted trade-off: every borrower Property Photo image is instantly public to anyone who can see the deal.
 
 > **Queue prompt:** The borrower also uploads photos. Use the borrower uploaded photo as well.
-<!-- agent:boundary:357142c8 -->
+
+### Re: deploy — opus-4-8
+
+Deployed. The borrower-property-photos feature (`e468759`) is now **live in production**.
+
+- Ran `bun run deploy:worker`: worker `equityfundingsource` uploaded (7.04 s), all bindings intact.
+- **Live:** https://equityfundingsource.brian-takita.workers.dev — Version ID `aad45b6d-aae8-454a-bb48-d4aa43d37da7`, hourly schedule intact.
+
+The **2 existing borrower-uploaded `dt_photos` PNG property photos** now appear as public deal photos on the lender dashboard/marketplace cards (and borrower/broker carousels) — closing the loop on "the cards are not showing the property photos." Going forward, any image a borrower files under **Property Photos** is auto-published as a public deal photo (the trade-off you chose).
+
+> **Queue prompt:** deploy
+<!-- agent:boundary:6a80483e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -229,7 +240,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~deploy~~
-- ~~The borrower also uploads photos. Use the borrower uploaded photo as well.~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 ~~The borrower also uploads photos. Use the borrower uploaded photo as well.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

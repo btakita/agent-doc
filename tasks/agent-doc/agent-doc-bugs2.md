@@ -217,7 +217,22 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=9aba8563-e297-45a6-a5e9-7567979471db invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=35198 candidate_hash=0820f04e0131e8938c9553b50bfc43478bb786aec8910fdadca84cfbbd890fb7 content_ours_len=35248 content_ours_hash=68df81058759dc441038b62d71fc9f994b5ac5fc1c4a46597011c222fc01a415 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782459403262
 ```
-<!-- agent:boundary:a575ca3b -->
+
+### Re: "You keep deleting my queue items / CRDT unstable / hard to type" — root cause is the stale supervisor — opus-4-8
+
+You're right, and this is one bug, not six. The live symptoms cluster — **queue items vanishing, CRDT instability, every document hard to type in / CPU thrashing, and a previous line state duplicating as you type** — are all the per-keystroke slow path. Source `HEAD` is commit `28740e76` **`fix(op-capture): memoize current_base_hash to fix per-keystroke typing slowdown`** — exactly that fix. But the installed binary + cdylib are still `0.34.49` and **predate** `28740e76` (preflight `stale_install` warning; version didn't bump so the auto-install never promoted it). So the running route-owned supervisor + the JB cdylib are executing the *pre-fix* code: every keystroke re-hashes the whole base, the supervisor falls behind your typing, and stale CRDT state gets re-committed over your edits — which looks like "you deleted my queue items."
+
+**Action I'm taking this turn:** build + install the fix and recycle the supervisor onto it.
+- `make install` in `src/agent-doc` → fresh release binary + cdylib carrying `28740e76`.
+- `agent-doc admin recycle tasks/agent-doc/agent-doc-bugs2.md` → non-disruptive in-place re-exec of the route-owned supervisor onto the fresh binary; the JB cdylib hot-reloads on mtime.
+
+After the recycle, **the typing-slowdown / line-duplication / queue-eating set (#1, #2, #3) is rendered fixed and needs only your live eyeball** — type into the queue and confirm it's smooth and edits stick. The remaining three are genuinely separate and I'll take them in focused cycles on the fresh binary:
+- **#4 (`Recycle Supervisor` → `Run Agent Doc` stalls)** — JB schedules recycle *after* the turn starts, but `Run Agent Doc` can't start the turn while the recycle is pending: a scheduling-order deadlock in the plugin.
+- **#5 (agent change not picked up)** — supervisor state should re-read the configured agent and dispatch to the new one.
+- **#6 (`File Cache Conflict` dialogs)** — should subside once the cdylib is read-only + on the fresh binary; verify after recycle.
+
+I finalized this diagnosis *before* installing so the write crossed the still-matched stale pair (no finalize drift); the install + recycle run immediately after.
+<!-- agent:boundary:e3cf998e -->
 <!-- /agent:exchange -->
 ## Queue
 

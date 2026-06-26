@@ -24,7 +24,6 @@ queue: stop
 
 <!-- agent:status -->
 
-🔴 (restart/recycle your supervisor)
 - [x] Phase 1: Research & design
 - [x] Phase 2: Core signal primitives
 - [x] Phase 3: Derived/computed signals
@@ -105,7 +104,7 @@ Results at **N = 100,000** (200k nodes/lib; leptos is far heavier per node, so t
 **Landed:** `lazily-rs` `a1d6bf6` (bench + feature-gated dep + BENCHMARKS.md `### Cross-library comparison`), submodule pointer bumped (`6c963efe2`). clippy clean; all `make check` tests pass. No crates.io release (dev/bench-only, no library code change). Reproduce: `cargo bench --features scale-compare --bench scale_compare`.
 
 **One caveat:** `make check`'s `benchmark-check` step is red, but on a **pre-existing** criterion-data staleness — `--check` just compares the committed machine-specific numbers against whatever is in `target/criterion`, and it fails identically with my changes stashed (verified). My diff is additive-only and touches neither the generated results section nor any benched library code. Refresh it with `make benchmark-update` on an unloaded host when convenient.
-<!-- agent:boundary:92bcb6b3 -->
+<!-- agent:boundary:c257a9de -->
 <!-- /agent:exchange -->
 ###
 <!--

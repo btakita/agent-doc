@@ -17,8 +17,8 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#simworld': Strengthen Simworld tests.
-  '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
-  '#spec-test-commit-push': update spec + tests. commit + push
+  '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
+  '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
 queue: start
 ---
 
@@ -39,8 +39,38 @@ done
 Compacted content:
 - Archived 8 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); do #qeditdup and #qftloss/#qftlossproof; #qeditdupguard - gpt-5; 5 more
 - Prior summary/context: prior compacted content: Archived 34 response topic(s): do #provauth1 #provauth2 #provauth3; drain #actorprune; drain...
+- Pending root closeout commit and push after this finalize writes the session document.
+- `src/agent-doc` submodule commit `fa98a2ed` (`agent-doc: add editor sync barrier`).
+- `make install` -> installed `agent-doc 0.34.63`; install marked two controllers for recycle at next idle boundary.
+- `gh run list --workflow CI --limit 1` -> latest CI run `28302427088` completed successfully.
+- `make check`
+- `cargo test -p agent-doc --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --exact`
+- `cargo test -p agent-doc-orchestration start::idle_watch::tests::open_agent_doc_cycle_defers_self_recycle_committed_cycle_allows_it -- --exact`
+- `cargo test -p agent-doc-orchestration editor_attached_commit_barrier_defers_in_flight_editor_epoch`
+- `cargo test -p agent-doc-orchestration live_buffer_epoch_reports_in_flight_until_disk_matches_editor_buffer`
+- `cargo test -p agent-doc-orchestration editor_sync`
+- Green: all focused tests passed after implementation.
+- Red: `cargo test -p agent-doc-orchestration handle_ipc_state_includes_editor_sync_for_actor_file` failed because `editor_sync` was absent from the state response.
+- Red: `cargo test -p agent-doc-orchestration editor_attached_commit_barrier_defers_in_flight_editor_epoch` failed because the MultiReplica commit barrier returned immediately.
+- Red: `cargo test -p agent-doc-orchestration editor_sync_barrier_times_out_until_editor_buffer_is_flushed` failed on missing `edit_epoch`, `editor_sync_statuses`, and `await_editor_sync_barrier`.
+- Fixed an idle-watch test isolation leak by waiting for process-global IPC handler counts to drain before asserting the committed-cycle recycle branch.
+- Added regression coverage for epoch classification, barrier timeout/ready behavior, MultiReplica commit deferral, and supervisor state exposure.
+- Extended the existing supervisor `state` response with `editor_sync` status for the active actor document without changing the `{ "method": "state" }` request shape.
+- Wired the bounded barrier before MultiReplica CRDT commit barriers, disk-projection reconcile, and IPC truncation recovery; timeout fails open by requesting an editor save when a live listener exists.
+- Added durable per-editor `edit_epoch`, `last_synced_epoch`, and optional `state_vector_b64` fields to live-buffer sidecars, plus `editor_sync_statuses` and `await_editor_sync_barrier`.
+- `src/agent-doc/agent-doc-orchestration/src/start/idle_watch.rs`
+- `src/agent-doc/agent-doc-orchestration/src/start/supervisor_io.rs`
+- `src/agent-doc/agent-doc-orchestration/src/realtime_model.rs`
+- `src/agent-doc/agent-doc-orchestration/src/preflight.rs`
+- `src/agent-doc/agent-doc-orchestration/src/crdt_relay_host.rs`
+- `src/agent-doc/agent-doc-orchestration/src/debounce.rs`
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+> **Queue prompt:**
+>
+> :pushpin: do [#syncbarrier]
+
 
 ```text
 **IPC proof issue dogfood log**
@@ -51,13 +81,13 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=7748d77a-629d-4aa5-a589-000e8789ae62 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=27649 candidate_hash=2c5f6a568a51a3a68bc7cad2dd096a712808773c8f70c4beef10c95ab1401bd3 content_ours_len=27274 content_ours_hash=e7495b0f08b897d617eee9980525d9a1d640f6ad4a866cae418211fbb58b64e6 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782598522661
 ```
-<!-- agent:boundary:e7d6f4bd -->
+<!-- agent:boundary:085dafe8 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- :pushpin: do [#syncbarrier]
+- ~~🚧 :pushpin: do [#syncbarrier]~~
 - :pushpin: do [#qheadstrikeauto]
 - :pushpin: do [#suprestassoc]
 - :pushpin: do [#2y8j]
@@ -113,7 +143,6 @@ What are #next-steps to fix bugs?
 - [ ] [#provauth3bimpl] Replacement for #provauth3b: operator-origin authority cutover. Once #crdtauth6 supplies live origin deltas, replace remaining content_ours/stale-editor resurrection heuristics with origin checks and add logs/tests proving operator-origin working-tree edits are never reset. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#supstaledetectverify] Replacement for #supstaledetect: stale-install warning merge/install verification. Merge the source-mtime warning fix, install/recycle, then verify logs show a fresh build no longer warns while a genuinely stale binary still emits stale_install evidence.
 - [ ] [#suptmuxstaleverify] Replacement for #suptmuxstale: stale-supervisor pane indicator install/log proof. Merge/install the pane-title marker change, recycle, then verify .agent-doc/supervisor-stale plus pane title/turn_status logs show STALE SUPERVISOR only when the supervisor binary is actually stale.
-- [ ] [#syncbarrier] #agent-doc-feature Phase 1 (editor-sync barrier) — epoch handshake so the binary DEFERS dangerous ops (snapshot reset / disk reconcile / merge-base rebuild) while an editor edit is in flight, bounded wait, fail-OPEN to the editor buffer (never a held lock, never snapshot-discard). Poll-check = yrs StateVector exchange, not text compare. Needs JB/VSCode edit_epoch + StateVector over IPC (extend State method). Phase 0 #ipctruncrecover shipped (0.34.53). Plan: tasks/agent-doc/plan-editor-sync-barrier.md
 - [ ] [#qheadstrikeauto] #agent-doc-feature auto-strike answered free-text head WITHOUT requiring the agent to quote it as a > **Queue prompt:** blockquote — operator: "the binary should do this automatically...not the agent". Today strike_answered_free_text_queue_heads (queue_consume.rs) only fires on a blockquote/prose-prefix match, so a head answered in plain prose is never struck. Key the strike off the binary drain-target / in-progress (the marker) head identity for the cycle instead of agent prose formatting. Plan: tasks/agent-doc/plan-freetext-queue-head-autostrike.md
 - [ ] [#suprestassoc] #agent-doc-bug restart-supervisor re-associates the wrong doc: restarting the equityfundingsource.md supervisor re-bound EFS to the agent-doc-bugs2.md claude session. Actor re-register/lease-replace likely keys on pane/session not (document_id,generation) across the shared project controller. Needs live repro; fix = scope re-association to the restarted doc only + regression. Plan: tasks/agent-doc/plan-restart-supervisor-doc-reassociation.md
 - [ ] [#60ev] plan-dynamic-context-injection-ledger.md

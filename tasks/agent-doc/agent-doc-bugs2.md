@@ -301,13 +301,29 @@ I also fixed the tmux crash root cause in `#tmuxsynccrash`: `repair_layout` now 
 Commits: `src/agent-doc` `c83edc1c` and superproject pointer `31b1f4526`. Verification: focused Rust tests for the blocked closeout, no-ACK write path, tmux rescue predicate, and live zero-stash tmux no-op; `make check` green with 5,473 tests; `make tmux-ci` green; `agent-doc --version` reports `0.34.62`. Latest GitHub CI is red on prior upstream `7b2e54c7`; log download is blocked by GitHub permissions, but the local `make check` failure class was fixed and rerun green here.
 
 `#tmuxsynccrash` is code-complete and installed; I am gating it only for the remaining operator live proof: run JB `Sync Tmux Layout` repeatedly with the repro layout and confirm the tmux server pid stays stable.
-<!-- agent:boundary:2f8c2763 -->
+
+### Re: review gate cleanup and queue corruption capture — gpt-5
+
+I treated this as a planning/backlog cleanup cycle, not as permission to mark the current backlog done. The queue corruption report is already represented by `#qeditdup` and `#qftloss`, so I did not add another duplicate bug for the same live-edit failure mode.
+
+I converted the seven gated `agent:review` items into ordinary actionable backlog replacements and cleared the review list. For the JB/live-proof cases, the replacement backlog text now names the logs or artifacts that should prove or disprove the item after you test: `idea.log`, agent-doc `ops.log`, tmux server pid/session evidence, `.agent-doc/live-buffer` journal evidence, `.agent-doc/supervisor-stale`, and turn-status markers as applicable.
+
+No source files changed and no tests ran in this cycle. I do not need you to install a new JB plugin for this cleanup; the next JB install is only needed after a later backlog item actually changes plugin code.
+<!-- agent:boundary:6e9c55db -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - 🚧 `/clear` was autonomously added...blocking JB `Run Agent Doc`. As I was typing in this item, 2 duplicates of the next queue item were added before this item. And a stale copy of this prompt was duplicated above this item...and the last 3 characters I typed were deleted in this prompt. CRDT issues...
+- Duplicate text document corruption occurred while I was typing into te queue.
+- [#tmuxsynccrashlog]
+- [#qftlossproof]
+- [#midturnrecycleproof]
+- [#midturnresumeimpl]
+- [#provauth3bimpl]
+- [#supstaledetectverify]
+- [#suptmuxstaleverify]
 ---
 :round_pushpin: JB `Run Agent Doc` on monsterrodholders.md
 ```text
@@ -315,6 +331,19 @@ Commits: `src/agent-doc` `c83edc1c` and superproject pointer `31b1f4526`. Verifi
 Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %1 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Summarize recent commits"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782586439553-direct_pane_protected_prompt_input-codex-_1-a0c7b4c8e461.txt
 ```
 ---
+- fix `• The finalize call rejected the sibling list because this binary requires one message per sibling path. I’m retrying with paired sibling messages; no file write happened on the rejected call.`
+- monsterrodholders.md issue `• The failed agent-doc write inserted only a few summary bullets instead of a clean Re: #osm-tile-key-provision section. I’m going to fix the task doc with a narrow patch: remove my partial bullets from the compacted summary and add a proper exchange entry before the boundary. `
+- :pushpin: do [#qeditdup] [#qftloss#qftloss]
+- :pushpin: JB `File Cache Conflict` occurences
+- :pushpin: do [#60ev]
+- :pushpin: do [#syncbarrier]
+- :pushpin: do [#qheadstrikeauto]
+- :pushpin: do [#suprestassoc]
+- :pushpin: do [#2y8j]
+- :pushpin: do [#cdtcutover]
+- :pushpin: do [#crdtauth6]
+- :pushpin: do [#nsfz]
+- :pushpin: do [#kj5flive]
 ---
 monsterrodholders.md issue
 ```
@@ -334,6 +363,20 @@ monsterrodholders.md issue
 - do [#crdtauth6]
 - do [#nsfz]
 - do [#kj5flive]
+- do [#tmuxsynccrashlog]
+- do [#qftlossproof]
+- do [#midturnrecycleproof]
+- do [#midturnresumeimpl]
+- do [#provauth3bimpl]
+- do [#supstaledetectverify]
+- do [#suptmuxstaleverify]
+- do [#tmuxsynccrashlog]
+- do [#qftlossproof]
+- do [#midturnrecycleproof]
+- do [#midturnresumeimpl]
+- do [#provauth3bimpl]
+- do [#supstaledetectverify]
+- do [#suptmuxstaleverify]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -360,10 +403,17 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#60ev] plan-dynamic-context-injection-ledger.md
+- [ ] [#tmuxsynccrashlog] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md
+- [ ] [#qftlossproof] Replacement for #qftloss: free-text prompt preservation live proof. After the operator types an unsaved queue/free-text prompt during concurrent finalize, inspect .agent-doc/live-buffer journal evidence plus ops.log qdurcrash/live-buffer replay markers; close only if the prompt survives end-to-end, otherwise file a focused loss bug with artifact paths. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
+- [ ] [#midturnrecycleproof] Replacement for #midturn-recycle-resume: Phase A recycle interlock live proof. Drive a recycle in the preflight->finalize window, inspect ops.log cycle-open recycle-defer/commit markers and editor writeback proof; close only if no live_prompt_drift_after_preflight appears, otherwise file a regression. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
+- [ ] [#midturnresumeimpl] Replacement for #midturnresumeb: Phase B durable turn checkpoint resume. Implement and verify consumption of the #durablerecycle turn checkpoint on fresh supervisor boot, with ops-log markers proving interrupted-child redispatch versus surviving-child no-op and deferred-too-long escalation coverage. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
+- [ ] [#provauth3bimpl] Replacement for #provauth3b: operator-origin authority cutover. Once #crdtauth6 supplies live origin deltas, replace remaining content_ours/stale-editor resurrection heuristics with origin checks and add logs/tests proving operator-origin working-tree edits are never reset. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
+- [ ] [#supstaledetectverify] Replacement for #supstaledetect: stale-install warning merge/install verification. Merge the source-mtime warning fix, install/recycle, then verify logs show a fresh build no longer warns while a genuinely stale binary still emits stale_install evidence.
+- [ ] [#suptmuxstaleverify] Replacement for #suptmuxstale: stale-supervisor pane indicator install/log proof. Merge/install the pane-title marker change, recycle, then verify .agent-doc/supervisor-stale plus pane title/turn_status logs show STALE SUPERVISOR only when the supervisor binary is actually stale.
 - [ ] [#syncbarrier] #agent-doc-feature Phase 1 (editor-sync barrier) — epoch handshake so the binary DEFERS dangerous ops (snapshot reset / disk reconcile / merge-base rebuild) while an editor edit is in flight, bounded wait, fail-OPEN to the editor buffer (never a held lock, never snapshot-discard). Poll-check = yrs StateVector exchange, not text compare. Needs JB/VSCode edit_epoch + StateVector over IPC (extend State method). Phase 0 #ipctruncrecover shipped (0.34.53). Plan: tasks/agent-doc/plan-editor-sync-barrier.md
 - [ ] [#qheadstrikeauto] #agent-doc-feature auto-strike answered free-text head WITHOUT requiring the agent to quote it as a > **Queue prompt:** blockquote — operator: "the binary should do this automatically...not the agent". Today strike_answered_free_text_queue_heads (queue_consume.rs) only fires on a blockquote/prose-prefix match, so a head answered in plain prose is never struck. Key the strike off the binary drain-target / in-progress (the marker) head identity for the cycle instead of agent prose formatting. Plan: tasks/agent-doc/plan-freetext-queue-head-autostrike.md
 - [ ] [#suprestassoc] #agent-doc-bug restart-supervisor re-associates the wrong doc: restarting the equityfundingsource.md supervisor re-bound EFS to the agent-doc-bugs2.md claude session. Actor re-register/lease-replace likely keys on pane/session not (document_id,generation) across the shared project controller. Needs live repro; fix = scope re-association to the restarted doc only + regression. Plan: tasks/agent-doc/plan-restart-supervisor-doc-reassociation.md
+- [ ] [#60ev] plan-dynamic-context-injection-ledger.md
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
 - [ ] [#qeditdup] [operator-verify] Queue items duplicated + manually-struck/deleted items resurrected when the operator edits the queue during an active turn. #queuestatemachine idempotent convergence + the Live<Struck lattice (merged, 0.34.48) should resolve this — VERIFY on the recycled binary; if it persists live, a deeper editor-edit-during-cycle guard is needed. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
@@ -375,13 +425,6 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
-- [/] [#tmuxsynccrash] #agent-doc-bug HIGH severity: JB Sync Tmux Layout crashes the tmux SERVER (all sessions/panes die; route::auto_start then respawns tmux new-session -d -s 0, which the operator sees as the crash). Operator repro 2026-06-26: ran Sync Tmux Layout twice, tmux crashed both times. Root cause from idea.log/ops.log: full-mode agent-doc sync runs doctor-backed repair_layout (agent-doc-orchestration/src/sync.rs:849) whose fast-path skip (has_target && stash_count==1 && has_exact_stash) never converges after its own repair (logs ping-pong target=true/stash=0 <-> target=false/stash=1), so every sync re-runs destructive move-window/swap-window/join-pane/resize-window -y 1000 churn; JB shouldRerunAfterSupersede loop + automatic editor-tab sync amplify into a rapid storm that crashes tmux 3.7. Server pid proof: current tmux STARTED 23:54:47 mid-storm. Fix: (1) make repair_layout converge (stash_count==0 + correct target = no-op), (2) supersede re-run dispatches passive --no-autostart (no doctor repair), (3) rate-limit destructive repair per session. Needs SimWorld + make tmux-ci + operator live tmux-pid-stable proof. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md
-- [/] [#provauth3b] provauth3 operator-origin half=#agent-doc-feature replace the remaining content-based recovery heuristics (content_ours / stale-editor resurrection guards) with operator-origin checks: an operator-origin working-tree change IS the authoritative prompt, never reset or treated as suspicious cleanup; content heuristics become the unknown-origin fallback only. Blocked on the live operator-origin delta signal from #crdtauth6 (origin is not known for operator edits until that seam is live). The binary-origin half shipped in 0.34.57. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
-- [/] [#qftloss] [operator-verify] Free-text prompt loss (mode-6) — CODE-COMPLETE on main (8b900bf4): binary now journals operator prompts from the plugin live-buffer sidecar (.agent-doc/live-buffer/<hash>) into the #qdurcrash store before any convergence/recovery can clobber the unsaved buffer, replayed if absent. Remaining: live IDE eyeball that an unsaved prompt typed during a concurrent finalize survives end-to-end. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
-- [/] [#midturnresumeb] Phase B (focused follow-up) — actively CONSUME the #durablerecycle turn checkpoint (cycle_state.rs:486, currently written but never read to resume) on a fresh supervisor boot to re-dispatch a turn that was genuinely interrupted (child died across the recycle), idempotent vs the surviving-child path. This is the full "restart reliably restarts the turn"; Phase A only makes the wedge impossible. Also add a deferred-too-long escalation counter so a never-closing cycle cannot starve the recycle indefinitely. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
-- [/] [#supstaledetect] stale_install warning false-positives in the dogfood edit->build->install->commit flow: it compared artifact mtime to the HEAD commit timestamp (300s grace), but the binary is always built BEFORE its covering commit, so an ~11min build->commit gap (binary 03:16:22 vs commit 03:27:51) flagged a FRESH binary as stale — disagreeing with the auto-install signal, which uses newest source-FILE mtime and correctly saw it fresh. FIX CODE-COMPLETE on branch supstaledetect-mtimebasis (agent-doc commit b983f144, make check green): warning now uses newest_crate_source_mtime_secs (same basis as auto-install). Remaining: merge -> install -> verify the false warning is gone AND genuine staleness still flags.
-- [/] [#suptmuxstale] DONE (code-complete, branch suptmuxstale-indicator b433bda2, make check green) — tmux pane now surfaces "⚠ STALE SUPERVISOR" in the turn-in-progress pane title (turn_status.rs) when the supervisor binary is stale, so the operator sees at a glance which sessions are stale. The turn-status hook is a separate process from the supervisor holding the binary_stale atomic, so it is bridged via an on-disk marker (.agent-doc/supervisor-stale) written by idle_watch next to the existing binary_stale.store. Pure pane_title_for_status helper + 5 unit tests. NOTE: mirrors the process_binary_is_stale PROBE (separate signal from the #supstaledetect preflight-warning fix); display-only, non-destructive. Remaining: merge -> install (bundle with #supstaledetect/#qimpstrike).
-- [/] [#midturn-recycle-resume] Phase A DONE — cycle-open recycle interlock: execve recycle/restart now defers every arm (auto/admin/wedge-escalation/fresh-binary-flush) while an agent-doc cycle is open or IPC is in-flight, so a recycle can no longer fire mid preflight->finalize and sever the in-flight finalize (the live_prompt_drift_after_preflight wedge root cause). Merged agent-doc main 27bf61a6, installed, supervisor recycle-marked. make check green + unit/SimWorld coverage. Remaining = operator live zero-drift eyeball: drive a recycle in the preflight->finalize window on a live editor, confirm NO live_prompt_drift_after_preflight. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

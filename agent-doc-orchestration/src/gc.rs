@@ -192,6 +192,23 @@ pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
     total_deleted += actors_closed;
     total_skipped += actors_kept;
 
+    // Prune long-dead `Closed` actor records (#actorprune). `close_stale_starting`
+    // only TRANSITIONS `Starting`→`Closed`; nothing removes `Closed` rows, so the
+    // actor store / `admin list` grows without bound (operator observed 251). Remove
+    // `Closed` records older than the prune window with no fresh/alive lease.
+    let (actors_pruned, actors_prune_kept) = crate::project_controller::prune_dead_actors(
+        &project_root,
+        crate::project_controller::DEAD_ACTOR_PRUNE_AFTER,
+        dry_run,
+    )?;
+    if actors_pruned > 0 {
+        eprintln!(
+            "[gc] actors: {} dead records pruned, {} kept",
+            actors_pruned, actors_prune_kept
+        );
+    }
+    total_deleted += actors_pruned;
+
     // Terminate any controller wedged in `Preparing`/`Promoted` past the
     // seconds-scale stuck-handoff threshold (#kqr6 / #sjwm / #stuckhandoff). This
     // kills the live wedged process (not just a projection record) so it stops

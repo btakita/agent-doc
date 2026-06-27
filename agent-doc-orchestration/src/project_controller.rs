@@ -1794,6 +1794,126 @@ pub fn close_stale_starting_actors(
     close_stale_starting_actors_for_caller(project_root, stale_after, dry_run, "gc")
 }
 
+/// Default age threshold for pruning dead `Closed` actor records (`#actorprune`).
+/// A record `Closed` longer than this with no fresh/alive supervisor lease is
+/// genuinely dead — its session is gone — so its `documents`/transitions/lease
+/// rows are removed to bound `admin list` growth. Matches the 1-hour window the
+/// stale-`Starting` sweep uses.
+pub const DEAD_ACTOR_PRUNE_AFTER: Duration = Duration::from_secs(3600);
+
+/// `#actorprune`: hard-remove long-dead `Closed` actor records.
+///
+/// `close_stale_starting_actors` only transitions `Starting`→`Closed`; nothing
+/// removes records already `Closed`, so the actor store accumulates dead
+/// `session-clear` rows forever (the operator observed 251 in one project). This
+/// prunes a record when ALL hold:
+///   - state is `Closed`,
+///   - `last_transition.timestamp` is older than `dead_after`,
+///   - no fresh/alive supervisor lease owns its document/generation
+///     (`supervisor_lease_is_fresh_or_alive`, the same guard the stale-`Starting`
+///     sweep uses) — so a live actor is never pruned.
+///
+/// `dry_run` logs the prune candidates without deleting. Every prune is logged
+/// (`<caller>_pruned_dead_actor ... reason=dead_closed_record`) — never silent.
+/// Returns `(pruned, kept)`.
+pub fn prune_dead_actors_for_caller(
+    project_root: &Path,
+    dead_after: Duration,
+    dry_run: bool,
+    caller: &str,
+) -> Result<(usize, usize)> {
+    let now = timestamp_secs();
+    let store = load_actor_store(project_root)?;
+    let mut conn = open_state_db(project_root)?;
+    let mut pruned = 0;
+    let mut kept = 0;
+
+    for record in store.values() {
+        if record.state != crate::session_actor::ActorState::Closed {
+            kept += 1;
+            continue;
+        }
+        let age = now.saturating_sub(record.last_transition.timestamp);
+        if age <= dead_after.as_secs() {
+            kept += 1;
+            continue;
+        }
+        // Never prune a record a live supervisor still owns (same guard as the
+        // stale-Starting sweep). The pid-alive check inside means a dead
+        // supervisor's lingering lease never blocks the prune.
+        let lease = load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?;
+        if lease
+            .as_ref()
+            .is_some_and(|lease| supervisor_lease_is_fresh_or_alive(lease, now, dead_after))
+        {
+            kept += 1;
+            continue;
+        }
+
+        if dry_run {
+            eprintln!(
+                "[{}] would prune dead actor record: {} session={} generation={} state={} age_secs={}",
+                caller,
+                record.document_id,
+                record.session_id,
+                record.generation,
+                record.state.as_str(),
+                age
+            );
+            crate::ops_log::log_op(
+                Path::new(&record.document_id),
+                &format!(
+                    "{}_would_prune_dead_actor document_id={} generation={} state={} age_secs={} reason=dead_closed_record",
+                    caller, record.document_id, record.generation, record.state.as_str(), age
+                ),
+            );
+            pruned += 1;
+            continue;
+        }
+
+        let removed = state_store::delete_actor_document_tx(&mut conn, &record.document_id)?;
+        if removed > 0 {
+            crate::ops_log::log_op(
+                Path::new(&record.document_id),
+                &format!(
+                    "{}_pruned_dead_actor document_id={} generation={} state={} age_secs={} reason=dead_closed_record",
+                    caller, record.document_id, record.generation, record.state.as_str(), age
+                ),
+            );
+            pruned += 1;
+        } else {
+            kept += 1;
+        }
+    }
+
+    // Refresh the legacy `session-actors.json` projection DIRECTLY from the
+    // post-prune db. Do NOT route through `emit_actor_projection`/`load_actor_store`
+    // here: those re-run `migrate_legacy_actor_projection`, which — once the prune
+    // empties the `documents` table — would re-import the just-deleted records
+    // back from the stale json, resurrecting them. Writing the raw db state keeps
+    // the projection and the source of truth in lockstep.
+    if pruned > 0 && !dry_run {
+        let final_store = state_store::load_actor_store_from_db(&conn)?;
+        let path = actor_projection_path(project_root);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, serde_json::to_string_pretty(&final_store)?).with_context(|| {
+            format!("failed to refresh actor projection {}", path.display())
+        })?;
+    }
+
+    Ok((pruned, kept))
+}
+
+pub fn prune_dead_actors(
+    project_root: &Path,
+    dead_after: Duration,
+    dry_run: bool,
+) -> Result<(usize, usize)> {
+    prune_dead_actors_for_caller(project_root, dead_after, dry_run, "gc")
+}
+
 /// Resolve the stuck-`Preparing` controller staleness threshold, honoring the
 /// `AGENT_DOC_STALE_PREPARING_CONTROLLER_SECS` env override.
 pub fn stale_preparing_controller_threshold() -> Duration {
@@ -2754,6 +2874,117 @@ mod tests {
             },
         }
     }
+    fn closed_actor_record(document_id: &str, timestamp: u64) -> crate::session_actor::ActorRecord {
+        crate::session_actor::ActorRecord {
+            document_id: document_id.to_string(),
+            session_id: "session-clear".to_string(),
+            generation: 1,
+            pane_id: String::new(),
+            window_id: String::new(),
+            harness: "codex".to_string(),
+            state: crate::session_actor::ActorState::Closed,
+            last_transition: crate::session_actor::ActorLastTransition {
+                caller: "session".to_string(),
+                reason: "session-clear".to_string(),
+                timestamp,
+                prior_generation: 0,
+                new_generation: 1,
+            },
+        }
+    }
+
+    #[test]
+    fn prune_dead_actors_removes_old_closed_records() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/dead.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        let old_ts = timestamp_secs().saturating_sub(7200); // 2h ago
+        store_actor_record(dir.path(), Some(0), &closed_actor_record(&document_id, old_ts)).unwrap();
+
+        let (pruned, _kept) =
+            prune_dead_actors(dir.path(), std::time::Duration::from_secs(3600), false).unwrap();
+        assert_eq!(pruned, 1, "old closed record with no lease should be pruned");
+        assert!(
+            load_actor_record(dir.path(), &document_id).unwrap().is_none(),
+            "pruned record should be gone from the store"
+        );
+    }
+
+    #[test]
+    fn prune_dead_actors_keeps_recent_closed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/recent.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        let recent_ts = timestamp_secs().saturating_sub(60); // 1min ago, inside window
+        store_actor_record(
+            dir.path(),
+            Some(0),
+            &closed_actor_record(&document_id, recent_ts),
+        )
+        .unwrap();
+
+        let (pruned, kept) =
+            prune_dead_actors(dir.path(), std::time::Duration::from_secs(3600), false).unwrap();
+        assert_eq!(pruned, 0, "recently-closed record within the window is kept");
+        assert_eq!(kept, 1);
+        assert!(
+            load_actor_record(dir.path(), &document_id)
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn prune_dead_actors_keeps_live_lease() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/live.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        let old_ts = timestamp_secs().saturating_sub(7200);
+        let record = closed_actor_record(&document_id, old_ts);
+        store_actor_record(dir.path(), Some(0), &record).unwrap();
+        // A fresh lease held by THIS (live) process must keep the record even
+        // though it looks old + closed.
+        upsert_supervisor_lease(dir.path(), &record, Some(std::process::id()), None, "running")
+            .unwrap();
+
+        let (pruned, kept) =
+            prune_dead_actors(dir.path(), std::time::Duration::from_secs(3600), false).unwrap();
+        assert_eq!(pruned, 0, "a fresh/alive lease must protect the record");
+        assert_eq!(kept, 1);
+        assert!(
+            load_actor_record(dir.path(), &document_id)
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn prune_dead_actors_dry_run_preserves() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/dry.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        let old_ts = timestamp_secs().saturating_sub(7200);
+        store_actor_record(dir.path(), Some(0), &closed_actor_record(&document_id, old_ts)).unwrap();
+
+        let (pruned, _kept) =
+            prune_dead_actors(dir.path(), std::time::Duration::from_secs(3600), true).unwrap();
+        assert_eq!(pruned, 1, "dry-run reports the prune candidate");
+        assert!(
+            load_actor_record(dir.path(), &document_id)
+                .unwrap()
+                .is_some(),
+            "dry-run must NOT delete the record"
+        );
+    }
+
     #[test]
     fn actor_store_writes_sqlite_before_actor_projection() {
         let dir = tempfile::TempDir::new().unwrap();

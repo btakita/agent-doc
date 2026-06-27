@@ -1495,6 +1495,32 @@ pub fn store_actor_record_tx(
     Ok(evicted_document_ids)
 }
 
+/// `#actorprune`: hard-delete a dead actor record and its history/lease rows.
+///
+/// `close_stale_starting_actors` only TRANSITIONS `Starting` actors to `Closed`;
+/// nothing removes long-dead `Closed` rows, so the `documents` projection (and
+/// `admin list`) grows without bound. This removes the `documents` row plus its
+/// `actor_transitions` history and `supervisor_leases` rows for one document_id
+/// in a single transaction. Returns the number of `documents` rows removed (0 or
+/// 1).
+pub fn delete_actor_document_tx(conn: &mut Connection, document_id: &str) -> Result<usize> {
+    let tx = conn.transaction()?;
+    tx.execute(
+        "DELETE FROM actor_transitions WHERE document_id = ?1",
+        params![document_id],
+    )?;
+    tx.execute(
+        "DELETE FROM supervisor_leases WHERE document_id = ?1",
+        params![document_id],
+    )?;
+    let removed = tx.execute(
+        "DELETE FROM documents WHERE document_id = ?1",
+        params![document_id],
+    )?;
+    tx.commit()?;
+    Ok(removed)
+}
+
 /// True when the `documents` table holds no rows yet.
 ///
 /// Orchestration uses this to gate the legacy `session-actors.json` read so the

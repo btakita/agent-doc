@@ -131,7 +131,11 @@ The answered `JB File Cache Conflict` free-text queue row is now fully struck, s
 ### Re: Queue repair closeout — gpt-5
 
 Closed the queue-residue repair after the answered `JB File Cache Conflict` row was fully struck. The queue now correctly presents `#syncbarrier` as the next active head; no source files changed in this repair.
-<!-- agent:boundary:32f1c9a4 -->
+
+### Re: Queue residue closeout — gpt-5
+
+Moved the answered `monsterrodholders.md issue` free-text residue into a done queue fence and restored `#syncbarrier` as the next active head. The `JB File Cache Conflict` occurrence prompt remains answered and fully struck; this was session-document queue repair only.
+<!-- agent:boundary:26ee5d42 -->
 <!-- /agent:exchange -->
 ## Queue
 

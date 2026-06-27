@@ -139,7 +139,19 @@ Done — rewrote `src/lazily-py/README.md` (was 73 lines documenting only the ba
 **Note (out of scope, pre-existing):** `poe precommit`'s `ty` step reports 2 type errors in `src/lazily/state_machine.py` (`subscriber` callback shape vs `CellSubscriber[T]`). They reproduce with my change stashed, so they predate this README task — not touched here. Flag if you want them fixed in a follow-up.
 
 Queue stays paused (the `release + publish` heads remain operator-gated), so I'm not auto-looping.
-<!-- agent:boundary:4ad9044b -->
+
+### Re: lazily-py README queue head — already completed — opus-4-8
+
+> **Queue prompt:** Update lazily-py README with the latest docs using the latest changes using lazily-spec + the lazily family.
+
+This was completed and pushed last cycle — striking the head so the queue stops churning no-op closeouts over done work.
+
+- `src/lazily-py/README.md` rewritten (Slot→Cell→Signal family, `lazily.ipc` lazily-spec wire protocol, `ShmBlobArena`, `PeerPermissions`, cross-language family table).
+- Verified: both new code blocks run against the package, `run_readme` passes, **77 tests pass**.
+- Committed + pushed: `lazily-hub/lazily-py` `ed786cc` (`docs: refresh README …`).
+
+Nothing else changed this cycle. Queue stays operator-paused on the `release + publish` heads — not looping.
+<!-- agent:boundary:c6132ca9 -->
 <!-- /agent:exchange -->
 ###
 <!--

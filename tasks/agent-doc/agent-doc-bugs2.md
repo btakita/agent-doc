@@ -131,6 +131,18 @@ I restored the queue rows that session-check warned were dropped: `do #closeouts
 
 The document frontmatter is still `queue: stop`, so these rows are inactive queue residue rather than executable drain work in this repair cycle. No repo implementation ran, no source files changed, and no tests were run.
 
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=88ca9130-304a-4796-8632-ac873c33c1b1 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=32401 candidate_hash=fc0ecbf88c2f72feea8ee035c0d7f5647e401edfaa002c2bda906a9c35ff5ee6 content_ours_len=32351 content_ours_hash=14813962a19e6007117c35f8dd2e8a13c3f167a9f45fc20af7965abcf66fc6f2 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782534915164
+```
+
 ### Re: closeout repair for IPC drift and stopped queue — gpt-5
 
 I reopened this Codex invocation as a closeout repair. Preflight repaired a stale `preflight_started` cycle, then found uncommitted document drift that needed the binary-owned write path: the auto-appended IPC proof diagnostic plus the preserved queue free-text row containing the JB `Run Agent Doc` route refusal log.
@@ -154,13 +166,20 @@ Plan classified this as a prompt-response closeout with no repo actions. I did n
 `agent-doc repair --apply-recovery` classified the remaining session-document diff as `unsafe_user_content_drift` and withheld metadata-only repair. I am closing it through the binary-owned `agent-doc write --commit` path with the preserved response body, as instructed, so the user/editor-authored diagnostic and queue edits are not committed by raw Git metadata.
 
 No repo implementation ran in this recovery step. Queue continuation remains false because frontmatter is still `queue: stop`.
-<!-- agent:boundary:54d86ffc -->
+<!-- agent:boundary:84739d25 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
 - ~~[#f693] [#q9w3] [#fpyh] [#818s] [#pcwcrt]~~
+- Whe I delete queue items and type into the queue, I see the full set of CRDT sync issues. I deleted queue items but they reappeared. I tried deleting an item again and the queue downward duplicated corrupting the document. As I was typing in this prompt, 1 character was deleted twie...actually 3 times. See the missing characters in this prompt. JB `Run Agent Doc` error `resync: purged stash window @3 (all panes idle)
+  [sync] recovered live pane %3 for session b26b9957 via path provenance pid=154324 instance=8da2c700-adb5-4b70-9050-f743f5bc4197
+  can't find pane: %4
+  resync: failed to kill stash pane %4: tmux kill-pane failed for %4
+  [route] target tmux session: 0
+  Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %3 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Implement {feature}"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782582746430-direct_pane_protected_prompt_input-codex-_3-209a769b2c10.txt
+`
 - [#syncbarrier] [#qheadstrikeauto] [#actorprune] [#suprestassoc]
 - [#2y8j] [#cdtcutover] [#qeditdup] [#crdtauth6] [#nsfz] [#kj5flive]
 - I deleted items from the queue but they reappeared
@@ -177,6 +196,9 @@ No repo implementation ran in this recovery step. Queue continuation remains fal
 - do [#nsfz]
 - do [#kj5flive]
 - ~~do [#provauth3b]~~
+- do [#closeoutstall]
+- do [#60ev]
+- do [#tmuxsynccrash]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

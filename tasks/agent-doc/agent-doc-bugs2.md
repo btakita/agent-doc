@@ -57,7 +57,7 @@ The fix consults a **recorded origin fact** instead of guessing:
 **Scope boundary (honest):** that's the binary-origin half — where origin is *known today*. The operator-origin half of #provauth3 ("an operator working-tree change IS authoritative; retire `content_ours` / stale-editor resurrection heuristics") needs the live operator-origin delta signal from the `#crdtauth6` seam, which isn't live yet — so I filed it as **#provauth3b** rather than fake it with more content heuristics.
 
 **Next (doing now, agent-doable):** `make install-full` → `admin recycle` so 0.34.57 goes live, then push. After recycle, the operator-eyeball proof is simply: this session no longer needs a manual compaction recovery and no `❯` appears on a Session Summary.
-<!-- agent:boundary:38a47162 -->
+<!-- agent:boundary:580ee6b0 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -79,7 +79,7 @@ The fix consults a **recorded origin fact** instead of guessing:
 - do [#crdtauth6]
 - do [#nsfz]
 - do [#kj5flive]
-- do [#provauth3b]
+- ~~do [#provauth3b]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -106,7 +106,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#provauth3b] provauth3 operator-origin half=#agent-doc-feature replace the remaining content-based recovery heuristics (content_ours / stale-editor resurrection guards) with operator-origin checks: an operator-origin working-tree change IS the authoritative prompt, never reset or treated as suspicious cleanup; content heuristics become the unknown-origin fallback only. Blocked on the live operator-origin delta signal from #crdtauth6 (origin is not known for operator edits until that seam is live). The binary-origin half shipped in 0.34.57. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#pcwcrt] #agent-doc-feature realtime cutover — gate/remove the post-commit working-tree reconcile + (HEAD) boundary reposition tower (git.rs reconcile_postcommit_worktree_to_head / #pcwc / #pcwcwarn / #pzjy / content_ours) when a live CRDT replica is attached. It is turn-based file-sync legacy: its value (keep editor buffer==HEAD after a commit, reposition the boundary, avoid the JB File Cache Conflict dialog, avoid #xbs3 disk-RMW racing the typist) is all subsumed by delta application in realtime — and re-deriving the buffer from a stale snapshot is the recurring #postcommit-ipc-worktree-corruption source. Keep the disk-write path ONLY for no-live-editor (pure-CLI #6b5h) sessions. Rides #provauth1 origin tagging + #crdtauth6 live replica + #cdtcutover. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#syncbarrier] #agent-doc-feature Phase 1 (editor-sync barrier) — epoch handshake so the binary DEFERS dangerous ops (snapshot reset / disk reconcile / merge-base rebuild) while an editor edit is in flight, bounded wait, fail-OPEN to the editor buffer (never a held lock, never snapshot-discard). Poll-check = yrs StateVector exchange, not text compare. Needs JB/VSCode edit_epoch + StateVector over IPC (extend State method). Phase 0 #ipctruncrecover shipped (0.34.53). Plan: tasks/agent-doc/plan-editor-sync-barrier.md
 - [ ] [#qheadstrikeauto] #agent-doc-feature auto-strike answered free-text head WITHOUT requiring the agent to quote it as a > **Queue prompt:** blockquote — operator: "the binary should do this automatically...not the agent". Today strike_answered_free_text_queue_heads (queue_consume.rs) only fires on a blockquote/prose-prefix match, so a head answered in plain prose is never struck. Key the strike off the binary drain-target / in-progress (the marker) head identity for the cycle instead of agent prose formatting. Plan: tasks/agent-doc/plan-freetext-queue-head-autostrike.md
@@ -123,6 +122,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#provauth3b] provauth3 operator-origin half=#agent-doc-feature replace the remaining content-based recovery heuristics (content_ours / stale-editor resurrection guards) with operator-origin checks: an operator-origin working-tree change IS the authoritative prompt, never reset or treated as suspicious cleanup; content heuristics become the unknown-origin fallback only. Blocked on the live operator-origin delta signal from #crdtauth6 (origin is not known for operator edits until that seam is live). The binary-origin half shipped in 0.34.57. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [/] [#qftloss] [operator-verify] Free-text prompt loss (mode-6) — CODE-COMPLETE on main (8b900bf4): binary now journals operator prompts from the plugin live-buffer sidecar (.agent-doc/live-buffer/<hash>) into the #qdurcrash store before any convergence/recovery can clobber the unsaved buffer, replayed if absent. Remaining: live IDE eyeball that an unsaved prompt typed during a concurrent finalize survives end-to-end. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [/] [#midturnresumeb] Phase B (focused follow-up) — actively CONSUME the #durablerecycle turn checkpoint (cycle_state.rs:486, currently written but never read to resume) on a fresh supervisor boot to re-dispatch a turn that was genuinely interrupted (child died across the recycle), idempotent vs the surviving-child path. This is the full "restart reliably restarts the turn"; Phase A only makes the wedge impossible. Also add a deferred-too-long escalation counter so a never-closing cycle cannot starve the recycle indefinitely. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
 - [/] [#supstaledetect] stale_install warning false-positives in the dogfood edit->build->install->commit flow: it compared artifact mtime to the HEAD commit timestamp (300s grace), but the binary is always built BEFORE its covering commit, so an ~11min build->commit gap (binary 03:16:22 vs commit 03:27:51) flagged a FRESH binary as stale — disagreeing with the auto-install signal, which uses newest source-FILE mtime and correctly saw it fresh. FIX CODE-COMPLETE on branch supstaledetect-mtimebasis (agent-doc commit b983f144, make check green): warning now uses newest_crate_source_mtime_secs (same basis as auto-install). Remaining: merge -> install -> verify the false warning is gone AND genuine staleness still flags.

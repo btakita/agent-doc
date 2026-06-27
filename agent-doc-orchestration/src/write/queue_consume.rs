@@ -794,6 +794,17 @@ fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &s
 /// strike it — the response blockquote can't possibly `contains` the full log.
 /// Matching on the prose prefix instead lets a code-fenced report strike when its
 /// lead is quoted. Falls back to the whole text when there is no fence.
+/// True when a queue head's text carries the in-progress `🚧` marker at its head
+/// (after optional leading whitespace). The binary stamps this marker on the
+/// cycle's drain target during preflight queue maintenance
+/// (`set_first_prompt_in_progress`), so it is the binary's own authoritative record
+/// of "the head this cycle is working" — used by `#qheadstrikeauto` to auto-strike
+/// an answered free-text drain target without depending on agent prose formatting.
+fn head_carries_in_progress_marker(text: &str) -> bool {
+    text.trim_start()
+        .starts_with(crate::queue::IN_PROGRESS_MARKER)
+}
+
 fn free_text_head_match_prose(head_text: &str) -> String {
     let mut prose = String::new();
     for line in head_text.lines() {
@@ -857,11 +868,18 @@ fn free_text_head_present_in_baseline(baseline: &str, head_text: &str) -> bool {
     })
 }
 
-/// Node keys of every non-struck free-text queue head that `response_body`
-/// answers, at ANY position in the queue (#ftstrike). Mirrors how
-/// `strike_done_queue_head_prompts` strikes id-backed heads regardless of
-/// position, but matches free-text heads to the answering response instead of a
-/// tracked id outcome.
+/// Node keys of every non-struck free-text queue head that this cycle answered,
+/// at ANY position in the queue (#ftstrike). Two signals mark a head answered:
+///
+/// 1. **Drain-target marker (`#qheadstrikeauto`).** The free-text head carrying
+///    the in-progress `🚧` marker IS the head the binary dispatched this cycle, so
+///    a committed (non-empty) response answers it by definition — struck without
+///    requiring the agent to quote it as a `> **Queue prompt:**` blockquote
+///    (operator: "the binary should do this automatically...not the agent").
+/// 2. **Prose/blockquote answer-match (`#ftstrike`).** A non-marker free-text head
+///    is struck when `response_body` quotes it, mirroring how
+///    `strike_done_queue_head_prompts` strikes id-backed heads regardless of
+///    position, but keyed to the answering response instead of a tracked id.
 ///
 /// `baseline` is the stable pre-turn document (the preflight baseline). When
 /// supplied, a candidate head is struck only if it was already present in that
@@ -888,7 +906,21 @@ pub(crate) fn answered_free_text_head_node_keys(
         if text.is_empty() || !queue_prompt_text_is_free_text(content, text) {
             continue;
         }
-        if !free_text_head_answered_by_response(response_body, text) {
+        // `#qheadstrikeauto`: the binary stamps the cycle's drain target with the
+        // in-progress `🚧` marker at preflight (`set_first_prompt_in_progress`). A
+        // free-text head carrying that marker IS the head this cycle was dispatched
+        // to drain — so on a committed (non-empty) response it is answered by
+        // definition, regardless of whether the agent quoted it as a
+        // `> **Queue prompt:**` blockquote. Operator: "the binary should do this
+        // automatically...not the agent." The prose/blockquote answer-match remains
+        // as the secondary signal that strikes non-marker free-text heads answered
+        // at any position (`#ftstrike`). The baseline gate below still applies, so a
+        // marker on an in-flight operator edit (head absent from the pre-turn
+        // baseline) is never struck.
+        let is_drain_target_marker_head = head_carries_in_progress_marker(text);
+        if !is_drain_target_marker_head
+            && !free_text_head_answered_by_response(response_body, text)
+        {
             continue;
         }
         // `#qstrikeexplain` Phase 2 — never strike a head still being authored this
@@ -3737,6 +3769,85 @@ mod core_tests {
             gated.len(),
             1,
             "a baseline-present answered head must still be struck: {gated:?}"
+        );
+    }
+
+    #[test]
+    fn marker_head_struck_without_blockquote_quote_qheadstrikeauto() {
+        // #qheadstrikeauto: the cycle's drain target carries the in-progress `🚧`
+        // marker (stamped by preflight `set_first_prompt_in_progress`). A committed
+        // response that answers it in PLAIN PROSE — never quoting it as a
+        // `> **Queue prompt:**` blockquote — must still strike it. The strike is
+        // keyed off the binary's drain-target marker identity, not agent prose
+        // (operator: "the binary should do this automatically...not the agent").
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- 🚧 My free-text queue items are not immediately struck as if they are addressed.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        // Plain-prose response with NO blockquote echo of the head: the legacy
+        // prose/blockquote answer-match returns false for this head...
+        let prose_only =
+            "### Re: fixed it — opus\n\nI addressed the queue-strike behavior and shipped the fix.\n";
+        assert!(
+            !free_text_head_answered_by_response(
+                prose_only,
+                "🚧 My free-text queue items are not immediately struck as if they are addressed."
+            ),
+            "precondition: a plain-prose response must NOT prose-match the head"
+        );
+        // ...but the drain-target marker path strikes it on a committed response.
+        let keys = answered_free_text_head_node_keys(content, prose_only, None).unwrap();
+        assert_eq!(
+            keys.len(),
+            1,
+            "the 🚧 drain-target marker head must be struck on a committed response: {keys:?}"
+        );
+    }
+
+    #[test]
+    fn marker_head_not_struck_when_absent_from_baseline_qheadstrikeauto() {
+        // The marker path still respects the #qstrikeexplain Phase 2 baseline gate:
+        // a 🚧 head that first appeared this turn (an in-flight operator edit) is
+        // deferred, never same-cycle struck.
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- 🚧 My free-text queue items are not immediately struck as if they are addressed.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let baseline = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- some entirely different earlier queue line about another topic\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let prose_only = "### Re: fixed it — opus\n\nDone.\n";
+        let gated =
+            answered_free_text_head_node_keys(content, prose_only, Some(baseline)).unwrap();
+        assert!(
+            gated.is_empty(),
+            "a 🚧 marker head absent from the pre-turn baseline must not be struck: {gated:?}"
+        );
+    }
+
+    #[test]
+    fn id_backed_marker_head_not_struck_by_free_text_pass_qheadstrikeauto() {
+        // P4: an id-backed head carrying the 🚧 marker is reaped via `--done`, never
+        // by the free-text auto-strike — even though it is the drain target. The
+        // marker path only ever strikes FREE-TEXT marker heads.
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- 🚧 do [#fullboundary]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let prose_only = "### Re: did the work — opus\n\nImplemented #fullboundary.\n";
+        let keys = answered_free_text_head_node_keys(content, prose_only, None).unwrap();
+        assert!(
+            keys.is_empty(),
+            "an id-backed 🚧 marker head must not be struck by the free-text pass: {keys:?}"
         );
     }
 

@@ -81,7 +81,24 @@ Verification:
 - I also tried local clean `make tmux-ci`; it failed because the live test saw this active Codex pane `%0` as `alive-busy` and refused to clear it, so that local live sweep is not a clean signal in this interactive tmux session.
 
 Confidence: high for the requested queue resurrection regression; remote CI conclusion was still pending when this closeout was written.
-<!-- agent:boundary:220fc9ba -->
+
+### Re: JB File Cache Conflict occurrences — gpt-5
+
+> **Queue prompt:** :pushpin: JB `File Cache Conflict` occurrences
+
+I scanned the active task document, backlog/review components, archived done list, and the agent-doc runbooks/specs for `File Cache Conflict`, `jbcc*`, and cache-conflict references.
+
+Current active occurrence: `tasks/agent-doc/agent-doc-bugs2.md` has this free-text queue head, plus active backlog `#kj5flive`, which asks for live JB+VSCode attach/detach and File Cache Conflict / `#6b5h` repro logs after the latest plugin update. I did not find a separate active backlog item that is only named `JB File Cache Conflict`; `#kj5flive` is the live-proof carrier that still mentions it.
+
+Current source-of-truth docs/code contracts:
+- `src/agent-doc/runbooks/jb-cache-conflict.md` is the main runbook: Accept applies through the Document API; Cancel must fail closed or auto-recover through preflight/write-commit when the response already reached the working tree; Compact Exchange must use component editor IPC when a listener is active; late Accept can replay stale IPC and duplicate a response until the planned fix revalidates against HEAD.
+- `src/agent-doc/specs/07-closeout-commands.md` records the closeout state-machine expectations for cancel recovery and accepted-conflict replay repair.
+- `src/agent-doc/specs/06-config.md`, `08-session-routing.md`, `08b-single-process-control-plane.md`, `12-deterministic-simulation.md`, and `process-topology.md` describe the prevention surfaces: append idempotence, editor-IPC queue writes, single-writer topology, and SimWorld coverage.
+
+Historical archived occurrence clusters in `tasks/agent-doc-bugs2.done.md` are: initial Compact Exchange repro/isolation (`#jbccache`, `#jbccfix`, `#jbccreg`, `#jbccdocs`); cancel-branch implementation and proof trail (`#jbccc1`/`#jbccc3`/`#jbccc4`/`#jbccc5`, `#jbcclivecancelresid`, `#0ep7`); late-accept duplicate replay (`#jbccacceptdup`, `#wkbs`); response-outside-exchange corruption (`#jb-cache-cancel-response-outside-exchange`); syntax/highlighting loss after disk load (`#7qfw`, `#jb-file-cache-conflict-syntax-loss`); degraded IPC avoiding raw disk writes (`#ipc-degraded-prefers-file-ipc`); reconnect stale-buffer recovery (`#yzer`, `#1jec`); remaining-trigger instrumentation (`#advr19`); and realtime cutover work removing the post-commit reconcile path that used to feed these dialogs (`#pcwcrt`).
+
+No source files changed for this queue item. Verification was `agent_doc_read` for queue/backlog/review plus a targeted `rg` scan over `tasks/agent-doc/agent-doc-bugs2.md`, `tasks/agent-doc-bugs2.done.md`, `src/agent-doc/runbooks`, `src/agent-doc/specs`, and mirrored skill runbooks.
+<!-- agent:boundary:e521e21f -->
 <!-- /agent:exchange -->
 ## Queue
 

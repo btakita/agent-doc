@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -33,177 +33,19 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260626-161443.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260626-200326.md`*
 
 Compacted content:
-❯ - Archived 11 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); compaction recovery and queue state; Session handed to Claude; available-deal Messages head still held; 8 more
-❯ - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
+- Archived 11 response topic(s): compaction recovery and queue state; IPC proof diagnostic (interrupted-cycle recovery); State machine(s) of all deal states; 8 more
+- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
+Blocked on agent-doc editor convergence.
 
-### Re: compaction recovery and queue state — gpt-5
+I loaded the local workflow, ran preflight/plan, reset sidecars with `--preserve-session`, and tried `agent-doc write --commit` twice. Both writes failed with `recovery=retry_without_disk_write`; `doctor` classifies this as operator-gated editor convergence, and `verify-op-capture` confirms there is a live editor endpoint, so I did not use `--force-disk`.
 
-> **Queue prompt:**
->
-> Please create state machine(s) of all deal states.
+No EFS code, tests, commits, pushes, or deploys were run. The document also has `queue: stop`, so the Messages-tab URL and `deploy` queue lines are inactive residue.
 
-
-Recovered the interrupted compaction/preflight state enough to continue through the agent-doc closeout path. Preflight still reports one legacy gated backlog item and several semantic-completion review candidates; I did not migrate or resolve those because the planning contract for this cycle was a prompt-response repair closeout.
-
-The current queue still needs operator intent cleanup before I start repo/deploy work from it: the held head is the available-deal Messages selection issue, followed by `deploy`, and recovery has also reintroduced the same available-deal Messages prompt once more without the `🚧` marker. I did not run code changes, tests, commit/push, or deploy in this cycle.
-
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md source=file_ipc patch_id=823adb3a-17d6-4689-9148-cb95001f702c invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782459489229
-```
-
-### Re: State machine(s) of all deal states — already modeled & verified — opus-4-8
-
-> **Queue prompt:**
->
-> Please create state machine(s) of all deal states.
-
-These already exist as maintained Mermaid state machines in **`src/equityfundingsource-dev/docs/master-state-machine.md` §4** (deeper narrative + sequence diagram in `docs/deal-pipeline-flow.md`). I re-verified §4 against current code — "all deal states" is actually **two independent** machines:
-
-- **Loan pipeline** — `loans.tmo_loan_status` (`LOAN_STATUS_STEPS`, `lib/admin/repo.ts`): `Application Received → Loan Estimate → Intent to Proceed → Processing → Underwriting → Closing → Closed → Funded`, plus off-pipeline `Denied` / `Unassigned` / `On Hold`. `Closed`↔`Funded` is a bi-directional TMO sync (`admin_deal_status_sync_by_loan_`).
-- **Marketplace offering** — `investment_deals.status` (`migrations/0085`, CHECK-constrained): `published → reserved → funded → closed`. `reserved` on lender-select hides the deal from other lenders; `funded` is derived from the loan `Funded`; `Closed` (loan milestone) is decoupled from closing the offering.
-
-No new artifact needed — the deal-state machine is current.
-
-### Re: State machine(s) of lender deal states — modeled with 3 gaps (head 🚧 held) — opus-4-8
-
-> **Queue prompt:**
->
-> Please create state machine(s) of lender deal states.
-
-§5 of the same living doc already models most of the lender side: the investor lifecycle board (`investor_pipeline_status_` → `lender_ready`), accreditation/requirements sub-state, TMO lender-account (`lender_requests.status`), and the per-deal **deal-interest** machine `deal_interest_workflow_stage_` (`interested → processing → document_request → selected → verbal_commitment`).
-
-Three real lender-deal-state machines are **missing** from §5:
-
-1. **Funding-commitment wire state** — `funds.status` `pending → active` (lender commits → admin confirms wire → `AddLoanFunding` to TMO). `migrations/0044_funds_active_status.sql`. The natural continuation of `verbal_commitment → [*]`.
-2. **Lender proposal sub-state** — `proposal_submitted_at → borrower_selected_at` (amount/rate proposal → borrower accepts), incl. `proposal_updated_at` / `proposal_update_read_at` re-read. `migrations/0085_deal_interest_loan_term_proposals.sql`, `lib/investor/shared.ts`. (Related to the open `#proprate` bug.)
-3. **Lending-group allocation states** — `lending_groups.status` (active/archived), `lending_group_members.status` (invited/active/declined/removed), per-deal `allocation_bps`. `migrations/0090_lending_groups.sql`.
-
-This head is **🚧 held**, so I did not drain it — the three gaps are filed as a tracked backlog item. To proceed, remove the `🚧` and say **doc-only** (close the gaps in `master-state-machine.md`, my recommendation) vs **also build an FSM code module**.
-
-**lazily-js:** orthogonal to this task — these are Markdown diagrams. lazily only matters under path (b): runtime *reactive* FSM cells (state in a `lazily` cell, derived guards/UI as derived cells). For documenting states it adds nothing; for code, model a pure transition function first and layer lazily on the client as a deliberate, separate dep-add.
-
-**"deploy":** no-op — nothing code-bearing changed this cycle.
-
-### Re: State machine(s) of lender deal states — gaps closed (doc-only) — opus-4-8
-
-Proceeded with the safe default (doc-only — my standing recommendation, and a prerequisite for any later FSM-code path). Closed the three lender-deal-state gaps in `src/equityfundingsource-dev/docs/master-state-machine.md §5`, each as a mermaid `stateDiagram-v2` + a status-model index row, cited to the migrations:
-
-1. **Funding commitment** — `funds.status` `pending → active` (lender commits amount+account+vesting → admin confirms wire → `AddLoanFunding` to TMO, stores `tmo_funding_rec_id`). `migrations/0044`.
-2. **Lender proposal sub-state** — `no_proposal → proposed → revised ⇄ read → borrower_selected`, derived from `proposal_submitted_at` / `proposal_updated_at` / `proposal_update_read_at` / `borrower_selected_at`. `migrations/0085` + `0094`. (Flags the `#proprate` "default rate must not persist as finalized" caveat.)
-3. **Lending group + allocation** — `lending_groups.status` (active/archived) and `lending_group_members.status` (invited/active/declined/removed); `lending_group_deal_allocations.allocation_bps` is a 0–10000 per-(group,deal,member) **share attribute**, not a state column (modeled accurately as such). `migrations/0090`.
-
-§4 (deal states) was already current — left as-is.
-
-**Shipped:** EFS `main` `362e1ae` (pushed; rebased over concurrent remote work), superproject pointer bumped `f98a45135`. Doc-only — no tests/build affected.
-
-### Re: deploy — no-op this cycle — opus-4-8
-
-> **Queue prompt:**
->
-> deploy
-
-Nothing to deploy: the change is `docs/master-state-machine.md`, a documentation file that is **not** part of the deployed Worker bundle, so there is no worker behavior to ship. (The last code deploy remains the messages-focus fix.) If you want the lender state machines as **runtime FSM code** rather than docs — the path where `lazily-js` would actually apply — say so and I'll scope that as a separate, deployable change.
-
-### Re: Deal pipeline must not block on lender-pipeline steps — shipped + deployed — opus-4-8
-
-> **Request (chat):** The admin pipeline Select Proposal was blocked — "Brian Takita annual requirements are not started. Complete or approve the lender requirements before selecting this lender." We should not block selecting a proposal from lenders who haven't filled out paperwork. Make the deal pipeline not block at all based on lender-pipeline steps.
-
-Done — implemented, tested, committed, pushed, and deployed.
-
-**Root cause.** The Select Proposal action (`admin_deal_interests_by_id_select_PUT_`, `lib/admin/investor_management/index.ts`) returned `409` on **three lender-pipeline-step gates**: (1) lender annual requirements/accreditation (`investor_requirements_blocks_funding_`), (2) multi-lender-group member accreditation (`lending_group_unaccredited_members_R_`), and (3) TMO-lender-account linkage. The client button isn't disabled — it just surfaced the server 409 toast.
-
-**Fix** (`#deal-select-no-lender-pipeline-block`, EFS `39e56c2`): removed all three lender-pipeline gates from selection. They are now **visibility-only** — the `requirements_blocked` / `compliance_hold` flags and the lender-card "Requirements: …" / "No TMO lender account" badges all remain, so you still *see* the state and decide for yourself (your "more control + visibility" ask). The two **deal-side** prerequisites are kept: the loan must have a TMO loan number, and the commitment must fit the deal amount.
-
-**Visibility into deal pipeline states:** the §5 lender + §4 deal state machines in `docs/master-state-machine.md` are now accurate to this change (updated the requirements note to say it no longer blocks selection).
-
-**One thing to know (no action taken):** selection was the *only* hard accreditation enforcement point — there is no separate accreditation gate at funding/wire-confirm today. So accreditation is now never hard-blocked before funding. The flags/badges still show it. If you want a *soft* gate (warn, not block) or a real gate at the **funding** step specifically, say so and I'll add it — I did not, since you asked for no blocking.
-
-**Verification:** `bun test` → **1327 pass, 2 fail**; both failures are the pre-existing `#doc-viewer` PDF/loan-detail tests (confirmed failing on clean HEAD before my change — unrelated to the deal pipeline, untouched here). `bun run build` + `build:worker` clean.
-
-**Shipped:** EFS `main` `362e1ae..39e56c2` (pushed); worker **deployed** — version `7f861de2-c207-451f-9259-71dc82193496` at https://equityfundingsource.brian-takita.workers.dev. Superproject pointer `96b7113a5`.
-
-Live-eyeball: open the deal `4046fa5a` dialog → loan tab → **Select proposal** on Brian Takita's interest → it should now select (deal → reserved, loan → Loan Estimate) without the requirements 409.
-
-### Re: Soft accreditation warning + test suite green + deploy — opus-4-8
-
-> **Request (chat):** Remove the hard accreditation gate. Leave a soft warning. Fix the test suite. deploy.
-
-Done — all three, shipped and deployed.
-
-**1. Hard gate → soft warning.** The hard accreditation/lender-pipeline gates were already removed from Select Proposal last change; this adds the **soft warning** in their place (`deal_detail.tsx` `select_interest_`). When an admin selects a lender whose annual requirements are unmet or who has no TMO lender account yet, a non-blocking confirm appears — e.g. *"Brian Takita: annual requirements are not started and no TMO lender account is on file yet. You can select this proposal anyway, but the lender must complete these before funding can be wired. Select anyway?"* — with a **Select anyway** button. The admin sees exactly what's incomplete and proceeds at their discretion; readiness still gates funding/wire-confirm.
-
-**2. Test suite fixed.** The 2 pre-existing `#doc-viewer` failures were stale pinned-source assertions (not behavior bugs): the PDF iframe had gained `align-self:stretch;`, and admin loan-detail now builds the document URL from `/api/admin/loans/:id/documents/:id/download` (the old test pinned `/api/dropbox/download?path=`). Updated both pins to the current source. Full suite now **1329 pass / 0 fail**.
-
-**3. Deploy.** `bun run build` + `build:worker` clean; worker **deployed** — version `b520702f-e9b1-4763-a8f6-bf96a66ddcbe` at https://equityfundingsource.brian-takita.workers.dev.
-
-**Shipped:** EFS `main` `39e56c2..3d76f3c` (pushed); superproject pointer `8909d5438`.
-
-Note: the standalone `/admin/loans/:id` page has a second select surface (`loan_detail.tsx`) whose row type doesn't carry the requirements field and isn't wired to the confirm dialog — I scoped the warning to the deal dialog (the surface from your URL). If you want the same warning there too, say so and I'll thread the data + confirm through it.
-
-Live-eyeball: deal `4046fa5a` → loan tab → Select proposal on Brian's interest → the soft warning should appear; confirm → it selects.
-
-### Re: Make the Select-proposal warning passive (no dialog) — opus-4-8
-
-> **Request (chat):** Remove the "Lender requirements incomplete" dialog when selecting a proposal. The warning should be more passive. deploy.
-
-Done — dialog removed, passive warning kept, deployed.
-
-Removed the `confirm_` block from `deal_detail.tsx` `select_interest_`, so clicking **Select proposal** no longer pops a confirm. Selecting a lender with incomplete lender-pipeline steps stays non-blocking. The warning is now fully **passive** — the lender card already renders, right next to the Select action, amber badges: **"Requirements: {label}"** (turns amber when requirements are unmet) and **"TMO account not linked"**, plus the "Lender account: Not linked" field in amber. The admin sees the gap at a glance without any interruption. Readiness still gates funding/wire-confirm later.
-
-**Verification:** `bun test` → **1329 pass / 0 fail**; `bun run build` + `build:worker` clean.
-
-**Shipped:** EFS `main` `3d76f3c..f1df6dc` (pushed); worker **deployed** — version `60ac57f7-4cfa-4136-84cc-6d94354b77d8` at https://equityfundingsource.brian-takita.workers.dev. Superproject pointer `d7c308c41`.
-
-Live-eyeball: deal `4046fa5a` → loan tab → Select proposal on Brian's interest → it selects immediately (no dialog); the amber "Requirements: Not started" / "TMO account not linked" badges remain visible on the card.
-
-### Re: One selected lender per Available Deal + swap-confirm — opus-4-8
-
-> **Request (chat):** An Available Deal should only have 1 lender selected. If selecting another lender, a confirmation dialog should ask if the admin wants to deselect the other lender. deploy.
-
-Done — implemented, tested, deployed.
-
-The deal selection model previously allowed **multiple** selected lenders (the server blended their rates into the deal sold-rate). Now an Available Deal has **at most one** selected lender:
-
-- **Server** (`admin_deal_interests_by_id_select_PUT_`): selecting a lender now deselects any other previously-selected lender on the same deal, atomically — before the blended-rate / `sold_rate` recompute — so the deal reflects only the new lender. This enforces the invariant for every caller, returning the full updated interest list.
-- **UI** (`deal_detail.tsx` `select_interest_`): when another lender is already selected and you click **Select proposal** on a different one, a confirm dialog appears — *"{Name} is already selected for this deal. A deal can have only one selected lender — deselect them and select {NewName} instead?"* with a **Deselect & select** button. Confirm → the server swaps the selection and the card updates (old one deselected, new one selected).
-
-**Verification:** `bun test` → **1329 pass / 0 fail** (added a pinned-source assertion for the deselect-others query). `bun run build` + `build:worker` clean. Updated `master-state-machine.md` §4 with the single-selection invariant.
-
-**Shipped:** EFS `main` `f1df6dc..fa657df` (pushed); worker **deployed** — version `e05a7880-cd2d-42cf-9162-c395daece8b0` at https://equityfundingsource.brian-takita.workers.dev. Superproject pointer `5724f3981`.
-
-Live-eyeball: deal `4046fa5a` → loan tab → select lender A → then click Select proposal on lender B → the swap-confirm dialog appears; confirm → A is deselected and B becomes the selected lender.
-
-### Re: Deal Message dialog — participant tabs annotated + Messenger card removed — opus-4-8
-
-> **Request (chat):** The Message dialog should have a tab for the borrower and interested lenders; the selected lender's tab should have an icon annotation (checkmark) and the borrower tab should be annotated. Also: remove the Messenger card — the message dialog will handle communication. deploy.
-
-Done — both, shipped and deployed.
-
-**Participant tabs + annotations (`#deal-msg-participant-tabs`).** The deal Message dialog already opened a dedicated tab per participant (borrower + each interested lender) via `open_deal_participant_messages_`. Added the annotations: I flowed a `badge` field through `admin_messages_open_user_T → context_user_T → PortalTabs` (now renders an optional badge node), and:
-- The **selected lender's** tab shows a green **✓** checkmark (`badge: interest.selected_at ? 'selected' : null`).
-- The **borrower's** tab shows a small **"Borrower"** pill (`badge: 'borrower'`).
-- Other interested lenders are unannotated.
-
-**Removed the Messenger card.** Deleted the inline `DealInterestMessengerCard` (the dropdown messenger) from the interests tab. Communication now goes through the Message dialog (the loan-tab button, relabeled **"Message borrower" → "Messages"**) and the existing **Deal conversations** sub-tab. Deal borrower/lender threads still render through the shared `PortalMessages` component — now via `<AdminConversationTabs>` rather than the inline card, so the `#portalmsg2-dealthreads` "threads use the unified component" invariant is preserved. Dropped the now-unused `PortalMessages` import.
-
-**Verification:** `bun test` → **1329 pass / 0 fail**. Five tests were pinned to the old inline `<PortalMessages>` literal / the pre-badge tab strings; I updated each honestly to the new delegation (`<AdminConversationTabs>`) and the badge wiring — behavior preserved, verified the threads still render via PortalMessages. `bun run build` + `build:worker` clean.
-
-**Shipped:** EFS `main` `fa657df..7d2e366` (pushed); worker **deployed** — version `f3e9db2c-8161-423e-b0fa-7a928160eb3a` at https://equityfundingsource.brian-takita.workers.dev. Superproject pointer `352a861fa`.
-
-Live-eyeball: deal `4046fa5a` → interests tab → **Messages** button → the dialog shows a tab per participant; the borrower tab has a "Borrower" pill and the selected lender's tab has a green ✓. The inline Messenger card is gone.
-<!-- agent:boundary:f4e6b143 -->
+To unblock: resolve/save the live editor buffer for [equityfundingsource.md](/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md:1), then I can retry `agent-doc write --commit`; or explicitly authorize `--force-disk`.
+<!-- agent:boundary:ebc79b7a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -223,9 +65,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-- ~~Please create state machine(s) of all deal states.~~
-- ~~Please create state machine(s) of lender deal states.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~deploy — auto-struck: completed by #do-id-closeout-open-backlog (#qftbklgstrike)~~
+- https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=deal&dialog_deal_id=4046fa5a-65d4-4292-bfa6-59b66376cf6c&deal_tab=interests -> Messages should have the interested lender conversations as separate tabs.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

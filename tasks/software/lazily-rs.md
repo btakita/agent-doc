@@ -115,7 +115,31 @@ Both done; landed in `lazily-rs` `3d124e6` (gitlink `7d45c704c`).
 **2. Added the "Honest read" to docs.** BENCHMARKS.md's Cross-library section now has a clearly-labeled **`Honest read:`** callout (was "Reading the result honestly"), with the fairness point made explicit: leptos *winning* the viewport case — and its 30 ms cold recalc proving its memos genuinely recompute — is the evidence the comparison isn't cherry-picked. The balanced claim stands: lazily has materially higher whole-graph throughput than a comparable native-Rust pull-based reactive system and matches it on incremental viewport reads — not "fastest reactive library."
 
 **⚠️ One thing I could NOT fix — a separate, unrelated blocker.** When I re-ran `make check` I hit a second failure that is **not mine**: an untracked `benches/ipc_transport.rs` (it was already `??` at session start, from concurrent/unmerged IPC work) fails `fmt` then `clippy`/`build` because it imports `lazily::{IpcTransport, InProcessIpcTransport, IpcControlFrame, IPC_DEFAULT_QUEUE_CAPACITY}` — symbols that **don't exist in this tree's source** (it's written against an unmerged IPC transport API). Since `clippy`/`build` use `--all-features --all-targets`, that `#![cfg(feature="ipc")]` bench is always built and can't compile here. I verified `make check` is green with it isolated, then **restored it untouched** (I won't complete or commit another session's WIP, and I won't silently hide it). To get `make check` fully green its owner needs to land the IPC transport API, or gate/remove the bench. No crates.io release (dev/docs/bench-tooling only).
-<!-- agent:boundary:559b57e7 -->
+
+### Re: Update lazily-py README with the latest lazily-spec + family docs — opus-4-8
+
+Done — rewrote `src/lazily-py/README.md` (was 73 lines documenting only the basic lazy example; now covers the full current surface) and pushed it.
+
+**What was stale:** the README only showed `CellSlot`/`slot`/`cell` lazy evaluation. It never mentioned anything added through 0.11.0+ — the eager `Signal` primitive, `lazily.ipc`, `ShmBlobArena`, or the cross-language family.
+
+**Brought in, mirroring the `lazily-rs` README structure with Python-accurate API:**
+- **`Slot → Cell → Signal` family** — overview + a Core Concepts section per primitive (tables of the actual exported types/decorators), plus a runnable eager-`Signal` example (`@signal`, eager materialization, `v1 → v2` no-unset-window, memo guard, `dispose()` → lazy).
+- **`StateMachine`** — brief section (Cell-backed FSM, `send`/`state`, PartialEq self-transition guard).
+- **`lazily.ipc` — the `lazily-spec` wire protocol** — Snapshot/Delta, the 7 `DeltaOp` variants, epoch sequencing, byte-compatibility with rs/zig/TS bindings, conformance fixtures, a working `IpcMessage.of_snapshot/of_delta` + `encode_json`/`decode_json` example, and the default-deny `PeerPermissions` boundary.
+- **`ShmBlobArena`** — Python-hosted shared-memory blob arena (40-byte `LZSH`/FNV-1a-64 header, append-only + wraparound, rs/zig byte-compatible).
+- **The lazily family** — table linking `lazily-rs` / `lazily-py` / `lazily-zig` / `@lazily/signaling` / `lazily-spec`, pointing at the spec's canonical schemas + Lean formal model.
+- Tagline, PyPI badge, and a Development section using `uv run poe precommit`.
+
+**Verification:**
+- Both new code blocks (Signal + IPC) executed against the installed package — pass.
+- Preserved the `tests/run_readme.py`-validated quick-start example verbatim → `run_readme` passes.
+- Full test suite: **77 passed**.
+- Pushed: `lazily-hub/lazily-py` `c255482..ed786cc` (`docs: refresh README …`).
+
+**Note (out of scope, pre-existing):** `poe precommit`'s `ty` step reports 2 type errors in `src/lazily/state_machine.py` (`subscriber` callback shape vs `CellSubscriber[T]`). They reproduce with my change stashed, so they predate this README task — not touched here. Flag if you want them fixed in a follow-up.
+
+Queue stays paused (the `release + publish` heads remain operator-gated), so I'm not auto-looping.
+<!-- agent:boundary:4ad9044b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -124,6 +148,7 @@ Both done; landed in `lazily-rs` `3d124e6` (gitlink `7d45c704c`).
 ## Queue 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- 🚧 Update lazily-py README with the latest docs using the latest changes using lazily-spec + the lazily family.
 <!-- /agent:queue -->
 
 ## Backlog

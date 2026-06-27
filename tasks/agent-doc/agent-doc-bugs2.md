@@ -81,7 +81,29 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=7748d77a-629d-4aa5-a589-000e8789ae62 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=27649 candidate_hash=2c5f6a568a51a3a68bc7cad2dd096a712808773c8f70c4beef10c95ab1401bd3 content_ours_len=27274 content_ours_hash=e7495b0f08b897d617eee9980525d9a1d640f6ad4a866cae418211fbb58b64e6 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782598522661
 ```
-<!-- agent:boundary:085dafe8 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=e0492ac5-7045-46e3-9809-deb6d5271aed invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=17603 candidate_hash=39b7e95ad2ac2b8c172f6c2065449c5374d9f498df24f63f363b7c30acc74caa content_ours_len=17782 content_ours_hash=895420c88e05de7c419f9e796c6451a5dd9c577c9dba48fe6b6ae8a46cb0b2e6 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782602932963
+```
+
+### Re: recovery closeout — gpt-5
+
+Committed the binary-authored IPC recovery diagnostic left by the interrupted finalize retry. No additional queue item was consumed.
+
+Execution evidence retained from the completed #syncbarrier closeout:
+- `make check` passed after the editor-sync barrier implementation.
+- `gh run list --workflow CI --limit 1` reported latest CI run `28302427088` completed successfully.
+- `make install` installed `agent-doc 0.34.63` and marked two controllers for recycle.
+- `src/agent-doc` commit `fa98a2ed` contains the implementation.
+<!-- agent:boundary:665f64bd -->
 <!-- /agent:exchange -->
 ## Queue
 

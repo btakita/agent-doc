@@ -343,7 +343,25 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=f47b5e80-c2a9-4d09-b453-c38a7bb0d72c invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=52236 candidate_hash=5b0bbb40765cf3d1aea12e93066ae263609fd44cb090dbf8e7ad11df5c2e51e0 content_ours_len=52078 content_ours_hash=ada8797cb1bc33df56f62b74a18478f95ad7a97a4063ec51c495e7c492705051 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782589268308
 ```
-<!-- agent:boundary:f1e9dc31 -->
+
+
+### Re: JB Run Agent Doc protected draft — gpt-5
+
+> **Queue prompt:**
+> JB `Run Agent Doc`
+> ```text
+> [route] target tmux session: 0
+> Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %12 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Use /skills to list available skills"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782591358742-direct_pane_protected_prompt_input-codex-_12-39e728d2278f.txt
+> ```
+
+The JB `Run Agent Doc` refusal is the protected-composer guard behaving correctly. Pane `%12` already had a drafted Codex prompt (`› Use /skills to list available skills`), so dispatch refused to inject `agent-doc ...agent-doc-bugs2.md` and recorded the route snapshot instead of overwriting operator input. Clear or submit that draft, then rerun JB `Run Agent Doc`.
+
+I also preserved the queue/order edits from this preflight rather than normalizing the queue by hand. The newly surfaced proof IDs (`#tmuxsynccrashlog`, `#qftlossproof`, `#midturnrecycleproof`, `#midturnresumeimpl`, `#provauth3bimpl`, `#supstaledetectverify`, `#suptmuxstaleverify`) remain open backlog work; this cycle did not select one for implementation.
+
+No source files changed and no tests were run. Preflight/plan/finalize were the only required commands for this prompt-response cycle. Preflight also reported semantic-completion warnings for unrelated `#kj5flive`, `#crdtauth6`, and `JB File Cache Conflict` candidates; I left them untouched.
+
+Codex session note: the installed `agent-doc` binary is `0.34.62` while the loaded skill text is `0.34.61`. Restart Codex when convenient so the hook/skill text reloads; it is not blocking this closeout.
+<!-- agent:boundary:e8f30f30 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -356,6 +374,13 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/
 ```text
 [route] target tmux session: 0
 Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %1 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Summarize recent commits"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782586439553-direct_pane_protected_prompt_input-codex-_1-a0c7b4c8e461.txt
+```
+---
+---
+JB `Run Agent Doc`
+```
+[route] target tmux session: 0
+Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %12 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Use /skills to list available skills"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782591358742-direct_pane_protected_prompt_input-codex-_12-39e728d2278f.txt
 ```
 ---
 ---

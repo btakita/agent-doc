@@ -123,7 +123,11 @@ Current active carrier: `#kj5flive`, which is still operator-verify work for liv
 The current source-of-truth surfaces are `src/agent-doc/runbooks/jb-cache-conflict.md`, `src/agent-doc/specs/07-closeout-commands.md`, `src/agent-doc/specs/06-config.md`, `src/agent-doc/specs/08-session-routing.md`, `src/agent-doc/specs/08b-single-process-control-plane.md`, `src/agent-doc/specs/12-deterministic-simulation.md`, and `src/agent-doc/specs/process-topology.md`. Historical occurrence clusters remain archived in `tasks/agent-doc-bugs2.done.md` under the `#jbcc*`, cancel-recovery, late-accept replay, syntax-loss, degraded-IPC, reconnect-staleness, trigger-instrumentation, and realtime-cutover entries.
 
 No source files changed for this queue item; verification was `agent_doc_read` for queue/exchange/backlog/review plus the targeted `rg` scan.
-<!-- agent:boundary:69cb1d36 -->
+
+### Re: Queue residue repair — gpt-5
+
+The answered `JB File Cache Conflict` free-text queue row is now fully struck, so the queue parser no longer treats it as active residue. `session-check` advanced the next queue head to `#syncbarrier`; this repair only touched the session-document queue/closeout state and did not change source files.
+<!-- agent:boundary:d68f213e -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -152,7 +156,7 @@ Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/
 ```
 ---
 - ~~:pushpin: do [#qeditdup] [#qftloss#qftloss]~~
-- ~~:pushpin: JB `File Cache Conflict` occurrences~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~~~:pushpin: JB `File Cache Conflict` occurrences~~ — auto-struck: answered this cycle (#ftstrike)~~
 - :pushpin: do [#syncbarrier]
 - :pushpin: do [#qheadstrikeauto]
 - :pushpin: do [#suprestassoc]

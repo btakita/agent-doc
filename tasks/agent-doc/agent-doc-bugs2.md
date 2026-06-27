@@ -98,7 +98,19 @@ Current source-of-truth docs/code contracts:
 Historical archived occurrence clusters in `tasks/agent-doc-bugs2.done.md` are: initial Compact Exchange repro/isolation (`#jbccache`, `#jbccfix`, `#jbccreg`, `#jbccdocs`); cancel-branch implementation and proof trail (`#jbccc1`/`#jbccc3`/`#jbccc4`/`#jbccc5`, `#jbcclivecancelresid`, `#0ep7`); late-accept duplicate replay (`#jbccacceptdup`, `#wkbs`); response-outside-exchange corruption (`#jb-cache-cancel-response-outside-exchange`); syntax/highlighting loss after disk load (`#7qfw`, `#jb-file-cache-conflict-syntax-loss`); degraded IPC avoiding raw disk writes (`#ipc-degraded-prefers-file-ipc`); reconnect stale-buffer recovery (`#yzer`, `#1jec`); remaining-trigger instrumentation (`#advr19`); and realtime cutover work removing the post-commit reconcile path that used to feed these dialogs (`#pcwcrt`).
 
 No source files changed for this queue item. Verification was `agent_doc_read` for queue/backlog/review plus a targeted `rg` scan over `tasks/agent-doc/agent-doc-bugs2.md`, `tasks/agent-doc-bugs2.done.md`, `src/agent-doc/runbooks`, `src/agent-doc/specs`, and mirrored skill runbooks.
-<!-- agent:boundary:bfda46ce -->
+
+### Re: JB File Cache Conflict occurrences — gpt-5
+
+> **Queue prompt:** ~~:pushpin: JB `File Cache Conflict` occurrences~~ — auto-struck: answered this cycle (#ftstrike)
+
+The `JB File Cache Conflict` queue head is answered and already struck. I verified the active document components and a targeted repo scan for `File Cache Conflict`, `jbcc*`, `cache-conflict`, and `jb-cache-conflict` references.
+
+Current active carrier: `#kj5flive`, which is still operator-verify work for live JB+VSCode attach/detach and File Cache Conflict / `#6b5h` repro logs after the latest plugin update. I did not find a separate active backlog item solely named `JB File Cache Conflict`.
+
+The current source-of-truth surfaces are `src/agent-doc/runbooks/jb-cache-conflict.md`, `src/agent-doc/specs/07-closeout-commands.md`, `src/agent-doc/specs/06-config.md`, `src/agent-doc/specs/08-session-routing.md`, `src/agent-doc/specs/08b-single-process-control-plane.md`, `src/agent-doc/specs/12-deterministic-simulation.md`, and `src/agent-doc/specs/process-topology.md`. Historical occurrence clusters remain archived in `tasks/agent-doc-bugs2.done.md` under the `#jbcc*`, cancel-recovery, late-accept replay, syntax-loss, degraded-IPC, reconnect-staleness, trigger-instrumentation, and realtime-cutover entries.
+
+No source files changed for this queue item; verification was `agent_doc_read` for queue/exchange/backlog/review plus the targeted `rg` scan.
+<!-- agent:boundary:a15d191a -->
 <!-- /agent:exchange -->
 ## Queue
 

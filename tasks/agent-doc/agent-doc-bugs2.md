@@ -348,6 +348,11 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/
 ### Re: JB Run Agent Doc protected draft — gpt-5
 
 > **Queue prompt:**
+>
+> ~~Duplicate text document corruption occurred while I was typing into te queue.~~ — auto-struck: answered this cycle (#ftstrike)
+
+
+> **Queue prompt:**
 > JB `Run Agent Doc`
 > ```text
 > [route] target tmux session: 0
@@ -366,8 +371,8 @@ Codex session note: the installed `agent-doc` binary is `0.34.62` while the load
 ### Re: JB Run Agent Doc protected draft — gpt-5
 
 > **Queue prompt:**
->
-> ~~Duplicate text document corruption occurred while I was typing into te queue.~~ — auto-struck: answered this cycle (#ftstrike)
+❯ >
+❯ > ~~Duplicate text document corruption occurred while I was typing into te queue.~~ — auto-struck: answered this cycle (#ftstrike)
 
 > **Queue prompt:**
 > JB `Run Agent Doc`
@@ -384,6 +389,18 @@ No source files changed and no tests were run. Preflight/plan/finalize were the 
 
 Codex session note: the installed `agent-doc` binary is `0.34.62` while the loaded skill text is `0.34.61`. Restart Codex when convenient so the hook/skill text reloads; it is not blocking this closeout.
 
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=8cc8e98e-91a5-40e3-bab4-e5e4e1e0cc61 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=57894 candidate_hash=7027603e001c4429bc8adf4406ffa881dc45e617517e366d1115a96daf01c31f content_ours_len=57738 content_ours_hash=249eba80ef288de5a503393af74590670fed74e5a49a51a365b2be8e045c0201 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782591446540
+```
+
 
 ### Re: JB Run Agent Doc on monsterrodholders.md — gpt-5
 
@@ -397,38 +414,38 @@ Codex session note: the installed `agent-doc` binary is `0.34.62` while the load
 This is the same protected-composer guard as the current-document refusal: the route correctly refused to inject `agent-doc ...monsterrodholders.md` into pane `%1` because that pane already had a drafted Codex prompt, `› Summarize recent commits`. The next operator action for that pane is to submit or clear that draft, then rerun JB `Run Agent Doc` for `src/boost-client/tasks/monsterrodholders.md`.
 
 I did not normalize the queue by hand, mark backlog IDs done, or run implementation work in this cycle. No source files changed and no tests were run. Preflight did warn that the installed `agent-doc` binary/cdylib may be stale relative to local source edits; I left that as a warning because this cycle was only answering the protected-draft queue prompt.
-<!-- agent:boundary:f0f2c10f -->
+<!-- agent:boundary:97c1167a -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~`/clear` was autonomously added...blocking JB `Run Agent Doc`. As I was typing in this item, 2 duplicates of the next queue item were added before this item. And a stale copy of this prompt was duplicated above this item...and the last 3 characters I typed were deleted in this prompt. CRDT issues...~~
-- 🚧 ~~Duplicate text document corruption occurred while I was typing into te queue.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~~~Duplicate text document corruption occurred while I was typing into te queue.~~ — auto-struck: answered this cycle (#ftstrike)~~
 ---
-:round_pushpin: JB `Run Agent Doc` on monsterrodholders.md
+🚧 :pushpin: JB `Run Agent Doc` on monsterrodholders.md
 ```text
 [route] target tmux session: 0
 Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %1 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Summarize recent commits"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782586439553-direct_pane_protected_prompt_input-codex-_1-a0c7b4c8e461.txt
 ```
 ---
----
-JB `Run Agent Doc`
+~~~done
+:pushpin: JB `Run Agent Doc`
 ```
 [route] target tmux session: 0
 Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %12 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Use /skills to list available skills"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782591358742-direct_pane_protected_prompt_input-codex-_12-39e728d2278f.txt
 ```
+~~~
 ---
----
-:round_pushpin: monsterrodholders.md issue
+:pushpin: monsterrodholders.md issue
 ```
 • The failed agent-doc write inserted only a few summary bullets instead of a clean Re: #osm-tile-key-provision
   section. I’m going to fix the task doc with a narrow patch: remove my partial bullets from the compacted summary and
   add a proper exchange entry before the boundary.
 ```
 ---
-- fix `• The finalize call rejected the sibling list because this binary requires one message per sibling path. I’m retrying with paired sibling messages; no file write happened on the rejected call.`
-- monsterrodholders.md issue `• The failed agent-doc write inserted only a few summary bullets instead of a clean Re: #osm-tile-key-provision section. I’m going to fix the task doc with a narrow patch: remove my partial bullets from the compacted summary and add a proper exchange entry before the boundary. `
+- :pushpin: fix `• The finalize call rejected the sibling list because this binary requires one message per sibling path. I’m retrying with paired sibling messages; no file write happened on the rejected call.`
+- :pushpin: monsterrodholders.md issue `• The failed agent-doc write inserted only a few summary bullets instead of a clean Re: #osm-tile-key-provision section. I’m going to fix the task doc with a narrow patch: remove my partial bullets from the compacted summary and add a proper exchange entry before the boundary. `
 - :pushpin: do [#qeditdup] [#qftloss#qftloss]
 - :pushpin: JB `File Cache Conflict` occurences
 - :pushpin: do [#60ev]
@@ -440,21 +457,20 @@ Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/
 - :pushpin: do [#crdtauth6]
 - :pushpin: do [#nsfz]
 - :pushpin: do [#kj5flive]
-- JB `File Cache Conflict` occurences
-- do [#tmuxsynccrashlog]
-- do [#qftlossproof]
-- do [#midturnrecycleproof]
-- do [#midturnresumeimpl]
-- do [#provauth3bimpl]
-- do [#supstaledetectverify]
-- do [#suptmuxstaleverify]
-- do [#tmuxsynccrashlog]
-- do [#qftlossproof]
-- do [#midturnrecycleproof]
-- do [#midturnresumeimpl]
-- do [#provauth3bimpl]
-- do [#supstaledetectverify]
-- do [#suptmuxstaleverify]
+- :pushpin: do [#tmuxsynccrashlog]
+- :pushpin: do [#qftlossproof]
+- :pushpin: do [#midturnrecycleproof]
+- :pushpin: do [#midturnresumeimpl]
+- :pushpin: do [#provauth3bimpl]
+- :pushpin: do [#supstaledetectverify]
+- :pushpin: do [#suptmuxstaleverify]
+- :pushpin: do [#tmuxsynccrashlog]
+- :pushpin: do [#qftlossproof]
+- :pushpin: do [#midturnrecycleproof]
+- :pushpin: do [#midturnresumeimpl]
+- :pushpin: do [#provauth3bimpl]
+- :pushpin: do [#supstaledetectverify]
+- :pushpin: do [#suptmuxstaleverify]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

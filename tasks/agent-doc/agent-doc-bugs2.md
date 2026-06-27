@@ -301,19 +301,20 @@ I also fixed the tmux crash root cause in `#tmuxsynccrash`: `repair_layout` now 
 Commits: `src/agent-doc` `c83edc1c` and superproject pointer `31b1f4526`. Verification: focused Rust tests for the blocked closeout, no-ACK write path, tmux rescue predicate, and live zero-stash tmux no-op; `make check` green with 5,473 tests; `make tmux-ci` green; `agent-doc --version` reports `0.34.62`. Latest GitHub CI is red on prior upstream `7b2e54c7`; log download is blocked by GitHub permissions, but the local `make check` failure class was fixed and rerun green here.
 
 `#tmuxsynccrash` is code-complete and installed; I am gating it only for the remaining operator live proof: run JB `Sync Tmux Layout` repeatedly with the repro layout and confirm the tmux server pid stays stable.
-<!-- agent:boundary:7980d6b0 -->
+<!-- agent:boundary:2f8c2763 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- `/clear` was autonomously added...blocking JB `Run Agent Doc`. As I was typing in this item, 2 duplicates of the next queue item were added before this item. And a stale copy of this prompt was duplicated above this item...and the last 3 characters I typed were deleted in this prompt. CRDT issues...
+- 🚧 `/clear` was autonomously added...blocking JB `Run Agent Doc`. As I was typing in this item, 2 duplicates of the next queue item were added before this item. And a stale copy of this prompt was duplicated above this item...and the last 3 characters I typed were deleted in this prompt. CRDT issues...
 ---
 :round_pushpin: JB `Run Agent Doc` on monsterrodholders.md
 ```text
 [route] target tmux session: 0
 Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %1 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Summarize recent commits"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782586439553-direct_pane_protected_prompt_input-codex-_1-a0c7b4c8e461.txt
 ```
+---
 ---
 monsterrodholders.md issue
 ```

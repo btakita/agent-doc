@@ -120,7 +120,21 @@ Recommend: recycle now, then I continue the program. Proceed?
 Closing `#q9w3`. Next in the program: **#provauth1** (CRDT transaction-origin tagging) — the foundation `#pcwcrt`/`#provauth3`/`#provauth4` all key off; it's a large core-CRDT change and gets its own focused cycle.
 
 I'll install `08df743c` + recycle so slice 2 goes live for your eyeball (delete a `do [#id]` mirror line mid-turn → it should stay gone; grep `queue_mirror_tombstone_suppressed #provauth2`), then the loop continues to `#provauth1` on the fresh binary.
-<!-- agent:boundary:5c2ccf2c -->
+
+### Re: #provauth1 + #provauth4 done — per-component authorship merge (operator cells win clean) — opus-4-8
+
+Committed `3c9dd556`, `make check` green. This is the real corruption fix.
+
+**Architectural finding (reframes #provauth1):** `crdt.rs` is a text-3-way / per-cell merge with **no yrs transaction origins** — so "tag every transaction" doesn't apply. The provenance signal is **per-component authorship at the merge boundary** (ours=binary, theirs=operator). That's the foundation, and it's now in.
+
+**#provauth4 (the fix for the markers/splice you saw all session):** the per-cell merge (`#qcellconflict`) resolved *every* same-cell conflict **ours-wins + injected `<<<<<<< ours` markers** into the live doc — which reset your queue edits and polluted the document. Now `component_conflict_policy` resolves by owner:
+- **operator-owned** cells (queue/backlog/review/done/icebox) → **theirs (operator) wins, cleanly, no marker**;
+- **agent-owned** cells (exchange/status/log) → ours (binary) wins.
+
+The marker machinery is retained behind an explicit opt-in env (default flipped OFF). Migrated ~17 conflict tests to the authorship semantics.
+
+Closing **#provauth1** (f693, reframed + foundation delivered) and **#provauth4** (818s). Remaining program: **#provauth3** (replace the `content_ours`/manual-cleanup/resurrection *recovery* heuristics in git.rs with the same authorship checks) and **#pcwcrt** (realtime post-commit cutover). Installing `3c9dd556` + recycling — it should sharply reduce the finalize/post-commit corruption that's dogged this session, since operator cells are no longer reset on merge.
+<!-- agent:boundary:9ddeda5a -->
 <!-- /agent:exchange -->
 ## Queue
 

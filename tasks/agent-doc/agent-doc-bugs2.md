@@ -88,7 +88,21 @@ Drained **#qheadstrikeauto** — the most self-contained non-blocked id in the p
 **Operator-verify (live eyeball):** after the supervisor recycles onto 0.34.59, drain a free-text queue head with a **plain-prose** response (no `> **Queue prompt:**` blockquote) and confirm the head auto-strikes (ops.log `freetext_head_strike` / `free_text_head_struck note=auto_struck_answered`) with `queue_drainable_head_count` dropping — no manual quoting needed.
 
 Remaining drainable heads: `#syncbarrier` (large), `#suprestassoc` (live repro), the JB-flood dispatch bug, and the free-text reports (deleted-items-reappear / no-dup-adds — already closed by the 0.34.x tombstone+dedup).
-<!-- agent:boundary:701baad6 -->
+
+### Re: drain #pcwcrt — CRDT no longer reverts operator marker/queue edits (#qmarkerauth + post-commit revert tower removed, v0.34.61) — opus-4-8
+
+Recovered the crashed run (tmux session died mid-cycle) and shipped the operator's #S9208 report ("agent-doc deletes attributes added to `agent:queue` / prevent CRDT from reverting operator changes"). The crashed run had built the fix in the submodule but never finished `make check` (one budget-guard test was red), bumped, installed, committed, or recorded the closeout — all done now. Two coherent fixes:
+
+**`#qmarkerauth` — operator marker-attribute edits survive merge (`agent-doc-core/src/crdt.rs` + `cell_doc.rs`):** adding an attribute / `go` activation to a component marker (`<!-- agent:queue priority go -->`) while a turn was running was silently deleted on the next merge. Root cause: `reconcile_component` and the cell-merge component branch both reframed the merged body with `ours_open`/`ours_close` unconditionally, discarding the operator's `theirs` marker. Fix: new `reconcile_marker_operator_authoritative` 3-way merges the marker line — operator (`theirs`) wins when it differs from base, an agent change is honored only when the operator left the marker at base, no base epoch ⇒ operator authoritative. Marker analogue of the field-wise frontmatter merge (`#fmreset`) and the list-order theirs-spine (`#qauthorder`). Coverage: `merge_by_component_preserves_operator_marker_attribute_qmarkerauth`, `reconcile_marker_operator_authoritative_resolution`, + cell-merge equivalents.
+
+**`#pcwcrt` / `#realtimecutover` — post-commit revert tower ripped out (`agent-doc-orchestration/src/git.rs`):** the legacy `postcommit_worktree_lost_committed_content` / `send_postcommit_editor_refresh` tower silently reverted the working tree back to HEAD (or pushed a stale-snapshot-derived buffer to the editor) whenever it judged committed content "lost" — the recurring `#postcommit-ipc-worktree-corruption` source that clobbered legitimate operator edits. Replaced with **observe-only** handling: it logs `postcommit_worktree_check match=false`, preserves any carry-forward superset, and **never** reverts an operator working-tree edit (the realtime replica owns disk reconciliation). ~955 lines removed; the FlowCore `git.rs` `reason=` token budget re-audited 20 → 7 in `tests/test_cli.rs`. Coverage: `postcommit_worktree_observe_only_never_reverts_lost_content`, `postcommit_worktree_preserves_carry_forward_superset`.
+
+This very session was a **live repro**: the crashed run left the `agent:queue` working tree with `:pushpin:`-mangled + triplicated `do [#…]` rows (operator edits reverted/duplicated by the 0.34.60 supervisor). Recovered the doc to clean HEAD; on 0.34.61 the supervisor no longer reverts those edits.
+
+**Shipped (v0.34.61, `make check` green / 5439 tests):** version bumped (all workspace crates + `pyproject.toml`), `VERSIONS.md` entry, `make install-full` (0.34.61 live, cdylib `libagent_doc-0.34.61.so` + auto-recycle marked controllers), committed + pushed (submodule `49f7d5da`, tag `v0.34.61`, superproject pointer `1bf94aab6`), supervisor recycle marked onto 0.34.61. **Not** published to crates.io/PyPI (0.34.x dogfood cadence batches publishing — separate operator step).
+
+**`[operator-verify]` (live eyeball, not agent-completable):** on the recycled 0.34.61 supervisor, add an attribute to the `agent:queue` marker mid-turn and confirm it is NOT deleted on the next merge; and edit/delete a queue row during an active turn and confirm it is NOT reverted/duplicated (ops.log shows `postcommit_worktree_check match=false` observe-only, no revert). Striking `#pcwcrt`; `#qmarkerauth` recorded as shipped.
+<!-- agent:boundary:db38063c -->
 <!-- /agent:exchange -->
 ## Queue
 

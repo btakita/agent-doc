@@ -85,13 +85,17 @@ describe('patchGuard', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         const applyIdx = source.indexOf('const applied = await this.applyPatch(patch, uri.fsPath)');
         const deleteIdx = source.indexOf('fs.unlinkSync(uri.fsPath)', source.indexOf('if (applied) {'));
-        const saveIdx = source.indexOf('const saved = await document.save();');
+        const minimalApplyIdx = source.indexOf('const ok = await this.applyMinimalTextEdit(document, content);');
         const ackIdx = source.indexOf('return this.writeAckContent(patch.patch_id, document.getText(), patchesDir);');
+        const applyPatchStart = source.indexOf('private async applyPatch(');
+        const applyPatchEnd = source.indexOf('private async applyMinimalTextEdit(', applyPatchStart);
+        const applyPatchBody = source.slice(applyPatchStart, applyPatchEnd);
 
         assert.ok(applyIdx >= 0);
         assert.ok(deleteIdx > applyIdx);
-        assert.ok(saveIdx >= 0);
-        assert.ok(ackIdx > saveIdx);
+        assert.ok(minimalApplyIdx >= 0);
+        assert.ok(ackIdx > minimalApplyIdx);
+        assert.strictEqual(applyPatchBody.includes('document.save()'), false);
         assert.ok(source.includes('private writeAckContent('));
         assert.ok(source.includes('): boolean {'));
         assert.ok(source.includes('return this.writeAckContent(patchId, content, patchesDir);'));
@@ -121,7 +125,7 @@ describe('patchGuard', () => {
         const fullContentVisibleEditIdx = source.indexOf('edit.replace(fileUri, fullRange, patch.fullContent)');
         const fullContentProofIdx = source.indexOf("this.verifyApplyProof(document, proof, patch.file, 'full content'");
         const componentProofIdx = source.indexOf("this.verifyApplyProof(document, proof, patch.file, 'component patch'");
-        const componentEditIdx = source.indexOf('edit.replace(fileUri, fullRange, content)');
+        const componentEditIdx = source.indexOf('this.applyMinimalTextEdit(document, content)');
 
         assert.ok(fullContentDeleteIdx >= 0);
         assert.ok(fullContentRejectIdx >= 0);
@@ -141,13 +145,14 @@ describe('patchGuard', () => {
         const fileFullContentGuardIdx = source.indexOf("if ((patch.fullContent ?? '') !== '')");
         const fileApplyIdx = source.indexOf('const applied = await this.applyPatch(patch, uri.fsPath)');
         const socketFullContentGuardIdx = source.indexOf("if (patch.fullContent != null && patch.fullContent !== '')");
-        const componentEditIdx = source.indexOf('edit.replace(fileUri, fullRange, content)');
+        const componentEditIdx = source.indexOf('this.applyMinimalTextEdit(document, content)');
 
         assert.ok(cycleFixture.fullContent.includes('#spec-test-build-install-commit-push'));
         assert.ok(cycleFixture.fullContent.includes('dispatch #spec-test-build-install-commit-push'));
         assert.ok(fileFullContentGuardIdx >= 0 && fileFullContentGuardIdx < fileApplyIdx);
         assert.ok(socketFullContentGuardIdx >= 0 && socketFullContentGuardIdx < componentEditIdx);
         assert.strictEqual(source.indexOf('fullRange, patch.fullContent'), -1);
+        assert.strictEqual(source.indexOf('edit.replace(fileUri, fullRange, content)'), -1);
     });
 
     it('honors explicit component op overrides for convergence patches', () => {

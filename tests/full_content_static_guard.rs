@@ -212,7 +212,7 @@ fn receiver_full_content_rejections_precede_visible_write_sinks() {
         jetbrains,
         "private fun applyPatch(patch: IpcPatch): Boolean",
         "if (!patch.fullContent.isNullOrEmpty())",
-        "document.setText(result)",
+        "applyMinimalDocumentEditUtil(document, content, result)",
     );
     assert_guard_before_sink(
         jetbrains,
@@ -232,18 +232,18 @@ fn receiver_full_content_rejections_precede_visible_write_sinks() {
         vscode,
         "private async applyPatch",
         "if (patch.fullContent != null && patch.fullContent !== '')",
-        "edit.replace(fileUri, fullRange, content)",
+        "this.applyMinimalTextEdit(document, content)",
     );
 }
 
 #[test]
-fn node_patches_apply_before_legacy_visible_write_sinks() {
+fn node_patches_apply_before_visible_write_sinks() {
     let jetbrains = "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt";
     assert_guard_before_sink(
         jetbrains,
         "private fun applyPatch(patch: IpcPatch): Boolean",
         "NativePatching.applyNodePatches",
-        "document.setText(result)",
+        "applyMinimalDocumentEditUtil(document, content, result)",
     );
     assert_guard_before_sink(
         jetbrains,
@@ -265,7 +265,7 @@ fn node_patches_apply_before_legacy_visible_write_sinks() {
         vscode,
         "private async applyPatch",
         "native.applyNodePatches",
-        "edit.replace(fileUri, fullRange, content)",
+        "this.applyMinimalTextEdit(document, content)",
     );
     assert_source_contains(vscode, "skipping legacy component patch for node-patched");
 }

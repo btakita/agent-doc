@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -93,10 +94,6 @@ class PromptPoller(private val project: Project) : Disposable {
         task = executor.scheduleWithFixedDelay({
             try {
                 val cycleStart = System.nanoTime()
-                // Auto-save is best-effort — must not block prompt detection
-                try { autoSaveTrackedFiles() } catch (_: Exception) {}
-                val saveMs = (System.nanoTime() - cycleStart) / 1_000_000
-
                 val refreshStart = System.nanoTime()
                 refreshTrackedFiles()
                 val refreshMs = (System.nanoTime() - refreshStart) / 1_000_000
@@ -107,7 +104,7 @@ class PromptPoller(private val project: Project) : Disposable {
 
                 handlePollResults(entries, basePath)
                 val totalMs = (System.nanoTime() - cycleStart) / 1_000_000
-                if (totalMs > 200) LOG.info("[perf] prompt-poller cycle: ${totalMs}ms (save=${saveMs}ms refresh=${refreshMs}ms poll=${pollMs}ms tracked=${trackedFiles.size})")
+                if (totalMs > 200) LOG.info("[perf] prompt-poller cycle: ${totalMs}ms (refresh=${refreshMs}ms poll=${pollMs}ms tracked=${trackedFiles.size})")
                 cycleCount++
                 if (cycleCount % 40 == 0L) { // ~every 60s at 1.5s interval
                     val ffiTracked = AgentDocLib.get()?.agent_doc_tracked_count() ?: -1
@@ -141,57 +138,6 @@ class PromptPoller(private val project: Project) : Disposable {
                 }
             }
         })
-    }
-
-    /**
-     * Auto-save unsaved tracked documents so Claude sees the user's latest edits.
-     * Uses invokeAndWait (blocking) to ensure saves complete before prompt polling.
-     *
-     * Refreshes VFS before saving to detect external disk writes (e.g. agent-doc
-     * CRDT merge). If disk changed, merges first so we don't overwrite with a
-     * stale in-memory buffer.
-     */
-    private fun autoSaveTrackedFiles() {
-        ApplicationManager.getApplication().invokeAndWait {
-            try {
-                val fdm = FileDocumentManager.getInstance()
-                for ((_, tracked) in trackedFiles) {
-                    if (!tracked.file.isValid) continue
-                    val doc = fdm.getDocument(tracked.file) ?: continue
-                    if (fdm.isDocumentUnsaved(doc)) {
-                        // #p2j4 / #jbcfdiag — this branch only runs for an UNSAVED buffer,
-                        // and it runs on the 1.5s poll timer regardless of any agent
-                        // activity. A bare content-bearing `VirtualFile.refresh(false,
-                        // false)` here arms IntelliJ's memory↔disk "File Cache Conflict"
-                        // dialog whenever the on-disk bytes diverged from the unsaved
-                        // buffer (e.g. after an agent commit wrote the working tree) — it
-                        // was the dominant behind-editor trigger because it fires every
-                        // poll cycle, not just during an apply. Since
-                        // shouldRefreshVfsBeforeApplyUtil(unsaved) is always false here,
-                        // skip the refresh entirely and detect disk divergence by
-                        // comparing the document against the VFS-cached disk bytes
-                        // (mergeOrReload also reads disk this way). The BulkFileListener
-                        // delivers real external writes via VFileContentChangeEvent, so we
-                        // do not need a forced refresh to learn about divergence.
-                        if (shouldRefreshVfsBeforeApplyUtil(/* documentUnsaved = */ true)) {
-                            tracked.file.refresh(false, false)
-                        }
-                        val diskContent = String(tracked.file.contentsToByteArray(), Charsets.UTF_8)
-                        if (doc.text != diskContent) {
-                            mergeOrReload(tracked)
-                            tracked.lastKnownModStamp = tracked.file.modificationStamp
-                        }
-                        if (fdm.isDocumentUnsaved(doc)) {
-                            tracked.lastSavedContent = doc.text
-                            fdm.saveDocument(doc)
-                            tracked.lastKnownModStamp = tracked.file.modificationStamp
-                        }
-                    }
-                }
-            } catch (_: Exception) {
-                // Best-effort save — never block prompt detection
-            }
-        }
     }
 
     /**
@@ -275,9 +221,9 @@ class PromptPoller(private val project: Project) : Disposable {
         val merged = NativePatching.mergeCrdt(base, diskContent, editorContent)
             ?: gitMergeFile(base, diskContent, editorContent)
         if (merged != null) {
-            ApplicationManager.getApplication().runWriteAction {
-                doc.setText(merged)
-            }
+            WriteCommandAction.runWriteCommandAction(project, "Agent Doc Merge External Write", null, {
+                applyMinimalDocumentEditUtil(doc, editorContent, merged)
+            })
             tracked.lastSavedContent = merged
         } else {
             // Task 2: preserve editor content on merge failure — don't discard user edits
@@ -354,7 +300,7 @@ class PromptPoller(private val project: Project) : Disposable {
             // addFile uses) so a file already tracked from the editor side is not
             // re-added under a divergent key. Double-tracking previously created
             // two TrackedFile entries for one file, each with its own baseline,
-            // and refreshTrackedFiles/autoSaveTrackedFiles then ran mergeOrReload
+            // and refreshTrackedFiles then ran mergeOrReload
             // twice with divergent baselines — a full-document duplication path
             // (#ipcfullprompt). See trackingKey().
             val key = trackingKey(vf.path)
@@ -577,7 +523,7 @@ private fun parsePromptAllEntry(json: String): PromptAllEntry? {
  * Previously addFile keyed by the project-relative path while the poller keyed
  * by `"$cwd:$file"`, so the same file was tracked under two keys. That created
  * two independent `TrackedFile` baselines, and `refreshTrackedFiles` /
- * `autoSaveTrackedFiles` then invoked `mergeOrReload` twice per change with
+ * the poller then invoked `mergeOrReload` twice per change with
  * divergent baselines — a full-document duplication path (#ipcfullprompt).
  */
 internal fun trackingKey(absolutePath: String): String = absolutePath

@@ -1294,56 +1294,27 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         std::thread::sleep(poll_interval);
     }
 
-    // Proven no IPC delivery this run (timeout or consumed-without-materialization).
-    // `#6b5hprimary`/`#g9d7`: this is the headline finalize wedge. Reuse the
-    // `decide_editorless_disk_fallback` semantics — only a pure-CLI / file-IPC-
-    // fallback session with NO live editor endpoint behind the (connectable)
-    // controller socket may land the pending `content_ours` via the guarded
-    // controller-host disk write; a proven live editor buffer ALWAYS stays
-    // authoritative and keeps the fail-closed bail (preserves `#editorbufwin` /
-    // the File Cache Conflict guard). Without this rung an editor-less finalize
-    // wedges forever and only `--force-disk` succeeds (`#kcb5`/`#6b5h`).
-    let take_editorless_disk = matches!(
-        run_ipc_editorless_disk_decision(file, false),
-        crate::flow::document_mutation::EditorlessDiskFallbackDecision::ForceDiskNoEditor
-    );
-
     if consumed_without_materialization {
         eprintln!(
-            "[write] IPC patch was consumed without materializing the response{}",
-            if take_editorless_disk {
-                " — routing to the editor-less disk fallback (no live editor endpoint)"
-            } else {
-                " — refusing direct document write; retry required"
-            }
+            "[write] IPC patch was consumed without materializing the response — refusing direct document write; retry required"
         );
     } else {
         eprintln!(
-            "[write] IPC timeout ({}s){}",
-            timeout.as_secs(),
-            if take_editorless_disk {
-                " — routing to the editor-less disk fallback (no live editor endpoint)"
-            } else {
-                " — leaving patch for editor retry; refusing direct document write"
-            }
+            "[write] IPC timeout ({}s) — leaving patch for editor retry; refusing direct document write",
+            timeout.as_secs()
         );
-        // Only record the unproven-closeout retry signal when we are actually
-        // bailing; the editor-less path proves delivery via the guarded disk
-        // write, so it must NOT emit `recovery=retry_without_disk_write`.
-        if !take_editorless_disk {
-            log_ipc_proof_failure(
-                file,
-                "explicit_file_ipc",
-                Some(&patch_id),
-                "no_ack",
-                "retry_without_disk_write",
-                &format!(
-                    "timeout_secs={} patch_file={}",
-                    timeout.as_secs(),
-                    patch_file.display()
-                ),
-            );
-        }
+        log_ipc_proof_failure(
+            file,
+            "explicit_file_ipc",
+            Some(&patch_id),
+            "no_ack",
+            "retry_without_disk_write",
+            &format!(
+                "timeout_secs={} patch_file={}",
+                timeout.as_secs(),
+                patch_file.display()
+            ),
+        );
     }
 
     // Guard: if the cycle was already committed by a concurrent closeout,
@@ -1373,37 +1344,6 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         return Ok(());
     }
 
-    // `#6b5hprimary`/`#g9d7`: editor-less guarded disk fallback. No live editor
-    // endpoint is behind the (connectable) socket, so route the pending
-    // `content_ours` to the controller-host disk write + snapshot/CRDT/pending
-    // update under the held `doc_lock` instead of wedging. `atomic_write_if_current_pub`
-    // fails closed if disk drifted from `content_at_start` or a visible editor
-    // buffer is non-idle, so a concurrent edit is never clobbered. The caller
-    // (`finalize`) commits this landed response through its normal commit boundary.
-    if take_editorless_disk {
-        atomic_write_if_current_pub(file, &content_ours, &content_at_start, "run_ipc_editorless")?;
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "run_ipc_editorless_disk_fallback file={} patch_id={} consumed_without_materialization={} transport=disk_fallback editor_endpoint=absent action=editorless_disk_fallback recovery=editorless_disk_write",
-                file.display(),
-                patch_id,
-                consumed_without_materialization
-            ),
-        );
-        snapshot::save(file, &content_ours)?;
-        let crdt_doc = crate::crdt::CrdtDoc::from_text(&content_ours);
-        snapshot::save_document_crdt(file, &crdt_doc.encode_state(), &content_ours)?;
-        cleanup_fallback_patch_files(file);
-        drop(doc_lock);
-        repair::clear_pending(file)?;
-        eprintln!(
-            "[write] editor-less disk fallback landed the response on {} (no live editor endpoint to protect) — snapshot updated",
-            file.display()
-        );
-        return Ok(());
-    }
-
     drop(doc_lock);
     crate::ops_log::log_op(
         file,
@@ -1418,36 +1358,6 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         "editor IPC did not prove the write for {}; pending response retained for retry; refusing direct document write",
         file.display()
     );
-}
-
-/// `#6b5hprimary`/`#g9d7`: decide whether the `run_ipc` proven-no-delivery bail
-/// may route the pending response to the guarded controller-host disk write.
-///
-/// Mirrors `converge.rs`'s `refuse_or_editorless_disk_fallback`: a proven live
-/// editor endpoint (a plugin-owner lease) ALWAYS fails closed so a real editor
-/// buffer is never disk-clobbered (`#editorbufwin` / File Cache Conflict guard),
-/// while a pure-CLI / file-IPC-fallback session with no editor behind the
-/// connectable controller socket routes to the disk write instead of wedging
-/// forever on `no_ack` (only `--force-disk` used to succeed — `#kcb5`/`#6b5h`).
-///
-/// We only reach the caller from the proven-no-delivery bail, so delivery is
-/// modeled as having failed at the single-attempt threshold
-/// (`consecutive_no_ack == threshold`). `run_ipc` is the editor-IPC (non
-/// `--force-disk`) path, so `force_disk_requested` is `false` in production;
-/// the parameter is threaded for explicit reuse of the decision semantics.
-pub(crate) fn run_ipc_editorless_disk_decision(
-    file: &Path,
-    force_disk_requested: bool,
-) -> crate::flow::document_mutation::EditorlessDiskFallbackDecision {
-    let editor_endpoint_proven =
-        crate::plugin_owner::live_editor_endpoint_attached(&file.to_string_lossy());
-    crate::flow::document_mutation::decide_editorless_disk_fallback(
-        true, // socket_connectable: we reached the file-IPC write path
-        editor_endpoint_proven,
-        1, // consecutive_no_ack: this run proved no delivery
-        1, // threshold
-        force_disk_requested,
-    )
 }
 
 fn content_uses_crdt_write(content: &str) -> bool {
@@ -1647,45 +1557,6 @@ mod tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
-
-    #[test]
-    fn run_ipc_editorless_decision_routes_disk_without_lease_fails_closed_with_lease() {
-        // `#6b5hprimary`/`#g9d7`: the run_ipc proven-no-delivery bail may route to
-        // the guarded controller-host disk write ONLY when there is no live editor
-        // endpoint to protect. With no plugin-owner lease (pure-CLI / file-IPC
-        // fallback) the decision is the editor-less disk fallback; once a live
-        // plugin-owner lease exists (a real editor buffer) it fails closed so the
-        // buffer stays authoritative (`#editorbufwin`).
-        let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("plan.md");
-        fs::write(&doc, "# plan\n").unwrap();
-
-        // No lease seeded → editor-less → route the pending response to disk.
-        assert_eq!(
-            run_ipc_editorless_disk_decision(&doc, false),
-            crate::flow::document_mutation::EditorlessDiskFallbackDecision::ForceDiskNoEditor,
-            "an editor-less run_ipc bail must route to the guarded disk write, not wedge"
-        );
-
-        // A live plugin-owner lease (real editor buffer) → fail closed.
-        crate::plugin_owner::write_plugin_owner_lease_for_test(
-            doc.to_str().unwrap(),
-            std::process::id(),
-        );
-        assert_eq!(
-            run_ipc_editorless_disk_decision(&doc, false),
-            crate::flow::document_mutation::EditorlessDiskFallbackDecision::FailClosed,
-            "a live editor buffer must never be disk-clobbered on unproven delivery"
-        );
-
-        // `--force-disk` is the explicit operator escape hatch even with a lease.
-        assert_eq!(
-            run_ipc_editorless_disk_decision(&doc, true),
-            crate::flow::document_mutation::EditorlessDiskFallbackDecision::ForceDiskNoEditor,
-            "explicit --force-disk overrides the live-editor fail-closed guard"
-        );
-    }
 
     #[test]
     fn apply_template_from_string_compact_exchange_replaces_exchange_body() {

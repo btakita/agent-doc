@@ -7,6 +7,39 @@ export interface RepositionPatchShape {
     fullContent?: string;
 }
 
+export interface MinimalReplacement {
+    start: number;
+    deleteLength: number;
+    text: string;
+}
+
+export function calculateMinimalReplacement(before: string, after: string): MinimalReplacement | null {
+    if (before === after) {
+        return null;
+    }
+
+    const minLen = Math.min(before.length, after.length);
+    let prefixLen = 0;
+    while (prefixLen < minLen && before.charCodeAt(prefixLen) === after.charCodeAt(prefixLen)) {
+        prefixLen++;
+    }
+
+    let suffixLen = 0;
+    while (
+        suffixLen < before.length - prefixLen &&
+        suffixLen < after.length - prefixLen &&
+        before.charCodeAt(before.length - 1 - suffixLen) === after.charCodeAt(after.length - 1 - suffixLen)
+    ) {
+        suffixLen++;
+    }
+
+    return {
+        start: prefixLen,
+        deleteLength: before.length - prefixLen - suffixLen,
+        text: after.substring(prefixLen, after.length - suffixLen),
+    };
+}
+
 export function isPureRepositionSignal(patch: RepositionPatchShape): boolean {
     if (!patch.reposition_boundary) {
         return false;

@@ -58,31 +58,31 @@ class RefreshBeforeApplyConflictTest {
     }
 
     /**
-     * `#p2j4` / `#jbcfdiag` — PromptPoller's auto-save / refresh loop runs on the
-     * 1.5s poll timer regardless of agent activity. Its content-bearing
-     * `VirtualFile.refresh(false, false)` calls were the dominant behind-editor File
-     * Cache Conflict trigger (fired every cycle, not just during an apply). Pin that
-     * both poll-timer refresh sites are gated by shouldRefreshVfsBeforeApplyUtil so a
-     * refresh never runs against an unsaved buffer.
+     * `#p2j4` / realtime cutover phase 0 — PromptPoller's poll timer must not
+     * auto-save dirty editor buffers. It may still notice external disk changes,
+     * but every content-bearing refresh remains gated so it never runs against an
+     * unsaved buffer.
      */
     @Test
-    fun `prompt-poller timer refresh sites are gated on document save state`() {
+    fun `prompt-poller timer does not auto-save and refresh sites are gated`() {
         val pollerPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PromptPoller.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PromptPoller.kt"),
         ).first { Files.exists(it) }
         val poller = Files.readString(pollerPath)
 
+        assertFalse(poller.contains("autoSaveTrackedFiles"))
+        assertFalse(poller.contains("saveDocument(doc)"))
+
         val gateToken = "shouldRefreshVfsBeforeApplyUtil"
-        // PromptPoller refreshes `tracked.file` / `file`, not `targetFile`.
+        // PromptPoller refreshes `file`, not `targetFile`.
         val refreshTokens = listOf(
-            "tracked.file.refresh(false, false)",
             "file.refresh(false, false)",
         )
         val refreshCount = refreshTokens.sumOf { token -> poller.split(token).size - 1 }
         assertTrue(
-            "expected at least 2 poll-timer refresh sites, found $refreshCount",
-            refreshCount >= 2,
+            "expected at least 1 poll-timer refresh site, found $refreshCount",
+            refreshCount >= 1,
         )
         for (token in refreshTokens) {
             assertEveryRefreshGated(poller, token, gateToken)

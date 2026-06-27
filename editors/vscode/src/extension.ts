@@ -7,7 +7,7 @@ import { execFile } from 'child_process';
 import * as native from './native';
 import * as stateMirror from './stateMirror';
 import { createEditorApplyProof, consumeClaimedPatch, isEditorApplyProofCurrent, isPatchAlreadyApplied } from './patchGuard';
-import { appendPatchAlreadyPresent, isPureRepositionSignal } from './patchPlan';
+import { appendPatchAlreadyPresent, calculateMinimalReplacement, isPureRepositionSignal } from './patchPlan';
 import { parseCrossSessionReject, CrossSessionReject } from './crossSession';
 import { parseSaveDocumentSignal, ackContentSidecarPath } from './saveSignal';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
@@ -1802,7 +1802,7 @@ async function popupMenuAction(): Promise<void> {
  * 1. `agent-doc write --ipc` writes `<hash>.json` to `.agent-doc/patches/`
  * 2. FileSystemWatcher detects the new file
  * 3. Reads JSON, finds/opens the target document, applies patches
- * 4. Saves the document and deletes the JSON file (ACK)
+ * 4. Writes ack-content and deletes the JSON file (ACK)
  * 5. agent-doc polls for deletion and updates the snapshot
  */
 
@@ -1976,13 +1976,10 @@ class PatchWatcher implements vscode.Disposable {
     private async applyReconnectReread(doc: vscode.TextDocument, content: string): Promise<void> {
         const before = doc.getText();
         if (before === content) return;
-        const edit = new vscode.WorkspaceEdit();
-        const fullRange = new vscode.Range(doc.positionAt(0), doc.positionAt(before.length));
-        edit.replace(doc.uri, fullRange, content);
         // Race guard: bail if the buffer changed since we read it (a concurrent
         // user edit) so editor-wins still holds.
         if (doc.getText() !== before) return;
-        const ok = await vscode.workspace.applyEdit(edit);
+        const ok = await this.applyMinimalTextEdit(doc, content);
         if (ok) {
             this.outputChannel.appendLine(`reconnect: reread disk into stale buffer ${doc.uri.fsPath} #yzer`);
         }
@@ -2286,14 +2283,7 @@ class PatchWatcher implements vscode.Disposable {
                     this.schedulePatchRetry(patchFilePath);
                     return;
                 }
-                const fullRange = new vscode.Range(
-                    document.positionAt(0),
-                    document.positionAt(content.length),
-                );
-                const edit = new vscode.WorkspaceEdit();
-                edit.replace(fileUri, fullRange, repositioned);
-                await vscode.workspace.applyEdit(edit);
-                await document.save();
+                await this.applyMinimalTextEdit(document, repositioned);
             }
             // ACK: delete the patch file
             try { fs.unlinkSync(patchFilePath); } catch { /* already consumed */ }
@@ -2353,10 +2343,6 @@ class PatchWatcher implements vscode.Disposable {
 
         const baselineContent = document.getText();
         const proof = createEditorApplyProof(baselineContent, document.version);
-        const fullRange = new vscode.Range(
-            document.positionAt(0),
-            document.positionAt(baselineContent.length),
-        );
 
         if (patch.fullContent != null && patch.fullContent !== '') {
             this.outputChannel.appendLine(`PatchWatcher: full content IPC is disabled for ${patch.file}; rejecting patch`);
@@ -2427,26 +2413,34 @@ class PatchWatcher implements vscode.Disposable {
             if (!this.verifyApplyProof(document, proof, patch.file, 'component patch', patchFilePath)) {
                 return false;
             }
-            const edit = new vscode.WorkspaceEdit();
-            edit.replace(fileUri, fullRange, content);
-            const ok = await vscode.workspace.applyEdit(edit);
+            const ok = await this.applyMinimalTextEdit(document, content);
             if (!ok) {
                 this.outputChannel.appendLine(`PatchWatcher: WorkspaceEdit failed for component patches`);
                 return false;
             }
         }
 
-        const saved = await document.save();
-        if (!saved) {
-            this.outputChannel.appendLine(`PatchWatcher: save failed for ${patch.file}`);
-            return false;
-        }
         const patchesDir = patchFilePath ? path.dirname(patchFilePath) : this.patchesDir;
         if (!patchesDir) {
             this.outputChannel.appendLine(`PatchWatcher: no patches dir for ack-content ${patch.file}`);
             return false;
         }
         return this.writeAckContent(patch.patch_id, document.getText(), patchesDir);
+    }
+
+    private async applyMinimalTextEdit(document: vscode.TextDocument, targetContent: string): Promise<boolean> {
+        const before = document.getText();
+        const replacement = calculateMinimalReplacement(before, targetContent);
+        if (replacement == null) {
+            return true;
+        }
+        const range = new vscode.Range(
+            document.positionAt(replacement.start),
+            document.positionAt(replacement.start + replacement.deleteLength),
+        );
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(document.uri, range, replacement.text);
+        return vscode.workspace.applyEdit(edit);
     }
 
     private verifyApplyProof(

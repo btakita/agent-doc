@@ -204,6 +204,23 @@ One.
     }
 
     @Test
+    fun `minimal document edit narrows replacement to changed span`() {
+        assertNull(minimalDocumentEditUtil("same", "same"))
+        assertEquals(
+            MinimalDocumentEdit(start = 6, end = 10, replacement = "BETA"),
+            minimalDocumentEditUtil("alpha beta gamma", "alpha BETA gamma"),
+        )
+        assertEquals(
+            MinimalDocumentEdit(start = 6, end = 6, replacement = "beta "),
+            minimalDocumentEditUtil("alpha gamma", "alpha beta gamma"),
+        )
+        assertEquals(
+            MinimalDocumentEdit(start = 6, end = 11, replacement = ""),
+            minimalDocumentEditUtil("alpha beta gamma", "alpha gamma"),
+        )
+    }
+
+    @Test
     fun `full content source buffer proof rejects live editor drift`() {
         val before = "before"
         val hash = sha256HexUtf8(before)
@@ -378,7 +395,7 @@ One.
         val cancelRefresh = patchWatcher.indexOf("refreshVisualHighlightersAfterFileCacheConflict(targetFile, \"cancel\")")
         val clearConflict = patchWatcher.indexOf("clearPatchDeferredForMemoryDiskConflict(patch)")
         val resolvedRefresh = patchWatcher.indexOf("refreshVisualHighlightersAfterFileCacheConflict(targetFile, \"resolved\")")
-        val documentWrite = patchWatcher.indexOf("document.setText(result)")
+        val documentWrite = patchWatcher.indexOf("applyMinimalDocumentEditUtil(document, content, result)")
         val appliedRefresh = patchWatcher.indexOf("refreshVisualHighlightersAfterFileCacheConflict(targetFile, \"applied\")")
 
         assertTrue(visualHighlighter.contains("fun refreshFile(file: VirtualFile)"))
@@ -434,6 +451,8 @@ One.
         assertTrue(patchWatcher.contains("FFI unavailable, cannot write ack-content"))
         assertTrue(patchWatcher.contains("if (!writeAckContent(patch.patchId, document.text, patch.file))"))
         assertTrue(patchWatcher.contains("return writeAckContent(patch.patchId, result, patch.file)"))
+        assertTrue(patchWatcher.contains("applyMinimalDocumentEditUtil(document, content, result)"))
+        assertFalse(patchWatcher.contains("document.setText(result)"))
 
         val applied = patchWatcher.indexOf("val applied = try", patchWatcher.indexOf("fun processPatchFile"))
         val appliedDelete = patchWatcher.indexOf("if (applied) {", applied)

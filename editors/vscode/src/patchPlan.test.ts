@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { appendPatchAlreadyPresent, isPureRepositionSignal } from './patchPlan';
+import { appendPatchAlreadyPresent, calculateMinimalReplacement, isPureRepositionSignal } from './patchPlan';
 
 describe('isPureRepositionSignal', () => {
     it('treats a bare reposition payload as pure reposition', () => {
@@ -91,6 +91,30 @@ Different content.
                 '### Re: Duplicate — gpt-5\n\nAlready applied.\n',
             ),
             false,
+        );
+    });
+});
+
+describe('calculateMinimalReplacement', () => {
+    it('returns null when content is unchanged', () => {
+        assert.strictEqual(calculateMinimalReplacement('same', 'same'), null);
+    });
+
+    it('collapses a middle replacement to the changed span', () => {
+        assert.deepStrictEqual(
+            calculateMinimalReplacement('alpha beta gamma', 'alpha BETA gamma'),
+            { start: 6, deleteLength: 4, text: 'BETA' },
+        );
+    });
+
+    it('handles insertion and deletion without replacing the whole document', () => {
+        assert.deepStrictEqual(
+            calculateMinimalReplacement('alpha gamma', 'alpha beta gamma'),
+            { start: 6, deleteLength: 0, text: 'beta ' },
+        );
+        assert.deepStrictEqual(
+            calculateMinimalReplacement('alpha beta gamma', 'alpha gamma'),
+            { start: 6, deleteLength: 5, text: '' },
         );
     });
 });

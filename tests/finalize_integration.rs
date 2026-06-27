@@ -551,13 +551,11 @@ fn ipc_timeout_retry_does_not_merge_from_stale_crdt_state() {
 }
 
 #[test]
-fn ipc_timeout_editorless_session_lands_response_via_guarded_disk_write() {
-    // `#6b5hprimary`/`#g9d7`: the headline finalize wedge. A pure-CLI /
-    // file-IPC-fallback session (no live editor plugin → NO plugin-owner lease)
-    // that hits the run_ipc no-delivery bail must land the pending response via
-    // the guarded controller-host disk write + commit instead of wedging forever
-    // on `no_ack` (only `--force-disk` used to succeed). No lease is seeded, so
-    // run_ipc classifies the session as editor-less and routes to disk.
+fn ipc_timeout_editorless_session_fails_closed_without_disk_fallback() {
+    // Reliable realtime phase 0: a pure-CLI / file-IPC-fallback session with no
+    // ACK may no longer materialize through the visible disk fallback. Stale
+    // editor presence can be under-proven, so run_ipc retains the patch and
+    // asks for retry/convergence unless an operator explicitly forces disk.
     let tmp = TempDir::new().unwrap();
     for subdir in [
         "patches",
@@ -602,42 +600,41 @@ fn ipc_timeout_editorless_session_lands_response_via_guarded_disk_write() {
             "<!-- patch:exchange -->\n### Re: editorless disk fallback — gpt-5\nbody\n<!-- /patch:exchange -->\n",
         )
         .assert()
-        .success();
+        .failure();
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
-        content.contains("### Re: editorless disk fallback — gpt-5"),
-        "editor-less session must land the response on disk instead of wedging:\n{content}"
+        !content.contains("### Re: editorless disk fallback — gpt-5"),
+        "run_ipc no-ACK must not materialize the response through disk:\n{content}"
     );
     assert_eq!(
         content.matches("[#keep] Keep this backlog item").count(),
         1,
-        "editor-less disk write must preserve shared document structure exactly once"
+        "retry path must preserve shared document structure exactly once"
     );
-    assert_ne!(
+    assert_eq!(
         initial_head,
         head_blob(tmp.path()),
-        "editor-less disk fallback must commit the landed response"
+        "run_ipc no-ACK must fail before committing"
     );
     let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
     assert!(
-        ops_log.contains("run_ipc_editorless_disk_fallback")
-            && ops_log.contains("transport=disk_fallback")
-            && ops_log.contains("editor_endpoint=absent"),
-        "editor-less fallback must be attributable in ops.log:\n{ops_log}"
+        !ops_log.contains("run_ipc_editorless_disk_fallback")
+            && !ops_log.contains("transport=disk_fallback"),
+        "ordinary run_ipc no-ACK must not emit a disk fallback:\n{ops_log}"
     );
     assert!(
-        !ops_log.contains("recovery=retry_without_disk_write"),
-        "a proven editor-less disk write must NOT emit the unproven-closeout retry signal:\n{ops_log}"
+        ops_log.contains("recovery=retry_without_disk_write"),
+        "run_ipc no-ACK must emit retry-without-disk recovery:\n{ops_log}"
     );
     let patch_jsons = fs::read_dir(tmp.path().join(".agent-doc/patches"))
         .unwrap()
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
         .count();
-    assert_eq!(
-        patch_jsons, 0,
-        "a landed editor-less disk write must clean up its fallback patch file"
+    assert!(
+        patch_jsons > 0,
+        "run_ipc no-ACK must retain the patch file for retry"
     );
 }
 

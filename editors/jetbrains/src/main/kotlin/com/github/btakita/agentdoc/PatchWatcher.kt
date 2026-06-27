@@ -25,14 +25,14 @@ import java.security.MessageDigest
 
 /**
  * Watches `.agent-doc/patches/` for JSON patch files and applies them
- * via IntelliJ's Document API. This avoids external file change dialogs
- * and cursor jumps that occur when agent-doc writes directly to disk.
+ * via IntelliJ's Document API. Normal realtime paths use minimal range edits
+ * instead of whole-document replacements so undo remains local and predictable.
  *
  * Flow:
  * 1. `agent-doc write --ipc` writes `<hash>.json` to `.agent-doc/patches/`
  * 2. This watcher detects the new file via NIO WatchService
  * 3. Reads the JSON, finds the target document, applies patches
- * 4. Saves the document and deletes the JSON file (ACK)
+ * 4. Writes ack-content and deletes the JSON file (ACK)
  * 5. agent-doc polls for deletion and updates the snapshot
  *
  * **Multi-root:** a single watcher tracks every nested `.agent-doc/` project
@@ -238,7 +238,7 @@ class PatchWatcher(private val project: Project) : Disposable {
      * Re-read committed disk/HEAD content into a stale editor buffer on reconnect
      * (#yzer). Mirrors [refreshContentViaDocument] but the staleness proof was
      * already established by the binary FFI, so this only re-checks the live
-     * editor generation before setText to avoid racing a concurrent edit.
+     * editor generation before applying the range edit to avoid racing a concurrent edit.
      */
     private fun applyReconnectReread(filePath: String, content: String) {
         if (!awaitIdleBeforeDocumentMutation(filePath, "reconnect stale-buffer reread")) {
@@ -249,8 +249,8 @@ class PatchWatcher(private val project: Project) : Disposable {
             val fdm = FileDocumentManager.getInstance()
             val document = fdm.getDocument(targetFile) ?: return@invokeAndWait
             // #p2j4 / #jbcfdiag — skip the content-bearing VFS refresh when the buffer
-            // is unsaved (the reread setText's the proven-stale content via the Document
-            // API regardless). See shouldRefreshVfsBeforeApplyUtil.
+            // is unsaved (the reread applies the proven-stale content via the
+            // Document API regardless). See shouldRefreshVfsBeforeApplyUtil.
             if (shouldRefreshVfsBeforeApplyUtil(fdm.isDocumentUnsaved(document))) {
                 targetFile.refresh(false, false)
             }
@@ -258,21 +258,16 @@ class PatchWatcher(private val project: Project) : Disposable {
                 return@invokeAndWait
             }
             val proof = EditorApplyProof(document.text, document.modificationStamp)
-            var applied = false
             WriteCommandAction.runWriteCommandAction(project, "Agent Doc Reconnect Reread", null, {
                 if (!editorApplyProofStillCurrentUtil(proof, document.text, document.modificationStamp)) {
                     LOG.warn("[reconnect] stale editor generation during reread for $filePath; rejecting")
                     return@runWriteCommandAction
                 }
-                document.setText(content)
-                applied = true
+                applyMinimalDocumentEditUtil(document, proof.content, content)
                 LOG.info(
                     "[reconnect] re-read disk/HEAD into stale buffer for $filePath (${content.length} chars) #yzer",
                 )
             })
-            if (applied) {
-                fdm.saveDocument(document)
-            }
         }
     }
 
@@ -634,7 +629,7 @@ class PatchWatcher(private val project: Project) : Disposable {
      *
      * This is intentionally narrower than generic full-content IPC: it is only
      * used after the binary has restored disk to HEAD for #pcwc, and it carries
-     * the stale buffer hash/length that must match before setText runs.
+     * the stale buffer hash/length that must match before the range edit runs.
      */
     private fun refreshContentViaDocument(
         filePath: String,
@@ -654,7 +649,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             // #p2j4 / #jbcfdiag — this socket refresh_content path is the IPC reconcile
             // that exists specifically to AVOID a behind-editor disk write; it must not
             // itself arm the File Cache Conflict dialog by refreshing an unsaved buffer.
-            // The setText below replaces the proven-stale buffer via the Document API.
+            // The range edit below replaces only the changed span in the proven-stale buffer.
             // See shouldRefreshVfsBeforeApplyUtil.
             if (shouldRefreshVfsBeforeApplyUtil(fdm.isDocumentUnsaved(document))) {
                 targetFile.refresh(false, false)
@@ -702,15 +697,12 @@ class PatchWatcher(private val project: Project) : Disposable {
                 )
                 if (LOG.isDebugEnabled) {
                     LOG.debug(
-                        "[patch-watcher] setText payload (refresh_content) for $filePath (${content.length} chars):\n$content",
+                        "[patch-watcher] minimal-edit target (refresh_content) for $filePath (${content.length} chars):\n$content",
                     )
                 }
-                document.setText(content)
+                applyMinimalDocumentEditUtil(document, proof.content, content)
                 applied = true
             })
-            if (applied) {
-                fdm.saveDocument(document)
-            }
         }
         return applied
     }
@@ -772,20 +764,19 @@ class PatchWatcher(private val project: Project) : Disposable {
                                 content, result, document.modificationStamp, true,
                             )
                         )
-                        // #jb-settext-payload-log: capture the exact setText
-                        // payload at debug level for IPC-corruption forensics.
+                        // Capture the exact target payload at debug level for
+                        // IPC-corruption forensics.
                         if (LOG.isDebugEnabled) {
                             LOG.debug(
-                                "[patch-watcher] setText payload (repositionBoundary) for $filePath boundaryId=$boundaryId (${result.length} chars):\n$result"
+                                "[patch-watcher] minimal-edit target (repositionBoundary) for $filePath boundaryId=$boundaryId (${result.length} chars):\n$result"
                             )
                         }
-                        document.setText(result)
+                        applyMinimalDocumentEditUtil(document, content, result)
                     } else if (result != content) {
                         LOG.warn("[patch-watcher] stale editor generation before reposition for $filePath; retrying")
                         scheduleRepositionRetry(filePath, boundaryId, preserveHead)
                     }
                 })
-                FileDocumentManager.getInstance().saveDocument(document)
                 val reposMs = (System.nanoTime() - reposStart) / 1_000_000
                 if (reposMs > 50) LOG.info("[perf] repositionBoundary: ${reposMs}ms $filePath")
             }
@@ -1316,16 +1307,16 @@ class PatchWatcher(private val project: Project) : Disposable {
                     content, result, document.modificationStamp, true,
                 )
             )
-            // #jb-settext-payload-log: the diagnostic above logs only hashes +
+            // The diagnostic above logs only hashes +
             // lengths. To capture the exact corrupting payload for the IPC
-            // duplication family, log the full setText payload at debug level
+            // duplication family, log the full target payload at debug level
             // (only when `#com.github.btakita.agentdoc` debug logging is on).
             if (LOG.isDebugEnabled) {
                 LOG.debug(
-                    "[patch-watcher] setText payload (applyPatch.component) for ${patch.file} patchId=${patch.patchId} (${result.length} chars):\n$result"
+                    "[patch-watcher] minimal-edit target (applyPatch.component) for ${patch.file} patchId=${patch.patchId} (${result.length} chars):\n$result"
                 )
             }
-            document.setText(result)
+            applyMinimalDocumentEditUtil(document, content, result)
             wrote = true
             LOG.info("Patch applied to ${patch.file} (${result.length - content.length} chars changed)")
         })
@@ -1333,8 +1324,6 @@ class PatchWatcher(private val project: Project) : Disposable {
             return false
         }
 
-        // Save the document to disk (so snapshot can read it)
-        FileDocumentManager.getInstance().saveDocument(document)
         if (wasDeferredForConflict) {
             refreshVisualHighlightersAfterFileCacheConflict(targetFile, "applied")
         }
@@ -2288,6 +2277,49 @@ internal data class EditorApplyProof(
     val modificationStamp: Long,
 )
 
+internal data class MinimalDocumentEdit(
+    val start: Int,
+    val end: Int,
+    val replacement: String,
+)
+
+internal fun minimalDocumentEditUtil(before: String, after: String): MinimalDocumentEdit? {
+    if (before == after) {
+        return null
+    }
+
+    var prefixLen = 0
+    val minLen = minOf(before.length, after.length)
+    while (prefixLen < minLen && before[prefixLen] == after[prefixLen]) {
+        prefixLen++
+    }
+
+    var suffixLen = 0
+    while (
+        suffixLen < before.length - prefixLen &&
+        suffixLen < after.length - prefixLen &&
+        before[before.length - 1 - suffixLen] == after[after.length - 1 - suffixLen]
+    ) {
+        suffixLen++
+    }
+
+    return MinimalDocumentEdit(
+        start = prefixLen,
+        end = before.length - suffixLen,
+        replacement = after.substring(prefixLen, after.length - suffixLen),
+    )
+}
+
+internal fun applyMinimalDocumentEditUtil(
+    document: Document,
+    before: String,
+    after: String,
+): Boolean {
+    val edit = minimalDocumentEditUtil(before, after) ?: return false
+    document.replaceString(edit.start, edit.end, edit.replacement)
+    return true
+}
+
 /**
  * `#p2j4` / `#jbcfdiag` — decide whether a content-bearing `VirtualFile.refresh`
  * is safe to run before applying an agent write.
@@ -2296,7 +2328,7 @@ internal data class EditorApplyProof(
  * dialog *during* a VFS refresh: when the on-disk bytes diverge from an **unsaved**
  * in-memory `Document`, the platform's `contentsChanged` handler pops the dialog
  * synchronously. Every agent write path that reconciles the document through the
- * Document API (`setText`) is the authority for an unsaved buffer, so a bare
+ * Document API is the authority for an unsaved buffer, so a bare
  * `refresh(false, false)` before that reconcile adds no value when the document is
  * unsaved — it only hands the platform a window to fire the dialog behind the
  * editor (the remaining trigger after IPC-first writes removed the Rust-side
@@ -2815,7 +2847,7 @@ internal fun documentMutationContentHashUtil(content: String): String =
 /**
  * The post-boundary tail of the `exchange` component: everything after the last
  * `<!-- agent:boundary:* -->` marker up to the exchange close. This is the live
- * user-prompt region; comparing it pre/post a `setText` reveals prompt
+ * user-prompt region; comparing it pre/post an editor-visible write reveals prompt
  * duplication (grows) or deletion (shrinks) caused by a whole-buffer mutation.
  */
 internal fun postBoundaryExchangeRegionUtil(content: String): String {
@@ -2832,7 +2864,7 @@ internal fun postBoundaryExchangeRegionUtil(content: String): String {
 }
 
 /**
- * Structured diagnostic for an editor-visible whole-buffer mutation (`setText`).
+ * Structured diagnostic for an editor-visible mutation.
  * Logged at every such site so a full-document IPC corruption packet can be
  * reconstructed from `idea.log` without a live debugger — operation, patch id,
  * transport, pre/post fingerprints, and whether the post-boundary user region

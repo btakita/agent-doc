@@ -983,6 +983,13 @@ pub(crate) fn unresolved_exchange_prompt_in_content(content: &str) -> Option<Str
                 // fence and leaves the bare line in the exchange tail. Match is
                 // token-specific so a real prompt mentioning IPC/drift is kept.
                 && !crate::diff::line_is_binary_authored_ipc_proof_diagnostic(line)
+                // `#provauth3`: a binary-authored compaction Session Summary line
+                // (heading / archive pointer / archived-topic item) is not a user
+                // prompt, even when an earlier content-inference repair pass stamped
+                // it with a `❯` prefix. Origin is known (the binary authored the
+                // compaction), so it must never INTERRUPT closeout as an unresolved
+                // prompt-only tail.
+                && !crate::diff::line_is_binary_authored_compact_summary(line)
         })
         .map(normalized_prompt_for_match)
         .filter(|line| !line.is_empty())

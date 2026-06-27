@@ -355,6 +355,7 @@ fn is_recovery_artifact_line(content: &str) -> bool {
         || trimmed.starts_with("<!-- patch:")
         || trimmed.starts_with("<!-- /patch:")
         || line_is_binary_authored_ipc_proof_diagnostic(trimmed)
+        || line_is_binary_authored_compact_summary(trimmed)
 }
 
 /// `#ipcproofnostall`: recognize a binary-authored interrupted-cycle IPC-proof
@@ -393,6 +394,44 @@ pub fn line_is_binary_authored_ipc_proof_diagnostic(line: &str) -> bool {
         return true;
     }
     false
+}
+
+/// `#provauth3`: recognize a binary-authored `### Session Summary` compaction
+/// line by its OWN unambiguous shape, independent of provenance inference.
+///
+/// `compact.rs` rewrites `agent:exchange` into a Session Summary block authored
+/// entirely by the binary (`### Session Summary`, the `*Compacted. Content
+/// archived to ...*` pointer, a `Compacted content:` section, and
+/// `- Archived N response topic(s): ...` / `- Prior summary/context: ...` /
+/// `- Trailing prompt/context: ...` items). Relative to the pre-compact snapshot
+/// every one of those lines is an *inserted* line in the exchange user region, so
+/// the content-inference prompt-prefix normalizer (`normalize_user_prompts_in_exchange`)
+/// stamps them with `❯` and the prompt classifier then treats them as an
+/// unresolved user prompt — falsely INTERRUPTing `session-check` and stalling the
+/// queue. Origin is *known* here (the binary authored the compaction), so this is
+/// the provenance check that replaces the content guess: a compaction summary
+/// line is never an operator prompt and never gets a `❯` prefix.
+///
+/// Match is intentionally narrow — it keys off the exact binary-authored summary
+/// shapes, tolerating a leading `❯ ` that an earlier mis-classification already
+/// applied, so a genuine user line that merely mentions "compacted" in prose does
+/// NOT match.
+pub fn line_is_binary_authored_compact_summary(line: &str) -> bool {
+    let trimmed = line.trim();
+    // Tolerate a `❯ ` (or bare `❯`) prefix a prior repair pass already applied,
+    // so the recognizer matches both a freshly-built summary (no prefix) and an
+    // already-corrupted committed one.
+    let trimmed = trimmed
+        .strip_prefix("❯ ")
+        .or_else(|| trimmed.strip_prefix('❯'))
+        .map(str::trim_start)
+        .unwrap_or(trimmed);
+    trimmed == "### Session Summary"
+        || trimmed == "Compacted content:"
+        || trimmed.starts_with("*Compacted. Content archived to `")
+        || (trimmed.starts_with("- Archived ") && trimmed.contains("response topic(s):"))
+        || trimmed.starts_with("- Prior summary/context:")
+        || trimmed.starts_with("- Trailing prompt/context:")
 }
 
 fn is_exchange_close_marker_line(content: &str) -> bool {
@@ -837,6 +876,18 @@ fn classify_prompt_bearing_block(
     if non_blank
         .iter()
         .any(|line| line_is_binary_authored_ipc_proof_diagnostic(line))
+    {
+        return Some(PromptBearingChangeKind::RecoveryArtifact);
+    }
+    // `#provauth3`: a block that is entirely binary-authored compaction summary
+    // content (Session Summary heading + archive pointer + archived-topic items)
+    // is never a user prompt. Compaction rewrites the whole exchange tail at once,
+    // so the block is self-contained; requiring EVERY non-blank line to match the
+    // narrow summary shapes keeps a real prompt that happens to sit next to a
+    // stray summary line from being hidden.
+    if non_blank
+        .iter()
+        .all(|line| line_is_binary_authored_compact_summary(line))
     {
         return Some(PromptBearingChangeKind::RecoveryArtifact);
     }
@@ -4213,5 +4264,65 @@ Done.\n\
             PromptBearingChangeKind::PromptTarget,
             "- do [#newitem]\nAnd please also fix the older bug."
         )));
+    }
+
+    #[test]
+    fn line_is_binary_authored_compact_summary_recognizes_summary_shapes() {
+        // Binary-authored compaction summary shapes — with and without a `❯ `
+        // prefix a prior content-inference repair may have wrongly applied.
+        for line in [
+            "### Session Summary",
+            "❯ ### Session Summary",
+            "Compacted content:",
+            "*Compacted. Content archived to `.agent-doc/archives/x.md`*",
+            "❯ *Compacted. Content archived to `.agent-doc/archives/x.md`*",
+            "- Archived 6 response topic(s): a; b; c; 3 more",
+            "❯ - Archived 6 response topic(s): a; b; c; 3 more",
+            "- Prior summary/context: prior compacted content: ...",
+            "- Trailing prompt/context: leftover prose",
+        ] {
+            assert!(
+                line_is_binary_authored_compact_summary(line),
+                "should recognize binary-authored summary line: {line:?}"
+            );
+        }
+        // Genuine user prompts must NOT match, even when they mention compaction.
+        for line in [
+            "Why did the compaction archive my queue items?",
+            "do #provauth3",
+            "- Archived the old plan, please review",
+            "Compacted the notes manually — is that ok?",
+        ] {
+            assert!(
+                !line_is_binary_authored_compact_summary(line),
+                "must not match a real user line: {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn compact_summary_replacement_is_not_a_prompt_target() {
+        // `#provauth3`: replacing the exchange tail with a compaction Session
+        // Summary must classify as a recovery artifact, never an unresolved user
+        // PromptTarget (which falsely INTERRUPTed session-check and stalled the
+        // queue at the start of this dogfood session).
+        let prev = "<!-- agent:exchange patch=append -->\n\
+### Re: old topic - gpt-5\n\nA long archived answer body.\n\n\
+<!-- agent:boundary:old -->\n<!-- /agent:exchange -->\n";
+        let current = "<!-- agent:exchange patch=append -->\n\
+### Session Summary\n\n\
+*Compacted. Content archived to `.agent-doc/archives/x.md`*\n\n\
+Compacted content:\n\
+- Archived 6 response topic(s): a; b; c; 3 more\n\
+- Prior summary/context: earlier work\n\
+<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n";
+        let diff = unified_diff_from_contents(prev, current).expect("diff");
+        let changes = classify_prompt_bearing_changes(&diff);
+        assert!(
+            changes
+                .iter()
+                .all(|c| c.kind != PromptBearingChangeKind::PromptTarget),
+            "compaction summary lines must not be PromptTargets: {changes:?}"
+        );
     }
 }

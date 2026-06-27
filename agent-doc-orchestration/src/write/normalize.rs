@@ -276,6 +276,11 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
             && !trimmed.starts_with('❯')
             && !trimmed.starts_with("<!--")
             && !is_fence_delim
+            // `#provauth3`: a compaction Session Summary line is binary-authored,
+            // not user input — never stamp it with the `❯` prompt prefix even
+            // though it appears as an inserted line relative to the pre-compact
+            // snapshot. Origin is known, so the content-diff guess is overridden.
+            && !crate::diff::line_is_binary_authored_compact_summary(trimmed)
         {
             user_added.insert(line.to_string());
         } else if change.tag() == ChangeTag::Insert && (in_agent_block || is_re_block_replacement) {
@@ -1648,6 +1653,26 @@ mod core_tests {
             result.contains("Agent answer here."),
             "agent response should be preserved: {}",
             result
+        );
+    }
+    #[test]
+    fn normalize_user_prompts_compact_summary_not_prefixed() {
+        // `#provauth3`: a compaction Session Summary is binary-authored. Relative
+        // to the pre-compact snapshot every summary line is an Insert, so the
+        // content-diff heuristic would otherwise stamp them all with `❯` — turning
+        // the summary into a fake unresolved prompt. Origin is known, so none of
+        // the summary lines may receive the prefix.
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: old - gpt-5\n\nA long archived body.\n<!-- /agent:exchange -->\n";
+        let summary = "### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/x.md`*\n\nCompacted content:\n- Archived 6 response topic(s): a; b; c; 3 more\n- Prior summary/context: earlier work\n";
+        let baseline =
+            format!("<!-- agent:exchange patch=append -->\n{summary}<!-- /agent:exchange -->\n");
+        let content = format!(
+            "<!-- agent:exchange patch=append -->\n{summary}<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n"
+        );
+        let result = normalize_user_prompts_in_exchange(&content, &baseline, snapshot);
+        assert!(
+            !result.contains('❯'),
+            "compaction summary lines must not get the ❯ prefix:\n{result}"
         );
     }
     #[test]

@@ -1155,7 +1155,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // compact-summary stream-write rebase and fake-summary rejection tests call
         // the same existing boundary. The production guard boundary is unchanged;
         // the new matches are test coverage.
-        ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 9,
+        // +2 (#provauth3): the post-`/clear` binary-origin compaction rebase test
+        // and its no-provenance fail-closed safety-rail test call the same existing
+        // `guard_no_stale_snapshot_reset_drift` boundary. Still test-only coverage;
+        // the production guard boundary is unchanged.
+        ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 11,
         // +9 (#fcc0-no-external-write): active editor listeners no longer allow
         // disk fallback when component convergence cannot prove editor apply.
         // The added `reason=` tokens are the blocked production reasons

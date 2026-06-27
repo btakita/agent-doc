@@ -87,7 +87,24 @@ fn classify_stale_snapshot_visible_rebase(
     snapshot_doc: &str,
     current_doc: &str,
 ) -> Option<&'static str> {
-    let scope = crate::turn_scope_store::load(file)?;
+    // `#provauth3`: the turn scope is the per-turn operator-edit provenance record,
+    // but it is ABSENT after a `/clear` (fresh session resume). Do not hard-require
+    // it — a binary-authored compaction is a known-origin reduction whose authority
+    // does not depend on a live turn scope. Non-exchange component drift still needs
+    // the scope to be classified as turn-independent, so that path fails closed
+    // below when the scope is missing.
+    let scope = crate::turn_scope_store::load(file);
+    // Known binary-origin signal: the binary recorded that it compacted this
+    // document's exchange within the recent window. That makes a snapshot→visible
+    // exchange shrink authoritative binary state, not a "suspicious manual cleanup"
+    // — the central #provauth3 replacement of a content guess with a recorded
+    // origin fact. (After a `/clear` the on-disk marker survives, so a resumed
+    // session can still recognize its own prior compaction.)
+    let recent_binary_compaction =
+        crate::session_accretion::recent_exchange_compaction_timestamp(file)
+            .ok()
+            .flatten()
+            .is_some();
     if active_capture_response_removed(file, snapshot_doc, current_doc) {
         return None;
     }
@@ -135,21 +152,40 @@ fn classify_stale_snapshot_visible_rebase(
             return None;
         }
 
-        if component_change_is_turn_independent(
-            snapshot_body,
-            current_body,
-            &snap_comp.name,
-            &scope,
-        ) {
-            saw_independent_component = true;
-            continue;
+        // A non-exchange component changed: this requires the turn scope to prove
+        // the change is independent of the current turn. Without a scope we cannot
+        // make that judgment, so fail closed (unchanged pre-#provauth3 behavior —
+        // the old `?` on the scope load returned None before reaching this point).
+        match scope.as_ref() {
+            Some(scope)
+                if component_change_is_turn_independent(
+                    snapshot_body,
+                    current_body,
+                    &snap_comp.name,
+                    scope,
+                ) =>
+            {
+                saw_independent_component = true;
+                continue;
+            }
+            _ => return None,
         }
-        return None;
     }
 
     match (saw_exchange_trim, saw_independent_component) {
         (true, true) => Some("historical_exchange_trim_unrelated_drift"),
-        (true, false) => Some("historical_exchange_trim"),
+        // Exchange-only safe reduction. Allow the rebase with a live turn scope
+        // (in-session historical trim, the pre-#provauth3 path) OR a recorded
+        // binary-origin compaction (post-`/clear` resume). Without either
+        // provenance signal, fail closed so a genuine manual cleanup still trips
+        // the guard and the operator is told to `reset --from-current`.
+        (true, false) => {
+            if scope.is_some() || recent_binary_compaction {
+                Some("historical_exchange_trim")
+            } else {
+                None
+            }
+        }
         (false, true) => Some("unrelated_component_drift"),
         (false, false) => None,
     }
@@ -3218,6 +3254,97 @@ mod core_tests {
                 && ops_log.contains("historical_exchange_trim"),
             "stream-write rebase marker should explain compact-summary drift:\n{ops_log}"
         );
+    }
+
+    #[test]
+    fn stale_snapshot_reset_drift_rebases_compact_summary_after_clear_via_binary_origin_marker() {
+        // `#provauth3`: a session resumed after `/clear` has NO turn scope, but the
+        // binary-authored compaction marker survives on disk. The guard must treat
+        // the pre-compact snapshot vs compacted file shrink as authoritative
+        // binary-origin state and rebase, instead of tripping "looks like a manual
+        // cleanup" (the bug hit at the start of this dogfood session).
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "seed").unwrap();
+        let old_blocks = (0..12)
+            .map(|idx| {
+                format!(
+                    "### Re: archived {idx} - gpt-5\n\n{}\n",
+                    "Archived response body.\n".repeat(12)
+                )
+            })
+            .collect::<String>();
+        let snapshot = format!(
+            "---\nagent_doc_session: test\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n{old_blocks}<!-- agent:boundary:old -->\n<!-- /agent:exchange -->\n\n\
+## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n"
+        );
+        let current = "---\nagent_doc_session: test\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\nCompacted content:\n- Archived 12 response topic(s): archived 0; archived 1; archived 2; 9 more\n- Prior summary/context: compacted prior responses\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n\n\
+## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
+        fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, &snapshot).unwrap();
+        // No turn_scope saved (post-`/clear`). The binary-origin signal is the
+        // recorded compaction marker.
+        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+
+        let rebased =
+            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "preflight")
+                .expect("binary-origin compaction marker should rebase the stale snapshot");
+
+        assert!(rebased, "guard should report a snapshot refresh");
+        assert_eq!(
+            crate::snapshot::load(&doc).unwrap(),
+            Some(current.to_string())
+        );
+        let ops_log =
+            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains("stale_snapshot_visible_rebased")
+                && ops_log.contains("historical_exchange_trim"),
+            "post-clear compaction rebase marker should explain the drift:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn stale_snapshot_reset_drift_blocks_compact_summary_without_scope_or_marker() {
+        // `#provauth3` safety rail: an exchange shrink to a compaction-shaped block
+        // with NEITHER a live turn scope NOR a recorded binary compaction has no
+        // provenance, so it must still fail closed (a genuine accidental cleanup
+        // that happens to look like a summary must not be auto-adopted).
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "seed").unwrap();
+        let old_blocks = (0..12)
+            .map(|idx| {
+                format!(
+                    "### Re: archived {idx} - gpt-5\n\n{}\n",
+                    "Archived response body.\n".repeat(12)
+                )
+            })
+            .collect::<String>();
+        let snapshot = format!(
+            "---\nagent_doc_session: test\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n{old_blocks}<!-- agent:boundary:old -->\n<!-- /agent:exchange -->\n\n\
+## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n"
+        );
+        let current = "---\nagent_doc_session: test\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\nCompacted content:\n- Archived 12 response topic(s): archived 0; archived 1; archived 2; 9 more\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n\n\
+## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
+        fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, &snapshot).unwrap();
+        // No turn_scope and no compaction marker → no provenance signal.
+
+        let err =
+            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "preflight")
+                .expect_err("compaction-shaped shrink without provenance must fail closed");
+        assert!(
+            err.to_string().contains("agent-doc reset --from-current"),
+            "unproven shrink should keep deterministic reset guidance: {err}"
+        );
+        assert_eq!(crate::snapshot::load(&doc).unwrap(), Some(snapshot));
     }
 
     #[test]

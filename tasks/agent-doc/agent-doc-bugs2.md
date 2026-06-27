@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -102,14 +102,14 @@ This very session was a **live repro**: the crashed run left the `agent:queue` w
 **Shipped (v0.34.61, `make check` green / 5439 tests):** version bumped (all workspace crates + `pyproject.toml`), `VERSIONS.md` entry, `make install-full` (0.34.61 live, cdylib `libagent_doc-0.34.61.so` + auto-recycle marked controllers), committed + pushed (submodule `49f7d5da`, tag `v0.34.61`, superproject pointer `1bf94aab6`), supervisor recycle marked onto 0.34.61. **Not** published to crates.io/PyPI (0.34.x dogfood cadence batches publishing — separate operator step).
 
 **`[operator-verify]` (live eyeball, not agent-completable):** on the recycled 0.34.61 supervisor, add an attribute to the `agent:queue` marker mid-turn and confirm it is NOT deleted on the next merge; and edit/delete a queue row during an active turn and confirm it is NOT reverted/duplicated (ops.log shows `postcommit_worktree_check match=false` observe-only, no revert). Striking `#pcwcrt`; `#qmarkerauth` recorded as shipped.
-<!-- agent:boundary:db38063c -->
+<!-- agent:boundary:8dccdba5 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~[#f693] [#q9w3] [#fpyh] [#818s]~~
-- 🚧 [#pcwcrt] [#syncbarrier] [#qheadstrikeauto] [#actorprune] [#suprestassoc]
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
+- ~~[#f693] [#q9w3] [#fpyh] [#818s] [#pcwcrt]~~
+- 🚧 [#syncbarrier] [#qheadstrikeauto] [#actorprune] [#suprestassoc]
 - [#2y8j] [#cdtcutover] [#qeditdup] [#crdtauth6] [#nsfz] [#kj5flive]
 - I deleted items from the queue but they reappeared
 - When auto-adding queue items, verify that the item is not already in the queue. Do not add duplicates.

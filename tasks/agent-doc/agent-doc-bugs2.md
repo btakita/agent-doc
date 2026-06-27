@@ -26,6 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -39,7 +40,29 @@ done
 Compacted content:
 - Archived 34 response topic(s): do #provauth1 #provauth2 #provauth3; drain #actorprune; drain #qheadstrikeauto; 31 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-<!-- agent:boundary:356104f2 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=2b631eb9-320c-4beb-a958-a5c6606d955c invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=60535 candidate_hash=d439f983a1af78f6bf53f4b138479447d3cc35459f79a2e20ed11d3b6aee36a1 content_ours_len=59263 content_ours_hash=5115e8a8ad9960d748139056313dcd6161dde54800dcbc12c3bd40585bd59a4e doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782591710165
+```
+
+### Re: do #qeditdup and #qftloss/#qftlossproof — gpt-5
+
+I treated `[#qftloss#qftloss]` as the legacy `#qftloss` class, whose current active replacement is `#qftlossproof`.
+
+`#qeditdup` failed live verification. The current working tree/live-buffer resurrected a queue row that HEAD had already struck: `do [#qeditdup] [#qftloss#qftloss]` came back unstruck during the interrupted preflight/writeback window. The evidence is the latest JetBrains live-buffer sidecar `.agent-doc/live-buffer/f6d9af4a09fc7ed8.jetbrains-52613-d265e059-af8c-421f-a813-9de0ac53521c`, plus ops.log markers for `cycle-1782592777227` (`ipc_proof_insufficient`, `live_prompt_drift_after_preflight`, `preflight_blocked_uncommitted_closeout_drift`, and editor ops). I added `#qeditdupguard` for the deeper editor-edit-during-cycle guard and marked `#qeditdup` done as a failed verification superseded by that focused follow-up.
+
+For `#qftlossproof`, the prompt text was preserved in the live-buffer sidecar and current disk state, so I did not find a free-text loss in this cycle. I am leaving `#qftlossproof` open because I did not find the full durable `qdurcrash`/replay proof needed to close that replacement item end-to-end.
+
+No source files changed and no tests were needed. `gh run list --workflow CI --limit 1` returned GitHub 404 for `btakita/agent-loop`, so I could not inspect the latest CI run.
+<!-- agent:boundary:fd7a6ca6 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -69,10 +92,8 @@ Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/
   add a proper exchange entry before the boundary.
 ```
 ---
-- ~~:pushpin: fix `• The finalize call rejected the sibling list because this binary requires one message per sibling path. I’m retrying with paired sibling messages; no file write happened on the rejected call.`~~
-- ~~:pushpin: monsterrodholders.md issue `• The failed agent-doc write inserted only a few summary bullets instead of a clean Re: #osm-tile-key-provision section. I’m going to fix the task doc with a narrow patch: remove my partial bullets from the compacted summary and add a proper exchange entry before the boundary. `~~
 - ~~:pushpin: do [#qeditdup] [#qftloss#qftloss]~~
-- ~~:pushpin: JB `File Cache Conflict` occurences~~
+- :pushpin: JB `File Cache Conflict` occurrences
 - :pushpin: do [#60ev]
 - :pushpin: do [#syncbarrier]
 - :pushpin: do [#qheadstrikeauto]
@@ -122,6 +143,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#qeditdupguard] #agent-doc-bug live #qeditdup verification failed on 2026-06-27: a queue row that HEAD had struck (`do [#qeditdup] [#qftloss#qftloss]`) was resurrected unstruck in the live buffer/current working tree during the interrupted preflight/writeback window. Evidence: live-buffer `.agent-doc/live-buffer/f6d9af4a09fc7ed8.jetbrains-52613-d265e059-af8c-421f-a813-9de0ac53521c`; ops.log cycle `cycle-1782592777227` with `ipc_proof_insufficient`, `live_prompt_drift_after_preflight`, `preflight_blocked_uncommitted_closeout_drift`, and `editor_op_recorded`; `git diff -- tasks/agent-doc/agent-doc-bugs2.md` showed the struck `#qeditdup` row restored unstruck. Implement the deeper editor-edit-during-cycle guard in the consolidated queue race plan and add regression coverage. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#tmuxsynccrashlog] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md
 - [ ] [#qftlossproof] Replacement for #qftloss: free-text prompt preservation live proof. After the operator types an unsaved queue/free-text prompt during concurrent finalize, inspect .agent-doc/live-buffer journal evidence plus ops.log qdurcrash/live-buffer replay markers; close only if the prompt survives end-to-end, otherwise file a focused loss bug with artifact paths. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#midturnrecycleproof] Replacement for #midturn-recycle-resume: Phase A recycle interlock live proof. Drive a recycle in the preflight->finalize window, inspect ops.log cycle-open recycle-defer/commit markers and editor writeback proof; close only if no live_prompt_drift_after_preflight appears, otherwise file a regression. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
@@ -135,7 +157,6 @@ What are #next-steps to fix bugs?
 - [ ] [#60ev] plan-dynamic-context-injection-ledger.md
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
-- [ ] [#qeditdup] [operator-verify] Queue items duplicated + manually-struck/deleted items resurrected when the operator edits the queue during an active turn. #queuestatemachine idempotent convergence + the Live<Struck lattice (merged, 0.34.48) should resolve this — VERIFY on the recycled binary; if it persists live, a deeper editor-edit-during-cycle guard is needed. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#crdtauth6] [operator-verify] crdtauth5 live hookup: thin JB DocumentListener calling CrdtReplicaForwarder.forwardLocalDelta + a Kotlin Unix-socket ReplicaTransport client (writes NDJSON register/deregister/update, delivers inbound update_b64 to applyRemoteUpdate); plus the deferred VS Code koffi replica seam (editors/vscode/src/native.ts out-param marshaling). Rust fan-out + Kotlin seam already merged + tested. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
 - [ ] [#kj5flive] [operator-verify] #mergestatemachine3 live proof replacement for cleared review #kj5f: after the latest JB plugin update is installed, verify JB+VSCode attach/detach/ownership facts flow through the merge-ownership state machine via #lazilystatesync, then run live editor-attached/detached repros for File Cache Conflict and the #6b5h wedge with logs sufficient to prove/disprove the fix before filing follow-up bugs. Plan: tasks/agent-doc/plan-merge-control-state-machine.md

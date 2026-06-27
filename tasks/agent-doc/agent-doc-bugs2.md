@@ -118,7 +118,13 @@ I processed the current document edit through preflight + plan. The document is 
 I did not start code work in this cycle because `agent-doc plan` classified this diff as a prompt-response / queue-state reconciliation and emitted no `repo_actions`; its only required command is this finalize closeout. The duplicated `do #60ev` / `do #tmuxsynccrash` rows stay open because they were not selected as this cycle's executable repo action and preflight reported no agent-drainable continuation head.
 
 No source files changed, and no tests were run. Preflight still surfaced semantic-completion warnings for unrelated review/backlog items; I left those untouched. Session accretion is at warn due prior no-op/restart churn, but the queue remains active and no compact handoff was requested.
-<!-- agent:boundary:9cb24d70 -->
+
+### Re: queue activation closeout repair — gpt-5
+
+I reopened the closeout because the prior finalize committed my response but left the live queue activation edits as working-tree drift. This pass preserves and commits those edits: `queue: start`, queue marker `go`, `#closeoutstall` as the in-progress head, and the duplicated `do #60ev` / `do #tmuxsynccrash` rows exactly as present.
+
+No repo implementation or tests ran in this repair pass. The next drainable head remains `#closeoutstall`; it is intentionally still open, not done or gated.
+<!-- agent:boundary:9b02c773 -->
 <!-- /agent:exchange -->
 ## Queue
 

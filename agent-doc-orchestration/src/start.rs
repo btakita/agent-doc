@@ -2889,6 +2889,7 @@ mod th {
             active_queue_heads: Vec::new(),
             active_free_text_queue_heads: Vec::new(),
             pending_semantic_merge_acks: Vec::new(),
+            blocked_closeout: None,
         }
     }
     pub(crate) fn committed_state_for_doc(

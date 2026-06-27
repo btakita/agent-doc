@@ -1161,7 +1161,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // guidance is provable/disprovable from the log (auto-verify keys on
         // `ops_log:queue_paused_continuation_guidance_emitted`). The recorded
         // `pause_reason=` is the controller pause text, not a new flow boundary.
-        ("agent-doc-orchestration/src/session_check.rs", "reason=") => 1,
+        // +2 (#closeoutstall): typed editor-convergence closeout interruption
+        // reports the blocked state as `reason=<no_ack|...>` in the canonical
+        // session-check diagnostic, plus the focused regression assertion for
+        // `reason=no_ack`. This routes the former ad hoc stall through the cycle
+        // state's `blocked_closeout` surface instead of a generic repair branch.
+        ("agent-doc-orchestration/src/session_check.rs", "reason=") => 3,
         ("agent-doc-orchestration/src/session_check/closeout_guards.rs", "guard_") => 4,
         // +3 (#mrhqueuepreserve): the audited
         // `queue_head_removal_guard_proof` diagnostic plus two regression test

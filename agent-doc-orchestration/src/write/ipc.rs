@@ -2103,6 +2103,26 @@ pub(crate) fn repair_ipc_decision_visible_state(
             crate::ops_log::content_hash(&decision.snapshot_content)
         ),
     );
+    let detail = format!(
+        "redeliver_editor={} bad_len={} bad_hash={} repaired_len={} repaired_hash={}",
+        decision.redeliver_editor,
+        bad_len,
+        bad_hash,
+        decision.snapshot_content.len(),
+        crate::ops_log::content_hash(&decision.snapshot_content)
+    );
+    if let Err(err) = crate::cycle_state::record_editor_convergence_required(
+        file,
+        "ipc_visible_repair",
+        reason.label(),
+        patch_id,
+        Some(&detail),
+    ) {
+        eprintln!(
+            "[write] WARNING: failed to record IPC repair blocked closeout for {}: {err}",
+            file.display()
+        );
+    }
     crate::ops_log::log_op(
         file,
         &format!(

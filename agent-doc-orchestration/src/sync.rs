@@ -51,8 +51,9 @@
 //!      using `swap-window` when index 0 is occupied to avoid data loss, then
 //!      renames and packs stash windows as `1:stash`, `2:stash`, and so on.
 //!
-//!   Phases 1 and 2 are skipped when the layout is already correct (target exists,
-//!   single stash). Phases 3 and 4 always run.
+//!   Phases 1 and 2 are skipped when the layout is already correct enough for
+//!   the destructive rescue phase (target exists, with either no stash windows
+//!   or one canonical stash). Phases 3 and 4 always run.
 //! - `repair_file_state_with_tmux` is the tmux-layout and commit-boundary portion of
 //!   the doctor repair path used by both `agent-doc session doctor <FILE> --repair`
 //!   and full sync.
@@ -899,8 +900,10 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
         .filter(|w| is_stash_window_name(&w.name))
         .count();
     let has_exact_stash = windows.iter().any(|w| w.name == "stash");
-    // Check if Phase 1+2 can be skipped (target exists, exactly one canonical stash)
-    let skip_phase_1_2 = has_target && stash_count == 1 && has_exact_stash;
+    // Check if Phase 1+2 can be skipped. A clean single-window layout has no
+    // stash yet; forcing one into existence makes repeated manual/JB syncs
+    // ping-pong through destructive tmux window ops (#tmuxsynccrash).
+    let skip_phase_1_2 = repair_layout_skips_rescue_phase(has_target, stash_count, has_exact_stash);
     if skip_phase_1_2 {
         // Target exists and stash is consolidated. Skip Phases 1+2,
         // but still run target consolidation and index normalization below.
@@ -1224,6 +1227,14 @@ fn sync_log(msg: &str) {
         );
         let _ = writeln!(f, "[{}] {}", ts, msg);
     }
+}
+
+fn repair_layout_skips_rescue_phase(
+    has_target: bool,
+    stash_count: usize,
+    has_exact_stash: bool,
+) -> bool {
+    has_target && (stash_count == 0 || (stash_count == 1 && has_exact_stash))
 }
 
 /// Minimum interval between destructive doctor-repair passes for one tmux
@@ -5182,6 +5193,21 @@ mod tests {
     }
 
     #[test]
+    fn repair_layout_rescue_phase_skips_zero_stash_target_tmuxsynccrash() {
+        assert!(
+            repair_layout_skips_rescue_phase(true, 0, false),
+            "target+zero-stash is already converged for the destructive rescue phase"
+        );
+        assert!(repair_layout_skips_rescue_phase(true, 1, true));
+        assert!(
+            !repair_layout_skips_rescue_phase(true, 1, false),
+            "a non-canonical single stash still needs normalization through repair"
+        );
+        assert!(!repair_layout_skips_rescue_phase(false, 0, false));
+        assert!(!repair_layout_skips_rescue_phase(true, 2, true));
+    }
+
+    #[test]
     fn planned_stash_window_indices_packs_overflow_after_agent_doc() {
         let windows = vec![
             ("0".to_string(), "@10".to_string(), "agent-doc".to_string()),
@@ -6035,6 +6061,26 @@ mod tests {
             "layout was already correct — nothing should change"
         );
     }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn repair_layout_zero_stash_target_is_noop_tmuxsynccrash() {
+        let iso = IsolatedTmux::new("sync-repair-zero-stash-target-noop");
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        let _pane = iso.new_session("test", tmp.path()).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+
+        let windows_before = list_windows(&iso, "test");
+        repair_layout(&iso, "test", "agent-doc").unwrap();
+        let windows_after = list_windows(&iso, "test");
+
+        assert_eq!(
+            windows_before, windows_after,
+            "zero-stash target layout should not create a stash window or churn tmux ops"
+        );
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_moves_window_to_index_0() {

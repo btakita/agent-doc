@@ -97,6 +97,21 @@ pub struct PendingSemanticMergeAck {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BlockedCloseout {
+    pub kind: String,
+    pub reason: String,
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patch_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CycleState {
     pub cycle_id: String,
     pub file: String,
@@ -221,6 +236,12 @@ pub struct CycleState {
     /// `semantic_merge_acks` so the agent emits an acknowledgement exchange turn.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_semantic_merge_acks: Vec<PendingSemanticMergeAck>,
+    /// `#closeoutstall`: typed operator-gated closeout state. A response may be
+    /// safely captured and queued for editor IPC while the live editor has not
+    /// proven application. This keeps the cycle open and gives session-check,
+    /// doctor, and hooks one canonical recovery surface.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_closeout: Option<BlockedCloseout>,
 }
 
 /// Extract the queue prompt head texts (e.g. `do [#convqa-rerun]`) from a
@@ -445,6 +466,7 @@ pub fn start_preflight_with_task(
             .map(active_free_text_queue_heads)
             .unwrap_or_default(),
         pending_semantic_merge_acks: carried_semantic_merge_acks,
+        blocked_closeout: None,
     };
     save(file, &state)?;
     append_phase_event_to_session_log(file, &state);
@@ -1101,6 +1123,35 @@ pub fn clear_dropped_queue_prompts(file: &Path) -> Result<Option<CycleState>> {
     Ok(Some(state))
 }
 
+pub fn record_editor_convergence_required(
+    file: &Path,
+    source: &str,
+    reason: &str,
+    patch_id: Option<&str>,
+    detail: Option<&str>,
+) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    let recovery_command = format!("agent-doc write --commit {}", file.display());
+    let blocked = BlockedCloseout {
+        kind: "editor_convergence_required".to_string(),
+        reason: reason.to_string(),
+        source: source.to_string(),
+        patch_id: patch_id.map(str::to_string),
+        recovery: Some("retry_without_disk_write".to_string()),
+        recovery_command: Some(recovery_command),
+        detail: detail.map(str::to_string),
+    };
+    if state.blocked_closeout.as_ref() != Some(&blocked) {
+        state.blocked_closeout = Some(blocked);
+        state.updated_at = now_secs();
+        save(file, &state)?;
+        append_phase_event_to_session_log(file, &state);
+    }
+    Ok(Some(state))
+}
+
 pub fn mark_committed(
     file: &Path,
     event: &str,
@@ -1119,6 +1170,7 @@ pub fn mark_committed(
     state.phase = next_phase;
     state.last_event = event.to_string();
     state.updated_at = now_secs();
+    state.blocked_closeout = None;
     if let Some(snapshot) = snapshot_content {
         state.snapshot_hash = Some(crate::ops_log::content_hash(snapshot));
         state.normalized_snapshot_hash = Some(normalized_content_hash(snapshot));
@@ -1345,6 +1397,7 @@ fn synthetic_state_with_id(
         active_queue_heads: Vec::new(),
         active_free_text_queue_heads: Vec::new(),
         pending_semantic_merge_acks: Vec::new(),
+        blocked_closeout: None,
     }
 }
 

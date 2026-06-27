@@ -700,6 +700,11 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
 
     if let Some(state) = crate::cycle_state::load(file)? {
         if state.is_open() {
+            if let Some(blocked) = state.blocked_closeout.as_ref() {
+                return Ok(SessionCheckStatus::Interrupted(blocked_closeout_message(
+                    file, &state, blocked,
+                )));
+            }
             if let Some(reason) = crate::repair::recover_missing_commit_boundary(
                 file,
                 "session_check_commit_boundary_recovered",
@@ -1020,6 +1025,47 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
             )))
         }
     }
+}
+
+fn blocked_closeout_message(
+    file: &Path,
+    state: &crate::cycle_state::CycleState,
+    blocked: &crate::cycle_state::BlockedCloseout,
+) -> String {
+    let patch = blocked
+        .patch_id
+        .as_deref()
+        .map(|id| format!(" patch_id={id}"))
+        .unwrap_or_default();
+    let recovery = blocked
+        .recovery
+        .as_deref()
+        .map(|value| format!(" recovery={value}"))
+        .unwrap_or_default();
+    let detail = blocked
+        .detail
+        .as_deref()
+        .map(|value| format!(" detail={value}"))
+        .unwrap_or_default();
+    let retry = blocked
+        .recovery_command
+        .as_deref()
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("agent-doc write --commit {}", file.display()));
+    format!(
+        "[session-check] INTERRUPTED: closeout blocked by `{}` for cycle `{}` (phase={} last_event={} source={} reason={}{}{}{}). The response/patch is retained for editor retry; save or resolve the live editor buffer, then run `{}`. Use `{} --force-disk` only after an explicit operator decision to override the live-editor safety guard.",
+        blocked.kind,
+        state.cycle_id,
+        phase_name(state.phase),
+        state.last_event,
+        blocked.source,
+        blocked.reason,
+        patch,
+        recovery,
+        detail,
+        retry,
+        retry,
+    )
 }
 
 fn detect_duplicate_response_patchback(file: &Path) -> Result<Option<String>> {
@@ -4959,6 +5005,43 @@ Body\n\
             other => panic!("expected interrupted status, got {other:?}"),
         }
     }
+
+    #[test]
+    fn session_check_reports_editor_convergence_required_blocked_closeout() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = tmp.path().join("doc.md");
+        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nPrompt\n";
+        fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        crate::cycle_state::record_editor_convergence_required(
+            &doc,
+            "try_editor_converge",
+            "no_ack",
+            Some("patch-123"),
+            Some("editor_endpoint=socket"),
+        )
+        .unwrap();
+
+        match inspect_with_warnings(&doc).unwrap().status {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("editor_convergence_required"), "{message}");
+                assert!(message.contains("source=try_editor_converge"), "{message}");
+                assert!(message.contains("reason=no_ack"), "{message}");
+                assert!(message.contains("patch_id=patch-123"), "{message}");
+                assert!(
+                    message.contains("recovery=retry_without_disk_write"),
+                    "{message}"
+                );
+                assert!(message.contains("agent-doc write --commit"), "{message}");
+                assert!(message.contains("--force-disk"), "{message}");
+            }
+            other => panic!("expected blocked closeout interruption, got {other:?}"),
+        }
+    }
+
     #[test]
     fn blocked_closeout_followup_guard_fails_when_gated_without_followup() {
         let tmp = tempfile::TempDir::new().unwrap();

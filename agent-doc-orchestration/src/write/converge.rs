@@ -1121,7 +1121,12 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
 /// untrusted ACK proof marks editor convergence required. Absence of a listener
 /// is also a fail-closed convergence condition; only explicit force-disk paths
 /// may bypass this converger.
-fn refuse_unproven_editor_delivery(file: &Path, source: &str, reason: &str) -> Result<bool> {
+fn refuse_unproven_editor_delivery(
+    file: &Path,
+    source: &str,
+    reason: &str,
+    patch_id: Option<&str>,
+) -> Result<bool> {
     let editor_endpoint = if crate::merge_control_state_machine::disk_write_permitted_for_file(
         &file.to_string_lossy(),
     ) {
@@ -1137,6 +1142,19 @@ fn refuse_unproven_editor_delivery(file: &Path, source: &str, reason: &str) -> R
             editor_endpoint
         ),
     );
+    let detail = format!("editor_endpoint={editor_endpoint}");
+    if let Err(err) = crate::cycle_state::record_editor_convergence_required(
+        file,
+        source,
+        reason,
+        patch_id,
+        Some(&detail),
+    ) {
+        eprintln!(
+            "[write] WARNING: failed to record editor-convergence blocked closeout for {}: {err}",
+            file.display()
+        );
+    }
     anyhow::bail!(
         "{source}: refused direct disk write for {} while editor convergence is unproven (reason={reason}, editor_endpoint={editor_endpoint})",
         file.display()
@@ -1461,7 +1479,7 @@ pub fn try_editor_converge(
         }
     }
     if !crate::ipc_socket::is_listener_active(&project_root) {
-        return refuse_unproven_editor_delivery(file, source, "no_listener");
+        return refuse_unproven_editor_delivery(file, source, "no_listener", None);
     }
 
     let canonical = canonical_file;
@@ -1513,7 +1531,12 @@ pub fn try_editor_converge(
             let Some(recovered) = sidecar else {
                 // `#6b5h`: ack received but no content sidecar proves application —
                 // fail closed instead of routing a sync wait failure to disk.
-                return refuse_unproven_editor_delivery(file, source, "no_ack_content");
+                return refuse_unproven_editor_delivery(
+                    file,
+                    source,
+                    "no_ack_content",
+                    Some(&patch_id),
+                );
             };
             if crate::git::normalize_transient_agent_doc_markers(&recovered)
                 == crate::git::normalize_transient_agent_doc_markers(target)
@@ -1576,13 +1599,13 @@ pub fn try_editor_converge(
                 );
                 // The ACK came back but content drifted. This is unproven editor
                 // convergence, not authorization to write through disk.
-                refuse_unproven_editor_delivery(file, source, "ack_mismatch")
+                refuse_unproven_editor_delivery(file, source, "ack_mismatch", Some(&patch_id))
             }
         }
         Ok(None) => {
             // Missing ACK marks the editor path stale; it must not trigger a
             // direct disk fallback.
-            refuse_unproven_editor_delivery(file, source, "no_ack")
+            refuse_unproven_editor_delivery(file, source, "no_ack", Some(&patch_id))
         }
         Err(err) => {
             crate::ops_log::log_op(
@@ -1621,7 +1644,7 @@ pub fn try_editor_converge(
             }
             // Send failure marks the editor path stale; it must not trigger a
             // direct disk fallback.
-            refuse_unproven_editor_delivery(file, source, "send_failed")
+            refuse_unproven_editor_delivery(file, source, "send_failed", Some(&patch_id))
         }
     }
 }

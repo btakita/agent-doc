@@ -343,21 +343,14 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=f47b5e80-c2a9-4d09-b453-c38a7bb0d72c invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=52236 candidate_hash=5b0bbb40765cf3d1aea12e93066ae263609fd44cb090dbf8e7ad11df5c2e51e0 content_ours_len=52078 content_ours_hash=ada8797cb1bc33df56f62b74a18478f95ad7a97a4063ec51c495e7c492705051 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782589268308
 ```
-<!-- agent:boundary:c5d71e30 -->
+<!-- agent:boundary:f1e9dc31 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~`/clear` was autonomously added...blocking JB `Run Agent Doc`. As I was typing in this item, 2 duplicates of the next queue item were added before this item. And a stale copy of this prompt was duplicated above this item...and the last 3 characters I typed were deleted in this prompt. CRDT issues...~~
-- ~~Duplicate text document corruption occurred while I was typing into te queue.~~ — auto-struck: answered this cycle (#ftstrike)
-- [#tmuxsynccrashlog]
-- [#qftlossproof]
-- [#midturnrecycleproof]
-- [#midturnresumeimpl]
-- [#provauth3bimpl]
-- [#supstaledetectverify]
-- [#suptmuxstaleverify]
+- 🚧 ~~Duplicate text document corruption occurred while I was typing into te queue.~~ — auto-struck: answered this cycle (#ftstrike)
 ---
 :round_pushpin: JB `Run Agent Doc` on monsterrodholders.md
 ```text

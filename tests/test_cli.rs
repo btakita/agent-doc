@@ -3362,8 +3362,18 @@ fn test_codex_skill_install_writes_hook_artifacts() {
 
     let hooks_path = tmp.path().join(".codex/hooks.json");
     let config_path = tmp.path().join(".codex/config.toml");
+    let skill_path = tmp.path().join(".codex/skills/agent-doc/SKILL.md");
     assert!(hooks_path.exists(), "missing {}", hooks_path.display());
     assert!(config_path.exists(), "missing {}", config_path.display());
+    assert!(skill_path.exists(), "missing {}", skill_path.display());
+    assert!(
+        !tmp.path().join(".codex/AGENTS.md").exists(),
+        "Codex workflow must not be installed into always-on .codex/AGENTS.md"
+    );
+
+    let skill = std::fs::read_to_string(&skill_path).unwrap();
+    assert!(skill.contains("Interactive markdown session for Codex"));
+    assert!(skill.contains("agent-doc skill install --harness codex --reload restart"));
 
     let hooks: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&hooks_path).unwrap()).unwrap();

@@ -35,8 +35,6 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use agent_kit::skill::SkillConfig;
-
 /// The shared SKILL.md source bundled at build time.
 const SKILL_TEMPLATE: &str = include_str!("../SKILL.md");
 
@@ -243,15 +241,6 @@ const CODEX_MCP_SERVER_NAME: &str = "agent-doc";
 const CODEX_MCP_COMMAND: &str = "agent-doc";
 const CODEX_MCP_APPROVAL_MODE: &str = "approve";
 
-fn config() -> SkillConfig {
-    let env = detect_install_env();
-    config_for_env(env)
-}
-
-fn config_for_env(env: agent_kit::detect::Environment) -> SkillConfig {
-    SkillConfig::with_environment("agent-doc", content_for_env(env), VERSION, env)
-}
-
 fn content_for_env(env: agent_kit::detect::Environment) -> String {
     use agent_kit::detect::Environment;
     let (description, invocation_section) = match env {
@@ -366,6 +355,92 @@ fn looks_like_managed_root_agents(content: &str) -> bool {
         && content.contains("## Workflow")
 }
 
+fn skill_rel_path_for_env(env: agent_kit::detect::Environment) -> std::path::PathBuf {
+    use agent_kit::detect::Environment;
+    match env {
+        // Codex loads `.codex/AGENTS.md` as always-on repository instructions. The
+        // agent-doc workflow is trigger-scoped, so install it as a real Codex skill
+        // instead of leaking it into every normal Codex task.
+        Environment::Codex => std::path::PathBuf::from(".codex/skills/agent-doc/SKILL.md"),
+        // A generic root `AGENTS.md` is also always-on for several harnesses. Keep
+        // the generic rendering available for tests/content parity, but never
+        // install it into the root instruction file.
+        Environment::Generic => std::path::PathBuf::from(".agent/skills/agent-doc/SKILL.md"),
+        _ => env.skill_rel_path("agent-doc"),
+    }
+}
+
+fn skill_path_for_env(
+    env: agent_kit::detect::Environment,
+    root: Option<&Path>,
+) -> std::path::PathBuf {
+    let rel = skill_rel_path_for_env(env);
+    match root {
+        Some(root) => root.join(rel),
+        None => rel,
+    }
+}
+
+fn is_skill_current_for_env(
+    env: agent_kit::detect::Environment,
+    root: Option<&Path>,
+) -> Result<bool> {
+    let path = skill_path_for_env(env, root);
+    if !path.exists() {
+        return Ok(false);
+    }
+    let existing = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    Ok(existing == content_for_env(env))
+}
+
+fn install_skill_for_env(env: agent_kit::detect::Environment, root: Option<&Path>) -> Result<bool> {
+    let path = skill_path_for_env(env, root);
+    let content = content_for_env(env);
+
+    if path.exists() {
+        let existing = std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        if existing == content {
+            eprintln!("[{}] skill already up to date (v{}).", env, VERSION);
+            return Ok(false);
+        }
+    }
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    std::fs::write(&path, content)
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    eprintln!(
+        "[{}] installed skill v{} -> {}",
+        env,
+        VERSION,
+        path.display()
+    );
+    Ok(true)
+}
+
+fn check_skill_for_env(env: agent_kit::detect::Environment, root: Option<&Path>) -> Result<bool> {
+    let path = skill_path_for_env(env, root);
+    if !path.exists() {
+        eprintln!("Not installed. Run `agent-doc skill install` to install.");
+        return Ok(false);
+    }
+    if is_skill_current_for_env(env, root)? {
+        eprintln!("Up to date (v{}).", VERSION);
+        Ok(true)
+    } else {
+        eprintln!(
+            "Outdated. Run `agent-doc skill install` to update to v{}.",
+            VERSION
+        );
+        Ok(false)
+    }
+}
+
 fn normalized_managed_instruction_surface_for_audit(content: &str) -> String {
     strip_tsift_code_navigation_block(content)
         .trim_end()
@@ -409,47 +484,67 @@ fn strip_tsift_code_navigation_block(content: &str) -> String {
     rendered
 }
 
-fn sync_managed_root_agents(root: Option<&Path>) -> Result<()> {
-    let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
-    let base = resolved.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    let path = base.join(agent_kit::detect::Environment::Generic.skill_rel_path("agent-doc"));
-
+fn retire_managed_agents_file(path: &Path) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
 
     let existing =
-        std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+        std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     if !looks_like_managed_root_agents(&existing) {
         return Ok(());
     }
 
-    let mut rendered = content_for_env(agent_kit::detect::Environment::Generic);
     if let Some(tsift_block) = extract_tsift_code_navigation_block(&existing) {
-        rendered = format!("{}\n\n{}\n", rendered.trim_end(), tsift_block);
-    }
-    if existing == rendered {
+        std::fs::write(path, format!("{}\n", tsift_block.trim_end()))
+            .with_context(|| format!("write {}", path.display()))?;
+        eprintln!(
+            "[agent-doc] retired managed instruction surface, preserved tsift block -> {}",
+            path.display()
+        );
         return Ok(());
     }
 
-    std::fs::write(&path, rendered).with_context(|| format!("write {}", path.display()))?;
+    std::fs::remove_file(path).with_context(|| format!("remove {}", path.display()))?;
     eprintln!(
-        "[Generic] refreshed managed AGENTS.md mirror → {}",
+        "[agent-doc] retired managed instruction surface -> {}",
         path.display()
     );
+    Ok(())
+}
+
+fn retire_managed_always_on_agents(root: Option<&Path>) -> Result<()> {
+    let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
+    let base = resolved.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    retire_managed_agents_file(&base.join("AGENTS.md"))?;
+    retire_managed_agents_file(&base.join(".codex/AGENTS.md"))?;
     Ok(())
 }
 
 pub(crate) fn audit_managed_instruction_surfaces(root: Option<&Path>) -> Result<()> {
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
     let base = resolved.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+    for path in [base.join("AGENTS.md"), base.join(".codex/AGENTS.md")] {
+        if !path.exists() {
+            continue;
+        }
+        let existing =
+            std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+        if looks_like_managed_root_agents(&existing) {
+            anyhow::bail!(
+                "retired managed agent-doc instruction surface is still present: {}. Run `agent-doc skill install --all` or reinstall the active harness to migrate it out of always-on AGENTS.md.",
+                path.display()
+            );
+        }
+    }
+
     for env in [
-        agent_kit::detect::Environment::Generic,
         agent_kit::detect::Environment::OpenCode,
         agent_kit::detect::Environment::Codex,
         agent_kit::detect::Environment::ClaudeCode,
     ] {
-        let path = base.join(env.skill_rel_path("agent-doc"));
+        let path = skill_path_for_env(env, Some(&base));
         if !path.exists() {
             continue;
         }
@@ -550,7 +645,7 @@ fn runbooks_rel_path(env: &agent_kit::detect::Environment) -> std::path::PathBuf
     match env {
         Environment::ClaudeCode => std::path::PathBuf::from(".claude/skills/agent-doc/runbooks"),
         Environment::OpenCode => std::path::PathBuf::from(".opencode/skills/agent-doc/runbooks"),
-        Environment::Codex => std::path::PathBuf::from(".codex/runbooks"),
+        Environment::Codex => std::path::PathBuf::from(".codex/skills/agent-doc/runbooks"),
         Environment::Cursor => std::path::PathBuf::from(".cursor/rules/runbooks"),
         Environment::Generic => std::path::PathBuf::from("runbooks"),
     }
@@ -635,7 +730,7 @@ fn okf_rel_path(env: &agent_kit::detect::Environment) -> std::path::PathBuf {
     match env {
         Environment::ClaudeCode => std::path::PathBuf::from(".claude/skills/agent-doc/okf"),
         Environment::OpenCode => std::path::PathBuf::from(".opencode/skills/agent-doc/okf"),
-        Environment::Codex => std::path::PathBuf::from(".codex/okf"),
+        Environment::Codex => std::path::PathBuf::from(".codex/skills/agent-doc/okf"),
         Environment::Cursor => std::path::PathBuf::from(".cursor/rules/okf"),
         Environment::Generic => std::path::PathBuf::from("okf"),
     }
@@ -1089,12 +1184,12 @@ fn merge_codex_config(path: &Path, project_root: &Path) -> Result<()> {
 #[allow(dead_code)]
 pub fn install_at(root: Option<&Path>) -> Result<()> {
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
-    let env = agent_kit::detect::Environment::detect();
-    config().install(resolved.as_deref())?;
+    let env = detect_install_env();
+    install_skill_for_env(env, resolved.as_deref())?;
     install_runbooks(resolved.as_deref())?;
     install_okf(resolved.as_deref())?;
     install_env_artifacts(env, resolved.as_deref())?;
-    sync_managed_root_agents(resolved.as_deref())
+    retire_managed_always_on_agents(resolved.as_deref())
 }
 
 /// Public entry point (resolves to superproject root, called from main).
@@ -1105,51 +1200,47 @@ pub fn install() -> Result<()> {
 
 /// Install and return whether the file was actually updated (not just already up to date).
 pub fn install_and_check_updated() -> Result<bool> {
-    let cfg = config();
+    let env = detect_install_env();
     let resolved = resolve_root();
-    let path = cfg.skill_path(resolved.as_deref());
 
     // Check if already up to date before install
-    let was_current = path.exists()
-        && std::fs::read_to_string(&path)
-            .map(|existing| existing == cfg.content)
-            .unwrap_or(false);
+    let was_current = is_skill_current_for_env(env, resolved.as_deref())?;
 
-    cfg.install(resolved.as_deref())?;
+    install_skill_for_env(env, resolved.as_deref())?;
     install_runbooks(resolved.as_deref())?;
     install_okf(resolved.as_deref())?;
-    install_env_artifacts(detect_install_env(), resolved.as_deref())?;
-    sync_managed_root_agents(resolved.as_deref())?;
+    install_env_artifacts(env, resolved.as_deref())?;
+    retire_managed_always_on_agents(resolved.as_deref())?;
     Ok(!was_current)
 }
 
 /// Install the skill for a specific harness environment.
 pub fn install_for(env: agent_kit::detect::Environment) -> Result<()> {
     let resolved = resolve_root();
-    config_for_env(env).install_for(env, resolved.as_deref())?;
+    install_skill_for_env(env, resolved.as_deref())?;
     install_runbooks_for(env, resolved.as_deref())?;
     install_okf_for(env, resolved.as_deref())?;
     install_env_artifacts(env, resolved.as_deref())?;
-    sync_managed_root_agents(resolved.as_deref())
+    retire_managed_always_on_agents(resolved.as_deref())
 }
 
 /// Install the skill for all supported harnesses.
 pub fn install_all() -> Result<()> {
     let resolved = resolve_root();
     for (env, _) in agent_kit::detect::Environment::all_skill_rel_paths("agent-doc") {
-        config_for_env(env).install_for(env, resolved.as_deref())?;
+        install_skill_for_env(env, resolved.as_deref())?;
     }
     install_runbooks_all(resolved.as_deref())?;
     install_okf_all(resolved.as_deref())?;
     install_env_artifacts_all(resolved.as_deref())?;
-    sync_managed_root_agents(resolved.as_deref())
+    retire_managed_always_on_agents(resolved.as_deref())
 }
 
 /// Check if the installed skill matches the bundled version.
 /// When `root` is None, resolves to git superproject root (or CWD fallback).
 pub fn check_at(root: Option<&Path>) -> Result<()> {
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
-    let up_to_date = config().check(resolved.as_deref())?;
+    let up_to_date = check_skill_for_env(detect_install_env(), resolved.as_deref())?;
     if !up_to_date {
         std::process::exit(1);
     }
@@ -1328,24 +1419,13 @@ mod tests {
         assert_eq!(super::detect_install_env(), Environment::Codex);
     }
 
-    /// Use an explicit ClaudeCode environment for deterministic test paths.
-    /// Environment::detect() is non-deterministic in CI (depends on env vars).
-    fn test_config() -> SkillConfig {
-        SkillConfig::with_environment(
-            "agent-doc",
-            content_for_env(Environment::ClaudeCode),
-            VERSION,
-            Environment::ClaudeCode,
-        )
-    }
-
     /// Resolve expected skill path using the explicit test environment.
     fn expected_path(dir: &std::path::Path) -> std::path::PathBuf {
-        test_config().skill_path(Some(dir))
+        super::skill_path_for_env(Environment::ClaudeCode, Some(dir))
     }
 
     fn install_test(root: Option<&std::path::Path>) -> anyhow::Result<()> {
-        test_config().install(root)
+        super::install_skill_for_env(Environment::ClaudeCode, root).map(|_| ())
     }
 
     fn line_count(content: &str) -> usize {
@@ -1437,7 +1517,9 @@ mod tests {
 
         super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
 
-        let runbook_path = dir.path().join(".codex/runbooks/compact-exchange.md");
+        let runbook_path = dir
+            .path()
+            .join(".codex/skills/agent-doc/runbooks/compact-exchange.md");
         assert!(
             runbook_path.exists(),
             "codex runbook not found at {}",
@@ -1527,7 +1609,7 @@ mod tests {
     fn install_runbooks_reaps_for_codex_and_opencode() {
         let dir = tempfile::tempdir().unwrap();
         for (env, rel) in [
-            (Environment::Codex, ".codex/runbooks"),
+            (Environment::Codex, ".codex/skills/agent-doc/runbooks"),
             (Environment::OpenCode, ".opencode/skills/agent-doc/runbooks"),
         ] {
             let runbooks_dir = dir.path().join(rel);
@@ -1551,7 +1633,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         for (env, rel) in [
             (Environment::ClaudeCode, ".claude/skills/agent-doc/okf"),
-            (Environment::Codex, ".codex/okf"),
+            (Environment::Codex, ".codex/skills/agent-doc/okf"),
             (Environment::OpenCode, ".opencode/skills/agent-doc/okf"),
         ] {
             super::install_okf_for(env, Some(dir.path())).unwrap();
@@ -1594,7 +1676,11 @@ mod tests {
                 .join(".claude/skills/agent-doc/runbooks/commit.md"),
         )
         .unwrap();
-        let codex = std::fs::read_to_string(dir.path().join(".codex/runbooks/commit.md")).unwrap();
+        let codex = std::fs::read_to_string(
+            dir.path()
+                .join(".codex/skills/agent-doc/runbooks/commit.md"),
+        )
+        .unwrap();
         let opencode = std::fs::read_to_string(
             dir.path()
                 .join(".opencode/skills/agent-doc/runbooks/commit.md"),
@@ -1623,8 +1709,11 @@ mod tests {
                 .join(".claude/skills/agent-doc/runbooks/pending-ops.md"),
         )
         .unwrap();
-        let codex =
-            std::fs::read_to_string(dir.path().join(".codex/runbooks/pending-ops.md")).unwrap();
+        let codex = std::fs::read_to_string(
+            dir.path()
+                .join(".codex/skills/agent-doc/runbooks/pending-ops.md"),
+        )
+        .unwrap();
         let opencode = std::fs::read_to_string(
             dir.path()
                 .join(".opencode/skills/agent-doc/runbooks/pending-ops.md"),
@@ -1654,9 +1743,11 @@ mod tests {
                 .join(".claude/skills/agent-doc/runbooks/harness-invocation.md"),
         )
         .unwrap();
-        let codex =
-            std::fs::read_to_string(dir.path().join(".codex/runbooks/harness-invocation.md"))
-                .unwrap();
+        let codex = std::fs::read_to_string(
+            dir.path()
+                .join(".codex/skills/agent-doc/runbooks/harness-invocation.md"),
+        )
+        .unwrap();
         let opencode = std::fs::read_to_string(
             dir.path()
                 .join(".opencode/skills/agent-doc/runbooks/harness-invocation.md"),
@@ -1684,11 +1775,9 @@ mod tests {
     fn install_for_codex_writes_codex_specific_content() {
         let dir = tempfile::tempdir().unwrap();
 
-        super::config_for_env(Environment::Codex)
-            .install_for(Environment::Codex, Some(dir.path()))
-            .unwrap();
+        super::install_skill_for_env(Environment::Codex, Some(dir.path())).unwrap();
 
-        let path = dir.path().join(".codex/AGENTS.md");
+        let path = dir.path().join(".codex/skills/agent-doc/SKILL.md");
         let content = std::fs::read_to_string(&path).unwrap();
 
         assert!(content.contains("Do **not** type `/agent-doc`"));
@@ -1700,15 +1789,17 @@ mod tests {
         assert!(content.contains("continue this turn"));
         assert!(content.contains(&format!("agent-doc-version: \"{VERSION}\"")));
         assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>."));
+        assert!(
+            !dir.path().join(".codex/AGENTS.md").exists(),
+            "Codex install must not write always-on .codex/AGENTS.md"
+        );
     }
 
     #[test]
     fn install_for_opencode_writes_opencode_specific_content() {
         let dir = tempfile::tempdir().unwrap();
 
-        super::config_for_env(Environment::OpenCode)
-            .install_for(Environment::OpenCode, Some(dir.path()))
-            .unwrap();
+        super::install_skill_for_env(Environment::OpenCode, Some(dir.path())).unwrap();
 
         let path = dir.path().join(".opencode/skills/agent-doc/SKILL.md");
         let content = std::fs::read_to_string(&path).unwrap();
@@ -1724,25 +1815,35 @@ mod tests {
     }
 
     #[test]
-    fn install_for_codex_refreshes_managed_root_agents_mirror() {
+    fn install_for_codex_retires_managed_always_on_agents_files() {
         let dir = tempfile::tempdir().unwrap();
-        let stale_root = super::content_for_env(Environment::Generic).replace(
+        let mut stale_root = super::content_for_env(Environment::Generic).replace(
             &format!("agent-doc-version: \"{VERSION}\""),
             "agent-doc-version: \"0.33.12\"",
         );
+        stale_root.push_str(
+            "\n<!-- tsift:code-navigation v=0.1.42 -->\n## Code Navigation\n\nRun `tsift status`.\n<!-- /tsift:code-navigation -->\n",
+        );
         std::fs::write(dir.path().join("AGENTS.md"), stale_root).unwrap();
+        std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
+        std::fs::write(
+            dir.path().join(".codex/AGENTS.md"),
+            super::content_for_env(Environment::Codex),
+        )
+        .unwrap();
 
-        super::config_for_env(Environment::Codex)
-            .install_for(Environment::Codex, Some(dir.path()))
-            .unwrap();
+        super::install_skill_for_env(Environment::Codex, Some(dir.path())).unwrap();
         super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
         super::install_env_artifacts(Environment::Codex, Some(dir.path())).unwrap();
-        super::sync_managed_root_agents(Some(dir.path())).unwrap();
+        super::retire_managed_always_on_agents(Some(dir.path())).unwrap();
 
         let root = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
-        let codex = std::fs::read_to_string(dir.path().join(".codex/AGENTS.md")).unwrap();
-        assert_eq!(root, super::content_for_env(Environment::Generic));
-        assert!(codex.contains("agent-doc skill install --harness codex --reload restart"));
+        assert!(root.contains("<!-- tsift:code-navigation v=0.1.42 -->"));
+        assert!(!root.contains("# agent-doc"));
+        assert!(!dir.path().join(".codex/AGENTS.md").exists());
+        let codex_skill =
+            std::fs::read_to_string(dir.path().join(".codex/skills/agent-doc/SKILL.md")).unwrap();
+        assert!(codex_skill.contains("agent-doc skill install --harness codex --reload restart"));
     }
 
     #[test]
@@ -1751,19 +1852,17 @@ mod tests {
         let custom = "# Custom Project Instructions\n\nKeep this file untouched.\n";
         std::fs::write(dir.path().join("AGENTS.md"), custom).unwrap();
 
-        super::config_for_env(Environment::Codex)
-            .install_for(Environment::Codex, Some(dir.path()))
-            .unwrap();
+        super::install_skill_for_env(Environment::Codex, Some(dir.path())).unwrap();
         super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
         super::install_env_artifacts(Environment::Codex, Some(dir.path())).unwrap();
-        super::sync_managed_root_agents(Some(dir.path())).unwrap();
+        super::retire_managed_always_on_agents(Some(dir.path())).unwrap();
 
         let root = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
         assert_eq!(root, custom);
     }
 
     #[test]
-    fn audit_managed_instruction_surfaces_rejects_stale_root_agents_mirror() {
+    fn audit_managed_instruction_surfaces_rejects_retired_root_agents_surface() {
         let dir = tempfile::tempdir().unwrap();
         let stale_root = super::content_for_env(Environment::Generic).replace(
             &format!("agent-doc-version: \"{VERSION}\""),
@@ -1774,13 +1873,13 @@ mod tests {
         let err = super::audit_managed_instruction_surfaces(Some(dir.path())).unwrap_err();
 
         let message = err.to_string();
-        assert!(message.contains("managed agent-doc instruction surface is stale"));
+        assert!(message.contains("retired managed agent-doc instruction surface"));
         assert!(message.contains("AGENTS.md"));
         assert!(message.contains("agent-doc skill install --all"));
     }
 
     #[test]
-    fn audit_managed_instruction_surfaces_allows_tsift_navigation_block() {
+    fn retire_managed_root_agents_preserves_tsift_navigation_block() {
         let dir = tempfile::tempdir().unwrap();
         let mut root = super::content_for_env(Environment::Generic);
         root.push_str(
@@ -1788,11 +1887,17 @@ mod tests {
         );
         std::fs::write(dir.path().join("AGENTS.md"), root).unwrap();
 
+        super::retire_managed_always_on_agents(Some(dir.path())).unwrap();
+
+        let root = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+        assert!(root.contains("<!-- tsift:code-navigation v=0.1.42 -->"));
+        assert!(root.contains("Run `tsift status`."));
+        assert!(!root.contains("# agent-doc"));
         super::audit_managed_instruction_surfaces(Some(dir.path())).unwrap();
     }
 
     #[test]
-    fn audit_managed_instruction_surfaces_treats_tsift_root_mirror_as_customized() {
+    fn audit_managed_instruction_surfaces_rejects_retired_root_agents_even_with_tsift() {
         let dir = tempfile::tempdir().unwrap();
         let mut root = super::content_for_env(Environment::Generic).replace(
             &format!("agent-doc-version: \"{VERSION}\""),
@@ -1803,11 +1908,14 @@ mod tests {
         );
         std::fs::write(dir.path().join("AGENTS.md"), root).unwrap();
 
-        super::audit_managed_instruction_surfaces(Some(dir.path())).unwrap();
+        let err = super::audit_managed_instruction_surfaces(Some(dir.path())).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("retired managed agent-doc instruction surface"));
+        assert!(message.contains("AGENTS.md"));
     }
 
     #[test]
-    fn audit_managed_instruction_surfaces_rejects_stale_codex_agents() {
+    fn audit_managed_instruction_surfaces_rejects_retired_codex_agents() {
         let dir = tempfile::tempdir().unwrap();
         let codex_dir = dir.path().join(".codex");
         std::fs::create_dir_all(&codex_dir).unwrap();
@@ -1820,7 +1928,7 @@ mod tests {
         let err = super::audit_managed_instruction_surfaces(Some(dir.path())).unwrap_err();
 
         let message = err.to_string();
-        assert!(message.contains("managed agent-doc instruction surface is stale"));
+        assert!(message.contains("retired managed agent-doc instruction surface"));
         assert!(message.contains(".codex"));
     }
 
@@ -1840,9 +1948,7 @@ mod tests {
     fn install_for_codex_writes_hooks_json_and_feature_flag() {
         let dir = tempfile::tempdir().unwrap();
 
-        super::config_for_env(Environment::Codex)
-            .install_for(Environment::Codex, Some(dir.path()))
-            .unwrap();
+        super::install_skill_for_env(Environment::Codex, Some(dir.path())).unwrap();
         super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
         super::install_env_artifacts(Environment::Codex, Some(dir.path())).unwrap();
 
@@ -1872,6 +1978,11 @@ mod tests {
         assert_eq!(config["features"]["hooks"].as_bool(), Some(true));
         assert!(config["features"].get("codex_hooks").is_none());
         assert_codex_mcp_config(&config, dir.path());
+        assert!(
+            dir.path().join(".codex/skills/agent-doc/SKILL.md").exists(),
+            "Codex workflow should be installed as a skill, not .codex/AGENTS.md"
+        );
+        assert!(!dir.path().join(".codex/AGENTS.md").exists());
     }
 
     #[test]
@@ -2014,7 +2125,7 @@ mod tests {
         );
         assert!(
             dir.path()
-                .join(".codex/runbooks/compact-exchange.md")
+                .join(".codex/skills/agent-doc/runbooks/compact-exchange.md")
                 .exists()
         );
         assert!(
@@ -2040,7 +2151,11 @@ mod tests {
                 .join(".claude/skills/agent-doc/okf/index.md")
                 .exists()
         );
-        assert!(dir.path().join(".codex/okf/index.md").exists());
+        assert!(
+            dir.path()
+                .join(".codex/skills/agent-doc/okf/index.md")
+                .exists()
+        );
         assert!(
             dir.path()
                 .join(".opencode/skills/agent-doc/okf/index.md")
@@ -2632,22 +2747,17 @@ mod tests {
     fn installed_harness_skill_content_shares_completion_boundary_text() {
         let dir = tempfile::tempdir().unwrap();
 
-        super::config_for_env(Environment::ClaudeCode)
-            .install_for(Environment::ClaudeCode, Some(dir.path()))
-            .unwrap();
-        super::config_for_env(Environment::OpenCode)
-            .install_for(Environment::OpenCode, Some(dir.path()))
-            .unwrap();
-        super::config_for_env(Environment::Codex)
-            .install_for(Environment::Codex, Some(dir.path()))
-            .unwrap();
+        super::install_skill_for_env(Environment::ClaudeCode, Some(dir.path())).unwrap();
+        super::install_skill_for_env(Environment::OpenCode, Some(dir.path())).unwrap();
+        super::install_skill_for_env(Environment::Codex, Some(dir.path())).unwrap();
 
         let claude =
             std::fs::read_to_string(dir.path().join(".claude/skills/agent-doc/SKILL.md")).unwrap();
         let opencode =
             std::fs::read_to_string(dir.path().join(".opencode/skills/agent-doc/SKILL.md"))
                 .unwrap();
-        let codex = std::fs::read_to_string(dir.path().join(".codex/AGENTS.md")).unwrap();
+        let codex =
+            std::fs::read_to_string(dir.path().join(".codex/skills/agent-doc/SKILL.md")).unwrap();
 
         for content in [&claude, &codex, &opencode] {
             assert!(content.contains("agent-doc finalize <FILE>"));

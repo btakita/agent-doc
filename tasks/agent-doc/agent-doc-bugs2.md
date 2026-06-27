@@ -39,14 +39,32 @@ done
 Compacted content:
 ❯ - Archived 6 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); distinguishing operator vs agent-doc authorship; should we remove the post-commit IPC worktree reconcile?; 3 more
 ❯ - Prior summary/context: prior compacted content: Archived 47 response topic(s): Is CellDocTree too specific to lazily?; queue state and revie...
-<!-- agent:boundary:52d3ebbc -->
+
+### Re: do #provauth1 #provauth2 #provauth3 — provauth3 shipped; 1 & 2 already live — opus-4-8
+
+**#provauth1 and #provauth2 were already committed and in HEAD** — I verified rather than redo them:
+- **#provauth1** (`3c9dd556`, current submodule HEAD) — per-component authorship merge (operator-owned cells theirs-win clean, conflict markers default OFF). The architectural reframe holds: `crdt.rs` is a per-cell text merge with no yrs transaction origins, so provenance lives at the *merge boundary* (ours=binary, theirs=operator), and it's in.
+- **#provauth2** (`cd8f3522` multi-id dedup + `08df743c` operator-delete tombstone) — backlog→queue mirror never duplicates operator multi-id lines and never resurrects an operator-deleted head.
+
+Both are in the installed 0.34.56 binary. Marking `#f693`/`#818s`/`#fpyh` done.
+
+**#provauth3 — implemented this cycle (`296ffe51`, v0.34.57, `make check` green / 5434 tests).** This is the origin-over-content replacement, and it closes the *exact* bug this session opened on: resuming after `/clear`, the stale pre-compact snapshot (33119 b) vs the compacted file (19123 b) both (a) tripped `guard_no_stale_snapshot_reset_drift`'s "looks like a manual cleanup" refusal — I had to hand-recover with `reset --from-current` + `commit` — and (b) had the preflight `repair` prompt-prefix normalizer stamp every `### Session Summary` / `*Compacted…*` / `- Archived N response topic(s)…` line with `❯`, so the classifier + `session-check` read the binary-authored compaction as an unresolved user prompt and falsely INTERRUPTed closeout. Both are the #provauth thesis in miniature: a *content* diff can't tell a binary-authored compaction from operator text.
+
+The fix consults a **recorded origin fact** instead of guessing:
+- `classify_stale_snapshot_visible_rebase` (`write/converge.rs`) no longer hard-requires a live `turn_scope` (which is absent after `/clear`). It reads the existing binary-authored `recent_exchange_compaction_timestamp` marker (it survives `/clear`): an exchange-only safe reduction rebases the stale snapshot when there's *either* a live turn scope (the prior in-session path) *or* a recorded binary compaction. Non-exchange drift still needs the scope; a compaction-shaped shrink with **no** provenance still fails closed with the `reset --from-current` guidance (safety rail kept + tested).
+- New `line_is_binary_authored_compact_summary` (`agent-doc-core/src/diff.rs`), mirroring the `line_is_binary_authored_ipc_proof_diagnostic` pattern, tolerates a stray `❯` and is wired into `is_recovery_artifact_line`, `classify_prompt_bearing_block` (an all-summary block → `RecoveryArtifact`, never `PromptTarget`), the normalizer's insert filter (never stamp `❯`), and the `session-check` unresolved-tail guard. A real prompt that merely mentions "compacted" still classifies normally.
+
+**Scope boundary (honest):** that's the binary-origin half — where origin is *known today*. The operator-origin half of #provauth3 ("an operator working-tree change IS authoritative; retire `content_ours` / stale-editor resurrection heuristics") needs the live operator-origin delta signal from the `#crdtauth6` seam, which isn't live yet — so I filed it as **#provauth3b** rather than fake it with more content heuristics.
+
+**Next (doing now, agent-doable):** `make install-full` → `admin recycle` so 0.34.57 goes live, then push. After recycle, the operator-eyeball proof is simply: this session no longer needs a manual compaction recovery and no `❯` appears on a Session Summary.
+<!-- agent:boundary:043e9e58 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 [#f693] [#q9w3] [#fpyh] [#818s]
-- [#pcwcrt] [#syncbarrier] [#qheadstrikeauto] [#actorprune] [#suprestassoc]
+- [#pcwcrt] [#syncbarrier] [#qheadstrikeauto] [#actorprune] [#suprestassoc] 
 - [#2y8j] [#cdtcutover] [#qeditdup] [#crdtauth6] [#nsfz] [#kj5flive]
 - I deleted items from the queue but they reappeared
 - When auto-adding queue items, verify that the item is not already in the queue. Do not add duplicates.

@@ -309,7 +309,19 @@ I treated this as a planning/backlog cleanup cycle, not as permission to mark th
 I converted the seven gated `agent:review` items into ordinary actionable backlog replacements and cleared the review list. For the JB/live-proof cases, the replacement backlog text now names the logs or artifacts that should prove or disprove the item after you test: `idea.log`, agent-doc `ops.log`, tmux server pid/session evidence, `.agent-doc/live-buffer` journal evidence, `.agent-doc/supervisor-stale`, and turn-status markers as applicable.
 
 No source files changed and no tests ran in this cycle. I do not need you to install a new JB plugin for this cleanup; the next JB install is only needed after a later backlog item actually changes plugin code.
-<!-- agent:boundary:6e9c55db -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=6e5216b3-3483-4a87-9338-31f1704dacc6 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=49876 candidate_hash=0e717403c4b0ec0b856101ab2a698dfed92231184cade4b128ca0b466e477e7e content_ours_len=66132 content_ours_hash=fd882ac79f90d72686c7d61b15a1fe450c437b320a198a320ca1341c24644aea doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782589089995
+```
+<!-- agent:boundary:d872f63e -->
 <!-- /agent:exchange -->
 ## Queue
 

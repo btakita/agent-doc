@@ -383,7 +383,21 @@ I also preserved the queue/order edits from this preflight rather than normalizi
 No source files changed and no tests were run. Preflight/plan/finalize were the only required commands for this prompt-response cycle. Preflight also reported semantic-completion warnings for unrelated `#kj5flive`, `#crdtauth6`, and `JB File Cache Conflict` candidates; I left them untouched.
 
 Codex session note: the installed `agent-doc` binary is `0.34.62` while the loaded skill text is `0.34.61`. Restart Codex when convenient so the hook/skill text reloads; it is not blocking this closeout.
-<!-- agent:boundary:7af92057 -->
+
+
+### Re: JB Run Agent Doc on monsterrodholders.md — gpt-5
+
+> **Queue prompt:**
+> 🚧 :pushpin: JB `Run Agent Doc` on monsterrodholders.md
+> ```text
+> [route] target tmux session: 0
+> Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %1 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Summarize recent commits"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782586439553-direct_pane_protected_prompt_input-codex-_1-a0c7b4c8e461.txt
+> ```
+
+This is the same protected-composer guard as the current-document refusal: the route correctly refused to inject `agent-doc ...monsterrodholders.md` into pane `%1` because that pane already had a drafted Codex prompt, `› Summarize recent commits`. The next operator action for that pane is to submit or clear that draft, then rerun JB `Run Agent Doc` for `src/boost-client/tasks/monsterrodholders.md`.
+
+I did not normalize the queue by hand, mark backlog IDs done, or run implementation work in this cycle. No source files changed and no tests were run. Preflight did warn that the installed `agent-doc` binary/cdylib may be stale relative to local source edits; I left that as a warning because this cycle was only answering the protected-draft queue prompt.
+<!-- agent:boundary:f0f2c10f -->
 <!-- /agent:exchange -->
 ## Queue
 

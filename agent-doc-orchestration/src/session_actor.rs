@@ -587,6 +587,8 @@ pub enum SessionOpKind {
     WriteSubmit,
     /// Cycle closeout / commit.
     Closeout,
+    /// Filesystem watcher event that should reconcile/submit through the actor.
+    FileWatch,
     /// Queue-head selection / advance.
     QueueHead,
     /// Ownership / state lifecycle transition (the CAS ops above).

@@ -39,6 +39,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 
+use crate::config::Config;
 use crate::session_actor::{SessionOpKind, document_actor_in};
 
 /// Minimal classification of a raw filesystem event, mirroring the
@@ -209,18 +210,64 @@ pub fn route_event(
     file: &str,
     raw: &RawWatchEvent,
     current_content: &str,
-    on_change: impl FnOnce() + Send + 'static,
+    on_change: impl FnOnce() -> Result<()> + Send + 'static,
 ) -> Result<WatchDelivery> {
     let (gate, _new) = registry().register(doc_id, file);
     let delivery = {
         let mut g = gate.lock().unwrap_or_else(|p| p.into_inner());
         g.observe(raw, current_content)
     };
-    if let WatchDelivery::Change { .. } = delivery {
+    if let WatchDelivery::Change { generation } = delivery {
         let actor = document_actor_in(base_dir, file);
-        actor.submit(SessionOpKind::QueueHead, move |_ctx| on_change())?;
+        let content_hash = crate::debounce::content_hash(current_content);
+        let event = crate::state_backbone::StateEvent::new(
+            file_watch_event_id(doc_id, generation, &content_hash),
+            crate::state_backbone::StateFact::FileWatchChangeObserved {
+                document_hash: doc_id.to_string(),
+                path: file.to_string(),
+                watch_generation: generation,
+                content_hash,
+            },
+        );
+        let base_dir = base_dir.to_path_buf();
+        actor.submit(SessionOpKind::FileWatch, move |_ctx| -> Result<()> {
+            crate::project_controller::append_state_event(&base_dir, &event)?;
+            on_change()
+        })??;
     }
     Ok(delivery)
+}
+
+/// Route a settled filesystem event through the document actor and, for the
+/// current cutover phase, run the legacy submit behind that actor. This keeps
+/// `watch.rs` out of the direct `run_with_context` path while admission and the
+/// realtime scheduler are still being built.
+pub fn route_legacy_submit(
+    base_dir: &Path,
+    doc_id: &str,
+    file: &str,
+    raw: &RawWatchEvent,
+    current_content: &str,
+    config: Config,
+) -> Result<WatchDelivery> {
+    let path = PathBuf::from(file);
+    route_event(base_dir, doc_id, file, raw, current_content, move || {
+        let run_context = crate::graph::ActorContext::new(path.clone());
+        crate::run::run_with_context(
+            &path,
+            false,
+            None,
+            None,
+            false,
+            false,
+            &config,
+            Some(run_context.context()),
+        )
+    })
+}
+
+fn file_watch_event_id(doc_id: &str, generation: u64, content_hash: &str) -> String {
+    format!("file-watch:{doc_id}:{generation}:{content_hash}")
 }
 
 #[cfg(test)]
@@ -349,6 +396,7 @@ mod tests {
             "change one",
             move || {
                 r.fetch_add(1, Ordering::SeqCst);
+                Ok(())
             },
         )
         .unwrap();
@@ -364,6 +412,7 @@ mod tests {
             "change one",
             move || {
                 r.fetch_add(1, Ordering::SeqCst);
+                Ok(())
             },
         )
         .unwrap();
@@ -378,6 +427,7 @@ mod tests {
             "change two",
             move || {
                 r.fetch_add(1, Ordering::SeqCst);
+                Ok(())
             },
         )
         .unwrap();
@@ -385,6 +435,19 @@ mod tests {
 
         // Exactly two reconciles ran (the two real changes, not the coalesced one).
         assert_eq!(reconciles.load(Ordering::SeqCst), 2);
+        let projection = crate::project_controller::load_state_backbone_projection(dir.path())
+            .expect("ledger projection should reload from sqlite");
+        let document = projection
+            .document(&doc_id)
+            .expect("watch event persisted document projection");
+        assert_eq!(
+            document
+                .document
+                .latest_file_watch_change
+                .as_ref()
+                .map(|change| change.watch_generation),
+            Some(2)
+        );
         registry().unregister(&doc_id);
     }
 }

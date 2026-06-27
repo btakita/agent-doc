@@ -26,10 +26,10 @@ pub use state_store::{
 };
 use state_store::{
     Connection, ProjectionDiagnosticInsert, insert_projection_diagnostic,
-    insert_projection_diagnostic_with_metadata, load_actor_record_from_db,
-    load_actor_store_from_db, load_control_plane_store_counts, load_layout_state_from_db,
-    load_session_operator_status_from_db, load_supervisor_lease_from_db, open_state_db,
-    store_layout_state_in_db, timestamp_secs,
+    insert_projection_diagnostic_with_metadata, insert_state_event_in_db,
+    load_actor_record_from_db, load_actor_store_from_db, load_control_plane_store_counts,
+    load_layout_state_from_db, load_session_operator_status_from_db, load_state_events_from_db,
+    load_supervisor_lease_from_db, open_state_db, store_layout_state_in_db, timestamp_secs,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
@@ -273,6 +273,7 @@ pub struct ControlPlaneActorStatus {
 #[derive(Debug)]
 struct ControllerMemoryState {
     actor_store: BTreeMap<String, crate::session_actor::ActorRecord>,
+    state_projection: crate::state_backbone::StateBackboneProjection,
     map_backend: &'static str,
 }
 
@@ -280,6 +281,7 @@ impl ControllerMemoryState {
     fn load(project_root: &Path) -> Result<Self> {
         Ok(Self {
             actor_store: load_actor_store(project_root)?,
+            state_projection: load_state_backbone_projection(project_root)?,
             map_backend: "std_btree_map",
         })
     }
@@ -369,6 +371,10 @@ impl ControllerRuntime {
             .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))?;
         Ok(status_categories([
             ("actor_records", memory.actor_store.len()),
+            (
+                "state_backbone_documents",
+                memory.state_projection.documents.len(),
+            ),
             (
                 "map_backend_std_btree_map",
                 usize::from(memory.map_backend == "std_btree_map"),
@@ -1585,6 +1591,103 @@ fn append_closeout_mutations<'a>(
     }
 }
 
+pub fn append_state_event(
+    project_root: &Path,
+    event: &crate::state_backbone::StateEvent,
+) -> Result<bool> {
+    let conn = open_state_db(project_root)?;
+    let payload_json = serde_json::to_string(event).context("serialize state backbone event")?;
+    insert_state_event_in_db(
+        &conn,
+        &state_store::StateEventInsert {
+            event_id: &event.event_id,
+            document_hash: event.document_hash(),
+            domain: state_domain_label(event.domain()),
+            fact_type: state_fact_label(&event.fact),
+            payload_json: &payload_json,
+        },
+    )
+}
+
+pub fn load_state_event_ledger(project_root: &Path) -> Result<crate::state_backbone::EventLedger> {
+    let conn = open_state_db(project_root)?;
+    let mut ledger = crate::state_backbone::EventLedger::new();
+    for row in load_state_events_from_db(&conn, None)? {
+        let event: crate::state_backbone::StateEvent = serde_json::from_str(&row.payload_json)
+            .with_context(|| {
+                format!(
+                    "parse state backbone event {} from controller state",
+                    row.event_id
+                )
+            })?;
+        ledger.append(event);
+    }
+    Ok(ledger)
+}
+
+pub fn load_state_backbone_projection(
+    project_root: &Path,
+) -> Result<crate::state_backbone::StateBackboneProjection> {
+    Ok(load_state_event_ledger(project_root)?.project())
+}
+
+pub(crate) fn state_domain_label(domain: crate::state_backbone::StateDomain) -> &'static str {
+    match domain {
+        crate::state_backbone::StateDomain::Document => "document",
+        crate::state_backbone::StateDomain::Queue => "queue",
+        crate::state_backbone::StateDomain::Closeout => "closeout",
+        crate::state_backbone::StateDomain::Transport => "transport",
+        crate::state_backbone::StateDomain::Supervisor => "supervisor",
+        crate::state_backbone::StateDomain::Route => "route",
+        crate::state_backbone::StateDomain::Proof => "proof",
+    }
+}
+
+pub(crate) fn state_fact_label(fact: &crate::state_backbone::StateFact) -> &'static str {
+    match fact {
+        crate::state_backbone::StateFact::PreflightStarted { .. } => "preflight_started",
+        crate::state_backbone::StateFact::BaselineSaved { .. } => "baseline_saved",
+        crate::state_backbone::StateFact::FileWatchChangeObserved { .. } => {
+            "file_watch_change_observed"
+        }
+        crate::state_backbone::StateFact::QueueHeadSelected { .. } => "queue_head_selected",
+        crate::state_backbone::StateFact::QueueHeadDeferred { .. } => "queue_head_deferred",
+        crate::state_backbone::StateFact::QueueHeadCompleted { .. } => "queue_head_completed",
+        crate::state_backbone::StateFact::SupervisorHosting { .. } => "supervisor_hosting",
+        crate::state_backbone::StateFact::ResponseCaptured { .. } => "response_captured",
+        crate::state_backbone::StateFact::WriteApplied { .. } => "write_applied",
+        crate::state_backbone::StateFact::CommitObserved { .. } => "commit_observed",
+        crate::state_backbone::StateFact::SessionCheckPassed { .. } => "session_check_passed",
+        crate::state_backbone::StateFact::CycleAbandoned { .. } => "cycle_abandoned",
+        crate::state_backbone::StateFact::OwnerGenerationChanged { .. } => {
+            "owner_generation_changed"
+        }
+        crate::state_backbone::StateFact::EditorPatchQueued { .. } => "editor_patch_queued",
+        crate::state_backbone::StateFact::EditorAckObserved { .. } => "editor_ack_observed",
+        crate::state_backbone::StateFact::IpcProofInsufficient { .. } => "ipc_proof_insufficient",
+        crate::state_backbone::StateFact::EditorPatchRetryRequested { .. } => {
+            "editor_patch_retry_requested"
+        }
+        crate::state_backbone::StateFact::ForceDiskFallbackRecorded { .. } => {
+            "force_disk_fallback_recorded"
+        }
+        crate::state_backbone::StateFact::ActorLifecycleObserved { .. } => {
+            "actor_lifecycle_observed"
+        }
+        crate::state_backbone::StateFact::AgentRestartPerformed { .. } => "agent_restart_performed",
+        crate::state_backbone::StateFact::CapabilityProofObserved { .. } => {
+            "capability_proof_observed"
+        }
+        crate::state_backbone::StateFact::RoutePaneObserved { .. } => "route_pane_observed",
+        crate::state_backbone::StateFact::RouteReadinessObserved { .. } => {
+            "route_readiness_observed"
+        }
+        crate::state_backbone::StateFact::DispatchProofObserved { .. } => "dispatch_proof_observed",
+        crate::state_backbone::StateFact::ProofMarkerObserved { .. } => "proof_marker_observed",
+        crate::state_backbone::StateFact::ProofMarkerDisproved { .. } => "proof_marker_disproved",
+    }
+}
+
 pub fn load_actor_store(
     project_root: &Path,
 ) -> Result<BTreeMap<String, crate::session_actor::ActorRecord>> {
@@ -1864,7 +1967,11 @@ pub fn prune_dead_actors_for_caller(
                 Path::new(&record.document_id),
                 &format!(
                     "{}_would_prune_dead_actor document_id={} generation={} state={} age_secs={} reason=dead_closed_record",
-                    caller, record.document_id, record.generation, record.state.as_str(), age
+                    caller,
+                    record.document_id,
+                    record.generation,
+                    record.state.as_str(),
+                    age
                 ),
             );
             pruned += 1;
@@ -1877,7 +1984,11 @@ pub fn prune_dead_actors_for_caller(
                 Path::new(&record.document_id),
                 &format!(
                     "{}_pruned_dead_actor document_id={} generation={} state={} age_secs={} reason=dead_closed_record",
-                    caller, record.document_id, record.generation, record.state.as_str(), age
+                    caller,
+                    record.document_id,
+                    record.generation,
+                    record.state.as_str(),
+                    age
                 ),
             );
             pruned += 1;
@@ -1898,9 +2009,8 @@ pub fn prune_dead_actors_for_caller(
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&path, serde_json::to_string_pretty(&final_store)?).with_context(|| {
-            format!("failed to refresh actor projection {}", path.display())
-        })?;
+        std::fs::write(&path, serde_json::to_string_pretty(&final_store)?)
+            .with_context(|| format!("failed to refresh actor projection {}", path.display()))?;
     }
 
     Ok((pruned, kept))
@@ -2901,13 +3011,23 @@ mod tests {
         std::fs::write(&doc, "body").unwrap();
         let document_id = doc.to_string_lossy().to_string();
         let old_ts = timestamp_secs().saturating_sub(7200); // 2h ago
-        store_actor_record(dir.path(), Some(0), &closed_actor_record(&document_id, old_ts)).unwrap();
+        store_actor_record(
+            dir.path(),
+            Some(0),
+            &closed_actor_record(&document_id, old_ts),
+        )
+        .unwrap();
 
         let (pruned, _kept) =
             prune_dead_actors(dir.path(), std::time::Duration::from_secs(3600), false).unwrap();
-        assert_eq!(pruned, 1, "old closed record with no lease should be pruned");
+        assert_eq!(
+            pruned, 1,
+            "old closed record with no lease should be pruned"
+        );
         assert!(
-            load_actor_record(dir.path(), &document_id).unwrap().is_none(),
+            load_actor_record(dir.path(), &document_id)
+                .unwrap()
+                .is_none(),
             "pruned record should be gone from the store"
         );
     }
@@ -2929,7 +3049,10 @@ mod tests {
 
         let (pruned, kept) =
             prune_dead_actors(dir.path(), std::time::Duration::from_secs(3600), false).unwrap();
-        assert_eq!(pruned, 0, "recently-closed record within the window is kept");
+        assert_eq!(
+            pruned, 0,
+            "recently-closed record within the window is kept"
+        );
         assert_eq!(kept, 1);
         assert!(
             load_actor_record(dir.path(), &document_id)
@@ -2950,8 +3073,14 @@ mod tests {
         store_actor_record(dir.path(), Some(0), &record).unwrap();
         // A fresh lease held by THIS (live) process must keep the record even
         // though it looks old + closed.
-        upsert_supervisor_lease(dir.path(), &record, Some(std::process::id()), None, "running")
-            .unwrap();
+        upsert_supervisor_lease(
+            dir.path(),
+            &record,
+            Some(std::process::id()),
+            None,
+            "running",
+        )
+        .unwrap();
 
         let (pruned, kept) =
             prune_dead_actors(dir.path(), std::time::Duration::from_secs(3600), false).unwrap();
@@ -2972,7 +3101,12 @@ mod tests {
         std::fs::write(&doc, "body").unwrap();
         let document_id = doc.to_string_lossy().to_string();
         let old_ts = timestamp_secs().saturating_sub(7200);
-        store_actor_record(dir.path(), Some(0), &closed_actor_record(&document_id, old_ts)).unwrap();
+        store_actor_record(
+            dir.path(),
+            Some(0),
+            &closed_actor_record(&document_id, old_ts),
+        )
+        .unwrap();
 
         let (pruned, _kept) =
             prune_dead_actors(dir.path(), std::time::Duration::from_secs(3600), true).unwrap();
@@ -5942,6 +6076,7 @@ agent:queue\n\
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(ControllerMemoryState {
                 actor_store: BTreeMap::new(),
+                state_projection: crate::state_backbone::StateBackboneProjection::default(),
                 map_backend: "std_btree_map",
             }),
             recycle_requested: AtomicBool::new(false),

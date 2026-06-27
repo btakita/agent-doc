@@ -16,8 +16,10 @@
 //!   document by frontmatter mode:
 //!   - `FileWatch` — append/template mode: monitored via `notify` file-system watcher.
 //!   - `StreamCapture` — CRDT mode: polled by capturing the associated tmux pane.
-//! - File-watch path: events are debounced (`debounce_ms`). After debounce, `run::run()`
-//!   is called on the changed file.
+//! - File-watch path: events are debounced (`debounce_ms`). After debounce, the
+//!   controller-owned document watcher gate routes the change through the
+//!   per-document session actor; the legacy submit still runs behind that actor
+//!   until admission replaces it.
 //! - Loop prevention for file-watch: agent-triggered changes (within `debounce * 3` of
 //!   last run) increment a per-file cycle counter; hard cap at `max_cycles`. Content hash
 //!   equality stops the loop early (convergence detection).
@@ -73,7 +75,13 @@ use notify::{EventKind, RecursiveMode, Watcher};
 
 use agent_doc_markdown_ast::events::DocumentNodeEvent;
 
-use crate::{config::Config, frontmatter, graph::ActorContext, run, sessions, stream};
+use crate::{
+    config::Config,
+    document_watcher::{RawWatchEvent, WatchDelivery},
+    frontmatter,
+    graph::ActorContext,
+    sessions, stream,
+};
 
 const PID_FILE: &str = ".agent-doc/watch.pid";
 
@@ -459,6 +467,7 @@ fn run_event_loop(
         .ok()
         .and_then(|d| crate::fs_util::find_project_root(&d))
         .map(|r| r.join(".agent-doc").join("config.toml"));
+    let base_dir = std::env::current_dir().context("resolve watch daemon project root")?;
 
     if let Some(ref cp) = config_toml_path
         && cp.exists()
@@ -749,19 +758,37 @@ fn run_event_loop(
                 .entry(path.clone())
                 .or_insert_with(|| ActorContext::new(path.clone()));
             ac.on_file_change(path.clone());
-            match run::run_with_context(
-                &path,
-                false,
-                None,
-                None,
-                false,
-                false,
-                config,
-                Some(ac.context()),
+            let current_content = match std::fs::read_to_string(&path) {
+                Ok(content) => content,
+                Err(e) => {
+                    eprintln!(
+                        "[watch] could not read {} for controller route: {}",
+                        path.display(),
+                        e
+                    );
+                    continue;
+                }
+            };
+            let raw = RawWatchEvent::modify(path.clone());
+            let config_owned = config.clone();
+            match crate::document_watcher::route_legacy_submit(
+                &base_dir,
+                &file_str,
+                &file_str,
+                &raw,
+                &current_content,
+                config_owned,
             ) {
-                Ok(()) => {
+                Ok(WatchDelivery::Change { .. }) => {
                     state.last_run = Some(Instant::now());
                     eprintln!("Submit complete: {}", path.display());
+                }
+                Ok(delivery) => {
+                    eprintln!(
+                        "[watch] routed {} without submit: {:?}",
+                        path.display(),
+                        delivery
+                    );
                 }
                 Err(e) => {
                     eprintln!("Submit failed for {}: {}", path.display(), e);

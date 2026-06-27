@@ -72,6 +72,12 @@ pub enum StateFact {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         baseline_path: Option<String>,
     },
+    FileWatchChangeObserved {
+        document_hash: String,
+        path: String,
+        watch_generation: u64,
+        content_hash: String,
+    },
     QueueHeadSelected {
         document_hash: String,
         node_key: String,
@@ -222,6 +228,7 @@ impl StateFact {
         match self {
             Self::PreflightStarted { document_hash, .. }
             | Self::BaselineSaved { document_hash, .. }
+            | Self::FileWatchChangeObserved { document_hash, .. }
             | Self::QueueHeadSelected { document_hash, .. }
             | Self::QueueHeadDeferred { document_hash, .. }
             | Self::QueueHeadCompleted { document_hash, .. }
@@ -256,7 +263,9 @@ impl StateFact {
             | Self::CommitObserved { .. }
             | Self::SessionCheckPassed { .. }
             | Self::CycleAbandoned { .. } => StateDomain::Closeout,
-            Self::BaselineSaved { .. } => StateDomain::Document,
+            Self::BaselineSaved { .. } | Self::FileWatchChangeObserved { .. } => {
+                StateDomain::Document
+            }
             Self::QueueHeadSelected { .. }
             | Self::QueueHeadDeferred { .. }
             | Self::QueueHeadCompleted { .. } => StateDomain::Queue,
@@ -339,10 +348,7 @@ impl EventLedger {
 
     /// Project the current state for a single document from the deduped event
     /// stream. Returns `None` when no accepted event targets the document.
-    pub fn project_document(
-        &self,
-        document_hash: &str,
-    ) -> Option<DocumentStateProjection> {
+    pub fn project_document(&self, document_hash: &str) -> Option<DocumentStateProjection> {
         let accepted: Vec<&StateEvent> = self
             .accepted_events()
             .into_iter()
@@ -485,6 +491,18 @@ impl DocumentStateProjection {
                     cycle_id: cycle_id.clone(),
                     baseline_hash: baseline_hash.clone(),
                     baseline_path: baseline_path.clone(),
+                });
+            }
+            StateFact::FileWatchChangeObserved {
+                path,
+                watch_generation,
+                content_hash,
+                ..
+            } => {
+                self.document.latest_file_watch_change = Some(FileWatchChangeProjection {
+                    path: path.clone(),
+                    watch_generation: *watch_generation,
+                    content_hash: content_hash.clone(),
                 });
             }
             StateFact::QueueHeadSelected {
@@ -783,8 +801,8 @@ impl DocumentStateProjection {
         let (is_switch, next_hosting_epoch) = match &self.hosting {
             None => (true, 1),
             Some(current) => {
-                let switched = current.pane_session != pane_session
-                    || lease_epoch > current.lease_epoch;
+                let switched =
+                    current.pane_session != pane_session || lease_epoch > current.lease_epoch;
                 if switched {
                     (true, current.hosting_epoch + 1)
                 } else {
@@ -878,6 +896,8 @@ pub struct RejectedStaleEvent {
 pub struct DocumentProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_baseline: Option<BaselineProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_file_watch_change: Option<FileWatchChangeProjection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -886,6 +906,13 @@ pub struct BaselineProjection {
     pub baseline_hash: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileWatchChangeProjection {
+    pub path: String,
+    pub watch_generation: u64,
+    pub content_hash: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -2007,6 +2034,38 @@ mod tests {
             doc.transport.patches["patch-1"].phase,
             TransportPatchPhase::Acked
         );
+    }
+
+    #[test]
+    fn file_watch_change_projects_latest_document_event() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "watch-1",
+            StateFact::FileWatchChangeObserved {
+                document_hash: "doc-watch".into(),
+                path: "/tmp/doc-watch.md".into(),
+                watch_generation: 1,
+                content_hash: "hash-one".into(),
+            },
+        ));
+        ledger.append(state_event(
+            "watch-2",
+            StateFact::FileWatchChangeObserved {
+                document_hash: "doc-watch".into(),
+                path: "/tmp/doc-watch.md".into(),
+                watch_generation: 2,
+                content_hash: "hash-two".into(),
+            },
+        ));
+
+        let projection = ledger.project();
+        let latest = projection
+            .document("doc-watch")
+            .and_then(|doc| doc.document.latest_file_watch_change.as_ref())
+            .expect("watch projection");
+
+        assert_eq!(latest.watch_generation, 2);
+        assert_eq!(latest.content_hash, "hash-two");
     }
 
     #[test]

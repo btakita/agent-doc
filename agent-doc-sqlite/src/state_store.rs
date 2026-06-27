@@ -236,6 +236,7 @@ pub struct ControlPlaneStoreCounts {
     pub live_actor_documents: usize,
     pub actor_transitions: usize,
     pub supervisor_leases: usize,
+    pub state_events: usize,
     pub dispatch_receipts: usize,
     pub queue_heads: usize,
     pub document_cycles: usize,
@@ -253,6 +254,7 @@ impl ControlPlaneStoreCounts {
         self.actor_documents
             + self.actor_transitions
             + self.supervisor_leases
+            + self.state_events
             + self.dispatch_receipts
             + self.queue_heads
             + self.document_cycles
@@ -284,6 +286,26 @@ pub struct SessionActorCloseoutCommit<'a> {
     pub queue_head_state: &'a str,
     pub response_commit: Option<&'a str>,
     pub mutations: Vec<SessionActorCloseoutMutation<'a>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StateEventStatus {
+    pub sequence: u64,
+    pub event_id: String,
+    pub document_hash: String,
+    pub domain: String,
+    pub fact_type: String,
+    pub payload_json: String,
+    pub timestamp: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StateEventInsert<'a> {
+    pub event_id: &'a str,
+    pub document_hash: &'a str,
+    pub domain: &'a str,
+    pub fact_type: &'a str,
+    pub payload_json: &'a str,
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +371,19 @@ pub fn initialize_state_db(conn: &Connection) -> Result<()> {
             runtime_state TEXT,
             PRIMARY KEY (document_id, generation)
         );
+
+        CREATE TABLE IF NOT EXISTS state_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT NOT NULL UNIQUE,
+            document_hash TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            fact_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            timestamp INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS state_events_document_hash_id
+            ON state_events(document_hash, id);
 
         CREATE TABLE IF NOT EXISTS dispatch_attempts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -567,6 +602,7 @@ pub fn load_control_plane_store_counts(conn: &Connection) -> Result<ControlPlane
             "SELECT COUNT(*) FROM supervisor_leases",
             "supervisor leases",
         )?,
+        state_events: count_rows(conn, "SELECT COUNT(*) FROM state_events", "state events")?,
         dispatch_receipts: count_rows(
             conn,
             "SELECT COUNT(*) FROM dispatch_attempts",
@@ -1106,6 +1142,58 @@ pub fn load_session_operator_status_from_db(
 }
 
 // ---------------------------------------------------------------------------
+// State-event ledger reads.
+// ---------------------------------------------------------------------------
+
+fn state_event_status_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StateEventStatus> {
+    let sequence: i64 = row.get("id")?;
+    let timestamp: i64 = row.get("timestamp")?;
+    Ok(StateEventStatus {
+        sequence: sqlite_u64(sequence, "state event sequence")
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        event_id: row.get("event_id")?,
+        document_hash: row.get("document_hash")?,
+        domain: row.get("domain")?,
+        fact_type: row.get("fact_type")?,
+        payload_json: row.get("payload_json")?,
+        timestamp: sqlite_u64(timestamp, "state event timestamp")
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+    })
+}
+
+pub fn load_state_events_from_db(
+    conn: &Connection,
+    document_hash: Option<&str>,
+) -> Result<Vec<StateEventStatus>> {
+    let mut events = Vec::new();
+    if let Some(document_hash) = document_hash {
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, event_id, document_hash, domain, fact_type, payload_json, timestamp
+            FROM state_events
+            WHERE document_hash = ?1
+            ORDER BY id
+            "#,
+        )?;
+        for row in stmt.query_map(params![document_hash], state_event_status_from_row)? {
+            events.push(row?);
+        }
+    } else {
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, event_id, document_hash, domain, fact_type, payload_json, timestamp
+            FROM state_events
+            ORDER BY id
+            "#,
+        )?;
+        for row in stmt.query_map([], state_event_status_from_row)? {
+            events.push(row?);
+        }
+    }
+    Ok(events)
+}
+
+// ---------------------------------------------------------------------------
 // Actor writes.
 // ---------------------------------------------------------------------------
 
@@ -1238,6 +1326,31 @@ pub fn upsert_supervisor_lease_in_db(
         ],
     )?;
     Ok(())
+}
+
+pub fn insert_state_event_in_db(conn: &Connection, event: &StateEventInsert<'_>) -> Result<bool> {
+    let changed = conn.execute(
+        r#"
+        INSERT OR IGNORE INTO state_events (
+            event_id,
+            document_hash,
+            domain,
+            fact_type,
+            payload_json,
+            timestamp
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "#,
+        params![
+            event.event_id,
+            event.document_hash,
+            event.domain,
+            event.fact_type,
+            event.payload_json,
+            sqlite_i64(timestamp_secs(), "state event timestamp")?,
+        ],
+    )?;
+    Ok(changed > 0)
 }
 
 /// `#qflood`: is a dispatch already in flight (accepted, not yet consumed) for this
@@ -1962,6 +2075,26 @@ mod tests {
             Some("supervisor.sock"),
             "ready",
         )?;
+        assert!(insert_state_event_in_db(
+            &conn,
+            &StateEventInsert {
+                event_id: "state-event-1",
+                document_hash: &record.document_id,
+                domain: "document",
+                fact_type: "file_watch_change_observed",
+                payload_json: r#"{"event_id":"state-event-1"}"#,
+            },
+        )?);
+        assert!(!insert_state_event_in_db(
+            &conn,
+            &StateEventInsert {
+                event_id: "state-event-1",
+                document_hash: &record.document_id,
+                domain: "document",
+                fact_type: "file_watch_change_observed",
+                payload_json: r#"{"event_id":"state-event-1"}"#,
+            },
+        )?);
         insert_dispatch_attempt_in_db(
             &conn,
             &DispatchAttemptInsert {
@@ -2063,6 +2196,7 @@ mod tests {
         assert_eq!(counts.live_actor_documents, 1);
         assert_eq!(counts.actor_transitions, 1);
         assert_eq!(counts.supervisor_leases, 1);
+        assert_eq!(counts.state_events, 1);
         assert_eq!(counts.dispatch_receipts, 1);
         assert_eq!(counts.queue_heads, 1);
         assert_eq!(counts.document_cycles, 1);
@@ -2073,7 +2207,13 @@ mod tests {
         assert_eq!(counts.queue_backpressure, 1);
         assert_eq!(counts.crash_recovery_markers, 1);
         assert_eq!(counts.layout_states, 1);
-        assert_eq!(counts.total_authoritative_rows(), 13);
+        assert_eq!(counts.total_authoritative_rows(), 14);
+
+        let state_events = load_state_events_from_db(&conn, Some(&record.document_id))?;
+        assert_eq!(state_events.len(), 1);
+        assert_eq!(state_events[0].event_id, "state-event-1");
+        assert_eq!(state_events[0].domain, "document");
+        assert_eq!(state_events[0].fact_type, "file_watch_change_observed");
 
         Ok(())
     }

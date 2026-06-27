@@ -110,7 +110,15 @@ I picked up the Codex handoff. The document now records `agent: codex`, and `#cl
 I did not start implementation in this cycle because preflight/plan classified the change as a prompt-response cycle and the document frontmatter still says `queue: stop`; inactive queue residue is context, not an executable drain command. No code paths changed and no tests were run.
 
 Preflight also surfaced semantic-completion warnings for unrelated backlog/review items; I left those untouched.
-<!-- agent:boundary:5d27820d -->
+
+### Re: queue activation and duplicate do rows — gpt-5
+
+I processed the current document edit through preflight + plan. The document is now in `queue: start` with `#closeoutstall` recorded as the in-progress queue head and the existing backlog item/plan at `tasks/agent-doc/plan-closeout-editor-convergence-stall.md`.
+
+I did not start code work in this cycle because `agent-doc plan` classified this diff as a prompt-response / queue-state reconciliation and emitted no `repo_actions`; its only required command is this finalize closeout. The duplicated `do #60ev` / `do #tmuxsynccrash` rows stay open because they were not selected as this cycle's executable repo action and preflight reported no agent-drainable continuation head.
+
+No source files changed, and no tests were run. Preflight still surfaced semantic-completion warnings for unrelated review/backlog items; I left those untouched. Session accretion is at warn due prior no-op/restart churn, but the queue remains active and no compact handoff was requested.
+<!-- agent:boundary:9cb24d70 -->
 <!-- /agent:exchange -->
 ## Queue
 

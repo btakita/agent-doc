@@ -221,6 +221,19 @@ This queue head matches the completed `#ipcproofnostall` entry in `tasks/agent-d
 
 I did not change source files or rerun tests in this cycle because this is an already-resolved duplicate queue head. I am consuming the free-text queue prompt and leaving the open implementation backlog items untouched.
 
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=0377f39f-284c-48e6-861d-315a9c8d5818 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=42183 candidate_hash=b54753fe355e94364aae39df76048a8b221d531b5d7ae134428212bf0f91493d content_ours_len=39261 content_ours_hash=dee55c46d9066e2d25f4ab3b79aa07eb68d3ba0f167d2c3261b1f28da2a59a8d doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782586534178
+```
+
 ### Re: queue normalization correction — gpt-5
 
 > **Queue prompt:** Fix. Your attempt to normalize the queue reverted some of my chages...including i
@@ -233,6 +246,7 @@ I did not change source files or rerun tests in this cycle because this is an al
 You were right: my first queue patch used an unquoted heredoc, so shell backtick substitution ran inside the queued route-log text. That polluted the queue and could overwrite or distort operator edits. I corrected the queue body with a quoted heredoc, preserved the `JB Run Agent Doc` route-refusal prompt as a fenced multiline queue prompt, and kept the existing id-backed backlog queue rows behind it.
 
 I did not change source files or run tests in this correction cycle. This was a session-document repair for my queue write mistake; the durable fix item for closeout/editor convergence remains open as `#closeoutstall`.
+
 
 ### Re: reverted queue item and CRDT character loss — gpt-5
 
@@ -249,7 +263,7 @@ I’m leaving the evidence in this session and mapping it to the existing open q
 
 No source files changed in this correction cycle, and I did not run tests. The immediate fix here is to preserve the corrected queue prompt and stop using manual queue replacement as a recovery shortcut.
 
-<!-- agent:boundary:12c31b26 -->
+<!-- agent:boundary:8a8d24cf -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -257,6 +271,14 @@ No source files changed in this correction cycle, and I did not run tests. The i
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~[#closeoutstall]~~
 - ~~Fix ipc_proof_insufficient~~
+~~~done
+Your attempt to normalize the queue reverted some of my chages...including entirely this item...and CRDT deleted a character...from `changes` to `chages`.
+```
+• The explicit consume fails the same way, which means the queue body is malformed for the queue parser: the pasted
+  route log and --- separators are inside agent:queue but not as list items. I’m checking the component patch command so
+  I can normalize the queue into parseable list entries while preserving the route-log information.
+```
+~~~
 ---
 JB `Run Agent Doc` on monsterrodholders.md
 ```text

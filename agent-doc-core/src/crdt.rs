@@ -3228,8 +3228,9 @@ Second answer line three.
         // A same-item conflict (both sides edit the SAME queue line differently).
         // With the flag ON, MultiNodeState::merge returns text T and state S; the
         // persisted state S must re-encode to a doc whose queue component matches
-        // T (the persisted base reflects the cell-merge ours-wins winner, NOT a
-        // legacy per-node winner that could diverge from T).
+        // T (the persisted base reflects the cell-merge winner, NOT a legacy
+        // per-node winner that could diverge from T). queue is operator-owned, so
+        // the winner is THEIRS (#provauth1/#provauth4).
         let _flag = CellMergeFlagOn::on();
 
         let base = doc_with_exchange_queue("Q.", "- do [#a1] original");
@@ -3245,10 +3246,11 @@ Second answer line three.
             merged,
             "persisted state diverges from returned merged text under conflict"
         );
-        // And the returned text reflects the cell-merge (ours-wins) winner.
+        // The returned text reflects the cell-merge winner — theirs, since queue
+        // is operator-owned.
         assert!(
-            merged.contains("OURS edit"),
-            "cell-merge ours-wins winner lost:\n{merged}"
+            merged.contains("THEIRS edit"),
+            "cell-merge operator-owned theirs-wins winner lost:\n{merged}"
         );
         // The persisted queue component must hold the winner, not the legacy text.
         let persisted = state.to_text().unwrap();
@@ -3258,7 +3260,7 @@ Second answer line three.
             .and_then(|s| s.split("<!-- /agent:queue -->").next())
             .unwrap_or("");
         assert!(
-            queue_body.contains("OURS edit"),
+            queue_body.contains("THEIRS edit"),
             "persisted base lost the cell-merge winner:\n{queue_body}"
         );
     }

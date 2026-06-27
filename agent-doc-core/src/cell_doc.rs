@@ -106,6 +106,16 @@ fn env_falsy(name: &str) -> bool {
     }
 }
 
+fn env_truthy(name: &str) -> bool {
+    match std::env::var(name) {
+        Ok(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            matches!(v.as_str(), "1" | "true" | "on" | "yes")
+        }
+        Err(_) => false,
+    }
+}
+
 /// Whether the per-cell 3-way merge routing seam is enabled. **Default ON** with
 /// an env kill-switch: per-cell merge is the production default and only an
 /// explicit falsy `AGENT_DOC_CELL_MERGE` (`0`/`false`/`off`/`no`, case/space-
@@ -125,16 +135,17 @@ pub fn cell_merge_opcapture_enabled() -> bool {
 }
 
 /// Whether recorded same-region [`CellConflict`]s are surfaced as operator-visible
-/// in-band conflict markers (`#qcellconflict`). **Default ON** with an env
-/// kill-switch: only an explicit falsy `AGENT_DOC_CELL_MERGE_CONFLICT_MARKERS`
-/// turns it off. As a sub-feature of the per-cell merge stack, it is also forced
-/// OFF whenever the master switch [`cell_merge_enabled`] is explicitly disabled —
-/// disabling the master kills the whole stack regardless of the sub-gate value.
-/// Independent of [`cell_merge_opcapture_enabled`] otherwise (opcapture *reduces*
-/// the conflict set by cleanly merging disjoint edits; this *surfaces* the
-/// irreducible same-region remainder), so the two sub-gates compose freely.
+/// in-band conflict markers (`#qcellconflict`). **Default OFF** as of
+/// #provauth1/#provauth4: same-cell conflicts now resolve by component
+/// authorship (operator-owned cells keep the operator's edit, agent-owned cells
+/// keep the binary's — see [`component_conflict_policy`]), so an in-band
+/// `<<<<<<<` marker would re-surface an operator action as a suspicious conflict,
+/// which is exactly what the provenance principle forbids. The marker machinery
+/// is retained behind an explicit opt-in (`AGENT_DOC_CELL_MERGE_CONFLICT_MARKERS`
+/// truthy) for debugging/inspection only. As a sub-feature of the per-cell merge
+/// stack it is still forced OFF whenever [`cell_merge_enabled`] is disabled.
 pub fn cell_merge_conflict_markers_enabled() -> bool {
-    cell_merge_enabled() && !env_falsy(CELL_MERGE_CONFLICT_MARKERS_ENV)
+    cell_merge_enabled() && env_truthy(CELL_MERGE_CONFLICT_MARKERS_ENV)
 }
 
 /// The stable per-item identity: `component:occurrence:item-id:index`, matching
@@ -553,6 +564,31 @@ pub enum ConflictPolicy {
     OursWins,
     /// Keep `theirs` (the live editor / disk side).
     TheirsWins,
+}
+
+/// Per-component **authorship** conflict policy (#provauth1/#provauth4 — operator
+/// provenance authority). When the same keyed cell was edited on both sides, the
+/// *owner* of that component wins, deterministically and cleanly — no in-band
+/// conflict marker.
+///
+/// - **Agent-owned** components (`exchange`, `status`, `log`) → [`OursWins`]:
+///   the binary authors the response/status/log spine, so the committed (ours)
+///   side is authoritative there (mirrors the `exchange` history spine and the
+///   `#pcwcwarn` "agent owns exchange" reconcile rule).
+/// - **Operator-owned** components (`queue`, `backlog`, `review`, `done`,
+///   `icebox`, and any other) → [`TheirsWins`]: the operator edits these in the
+///   live editor, so their edit is authoritative and must never be reset or
+///   surfaced as a suspicious conflict ("all operator actions should never be
+///   reset or treated as suspicious"). This is what makes the operator the
+///   authority over their own cells instead of ours-wins + a `<<<<<<<` marker.
+///
+/// [`OursWins`]: ConflictPolicy::OursWins
+/// [`TheirsWins`]: ConflictPolicy::TheirsWins
+pub fn component_conflict_policy(component: &str) -> ConflictPolicy {
+    match component {
+        "exchange" | "status" | "log" => ConflictPolicy::OursWins,
+        _ => ConflictPolicy::TheirsWins,
+    }
 }
 
 /// Outcome of a 3-way per-cell merge.
@@ -1101,7 +1137,8 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
     };
 
     // Walk ours/theirs in lockstep (same component-name sequence ⇒ same shape).
-    let policy = ConflictPolicy::default();
+    // Conflict policy is chosen per component by authorship (#provauth1/#provauth4)
+    // inside the component branch, not a single global default.
     let mut out = String::new();
     let mut all_conflicts = Vec::new();
     let empty_occurrence = |o: &ComponentOccurrence| ComponentOccurrence {
@@ -1181,16 +1218,23 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
                 if !keys_unique(o_occ) || !keys_unique(t_occ) || !keys_unique(base_ref) {
                     return CellMergeOutcome::fallback();
                 }
+                // #provauth1/#provauth4: resolve same-cell conflicts by component
+                // AUTHORSHIP — operator-owned cells (queue/backlog/…) keep the
+                // operator's (theirs) edit, agent-owned cells (exchange/status/log)
+                // keep the binary's (ours). The owner wins cleanly; no in-band
+                // `<<<<<<<` marker is injected (operator actions are never reset or
+                // surfaced as suspicious), superseding the legacy #qcellconflict
+                // ours-wins+marker behavior.
+                let comp_policy = component_conflict_policy(&o_occ.component);
                 let (mut merged_items, conflicts) =
-                    match compose_occurrence(base_ref, o_occ, t_occ, policy) {
+                    match compose_occurrence(base_ref, o_occ, t_occ, comp_policy) {
                         Some(r) => r,
                         None => return CellMergeOutcome::fallback(),
                     };
-                // `#qcellconflict` (default ON, env kill-switch): surface each
-                // recorded same-region content conflict as an operator-visible
-                // in-band marker after the conflicted node's (active, ours) value.
-                // Explicitly OFF ⇒ no mutation, so the body is byte-identical to
-                // the legacy ours-wins output.
+                // In-band conflict markers are OFF by default (#provauth1/#provauth4):
+                // the owner already won cleanly above, so surfacing a `<<<<<<<`
+                // marker would re-expose an operator action as a suspicious
+                // conflict. Retained behind the explicit opt-in env gate only.
                 if cell_merge_conflict_markers_enabled() {
                     surface_conflict_markers(&mut merged_items, &conflicts);
                 }
@@ -2119,13 +2163,10 @@ prior response.
     #[test]
     fn same_item_edited_both_sides_surfaces_conflict() {
         // Both sides edit beta to DIFFERENT text → a real conflict, not a blend.
-        // Serialize against marker-toggling tests + explicitly disable the
-        // conflict-marker sub-gate (default-ON kill-switch) so the "theirs absent"
-        // assertion is deterministic and exercises the legacy ours-wins path.
+        // queue is operator-owned (#provauth1/#provauth4), so the conflict
+        // resolves THEIRS-wins (the operator's edit is authoritative) cleanly,
+        // with the losing (ours) side not blended in-band.
         let _guard = ENV_LOCK.lock().unwrap();
-        unsafe {
-            std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, "0");
-        }
         let ours = BASE3.replace(
             "- do [#beta] second task\n",
             "- do [#beta] second task OURS-VERSION\n",
@@ -2142,17 +2183,13 @@ prior response.
         assert_eq!(c.identity, "queue:0:id:beta");
         assert!(c.ours.contains("OURS-VERSION"));
         assert!(c.theirs.contains("THEIRS-VERSION"));
-        // Default policy is ours-wins; the chosen value lands and is NOT a blend.
-        assert!(c.chosen.contains("OURS-VERSION"));
-        assert!(out.merged_text.contains("OURS-VERSION"));
+        // queue is operator-owned ⇒ theirs-wins; the chosen value is NOT a blend.
+        assert!(c.chosen.contains("THEIRS-VERSION"));
+        assert!(out.merged_text.contains("THEIRS-VERSION"));
         assert!(
-            !out.merged_text.contains("THEIRS-VERSION"),
-            "no fabricated blend: theirs value must not also appear"
+            !out.merged_text.contains("OURS-VERSION"),
+            "no fabricated blend: the losing ours value must not also appear"
         );
-        // SAFETY: still holding the lock — restore the default (ON).
-        unsafe {
-            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
-        }
     }
 
     #[test]
@@ -2572,11 +2609,6 @@ working on it
     #[test]
     fn genuine_same_level_content_conflict_is_recorded() {
         let _guard = ENV_LOCK.lock().unwrap();
-        // Conflict-marker surfacing is default-ON; explicitly disable it via the
-        // kill-switch so the legacy "theirs absent in-band" assertion is exercised.
-        unsafe {
-            std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, "0");
-        }
         let base = "<!-- agent:queue -->\n- do [#beta] orig\n<!-- /agent:queue -->\n";
         let ours = "<!-- agent:queue -->\n- do [#beta] OURS-VERSION\n<!-- /agent:queue -->\n";
         let theirs = "<!-- agent:queue -->\n- do [#beta] THEIRS-VERSION\n<!-- /agent:queue -->\n";
@@ -2590,17 +2622,14 @@ working on it
         assert_eq!(c.kind, ConflictKind::Content);
         assert!(c.ours.contains("OURS-VERSION"));
         assert!(c.theirs.contains("THEIRS-VERSION"));
-        assert!(c.chosen.contains("OURS-VERSION"), "default ours-wins");
-        assert!(out.merged_text.contains("OURS-VERSION"));
+        // queue is operator-owned ⇒ theirs-wins (#provauth1/#provauth4).
+        assert!(c.chosen.contains("THEIRS-VERSION"), "operator-owned theirs-wins");
+        assert!(out.merged_text.contains("THEIRS-VERSION"));
         assert!(
-            !out.merged_text.contains("THEIRS-VERSION"),
-            "no fabricated blend: theirs value must not also appear:\n{}",
+            !out.merged_text.contains("OURS-VERSION"),
+            "no fabricated blend: losing ours value must not also appear:\n{}",
             out.merged_text
         );
-        // SAFETY: still holding the lock — restore the default (ON).
-        unsafe {
-            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
-        }
     }
 
     /// Both sides struck the SAME head to DIFFERENT text (e.g. an operator note
@@ -2609,11 +2638,6 @@ working on it
     #[test]
     fn both_sides_struck_different_text_is_a_content_conflict() {
         let _guard = ENV_LOCK.lock().unwrap();
-        // Conflict-marker surfacing is default-ON; explicitly disable it via the
-        // kill-switch so the legacy "theirs absent in-band" assertion is exercised.
-        unsafe {
-            std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, "0");
-        }
         let base = "<!-- agent:queue -->\n- do [#k] live\n<!-- /agent:queue -->\n";
         let ours = "<!-- agent:queue -->\n- ~~do [#k] struck OURS~~\n<!-- /agent:queue -->\n";
         let theirs = "<!-- agent:queue -->\n- ~~do [#k] struck THEIRS~~\n<!-- /agent:queue -->\n";
@@ -2627,12 +2651,9 @@ working on it
             out.conflicts
         );
         assert_eq!(out.conflicts[0].kind, ConflictKind::Content);
-        assert!(out.merged_text.contains("struck OURS"));
-        assert!(!out.merged_text.contains("struck THEIRS"));
-        // SAFETY: still holding the lock — restore the default (ON).
-        unsafe {
-            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
-        }
+        // queue is operator-owned ⇒ theirs-wins (#provauth1/#provauth4).
+        assert!(out.merged_text.contains("struck THEIRS"));
+        assert!(!out.merged_text.contains("struck OURS"));
     }
 
     // ----- op-level TextCrdt 3-way merge (`#qcellmerge1` opcapture) ----------
@@ -2755,9 +2776,10 @@ working on it
             out.conflicts
         );
         assert_eq!(out.conflicts[0].kind, ConflictKind::Content);
-        assert!(out.merged_text.contains("OURS-ONLY"), "ours-wins policy");
+        // queue is operator-owned ⇒ theirs-wins (#provauth1/#provauth4).
+        assert!(out.merged_text.contains("THEIRS-ONLY"), "operator-owned theirs-wins");
         assert!(
-            !out.merged_text.contains("THEIRS-ONLY"),
+            !out.merged_text.contains("OURS-ONLY"),
             "no blend on a real overlap: {}",
             out.merged_text
         );
@@ -2766,19 +2788,16 @@ working on it
     /// (c) Gate explicitly OFF reproduces the legacy ours-wins behavior unchanged:
     /// even DISJOINT same-cell edits record a conflict and drop theirs.
     #[test]
-    fn opcapture_off_legacy_ours_wins_unchanged() {
+    fn opcapture_off_legacy_owner_wins_unchanged() {
         let _guard = ENV_LOCK.lock().unwrap();
         let base = "<!-- agent:queue -->\n- do [#beta] the original answer body here\n<!-- /agent:queue -->\n";
         let ours = "<!-- agent:queue -->\n- do [#beta] the EDITED answer body here\n<!-- /agent:queue -->\n";
         let theirs = "<!-- agent:queue -->\n- do [#beta] the original answer body THERE!\n<!-- /agent:queue -->\n";
 
         // SAFETY: opcapture is default-ON, so explicitly engage its kill-switch to
-        // exercise the legacy policy-only path. Also disable conflict-marker
-        // surfacing (also default-ON) so the "theirs absent in-band" assertion is
-        // deterministic.
+        // exercise the policy-only path (no op-level merge).
         unsafe {
             std::env::set_var(CELL_MERGE_OPCAPTURE_ENV, "0");
-            std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, "0");
         }
         assert!(!cell_merge_opcapture_enabled(), "opcapture kill-switch off");
 
@@ -2787,19 +2806,20 @@ working on it
         assert_eq!(
             out.conflicts.len(),
             1,
-            "OFF: disjoint same-cell edits are a conflict (legacy behavior): {:?}",
+            "OFF: disjoint same-cell edits are a conflict (no op-merge): {:?}",
             out.conflicts
         );
-        assert!(out.merged_text.contains("EDITED"), "ours-wins keeps ours");
+        // queue is operator-owned ⇒ theirs-wins (#provauth1/#provauth4); with
+        // opcapture OFF the disjoint ours edit is dropped, not blended.
+        assert!(out.merged_text.contains("THERE!"), "operator-owned theirs-wins");
         assert!(
-            !out.merged_text.contains("THERE!"),
-            "OFF: theirs disjoint edit is dropped (no op-merge): {}",
+            !out.merged_text.contains("EDITED"),
+            "OFF: losing ours disjoint edit is dropped (no op-merge): {}",
             out.merged_text
         );
-        // SAFETY: still holding the lock — restore the defaults (ON).
+        // SAFETY: still holding the lock — restore the default (ON).
         unsafe {
             std::env::remove_var(CELL_MERGE_OPCAPTURE_ENV);
-            std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
         }
     }
 
@@ -2864,11 +2884,12 @@ working on it
             "{}",
             out.merged_text
         );
-        // The active/structural list line is still ours (no fabricated blend):
-        // the literal `- do [#beta] OURS-VERSION` line is intact.
+        // The active/structural list line is theirs — queue is operator-owned, so
+        // theirs-wins (#provauth1/#provauth4); the marker (opt-in ON) still shows
+        // both verbatim, but the active line is the operator's.
         assert!(
-            out.merged_text.contains("- do [#beta] OURS-VERSION\n"),
-            "ours stays the active list line: {}",
+            out.merged_text.contains("- do [#beta] THEIRS-VERSION\n"),
+            "theirs stays the active list line: {}",
             out.merged_text
         );
         // The marker is an HTML comment (framing-safe), so re-parsing yields the
@@ -2972,71 +2993,76 @@ working on it
     /// default (absent) is now ON and DOES surface the marker, proving the gate
     /// flipped to default-ON-with-kill-switch.
     #[test]
-    fn conflict_markers_off_byte_identical_to_legacy() {
+    fn conflict_markers_default_off_optin_surfaces() {
         let base = "<!-- agent:queue -->\n- do [#beta] original\n<!-- /agent:queue -->\n";
         let ours = "<!-- agent:queue -->\n- do [#beta] OURS-VERSION\n<!-- /agent:queue -->\n";
         let theirs = "<!-- agent:queue -->\n- do [#beta] THEIRS-VERSION\n<!-- /agent:queue -->\n";
 
-        // Explicit kill-switch ("0") ⇒ legacy ours-wins, no in-band marker.
-        let off = merge_with_markers(Some("0"), base, ours, theirs);
-        assert!(off.merged_text.contains("OURS-VERSION"));
-        assert!(
-            !off.merged_text.contains("THEIRS-VERSION"),
-            "OFF: theirs not surfaced in-band: {}",
-            off.merged_text
-        );
-        assert!(
-            !off.merged_text.contains("<<<<<<<"),
-            "OFF: no conflict marker: {}",
-            off.merged_text
-        );
-        // The conflict is still RECORDED (stderr surface) regardless of gate.
-        assert_eq!(off.conflicts.len(), 1, "conflict still recorded OFF");
-
-        // Default (absent) is now ON: the same overlap DOES surface the marker.
+        // queue is operator-owned ⇒ theirs-wins. Default (absent) is OFF
+        // (#provauth1/#provauth4): clean theirs-wins, NO in-band marker.
         let absent = merge_with_markers(None, base, ours, theirs);
+        assert!(absent.merged_text.contains("THEIRS-VERSION"));
         assert!(
-            absent.merged_text.contains("THEIRS-VERSION") && absent.merged_text.contains("<<<<<<<"),
-            "default-ON must surface both versions in-band: {}",
+            !absent.merged_text.contains("OURS-VERSION"),
+            "default OFF: losing ours not surfaced: {}",
             absent.merged_text
         );
-        // The OFF path must NOT be byte-identical to the new default — the
-        // kill-switch genuinely changes behavior.
+        assert!(
+            !absent.merged_text.contains("<<<<<<<"),
+            "default OFF: no conflict marker: {}",
+            absent.merged_text
+        );
+        // The conflict is still RECORDED (stderr surface) regardless of gate.
+        assert_eq!(absent.conflicts.len(), 1, "conflict still recorded");
+
+        // Explicit opt-in ("1") DOES surface both versions in-band for inspection.
+        let on = merge_with_markers(Some("1"), base, ours, theirs);
+        assert!(
+            on.merged_text.contains("THEIRS-VERSION")
+                && on.merged_text.contains("OURS-VERSION")
+                && on.merged_text.contains("<<<<<<<"),
+            "opt-in ON surfaces both versions in-band: {}",
+            on.merged_text
+        );
+        // Opt-in ON must diverge from the default-OFF clean output.
         assert_ne!(
-            off.merged_text, absent.merged_text,
-            "kill-switch must diverge from the default-ON marker output"
+            absent.merged_text, on.merged_text,
+            "opt-in must diverge from the default-OFF clean output"
         );
     }
 
-    /// Sub-gate default-ON + kill-switch + master-gate parsing, mirroring the
-    /// sibling gate tests.
+    /// Sub-gate default-OFF + explicit opt-in + master-gate parsing
+    /// (#provauth1/#provauth4 flipped the marker default to OFF).
     #[test]
-    fn conflict_markers_gate_default_on_with_kill_switch() {
+    fn conflict_markers_gate_default_off_with_optin() {
         let _guard = ENV_LOCK.lock().unwrap();
         // Master stays default-ON (absent) throughout the sub-gate checks.
         unsafe {
             std::env::remove_var(CELL_MERGE_ENV);
             std::env::remove_var(CELL_MERGE_CONFLICT_MARKERS_ENV);
         }
-        assert!(cell_merge_conflict_markers_enabled(), "absent ⇒ default ON");
-        // Empty / truthy / unrecognized ⇒ still ON.
-        for v in ["1", "true", "on", "yes", "TRUE", " On ", "", "maybe"] {
+        assert!(
+            !cell_merge_conflict_markers_enabled(),
+            "absent ⇒ default OFF"
+        );
+        // Only an explicit truthy value opts the marker surfacing IN.
+        for v in ["1", "true", "on", "yes", "TRUE", " On "] {
             unsafe {
                 std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, v);
             }
             assert!(
                 cell_merge_conflict_markers_enabled(),
-                "{v:?} should stay ON"
+                "{v:?} should opt-in ON"
             );
         }
-        // Explicit falsy kill-switch turns it off.
-        for v in ["0", "false", "off", "no", "FALSE", " Off "] {
+        // Falsy / empty / unrecognized ⇒ stays OFF (default).
+        for v in ["0", "false", "off", "no", "FALSE", " Off ", "", "maybe"] {
             unsafe {
                 std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, v);
             }
             assert!(
                 !cell_merge_conflict_markers_enabled(),
-                "{v:?} should kill (OFF)"
+                "{v:?} should stay OFF"
             );
         }
         // Master kill-switch forces the sub-feature OFF regardless of its value.
@@ -3073,8 +3099,9 @@ working on it
             "framing-unsafe side must not be surfaced in-band: {}",
             out.merged_text
         );
-        // Ours-wins still holds.
-        assert!(out.merged_text.contains("OURS-VERSION"));
+        // queue is operator-owned ⇒ theirs-wins; the active line is theirs (the
+        // `-->` is harmless as ordinary list text, only unsafe inside a marker).
+        assert!(out.merged_text.contains("THEIRS with --> inside"));
     }
 
     // -----------------------------------------------------------------------

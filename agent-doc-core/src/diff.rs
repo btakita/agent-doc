@@ -2086,11 +2086,32 @@ pub fn diff_contains_imperative_directive(diff: &str) -> bool {
     matches!(classify_diff(diff).diff_type, DiffType::Approval)
 }
 
+/// True when `trimmed` (a line already left-trimmed of whitespace) opens with a
+/// markdown list bullet (`- `, `* `, `+ `, or an ordered `N. `). Used to exclude
+/// queue/backlog/review task entries from same-turn exchange-directive detection
+/// (`#qcompactfp`).
+fn trimmed_is_markdown_list_item(trimmed: &str) -> bool {
+    if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
+        return true;
+    }
+    // Ordered-list `N. ` bullet.
+    if let Some(dot) = trimmed.find(". ") {
+        let head = &trimmed[..dot];
+        if !head.is_empty() && head.chars().all(|c| c.is_ascii_digit()) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Detect whether the user explicitly requested exchange compaction in added
 /// diff lines.
 ///
 /// This only matches direct imperative forms that start with `compact exchange`
-/// (or `compact the exchange`) after prompt/pending normalization.
+/// (or `compact the exchange`) after prompt/pending normalization, and only when
+/// authored as exchange prose — a queue/backlog/review **list item** that merely
+/// begins with those words is a task entry, not a same-turn directive, and is
+/// skipped (`#qcompactfp`).
 pub fn detect_exchange_compaction_request(diff: &str) -> bool {
     let mut in_fence = false;
     let mut fence_char = '`';
@@ -2130,8 +2151,18 @@ pub fn detect_exchange_compaction_request(diff: &str) -> bool {
             }
         }
 
-        if !line.starts_with('+') || line.starts_with("+++") || in_fence || content.starts_with('>')
+        if !line.starts_with('+')
+            || line.starts_with("+++")
+            || in_fence
+            || content.starts_with('>')
+            || trimmed_is_markdown_list_item(trimmed)
         {
+            // A markdown list item (`- `/`* `/`+ `/`N. `) is a queue/backlog/review
+            // task entry, never a same-turn exchange compaction directive — a real
+            // `compact exchange` request is exchange prose (optionally `❯`-prefixed).
+            // Skipping bullets prevents a queued bug-report head such as
+            // "Compact exchange should commit the compacted content" from falsely
+            // aborting finalize (#qcompactfp).
             continue;
         }
 
@@ -4021,6 +4052,26 @@ Done.\n\
     fn detect_exchange_compaction_request_ignores_non_directive_mentions() {
         let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+I failed to compact exchange earlier.\n";
         assert!(!detect_exchange_compaction_request(diff));
+    }
+
+    #[test]
+    fn detect_exchange_compaction_request_ignores_queue_list_item() {
+        // #qcompactfp: a queued bug-report head that merely begins with "compact
+        // exchange" is a task entry, not a same-turn directive — it must not abort
+        // finalize. Bullet spellings `- `, `* `, and ordered `N. ` are all skipped.
+        for diff in [
+            "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+- Compact exchange should commit the compacted content\n",
+            "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+* compact exchange should commit the compacted content\n",
+            "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+1. compact exchange should commit the compacted content\n",
+        ] {
+            assert!(
+                !detect_exchange_compaction_request(diff),
+                "list-item compaction mention must not be a directive: {diff:?}"
+            );
+        }
+        // A genuine prose directive (no bullet) still matches.
+        let prose = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+compact exchange\n";
+        assert!(detect_exchange_compaction_request(prose));
     }
 
     #[test]

@@ -331,7 +331,19 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/
 I treated both queue prompts as live evidence for the existing queue-edit corruption work, not as new duplicate backlog items. The duplicated/resurrected queue rows and autonomous `/clear` behavior map to `#qeditdup`; the lost typed characters and duplicated free text map to the replacement backlog proof item `#qftlossproof` for the existing `#qftloss` class.
 
 No source files changed and no tests ran in this cycle. The review cleanup from the prior closeout remains in place: `agent:review` is empty, and the proof/log follow-ups are ordinary backlog items now.
-<!-- agent:boundary:d3f74194 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=f47b5e80-c2a9-4d09-b453-c38a7bb0d72c invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=52236 candidate_hash=5b0bbb40765cf3d1aea12e93066ae263609fd44cb090dbf8e7ad11df5c2e51e0 content_ours_len=52078 content_ours_hash=ada8797cb1bc33df56f62b74a18478f95ad7a97a4063ec51c495e7c492705051 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782589268308
+```
+<!-- agent:boundary:c5d71e30 -->
 <!-- /agent:exchange -->
 ## Queue
 

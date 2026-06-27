@@ -238,9 +238,7 @@ pub fn relay_replica_update_for_file(
         return Ok(None);
     }
     let client_id = crate::crdt_relay::mint_client_id(identity);
-    let packet = with_hub_seeded_from_file(file, |hub| {
-        hub.relay_update(client_id, update)
-    })??;
+    let packet = with_hub_seeded_from_file(file, |hub| hub.relay_update(client_id, update))??;
     let canonical_len =
         with_hub_seeded_from_file(file, |hub| hub.canonical_text().chars().count())?;
     crate::ops_log::log_op(
@@ -271,9 +269,7 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
         return Ok(None);
     }
     let client_id = crate::crdt_relay::mint_client_id(identity);
-    let updates = with_hub_seeded_from_file(file, |hub| {
-        hub.pending_updates(client_id)
-    })??;
+    let updates = with_hub_seeded_from_file(file, |hub| hub.pending_updates(client_id))??;
     let delivery = with_hub_seeded_from_file(file, |hub| {
         hub.delivery_snapshot()
             .into_iter()
@@ -455,9 +451,7 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
             ),
         }
     }
-    match with_hub_seeded_from_file(file, |hub| {
-        hub.commit_barrier_under_authority(authority)
-    }) {
+    match with_hub_seeded_from_file(file, |hub| hub.commit_barrier_under_authority(authority)) {
         Ok(Ok(ready)) => {
             let delivery_converged =
                 with_hub_seeded_from_file(file, |hub| hub.delivery_converged()).unwrap_or(false);
@@ -585,9 +579,8 @@ pub fn reconcile_disk_projection_for_file(file: &Path, projection: &[u8]) -> Res
         // baseline-wins load path in snapshot.rs already handles stale disk.
         return Ok(None);
     }
-    let changed = with_hub_seeded_from_file(file, |hub| {
-        hub.reconcile_disk_projection(projection)
-    })??;
+    let changed =
+        with_hub_seeded_from_file(file, |hub| hub.reconcile_disk_projection(projection))??;
     crate::ops_log::log_op(
         file,
         &format!(

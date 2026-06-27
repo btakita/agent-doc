@@ -104,6 +104,7 @@ struct TsiftContextSummary {
     context_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     estimated_tokens: Option<usize>,
+    loaded_context_ledger: plan::LoadedContextLedger,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +115,7 @@ struct ContextSidecar {
     command: Vec<String>,
     report: Value,
     estimated_tokens: usize,
+    loaded_context_ledger: plan::LoadedContextLedger,
 }
 
 #[derive(Debug, Clone)]
@@ -1185,6 +1187,7 @@ fn collect_tsift_context(
         diagnostics: Vec::new(),
         context_path: None,
         estimated_tokens: None,
+        loaded_context_ledger: dispatch_plan.tsift_context.loaded_context_ledger.clone(),
     };
 
     let bin = std::env::var("AGENT_DOC_TSIFT_BIN").unwrap_or_else(|_| "tsift".to_string());
@@ -1197,6 +1200,8 @@ fn collect_tsift_context(
         .output();
     match status {
         Ok(output) if output.status.success() => {
+            let status_stdout = String::from_utf8_lossy(&output.stdout);
+            let status_stderr = String::from_utf8_lossy(&output.stderr);
             if let Ok(value) = serde_json::from_slice::<Value>(&output.stdout)
                 && let Some(index_status) = value
                     .get("index")
@@ -1205,6 +1210,16 @@ fn collect_tsift_context(
             {
                 summary.status = index_status.to_string();
             }
+            summary.loaded_context_ledger =
+                plan::build_loaded_context_ledger(vec![plan::loaded_context_record(
+                    "agent-doc.job.tsift-status",
+                    "generated-state",
+                    &root.display().to_string(),
+                    &format!("{status_stdout}{status_stderr}"),
+                    None,
+                    "job_context_collection",
+                    "verify tsift index status before materializing context sidecar",
+                )]);
         }
         Ok(output) => {
             summary.status = "unavailable".to_string();
@@ -1246,6 +1261,17 @@ fn collect_tsift_context(
             let report: Value = serde_json::from_slice(&output.stdout)
                 .context("failed to parse tsift context-pack JSON")?;
             let bytes = output.stdout.len();
+            let mut ledger_entries = summary.loaded_context_ledger.entries.clone();
+            ledger_entries.push(plan::loaded_context_record(
+                "agent-doc.job.context-pack",
+                "generated-state",
+                &file.display().to_string(),
+                &String::from_utf8_lossy(&output.stdout),
+                None,
+                "job_context_collection",
+                "materialize bounded tsift context-pack sidecar",
+            ));
+            let loaded_context_ledger = plan::build_loaded_context_ledger(ledger_entries);
             let sidecar = ContextSidecar {
                 contract_version: "agent-doc-tsift-context-sidecar-v1".to_string(),
                 job_id: job_id.to_string(),
@@ -1262,6 +1288,7 @@ fn collect_tsift_context(
                 ],
                 report,
                 estimated_tokens: bytes.div_ceil(4),
+                loaded_context_ledger: loaded_context_ledger.clone(),
             };
             std::fs::write(
                 context_path,
@@ -1271,6 +1298,7 @@ fn collect_tsift_context(
             .with_context(|| format!("failed to write {}", context_path.display()))?;
             summary.context_path = Some(relative_to(root, context_path));
             summary.estimated_tokens = Some(sidecar.estimated_tokens);
+            summary.loaded_context_ledger = loaded_context_ledger;
         }
         Ok(output) => {
             summary.diagnostics.push(format!(
@@ -1796,6 +1824,9 @@ agent_doc_dispatch: auto
         let context = index.jobs[0].context_path.as_ref().unwrap();
         let sidecar = std::fs::read_to_string(dir.path().join(context)).unwrap();
         assert!(sidecar.contains("agent-doc-tsift-context-sidecar-v1"));
+        assert!(sidecar.contains("loaded_context_ledger"));
+        assert!(sidecar.contains("agent-doc.job.context-pack"));
+        assert!(sidecar.contains("duplicate_expansions_suppressed"));
         assert_eq!(index.jobs[0].tsift_status, "fresh");
     }
 

@@ -14,6 +14,8 @@
 //!   release installs. With explicit `--root`, the given root is audited exactly, so
 //!   submodule-local managed artifacts can still be checked intentionally. Managed surfaces must
 //!   match the running binary's rendered content; custom root AGENTS.md files are ignored.
+//! - Managed OKF bundles are checked against the running binary: stale files, missing files,
+//!   stale installed concept markdown, and unbundled OKF links are release-blocking.
 //! - Filesystem mtime staleness is reported as advisory output only; managed instruction surfaces
 //!   are release-blocking through rendered-content comparison, not timestamp comparison.
 //!
@@ -34,6 +36,7 @@
 //! - explicit_managed_instruction_surface_root: `--root` audits the requested root exactly,
 //!   including submodule-local managed instruction artifacts
 //! - mtime_staleness_advisory: source-newer-than-doc output is non-blocking when content checks pass
+//! - managed_okf_bundle_roots: managed OKF bundles must match the embedded bundle
 
 use anyhow::Result;
 use instruction_files::AuditConfig;
@@ -56,6 +59,7 @@ pub fn run(root_override: Option<&Path>) -> Result<()> {
         .or(fallback_root);
     for root in managed_instruction_surface_roots(root_override) {
         crate::skill::audit_managed_instruction_surfaces(Some(&root))?;
+        crate::skill::audit_managed_okf_bundles(Some(&root))?;
     }
     run_agent_doc_audit(&config, resolved_root.as_deref())
 }

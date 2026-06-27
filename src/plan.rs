@@ -41,6 +41,8 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::{
@@ -107,6 +109,27 @@ pub struct TsiftContextPlan {
     pub diff_digest_command: String,
     pub test_digest_command: String,
     pub stale_fallback: String,
+    pub loaded_context_ledger: LoadedContextLedger,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct LoadedContextLedger {
+    pub entries: Vec<LoadedContextRecord>,
+    pub duplicate_expansions_suppressed: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct LoadedContextRecord {
+    pub source_id: String,
+    pub source_kind: String,
+    pub path: String,
+    pub content_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concept_id: Option<String>,
+    pub loaded_at: String,
+    pub expansion_reason: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -651,16 +674,113 @@ fn tsift_context_plan(file: &Path) -> TsiftContextPlan {
     };
     let file_arg = shell_quote(&display_path(file));
     let root_arg = shell_quote(&display_path(&root));
+    let index_status_command = format!("tsift status --json {root_arg}");
+    let context_pack_command = format!("tsift context-pack {file_arg} --json --budget normal");
+    let diff_digest_command = format!("tsift diff-digest --cached {root_arg} --json");
+    let test_digest_command =
+        format!("tsift test-digest --path {root_arg} --input <test.log> --json");
+    let loaded_context_ledger = build_loaded_context_ledger(vec![
+        loaded_context_record(
+            "agent-doc.plan.tsift-status",
+            "generated-state",
+            &display_path(&root),
+            &index_status_command,
+            None,
+            "plan_build",
+            "verify tsift index availability for this cycle",
+        ),
+        loaded_context_record(
+            "agent-doc.plan.context-pack",
+            "generated-state",
+            &display_path(file),
+            &context_pack_command,
+            None,
+            "plan_build",
+            "declare bounded context-pack source for this cycle",
+        ),
+        loaded_context_record(
+            "agent-doc.plan.diff-digest",
+            "generated-state",
+            &display_path(&root),
+            &diff_digest_command,
+            None,
+            "plan_build",
+            "declare bounded diff evidence source for this cycle",
+        ),
+        loaded_context_record(
+            "agent-doc.plan.test-digest",
+            "generated-state",
+            &display_path(&root),
+            &test_digest_command,
+            None,
+            "plan_build",
+            "declare bounded test-output source for this cycle",
+        ),
+    ]);
     TsiftContextPlan {
         status: status.to_string(),
         freshness_policy: "fresh context required for automatic dispatch; manual packets record stale or missing context explicitly".to_string(),
-        index_status_command: format!("tsift status --json {root_arg}"),
-        context_pack_command: format!("tsift context-pack {file_arg} --json --budget normal"),
+        index_status_command,
+        context_pack_command,
         source_read_command: "tsift source-read <handle>".to_string(),
-        diff_digest_command: format!("tsift diff-digest --cached {root_arg} --json"),
-        test_digest_command: format!("tsift test-digest --path {root_arg} --input <test.log> --json"),
+        diff_digest_command,
+        test_digest_command,
         stale_fallback: "skip tsift graph/context evidence, continue with parent-owned execution or manual packets, and carry the diagnostic for review".to_string(),
+        loaded_context_ledger,
     }
+}
+
+pub(crate) fn loaded_context_record(
+    source_id: &str,
+    source_kind: &str,
+    path: &str,
+    content: &str,
+    concept_id: Option<&str>,
+    loaded_at: &str,
+    expansion_reason: &str,
+) -> LoadedContextRecord {
+    LoadedContextRecord {
+        source_id: source_id.to_string(),
+        source_kind: source_kind.to_string(),
+        path: path.to_string(),
+        content_hash: sha256_hex(content),
+        concept_id: concept_id.map(str::to_string),
+        loaded_at: loaded_at.to_string(),
+        expansion_reason: expansion_reason.to_string(),
+    }
+}
+
+pub(crate) fn build_loaded_context_ledger(
+    records: Vec<LoadedContextRecord>,
+) -> LoadedContextLedger {
+    let mut entries_by_key: HashMap<(String, String), LoadedContextRecord> = HashMap::new();
+    let mut duplicate_expansions_suppressed = 0;
+    for record in records {
+        let key = (record.source_id.clone(), record.content_hash.clone());
+        if let std::collections::hash_map::Entry::Vacant(entry) = entries_by_key.entry(key) {
+            entry.insert(record);
+        } else {
+            duplicate_expansions_suppressed += 1;
+        }
+    }
+    let mut entries = entries_by_key.into_values().collect::<Vec<_>>();
+    entries.sort_by(|a, b| {
+        a.source_id
+            .cmp(&b.source_id)
+            .then_with(|| a.path.cmp(&b.path))
+            .then_with(|| a.content_hash.cmp(&b.content_hash))
+    });
+    LoadedContextLedger {
+        entries,
+        duplicate_expansions_suppressed,
+    }
+}
+
+fn sha256_hex(content: &str) -> String {
+    Sha256::digest(content.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn display_path(path: &Path) -> String {
@@ -1534,6 +1654,42 @@ agent_doc_dispatch: auto
                 .iter()
                 .any(|cmd| cmd.contains("--done jobp1") && cmd.contains("--done jobp2"))
         );
+    }
+
+    #[test]
+    fn loaded_context_ledger_suppresses_duplicate_source_hashes() {
+        let first = loaded_context_record(
+            "agent-doc.test.source",
+            "procedure",
+            "runbooks/respond.md",
+            "same content",
+            None,
+            "test",
+            "first expansion",
+        );
+        let duplicate = loaded_context_record(
+            "agent-doc.test.source",
+            "procedure",
+            "runbooks/respond.md",
+            "same content",
+            None,
+            "test",
+            "duplicate expansion",
+        );
+        let distinct = loaded_context_record(
+            "agent-doc.test.source",
+            "procedure",
+            "runbooks/respond.md",
+            "changed content",
+            None,
+            "test",
+            "changed source expansion",
+        );
+
+        let ledger = build_loaded_context_ledger(vec![first, duplicate, distinct]);
+
+        assert_eq!(ledger.entries.len(), 2);
+        assert_eq!(ledger.duplicate_expansions_suppressed, 1);
     }
 
     #[test]

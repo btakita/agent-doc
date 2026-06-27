@@ -972,7 +972,9 @@ fn marker_has_unterminated_quote(marker: &str) -> bool {
 }
 
 fn byte_in_ranges(offset: usize, ranges: &[(usize, usize)]) -> bool {
-    ranges.iter().any(|&(start, end)| offset >= start && offset < end)
+    ranges
+        .iter()
+        .any(|&(start, end)| offset >= start && offset < end)
 }
 
 /// Detect agent-looking HTML comment markers that were truncated before their
@@ -999,8 +1001,7 @@ pub fn malformed_agent_comment_reason(doc: &str) -> Option<String> {
             continue;
         }
         let inner = trimmed["<!--".len()..].trim_start();
-        if (inner.starts_with("agent:") || inner.starts_with("/agent:"))
-            && !trimmed.contains("-->")
+        if (inner.starts_with("agent:") || inner.starts_with("/agent:")) && !trimmed.contains("-->")
         {
             let preview = trimmed.chars().take(80).collect::<String>();
             return Some(format!(

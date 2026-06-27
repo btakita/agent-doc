@@ -2429,9 +2429,7 @@ fn arg_file_name_is(arg: &str, expected: &str) -> bool {
 
 fn is_shell_c_controller_sentinel(args: &[String], agent_doc_idx: usize) -> bool {
     agent_doc_idx >= 3
-        && args
-            .get(agent_doc_idx - 2)
-            .is_some_and(|arg| arg == "-c")
+        && args.get(agent_doc_idx - 2).is_some_and(|arg| arg == "-c")
         && args.first().is_some_and(|arg| {
             ["sh", "bash", "dash", "zsh"]
                 .iter()
@@ -6876,7 +6874,10 @@ agent:queue\n\
             "--project-root".to_string(),
             "/home/me/work/boost-client".to_string(),
         ];
-        assert_eq!(controller_serve_project_root_from_args(&tmux_launcher), None);
+        assert_eq!(
+            controller_serve_project_root_from_args(&tmux_launcher),
+            None
+        );
     }
     #[test]
     #[ignore = "global /proc preparing-controller sweep: would reap the per-project M3 \

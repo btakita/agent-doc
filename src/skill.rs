@@ -33,6 +33,7 @@
 //! - bundled_skill_contains_agent_doc: bundled content references "agent-doc"
 
 use anyhow::{Context, Result};
+use std::collections::HashSet;
 use std::path::Path;
 
 /// The shared SKILL.md source bundled at build time.
@@ -559,6 +560,175 @@ pub(crate) fn audit_managed_instruction_surfaces(root: Option<&Path>) -> Result<
         }
     }
     Ok(())
+}
+
+pub(crate) fn audit_managed_okf_bundles(root: Option<&Path>) -> Result<()> {
+    audit_bundled_okf_shape()?;
+
+    let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
+    let base = resolved.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    for env in [
+        agent_kit::detect::Environment::Generic,
+        agent_kit::detect::Environment::OpenCode,
+        agent_kit::detect::Environment::Codex,
+        agent_kit::detect::Environment::Cursor,
+        agent_kit::detect::Environment::ClaudeCode,
+    ] {
+        let instruction_path = skill_path_for_env(env, Some(&base));
+        let okf_dir = base.join(okf_rel_path(&env));
+        if instruction_path.exists() {
+            let content = std::fs::read_to_string(&instruction_path)
+                .with_context(|| format!("read {}", instruction_path.display()))?;
+            audit_okf_links_for_surface(&env, &instruction_path, &content)?;
+            if content.contains("okf/") && !okf_dir.is_dir() {
+                anyhow::bail!(
+                    "managed agent-doc OKF bundle is missing for {env}: {} references okf/ but {} does not exist. Run `agent-doc skill install --all`.",
+                    instruction_path.display(),
+                    okf_dir.display()
+                );
+            }
+        }
+        if okf_dir.is_dir() {
+            audit_okf_dir(&env, &okf_dir)?;
+        }
+    }
+    Ok(())
+}
+
+fn audit_bundled_okf_shape() -> Result<()> {
+    let canonical_names: HashSet<&str> = BUNDLED_OKF.iter().map(|(name, _)| *name).collect();
+    let mut concept_ids = HashSet::new();
+    for (name, content) in BUNDLED_OKF {
+        for link in markdown_okf_links(content, true) {
+            if !canonical_names.contains(link.as_str()) {
+                anyhow::bail!(
+                    "bundled OKF file {name} references okf/{link}, but {link} is not bundled"
+                );
+            }
+        }
+        if content.contains("type: concept") {
+            let Some(concept_id) = frontmatter_value(content, "concept_id") else {
+                anyhow::bail!("bundled OKF concept {name} is missing concept_id frontmatter");
+            };
+            if !concept_ids.insert(concept_id.to_string()) {
+                anyhow::bail!("duplicate bundled OKF concept_id `{concept_id}`");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn audit_okf_links_for_surface(
+    env: &agent_kit::detect::Environment,
+    path: &Path,
+    content: &str,
+) -> Result<()> {
+    let canonical_names: HashSet<&str> = BUNDLED_OKF.iter().map(|(name, _)| *name).collect();
+    for link in markdown_okf_links(content, false) {
+        if !canonical_names.contains(link.as_str()) {
+            anyhow::bail!(
+                "managed agent-doc instruction surface for {env} references unbundled OKF file okf/{link}: {}",
+                path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn audit_okf_dir(env: &agent_kit::detect::Environment, okf_dir: &Path) -> Result<()> {
+    let canonical_names: HashSet<&str> = BUNDLED_OKF.iter().map(|(name, _)| *name).collect();
+    for (name, expected) in BUNDLED_OKF {
+        let path = okf_dir.join(name);
+        if !path.exists() {
+            anyhow::bail!(
+                "managed agent-doc OKF bundle for {env} is missing {}. Run `agent-doc skill install --all`.",
+                path.display()
+            );
+        }
+        let existing =
+            std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+        if existing != *expected {
+            anyhow::bail!(
+                "managed agent-doc OKF bundle for {env} is stale: {}. Run `agent-doc skill install --all`.",
+                path.display()
+            );
+        }
+    }
+
+    let entries = std::fs::read_dir(okf_dir)
+        .with_context(|| format!("read OKF dir {}", okf_dir.display()))?;
+    for entry in entries {
+        let entry =
+            entry.with_context(|| format!("read OKF dir entry under {}", okf_dir.display()))?;
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("inspect OKF entry {}", entry.path().display()))?;
+        if !file_type.is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("md") {
+            continue;
+        }
+        let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if !canonical_names.contains(file_name) {
+            anyhow::bail!(
+                "managed agent-doc OKF bundle for {env} contains stale concept markdown: {}. Run `agent-doc skill install --all`.",
+                path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn markdown_okf_links(content: &str, include_local_okf_links: bool) -> Vec<String> {
+    let mut links = Vec::new();
+    let mut rest = content;
+    while let Some(open) = rest.find("](") {
+        rest = &rest[open + 2..];
+        let Some(close) = rest.find(')') else {
+            break;
+        };
+        let target = &rest[..close];
+        if let Some(name) = okf_link_name(target, include_local_okf_links) {
+            links.push(name.to_string());
+        }
+        rest = &rest[close + 1..];
+    }
+    links
+}
+
+fn okf_link_name(target: &str, include_local_okf_links: bool) -> Option<&str> {
+    let target = target.split('#').next().unwrap_or(target);
+    let target = target.strip_prefix("./").unwrap_or(target);
+    if let Some(name) = target.strip_prefix("okf/") {
+        return name.ends_with(".md").then_some(name);
+    }
+    if include_local_okf_links && !target.contains('/') && target.ends_with(".md") {
+        return Some(target);
+    }
+    None
+}
+
+fn frontmatter_value<'a>(content: &'a str, key: &str) -> Option<&'a str> {
+    let mut lines = content.lines();
+    if lines.next()? != "---" {
+        return None;
+    }
+    for line in lines {
+        if line == "---" {
+            break;
+        }
+        let Some((candidate, value)) = line.split_once(':') else {
+            continue;
+        };
+        if candidate.trim() == key {
+            return Some(value.trim().trim_matches('"'));
+        }
+    }
+    None
 }
 
 fn detect_install_env() -> agent_kit::detect::Environment {
@@ -1625,6 +1795,8 @@ mod tests {
             (Environment::ClaudeCode, ".claude/skills/agent-doc/okf"),
             (Environment::Codex, ".codex/skills/agent-doc/okf"),
             (Environment::OpenCode, ".opencode/skills/agent-doc/okf"),
+            (Environment::Cursor, ".cursor/rules/okf"),
+            (Environment::Generic, "okf"),
         ] {
             super::install_okf_for(env, Some(dir.path())).unwrap();
 
@@ -1651,6 +1823,77 @@ mod tests {
         assert!(!stale.exists(), "stale OKF markdown should be reaped");
         assert!(kept.exists(), "non-md OKF artifacts should be preserved");
         assert!(okf_dir.join("instruction-surface.md").exists());
+    }
+
+    #[test]
+    fn audit_managed_okf_bundles_accepts_current_install() {
+        let dir = tempfile::tempdir().unwrap();
+        super::install_skill_for_env(Environment::Codex, Some(dir.path())).unwrap();
+        super::install_okf_for(Environment::Codex, Some(dir.path())).unwrap();
+
+        super::audit_managed_okf_bundles(Some(dir.path())).unwrap();
+    }
+
+    #[test]
+    fn audit_managed_okf_bundles_rejects_missing_concept() {
+        let dir = tempfile::tempdir().unwrap();
+        super::install_okf_for(Environment::Codex, Some(dir.path())).unwrap();
+        std::fs::remove_file(
+            dir.path()
+                .join(".codex/skills/agent-doc/okf/session-cycle.md"),
+        )
+        .unwrap();
+
+        let err = super::audit_managed_okf_bundles(Some(dir.path())).unwrap_err();
+        assert!(err.to_string().contains("missing"));
+        assert!(err.to_string().contains("session-cycle.md"));
+    }
+
+    #[test]
+    fn audit_managed_okf_bundles_rejects_stale_concept() {
+        let dir = tempfile::tempdir().unwrap();
+        super::install_okf_for(Environment::Codex, Some(dir.path())).unwrap();
+        std::fs::write(
+            dir.path()
+                .join(".codex/skills/agent-doc/okf/dynamic-context.md"),
+            "# stale\n",
+        )
+        .unwrap();
+
+        let err = super::audit_managed_okf_bundles(Some(dir.path())).unwrap_err();
+        assert!(err.to_string().contains("stale"));
+        assert!(err.to_string().contains("dynamic-context.md"));
+    }
+
+    #[test]
+    fn audit_managed_okf_bundles_rejects_extra_managed_markdown() {
+        let dir = tempfile::tempdir().unwrap();
+        super::install_okf_for(Environment::Codex, Some(dir.path())).unwrap();
+        std::fs::write(
+            dir.path().join(".codex/skills/agent-doc/okf/legacy.md"),
+            "# stale\n",
+        )
+        .unwrap();
+
+        let err = super::audit_managed_okf_bundles(Some(dir.path())).unwrap_err();
+        assert!(err.to_string().contains("stale concept markdown"));
+        assert!(err.to_string().contains("legacy.md"));
+    }
+
+    #[test]
+    fn audit_managed_okf_bundles_rejects_unbundled_surface_link() {
+        let dir = tempfile::tempdir().unwrap();
+        super::install_okf_for(Environment::Codex, Some(dir.path())).unwrap();
+        std::fs::create_dir_all(dir.path().join(".codex/skills/agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".codex/skills/agent-doc/SKILL.md"),
+            "# agent-doc\n\nSee [missing](okf/missing.md).\n",
+        )
+        .unwrap();
+
+        let err = super::audit_managed_okf_bundles(Some(dir.path())).unwrap_err();
+        assert!(err.to_string().contains("unbundled OKF file"));
+        assert!(err.to_string().contains("missing.md"));
     }
 
     #[test]

@@ -407,12 +407,13 @@ pub fn reap_all_stale_with_liveness(
 pub fn reap_all_stale(project_root: Option<&Path>, reason: &str, json: bool) -> Result<()> {
     let root = resolve_root(project_root)?;
     let stored_reason = format!("manual_reap_all_stale {reason}");
-    let (reaped, kept) = crate::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
-        &root,
-        false,
-        "admin",
-        &stored_reason,
-    )?;
+    let (reaped, kept) =
+        crate::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
+            &root,
+            false,
+            "admin",
+            &stored_reason,
+        )?;
     let summary = ReapAllStaleSummary {
         project_root: root.display().to_string(),
         reaped,

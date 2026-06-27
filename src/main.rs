@@ -177,18 +177,32 @@ fn is_known_subcommand(arg: &str) -> bool {
 /// Side-effect free so the escalation gate is unit-testable without driving a real
 /// supervisor. The reused `session_actor_cmd::restart` carries its own
 /// self-ancestor guard, so this decision deliberately does NOT re-implement one.
-fn recycle_force_should_escalate_dead_supervisor(
-    force: bool,
-    recycled: bool,
-    target: Option<&Path>,
-) -> bool {
-    if !force || recycled {
+/// Whether a no-op `admin recycle` should escalate to a kill+cold-start
+/// (`session restart-supervisor`). `#recycleforce` / `#recycle-no-boundaries`:
+/// a recycle that found no live controller is almost always an operator trying
+/// to bring a document's session back — either a DEAD supervisor (stale socket)
+/// or a live supervisor whose project controller went away. `admin recycle` only
+/// re-execs a *live* controller onto the fresh binary; it cannot revive those on
+/// its own. Rather than dead-end with "nothing to recycle" and make the operator
+/// pick a different command, escalate automatically whenever a session-document
+/// path was given.
+///
+/// This is intentionally NOT gated on `--force` — recycle should "just work".
+/// `--force` still flows through to `session_actor_cmd::restart`, where it
+/// controls only whether a *busy* live pane is interrupted; the default keeps the
+/// busy-pane guard. The reused `session_actor_cmd::restart` carries the same
+/// self-ancestor guard `admin kill-supervisor` uses, so an escalation never tears
+/// down the caller's own ancestor supervisor, and it routes a live supervisor to
+/// a continue-restart and a dead one to a cold-start — so this single escalation
+/// path covers every degraded state.
+fn recycle_should_escalate_dead_supervisor(recycled: bool, target: Option<&Path>) -> bool {
+    if recycled {
         return false;
     }
     match target {
-        // A document path the operator typed (`agent-doc admin recycle <FILE>
-        // --force`). Require an extension or an existing non-directory file so a
-        // bare project-root directory argument does not get fed to
+        // A document path the operator typed (`agent-doc admin recycle <FILE>`).
+        // Require an extension or an existing non-directory file so a bare
+        // project-root directory argument does not get fed to
         // `session restart-supervisor`, which expects a session document.
         Some(path) => {
             if path.is_dir() {
@@ -3298,20 +3312,30 @@ fn main() -> anyhow::Result<()> {
                         agent_doc_orchestration::project_controller::recycle_controller_force(
                             &root, force,
                         )?;
-                    // `#recycleforce`: when the operator forced the recycle and NO live
-                    // controller answered, this is almost always an attempt to revive a
-                    // DEAD supervisor. Escalate to the kill+cold-start path
-                    // (`session restart-supervisor`) instead of a no-op — but ONLY when
-                    // the operator passed a document path we can cold-start, and only
-                    // under `--force` (default behavior is unchanged). The reused
-                    // `session_actor_cmd::restart` carries the same self-ancestor guard
-                    // `admin kill-supervisor` uses, so a forced escalation never tears
-                    // down the caller's own ancestor supervisor.
-                    let escalate = recycle_force_should_escalate_dead_supervisor(
-                        force,
+                    // `#recycle-no-boundaries`: when NO live controller answered, this
+                    // is almost always an operator trying to bring a document's session
+                    // back (a dead supervisor, or a live supervisor whose controller went
+                    // away). Escalate to the kill+cold-start path
+                    // (`session restart-supervisor`) automatically instead of a dead-end
+                    // no-op, whenever a session-document path was given — no `--force`
+                    // required. `--force` still flows through to the restart, where it
+                    // only governs interrupting a *busy* pane.
+                    //
+                    // Only escalate for an actual session document (one carrying an
+                    // `agent_doc_session` frontmatter id). A path that is not a startable
+                    // session — a stray file, a scratch doc — degrades to the informative
+                    // message instead of hard-failing the `restart` cold-start, so
+                    // `admin recycle <anything>` never errors out where the old no-op
+                    // silently succeeded.
+                    let escalate = recycle_should_escalate_dead_supervisor(
                         recycled,
                         target.as_deref(),
-                    );
+                    ) && target
+                        .as_deref()
+                        .map(|p| {
+                            agent_doc_orchestration::frontmatter_io::read_session_id(p).is_some()
+                        })
+                        .unwrap_or(false);
                     if json {
                         println!(
                             "{}",
@@ -3329,23 +3353,21 @@ fn main() -> anyhow::Result<()> {
                             root.display()
                         );
                     } else if !escalate {
-                        // `#supdead-coldstart-fallback`: a no-op recycle here often
-                        // means the operator is actually trying to revive a DEAD
-                        // supervisor. `admin recycle` only re-execs a *live*
-                        // controller onto the fresh binary; it cannot cold-start a
-                        // dead supervisor. Point at the cold-start remedy instead of
-                        // a bare "nothing to recycle".
+                        // No session-document path to cold-start (a bare project-root /
+                        // `--project-root` form). `admin recycle` can only re-exec a
+                        // *live* controller onto the fresh binary; with none running and
+                        // no document to revive, point at the one-step remedy.
                         println!(
-                            "[admin] recycle: no running controller for {} (nothing to recycle). If a supervisor is DEAD (stale socket), `admin recycle` cannot revive it — cold-start a fresh one with `agent-doc session restart-supervisor <FILE>` (JB \"Recycle Supervisor\") or `Run Agent Doc` on the document. Pass a document path with `--force` to escalate automatically.",
+                            "[admin] recycle: no running controller for {} (nothing to recycle). Pass a session-document path (`agent-doc admin recycle <FILE>`) to cold-start its supervisor automatically.",
                             root.display()
                         );
                     }
                     if escalate {
                         let file = target.as_deref().expect(
-                            "recycle_force_should_escalate_dead_supervisor guarantees a target",
+                            "recycle_should_escalate_dead_supervisor guarantees a target",
                         );
                         eprintln!(
-                            "[admin] recycle --force: no live controller for {} — escalating to a kill+cold-start via `session restart-supervisor {}`",
+                            "[admin] recycle: no live controller for {} — escalating to a kill+cold-start via `session restart-supervisor {}`",
                             root.display(),
                             file.display()
                         );
@@ -3847,43 +3869,29 @@ mod recycle_force_tests {
 
     #[test]
     fn default_recycle_has_no_force() {
+        // The `--force` *flag* still defaults to false; only the busy-pane interrupt
+        // depends on it. Escalation to cold-start no longer requires it
+        // (`#recycle-no-boundaries`).
         let cmd = parse(&["agent-doc", "admin", "recycle"]);
         match cmd {
             Commands::Admin {
                 action: AdminAction::Recycle { force, .. },
-            } => assert!(
-                !force,
-                "default must remain force=false (unchanged behavior)"
-            ),
+            } => assert!(!force, "the --force flag default must remain false"),
             _ => panic!("expected admin recycle subcommand"),
         }
     }
 
     #[test]
-    fn escalation_requires_force_and_no_live_controller_and_a_document_path() {
+    fn escalation_triggers_on_no_live_controller_with_a_document_path() {
         let doc = Path::new("plan.md");
-        // Happy path: forced, no live controller, a document path with an extension.
-        assert!(recycle_force_should_escalate_dead_supervisor(
-            true,
-            false,
-            Some(doc)
-        ));
-        // Not forced → never escalate (default behavior unchanged).
-        assert!(!recycle_force_should_escalate_dead_supervisor(
-            false,
-            false,
-            Some(doc)
-        ));
-        // A live controller answered (recycled==true) → no escalation.
-        assert!(!recycle_force_should_escalate_dead_supervisor(
-            true,
-            true,
-            Some(doc)
-        ));
-        // No positional target (e.g. `--project-root` form) → cannot cold-start.
-        assert!(!recycle_force_should_escalate_dead_supervisor(
-            true, false, None
-        ));
+        // `#recycle-no-boundaries`: no live controller + a session-document path →
+        // escalate to a cold-start automatically, with or without `--force`.
+        assert!(recycle_should_escalate_dead_supervisor(false, Some(doc)));
+        // A live controller answered (recycled==true) → no escalation; the normal
+        // recycle path handled it.
+        assert!(!recycle_should_escalate_dead_supervisor(true, Some(doc)));
+        // No positional target (e.g. `--project-root` form) → nothing to cold-start.
+        assert!(!recycle_should_escalate_dead_supervisor(false, None));
     }
 
     #[test]
@@ -3892,8 +3900,7 @@ mod recycle_force_tests {
         // `session restart-supervisor`.
         let dir = std::env::temp_dir();
         assert!(dir.is_dir());
-        assert!(!recycle_force_should_escalate_dead_supervisor(
-            true,
+        assert!(!recycle_should_escalate_dead_supervisor(
             false,
             Some(dir.as_path())
         ));

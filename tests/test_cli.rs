@@ -1289,6 +1289,11 @@ fn test_admin_recycle_accepts_document_target() {
     assert!(stdout.contains("\"scope\":\"project\""), "{stdout}");
     assert!(stdout.contains(&expected_root), "{stdout}");
     assert!(stdout.contains("\"recycled\":false"), "{stdout}");
+    // `#recycle-no-boundaries`: escalation to a cold-start fires only for an actual
+    // session document (one with an `agent_doc_session` id). This fixture has no
+    // frontmatter, so recycle must degrade to a clean no-op exit (not a hard
+    // `restart` error) with `escalated_cold_start:false`.
+    assert!(stdout.contains("\"escalated_cold_start\":false"), "{stdout}");
 }
 
 #[test]

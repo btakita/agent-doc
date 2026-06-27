@@ -26,7 +26,6 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -62,7 +61,7 @@ I treated `[#qftloss#qftloss]` as the legacy `#qftloss` class, whose current act
 For `#qftlossproof`, the prompt text was preserved in the live-buffer sidecar and current disk state, so I did not find a free-text loss in this cycle. I am leaving `#qftlossproof` open because I did not find the full durable `qdurcrash`/replay proof needed to close that replacement item end-to-end.
 
 No source files changed and no tests were needed. `gh run list --workflow CI --limit 1` returned GitHub 404 for `btakita/agent-loop`, so I could not inspect the latest CI run.
-<!-- agent:boundary:fd7a6ca6 -->
+<!-- agent:boundary:e8934402 -->
 <!-- /agent:exchange -->
 ## Queue
 

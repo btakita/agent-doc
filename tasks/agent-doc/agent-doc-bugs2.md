@@ -34,24 +34,11 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260627-202333.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260627-232757.md`*
 
 Compacted content:
-- Archived 34 response topic(s): do #provauth1 #provauth2 #provauth3; drain #actorprune; drain #qheadstrikeauto; 31 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-- I also tried local clean `make tmux-ci`; it failed because the live test saw this active Codex pane `%0` as `alive-busy` and refused to clear it, so that local live sweep is not a clean signal in this interactive tmux session.
-- `src/agent-doc/specs/06-config.md`, `08-session-routing.md`, `08b-single-process-control-plane.md`, `12-deterministic-simulation.md`, and `process-topology.md` describe the prevention surfaces: append idempotence, editor-IPC queue writes, single-writer topology, and SimWorld coverage.
-- `src/agent-doc/specs/07-closeout-commands.md` records the closeout state-machine expectations for cancel recovery and accepted-conflict replay repair.
-- `src/agent-doc/runbooks/jb-cache-conflict.md` is the main runbook: Accept applies through the Document API; Cancel must fail closed or auto-recover through preflight/write-commit when the response already reached the working tree; Compact Exchange must use component editor IPC when a listener is active; late Accept can replay stale IPC and duplicate a response until the planned fix revalidates against HEAD.
-- Latest GitHub Actions CI run for `201270a4` is `28301694825`; repeated public Actions checks through 2026-06-27 17:20 America/New_York still showed `Status In progress`. `gh` cannot currently poll authenticated logs because its stored token is invalid and the unauthenticated API hit rate/permission limits.
-- `git push origin main` passed.
-- Clean committed worktree `make install-full` passed and installed `agent-doc`/`libagent_doc`.
-- Clean committed worktree `make check` passed: clippy, 5,480 nextest tests, doctests, medium simulation, and Lean build.
-- `cargo test -p agent-doc-orchestration run_queue_maintenance_restrikes_snapshot_struck_live_reemit` passed.
-- `cargo test -p agent-doc-orchestration queue::tests::converge` passed.
-- `cargo test -p agent-doc-orchestration stale_live_reemit` passed.
-- `agent-doc-orchestration/src/preflight/maintenance.rs`: added a maintenance regression for the `#qeditdup` / `#qftloss#qftloss` shape where a struck snapshot line reappears live during the preflight/writeback window.
-- `agent-doc-orchestration/src/queue.rs`: queue convergence now treats a struck snapshot/current representative for the same queue-head identity as authoritative over a stale live re-emit, so the unstruck copy is dropped or re-struck instead of resurrected.
+- Archived 8 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); do #qeditdup and #qftloss/#qftlossproof; #qeditdupguard - gpt-5; 5 more
+- Prior summary/context: prior compacted content: Archived 34 response topic(s): do #provauth1 #provauth2 #provauth3; drain #actorprune; drain...
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
@@ -62,109 +49,14 @@ This is binary-authored diagnostic content, not a user prompt, so it does not re
 Issue class: `ipc_proof_insufficient`
 Affected component: editor IPC / writeback
 
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=2b631eb9-320c-4beb-a958-a5c6606d955c invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=60535 candidate_hash=d439f983a1af78f6bf53f4b138479447d3cc35459f79a2e20ed11d3b6aee36a1 content_ours_len=59263 content_ours_hash=5115e8a8ad9960d748139056313dcd6161dde54800dcbc12c3bd40585bd59a4e doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782591710165
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=7748d77a-629d-4aa5-a589-000e8789ae62 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=27649 candidate_hash=2c5f6a568a51a3a68bc7cad2dd096a712808773c8f70c4beef10c95ab1401bd3 content_ours_len=27274 content_ours_hash=e7495b0f08b897d617eee9980525d9a1d640f6ad4a866cae418211fbb58b64e6 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782598522661
 ```
-
-### Re: do #qeditdup and #qftloss/#qftlossproof — gpt-5
-
-I treated `[#qftloss#qftloss]` as the legacy `#qftloss` class, whose current active replacement is `#qftlossproof`.
-
-`#qeditdup` failed live verification. The current working tree/live-buffer resurrected a queue row that HEAD had already struck: `do [#qeditdup] [#qftloss#qftloss]` came back unstruck during the interrupted preflight/writeback window. The evidence is the latest JetBrains live-buffer sidecar `.agent-doc/live-buffer/f6d9af4a09fc7ed8.jetbrains-52613-d265e059-af8c-421f-a813-9de0ac53521c`, plus ops.log markers for `cycle-1782592777227` (`ipc_proof_insufficient`, `live_prompt_drift_after_preflight`, `preflight_blocked_uncommitted_closeout_drift`, and editor ops). I added `#qeditdupguard` for the deeper editor-edit-during-cycle guard and marked `#qeditdup` done as a failed verification superseded by that focused follow-up.
-
-For `#qftlossproof`, the prompt text was preserved in the live-buffer sidecar and current disk state, so I did not find a free-text loss in this cycle. I am leaving `#qftlossproof` open because I did not find the full durable `qdurcrash`/replay proof needed to close that replacement item end-to-end.
-
-No source files changed and no tests were needed. `gh run list --workflow CI --limit 1` returned GitHub 404 for `btakita/agent-loop`, so I could not inspect the latest CI run.
-
-### Re: #qeditdupguard - gpt-5
-
-Implemented `#qeditdupguard` in `src/agent-doc` and pushed commit `201270a4` (`fix: prevent struck queue head resurrection`) to `origin/main`.
-
-What changed:
-- `agent-doc-orchestration/src/queue.rs`: queue convergence now treats a struck snapshot/current representative for the same queue-head identity as authoritative over a stale live re-emit, so the unstruck copy is dropped or re-struck instead of resurrected.
-- `agent-doc-orchestration/src/preflight/maintenance.rs`: added a maintenance regression for the `#qeditdup` / `#qftloss#qftloss` shape where a struck snapshot line reappears live during the preflight/writeback window.
-
-Verification:
-- `cargo test -p agent-doc-orchestration stale_live_reemit` passed.
-- `cargo test -p agent-doc-orchestration queue::tests::converge` passed.
-- `cargo test -p agent-doc-orchestration run_queue_maintenance_restrikes_snapshot_struck_live_reemit` passed.
-❯ - Clean committed worktree `make check` passed: clippy, 5,480 nextest tests, doctests, medium simulation, and Lean build.
-❯ - Clean committed worktree `make install-full` passed and installed `agent-doc`/`libagent_doc`.
-- `git push origin main` passed.
-- Latest GitHub Actions CI run for `201270a4` is `28301694825`; repeated public Actions checks through 2026-06-27 17:20 America/New_York still showed `Status In progress`. `gh` cannot currently poll authenticated logs because its stored token is invalid and the unauthenticated API hit rate/permission limits.
-- I also tried local clean `make tmux-ci`; it failed because the live test saw this active Codex pane `%0` as `alive-busy` and refused to clear it, so that local live sweep is not a clean signal in this interactive tmux session.
-
-Confidence: high for the requested queue resurrection regression; remote CI conclusion was still pending when this closeout was written.
-
-### Re: JB File Cache Conflict occurrences — gpt-5
-
-> **Queue prompt:** :pushpin: JB `File Cache Conflict` occurrences
-
-I scanned the active task document, backlog/review components, archived done list, and the agent-doc runbooks/specs for `File Cache Conflict`, `jbcc*`, and cache-conflict references.
-
-Current active occurrence: `tasks/agent-doc/agent-doc-bugs2.md` has this free-text queue head, plus active backlog `#kj5flive`, which asks for live JB+VSCode attach/detach and File Cache Conflict / `#6b5h` repro logs after the latest plugin update. I did not find a separate active backlog item that is only named `JB File Cache Conflict`; `#kj5flive` is the live-proof carrier that still mentions it.
-
-Current source-of-truth docs/code contracts:
-- `src/agent-doc/runbooks/jb-cache-conflict.md` is the main runbook: Accept applies through the Document API; Cancel must fail closed or auto-recover through preflight/write-commit when the response already reached the working tree; Compact Exchange must use component editor IPC when a listener is active; late Accept can replay stale IPC and duplicate a response until the planned fix revalidates against HEAD.
-- `src/agent-doc/specs/07-closeout-commands.md` records the closeout state-machine expectations for cancel recovery and accepted-conflict replay repair.
-- `src/agent-doc/specs/06-config.md`, `08-session-routing.md`, `08b-single-process-control-plane.md`, `12-deterministic-simulation.md`, and `process-topology.md` describe the prevention surfaces: append idempotence, editor-IPC queue writes, single-writer topology, and SimWorld coverage.
-
-Historical archived occurrence clusters in `tasks/agent-doc-bugs2.done.md` are: initial Compact Exchange repro/isolation (`#jbccache`, `#jbccfix`, `#jbccreg`, `#jbccdocs`); cancel-branch implementation and proof trail (`#jbccc1`/`#jbccc3`/`#jbccc4`/`#jbccc5`, `#jbcclivecancelresid`, `#0ep7`); late-accept duplicate replay (`#jbccacceptdup`, `#wkbs`); response-outside-exchange corruption (`#jb-cache-cancel-response-outside-exchange`); syntax/highlighting loss after disk load (`#7qfw`, `#jb-file-cache-conflict-syntax-loss`); degraded IPC avoiding raw disk writes (`#ipc-degraded-prefers-file-ipc`); reconnect stale-buffer recovery (`#yzer`, `#1jec`); remaining-trigger instrumentation (`#advr19`); and realtime cutover work removing the post-commit reconcile path that used to feed these dialogs (`#pcwcrt`).
-
-No source files changed for this queue item. Verification was `agent_doc_read` for queue/backlog/review plus a targeted `rg` scan over `tasks/agent-doc/agent-doc-bugs2.md`, `tasks/agent-doc-bugs2.done.md`, `src/agent-doc/runbooks`, `src/agent-doc/specs`, and mirrored skill runbooks.
-
-### Re: JB File Cache Conflict occurrences — gpt-5
-
-> **Queue prompt:** ~~:pushpin: JB `File Cache Conflict` occurrences~~ — auto-struck: answered this cycle (#ftstrike)
-
-The `JB File Cache Conflict` queue head is answered and already struck. I verified the active document components and a targeted repo scan for `File Cache Conflict`, `jbcc*`, `cache-conflict`, and `jb-cache-conflict` references.
-
-Current active carrier: `#kj5flive`, which is still operator-verify work for live JB+VSCode attach/detach and File Cache Conflict / `#6b5h` repro logs after the latest plugin update. I did not find a separate active backlog item solely named `JB File Cache Conflict`.
-
-The current source-of-truth surfaces are `src/agent-doc/runbooks/jb-cache-conflict.md`, `src/agent-doc/specs/07-closeout-commands.md`, `src/agent-doc/specs/06-config.md`, `src/agent-doc/specs/08-session-routing.md`, `src/agent-doc/specs/08b-single-process-control-plane.md`, `src/agent-doc/specs/12-deterministic-simulation.md`, and `src/agent-doc/specs/process-topology.md`. Historical occurrence clusters remain archived in `tasks/agent-doc-bugs2.done.md` under the `#jbcc*`, cancel-recovery, late-accept replay, syntax-loss, degraded-IPC, reconnect-staleness, trigger-instrumentation, and realtime-cutover entries.
-
-No source files changed for this queue item; verification was `agent_doc_read` for queue/exchange/backlog/review plus the targeted `rg` scan.
-
-### Re: Queue residue repair — gpt-5
-
-The answered `JB File Cache Conflict` free-text queue row is now fully struck, so the queue parser no longer treats it as active residue. `session-check` advanced the next queue head to `#syncbarrier`; this repair only touched the session-document queue/closeout state and did not change source files.
-
-### Re: Queue repair closeout — gpt-5
-
-Closed the queue-residue repair after the answered `JB File Cache Conflict` row was fully struck. The queue now correctly presents `#syncbarrier` as the next active head; no source files changed in this repair.
-
-### Re: Queue residue closeout — gpt-5
-
-Moved the answered `monsterrodholders.md issue` free-text residue into a done queue fence and restored `#syncbarrier` as the next active head. The `JB File Cache Conflict` occurrence prompt remains answered and fully struck; this was session-document queue repair only.
-<!-- agent:boundary:26ee5d42 -->
+<!-- agent:boundary:e7d6f4bd -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-~~~done
-:pushpin: JB `Run Agent Doc` on monsterrodholders.md
-```text
-[route] target tmux session: 0
-Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %1 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Summarize recent commits"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782586439553-direct_pane_protected_prompt_input-codex-_1-a0c7b4c8e461.txt
-```
-~~~
-~~~done
-:pushpin: JB `Run Agent Doc`
-```
-[route] target tmux session: 0
-Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %12 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Use /skills to list available skills"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782591358742-direct_pane_protected_prompt_input-codex-_12-39e728d2278f.txt
-```
-~~~
----
-🚧 :pushpin: monsterrodholders.md issue
-```
-• The failed agent-doc write inserted only a few summary bullets instead of a clean Re: #osm-tile-key-provision
-  section. I’m going to fix the task doc with a narrow patch: remove my partial bullets from the compacted summary and
-  add a proper exchange entry before the boundary.
-```
----
-- ~~:pushpin: do [#qeditdup] [#qftloss#qftloss]~~
-- ~~~~:pushpin: JB `File Cache Conflict` occurrences~~ — auto-struck: answered this cycle (#ftstrike)~~
 - :pushpin: do [#syncbarrier]
 - :pushpin: do [#qheadstrikeauto]
 - :pushpin: do [#suprestassoc]
@@ -188,7 +80,6 @@ Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/
 - :pushpin: do [#supstaledetectverify]
 - :pushpin: do [#suptmuxstaleverify]
 - :pushpin: do [#60ev]
-- ~~do [#qeditdupguard]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

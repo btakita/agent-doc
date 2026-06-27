@@ -1889,12 +1889,13 @@ pub(crate) fn normalize_multiline_dedup_text(text: &str) -> String {
 /// `do deploy` lines stay two, but a single committed line re-emitted twice
 /// collapses back to one. Lines are keyed after stripping the cosmetic pin
 /// marker (case-insensitively) so a pin-injected re-emit still collapses; live
-/// and struck (`Completed`) lines are keyed separately so a genuine in-progress
-/// vs done pair survives. Multiline free-text pins (e.g. `:round_pushpin:`
-/// actor-switch paste blocks) are deduped too, keyed on their whitespace-collapsed
-/// text so a verbatim phantom re-emit converges to the authored count
-/// (`#rt83qflood`). `Preset`/`Dispatch`/fence/`Freeform` entries and id-backed
-/// heads are left untouched.
+/// and struck (`Completed`) lines are keyed separately here so a genuine
+/// in-progress vs done pair survives; the later unified lifecycle convergence
+/// still lets struck snapshot evidence dominate stale live re-emits. Multiline
+/// free-text pins (e.g. `:round_pushpin:` actor-switch paste blocks) are deduped
+/// too, keyed on their whitespace-collapsed text so a verbatim phantom re-emit
+/// converges to the authored count (`#rt83qflood`). `Preset`/`Dispatch`/fence/
+/// `Freeform` entries and id-backed heads are left untouched.
 pub fn dedup_free_text_heads(
     entries: &[QueueEntry],
     snapshot_entries: &[QueueEntry],
@@ -1982,7 +1983,8 @@ fn head_shape(prompt: &QueuePrompt) -> HeadShape {
 ///   original pass separation (directive twins are intentional; bare references
 ///   and free-text re-emits collapse).
 /// - **Lifecycle** partitions live vs struck so a genuine "in progress" + "done"
-///   pair of the same work survives.
+///   pair of the same work survives, while snapshot/current struck evidence still
+///   dominates stale live re-emits for the same identity.
 ///
 /// Returns `None` for non-prompt entries (fences, presets, dispatch, freeform),
 /// which convergence leaves untouched.
@@ -2000,6 +2002,41 @@ fn convergence_identity(entry: &QueueEntry) -> Option<ConvergenceKey> {
     let lifecycle = entry_lifecycle(entry)?;
     let identity = crate::queue_item_state_machine::QueueItemIdentity::from_prompt(&prompt.text);
     Some((identity, head_shape(prompt), lifecycle))
+}
+
+fn queue_item_identity(
+    entry: &QueueEntry,
+) -> Option<crate::queue_item_state_machine::QueueItemIdentity> {
+    let prompt = match entry {
+        QueueEntry::Prompt(p) | QueueEntry::Completed(p) => p,
+        _ => return None,
+    };
+    Some(crate::queue_item_state_machine::QueueItemIdentity::from_prompt(&prompt.text))
+}
+
+fn snapshot_struck_representatives(
+    snapshot_entries: &[QueueEntry],
+) -> std::collections::HashMap<crate::queue_item_state_machine::QueueItemIdentity, QueueEntry> {
+    let mut struck = std::collections::HashMap::new();
+    for entry in snapshot_entries {
+        if !matches!(entry, QueueEntry::Completed(_)) {
+            continue;
+        }
+        if let Some(identity) = queue_item_identity(entry) {
+            struck.entry(identity).or_insert_with(|| entry.clone());
+        }
+    }
+    struck
+}
+
+fn current_struck_identities(
+    entries: &[QueueEntry],
+) -> std::collections::HashSet<crate::queue_item_state_machine::QueueItemIdentity> {
+    entries
+        .iter()
+        .filter(|entry| matches!(entry, QueueEntry::Completed(_)))
+        .filter_map(queue_item_identity)
+        .collect()
 }
 
 /// `true` when two same-identity `do [#id]` directive heads are *textually
@@ -2078,8 +2115,12 @@ fn strongest_pin_text<'a>(texts: &[&'a str]) -> &'a str {
 ///   position property carried across the dedup.
 /// - **Intentional duplicates** (`#queue-dedup-destroys-intentional-duplicates`):
 ///   identical `do [#id]` directive twins survive; only re-emit artifacts collapse.
-/// - **Live vs struck**: keyed separately via [`QueueItemLifecycle`], so an
-///   in-progress + done pair of the same work is two lawful states, not a dup.
+/// - **Live vs struck**: a genuine live + struck pair can survive when the
+///   current queue authored both, but terminal evidence from the snapshot/current
+///   queue is monotonic (`Live < Struck`). A stale live re-emit of an already
+///   struck identity is rewritten to the struck representative (or dropped when a
+///   struck representative is already present), so a stale editor buffer cannot
+///   resurrect a retired queue head.
 ///
 /// Returns `Some(converged)` when anything changed, `None` when the queue is
 /// already at its lawful fixpoint (idempotent — safe every cycle). Driving the
@@ -2090,6 +2131,34 @@ pub fn converge_queue_via_lifecycle(
     snapshot_entries: &[QueueEntry],
 ) -> Option<Vec<QueueEntry>> {
     use crate::queue_item_state_machine::{QueueItemEvent, QueueItemMachine, QueueItemState};
+
+    let snapshot_struck = snapshot_struck_representatives(snapshot_entries);
+    let current_struck = current_struck_identities(entries);
+    let mut injected_snapshot_struck =
+        std::collections::HashSet::<crate::queue_item_state_machine::QueueItemIdentity>::new();
+    let mut lifecycle_changed = false;
+    let mut entries_for_convergence = Vec::with_capacity(entries.len());
+    for entry in entries {
+        if let QueueEntry::Prompt(_) = entry
+            && let Some(identity) = queue_item_identity(entry)
+            && let Some(struck_entry) = snapshot_struck.get(&identity)
+        {
+            lifecycle_changed = true;
+            if current_struck.contains(&identity) {
+                // A current struck copy already carries the terminal state; the
+                // live copy is a stale re-emit and should disappear.
+                continue;
+            }
+            if injected_snapshot_struck.insert(identity) {
+                entries_for_convergence.push(struck_entry.clone());
+            }
+            // Additional live copies of the same struck identity are stale
+            // re-emits too; one struck representative is enough.
+            continue;
+        }
+        entries_for_convergence.push(entry.clone());
+    }
+    let entries = entries_for_convergence;
 
     // Authored multiplicity per (identity, lifecycle): how many copies the
     // operator committed in the snapshot. A given identity may lawfully appear
@@ -2172,7 +2241,7 @@ pub fn converge_queue_via_lifecycle(
         std::collections::HashMap::new();
     let mut kept_count: std::collections::HashMap<_, usize> = std::collections::HashMap::new();
     let mut converged = Vec::with_capacity(entries.len());
-    let mut changed = false;
+    let mut changed = lifecycle_changed;
 
     for (idx, entry) in entries.iter().enumerate() {
         let Some(key) = convergence_identity(entry) else {
@@ -2227,7 +2296,9 @@ pub fn converge_queue_via_lifecycle(
             0
         } else if pin_collapsing {
             1
-        } else if shape == HeadShape::Directive {
+        } else if shape == HeadShape::Directive
+            && lifecycle == agent_doc_core::queue_item_lifecycle::QueueItemLifecycle::Live
+        {
             usize::MAX // intentional run-twice: never drop identical directive twins
         } else {
             authored.get(&key).copied().unwrap_or(0).max(1)
@@ -4759,6 +4830,43 @@ mod tests {
         assert!(
             converge_queue_via_lifecycle(&entries, &[]).is_none(),
             "a live + struck pair of the same text is not a duplicate"
+        );
+    }
+
+    /// `#qeditdupguard`: snapshot-terminal queue lifecycle evidence is
+    /// monotonic. A stale editor/live-buffer flush that replays an unstruck copy
+    /// of a head the snapshot already struck must converge back to struck instead
+    /// of resurrecting runnable work.
+    #[test]
+    fn converge_snapshot_struck_dominates_stale_live_reemit() {
+        let snapshot = vec![c(":pushpin: do [#qeditdup] [#qftloss#qftloss]")];
+        let entries = vec![p(":pushpin: do [#qeditdup] [#qftloss#qftloss]")];
+
+        let out = converge(&entries, &snapshot);
+
+        assert_eq!(
+            out,
+            vec![c(":pushpin: do [#qeditdup] [#qftloss#qftloss]")],
+            "a stale live re-emit must render as the snapshot's struck representative"
+        );
+    }
+
+    /// When the current queue already carries the struck representative, an
+    /// adjacent stale live copy is just replay residue and should disappear.
+    #[test]
+    fn converge_current_struck_drops_stale_live_reemit() {
+        let snapshot = vec![c("do [#qeditdup] [#qftloss#qftloss]")];
+        let entries = vec![
+            p("do [#qeditdup] [#qftloss#qftloss]"),
+            c("do [#qeditdup] [#qftloss#qftloss]"),
+        ];
+
+        let out = converge(&entries, &snapshot);
+
+        assert_eq!(
+            out,
+            vec![c("do [#qeditdup] [#qftloss#qftloss]")],
+            "current struck evidence should absorb the stale live duplicate"
         );
     }
 

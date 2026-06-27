@@ -3553,6 +3553,68 @@ mod tests {
     }
 
     #[test]
+    fn run_queue_maintenance_restrikes_snapshot_struck_live_reemit() {
+        // #qeditdupguard: a stale editor/live-buffer flush can replay an
+        // unstruck copy of a queue row that the committed snapshot already
+        // struck. Queue maintenance must converge that row back to `Completed`
+        // instead of making the retired work runnable again.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- ~~:pushpin: do [#qeditdup] [#qftloss#qftloss]~~\n",
+            "- do [#stillopen]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let live_stale_reemit = snapshot_content.replace(
+            "- ~~:pushpin: do [#qeditdup] [#qftloss#qftloss]~~",
+            "- :pushpin: do [#qeditdup] [#qftloss#qftloss]",
+        );
+        std::fs::write(&doc, live_stale_reemit).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let entries = read_queue_entries(&doc);
+        let active: Vec<&str> = entries
+            .iter()
+            .filter_map(|entry| match entry {
+                crate::queue::QueueEntry::Prompt(prompt) => Some(prompt.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        let completed: Vec<&str> = entries
+            .iter()
+            .filter_map(|entry| match entry {
+                crate::queue::QueueEntry::Completed(prompt) => Some(prompt.text.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            !active.iter().any(|text| text.contains("#qeditdup")),
+            "stale live qeditdup head must not stay runnable: active={active:?}"
+        );
+        assert!(
+            completed.iter().any(|text| text.contains("#qeditdup")),
+            "snapshot-struck qeditdup head must remain struck: completed={completed:?}"
+        );
+        assert!(
+            active.iter().any(|text| text.contains("#stillopen")),
+            "unrelated live head must stay runnable: active={active:?}"
+        );
+    }
+
+    #[test]
     fn run_queue_maintenance_mirrors_operator_verify_into_queue_but_keeps_it_nondrainable() {
         // #mirrorall (operator directive 2026-06-18): operator-verify backlog items
         // are mirrored INTO the queue (complete worklist) instead of being skipped,

@@ -180,7 +180,15 @@ No source files changed and no tests were run. This response is only to cross th
 The Codex Stop hook was repeatedly treating inactive queue residue as active session work even though frontmatter is `queue: stop`. I cleared the stopped `agent:queue` component; the actionable items remain open in `agent:backlog`, so no work was marked complete or lost.
 
 No source implementation ran in this closeout step, and no tests were run. This is a document-state repair so the already-answered CRDT/JB free-text prompt stops retriggering the Stop hook.
-<!-- agent:boundary:089a0fb4 -->
+
+### Re: queue convergence and #closeoutstall handoff — gpt-5
+
+Preflight repaired the stale Codex cycle, appended the IPC proof diagnostic as recovery metadata, and converged the queue back to `queue: start` with `#closeoutstall` as the in-progress head. The `#closeoutstall` backlog item and plan path are present, so I refreshed that existing backlog capture rather than adding a duplicate.
+
+`agent-doc plan` classified this turn as a prompt-response/document-state closeout with no repo actions beyond finalize. I left `#closeoutstall` open for the next executable drain cycle, did not mark any backlog item done or gated, and did not run source tests because no source files changed.
+
+Preflight also reported semantic-completion warnings for unrelated backlog/review items (`#kj5flive`, `#crdtauth6`, `#suptmuxstale`); I left those untouched.
+<!-- agent:boundary:3ec37c18 -->
 <!-- /agent:exchange -->
 ## Queue
 

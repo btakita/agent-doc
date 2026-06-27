@@ -1226,6 +1226,93 @@ fn sync_log(msg: &str) {
     }
 }
 
+/// Minimum interval between destructive doctor-repair passes for one tmux
+/// session. Rapid `agent-doc sync` invocations within this window — a
+/// double-pressed `Sync Tmux Layout`, the JB supersede re-run, or any other
+/// burst — skip the destructive `repair_layout` window-op sequence
+/// (`move-window`/`swap-window`/`join-pane`/`resize-window`) that crashes the
+/// tmux server when it storms (`#tmuxsynccrash`). The non-destructive
+/// reconciler still runs so layout/focus stays correct.
+const DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS: u64 = 1500;
+
+/// Pure throttle decision: `true` ⇒ skip the destructive repair this pass.
+/// `last_ms` is the timestamp of the previous destructive repair for this
+/// session (if any). Throttle only when the previous repair is strictly within
+/// `min_interval_ms` of `now_ms`; a missing or older stamp runs the repair.
+fn destructive_repair_throttled(last_ms: Option<u64>, now_ms: u64, min_interval_ms: u64) -> bool {
+    match last_ms {
+        // Only throttle when the stamp is in the past and within the window.
+        // A future stamp (backward clock skew) is treated as stale → run.
+        Some(last) if now_ms >= last => now_ms - last < min_interval_ms,
+        _ => false,
+    }
+}
+
+fn destructive_repair_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn sanitize_stamp_component(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Stamp path keyed by BOTH the tmux server socket and the session name. The
+/// socket key keeps isolated test servers (each a unique socket) from sharing a
+/// stamp with each other or with the default production server, so the rate
+/// limit is per real server+session.
+fn destructive_repair_stamp_path(server_socket: Option<&str>, session_name: &str) -> Option<PathBuf> {
+    let dir = std::env::current_dir().ok()?.join(".agent-doc");
+    if !dir.is_dir() {
+        return None;
+    }
+    let socket = sanitize_stamp_component(server_socket.unwrap_or("default"));
+    let session = sanitize_stamp_component(session_name);
+    Some(dir.join(format!("sync-repair-{socket}-{session}.stamp")))
+}
+
+/// Check the per-server-per-session destructive-repair stamp. Returns `true`
+/// when a destructive repair ran within `DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS` (so
+/// this pass should skip it); otherwise records a fresh stamp and returns
+/// `false`. Failing to resolve the stamp path (no `.agent-doc/`) never throttles.
+fn throttle_destructive_repair(tmux: &Tmux, session_name: &str) -> bool {
+    let Some(path) =
+        destructive_repair_stamp_path(tmux.server_socket.as_deref(), session_name)
+    else {
+        return false;
+    };
+    let now = destructive_repair_now_ms();
+    let last = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok());
+    if destructive_repair_throttled(last, now, DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS) {
+        sync_log(&format!(
+            "destructive_repair_throttled session={} last={:?} now={} min_ms={}",
+            session_name, last, now, DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS
+        ));
+        return true;
+    }
+    if let Err(e) = std::fs::write(&path, now.to_string()) {
+        eprintln!(
+            "[sync] warning: could not write destructive-repair stamp {}: {}",
+            path.display(),
+            e
+        );
+    }
+    false
+}
+
 fn normalize_scope_arg(value: Option<&str>) -> Option<&str> {
     value.and_then(|s| {
         let trimmed = s.trim();
@@ -1895,7 +1982,32 @@ fn run_with_options_internal(
     } else {
         None
     };
-    if full_sync {
+    // `#tmuxsynccrash`: gate the destructive doctor repair behind a per-session
+    // rate limit. A rapid burst of full syncs (double-pressed `Sync Tmux
+    // Layout`, the JB supersede re-run, interleaved triggers) otherwise storms
+    // tmux with `move-window`/`swap-window`/`join-pane`/`resize-window` ops and
+    // crashes the server. Decide once and apply to BOTH the pre- and
+    // post-reconcile repair so a single gesture still runs its full pass; only
+    // cross-invocation bursts are throttled. The reconciler always runs.
+    let run_doctor_repair = if full_sync {
+        match target_session
+            .clone()
+            .or_else(|| current_tmux_session_name(tmux))
+        {
+            Some(session) if throttle_destructive_repair(tmux, &session) => {
+                let message = format!(
+                    "[sync] doctor repair throttled for session `{session}` (within {DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS}ms of a prior repair); running reconcile only (#tmuxsynccrash)"
+                );
+                eprintln!("{message}");
+                sync_log(&message);
+                false
+            }
+            _ => true,
+        }
+    } else {
+        false
+    };
+    if run_doctor_repair {
         if let Some(file) = doctor_repair_candidate.as_deref() {
             let notes = repair_file_state_with_tmux(tmux, file)?;
             for note in notes {
@@ -3140,7 +3252,7 @@ fn run_with_options_internal(
     if let Err(e) = resync::run(false, None, None) {
         eprintln!("[sync] warning: post-sync resync failed: {}", e);
     }
-    if full_sync {
+    if run_doctor_repair {
         if let Some(file) = doctor_repair_candidate.as_deref() {
             let notes = repair_file_state_with_tmux(tmux, file)?;
             for note in notes {
@@ -5022,6 +5134,24 @@ mod tests {
     use crate::sessions::IsolatedTmux;
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
+    // `#tmuxsynccrash`: a destructive doctor repair within the min interval of a
+    // prior one must be throttled (skipped) so a rapid `Sync Tmux Layout` burst /
+    // supersede re-run cannot storm tmux into a crash.
+    #[test]
+    fn destructive_repair_throttled_within_interval_only() {
+        let min = DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS;
+        // No prior repair → never throttled.
+        assert!(!destructive_repair_throttled(None, 10_000, min));
+        // Same instant and strictly inside the window → throttled (skip).
+        assert!(destructive_repair_throttled(Some(10_000), 10_000, min));
+        assert!(destructive_repair_throttled(Some(10_000), 10_000 + min - 1, min));
+        // Exactly at and beyond the interval → run again.
+        assert!(!destructive_repair_throttled(Some(10_000), 10_000 + min, min));
+        assert!(!destructive_repair_throttled(Some(10_000), 10_000 + min + 500, min));
+        // Clock skew (now < last) must not panic and must not throttle forever.
+        assert!(!destructive_repair_throttled(Some(10_000), 9_000, min));
+    }
+
     #[test]
     fn planned_stash_window_indices_packs_overflow_after_agent_doc() {
         let windows = vec![

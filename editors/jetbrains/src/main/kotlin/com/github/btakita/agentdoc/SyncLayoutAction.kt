@@ -357,8 +357,14 @@ class SyncLayoutAction : AnAction() {
                     if (lib != null &&
                         shouldRerunAfterSupersede(heldGuard, lib.agent_doc_sync_check_generation(myGen))
                     ) {
-                        LOG.info("[sync] re-running after supersede (a newer sync arrived during this one)")
-                        syncLayout(project, notify = false, noAutostart = noAutostart)
+                        // `#tmuxsynccrash`: the supersede re-run only needs to apply the
+                        // newer editor layout's focus/placement — the destructive doctor
+                        // repair already ran in the superseded pass. Force the re-run
+                        // passive (`--no-autostart`, no doctor repair) so a rapid manual
+                        // sync cannot loop the destructive window-op sequence that crashes
+                        // the tmux server. The binary also rate-limits this defensively.
+                        LOG.info("[sync] re-running after supersede (passive, a newer sync arrived during this one)")
+                        syncLayout(project, notify = false, noAutostart = true)
                     }
                 }
             }.start()

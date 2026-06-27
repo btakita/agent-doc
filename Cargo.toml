@@ -3,7 +3,7 @@ members = ["agent-doc-core", "agent-doc-sqlite", "agent-doc-orchestration", "age
 
 [package]
 name = "agent-doc"
-version = "0.34.60"
+version = "0.34.61"
 edition = "2024"
 description = "Interactive document sessions with AI agents"
 license = "MIT"
@@ -28,9 +28,9 @@ name = "agent-doc"
 path = "src/main.rs"
 
 [dependencies]
-agent-doc-core = { path = "agent-doc-core", version = "0.34.60" }
-agent-doc-markdown-ast = { path = "agent-doc-markdown-ast", version = "0.34.60" }
-agent-doc-orchestration = { path = "agent-doc-orchestration", version = "0.34.60" }
+agent-doc-core = { path = "agent-doc-core", version = "0.34.61" }
+agent-doc-markdown-ast = { path = "agent-doc-markdown-ast", version = "0.34.61" }
+agent-doc-orchestration = { path = "agent-doc-orchestration", version = "0.34.61" }
 anyhow = "1"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
@@ -64,7 +64,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 [dev-dependencies]
 # Enable orchestration's in-process controller test short-circuits for the CLI
 # shell's own tests (project_controller moved to orchestration in #bz6s).
-agent-doc-orchestration = { path = "agent-doc-orchestration", version = "0.34.60", features = ["test-support"] }
+agent-doc-orchestration = { path = "agent-doc-orchestration", version = "0.34.61", features = ["test-support"] }
 assert_cmd = "2"
 existence = "0.4"
 filetime = "0.2"

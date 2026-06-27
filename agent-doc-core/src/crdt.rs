@@ -941,11 +941,58 @@ fn reconcile_component(
         return None;
     }
     let (ours_open, ours_body, ours_close) = component_framing(ours_text)?;
-    let (_, theirs_body, _) = component_framing(theirs_text)?;
-    let base_body = base_text.and_then(|t| component_framing(t).map(|(_, b, _)| b));
+    let (theirs_open, theirs_body, theirs_close) = component_framing(theirs_text)?;
+    let base_framing = base_text.and_then(component_framing);
+    let base_body = base_framing.map(|(_, b, _)| b);
 
     let merged_body = reconcile_component_body(name, base_body, ours_body, theirs_body)?;
-    Some(format!("{ours_open}{merged_body}{ours_close}"))
+    // `#qmarkerauth`: the component marker (`<!-- agent:name attrs -->` and its
+    // closing counterpart) carries OPERATOR-authored configuration — priority /
+    // preset / `go` / queue activation and any custom attributes. It is
+    // operator-owned, so reconcile it operator-authoritatively: an operator
+    // attribute edit on `theirs` (the live editor / disk side) must never be
+    // reverted to `ours`' marker. Previously this unconditionally re-framed with
+    // `ours_open`/`ours_close`, so adding an attribute to `agent:queue` was silently
+    // deleted on the next merge. Mirrors frontmatter field-wise authority
+    // (`#fmreset`) and the list-order theirs-spine (`#qauthorder`).
+    let merged_open = reconcile_marker_operator_authoritative(
+        base_framing.map(|(o, _, _)| o),
+        ours_open,
+        theirs_open,
+    );
+    let merged_close = reconcile_marker_operator_authoritative(
+        base_framing.map(|(_, _, c)| c),
+        ours_close,
+        theirs_close,
+    );
+    Some(format!("{merged_open}{merged_body}{merged_close}"))
+}
+
+/// Reconcile one component marker line operator-authoritatively (`#qmarkerauth`).
+///
+/// The marker (`<!-- agent:name attrs -->` / `<!-- /agent:name -->`) is
+/// operator-authored configuration, so `theirs` (the live editor / disk side) wins
+/// over `ours` (the agent / snapshot side) whenever the operator changed it; an
+/// agent-side change is honored only when the operator left the marker untouched
+/// relative to base. With no base, `theirs` (operator) is authoritative. This is
+/// the marker analogue of the frontmatter field-wise merge (`#fmreset`): an
+/// operator edit is never reverted by the CRDT/snapshot path.
+fn reconcile_marker_operator_authoritative<'a>(
+    base: Option<&str>,
+    ours: &'a str,
+    theirs: &'a str,
+) -> &'a str {
+    if ours == theirs {
+        return ours;
+    }
+    match base {
+        // Operator changed the marker relative to base → operator edit wins.
+        Some(b) if theirs != b => theirs,
+        // Operator left it as base; only the agent changed it → agent change wins.
+        Some(_) => ours,
+        // No base epoch: the operator/editor side is authoritative for markers.
+        None => theirs,
+    }
 }
 
 /// Three-way reconcile a component body's keyed children. `None` falls back to
@@ -2925,6 +2972,63 @@ Second answer line three.
         assert!(
             !exchange_body.contains("[#b2]"),
             "queue content spliced into exchange:\n{exchange_body}"
+        );
+    }
+
+    #[test]
+    fn merge_by_component_preserves_operator_marker_attribute_qmarkerauth() {
+        // #qmarkerauth: the operator adds attributes to the `agent:queue` marker
+        // (`<!-- agent:queue priority go -->`). The agent side (ours) still has the
+        // base marker. The merge MUST keep the operator's marker attributes — never
+        // revert them to ours' marker (the "adding an attribute deletes it" bug).
+        let mk = |marker: &str| -> String {
+            format!("---\nagent_doc_format: template\n---\n\n## Queue\n\n{marker}\n- do [#a1]\n<!-- /agent:queue -->\n")
+        };
+        let base = mk("<!-- agent:queue -->");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let ours = mk("<!-- agent:queue -->");
+        let theirs = mk("<!-- agent:queue priority go -->");
+
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert!(
+            merged.contains("<!-- agent:queue priority go -->"),
+            "operator marker attribute lost (reverted to ours' marker):\n{merged}"
+        );
+    }
+
+    #[test]
+    fn reconcile_marker_operator_authoritative_resolution() {
+        // Operator changed the marker (theirs != base) → operator wins.
+        assert_eq!(
+            reconcile_marker_operator_authoritative(
+                Some("<!-- agent:queue -->"),
+                "<!-- agent:queue -->",
+                "<!-- agent:queue priority -->"
+            ),
+            "<!-- agent:queue priority -->"
+        );
+        // Operator left it at base; only the agent changed it → agent wins.
+        assert_eq!(
+            reconcile_marker_operator_authoritative(
+                Some("<!-- agent:queue -->"),
+                "<!-- agent:queue go -->",
+                "<!-- agent:queue -->"
+            ),
+            "<!-- agent:queue go -->"
+        );
+        // No base epoch → operator (theirs) is authoritative.
+        assert_eq!(
+            reconcile_marker_operator_authoritative(
+                None,
+                "<!-- agent:queue -->",
+                "<!-- agent:queue preset=\"#x\" -->"
+            ),
+            "<!-- agent:queue preset=\"#x\" -->"
+        );
+        // Identical markers → unchanged.
+        assert_eq!(
+            reconcile_marker_operator_authoritative(None, "<!-- x -->", "<!-- x -->"),
+            "<!-- x -->"
         );
     }
 

@@ -670,6 +670,30 @@ fn parse_doc_nodes(doc: &str) -> Option<Vec<DocNode>> {
     Some(nodes)
 }
 
+/// Reconcile one component marker line operator-authoritatively (`#qmarkerauth`).
+///
+/// The marker (`<!-- agent:name attrs -->` / `<!-- /agent:name -->`) is
+/// operator-authored configuration (priority / preset / `go` / activation / custom
+/// attributes), so `theirs` (the live editor / disk side) wins over `ours` (the
+/// agent / snapshot side) whenever the operator changed it; an agent-side change is
+/// honored only when the operator left the marker at base. With no base, `theirs`
+/// (operator) is authoritative. The marker analogue of the field-wise frontmatter
+/// merge (`#fmreset`): an operator marker edit is never reverted by the merge path.
+fn reconcile_marker_operator_authoritative<'a>(
+    base: Option<&str>,
+    ours: &'a str,
+    theirs: &'a str,
+) -> &'a str {
+    if ours == theirs {
+        return ours;
+    }
+    match base {
+        Some(b) if theirs != b => theirs,
+        Some(_) => ours,
+        None => theirs,
+    }
+}
+
 /// The ordered component-name sequence of a node list (for structural pairing).
 fn component_name_sequence(nodes: &[DocNode]) -> Vec<&str> {
     nodes
@@ -1107,14 +1131,27 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
         return CellMergeOutcome::fallback();
     }
 
-    // Index base occurrences by (component, occurrence) for per-cell base resolution.
+    // Index base occurrences + framings by (component, occurrence) for per-cell
+    // base resolution. The framing map (`#qmarkerauth`) lets the component branch
+    // reconcile the operator-owned marker line 3-way instead of always reframing
+    // with ours' marker.
     let mut base_by_key: std::collections::HashMap<(String, usize), &ComponentOccurrence> =
         std::collections::HashMap::new();
+    let mut base_framing_by_key: std::collections::HashMap<(String, usize), &ComponentFraming> =
+        std::collections::HashMap::new();
     for n in &base_nodes {
-        if let DocNode::Component { occurrence, .. } = n {
+        if let DocNode::Component {
+            framing,
+            occurrence,
+        } = n
+        {
             base_by_key.insert(
                 (occurrence.component.clone(), occurrence.occurrence),
                 occurrence,
+            );
+            base_framing_by_key.insert(
+                (occurrence.component.clone(), occurrence.occurrence),
+                framing,
             );
         }
     }
@@ -1173,7 +1210,8 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
                     occurrence: o_occ,
                 },
                 DocNode::Component {
-                    occurrence: t_occ, ..
+                    framing: t_framing,
+                    occurrence: t_occ,
                 },
             ) => {
                 // Splittability parity with the legacy `reconcile_component_body`
@@ -1240,11 +1278,29 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
                 }
                 all_conflicts.extend(conflicts);
                 // Recombine the body losslessly from the merged item values, then
-                // reframe inside ours' open/close markers.
+                // reframe with the operator-authoritative marker (`#qmarkerauth`).
+                // Previously this always reframed with OURS' marker, so an operator
+                // attribute edit on the `<!-- agent:queue … -->` marker was silently
+                // deleted on the next merge. The marker is operator-owned config, so
+                // an operator change (theirs ≠ base) wins; an agent change wins only
+                // when the operator left the marker at base.
                 let body: String = merged_items.iter().map(|(_, v)| v.as_str()).collect();
-                out.push_str(&o_framing.open);
+                let base_framing = base_framing_by_key
+                    .get(&(o_occ.component.clone(), o_occ.occurrence))
+                    .copied();
+                let open = reconcile_marker_operator_authoritative(
+                    base_framing.map(|f| f.open.as_str()),
+                    &o_framing.open,
+                    &t_framing.open,
+                );
+                let close = reconcile_marker_operator_authoritative(
+                    base_framing.map(|f| f.close.as_str()),
+                    &o_framing.close,
+                    &t_framing.close,
+                );
+                out.push_str(open);
                 out.push_str(&body);
-                out.push_str(&o_framing.close);
+                out.push_str(close);
             }
             // Shape mismatch despite equal name sequences (interstitial vs
             // component): structural — fall back.
@@ -2705,6 +2761,47 @@ working on it
         let o = char_span_edit(&base, &"abXXef".chars().collect::<Vec<_>>()).unwrap();
         let t = char_span_edit(&base, &"abYYef".chars().collect::<Vec<_>>()).unwrap();
         assert!(ranges_overlap(&o, &t), "same middle region overlaps");
+    }
+
+    #[test]
+    fn merge_3way_preserves_operator_marker_attribute_qmarkerauth() {
+        // #qmarkerauth: the operator adds attributes to the agent:queue marker
+        // (`<!-- agent:queue priority go -->`) on the live/disk (theirs) side. The
+        // agent (ours) side still has the base marker. The cell merge MUST keep the
+        // operator's marker attributes — never reframe with ours' bare marker (the
+        // "adding an attribute to agent:queue deletes the attribute" bug).
+        let base = "<!-- agent:queue -->\n- do [#beta] task\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- do [#beta] task\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:queue priority go -->\n- do [#beta] task\n<!-- /agent:queue -->\n";
+        let out = merge_3way(base, ours, theirs);
+        assert!(!out.fell_back, "should not fall back: {out:?}");
+        assert!(
+            out.merged_text
+                .contains("<!-- agent:queue priority go -->"),
+            "operator marker attribute lost (reverted to ours' marker): {}",
+            out.merged_text
+        );
+    }
+
+    #[test]
+    fn merge_3way_keeps_agent_marker_when_operator_left_it_at_base_qmarkerauth() {
+        // The inverse: only the AGENT (ours) changed the marker; the operator left
+        // it at base. The agent change is honored (operator didn't touch it).
+        let base = "<!-- agent:queue -->\n- do [#beta] task\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue go -->\n- do [#beta] task\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:queue -->\n- do [#beta] task EDITED\n<!-- /agent:queue -->\n";
+        let out = merge_3way(base, ours, theirs);
+        assert!(!out.fell_back, "should not fall back: {out:?}");
+        assert!(
+            out.merged_text.contains("<!-- agent:queue go -->"),
+            "agent marker change lost: {}",
+            out.merged_text
+        );
+        assert!(
+            out.merged_text.contains("EDITED"),
+            "operator body edit lost: {}",
+            out.merged_text
+        );
     }
 
     /// (a) End-to-end with the opcapture gate ON: two DISJOINT-region edits to the

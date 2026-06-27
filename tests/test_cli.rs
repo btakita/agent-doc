@@ -769,41 +769,19 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // label string — not a new flow guard boundary.
         ("agent-doc-orchestration/src/git.rs", "guard_") => 19,
         ("agent-doc-orchestration/src/git/normalize.rs", "guard_") => 1,
-        // +1 (`reason=committed_content_lost`): #pcwc post-commit auto-reconcile
-        // logs when it restored the working tree to HEAD because committed content
-        // was dropped with no new user work (vs a preserved carry-forward superset).
-        // +2 (`reason=no_listener`, `reason=no_ack`): #pcwc post-commit editor-buffer
-        // refresh logs when it skipped the IPC push back to the IDE because no
-        // listener was active or the plugin sent no ack after the HEAD-authoritative
-        // working-tree repair (so the IDE stops writing the stale buffer back).
-        // +2 (`reason=clear_carry_forward_drift`, `reason={e}`): #jb-editor-save-resolves-drift
-        // post-commit editor flush logs whether it asked the live plugin to save its
-        // (carry-forward-superset) buffer to clear the dirty flag, or skipped/failed —
-        // routed through `flush_editor_buffer_to_clear_drift`.
-        // +2 (file-signal `reason=clear_carry_forward_drift`, `reason={e}`):
-        // #jbeditorsavedrift-vscode adds a file-based `save-document.signal` fallback
-        // in the same `flush_editor_buffer_to_clear_drift` flow for editors that watch
-        // `.agent-doc/patches/` (VS Code) instead of the socket (JetBrains).
-        // +2 (#pcwcdiskfree): post-commit auto-reconcile now logs which
-        // transport it used (`transport=editor_ipc_skipped_disk_write` when a JB
-        // listener is active vs `transport=disk` headless), so a hot editor
-        // buffer no longer triggers `File Cache Conflict`. Each branch keeps its
-        // own `reason=committed_content_lost transport=…` log line, replacing
-        // the prior single unconditional `reason=committed_content_lost`.
-        // +2 (`#pcwcwarn`): the per-component stale-exchange reconcile logs
-        // `reason=stale_editor_exchange transport=…` on both the editor-IPC and
-        // disk transports, the INVERSE of `#qpcwcmerge` (HEAD wins inside the
-        // agent-owned `exchange`, editor wins outside it).
-        // +2 (`#pzjy`): the per-component stale-queue reconcile logs
-        // `reason=stale_editor_queue_resurrection transport=…` on both the
-        // editor-IPC and disk transports so committed completed queue rows win
-        // over stale live-buffer unstrikes before the generic editor flush.
-        // +3 (`#editorbufwin` P2): one production
-        // `reason=preserved_queue_addition_replay_neutralized` marker plus two
-        // regression assertions prove replay-neutralized queue additions are
-        // committed only after closeout recovery evidence, not during ordinary
-        // independent queue edits.
-        ("agent-doc-orchestration/src/git.rs", "reason=") => 20,
+        // `#pcwcrt`: the legacy post-commit working-tree revert tower
+        // (`postcommit_worktree_lost_committed_content` / `send_postcommit_editor_refresh`
+        // and their transport-tagged reconcile logs: `reason=committed_content_lost`,
+        // `reason=no_listener`/`reason=no_ack`, `reason=clear_carry_forward_drift`,
+        // `reason=stale_editor_exchange`, `reason=stale_editor_queue_resurrection`)
+        // was removed in favor of observe-only post-commit drift handling — the binary
+        // no longer silently reverts an operator working-tree edit back to HEAD. That
+        // drops the historical `reason=` annotations from 20 to the 7 that survive on
+        // the non-reverting paths: 3 generic `reason=` log formats, `reason=already_current`,
+        // and the 3 `#editorbufwin` P2 `reason=preserved_queue_addition_replay_neutralized`
+        // markers/assertions (replay-neutralized queue additions are committed only after
+        // closeout recovery evidence, not during ordinary independent queue edits).
+        ("agent-doc-orchestration/src/git.rs", "reason=") => 7,
         ("src/orchestrate.rs", "guard_") => 0,
         ("src/orchestrate/dag.rs", "guard_") => 2,
         // +1 (`reason=probe_inspection_only`): `preflight --probe` logs why it

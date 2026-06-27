@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-orchestration"
-version = "0.34.60"
+version = "0.34.61"
 edition = "2024"
 description = "Orchestration layer for agent-doc (routing, git, sessions, IPC, supervision, sync) — sits between the CLI and agent-doc-core"
 license = "MIT"

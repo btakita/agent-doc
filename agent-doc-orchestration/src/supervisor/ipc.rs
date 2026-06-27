@@ -205,6 +205,19 @@ pub enum IpcMethod {
         /// Base64-encoded yrs update bytes produced by the editor's FFI node.
         update_b64: String,
     },
+    /// Pull pending supervisor-to-editor updates for this replica. Updates are
+    /// retained until the editor applies and ACKs them via `replica_ack`.
+    ReplicaPull {
+        file: String,
+        identity: String,
+    },
+    /// ACK one pending update after the editor has applied it locally.
+    ReplicaAck {
+        file: String,
+        identity: String,
+        patch_id: String,
+        generation: u64,
+    },
     /// Push an ephemeral awareness/presence update (cursor/selection). NOT part
     /// of the document CRDT, never persisted, never committed. Replies with the
     /// current presence snapshot (base64 JSON) for the other live replicas.
@@ -570,6 +583,8 @@ mod tests {
             IpcMethod::ReplicaRegister { .. }
             | IpcMethod::ReplicaDeregister { .. }
             | IpcMethod::ReplicaUpdate { .. }
+            | IpcMethod::ReplicaPull { .. }
+            | IpcMethod::ReplicaAck { .. }
             | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
         })
         .expect("start test handler")
@@ -679,7 +694,10 @@ mod tests {
         if !sock.exists() {
             std::fs::write(&sock, b"").unwrap();
         }
-        assert!(sock.exists(), "stale socket path should exist for the probe");
+        assert!(
+            sock.exists(),
+            "stale socket path should exist for the probe"
+        );
         assert_eq!(probe_socket(&sock), SocketLiveness::Dead);
     }
 
@@ -758,7 +776,38 @@ mod tests {
             identity: "vscode:99".into(),
             update_b64: "AAEC".into(),
         };
-        assert_eq!(serde_json::from_str::<IpcMethod>(&serde_json::to_string(&upd).unwrap()).unwrap(), upd);
+        assert_eq!(
+            serde_json::from_str::<IpcMethod>(&serde_json::to_string(&upd).unwrap()).unwrap(),
+            upd
+        );
+
+        let pull = IpcMethod::ReplicaPull {
+            file: "plan.md".into(),
+            identity: "vscode:99".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&pull).unwrap(),
+            r#"{"method":"replica_pull","file":"plan.md","identity":"vscode:99"}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<IpcMethod>(&serde_json::to_string(&pull).unwrap()).unwrap(),
+            pull
+        );
+
+        let ack = IpcMethod::ReplicaAck {
+            file: "plan.md".into(),
+            identity: "vscode:99".into(),
+            patch_id: "crdt:1:2:3".into(),
+            generation: 3,
+        };
+        assert_eq!(
+            serde_json::to_string(&ack).unwrap(),
+            r#"{"method":"replica_ack","file":"plan.md","identity":"vscode:99","patch_id":"crdt:1:2:3","generation":3}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<IpcMethod>(&serde_json::to_string(&ack).unwrap()).unwrap(),
+            ack
+        );
 
         // ...and the existing control-plane variants are byte-for-byte unchanged
         // on the wire (additive enum extension — no method tag collision).

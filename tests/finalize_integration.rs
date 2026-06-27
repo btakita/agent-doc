@@ -945,6 +945,7 @@ fn write_commit_empty_stdin_with_pending_add_commits_pending_only_change() {
             "write",
             "--commit",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--pending-add",
             "pending-only repair item",
         ])
@@ -994,6 +995,7 @@ fn write_commit_visible_response_retry_preserves_pending_add() {
             "write",
             "--commit",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--pending-add",
             "[#retry] Retry-visible response must keep backlog mutation",
         ])
@@ -1038,6 +1040,7 @@ fn write_commit_empty_stdin_with_done_commits_pending_only_reap() {
             "write",
             "--commit",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--done",
             "done1",
         ])
@@ -1102,6 +1105,7 @@ fn finalize_writes_and_commits_template_response() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--pending-add",
             "follow up task",
         ])
@@ -1413,6 +1417,7 @@ fn finalize_rejects_status_only_response_for_imperative_directive() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--baseline-file",
             baseline.to_str().unwrap(),
         ])
@@ -1450,6 +1455,7 @@ fn finalize_rejects_status_only_response_for_natural_language_pending_task() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--baseline-file",
             baseline.to_str().unwrap(),
         ])
@@ -1544,6 +1550,7 @@ fn finalize_prewrite_guard_failure_leaves_cycle_open_for_retry() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--baseline-file",
             baseline.to_str().unwrap(),
         ])
@@ -1580,6 +1587,7 @@ fn finalize_prewrite_guard_failure_leaves_cycle_open_for_retry() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--baseline-file",
             baseline.to_str().unwrap(),
             "--pending-add",
@@ -1620,6 +1628,7 @@ fn finalize_pending_add_multiple_flags_keep_cli_order_at_top() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--pending-add",
             "id=first first task",
             "--pending-add",
@@ -1697,6 +1706,7 @@ fn finalize_next_steps_pending_adds_keep_priority_order_and_status_top() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--pending-add",
             "id=first first prioritized next step",
             "--pending-add",
@@ -1832,6 +1842,7 @@ fn finalize_reaps_completed_pending_items_in_same_closeout_commit() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--done",
             "done1",
         ])
@@ -1885,6 +1896,7 @@ fn finalize_accepts_hash_prefixed_pending_done_id() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--done",
             "#done1",
         ])
@@ -1923,6 +1935,7 @@ fn finalize_accepts_deprecated_pending_done_alias_with_warning() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--pending-done",
             "done1",
         ])
@@ -1957,6 +1970,7 @@ fn finalize_pending_done_is_noop_when_item_was_already_reaped() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--done",
             "done1",
         ])
@@ -2062,6 +2076,7 @@ fn finalize_fails_closed_on_concurrent_prompt_added_after_baseline() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--baseline-file",
             baseline.to_str().unwrap(),
             "--stream",
@@ -2123,6 +2138,7 @@ fn finalize_forward_merges_late_comment_tail_edit_outside_exchange() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--baseline-file",
             baseline.to_str().unwrap(),
             "--stream",
@@ -2188,6 +2204,7 @@ fn finalize_preserves_current_duplicate_prompt_html_comment_body() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--baseline-file",
             baseline.to_str().unwrap(),
             "--stream",
@@ -2241,6 +2258,7 @@ fn finalize_ignores_concurrent_duplicate_prompt_comment_for_session_check() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--baseline-file",
             baseline.to_str().unwrap(),
             "--stream",
@@ -2325,6 +2343,7 @@ fn finalize_preserves_compacted_exchange_ipc_scratch_comment() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--baseline-file",
             baseline.to_str().unwrap(),
             "--stream",
@@ -2395,6 +2414,7 @@ fn finalize_preserves_baseline_prompt_html_comment_body() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--baseline-file",
             baseline.to_str().unwrap(),
             "--stream",
@@ -2450,6 +2470,7 @@ fn finalize_pending_add_appends_to_active_go_backlog_queue_after_consuming_head(
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--baseline-file",
             baseline.to_str().unwrap(),
             "--done",
@@ -2504,6 +2525,7 @@ fn finalize_pending_add_multiple_flags_keep_cli_order_in_active_go_queue() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--baseline-file",
             baseline.to_str().unwrap(),
             "--done",
@@ -2579,6 +2601,7 @@ fn finalize_consumes_first_queue_prompt_after_commit() {
             doc.to_str().unwrap(),
             "--baseline-file",
             baseline.to_str().unwrap(),
+            "--force-disk",
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: do #fix1 — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
@@ -2625,6 +2648,7 @@ fn finalize_skips_queue_consumption_when_unrelated_prompt_is_already_in_baseline
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--baseline-file",
             baseline.to_str().unwrap(),
         ])
@@ -2669,6 +2693,7 @@ fn finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id(
             doc.to_str().unwrap(),
             "--baseline-file",
             baseline.to_str().unwrap(),
+            "--force-disk",
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: #spec-test-build-install-commit-push — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
@@ -2728,6 +2753,7 @@ fn finalize_echoes_consumed_free_text_queue_prompt_into_response() {
             doc.to_str().unwrap(),
             "--baseline-file",
             baseline.to_str().unwrap(),
+            "--force-disk",
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: queue prompt copy — gpt-5\n\n> **Queue prompt:**\n>\n> Make queue responses copy the originating prompt.\n> This line documents the request.\n\nImplemented and verified.\n<!-- /patch:exchange -->\n",
@@ -2885,6 +2911,7 @@ fn finalize_consumes_queue_prompt_after_dispatch_directive() {
             doc.to_str().unwrap(),
             "--baseline-file",
             baseline.to_str().unwrap(),
+            "--force-disk",
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: do #has9 — gpt-5\nChanged paths: src/write.rs.\nCommands: cargo test finalize_queue.\nVerification: passed.\n<!-- /patch:exchange -->\n",
@@ -2935,6 +2962,7 @@ fn finalize_drains_queue_and_clears_active_on_last_prompt() {
             doc.to_str().unwrap(),
             "--baseline-file",
             baseline.to_str().unwrap(),
+            "--force-disk",
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nThe project is a CLI tool for interactive document sessions with AI agents.\n<!-- /patch:exchange -->\n",
@@ -2985,6 +3013,7 @@ fn finalize_drains_queue_and_removes_dispatch_directive_on_last_prompt() {
             doc.to_str().unwrap(),
             "--baseline-file",
             baseline.to_str().unwrap(),
+            "--force-disk",
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: do #has9 — gpt-5\nChanged paths: src/write.rs.\nCommands: cargo test finalize_queue.\nVerification: passed.\n<!-- /patch:exchange -->\n",
@@ -3035,6 +3064,7 @@ fn finalize_consumes_contiguous_queue_items_resolved_by_done_ids() {
             doc.to_str().unwrap(),
             "--baseline-file",
             baseline.to_str().unwrap(),
+            "--force-disk",
             "--done",
             "cspe",
             "--done",
@@ -3103,6 +3133,7 @@ fn finalize_consumes_done_id_queue_items_interspersed_with_priority_prompt() {
             doc.to_str().unwrap(),
             "--baseline-file",
             baseline.to_str().unwrap(),
+            "--force-disk",
             "--done",
             "cspe",
             "--done",
@@ -3195,6 +3226,7 @@ fn finalize_queue_consume_updates_snapshot_atomically() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
+            "--force-disk",
             "--baseline-file",
             baseline.to_str().unwrap(),
         ])

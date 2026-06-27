@@ -52,6 +52,14 @@ pub struct AdminFinding {
     pub pane: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ReapAllStaleSummary {
+    pub project_root: String,
+    pub reaped: usize,
+    pub kept: usize,
+    pub reason: String,
+}
+
 /// Resolve the project root for fleet enumeration: explicit `--project-root`,
 /// else the nearest `.agent-doc` ancestor of the current directory.
 fn resolve_root(project_root: Option<&Path>) -> Result<PathBuf> {
@@ -375,6 +383,53 @@ pub fn reap(
     print_receipt(&receipt, json)
 }
 
+pub fn reap_all_stale_with_liveness(
+    root: &Path,
+    pane_alive: impl FnMut(&str) -> bool,
+    reason: &str,
+) -> Result<ReapAllStaleSummary> {
+    let stored_reason = format!("manual_reap_all_stale {reason}");
+    let (reaped, kept) = crate::project_controller::close_stale_dead_pane_actors_for_caller(
+        root,
+        pane_alive,
+        false,
+        "admin",
+        &stored_reason,
+    )?;
+    Ok(ReapAllStaleSummary {
+        project_root: root.display().to_string(),
+        reaped,
+        kept,
+        reason: stored_reason,
+    })
+}
+
+pub fn reap_all_stale(project_root: Option<&Path>, reason: &str, json: bool) -> Result<()> {
+    let root = resolve_root(project_root)?;
+    let stored_reason = format!("manual_reap_all_stale {reason}");
+    let (reaped, kept) = crate::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
+        &root,
+        false,
+        "admin",
+        &stored_reason,
+    )?;
+    let summary = ReapAllStaleSummary {
+        project_root: root.display().to_string(),
+        reaped,
+        kept,
+        reason: stored_reason,
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&summary)?);
+    } else {
+        println!(
+            "admin_reap_all_stale accepted project_root={} reaped={} kept={} reason={}",
+            summary.project_root, summary.reaped, summary.kept, summary.reason
+        );
+    }
+    Ok(())
+}
+
 pub fn handoff(
     project_root: Option<&Path>,
     document: &Path,
@@ -511,6 +566,52 @@ mod tests {
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].kind, "stale_dead_pane");
         assert_eq!(findings[0].pane.as_deref(), Some("%9"));
+    }
+
+    #[test]
+    fn reap_all_stale_with_liveness_closes_detected_dead_pane_actors() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let dead_doc = dir.path().join("tasks/a.md");
+        let live_doc = dir.path().join("tasks/b.md");
+        std::fs::create_dir_all(dead_doc.parent().unwrap()).unwrap();
+        std::fs::write(&dead_doc, "body").unwrap();
+        std::fs::write(&live_doc, "body").unwrap();
+        let dead_id = dead_doc.to_string_lossy().to_string();
+        let live_id = live_doc.to_string_lossy().to_string();
+        crate::project_controller::store_actor_record(
+            dir.path(),
+            Some(0),
+            &record(&dead_id, "sid-dead", "%dead", ActorState::Ready),
+        )
+        .unwrap();
+        crate::project_controller::store_actor_record(
+            dir.path(),
+            Some(0),
+            &record(&live_id, "sid-live", "%live", ActorState::Busy),
+        )
+        .unwrap();
+
+        let summary =
+            reap_all_stale_with_liveness(dir.path(), |pane| pane == "%live", "test bulk").unwrap();
+        assert_eq!(summary.reaped, 1);
+        assert_eq!(summary.kept, 1);
+        assert_eq!(summary.reason, "manual_reap_all_stale test bulk");
+
+        let dead = crate::project_controller::load_actor_record(dir.path(), &dead_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(dead.state, ActorState::Closed);
+        assert_eq!(dead.pane_id, "");
+        assert_eq!(
+            dead.last_transition.reason,
+            "manual_reap_all_stale test bulk"
+        );
+        let live = crate::project_controller::load_actor_record(dir.path(), &live_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(live.state, ActorState::Busy);
+        assert_eq!(live.pane_id, "%live");
     }
 
     #[test]

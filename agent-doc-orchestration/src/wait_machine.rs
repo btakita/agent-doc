@@ -448,8 +448,14 @@ mod tests {
     #[test]
     fn ready_and_idle_are_fixpoints() {
         for sig in [Signal::Satisfied, Signal::StillWaiting, Signal::Blocked] {
-            assert_eq!(tick(WaitState::Ready, Duration::from_secs(999), sig), WaitState::Ready);
-            assert_eq!(tick(WaitState::Idle, Duration::from_secs(999), sig), WaitState::Idle);
+            assert_eq!(
+                tick(WaitState::Ready, Duration::from_secs(999), sig),
+                WaitState::Ready
+            );
+            assert_eq!(
+                tick(WaitState::Idle, Duration::from_secs(999), sig),
+                WaitState::Idle
+            );
         }
     }
 
@@ -475,7 +481,11 @@ mod tests {
         );
         assert_eq!(mid, WaitState::ReinstallPause);
         // But it is NOT unbounded — at REINSTALL_BUDGET it fails closed distinctly.
-        let done = tick(WaitState::ReinstallPause, REINSTALL_BUDGET, Signal::StillWaiting);
+        let done = tick(
+            WaitState::ReinstallPause,
+            REINSTALL_BUDGET,
+            Signal::StillWaiting,
+        );
         assert_eq!(
             done,
             WaitState::FailedClosed {
@@ -599,8 +609,7 @@ mod tests {
             clock: std::cell::Cell::new(Duration::ZERO),
             step: Duration::from_millis(500), // AGENT_READY_POLL_INTERVAL shape
         };
-        let mut state =
-            WaitState::awaiting(WaitKind::DispatchReady, Duration::from_secs(30));
+        let mut state = WaitState::awaiting(WaitKind::DispatchReady, Duration::from_secs(30));
         // Simulate the driver loop with a model clock instead of real sleeping.
         let mut model_elapsed = Duration::ZERO;
         let mut iterations = 0;
@@ -635,7 +644,11 @@ mod tests {
     fn simworld_reinstall_pause_exceeds_ceiling_but_bounded() {
         let mut state = WaitState::ReinstallPause;
         // Just past the global ceiling it is still pausing (exemption holds).
-        state = tick(state, GLOBAL_HANG_CEILING + Duration::from_secs(1), Signal::StillWaiting);
+        state = tick(
+            state,
+            GLOBAL_HANG_CEILING + Duration::from_secs(1),
+            Signal::StillWaiting,
+        );
         assert_eq!(state, WaitState::ReinstallPause);
         // At the reinstall budget it finally fails closed.
         state = tick(state, REINSTALL_BUDGET, Signal::StillWaiting);
@@ -669,7 +682,9 @@ mod tests {
         let budget = st.budget();
         let elapsed = if elapsed_lt_budget {
             // Strictly less than budget.
-            budget.checked_sub(Duration::from_millis(1)).unwrap_or(Duration::ZERO)
+            budget
+                .checked_sub(Duration::from_millis(1))
+                .unwrap_or(Duration::ZERO)
         } else {
             // At/over budget.
             budget
@@ -691,7 +706,11 @@ mod tests {
             Signal::StillWaiting => "stillWaiting",
             Signal::Blocked => "blocked",
         };
-        let elapsed_name = if elapsed_lt_budget { "beforeDeadline" } else { "atDeadline" };
+        let elapsed_name = if elapsed_lt_budget {
+            "beforeDeadline"
+        } else {
+            "atDeadline"
+        };
         format!("{state_name} | {sig_name} | {elapsed_name} => {next_name}")
     }
 
@@ -721,15 +740,19 @@ mod tests {
         assert!(rows.contains(
             &"awaitingDispatch | stillWaiting | beforeDeadline => awaitingDispatch".to_string()
         ));
-        assert!(rows.contains(
-            &"awaitingDispatch | stillWaiting | atDeadline => failedClosed(deadline_exceeded)"
-                .to_string()
-        ));
+        assert!(
+            rows.contains(
+                &"awaitingDispatch | stillWaiting | atDeadline => failedClosed(deadline_exceeded)"
+                    .to_string()
+            )
+        );
         assert!(rows.contains(&"awaitingShell | satisfied | beforeDeadline => ready".to_string()));
-        assert!(rows.contains(
-            &"awaitingIpcAck | blocked | beforeDeadline => failedClosed(blocker_observed)"
-                .to_string()
-        ));
+        assert!(
+            rows.contains(
+                &"awaitingIpcAck | blocked | beforeDeadline => failedClosed(blocker_observed)"
+                    .to_string()
+            )
+        );
         assert!(rows.contains(
             &"reinstallPause | stillWaiting | beforeDeadline => reinstallPause".to_string()
         ));

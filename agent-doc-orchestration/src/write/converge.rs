@@ -621,9 +621,10 @@ pub(crate) fn log_live_prompt_drift_auto_recovered(
 /// refused a bounded number of consecutive writes (`send_failed`/`no_ack`/
 /// `retry_without_disk_write` ack timeouts) without ever proving delivery — exactly
 /// the `consecutive_timeouts` the `#fcc0e` de-wedge circuit breaker latches
-/// `degraded` on. A failure against a listener that is NOT nominally active is just
-/// a safe no-listener disk fallback, not a wedge, so it never trips. Pure so the
-/// derivation is unit-testable without a live socket.
+/// `degraded` on. A failure against a listener that is NOT nominally active is a
+/// fail-closed missing-listener condition, not a wedged active listener, so it
+/// never trips this classifier. Pure so the derivation is unit-testable without
+/// a live socket.
 pub fn write_wedged_from_ipc_failures(
     consecutive_failures: u64,
     listener_nominally_active: bool,
@@ -840,13 +841,16 @@ pub fn reconcile_postcommit_exchange_to_head(working: &str, head: &str) -> Optio
 /// Conservatively returns `false` when either side fails to parse or lacks an `exchange`
 /// component, so an unparseable flush is never silently trusted.
 pub fn editor_buffer_preserved_head_exchange(flushed: &str, head: &str) -> bool {
-    let (Ok(flushed_comps), Ok(head_comps)) =
-        (crate::component::parse(flushed), crate::component::parse(head))
-    else {
+    let (Ok(flushed_comps), Ok(head_comps)) = (
+        crate::component::parse(flushed),
+        crate::component::parse(head),
+    ) else {
         return false;
     };
     let (Some(head_exchange), Some(flushed_exchange)) = (
-        head_comps.iter().find(|c| c.name == AGENT_RESPONSE_COMPONENT),
+        head_comps
+            .iter()
+            .find(|c| c.name == AGENT_RESPONSE_COMPONENT),
         flushed_comps
             .iter()
             .find(|c| c.name == AGENT_RESPONSE_COMPONENT),
@@ -1095,66 +1099,48 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
 /// active, send component `op:replace` patches for the changed components
 /// (`exchange`, etc.) and verify the editor's ack content matches the compacted
 /// target. Returns `Ok(true)` when converged via editor IPC (the caller skips
-/// the disk write), `Ok(false)` only when no listener is running and a disk
-/// fallback is safe, and `Err` when a running listener cannot prove the editor
-/// mutation. The error is intentional: direct disk writes behind a running
-/// JetBrains plugin are the File Cache Conflict source this guard prevents.
+/// the disk write) and `Err` when editor convergence is unavailable or unproven.
+/// The error is intentional: direct disk writes behind or around editor
+/// convergence are the File Cache Conflict source this guard prevents.
 /// `#fcc0`/`#w42v`: converge a full-document write through the editor IPC when a
 /// JB listener is active, returning `true` when the editor buffer has been
-/// converged to `target` (no disk write needed) and `false` when no listener is
-/// running and the caller may fall back to a disk write.
+/// converged to `target` (no disk write needed).
 ///
 /// When a listener is active this computes the component-scoped delta between
 /// `current_content` and `target` and applies it via `op:replace` patches through
 /// the Document API, so the open buffer never diverges from disk and no
 /// `File Cache Conflict` dialog fires. `source` labels the `ops.log` writeback
-/// transport lines (`<source>_writeback ... transport=editor_ipc|disk_fallback|blocked`)
+/// transport lines (`<source>_writeback ... transport=editor_ipc|blocked`)
 /// so each write site is attributable; see [`converge_document_or_disk`] for
 /// the shared converge-or-disk wrapper every document-mutating write routes
 /// through.
-/// `#6b5h`: at a proven-no-delivery editor-converge refusal point, decide between
-/// failing closed (a live editor buffer must be protected — the `#editorbufwin` /
-/// File Cache Conflict guard) and falling through to the caller's guarded disk
-/// write because there is no live editor endpoint to protect (the pure-CLI /
-/// `#kcb5` case: a controller-hosted socket is *connectable* but no JB plugin
-/// editor is behind it, so every finalize would otherwise wedge on `no_ack`
-/// forever and only `--force-disk` succeeds).
+/// `#6b5h`: at a proven-no-delivery editor-converge refusal point, fail closed.
 ///
-/// Returns `Ok(false)` — routing the caller to its disk fallback — only when
-/// [`crate::plugin_owner::live_editor_endpoint_attached`] proves there is no live
-/// editor buffer; otherwise it emits the unchanged fail-closed error. The safety
-/// invariant is mechanical: a proven live editor endpoint ALWAYS bails, so this
-/// never clobbers a real editor buffer (preserves `#editorbufwin`). Logs the
-/// chosen transport so each decision is attributable in `ops.log`.
-fn refuse_or_editorless_disk_fallback(file: &Path, source: &str, reason: &str) -> Result<bool> {
-    // `#mergestatemachine2`: gate the disk write through the ownership SM. A live
-    // editor (lease + live pid) resolves to EditorOwnsBuffer → refuse the disk
-    // clobber (preserves #editorbufwin / the File Cache Conflict guard). A stale
-    // listener / no editor resolves to Detached → route to the controller-host
-    // disk write so a CLI-only / no-editor session never wedges on no_ack.
-    if !crate::merge_control_state_machine::disk_write_permitted_for_file(
+/// The realtime cutover removes the old synchronous "send patch, wait, then
+/// disk-fallback" branch: once a listener is active/connectable, missing or
+/// untrusted ACK proof marks editor convergence required. Absence of a listener
+/// is also a fail-closed convergence condition; only explicit force-disk paths
+/// may bypass this converger.
+fn refuse_unproven_editor_delivery(file: &Path, source: &str, reason: &str) -> Result<bool> {
+    let editor_endpoint = if crate::merge_control_state_machine::disk_write_permitted_for_file(
         &file.to_string_lossy(),
     ) {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "{source}_writeback file={} transport=blocked reason={reason} editor_endpoint=live action=refuse_external_disk_write",
-                file.display()
-            ),
-        );
-        anyhow::bail!(
-            "{source}: refused direct disk write for {} while editor IPC listener is active (reason={reason})",
-            file.display()
-        );
-    }
+        "absent"
+    } else {
+        "live"
+    };
     crate::ops_log::log_op(
         file,
         &format!(
-            "{source}_writeback file={} transport=disk_fallback reason={reason} editor_endpoint=absent action=editorless_disk_fallback",
-            file.display()
+            "{source}_writeback file={} transport=blocked reason={reason} editor_endpoint={} action=editor_convergence_required",
+            file.display(),
+            editor_endpoint
         ),
     );
-    Ok(false)
+    anyhow::bail!(
+        "{source}: refused direct disk write for {} while editor convergence is unproven (reason={reason}, editor_endpoint={editor_endpoint})",
+        file.display()
+    );
 }
 
 fn blank_components_named(doc: &str, names: &[&str]) -> Option<String> {
@@ -1402,13 +1388,10 @@ pub fn try_editor_converge(
     current_content: &str,
     source: &str,
 ) -> Result<bool> {
-    let Some(project_root) = file
+    let canonical_file = file
         .canonicalize()
-        .ok()
-        .map(|c| resolve_ipc_project_root_pub(&c))
-    else {
-        return Ok(false);
-    };
+        .with_context(|| format!("{source}: failed to resolve {}", file.display()))?;
+    let project_root = resolve_ipc_project_root_pub(&canonical_file);
     // `#fcc0e`: integrate the converger with the `#ipcdrift` degraded-latch
     // circuit breaker. A session whose socket listener latched degraded
     // (repeated ack timeouts) may skip the socket, but must still prefer the
@@ -1478,17 +1461,10 @@ pub fn try_editor_converge(
         }
     }
     if !crate::ipc_socket::is_listener_active(&project_root) {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "{source}_writeback file={} transport=disk_fallback reason=no_listener",
-                file.display()
-            ),
-        );
-        return Ok(false);
+        return refuse_unproven_editor_delivery(file, source, "no_listener");
     }
 
-    let canonical = file.canonicalize()?;
+    let canonical = canonical_file;
     let patch_id = uuid::Uuid::new_v4().to_string();
     let Some(payload) =
         editor_convergence_payload(&canonical, target, current_content, source, &patch_id)?
@@ -1536,9 +1512,8 @@ pub fn try_editor_converge(
             )?;
             let Some(recovered) = sidecar else {
                 // `#6b5h`: ack received but no content sidecar proves application —
-                // fail closed for a live editor, else (CLI-only, no editor endpoint)
-                // route to the caller's disk fallback.
-                return refuse_or_editorless_disk_fallback(file, source, "no_ack_content");
+                // fail closed instead of routing a sync wait failure to disk.
+                return refuse_unproven_editor_delivery(file, source, "no_ack_content");
             };
             if crate::git::normalize_transient_agent_doc_markers(&recovered)
                 == crate::git::normalize_transient_agent_doc_markers(target)
@@ -1592,25 +1567,22 @@ pub fn try_editor_converge(
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "{source}_writeback file={} patch_id={} transport=blocked reason=ack_mismatch recovered_len={} target_len={} action=editorless_disk_fallback_or_refuse",
+                        "{source}_writeback file={} patch_id={} transport=blocked reason=ack_mismatch recovered_len={} target_len={} action=editor_convergence_required",
                         file.display(),
                         patch_id,
                         recovered.len(),
                         target.len()
                     ),
                 );
-                // `#mergestatemachine2`: the ACK came back but content drifted.
-                // Protect a live editor buffer; route an editor-less (controller-
-                // hosted socket, no plugin) session to the caller's disk fallback
-                // instead of hard-refusing — the #6b5h CLI-only wedge on ack_mismatch.
-                refuse_or_editorless_disk_fallback(file, source, "ack_mismatch")
+                // The ACK came back but content drifted. This is unproven editor
+                // convergence, not authorization to write through disk.
+                refuse_unproven_editor_delivery(file, source, "ack_mismatch")
             }
         }
         Ok(None) => {
-            // `#6b5h`: no ack at all — the primary CLI-only wedge. Protect a live
-            // editor buffer; route an editor-less (controller-hosted socket, no
-            // plugin) session to the caller's disk fallback instead of wedging.
-            refuse_or_editorless_disk_fallback(file, source, "no_ack")
+            // Missing ACK marks the editor path stale; it must not trigger a
+            // direct disk fallback.
+            refuse_unproven_editor_delivery(file, source, "no_ack")
         }
         Err(err) => {
             crate::ops_log::log_op(
@@ -1647,9 +1619,9 @@ pub fn try_editor_converge(
                     ),
                 }
             }
-            // `#6b5h`: protect a live editor buffer; route an editor-less
-            // (controller-hosted socket, no plugin) session to the disk fallback.
-            refuse_or_editorless_disk_fallback(file, source, "send_failed")
+            // Send failure marks the editor path stale; it must not trigger a
+            // direct disk fallback.
+            refuse_unproven_editor_delivery(file, source, "send_failed")
         }
     }
 }
@@ -1790,11 +1762,10 @@ fn queue_consume_node_patches(
 /// `#fcc0`: the single converge-or-disk gate every document-mutating write site
 /// routes through. When a JB editor listener is active it converges `target`
 /// through the editor IPC (component `op:replace` — no `File Cache Conflict`
-/// dialog); otherwise, it falls back to the guarded disk write only when no
-/// listener is running. Active-listener failures fail closed instead of writing
-/// behind the editor. `current` is the expected current document content (held
-/// under the caller's doc lock) and drives both the editor delta and the
-/// idle+current disk guard.
+/// dialog). If editor convergence is unavailable or unproven, the write fails
+/// closed instead of falling back to disk. `current` is the expected current
+/// document content (held under the caller's doc lock) and drives the editor
+/// delta.
 pub fn converge_document_or_disk(
     file: &Path,
     target: &str,
@@ -1804,25 +1775,22 @@ pub fn converge_document_or_disk(
     if try_editor_converge(file, target, current, source)? {
         return Ok(());
     }
-    atomic_write_if_current_pub(file, target, current, source)
+    anyhow::bail!(
+        "{source}: refused direct disk write for {} because editor convergence did not complete",
+        file.display()
+    )
 }
 
-/// `#fcc0`: converge-or-**plain**-disk gate for the component-mutating CLI write
+/// `#fcc0`: converge-only gate for the component-mutating CLI write
 /// sites that historically wrote straight to disk with a bare `std::fs::write`
 /// (the `agent:pending` / `agent:review` operator ops, `dedupe`, preflight
 /// `run_pending_maintenance`, the `agent_doc_pipeline:` frontmatter mirror). When
 /// a JB editor listener is active it converges `target` through the editor IPC
-/// (component/frontmatter `op:replace` — no `File Cache Conflict` dialog);
-/// otherwise it falls back to the SAME plain disk write those sites already did
-/// only when no live IDE listener is running, so with no live IDE the behavior
-/// is byte-identical to before this gate.
-///
-/// Unlike [`converge_document_or_disk`], the no-listener disk fallback here is
-/// an unguarded `std::fs::write` rather than the visible-buffer-proof guarded
-/// write. These sites are CLI document mutations that must not newly fail when
-/// no editor is attached. `current` is the expected current on-disk content the
-/// editor delta is computed against; `source` labels the `ops.log`
-/// `<source>_writeback` line.
+/// (component/frontmatter `op:replace` — no `File Cache Conflict` dialog). If
+/// editor convergence is unavailable or unproven, the write fails closed instead
+/// of falling back to the historical plain disk write. `current` is the expected
+/// current on-disk content the editor delta is computed against; `source` labels
+/// the `ops.log` `<source>_writeback` line.
 pub fn converge_or_disk_write(
     file: &Path,
     current: &str,
@@ -1832,8 +1800,10 @@ pub fn converge_or_disk_write(
     if try_editor_converge(file, target, current, source)? {
         return Ok(());
     }
-    std::fs::write(file, target)
-        .with_context(|| format!("{source}: failed to write {}", file.display()))
+    anyhow::bail!(
+        "{source}: refused direct disk write for {} because editor convergence did not complete",
+        file.display()
+    )
 }
 
 pub(crate) fn live_prompt_drift_convergence_patches(
@@ -2158,7 +2128,7 @@ mod core_tests {
     fn write_wedged_classifier_trips_only_against_active_listener_at_threshold() {
         // `#supselfheal` Phase 2: the wedge fact trips only when a *nominally
         // active* listener has refused >= threshold consecutive writes. A failure
-        // against an inactive listener is a safe disk fallback, not a wedge.
+        // against an inactive listener is a missing-listener block, not a wedge.
         let threshold = IPC_DEWEDGE_TIMEOUT_THRESHOLD;
         // Active listener at/over threshold → wedged.
         assert!(write_wedged_from_ipc_failures(threshold, true, threshold));
@@ -2173,7 +2143,7 @@ mod core_tests {
             true,
             threshold
         ));
-        // No listener nominally active → never a wedge (disk fallback is safe).
+        // No listener nominally active → never an active-listener wedge.
         assert!(!write_wedged_from_ipc_failures(
             threshold + 5,
             false,
@@ -2233,10 +2203,9 @@ mod core_tests {
         );
     }
     #[test]
-    fn try_compact_editor_converge_falls_back_to_disk_without_listener() {
-        // `#w42v`: with no live JB IPC listener, compact convergence must report
-        // disk fallback (Ok(false)) so the caller does the guarded disk write —
-        // never silently skip the compaction.
+    fn try_compact_editor_converge_blocks_without_listener() {
+        // Realtime cutover: with no live editor listener, compact convergence
+        // must fail closed instead of authorizing a guarded disk fallback.
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("plan.md");
@@ -2244,10 +2213,28 @@ mod core_tests {
         let compacted = crate::test_support::drift_content_ours();
         std::fs::write(&doc, &current).unwrap();
 
-        let converged = try_editor_converge(&doc, &compacted, &current, "compact").unwrap();
+        let err = try_editor_converge(&doc, &compacted, &current, "compact")
+            .unwrap_err()
+            .to_string();
         assert!(
-            !converged,
-            "without a live JB IPC listener, compact must fall back to the disk write"
+            err.contains("no_listener"),
+            "without a live editor listener, compact must fail closed: {err}"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            current,
+            "no-listener compact convergence must not write the compacted target"
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("compact_writeback")
+                && log.contains("transport=blocked")
+                && log.contains("reason=no_listener"),
+            "no-listener compact must record a blocked writeback:\n{log}"
+        );
+        assert!(
+            !log.contains("transport=disk_fallback"),
+            "no-listener compact must not advertise disk fallback:\n{log}"
         );
     }
     /// Pre-compact document with a multi-item `queue` an operator could be
@@ -2630,10 +2617,9 @@ mod core_tests {
         );
     }
     #[test]
-    fn converge_document_or_disk_falls_back_to_guarded_disk_without_listener() {
-        // `#fcc0`: with no live JB listener the shared converger must land the
-        // target on disk via the guarded write and record the source-labelled
-        // disk fallback — never silently skip the write.
+    fn converge_document_or_disk_blocks_guarded_disk_without_listener() {
+        // Realtime cutover: with no live editor listener the shared converger
+        // must refuse the guarded disk fallback and leave the file unchanged.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -2643,31 +2629,40 @@ mod core_tests {
         let target = crate::test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
-        converge_document_or_disk(&doc, &target, &source, "queue_consume").unwrap();
+        let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("no_listener"),
+            "with no live editor listener the converger must fail closed: {err}"
+        );
 
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            target,
-            "with no listener the converger must write the target to disk"
+            source,
+            "with no listener the converger must not write the target to disk"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             log.contains("queue_consume_writeback")
-                && log.contains("transport=disk_fallback")
+                && log.contains("transport=blocked")
                 && log.contains("reason=no_listener"),
-            "a no-listener queue consume must record the source-labelled disk fallback:\n{log}"
+            "a no-listener queue consume must record the source-labelled blocked writeback:\n{log}"
+        );
+        assert!(
+            !log.contains("transport=disk_fallback"),
+            "no-listener queue consume must not record disk fallback:\n{log}"
         );
     }
     #[test]
-    fn converge_document_or_disk_route_source_falls_back_to_disk_without_listener() {
+    fn converge_document_or_disk_route_source_blocks_without_listener() {
         // `#fccroute`: the three route/dispatch session-document write sites
         // (`route_session_id`, `route_dedup_scrub`, `route_queue_activation`) now
         // route their disk writes through `converge_document_or_disk` so a live JB
         // editor converges them instead of hitting the File Cache Conflict dialog.
-        // With NO listener the gate must remain byte-identical to the old direct
-        // disk write: the target lands on disk and a source-labelled disk fallback
-        // is recorded. Cover each route source label so a future regression on any
-        // one of them is caught.
+        // With no listener, realtime cutover fails closed instead of authorizing
+        // a source-labelled disk fallback. Cover each route source label so a
+        // future regression on any one of them is caught.
         for source_label in [
             "route_session_id",
             "route_dedup_scrub",
@@ -2682,19 +2677,29 @@ mod core_tests {
             let target = crate::test_support::queue_consume_convergence_target();
             fs::write(&doc, &source).unwrap();
 
-            converge_document_or_disk(&doc, &target, &source, source_label).unwrap();
+            let err = converge_document_or_disk(&doc, &target, &source, source_label)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("no_listener"),
+                "{source_label}: no listener must fail closed: {err}"
+            );
 
             assert_eq!(
                 fs::read_to_string(&doc).unwrap(),
-                target,
-                "{source_label}: with no listener the converger must write the target to disk"
+                source,
+                "{source_label}: with no listener the converger must leave disk unchanged"
             );
             let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
             assert!(
                 log.contains(&format!("{source_label}_writeback"))
-                    && log.contains("transport=disk_fallback")
+                    && log.contains("transport=blocked")
                     && log.contains("reason=no_listener"),
-                "{source_label}: no-listener route write must record the source-labelled disk fallback:\n{log}"
+                "{source_label}: no-listener route write must record a source-labelled blocked writeback:\n{log}"
+            );
+            assert!(
+                !log.contains("transport=disk_fallback"),
+                "{source_label}: no-listener route write must not record disk fallback:\n{log}"
             );
         }
     }
@@ -2744,11 +2749,11 @@ mod core_tests {
         );
     }
     #[test]
-    fn converge_or_disk_write_falls_back_to_plain_disk_without_listener() {
-        // `#fcc0`: the unguarded converge-or-disk gate (used by the pending/review,
-        // dedupe, preflight-maintenance, and pipeline-mirror write sites) must, with
-        // no live JB listener, land the target via a plain disk write and record the
-        // source-labelled disk fallback — never silently skip the write.
+    fn converge_or_disk_write_blocks_plain_disk_without_listener() {
+        // Realtime cutover: the old unguarded converge-or-disk gate (used by the
+        // pending/review, dedupe, preflight-maintenance, and pipeline-mirror
+        // write sites) must fail closed with no live editor listener instead of
+        // landing the target via a plain disk write.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -2758,19 +2763,29 @@ mod core_tests {
         let target = crate::test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
-        converge_or_disk_write(&doc, &source, &target, "pending_write").unwrap();
+        let err = converge_or_disk_write(&doc, &source, &target, "pending_write")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("no_listener"),
+            "with no live editor listener the plain write gate must fail closed: {err}"
+        );
 
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            target,
-            "with no listener the converger must write the target to disk"
+            source,
+            "with no listener the converger must not write the target to disk"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             log.contains("pending_write_writeback")
-                && log.contains("transport=disk_fallback")
+                && log.contains("transport=blocked")
                 && log.contains("reason=no_listener"),
-            "a no-listener plain converge must record the source-labelled disk fallback:\n{log}"
+            "a no-listener plain converge must record the source-labelled blocked writeback:\n{log}"
+        );
+        assert!(
+            !log.contains("transport=disk_fallback"),
+            "a no-listener plain converge must not record disk fallback:\n{log}"
         );
     }
     #[test]
@@ -2788,7 +2803,7 @@ mod core_tests {
         let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
         // `#6b5h`: a real editor is attached — seed a live plugin-owner lease so
-        // the guard fails closed instead of taking the editor-less disk fallback.
+        // the guard fails closed on unproven delivery.
         crate::plugin_owner::write_plugin_owner_lease_for_test(
             doc.to_str().unwrap(),
             std::process::id(),
@@ -2819,12 +2834,11 @@ mod core_tests {
         );
     }
     #[test]
-    fn converge_document_or_disk_editorless_socket_routes_to_disk_fallback() {
-        // `#6b5h`: a pure-CLI session sees a *connectable* controller-hosted socket
-        // with NO plugin editor behind it (no plugin-owner lease). The ack-without-
-        // content listener proves no delivery, but with no editor buffer to protect
-        // the write must fall through to the guarded disk write instead of wedging
-        // on `no_ack` forever (only `--force-disk` used to succeed).
+    fn converge_document_or_disk_editorless_socket_blocks_without_ack_proof() {
+        // `#6b5h` cutover: a pure-CLI session may see a connectable
+        // controller-hosted socket with NO plugin editor behind it. An
+        // ack-without-content listener still does not prove editor convergence, so
+        // the realtime path fails closed instead of routing the write to disk.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -2836,21 +2850,34 @@ mod core_tests {
 
         let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
-        // No plugin-owner lease seeded → no live editor endpoint → editor-less.
+        // No plugin-owner lease seeded → no live editor endpoint, but the
+        // connectable socket still requires convergence proof.
 
-        converge_document_or_disk(&doc, &target, &source, "queue_consume").unwrap();
+        let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("editor convergence is unproven"),
+            "editorless socket without ack proof should fail closed: {err}"
+        );
 
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            target,
-            "editor-less CLI session must land the target via the guarded disk write"
+            source,
+            "unproven editor convergence must not be followed by a disk write"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             log.contains("queue_consume_writeback")
-                && log.contains("transport=disk_fallback")
-                && log.contains("editor_endpoint=absent"),
-            "editor-less converge must record the editorless disk fallback:\n{log}"
+                && log.contains("transport=blocked")
+                && log.contains("reason=no_ack_content")
+                && log.contains("editor_endpoint=absent")
+                && log.contains("action=editor_convergence_required"),
+            "editorless socket must record a fail-closed convergence requirement:\n{log}"
+        );
+        assert!(
+            !log.contains("transport=disk_fallback"),
+            "editorless socket must not route missing ACK proof to disk fallback:\n{log}"
         );
     }
     #[test]
@@ -3337,9 +3364,8 @@ mod core_tests {
         crate::snapshot::save(&doc, &snapshot).unwrap();
         // No turn_scope and no compaction marker → no provenance signal.
 
-        let err =
-            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "preflight")
-                .expect_err("compaction-shaped shrink without provenance must fail closed");
+        let err = guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "preflight")
+            .expect_err("compaction-shaped shrink without provenance must fail closed");
         assert!(
             err.to_string().contains("agent-doc reset --from-current"),
             "unproven shrink should keep deterministic reset guidance: {err}"
@@ -3494,10 +3520,8 @@ mod core_tests {
     fn editor_buffer_preserved_head_exchange_ignores_boundary_markers() {
         // A `(HEAD)` boundary annotation on the flushed side must not perturb the match.
         let head = doc_with_exchange("### Re: topic\n\nThe committed answer.", "- do [#a]");
-        let flushed = doc_with_exchange(
-            "### Re: topic (HEAD)\n\nThe committed answer.",
-            "- do [#a]",
-        );
+        let flushed =
+            doc_with_exchange("### Re: topic (HEAD)\n\nThe committed answer.", "- do [#a]");
         assert!(editor_buffer_preserved_head_exchange(&flushed, &head));
     }
 }

@@ -605,6 +605,7 @@ mod tests {
         let lifecycle = FakeLifecycleOps {
             baseline_file: baseline.to_string_lossy().into_owned(),
             preflight_calls: RefCell::new(0),
+            admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
@@ -642,7 +643,8 @@ mod tests {
         let final_doc = fs::read_to_string(&doc).unwrap();
         assert!(final_doc.contains("❯ do #gkke"));
         assert!(final_doc.contains("### Re: task — gpt-5"));
-        assert_eq!(*lifecycle.preflight_calls.borrow(), 1);
+        assert_eq!(*lifecycle.admit_calls.borrow(), 1);
+        assert_eq!(*lifecycle.preflight_calls.borrow(), 0);
         assert_eq!(lifecycle.finalize_calls.borrow().len(), 1);
         assert_eq!(*lifecycle.session_checks.borrow(), 1);
         assert!(
@@ -667,19 +669,20 @@ mod tests {
         let lifecycle = FakeLifecycleOps {
             baseline_file: baseline.to_string_lossy().into_owned(),
             preflight_calls: RefCell::new(0),
+            admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
         let agent = FakeAgentRunner {
-        prompts: RefCell::new(Vec::new()),
-        envs: RefCell::new(Vec::new()),
-        fresh_calls: RefCell::new(0),
-        streaming_calls: RefCell::new(0),
-        response:
-            "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented.\n<!-- /patch:exchange -->\n"
-                .to_string(),
-        streaming_chunks: None,
-    };
+            prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response:
+                "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test orchestrate`\n<!-- /patch:exchange -->\n"
+                    .to_string(),
+            streaming_chunks: None,
+        };
         let tasks = vec![ExecutionTask {
             label: "do #gkke".to_string(),
             prompt: "do #gkke".to_string(),
@@ -729,7 +732,7 @@ mod tests {
         assert!(!final_doc.contains("<tsift_graph_evidence>"));
     }
     #[test]
-    fn sequential_orchestration_always_reruns_preflight_after_injection() {
+    fn sequential_orchestration_admits_after_injection_without_preflight() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("session.md");
         let baseline = dir.path().join("baseline.md");
@@ -739,6 +742,7 @@ mod tests {
         let lifecycle = FakeLifecycleOps {
             baseline_file: baseline.to_string_lossy().into_owned(),
             preflight_calls: RefCell::new(0),
+            admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
@@ -775,9 +779,14 @@ mod tests {
 
         let final_doc = fs::read_to_string(&doc).unwrap();
         assert_eq!(
-            *lifecycle.preflight_calls.borrow(),
+            *lifecycle.admit_calls.borrow(),
             1,
-            "sequential mode should always rerun preflight after prompt injection"
+            "sequential mode should admit after prompt injection"
+        );
+        assert_eq!(
+            *lifecycle.preflight_calls.borrow(),
+            0,
+            "sequential mode should not require full preflight after prompt injection"
         );
         assert!(final_doc.contains("❯ do #opcc"));
         assert!(agent.prompts.borrow()[0].contains("❯ do #opcc"));
@@ -798,6 +807,7 @@ mod tests {
         let lifecycle = FakeLifecycleOps {
             baseline_file: baseline.to_string_lossy().into_owned(),
             preflight_calls: RefCell::new(0),
+            admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
@@ -807,7 +817,7 @@ mod tests {
         fresh_calls: RefCell::new(0),
         streaming_calls: RefCell::new(0),
         response:
-            "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented.\n<!-- /patch:exchange -->\n"
+            "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test orchestrate`\n<!-- /patch:exchange -->\n"
                 .to_string(),
         streaming_chunks: None,
     };
@@ -853,14 +863,16 @@ mod tests {
         let lifecycle = FakeLifecycleOps {
             baseline_file: baseline.to_string_lossy().into_owned(),
             preflight_calls: RefCell::new(0),
+            admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
         let agent = MutatingAgentRunner {
-        fresh_calls: RefCell::new(0),
-        response: "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n"
-            .to_string(),
-    };
+            fresh_calls: RefCell::new(0),
+            response:
+                "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test orchestrate`\n<!-- /patch:exchange -->\n"
+                    .to_string(),
+        };
         let tasks = vec![
             ExecutionTask {
                 label: "do #first".to_string(),
@@ -893,12 +905,17 @@ mod tests {
         .to_string();
 
         let final_doc = fs::read_to_string(&doc).unwrap();
-        assert!(err.contains("orchestration batch changed during run"));
+        assert!(
+            err.contains("orchestration batch changed during run"),
+            "unexpected error: {err}"
+        );
         assert!(final_doc.contains("- do #inserted"));
         assert!(final_doc.contains("### Re: first — gpt-5"));
         assert!(final_doc.contains("### Re: orchestration batch changed — gpt-5"));
         assert!(!final_doc.contains("❯ do #second"));
         assert_eq!(*agent.fresh_calls.borrow(), 1);
+        assert_eq!(*lifecycle.admit_calls.borrow(), 2);
+        assert_eq!(*lifecycle.preflight_calls.borrow(), 0);
         assert_eq!(lifecycle.finalize_calls.borrow().len(), 2);
         assert_eq!(*lifecycle.session_checks.borrow(), 2);
     }
@@ -914,6 +931,7 @@ mod tests {
         let lifecycle = FakeLifecycleOps {
             baseline_file: baseline.to_string_lossy().into_owned(),
             preflight_calls: RefCell::new(0),
+            admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
@@ -977,6 +995,7 @@ mod tests {
         let lifecycle = FakeLifecycleOps {
             baseline_file: baseline.to_string_lossy().into_owned(),
             preflight_calls: RefCell::new(0),
+            admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
@@ -986,7 +1005,7 @@ mod tests {
             fresh_calls: RefCell::new(0),
             streaming_calls: RefCell::new(0),
             response:
-                "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n"
+                "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test orchestrate`\n<!-- /patch:exchange -->\n"
                     .to_string(),
             streaming_chunks: None,
         };
@@ -1034,6 +1053,8 @@ mod tests {
 
         assert_eq!(lifecycle.finalize_calls.borrow().len(), 3);
         assert_eq!(*lifecycle.session_checks.borrow(), 3);
+        assert_eq!(*lifecycle.admit_calls.borrow(), 3);
+        assert_eq!(*lifecycle.preflight_calls.borrow(), 0);
         let prompts = agent.prompts.borrow();
         assert!(prompts[0].contains("❯ do #prep"));
         assert!(prompts[1].contains("❯ do #bench"));
@@ -1048,6 +1069,7 @@ mod tests {
         let lifecycle = FakeLifecycleOps {
             baseline_file: "unused".to_string(),
             preflight_calls: RefCell::new(0),
+            admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
@@ -1137,6 +1159,7 @@ exit 2
         let lifecycle = FakeLifecycleOps {
             baseline_file: "unused".to_string(),
             preflight_calls: RefCell::new(0),
+            admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
@@ -1194,6 +1217,7 @@ exit 2
         let lifecycle = FakeLifecycleOps {
             baseline_file: "unused".to_string(),
             preflight_calls: RefCell::new(0),
+            admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
@@ -1248,6 +1272,7 @@ exit 2
         let lifecycle = FakeLifecycleOps {
             baseline_file: "unused".to_string(),
             preflight_calls: RefCell::new(0),
+            admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
@@ -1299,6 +1324,7 @@ exit 2
         let lifecycle = FakeLifecycleOps {
             baseline_file: "unused".to_string(),
             preflight_calls: RefCell::new(0),
+            admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
@@ -1349,6 +1375,7 @@ exit 2
         let lifecycle = FakeLifecycleOps {
             baseline_file: "unused".to_string(),
             preflight_calls: RefCell::new(0),
+            admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
@@ -1398,6 +1425,7 @@ exit 2
         let lifecycle = FakeLifecycleOps {
             baseline_file: "unused".to_string(),
             preflight_calls: RefCell::new(0),
+            admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
@@ -1450,6 +1478,7 @@ exit 2
         let lifecycle = FakeLifecycleOps {
             baseline_file: baseline.to_string_lossy().into_owned(),
             preflight_calls: RefCell::new(0),
+            admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
             session_checks: RefCell::new(0),
         };
@@ -1459,7 +1488,7 @@ exit 2
         fresh_calls: RefCell::new(0),
         streaming_calls: RefCell::new(0),
         response:
-            "<!-- patch:exchange -->\n### Re: network — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n"
+            "<!-- patch:exchange -->\n### Re: network — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test orchestrate`\n<!-- /patch:exchange -->\n"
                 .to_string(),
         streaming_chunks: None,
     };

@@ -107,11 +107,7 @@ pub fn merge_contents_crdt(
 /// equivalent to the plain `merge_by_component` path, so unchanged-frontmatter
 /// cycles keep their exact behavior (and frontmatter is never reformatted unless
 /// it genuinely changed). The body is still reconciled by the per-component merge.
-fn merge_frontmatter_aware(
-    base_state: Option<&[u8]>,
-    ours: &str,
-    theirs: &str,
-) -> Result<String> {
+fn merge_frontmatter_aware(base_state: Option<&[u8]>, ours: &str, theirs: &str) -> Result<String> {
     use crate::frontmatter as fm;
 
     let (ours_fm, ours_body) = fm::split_frontmatter_parts(ours);
@@ -138,9 +134,7 @@ fn merge_frontmatter_aware(
         None => (None, None),
     };
 
-    let Some(merged_fm) =
-        fm::merge_frontmatter_3way(base_fm.as_deref(), ours_fm, theirs_fm)
-    else {
+    let Some(merged_fm) = fm::merge_frontmatter_3way(base_fm.as_deref(), ours_fm, theirs_fm) else {
         // No side actually had frontmatter (shouldn't happen here) — fall back.
         return crate::crdt::merge_by_component(base_state, ours, theirs)
             .context("CRDT merge failed");

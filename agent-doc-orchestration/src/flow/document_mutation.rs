@@ -448,27 +448,24 @@ pub fn decide_reconnect_buffer(
     ReconnectBufferDecision::KeepBuffer
 }
 
-/// Decision for a finalize/converge write when the editor-IPC socket is
-/// connectable but may have no live editor endpoint behind it (`#kcb5`).
+/// Decision for a finalize/converge write when the editor-IPC socket may be
+/// absent, connectable, or backed by a live editor endpoint (`#kcb5`).
 ///
 /// After the 08b in-process-supervisor cutover the controller hosts the
 /// editor-IPC socket even when no JB plugin is attached, so a pure-CLI session
-/// has a *connectable* socket with no editor. The fail-closed disk-write guard
-/// (which protects a live editor buffer) must NOT wedge such a session: with no
-/// editor there is no buffer to protect, so a proven-no-delivery write should
-/// route to the controller-host disk write instead of `retry_without_disk_write`.
+/// can have a *connectable* socket with no editor. Under the realtime cutover, a
+/// connectable socket that fails to prove delivery is still not permission to
+/// write the visible document behind the editor path. It must fail closed and let
+/// the controller/reconciler resolve convergence.
 ///
-/// Safety invariant: an actor with a PROVEN live editor endpoint still
-/// fail-closes on unproven delivery — the disk clobber is reserved for the
-/// editor-less / no-listener / explicit-force cases (preserves `#editorbufwin`).
+/// Safety invariant: unproven delivery over the editor path always fails closed.
+/// Disk writes remain reserved for explicit operator force.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorlessDiskFallbackDecision {
     /// A live editor endpoint is (or may be) present and delivery is unproven —
     /// never clobber the buffer; retry the editor/CRDT path.
     FailClosed,
-    /// No live editor endpoint (or no socket at all), and delivery is proven
-    /// failing / explicitly forced — route to the controller-host disk write.
-    /// The `#kcb5` CLI-only case.
+    /// Explicit operator force — route to the controller-host disk write.
     ForceDiskNoEditor,
     /// A live editor endpoint is present and reachable — converge through it.
     ConvergeViaEditor,
@@ -496,7 +493,7 @@ impl EditorlessDiskFallbackDecision {
 /// - `threshold`: how many consecutive failures prove "no delivery."
 /// - `force_disk_requested`: the operator passed `--force-disk`.
 ///
-/// Routes to disk only when there is provably no editor buffer to protect.
+/// Routes to disk only when the operator explicitly requested `--force-disk`.
 pub fn decide_editorless_disk_fallback(
     socket_connectable: bool,
     editor_endpoint_proven: bool,
@@ -516,19 +513,11 @@ pub fn decide_editorless_disk_fallback(
             EditorlessDiskFallbackDecision::ConvergeViaEditor
         };
     }
-    // No editor endpoint proven.
-    if !socket_connectable {
-        // No listener at all — a plain disk write is safe.
-        return EditorlessDiskFallbackDecision::ForceDiskNoEditor;
-    }
-    // Connectable socket (controller-hosted) with no editor behind it: route to
-    // disk only once delivery is PROVEN failing, so a still-registering editor is
-    // never clobbered. The #kcb5 CLI-only actor reaches this every cycle.
-    if consecutive_no_ack >= threshold && threshold > 0 {
-        EditorlessDiskFallbackDecision::ForceDiskNoEditor
-    } else {
-        EditorlessDiskFallbackDecision::FailClosed
-    }
+    // No editor endpoint proven. Whether the socket is absent or merely
+    // controller-hosted, realtime writeback must not silently degrade to a disk
+    // mutation; the operator can still use explicit --force-disk.
+    let _ = socket_connectable;
+    EditorlessDiskFallbackDecision::FailClosed
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -680,16 +669,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn editorless_force_disk_when_no_editor_and_delivery_proven_failing() {
-        // #kcb5: connectable controller socket, no editor, every send no_acks.
+    fn editorless_force_disk_only_when_forced() {
+        // #kcb5 cutover: connectable controller socket, no editor, every send
+        // no_acks. This now fails closed instead of routing to disk.
         assert_eq!(
             decide_editorless_disk_fallback(true, false, 3, 3, false),
-            EditorlessDiskFallbackDecision::ForceDiskNoEditor
+            EditorlessDiskFallbackDecision::FailClosed
         );
-        // No listener at all → plain disk write is safe.
+        // No listener at all is also fail-closed during realtime cutover.
         assert_eq!(
             decide_editorless_disk_fallback(false, false, 0, 3, false),
-            EditorlessDiskFallbackDecision::ForceDiskNoEditor
+            EditorlessDiskFallbackDecision::FailClosed
         );
         // Explicit --force-disk overrides everything.
         assert_eq!(

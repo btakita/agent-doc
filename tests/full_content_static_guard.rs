@@ -218,7 +218,7 @@ fn receiver_full_content_rejections_precede_visible_write_sinks() {
         jetbrains,
         "private fun applyPatchViaVfs",
         "if (!patch.fullContent.isNullOrEmpty())",
-        "targetFile.setBinaryContent(result.toByteArray",
+        "VFS whole-buffer patch apply is disabled",
     );
 
     let vscode = "editors/vscode/src/extension.ts";
@@ -245,19 +245,11 @@ fn node_patches_apply_before_visible_write_sinks() {
         "NativePatching.applyNodePatches",
         "applyMinimalDocumentEditUtil(document, content, result)",
     );
-    assert_guard_before_sink(
-        jetbrains,
-        "private fun applyPatchViaVfs",
-        "NativePatching.applyNodePatches",
-        "targetFile.setBinaryContent(result.toByteArray",
-    );
+    assert_source_not_contains(jetbrains, "targetFile.setBinaryContent(result.toByteArray");
+    assert_source_contains(jetbrains, "VFS whole-buffer patch apply is disabled");
     assert_source_contains(
         jetbrains,
         "skipping legacy component patch for node-patched component",
-    );
-    assert_source_contains(
-        jetbrains,
-        "skipping legacy VFS component patch for node-patched component",
     );
 
     let vscode = "editors/vscode/src/extension.ts";

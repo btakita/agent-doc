@@ -177,9 +177,7 @@ pub(crate) fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcRes
             shared.kill_child();
             IpcResponse::ok_empty()
         }
-        IpcMethod::ReplicaRegister { file, identity } => {
-            handle_replica_register(&file, &identity)
-        }
+        IpcMethod::ReplicaRegister { file, identity } => handle_replica_register(&file, &identity),
         IpcMethod::ReplicaDeregister { file, identity } => {
             handle_replica_deregister(&file, &identity)
         }
@@ -188,6 +186,13 @@ pub(crate) fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcRes
             identity,
             update_b64,
         } => handle_replica_update(&file, &identity, &update_b64),
+        IpcMethod::ReplicaPull { file, identity } => handle_replica_pull(&file, &identity),
+        IpcMethod::ReplicaAck {
+            file,
+            identity,
+            patch_id,
+            generation,
+        } => handle_replica_ack(&file, &identity, &patch_id, generation),
         IpcMethod::ReplicaAwareness {
             file,
             identity,
@@ -216,13 +221,16 @@ fn handle_replica_register(file: &str, identity: &str) -> IpcResponse {
         // Detached / no live editor: refuse so a headless document never spins up
         // a multi-replica session. NOT an error — the editor falls back to the
         // existing patch-file path.
-        Ok(None) => IpcResponse::err("crdt replica register refused: document is not editor-attached"),
+        Ok(None) => {
+            IpcResponse::err("crdt replica register refused: document is not editor-attached")
+        }
         Err(e) => IpcResponse::err(format!("crdt replica register failed: {e}")),
     }
 }
 
 fn handle_replica_deregister(file: &str, identity: &str) -> IpcResponse {
-    match crate::crdt_relay_host::deregister_replica_for_file(std::path::Path::new(file), identity) {
+    match crate::crdt_relay_host::deregister_replica_for_file(std::path::Path::new(file), identity)
+    {
         Ok(removed) => IpcResponse::ok(serde_json::json!({ "removed": removed })),
         Err(e) => IpcResponse::err(format!("crdt replica deregister failed: {e}")),
     }
@@ -258,8 +266,57 @@ fn handle_replica_update(file: &str, identity: &str, update_b64: &str) -> IpcRes
                 "targets": targets,
             }))
         }
-        Ok(None) => IpcResponse::err("crdt replica update refused: document is not editor-attached"),
+        Ok(None) => {
+            IpcResponse::err("crdt replica update refused: document is not editor-attached")
+        }
         Err(e) => IpcResponse::err(format!("crdt replica update failed: {e}")),
+    }
+}
+
+fn handle_replica_pull(file: &str, identity: &str) -> IpcResponse {
+    match crate::crdt_relay_host::pull_replica_updates_for_file(
+        std::path::Path::new(file),
+        identity,
+    ) {
+        Ok(Some(pull)) => {
+            let updates: Vec<serde_json::Value> = pull
+                .updates
+                .iter()
+                .map(|update| {
+                    serde_json::json!({
+                        "patch_id": update.patch_id,
+                        "origin": update.origin,
+                        "target": update.target,
+                        "generation": update.generation,
+                        "update_b64": BASE64_STANDARD.encode(&update.update),
+                    })
+                })
+                .collect();
+            IpcResponse::ok(serde_json::json!({
+                "client_id": pull.client_id,
+                "updates": updates,
+                "current_generation": pull.delivery.current_generation,
+                "last_ack_generation": pull.delivery.last_ack_generation,
+                "pending_updates": pull.delivery.pending_updates,
+            }))
+        }
+        Ok(None) => IpcResponse::err("crdt replica pull refused: document is not editor-attached"),
+        Err(e) => IpcResponse::err(format!("crdt replica pull failed: {e}")),
+    }
+}
+
+fn handle_replica_ack(file: &str, identity: &str, patch_id: &str, generation: u64) -> IpcResponse {
+    match crate::crdt_relay_host::ack_replica_update_for_file(
+        std::path::Path::new(file),
+        identity,
+        patch_id,
+        generation,
+    ) {
+        Ok(Some(acknowledged)) => IpcResponse::ok(serde_json::json!({
+            "acknowledged": acknowledged,
+        })),
+        Ok(None) => IpcResponse::err("crdt replica ack refused: document is not editor-attached"),
+        Err(e) => IpcResponse::err(format!("crdt replica ack failed: {e}")),
     }
 }
 
@@ -290,9 +347,7 @@ fn handle_replica_awareness(file: &str, identity: &str, awareness_b64: &str) -> 
                 .collect();
             IpcResponse::ok(serde_json::json!({ "presence": presence }))
         }
-        Ok(None) => {
-            IpcResponse::err("crdt awareness refused: document is not editor-attached")
-        }
+        Ok(None) => IpcResponse::err("crdt awareness refused: document is not editor-attached"),
         Err(e) => IpcResponse::err(format!("crdt awareness failed: {e}")),
     }
 }
@@ -634,14 +689,17 @@ mod tests {
     /// Send a `#crdtauth5` replica IPC method over a REAL supervisor socket and
     /// return the parsed response — the production handler routes it through the
     /// per-document `crdt_relay_host` hub.
-    fn crdt_send(sock: &std::path::Path, method: &IpcMethod) -> crate::supervisor::ipc::IpcResponse {
+    fn crdt_send(
+        sock: &std::path::Path,
+        method: &IpcMethod,
+    ) -> crate::supervisor::ipc::IpcResponse {
         crate::supervisor::ipc::send_command(sock, method).expect("send crdt ipc")
     }
 
     #[test]
     fn crdtauth5_end_to_end_fan_out_over_the_ipc_path() {
-        use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
         use agent_doc_core::crdt_sync::ReplicaState;
+        use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 
         let (_dir, doc) = crdt_temp_doc("fanout.md");
         let project_root = doc.parent().unwrap().to_path_buf();
@@ -656,7 +714,10 @@ mod tests {
         );
 
         // Stand up the REAL supervisor IPC socket with the production handler.
-        let shared = Arc::new(SupervisorShared::new("test", "crdtauth5-instance".to_string()));
+        let shared = Arc::new(SupervisorShared::new(
+            "test",
+            "crdtauth5-instance".to_string(),
+        ));
         let shared_for_ipc = shared.clone();
         let session_id = "crdtauth5-session";
         let mut ipc = crate::supervisor::ipc::SupervisorIpc::start(
@@ -680,7 +741,11 @@ mod tests {
         assert!(reg_a.ok, "register A: {reg_a:?}");
         let a_id = reg_a.data.as_ref().unwrap()["client_id"].as_u64().unwrap();
         let a_bootstrap = B64
-            .decode(reg_a.data.as_ref().unwrap()["bootstrap_b64"].as_str().unwrap())
+            .decode(
+                reg_a.data.as_ref().unwrap()["bootstrap_b64"]
+                    .as_str()
+                    .unwrap(),
+            )
             .unwrap();
 
         let reg_b = crdt_send(
@@ -714,22 +779,63 @@ mod tests {
         let data = upd.data.as_ref().unwrap();
         assert_eq!(data["origin"].as_u64().unwrap(), a_id);
         let targets = data["targets"].as_array().unwrap();
-        assert_eq!(targets.len(), 1, "the update fans out to the one other replica (B)");
+        assert_eq!(
+            targets.len(),
+            1,
+            "the update fans out to the one other replica (B)"
+        );
         assert_eq!(targets[0]["client_id"].as_u64().unwrap(), b_id);
 
-        // The fanned-out delta returned to B's FFI node converges B onto A's edit —
-        // this is the update reaching replica B THROUGH the supervisor hub.
+        // Until B applies + ACKs the queued fan-out delivery, the live delivery cut
+        // is not converged and materialization must not be considered safe.
+        assert!(
+            !crate::crdt_relay_host::commit_barrier_for_file(&doc),
+            "unacked live fan-out delivery blocks the materialization barrier"
+        );
+
+        // B pulls its own pending delivery, applies it to its FFI node, then ACKs it.
         let editor_b = ReplicaState::from_encoded(b_id, &a_bootstrap).unwrap();
-        let to_b = B64.decode(targets[0]["update_b64"].as_str().unwrap()).unwrap();
+        let pull = crdt_send(
+            &sock,
+            &IpcMethod::ReplicaPull {
+                file: file_str.clone(),
+                identity: "vscode:B".into(),
+            },
+        );
+        assert!(pull.ok, "replica pull: {pull:?}");
+        let pulled = pull.data.as_ref().unwrap()["updates"].as_array().unwrap();
+        assert_eq!(pulled.len(), 1, "B owns one pending delivery");
+        assert_eq!(pulled[0]["target"].as_u64().unwrap(), b_id);
+        let patch_id = pulled[0]["patch_id"].as_str().unwrap().to_string();
+        let generation = pulled[0]["generation"].as_u64().unwrap();
+        let to_b = B64
+            .decode(pulled[0]["update_b64"].as_str().unwrap())
+            .unwrap();
         editor_b.apply_update(&to_b).unwrap();
         assert!(
             editor_b.text().contains("FROM-A"),
             "replica B received A's op over the IPC fan-out path: {:?}",
             editor_b.text()
         );
+        let ack = crdt_send(
+            &sock,
+            &IpcMethod::ReplicaAck {
+                file: file_str.clone(),
+                identity: "vscode:B".into(),
+                patch_id,
+                generation,
+            },
+        );
+        assert!(ack.ok, "replica ack: {ack:?}");
+        assert!(
+            ack.data.as_ref().unwrap()["acknowledged"]
+                .as_bool()
+                .unwrap(),
+            "the target ack clears the pending delivery"
+        );
 
         // The commit barrier then captures a consistent cut INCLUDING the fanned-out
-        // ops: the canonical replica holds A's edit.
+        // ops: the canonical replica holds A's edit and every live delivery is ACKed.
         assert!(crate::crdt_relay_host::commit_barrier_for_file(&doc));
         crate::crdt_relay_host::with_hub(&doc, |hub| {
             assert!(
@@ -766,7 +872,10 @@ mod tests {
             "test setup: the document must be detached"
         );
 
-        let shared = Arc::new(SupervisorShared::new("test", "detached-instance".to_string()));
+        let shared = Arc::new(SupervisorShared::new(
+            "test",
+            "detached-instance".to_string(),
+        ));
         let shared_for_ipc = shared.clone();
         let session_id = "crdtauth5-detached";
         let mut ipc = crate::supervisor::ipc::SupervisorIpc::start(
@@ -787,13 +896,19 @@ mod tests {
         );
         assert!(!reg.ok, "the detached path refuses replica register");
         assert!(
-            reg.error.as_deref().unwrap_or_default().contains("not editor-attached"),
+            reg.error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("not editor-attached"),
             "{reg:?}"
         );
         // No hub was allocated for the detached document.
         let hash = crate::snapshot::doc_hash(&doc).unwrap();
         let allocated = crate::crdt_relay_host::hub_is_allocated_for_test(&hash);
-        assert!(!allocated, "the detached path must not allocate a relay hub");
+        assert!(
+            !allocated,
+            "the detached path must not allocate a relay hub"
+        );
 
         ipc.stop();
     }

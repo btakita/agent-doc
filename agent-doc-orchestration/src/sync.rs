@@ -1272,7 +1272,10 @@ fn sanitize_stamp_component(value: &str) -> String {
 /// socket key keeps isolated test servers (each a unique socket) from sharing a
 /// stamp with each other or with the default production server, so the rate
 /// limit is per real server+session.
-fn destructive_repair_stamp_path(server_socket: Option<&str>, session_name: &str) -> Option<PathBuf> {
+fn destructive_repair_stamp_path(
+    server_socket: Option<&str>,
+    session_name: &str,
+) -> Option<PathBuf> {
     let dir = std::env::current_dir().ok()?.join(".agent-doc");
     if !dir.is_dir() {
         return None;
@@ -1287,8 +1290,7 @@ fn destructive_repair_stamp_path(server_socket: Option<&str>, session_name: &str
 /// this pass should skip it); otherwise records a fresh stamp and returns
 /// `false`. Failing to resolve the stamp path (no `.agent-doc/`) never throttles.
 fn throttle_destructive_repair(tmux: &Tmux, session_name: &str) -> bool {
-    let Some(path) =
-        destructive_repair_stamp_path(tmux.server_socket.as_deref(), session_name)
+    let Some(path) = destructive_repair_stamp_path(tmux.server_socket.as_deref(), session_name)
     else {
         return false;
     };
@@ -1941,6 +1943,21 @@ fn run_with_options_internal(
             }
             Ok(_) => {}
             Err(e) => eprintln!("[sync] actor gc warning: {}", e),
+        }
+        match crate::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
+            &project_root,
+            false,
+            "sync",
+            "stale_dead_pane_actor",
+        ) {
+            Ok((closed, kept)) if closed > 0 => {
+                eprintln!(
+                    "[sync] actors: {} stale dead-pane closed, {} still active",
+                    closed, kept
+                );
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("[sync] dead-pane actor gc warning: {}", e),
         }
     }
 
@@ -5144,10 +5161,22 @@ mod tests {
         assert!(!destructive_repair_throttled(None, 10_000, min));
         // Same instant and strictly inside the window → throttled (skip).
         assert!(destructive_repair_throttled(Some(10_000), 10_000, min));
-        assert!(destructive_repair_throttled(Some(10_000), 10_000 + min - 1, min));
+        assert!(destructive_repair_throttled(
+            Some(10_000),
+            10_000 + min - 1,
+            min
+        ));
         // Exactly at and beyond the interval → run again.
-        assert!(!destructive_repair_throttled(Some(10_000), 10_000 + min, min));
-        assert!(!destructive_repair_throttled(Some(10_000), 10_000 + min + 500, min));
+        assert!(!destructive_repair_throttled(
+            Some(10_000),
+            10_000 + min,
+            min
+        ));
+        assert!(!destructive_repair_throttled(
+            Some(10_000),
+            10_000 + min + 500,
+            min
+        ));
         // Clock skew (now < last) must not panic and must not throttle forever.
         assert!(!destructive_repair_throttled(Some(10_000), 9_000, min));
     }

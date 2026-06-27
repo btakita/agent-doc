@@ -265,7 +265,7 @@ interface AgentDocLib : Library {
     /**
      * #8bfz / #fcconeowner: elect a single live plugin consumer per document.
      * Returns true if THIS consumer (consumer_id, pid) owns the document and
-     * should apply the patch + saveDocument; false if a live owner already holds
+     * should apply/ACK the patch; false if a live owner already holds
      * it and this instance must defer. Cross-process safe + self-healing; fails
      * open (returns true) on any IO error so single-instance setups are never
      * worse off than before the lease.

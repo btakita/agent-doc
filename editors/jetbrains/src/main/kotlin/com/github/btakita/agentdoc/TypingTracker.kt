@@ -31,6 +31,7 @@ object TypingTracker : DocumentListener {
         val lib = AgentDocLib.get()
         if (lib != null) {
             val text = event.document.text
+            val remoteCrdtApply = CrdtReplicaManager.isApplyingRemote(vFile.path)
             // #pcp6: send the full editor buffer content for .md session documents
             // so the CLI visible-write reconcile guard can positively confirm the
             // editor buffer equals on-disk content (no unsaved edit ahead of disk)
@@ -55,7 +56,9 @@ object TypingTracker : DocumentListener {
             // Best-effort and isolated — a reporting failure must never perturb
             // the typing path; a missing FFI symbol (older cdylib) is ignored.
             try {
-                reportEditorOp(lib, vFile.path, text, event)
+                if (!remoteCrdtApply) {
+                    reportEditorOp(lib, vFile.path, text, event)
+                }
             } catch (_: UnsatisfiedLinkError) {
                 // older cdylib without the op-capture symbols; skip
             } catch (_: NoSuchMethodError) {

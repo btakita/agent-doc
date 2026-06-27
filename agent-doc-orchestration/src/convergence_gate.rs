@@ -11,8 +11,8 @@
 //!
 //! This module is the **pure decision core**: given the four quiescence proofs for
 //! the prior turn's close plus the elapsed wait, it decides whether to dispatch the
-//! next item, keep deferring, or trip the bounded timeout into a loud force-disk
-//! fallback. It performs no I/O so it is fully unit-testable and safe to land ahead
+//! next item, keep deferring, or fail closed after the bounded timeout. It performs
+//! no I/O so it is fully unit-testable and safe to land ahead
 //! of the live-supervisor-critical dispatch wiring (which needs `make tmux-ci`). The
 //! supervisor inter-item dispatch path (idle-queue watch / drain) is the consumer.
 
@@ -35,9 +35,8 @@ pub struct ConvergenceFacts {
     pub actor_idle: bool,
     /// Milliseconds spent waiting on this gate for the current boundary.
     pub elapsed_ms: u64,
-    /// Bounded timeout (ms). Past this, an unconverged boundary trips the loud
-    /// force-disk fallback rather than deferring forever (which would wedge the
-    /// queue on a dead editor).
+    /// Bounded timeout (ms). Past this, an unconverged boundary blocks dispatch
+    /// loudly rather than silently waiting forever or routing through disk fallback.
     pub timeout_ms: u64,
 }
 
@@ -60,11 +59,9 @@ pub enum ConvergenceGateDecision {
     /// poll again. `unmet` lists which proofs are still outstanding.
     Defer { unmet: Vec<&'static str> },
     /// The bounded timeout elapsed while still not converged (editor IPC
-    /// wedged/dead). The closeout MAY fall back to a direct `--force-disk` write so
-    /// work is never permanently stuck — but this is an ERROR condition that must be
-    /// logged loudly with a replayable playback artifact. `unmet` lists the proofs
-    /// that never satisfied.
-    ForceDiskFallback { unmet: Vec<&'static str> },
+    /// wedged/dead). Dispatch must fail closed until convergence recovers or the
+    /// operator intervenes. `unmet` lists the proofs that never satisfied.
+    Blocked { unmet: Vec<&'static str> },
 }
 
 impl ConvergenceFacts {
@@ -96,16 +93,15 @@ impl ConvergenceFacts {
 ///
 /// Quiescent ⇒ [`ConvergenceGateDecision::Dispatch`]. Otherwise, still within the
 /// bounded timeout ⇒ [`ConvergenceGateDecision::Defer`]; at or past the timeout ⇒
-/// [`ConvergenceGateDecision::ForceDiskFallback`]. A `timeout_ms` of 0 means "no
-/// bounded fallback" — an unconverged boundary defers indefinitely (caller opts out
-/// of the force-disk escape hatch).
+/// [`ConvergenceGateDecision::Blocked`]. A `timeout_ms` of 0 means "no bounded
+/// blocked transition" — an unconverged boundary defers indefinitely.
 pub fn convergence_gate_decision(facts: &ConvergenceFacts) -> ConvergenceGateDecision {
     if facts.is_quiescent() {
         return ConvergenceGateDecision::Dispatch;
     }
     let unmet = facts.unmet_proofs();
     if facts.timeout_ms > 0 && facts.elapsed_ms >= facts.timeout_ms {
-        ConvergenceGateDecision::ForceDiskFallback { unmet }
+        ConvergenceGateDecision::Blocked { unmet }
     } else {
         ConvergenceGateDecision::Defer { unmet }
     }
@@ -185,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn timeout_exceeded_while_unconverged_trips_force_disk_fallback() {
+    fn timeout_exceeded_while_unconverged_blocks_dispatch() {
         let facts = ConvergenceFacts {
             editor_converged: false,
             inflight: 5,
@@ -194,20 +190,20 @@ mod tests {
             ..quiescent_facts()
         };
         match convergence_gate_decision(&facts) {
-            ConvergenceGateDecision::ForceDiskFallback { unmet } => {
+            ConvergenceGateDecision::Blocked { unmet } => {
                 assert_eq!(
                     unmet,
                     vec![proof::EDITOR_CONVERGED, proof::INFLIGHT_DRAINED]
                 );
             }
-            other => panic!("expected ForceDiskFallback at timeout, got {other:?}"),
+            other => panic!("expected Blocked at timeout, got {other:?}"),
         }
     }
 
     #[test]
     fn quiescent_at_timeout_still_dispatches() {
         // Reaching convergence exactly at the deadline dispatches — never a
-        // needless force-disk fallback when the editor actually converged.
+        // needless blocked boundary when the editor actually converged.
         let facts = ConvergenceFacts {
             elapsed_ms: 9_999,
             timeout_ms: 5_000,
@@ -220,9 +216,9 @@ mod tests {
     }
 
     #[test]
-    fn zero_timeout_defers_indefinitely_no_force_disk() {
-        // timeout_ms == 0 opts out of the force-disk escape hatch: an unconverged
-        // boundary keeps deferring rather than ever forcing a disk write.
+    fn zero_timeout_defers_indefinitely_without_blocking_transition() {
+        // timeout_ms == 0 opts out of the bounded blocked transition: an
+        // unconverged boundary keeps deferring rather than escalating.
         let facts = ConvergenceFacts {
             committed: false,
             elapsed_ms: 1_000_000,

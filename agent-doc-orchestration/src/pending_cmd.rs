@@ -10,6 +10,7 @@
 //! - `agent-doc backlog <FILE> list` — print backlog items
 
 use anyhow::{Context, Result};
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -17,6 +18,47 @@ use crate::component;
 use crate::component::{is_backlog_component, is_review_component, is_tracked_work_component};
 use crate::pending;
 use crate::snapshot;
+
+thread_local! {
+    static FORCE_DISK_PENDING_WRITE: Cell<bool> = const { Cell::new(false) };
+}
+
+pub fn with_force_disk_pending_writes<T>(
+    force_disk: bool,
+    f: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    if !force_disk {
+        return f();
+    }
+
+    FORCE_DISK_PENDING_WRITE.with(|slot| {
+        let previous = slot.replace(true);
+        let result = f();
+        slot.set(previous);
+        result
+    })
+}
+
+fn persist_pending_write(file: &Path, current: &str, target: &str) -> Result<()> {
+    let force_disk = FORCE_DISK_PENDING_WRITE.with(Cell::get);
+    if force_disk {
+        std::fs::write(file, target)
+            .with_context(|| format!("pending_write: failed to write {}", file.display()))?;
+        crate::write::record_document_write_provenance(file, target);
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "pending_write_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
+                file.display(),
+                target.len(),
+                crate::ops_log::content_hash(target)
+            ),
+        );
+        return Ok(());
+    }
+
+    crate::write::converge_or_disk_write(file, current, target, "pending_write")
+}
 
 fn trim_tracked_parent_prefix(line: &str) -> &str {
     let trimmed = line.trim();
@@ -222,7 +264,7 @@ pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     let outcome = pending::op_add_with_outcome(existing, item, &doc_id, gated)?;
     let canonical = canonicalize_component_content(file, &outcome.body);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     if let Some(key) = outcome.deduped_key.as_ref() {
         log_symptom_dedupe(file, "backlog", &outcome.id, key);
     }
@@ -247,7 +289,7 @@ pub fn add_many(file: &Path, items: &[String], gated: bool) -> Result<Vec<String
         let outcome = pending::op_add_with_outcome(existing, item, &doc_id, gated)?;
         let canonical = canonicalize_component_content(file, &outcome.body);
         let new_doc = comp.replace_content(&full_content, &canonical);
-        crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+        persist_pending_write(file, &full_content, &new_doc)?;
         if outcome.inserted {
             ids.push(outcome.id.clone());
         } else if let Some(key) = outcome.deduped_key.as_ref() {
@@ -269,7 +311,7 @@ fn add_at(file: &Path, item: &str, position: pending::AddPosition<'_>) -> Result
     let outcome = pending::op_add_at_with_outcome(existing, item, &doc_id, false, position)?;
     let canonical = canonicalize_component_content(file, &outcome.body);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     if let Some(key) = outcome.deduped_key.as_ref() {
         log_symptom_dedupe(file, "backlog", &outcome.id, key);
     }
@@ -496,7 +538,7 @@ pub fn backfill(file: &Path) -> Result<()> {
         return Ok(());
     }
     let new_doc = comp.replace_content(&full_content, &new_content);
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
 }
 
@@ -517,7 +559,7 @@ pub fn done(file: &Path, id: &str) -> Result<()> {
     let new_content = pending::op_done(existing, id)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
 }
 
@@ -561,7 +603,7 @@ pub fn gate(file: &Path, id: &str) -> Result<()> {
         .context("document has no review component after insertion")?;
     let new_doc =
         review_comp.replace_content(&new_doc, &canonicalize_component_content(file, &new_review));
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
 }
 
@@ -576,7 +618,7 @@ pub fn review_add(file: &Path, item: &str) -> Result<Option<String>> {
     let outcome = pending::op_add_with_outcome(existing, item, &doc_id, true)?;
     let canonical = canonicalize_component_content(file, &outcome.body);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     if let Some(key) = outcome.deduped_key.as_ref() {
         log_symptom_dedupe(file, "review", &outcome.id, key);
     }
@@ -592,7 +634,7 @@ pub fn review_edit(file: &Path, id: &str, text: &str) -> Result<()> {
     let new_content = pending::op_edit(existing, id, text)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
 }
 
@@ -617,7 +659,7 @@ pub fn review_remove(file: &Path, id: &str) -> Result<()> {
     }
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     eprintln!(
         "[pending] review-remove: removed {} entr{} for #{}",
         removed.len(),
@@ -655,7 +697,7 @@ pub fn review_resolve(file: &Path, id: &str) -> Result<()> {
     let archived = crate::preflight::archive_pending_done(file, &new_doc, &removed)
         .context("failed to archive resolved review item(s) to agent:done")?
         .unwrap_or(new_doc);
-    crate::write::converge_or_disk_write(file, &full_content, &archived, "pending_write")?;
+    persist_pending_write(file, &full_content, &archived)?;
     eprintln!(
         "[pending] review-resolve: archived {} entr{} for #{} to agent:done",
         removed.len(),
@@ -675,7 +717,7 @@ pub fn ungate(file: &Path, id: &str) -> Result<()> {
         let new_content = pending::op_ungate(existing, id)?;
         let canonical = canonicalize_component_content(file, &new_content);
         let new_doc = comp.replace_content(&full_content, &canonical);
-        crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+        persist_pending_write(file, &full_content, &new_doc)?;
         return Ok(());
     };
     let review_body = review_comp.content(&full_content);
@@ -687,7 +729,7 @@ pub fn ungate(file: &Path, id: &str) -> Result<()> {
             let new_content = pending::op_ungate(existing, id)?;
             let canonical = canonicalize_component_content(file, &new_content);
             let new_doc = comp.replace_content(&full_content, &canonical);
-            crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+            persist_pending_write(file, &full_content, &new_doc)?;
             return Ok(());
         }
     };
@@ -713,7 +755,7 @@ pub fn ungate(file: &Path, id: &str) -> Result<()> {
         &new_doc,
         &canonicalize_component_content(file, &new_backlog),
     );
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
 }
 
@@ -728,7 +770,7 @@ fn gate_in_place(file: &Path, id: &str) -> Result<()> {
     }
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
 }
 
@@ -739,7 +781,7 @@ pub fn edit(file: &Path, id: &str, text: &str) -> Result<()> {
     let new_content = pending::op_edit(existing, id, text)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
 }
 
@@ -749,7 +791,7 @@ pub fn clear(file: &Path) -> Result<()> {
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = pending::op_clear(existing)?;
     let new_doc = comp.replace_content(&full_content, &new_content);
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
 }
 
@@ -760,7 +802,7 @@ pub fn reorder(file: &Path, ids: &[String]) -> Result<()> {
     let new_content = pending::op_reorder(existing, ids)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
 }
 
@@ -792,7 +834,7 @@ pub fn reap(file: &Path) -> Result<()> {
     if let Some(reconciled) = crate::status_cmd::reconcile_top_backlog_status_content(&new_doc)? {
         new_doc = reconciled;
     }
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     if changed {
         eprintln!("[pending] backfilled missing hash ids / checkboxes before reap");
     }
@@ -836,7 +878,7 @@ pub fn remove(file: &Path, target: &str, contains: bool) -> Result<()> {
 
     let new_content = new_lines.join("\n");
     let new_doc = comp.replace_content(&full_content, &new_content);
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
 }
 
@@ -861,7 +903,7 @@ pub fn prune(file: &Path) -> Result<()> {
     let removed = lines.len() - new_lines.len();
     let new_content = new_lines.join("\n");
     let new_doc = comp.replace_content(&full_content, &new_content);
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     eprintln!("[pending] pruned {} completed items", removed);
     Ok(())
 }
@@ -882,7 +924,7 @@ pub fn resolve_gate(file: &Path, gate_type: &str) -> Result<()> {
     }
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     eprintln!(
         "[pending] resolved {} [/{}] item(s): {}",
         resolved.len(),
@@ -902,7 +944,7 @@ pub fn set_gate_type(file: &Path, id: &str, gate_type: &str) -> Result<()> {
     let new_content = pending::op_set_gate_type(existing, id, gate_type)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     eprintln!("[pending] set gate type [/{}] on [#{}]", gate_type, id);
     Ok(())
 }
@@ -920,7 +962,7 @@ pub fn set_gate_verify(file: &Path, id: &str, spec: &str) -> Result<()> {
     let new_content = pending::op_set_gate_verify(existing, id, spec, set_at)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
-    crate::write::converge_or_disk_write(file, &full_content, &new_doc, "pending_write")?;
+    persist_pending_write(file, &full_content, &new_doc)?;
     eprintln!(
         "[pending] set verify predicate on [#{}] (set_at={})",
         id, set_at
@@ -1021,6 +1063,10 @@ mod tests {
         (tmp, doc)
     }
 
+    fn force_pending<T>(f: impl FnOnce() -> Result<T>) -> T {
+        with_force_disk_pending_writes(true, f).unwrap()
+    }
+
     fn doc_with_pending(items: &str) -> (TempDir, PathBuf) {
         let content = format!(
             "---\nagent_doc_session: test\n---\n\n<!-- agent:pending -->\n{}\n<!-- /agent:pending -->\n",
@@ -1090,7 +1136,7 @@ mod tests {
     #[test]
     fn add_allows_explicit_noncolliding_id() {
         let (_tmp, doc) = doc_with_preset_and_pending("next-steps", "- [ ] [#abcd] existing");
-        add(&doc, "id=fresh01 a new task", false).expect("non-colliding explicit id is allowed");
+        force_pending(|| add(&doc, "id=fresh01 a new task", false));
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("[#fresh01]"), "{content}");
     }
@@ -1100,7 +1146,7 @@ mod tests {
         // An ordinary auto-id add (no explicit id prefix) is never blocked, even
         // when the free text references the preset token.
         let (_tmp, doc) = doc_with_preset_and_pending("next-steps", "- [ ] [#abcd] existing");
-        add(&doc, "plan the #next-steps rollout", false).expect("auto-id add must not be blocked");
+        force_pending(|| add(&doc, "plan the #next-steps rollout", false));
         let content = fs::read_to_string(&doc).unwrap();
         // The new item got a generated hash id, not the preset id.
         assert!(content.contains("rollout"), "{content}");
@@ -1109,7 +1155,7 @@ mod tests {
     #[test]
     fn add_prepends_to_pending_component() {
         let (_tmp, doc) = doc_with_pending("- item one");
-        add(&doc, "item two", false).unwrap();
+        force_pending(|| add(&doc, "item two", false));
 
         let content = fs::read_to_string(&doc).unwrap();
         let pending = content
@@ -1134,12 +1180,13 @@ mod tests {
     #[test]
     fn add_many_preserves_sequence_order_at_front() {
         let (_tmp, doc) = doc_with_pending("- [ ] [#abcd] existing item");
-        add_many(
-            &doc,
-            &["first new".to_string(), "second new".to_string()],
-            false,
-        )
-        .unwrap();
+        force_pending(|| {
+            add_many(
+                &doc,
+                &["first new".to_string(), "second new".to_string()],
+                false,
+            )
+        });
 
         let content = fs::read_to_string(&doc).unwrap();
         let pending = content
@@ -1168,7 +1215,7 @@ mod tests {
     #[test]
     fn add_creates_content_if_empty() {
         let (_tmp, doc) = doc_with_pending("");
-        add(&doc, "new item", false).unwrap();
+        force_pending(|| add(&doc, "new item", false));
 
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("new item"));
@@ -1179,7 +1226,7 @@ mod tests {
     #[test]
     fn remove_by_contains_match() {
         let (_tmp, doc) = doc_with_pending("- implement feature X\n- write tests");
-        remove(&doc, "feature X", true).unwrap();
+        force_pending(|| remove(&doc, "feature X", true));
 
         let content = fs::read_to_string(&doc).unwrap();
         assert!(!content.contains("implement feature X"));
@@ -1189,7 +1236,7 @@ mod tests {
     #[test]
     fn remove_noop_for_nonmatching() {
         let (_tmp, doc) = doc_with_pending("- item one");
-        remove(&doc, "not found", true).unwrap();
+        force_pending(|| remove(&doc, "not found", true));
 
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("- item one"));
@@ -1198,7 +1245,7 @@ mod tests {
     #[test]
     fn remove_exact_match_supports_ordered_parent_items() {
         let (_tmp, doc) = doc_with_pending("1. [ ] [#abcd] first item\n2. [ ] [#efgh] second item");
-        remove(&doc, "[ ] [#abcd] first item", false).unwrap();
+        force_pending(|| remove(&doc, "[ ] [#abcd] first item", false));
 
         let content = fs::read_to_string(&doc).unwrap();
         assert!(!content.contains("[#abcd] first item"));
@@ -1208,7 +1255,7 @@ mod tests {
     #[test]
     fn prune_removes_checked_items() {
         let (_tmp, doc) = doc_with_pending("- [ ] active\n- [x] done\n✅ finished");
-        prune(&doc).unwrap();
+        force_pending(|| prune(&doc));
 
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("- [ ] active"));
@@ -1219,7 +1266,7 @@ mod tests {
     #[test]
     fn prune_removes_checked_ordered_items() {
         let (_tmp, doc) = doc_with_pending("1. [ ] active\n2. [x] done");
-        prune(&doc).unwrap();
+        force_pending(|| prune(&doc));
 
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("1. [ ] active"));
@@ -1229,7 +1276,7 @@ mod tests {
     #[test]
     fn prune_noop_for_no_checked() {
         let (_tmp, doc) = doc_with_pending("- [ ] active\n- [ ] another");
-        prune(&doc).unwrap();
+        force_pending(|| prune(&doc));
 
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("- [ ] active"));
@@ -1243,7 +1290,7 @@ mod tests {
             "- [ ] [#ice01] Parked follow-up\n",
         );
 
-        done(&doc, "ice01").unwrap();
+        force_pending(|| done(&doc, "ice01"));
 
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("<!-- agent:pending -->\n- [ ] [#keep1] Keep backlog item\n"));
@@ -1256,7 +1303,7 @@ mod tests {
             "- [ ] [#keep1] Keep backlog item\n",
             "- 2026-05-09 [#done1] Already completed\n",
         );
-        done(&doc, "done1").unwrap();
+        force_pending(|| done(&doc, "done1"));
 
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("- [ ] [#keep1] Keep backlog item"));
@@ -1284,12 +1331,13 @@ mod tests {
     #[test]
     fn edit_canonicalizes_nested_subtask_ids_immediately() {
         let (_tmp, doc) = doc_with_pending("- [ ] [#tmuxcrash] parent task\n");
-        edit(
-            &doc,
-            "tmuxcrash",
-            "parent task\n  - child dependency\n  - child subtask",
-        )
-        .unwrap();
+        force_pending(|| {
+            edit(
+                &doc,
+                "tmuxcrash",
+                "parent task\n  - child dependency\n  - child subtask",
+            )
+        });
 
         let content = fs::read_to_string(&doc).unwrap();
         let pending = content
@@ -1319,12 +1367,13 @@ mod tests {
             "  - [ ] [#tmuxcrash-old2] stale child two\n",
             "- [ ] [#keep1] sibling task\n"
         ));
-        edit(
-            &doc,
-            "tmuxcrash",
-            "parent task\n  - fresh child\n  - fresh child two",
-        )
-        .unwrap();
+        force_pending(|| {
+            edit(
+                &doc,
+                "tmuxcrash",
+                "parent task\n  - fresh child\n  - fresh child two",
+            )
+        });
 
         let content = fs::read_to_string(&doc).unwrap();
         let pending = content
@@ -1354,7 +1403,7 @@ mod tests {
         let (_tmp, doc) = doc_with_pending(
             "- [/release] [#a1b2] Release v1.0\n- [/deploy] [#c3d4] Deploy\n- [/] [#e5f6] Generic",
         );
-        resolve_gate(&doc, "release").unwrap();
+        force_pending(|| resolve_gate(&doc, "release"));
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("[x]"), "release item should be done");
         assert!(content.contains("[/deploy]"), "deploy should be untouched");
@@ -1372,7 +1421,7 @@ mod tests {
     #[test]
     fn set_gate_type_on_gated_item() {
         let (_tmp, doc) = doc_with_pending("- [/] [#a1b2] Release v1.0");
-        set_gate_type(&doc, "a1b2", "release").unwrap();
+        force_pending(|| set_gate_type(&doc, "a1b2", "release"));
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("[/release]"));
     }
@@ -1412,7 +1461,7 @@ mod tests {
         );
         fs::write(&doc, content).unwrap();
 
-        let report = add_ungate_tasks_for_review(&doc).unwrap();
+        let report = force_pending(|| add_ungate_tasks_for_review(&doc));
         assert_eq!(report.scanned, 2);
         assert_eq!(report.added.len(), 2, "{report:?}");
         assert!(report.skipped.is_empty());
@@ -1422,7 +1471,7 @@ mod tests {
         assert!(after.contains("Ungate review item #rev2"), "{after}");
 
         // Re-run is idempotent: both already tracked, nothing added.
-        let report2 = add_ungate_tasks_for_review(&doc).unwrap();
+        let report2 = force_pending(|| add_ungate_tasks_for_review(&doc));
         assert_eq!(report2.scanned, 2);
         assert!(report2.added.is_empty(), "{report2:?}");
         assert_eq!(report2.skipped.len(), 2);
@@ -1513,7 +1562,7 @@ mod tests {
             "- [/] [#saevon] activate early-ack\n",
             "- [/] [#other] keep me\n",
         ));
-        review_remove(&doc, "saevon").unwrap();
+        force_pending(|| review_remove(&doc, "saevon"));
         let after = fs::read_to_string(&doc).unwrap();
         assert!(!after.contains("#saevon"), "{after}");
         assert!(after.contains("[#other]"), "{after}");
@@ -1536,7 +1585,7 @@ mod tests {
             "- [/] [#aa11] finished work\n",
             "- [/] [#bb22] still open\n",
         ));
-        review_resolve(&doc, "aa11").unwrap();
+        force_pending(|| review_resolve(&doc, "aa11"));
         let after = fs::read_to_string(&doc).unwrap();
         // Removed from review.
         let review_body = find_review_component_in_content(&after)
@@ -1564,7 +1613,7 @@ mod tests {
             "- [/] [#saevon] activate early-ack\n",
             "- [/] [#saevon] activate early-ack\n",
         ));
-        crate::preflight::run_pending_maintenance(&doc).unwrap();
+        crate::preflight::run_pending_maintenance_force_disk(&doc).unwrap();
         let after = fs::read_to_string(&doc).unwrap();
         assert_eq!(after.matches("[#saevon]").count(), 1, "{after}");
     }
@@ -1577,7 +1626,7 @@ mod tests {
             "- [/] [#saevon] first meaning\n",
             "- [/] [#saevon] second meaning\n",
         ));
-        crate::preflight::run_pending_maintenance(&doc).unwrap();
+        crate::preflight::run_pending_maintenance_force_disk(&doc).unwrap();
         let after = fs::read_to_string(&doc).unwrap();
         assert_eq!(after.matches("[#saevon]").count(), 2, "{after}");
     }

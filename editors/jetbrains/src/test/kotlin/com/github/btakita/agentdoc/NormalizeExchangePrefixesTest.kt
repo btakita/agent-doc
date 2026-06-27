@@ -249,7 +249,7 @@ One.
     }
 
     @Test
-    fun `component patch op override is wired into document and vfs apply paths`() {
+    fun `component patch op override is wired into document apply path`() {
         val sourcePath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
@@ -258,7 +258,7 @@ One.
 
         assertTrue(source.contains("componentPatchModeOverrideUtil(modeOverride) ?: extractComponentMode(doc, component)"))
         assertTrue(source.contains("applyComponentPatchNative(result, p.component, p.content, caretOffset, effectiveBoundaryId, p.op)"))
-        assertTrue(source.contains("applyComponentPatchNative(result, p.component, p.content, null, effectiveBoundaryId, p.op)"))
+        assertTrue(source.contains("VFS whole-buffer patch apply is disabled"))
     }
 
     @Test
@@ -270,8 +270,15 @@ One.
         val source = Files.readString(sourcePath)
 
         assertTrue(source.contains("full-content IPC is disabled"))
+        assertTrue(source.contains("save_document IPC is disabled"))
+        assertTrue(source.contains("reread_disk repair is disabled"))
         assertFalse(source.contains("document.setText(patch.fullContent)"))
         assertFalse(source.contains("setBinaryContent(patch.fullContent"))
+        assertFalse(source.contains("setBinaryContent("))
+        assertFalse(source.contains("saveDocument("))
+        assertFalse(source.contains("applyReconnectReread("))
+        assertFalse(source.contains("Agent Doc Reconnect Reread"))
+        assertFalse(source.contains("re-read disk/HEAD into stale buffer"))
     }
 
     @Test
@@ -304,6 +311,7 @@ One.
         assertTrue(fileFullContentGuard >= 0 && fileFullContentGuard < fileTypingGuard)
         assertFalse(source.contains("document.setText(patch.fullContent)"))
         assertFalse(source.contains("setBinaryContent(patch.fullContent"))
+        assertFalse(source.contains("setBinaryContent("))
     }
 
     @Test
@@ -450,9 +458,10 @@ One.
         assertTrue(patchWatcher.contains("private fun writeAckContent(patchId: String?, content: String, filePath: String? = null): Boolean"))
         assertTrue(patchWatcher.contains("FFI unavailable, cannot write ack-content"))
         assertTrue(patchWatcher.contains("if (!writeAckContent(patch.patchId, document.text, patch.file))"))
-        assertTrue(patchWatcher.contains("return writeAckContent(patch.patchId, result, patch.file)"))
+        assertTrue(patchWatcher.contains("if (!writeAckContent(patch.patchId, content, patch.file))"))
         assertTrue(patchWatcher.contains("applyMinimalDocumentEditUtil(document, content, result)"))
         assertFalse(patchWatcher.contains("document.setText(result)"))
+        assertFalse(patchWatcher.contains("setBinaryContent("))
 
         val applied = patchWatcher.indexOf("val applied = try", patchWatcher.indexOf("fun processPatchFile"))
         val appliedDelete = patchWatcher.indexOf("if (applied) {", applied)

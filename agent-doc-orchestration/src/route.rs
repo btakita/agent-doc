@@ -205,6 +205,7 @@ thread_local! {
     /// override — the binary-specific timeout in
     /// `authoritative_actor_ready_retry_budget` applies.
     static WAIT_FOR_READY_OVERRIDE: Cell<Option<Duration>> = const { Cell::new(None) };
+    static FORCE_DISK_ROUTE_WRITES: Cell<bool> = const { Cell::new(false) };
 }
 
 /// RAII guard that installs a `wait_for_ready` override on entry and restores
@@ -225,6 +226,48 @@ impl Drop for WaitForReadyOverrideGuard {
     fn drop(&mut self) {
         let previous = self.previous;
         WAIT_FOR_READY_OVERRIDE.with(|cell| cell.set(previous));
+    }
+}
+
+struct ForceDiskRouteWritesGuard {
+    previous: bool,
+}
+
+impl ForceDiskRouteWritesGuard {
+    fn set(value: bool) -> Self {
+        let previous = FORCE_DISK_ROUTE_WRITES.with(|cell| cell.replace(value));
+        Self { previous }
+    }
+}
+
+impl Drop for ForceDiskRouteWritesGuard {
+    fn drop(&mut self) {
+        let previous = self.previous;
+        FORCE_DISK_ROUTE_WRITES.with(|cell| cell.set(previous));
+    }
+}
+
+fn route_write_document(
+    file: &Path,
+    next_content: &str,
+    previous_content: &str,
+    reason: &str,
+) -> Result<()> {
+    if FORCE_DISK_ROUTE_WRITES.with(Cell::get) {
+        crate::write::atomic_write_pub(file, next_content)?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "{}_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
+                reason,
+                file.display(),
+                next_content.len(),
+                crate::ops_log::content_hash(next_content)
+            ),
+        );
+        Ok(())
+    } else {
+        crate::write::converge_document_or_disk(file, next_content, previous_content, reason)
     }
 }
 
@@ -749,7 +792,10 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
         }
     };
     let items = [item];
-    match crate::pending_cmd::add_many(&target_file, &items, false) {
+    match crate::pending_cmd::with_force_disk_pending_writes(
+        FORCE_DISK_ROUTE_WRITES.with(Cell::get),
+        || crate::pending_cmd::add_many(&target_file, &items, false),
+    ) {
         Ok(ids) => {
             let id = ids
                 .first()
@@ -2002,7 +2048,30 @@ pub fn run(
     plain_trigger: bool,
     wait_for_ready: Option<Duration>,
 ) -> Result<()> {
-    run_with_tmux(
+    run_with_force_disk(
+        file,
+        pane,
+        debounce_ms,
+        col_args,
+        mode,
+        plain_trigger,
+        wait_for_ready,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_force_disk(
+    file: &Path,
+    pane: Option<&str>,
+    debounce_ms: u64,
+    col_args: &[String],
+    mode: RouteMode,
+    plain_trigger: bool,
+    wait_for_ready: Option<Duration>,
+    force_disk: bool,
+) -> Result<()> {
+    run_with_tmux_with_options(
         file,
         &Tmux::default_server(),
         pane,
@@ -2011,6 +2080,7 @@ pub fn run(
         mode,
         plain_trigger,
         wait_for_ready,
+        force_disk,
     )
 }
 
@@ -2025,7 +2095,33 @@ pub fn run_with_tmux(
     plain_trigger: bool,
     wait_for_ready: Option<Duration>,
 ) -> Result<()> {
+    run_with_tmux_with_options(
+        file,
+        tmux,
+        pane,
+        debounce_ms,
+        col_args,
+        mode,
+        plain_trigger,
+        wait_for_ready,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_tmux_with_options(
+    file: &Path,
+    tmux: &Tmux,
+    pane: Option<&str>,
+    debounce_ms: u64,
+    col_args: &[String],
+    mode: RouteMode,
+    plain_trigger: bool,
+    wait_for_ready: Option<Duration>,
+    force_disk: bool,
+) -> Result<()> {
     let _wait_for_ready_guard = WaitForReadyOverrideGuard::set(wait_for_ready);
+    let _force_disk_guard = ForceDiskRouteWritesGuard::set(force_disk);
     tracing::debug!(file = %file.display(), pane, debounce_ms, cols = ?col_args, "route::run start");
     let _ = resync::prune_with_tmux(tmux); // Clean stale entries before lookup
 
@@ -2061,13 +2157,8 @@ pub fn run_with_tmux(
     frontmatter::require_agent_doc_document(&content, file)?;
     let (mut updated_content, session_id) = frontmatter::ensure_session_for_file(&content, file)?;
     if updated_content != content {
-        crate::write::converge_document_or_disk(
-            file,
-            &updated_content,
-            &content,
-            "route_session_id",
-        )
-        .with_context(|| format!("failed to write {}", file.display()))?;
+        route_write_document(file, &updated_content, &content, "route_session_id")
+            .with_context(|| format!("failed to write {}", file.display()))?;
         eprintln!("[route] Generated session UUID: {}", session_id);
     }
     let snapshot_doc = crate::snapshot::load(file).ok().flatten();
@@ -2083,7 +2174,7 @@ pub fn run_with_tmux(
     if let Some(cleanup) =
         scrub_duplicate_prompt_comments_for_route(&updated_content, &preserve_docs)?
     {
-        crate::write::converge_document_or_disk(
+        route_write_document(
             file,
             &cleanup.content,
             &updated_content,
@@ -2326,7 +2417,12 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
         // refuse dispatch until the user manually retried (the "JB Run Agent Doc
         // failed; repeat succeeded" report). run_pending_maintenance is
         // idempotent, so this is safe even when there is nothing to reap.
-        if let Err(e) = crate::preflight::run_pending_maintenance(file) {
+        let maintenance_result = if FORCE_DISK_ROUTE_WRITES.with(Cell::get) {
+            crate::preflight::run_pending_maintenance_force_disk(file)
+        } else {
+            crate::preflight::run_pending_maintenance(file)
+        };
+        if let Err(e) = maintenance_result {
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -2694,13 +2790,14 @@ fn enqueue_route_dispatch_prompt(
 
     let activated = content != original;
     if activated {
-        crate::write::converge_document_or_disk(file, &content, &original, "route_dispatch_queue")
-            .with_context(|| {
+        route_write_document(file, &content, &original, "route_dispatch_queue").with_context(
+            || {
                 format!(
                     "failed to converge queued dispatch for {} through editor IPC/disk",
                     file.display()
                 )
-            })?;
+            },
+        )?;
         crate::snapshot::save(file, &content).with_context(|| {
             format!(
                 "failed to sync snapshot after queueing dispatch for {}",
@@ -2909,13 +3006,8 @@ fn activate_existing_route_queue_head(
     content = strip_queue_component_auto_attr(&content)?;
     let activated = content != original;
     if activated {
-        crate::write::converge_document_or_disk(
-            file,
-            &content,
-            &original,
-            "route_queue_activation",
-        )
-        .with_context(|| format!("failed to activate queue in {}", file.display()))?;
+        route_write_document(file, &content, &original, "route_queue_activation")
+            .with_context(|| format!("failed to activate queue in {}", file.display()))?;
         crate::snapshot::save(file, &content).with_context(|| {
             format!(
                 "failed to sync snapshot after activating queue for {}",
@@ -5645,6 +5737,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         crate::snapshot::save(&doc, content).unwrap();
 
+        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
             &doc,
             "❯ do [#qipc]. #spec-test-build-install-commit-push",
@@ -5775,6 +5868,7 @@ mod tests {
                 .any(|e| matches!(e, crate::queue::QueueEntry::Freeform(_)))
         );
 
+        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome =
             enqueue_route_dispatch_prompt(&doc, "do [#newitem]", "test_busy_actor", false)
                 .expect("route must not crash on a polluted agent:queue");
@@ -5821,6 +5915,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         crate::snapshot::save(&doc, content).unwrap();
 
+        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
             &doc,
             "do [#qipc]. #spec-test-build-install-commit-push",
@@ -5873,6 +5968,7 @@ mod tests {
             Some("do [#shipstationaudit]. #spec-test-commit-push")
         );
 
+        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome = activate_existing_route_queue_head(&doc, "busy actor")
             .unwrap()
             .expect("legacy inactive auto queue head should activate");
@@ -6026,6 +6122,7 @@ mod tests {
             Some("do [#committed]"),
             "a committed-backed head is dispatchable"
         );
+        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome = activate_existing_route_queue_head(&doc, "dispatch_only_inactive_queue")
             .unwrap()
             .expect("committed-backed head should activate");
@@ -6137,6 +6234,7 @@ mod tests {
             "marker-side `go` must be recognized as an activatable head despite `queue: stop`"
         );
 
+        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome = activate_existing_route_queue_head(&doc, "busy actor")
             .unwrap()
             .expect("startable inactive `go` queue head should activate");
@@ -6220,6 +6318,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         crate::snapshot::save(&doc, content).unwrap();
 
+        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
             &doc,
             "do [#adoc-orch-shim-cleanup]",
@@ -6260,6 +6359,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         crate::snapshot::save(&doc, content).unwrap();
 
+        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
             &doc,
             "Run Agent Doc queued the edited prompt.",
@@ -6312,6 +6412,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         crate::snapshot::save(&doc, content).unwrap();
 
+        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome =
             enqueue_route_dispatch_prompt(&doc, "third queued prompt", "test_busy_actor", false)
                 .expect("route should append to legacy multi-prompt queues");
@@ -6353,6 +6454,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         crate::snapshot::save(&doc, content).unwrap();
 
+        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome =
             enqueue_route_dispatch_prompt(&doc, "manual preempt prompt", "test_busy_actor", true)
                 .expect("priority route dispatch should preempt the pending queue");
@@ -6396,6 +6498,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         crate::snapshot::save(&doc, content).unwrap();
 
+        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome =
             enqueue_route_dispatch_prompt(&doc, "manual preempt prompt", "test_busy_actor", true)
                 .expect("priority route dispatch should insert ahead, not supersede");
@@ -6434,6 +6537,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         crate::snapshot::save(&doc, content).unwrap();
 
+        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         enqueue_route_dispatch_prompt(&doc, "manual preempt prompt", "test_busy_actor", true)
             .expect("priority route dispatch should insert after leading directives");
 
@@ -6998,6 +7102,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         // The drain may still report Blocked on later (committed/etc.) guards in this
         // minimal fixture, but the all-surface reap runs before that — assert the
         // completed review item is gone from the file.
+        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let _ = super::drain_open_closeout_before_routed_dispatch(&doc);
 
         let after = std::fs::read_to_string(&doc).unwrap();
@@ -7426,6 +7531,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             proof: None,
             diagnostic_path: Some(&first_diagnostic),
         };
+        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         file_route_dispatch_bug_report(base);
         file_route_dispatch_bug_report(RouteDispatchBugReportFacts {
             diagnostic_path: Some(&second_diagnostic),
@@ -7496,6 +7602,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             diagnostic_path: Some(&diagnostic),
         };
 
+        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         file_route_dispatch_bug_report(facts);
 
         let source = std::fs::read_to_string(&doc).unwrap();

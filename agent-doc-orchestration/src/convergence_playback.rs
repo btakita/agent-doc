@@ -1,10 +1,10 @@
-//! `#fullboundary` Fix 2 — loud force-disk fallback diagnostics (operation playback).
+//! `#fullboundary` Fix 2 — loud blocked-boundary diagnostics (operation playback).
 //!
 //! When the convergence boundary ([`crate::convergence_gate`]) cannot be satisfied
 //! within its bounded timeout (editor IPC wedged/dead — the `inflight=5` /
-//! `send_failed` state), the closeout MAY fall back to a direct `--force-disk` write
-//! so work is never permanently stuck. Per the operator directive, that fallback is
-//! an **error condition, not a routine path**: it must be loud and fully diagnosable.
+//! `send_failed` state), the supervisor fails closed instead of dispatching the
+//! next item through a disk fallback. Per the operator directive, the wedge is an
+//! **error condition, not a routine path**: it must be loud and fully diagnosable.
 //!
 //! This module writes a replayable **operation playback** artifact capturing the full
 //! sequence that led to the wedge — the ordered IPC attempt sequence, inflight,
@@ -35,7 +35,7 @@ pub struct IpcAttempt {
     pub inflight: u64,
 }
 
-/// The full replayable diagnostic for a force-disk fallback at a failed convergence
+/// The full replayable diagnostic for a blocked failed convergence
 /// boundary. Serialized to `.agent-doc/playback/<doc-hash>/<cycle-id>.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConvergencePlayback {
@@ -43,7 +43,7 @@ pub struct ConvergencePlayback {
     pub schema_version: u32,
     /// Canonical document path.
     pub document: String,
-    /// Cycle id this fallback occurred in.
+    /// Cycle id this blocked boundary occurred in.
     pub cycle_id: String,
     /// Pipeline run id, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -57,7 +57,7 @@ pub struct ConvergencePlayback {
     /// Whether the supervisor binary matched the installed build (freshness).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supervisor_binary_fresh: Option<bool>,
-    /// Inflight count at the moment the fallback tripped.
+    /// Inflight count at the moment the boundary blocked.
     pub inflight: u64,
     /// Bounded timeout (ms) that was exceeded.
     pub timeout_ms: u64,
@@ -87,7 +87,7 @@ pub struct ConvergencePlayback {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_ours_hash: Option<String>,
     /// Closeout state-machine transitions (preflight → write → commit →
-    /// postcommit_worktree_check → fallback), in order.
+    /// postcommit_worktree_check → blocked), in order.
     pub state_transitions: Vec<String>,
 }
 
@@ -204,16 +204,16 @@ pub fn write_convergence_playback(file: &Path, playback: &ConvergencePlayback) -
     Ok(path)
 }
 
-/// The ERROR-level ops.log line for a force-disk fallback at a failed convergence
-/// boundary. Greppable (`severity=error`) and references the playback artifact so a
-/// recovering agent can load the full sequence directly.
-pub fn force_disk_fallback_ops_message(
+/// The ERROR-level ops.log line for a failed convergence boundary. Greppable
+/// (`severity=error`) and references the playback artifact so a recovering agent can
+/// load the full sequence directly.
+pub fn blocked_boundary_ops_message(
     file: &Path,
     playback: &ConvergencePlayback,
     playback_path: &Path,
 ) -> String {
     format!(
-        "convergence_gate_force_disk_fallback severity=error file={} reason=editor_ipc_convergence_boundary_failed cycle={} inflight={} timeout_ms={} unmet={} playback={}",
+        "convergence_gate_blocked severity=error file={} reason=editor_ipc_convergence_boundary_failed action=fail_closed cycle={} inflight={} timeout_ms={} unmet={} playback={}",
         file.display(),
         playback.cycle_id,
         playback.inflight,
@@ -226,12 +226,9 @@ pub fn force_disk_fallback_ops_message(
 /// Write the playback artifact AND emit the ERROR-level ops.log line referencing it.
 /// Best-effort on the ops.log side (it never fails), but the artifact write is
 /// surfaced so a failure to persist diagnostics is visible rather than swallowed.
-pub fn record_force_disk_fallback(file: &Path, playback: &ConvergencePlayback) -> Result<PathBuf> {
+pub fn record_blocked_boundary(file: &Path, playback: &ConvergencePlayback) -> Result<PathBuf> {
     let path = write_convergence_playback(file, playback)?;
-    crate::ops_log::log_op(
-        file,
-        &force_disk_fallback_ops_message(file, playback, &path),
-    );
+    crate::ops_log::log_op(file, &blocked_boundary_ops_message(file, playback, &path));
     Ok(path)
 }
 
@@ -271,7 +268,7 @@ mod tests {
             "write".into(),
             "commit".into(),
             "postcommit_worktree_check:match=false".into(),
-            "force_disk_fallback".into(),
+            "convergence_gate_blocked".into(),
         ])
         .with_hashes(
             Some("snap".into()),
@@ -300,7 +297,7 @@ mod tests {
         assert_eq!(back.candidate_len, Some(40_279));
         assert!(
             back.state_transitions
-                .contains(&"force_disk_fallback".to_string())
+                .contains(&"convergence_gate_blocked".to_string())
         );
     }
 
@@ -308,8 +305,10 @@ mod tests {
     fn ops_message_is_error_level_and_references_playback() {
         let pb = sample_playback();
         let path = Path::new("/tmp/.agent-doc/playback/abc/cycle-123.json");
-        let msg = force_disk_fallback_ops_message(Path::new("/tmp/doc.md"), &pb, path);
+        let msg = blocked_boundary_ops_message(Path::new("/tmp/doc.md"), &pb, path);
+        assert!(msg.contains("convergence_gate_blocked"));
         assert!(msg.contains("severity=error"));
+        assert!(msg.contains("action=fail_closed"));
         assert!(msg.contains("reason=editor_ipc_convergence_boundary_failed"));
         assert!(msg.contains("unmet=editor_converged,inflight_drained"));
         assert!(msg.contains("playback=/tmp/.agent-doc/playback/abc/cycle-123.json"));

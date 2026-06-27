@@ -17,6 +17,18 @@ pub fn run(file: &Path) -> Result<()> {
     run_with_options(file, PreflightOptions::default())
 }
 
+fn maybe_record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool) {
+    let Ok(crate::session_check::SessionCheckStatus::Ok(_)) = crate::session_check::inspect(file)
+    else {
+        return;
+    };
+    if let Err(err) = crate::project_controller::persist_session_actor_closeout(file)
+        .and_then(|_| crate::flow::closeout::record_terminal_closeout_proof(file, did_commit))
+    {
+        eprintln!("[preflight] terminal proof warning: {err}");
+    }
+}
+
 pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -96,7 +108,6 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 Ok(_) => {}
                 Err(e) => eprintln!("[preflight] actor gc warning: {}", e),
             }
-
             let stamp = root.join(".agent-doc/gc.stamp");
             let needs_gc = match std::fs::metadata(&stamp) {
                 Ok(meta) => meta
@@ -332,11 +343,13 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
 
     // Step 2: Commit previous cycle.
     eprintln!("[preflight] step 2: commit");
+    let mut did_commit_this_preflight = false;
     let committed = committed_prior
         || match git::commit(file) {
             Ok(did_commit) => {
                 if did_commit {
                     rc.invalidate_head_content();
+                    did_commit_this_preflight = true;
                 }
                 did_commit
             }
@@ -345,6 +358,9 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 false
             }
         };
+    if committed {
+        maybe_record_preflight_terminal_closeout_proof(file, did_commit_this_preflight);
+    }
 
     if let Some(repaired_doc) =
         relocate_out_of_exchange_prompt_before_diff(file, &std::fs::read_to_string(file)?)?
@@ -480,6 +496,26 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                         ),
                     }
                 }
+            }
+        }
+    }
+    {
+        let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+        if let Some(root) = snapshot::find_project_root(&canonical) {
+            match crate::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
+                &root,
+                false,
+                "preflight",
+                "stale_dead_pane_actor",
+            ) {
+                Ok((closed, kept)) if closed > 0 => {
+                    eprintln!(
+                        "[preflight] actors: {} stale dead-pane closed, {} still active",
+                        closed, kept
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => eprintln!("[preflight] dead-pane actor gc warning: {}", e),
             }
         }
     }
@@ -3471,7 +3507,7 @@ mod tests {
             "<!-- /agent:exchange -->\n\n",
             "###\n\n",
             "<!-- agent:backlog -->\n",
-            "- [ ] keep me\n",
+            "- [ ] [#keepme] keep me\n",
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
@@ -3497,7 +3533,7 @@ mod tests {
             "do [#oobprompt]. spec-test-build-install-commit-push\n",
             "###\n\n",
             "<!-- agent:backlog -->\n",
-            "- [ ] keep me\n",
+            "- [ ] [#keepme] keep me\n",
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, live).unwrap();
@@ -3552,7 +3588,7 @@ mod tests {
             "<!-- /agent:exchange -->\n\n",
             "###\n\n",
             "<!-- agent:backlog -->\n",
-            "- [ ] keep me\n",
+            "- [ ] [#keepme] keep me\n",
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
@@ -3583,7 +3619,7 @@ mod tests {
             "older scratch note\n",
             "-->\n\n",
             "<!-- agent:backlog -->\n",
-            "- [ ] keep me\n",
+            "- [ ] [#keepme] keep me\n",
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, live).unwrap();
@@ -3665,7 +3701,7 @@ mod tests {
             "Keep this unrelated scratch note hidden.\n",
             "-->\n\n",
             "<!-- agent:backlog -->\n",
-            "- [ ] keep me\n",
+            "- [ ] [#keepme] keep me\n",
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
@@ -3699,7 +3735,7 @@ mod tests {
                 "Keep this unrelated scratch note hidden.\n",
                 "-->\n\n",
                 "<!-- agent:backlog -->\n",
-                "- [ ] keep me\n",
+                "- [ ] [#keepme] keep me\n",
                 "<!-- /agent:backlog -->\n"
             ),
             prompt = prompt
@@ -3740,7 +3776,7 @@ mod tests {
             "<!--\n",
             "-->\n\n",
             "<!-- agent:backlog -->\n",
-            "- [ ] keep me\n",
+            "- [ ] [#keepme] keep me\n",
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
@@ -3776,7 +3812,7 @@ mod tests {
                 "Look through the Claude + Codex + agent-doc session logs for #next-steps to fix bugs.\n",
                 "-->\n\n",
                 "<!-- agent:backlog -->\n",
-                "- [ ] keep me\n",
+                "- [ ] [#keepme] keep me\n",
                 "<!-- /agent:backlog -->\n"
             ),
             exchange_prompt = exchange_prompt,
@@ -3828,7 +3864,7 @@ mod tests {
                 "Keep this scratch note.\n",
                 "-->\n\n",
                 "<!-- agent:backlog -->\n",
-                "- [ ] keep me\n",
+                "- [ ] [#keepme] keep me\n",
                 "<!-- /agent:backlog -->\n"
             ),
             prompt = prompt
@@ -3893,7 +3929,7 @@ mod tests {
             "<!-- /agent:exchange -->\n\n",
             "###\n\n",
             "<!-- agent:backlog -->\n",
-            "- [ ] keep me\n",
+            "- [ ] [#keepme] keep me\n",
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
@@ -3923,7 +3959,7 @@ mod tests {
                 "{prompt}\n",
                 "-->\n\n",
                 "<!-- agent:backlog -->\n",
-                "- [ ] keep me\n",
+                "- [ ] [#keepme] keep me\n",
                 "<!-- /agent:backlog -->\n"
             ),
             prompt = prompt
@@ -4261,7 +4297,7 @@ mod tests {
     fn preflight_recovers_response_captured_cycle_without_pending_file() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
-        let content = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
         crate::repair::save_pending(&doc, "Recovered answer.").unwrap();

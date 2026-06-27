@@ -40,6 +40,10 @@ export function calculateMinimalReplacement(before: string, after: string): Mini
     };
 }
 
+export function isFullDocumentReplacement(before: string, replacement: MinimalReplacement): boolean {
+    return before.length > 0 && replacement.start === 0 && replacement.deleteLength === before.length;
+}
+
 export function isPureRepositionSignal(patch: RepositionPatchShape): boolean {
     if (!patch.reposition_boundary) {
         return false;

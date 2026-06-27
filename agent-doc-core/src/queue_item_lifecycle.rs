@@ -32,9 +32,7 @@ use serde::{Deserialize, Serialize};
 /// Visible lifecycle state of a single rendered queue item, in ascending lawful
 /// order. This is the coarse lattice the CRDT convergence joins over; the
 /// orchestration `QueueItemState` is a finer-grained refinement that maps onto it.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QueueItemLifecycle {
     /// The item is a live (un-struck) queue head — still actionable.

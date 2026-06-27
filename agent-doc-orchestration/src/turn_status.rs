@@ -326,7 +326,10 @@ mod tests {
     fn pane_title_idle_stale_still_warns() {
         // Between turns the warning stays visible so a stale session is obvious
         // even when no turn is in flight.
-        assert_eq!(pane_title_for_status(false, true), STALE_SUPERVISOR_PANE_MARKER);
+        assert_eq!(
+            pane_title_for_status(false, true),
+            STALE_SUPERVISOR_PANE_MARKER
+        );
     }
 
     #[test]

@@ -83,6 +83,8 @@ pub enum StateFact {
         node_key: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         backlog_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prompt_text: Option<String>,
         drainable: bool,
         /// Hosting epoch this queue fact was produced under (`#xdocsuper3`). When
         /// present and behind the document's current hosting epoch the fact is
@@ -103,6 +105,14 @@ pub enum StateFact {
         node_key: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         backlog_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hosting_epoch: Option<u64>,
+    },
+    QueueWorklistProjected {
+        document_hash: String,
+        queue_hash: String,
+        entries: Vec<QueueWorklistEntry>,
+        active: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         hosting_epoch: Option<u64>,
     },
@@ -232,6 +242,7 @@ impl StateFact {
             | Self::QueueHeadSelected { document_hash, .. }
             | Self::QueueHeadDeferred { document_hash, .. }
             | Self::QueueHeadCompleted { document_hash, .. }
+            | Self::QueueWorklistProjected { document_hash, .. }
             | Self::ResponseCaptured { document_hash, .. }
             | Self::WriteApplied { document_hash, .. }
             | Self::CommitObserved { document_hash, .. }
@@ -268,7 +279,8 @@ impl StateFact {
             }
             Self::QueueHeadSelected { .. }
             | Self::QueueHeadDeferred { .. }
-            | Self::QueueHeadCompleted { .. } => StateDomain::Queue,
+            | Self::QueueHeadCompleted { .. }
+            | Self::QueueWorklistProjected { .. } => StateDomain::Queue,
             Self::EditorPatchQueued { .. }
             | Self::EditorAckObserved { .. }
             | Self::IpcProofInsufficient { .. }
@@ -508,13 +520,18 @@ impl DocumentStateProjection {
             StateFact::QueueHeadSelected {
                 node_key,
                 backlog_id,
+                prompt_text,
                 drainable,
                 hosting_epoch,
                 ..
             } => {
                 if self.hosting_epoch_current(*hosting_epoch) {
-                    self.queue
-                        .apply_selected(node_key, backlog_id.as_deref(), *drainable);
+                    self.queue.apply_selected(
+                        node_key,
+                        backlog_id.as_deref(),
+                        prompt_text.as_deref(),
+                        *drainable,
+                    );
                 } else {
                     self.reject_stale(StateDomain::Queue, StateOwner::QueueOrchestrator);
                 }
@@ -539,6 +556,19 @@ impl DocumentStateProjection {
             } => {
                 if self.hosting_epoch_current(*hosting_epoch) {
                     self.queue.apply_completed(node_key, backlog_id.as_deref());
+                } else {
+                    self.reject_stale(StateDomain::Queue, StateOwner::QueueOrchestrator);
+                }
+            }
+            StateFact::QueueWorklistProjected {
+                queue_hash,
+                entries,
+                active,
+                hosting_epoch,
+                ..
+            } => {
+                if self.hosting_epoch_current(*hosting_epoch) {
+                    self.queue.apply_worklist(queue_hash, entries, *active);
                 } else {
                     self.reject_stale(StateDomain::Queue, StateOwner::QueueOrchestrator);
                 }
@@ -923,16 +953,30 @@ pub struct QueueProjection {
     pub heads: BTreeMap<String, QueueHeadProjection>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub completed_heads: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub worklist: Vec<QueueWorklistEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worklist_queue_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub worklist_active: bool,
 }
 
 impl QueueProjection {
-    fn apply_selected(&mut self, node_key: &str, backlog_id: Option<&str>, drainable: bool) {
+    fn apply_selected(
+        &mut self,
+        node_key: &str,
+        backlog_id: Option<&str>,
+        prompt_text: Option<&str>,
+        drainable: bool,
+    ) {
         let head = self
             .heads
             .entry(node_key.to_string())
             .or_insert_with(|| QueueHeadProjection::new(backlog_id));
         head.backlog_id = backlog_id.map(str::to_string).or(head.backlog_id.clone());
+        head.prompt_text = prompt_text.map(str::to_string).or(head.prompt_text.clone());
         head.drainable = drainable;
+        head.defer_reason = None;
         if head.transition(QueueHeadEvent::Selected) {
             self.active_head = Some(node_key.to_string());
         }
@@ -944,6 +988,7 @@ impl QueueProjection {
             .entry(node_key.to_string())
             .or_insert_with(|| QueueHeadProjection::new(None));
         head.defer_reason = Some(reason.to_string());
+        head.drainable = false;
         head.transition(QueueHeadEvent::Deferred);
         if self.active_head.as_deref() == Some(node_key) {
             self.active_head = None;
@@ -962,6 +1007,31 @@ impl QueueProjection {
             self.active_head = None;
         }
     }
+
+    fn apply_worklist(&mut self, queue_hash: &str, entries: &[QueueWorklistEntry], active: bool) {
+        self.worklist_queue_hash = Some(queue_hash.to_string());
+        self.worklist_active = active;
+        self.worklist = if active { entries.to_vec() } else { Vec::new() };
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueWorklistEntryKind {
+    Prompt,
+    Preset,
+    Dispatch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueWorklistEntry {
+    pub kind: QueueWorklistEntryKind,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backlog_id: Option<String>,
+    pub drainable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -969,6 +1039,8 @@ pub struct QueueHeadProjection {
     pub phase: QueueHeadPhase,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backlog_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_text: Option<String>,
     pub drainable: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub defer_reason: Option<String>,
@@ -979,6 +1051,7 @@ impl QueueHeadProjection {
         Self {
             phase: QueueHeadPhase::Pending,
             backlog_id: backlog_id.map(str::to_string),
+            prompt_text: None,
             drainable: false,
             defer_reason: None,
         }
@@ -1937,6 +2010,7 @@ mod tests {
                 document_hash: "doc-a".into(),
                 node_key: "queue-node-1".into(),
                 backlog_id: Some("#advr-state".into()),
+                prompt_text: None,
                 drainable: true,
                 hosting_epoch: None,
             },
@@ -2271,6 +2345,7 @@ mod tests {
                 document_hash: "doc-a".into(),
                 node_key: "free-text-head".into(),
                 backlog_id: None,
+                prompt_text: None,
                 drainable: true,
                 hosting_epoch: Some(1),
             },
@@ -2367,6 +2442,7 @@ mod tests {
                 document_hash: "doc-b".into(),
                 node_key: "b-head".into(),
                 backlog_id: None,
+                prompt_text: None,
                 drainable: true,
                 hosting_epoch: Some(1),
             },
@@ -2436,9 +2512,54 @@ mod tests {
         );
         let mut queue = QueueProjection::default();
         queue.apply_completed("node-1", None);
-        queue.apply_selected("node-1", None, true);
+        queue.apply_selected("node-1", None, None, true);
         assert_eq!(queue.active_head, None);
         assert_eq!(queue.heads["node-1"].phase, QueueHeadPhase::Completed);
+        let mut deferred_queue = QueueProjection::default();
+        deferred_queue.apply_selected("node-2", Some("alpha"), Some("do [#alpha]"), true);
+        deferred_queue.apply_deferred("node-2", "stop_fence");
+        assert_eq!(deferred_queue.active_head, None);
+        assert_eq!(
+            deferred_queue.heads["node-2"].phase,
+            QueueHeadPhase::Deferred
+        );
+        assert!(!deferred_queue.heads["node-2"].drainable);
+        assert_eq!(
+            deferred_queue.heads["node-2"].defer_reason.as_deref(),
+            Some("stop_fence")
+        );
+        deferred_queue.apply_selected("node-2", None, None, true);
+        assert_eq!(deferred_queue.active_head.as_deref(), Some("node-2"));
+        assert_eq!(
+            deferred_queue.heads["node-2"].phase,
+            QueueHeadPhase::Selected
+        );
+        assert_eq!(deferred_queue.heads["node-2"].defer_reason, None);
+        assert!(deferred_queue.heads["node-2"].drainable);
+        deferred_queue.apply_worklist(
+            "queue-hash-a",
+            &[QueueWorklistEntry {
+                kind: QueueWorklistEntryKind::Prompt,
+                text: "do [#alpha]".into(),
+                node_key: Some("node-2".into()),
+                backlog_id: Some("alpha".into()),
+                drainable: true,
+            }],
+            true,
+        );
+        assert!(deferred_queue.worklist_active);
+        assert_eq!(
+            deferred_queue.worklist_queue_hash.as_deref(),
+            Some("queue-hash-a")
+        );
+        assert_eq!(deferred_queue.worklist[0].text, "do [#alpha]");
+        deferred_queue.apply_worklist("queue-hash-b", &[], false);
+        assert!(!deferred_queue.worklist_active);
+        assert_eq!(
+            deferred_queue.worklist_queue_hash.as_deref(),
+            Some("queue-hash-b")
+        );
+        assert!(deferred_queue.worklist.is_empty());
         assert_eq!(
             TransportPatchMachine::transition(
                 TransportPatchPhase::InsufficientProof,

@@ -1728,6 +1728,7 @@ fn stamp_queue_fact_hosting_epoch(
         StateFact::QueueHeadSelected { hosting_epoch, .. }
         | StateFact::QueueHeadDeferred { hosting_epoch, .. }
         | StateFact::QueueHeadCompleted { hosting_epoch, .. }
+        | StateFact::QueueWorklistProjected { hosting_epoch, .. }
             if hosting_epoch.is_none() =>
         {
             *hosting_epoch = Some(current);
@@ -3131,6 +3132,28 @@ operator note
         let error = unsafe { CStr::from_ptr(result.error) }.to_str().unwrap();
         assert!(
             error.contains("mixed duplicate scaffold"),
+            "unexpected error: {error}"
+        );
+        unsafe { agent_doc_free_string(result.error) };
+    }
+
+    #[test]
+    fn normalize_template_structure_ffi_rejects_truncated_agent_comment() {
+        let doc = concat!(
+            "<!-- agent:queue -->\n",
+            "- a\n",
+            "<!-- /agent:queue ->\n",
+            "<!-- /agent:exchange --\n",
+        );
+        let c_doc = CString::new(doc).unwrap();
+
+        let result = unsafe { agent_doc_normalize_template_structure(c_doc.as_ptr()) };
+
+        assert!(result.text.is_null());
+        assert!(!result.error.is_null());
+        let error = unsafe { CStr::from_ptr(result.error) }.to_str().unwrap();
+        assert!(
+            error.contains("malformed_agent_comment"),
             "unexpected error: {error}"
         );
         unsafe { agent_doc_free_string(result.error) };

@@ -328,9 +328,7 @@ impl CycleState {
     /// so the `execve` recycle reaches its boundary instead of deferring forever.
     /// Pure so the deadline policy is unit-testable without the live idle watch.
     pub fn open_stalled(&self, inflight: u64, now_secs: u64, deadline_secs: u64) -> bool {
-        self.is_open()
-            && inflight == 0
-            && now_secs.saturating_sub(self.updated_at) > deadline_secs
+        self.is_open() && inflight == 0 && now_secs.saturating_sub(self.updated_at) > deadline_secs
     }
 
     /// Derive the live finalize-pipeline view (`#fm-run-id-step` / `#fmrunid-wire`)

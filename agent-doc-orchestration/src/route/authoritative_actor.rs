@@ -194,11 +194,9 @@ fn defer_recovery_hint(
     queue_paused: bool,
     file: &Path,
 ) -> String {
-    let recovery_cmd = format!(
-        "agent-doc session restart-supervisor {}",
-        file.display()
-    );
-    if queue_paused || runtime.health == SupervisorHealth::Unreachable
+    let recovery_cmd = format!("agent-doc session restart-supervisor {}", file.display());
+    if queue_paused
+        || runtime.health == SupervisorHealth::Unreachable
         || runtime.health == SupervisorHealth::NoSocket
     {
         let blocker = if queue_paused {
@@ -859,7 +857,14 @@ mod tests {
             IpcMethod::Inject { .. } | IpcMethod::Clear { .. } => IpcResponse::ok_empty(),
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. }
+            | IpcMethod::StopAgent { .. }
+            | IpcMethod::ReplicaRegister { .. }
+            | IpcMethod::ReplicaDeregister { .. }
+            | IpcMethod::ReplicaUpdate { .. }
+            | IpcMethod::ReplicaPull { .. }
+            | IpcMethod::ReplicaAck { .. }
+            | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 

@@ -760,11 +760,19 @@ fn update_active_state(file: &Path, state: CaptureState) -> Result<()> {
     let Some(mut record) = load_active(file)? else {
         return Ok(());
     };
-    if capture_state_rank(state.clone()) < capture_state_rank(record.state.clone()) {
-        return Ok(());
-    }
     let prior_state = record.state.clone();
     let now = now_secs();
+    if capture_state_rank(state.clone()) < capture_state_rank(record.state.clone()) {
+        if matches!(state, CaptureState::Replayed)
+            && matches!(record.state, CaptureState::Committed)
+            && record.replayed_at.is_none()
+        {
+            record.replayed_at = Some(now);
+            record.updated_at = now;
+            return write_record(file, &record);
+        }
+        return Ok(());
+    }
     let mut changed = false;
     match state {
         CaptureState::Captured => {}
@@ -1342,6 +1350,23 @@ mod tests {
 
         let active = load_active(&doc).unwrap().unwrap();
         assert_eq!(active.state, CaptureState::Committed);
+    }
+
+    #[test]
+    fn mark_replayed_backfills_committed_capture_provenance() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "body").unwrap();
+        crate::snapshot::save(&doc, "body").unwrap();
+        capture_response(&doc, "response body").unwrap();
+
+        mark_committed(&doc).unwrap();
+        mark_replayed(&doc).unwrap();
+
+        let active = load_active(&doc).unwrap().unwrap();
+        assert_eq!(active.state, CaptureState::Committed);
+        assert!(active.replayed_at.is_some());
+        assert!(active.committed_at.is_some());
     }
 
     #[test]

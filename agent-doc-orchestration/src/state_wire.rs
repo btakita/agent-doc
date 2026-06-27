@@ -221,8 +221,9 @@ impl WireSubscribe {
     /// Serialize to the lazily-spec JSON wire string.
     pub fn to_json(&self) -> String {
         match self {
-            Self::Snapshot(snapshot) => serde_json::to_string(snapshot)
-                .unwrap_or_else(|_| "null".to_string()),
+            Self::Snapshot(snapshot) => {
+                serde_json::to_string(snapshot).unwrap_or_else(|_| "null".to_string())
+            }
             Self::Delta(delta) => {
                 serde_json::to_string(delta).unwrap_or_else(|_| "null".to_string())
             }
@@ -314,10 +315,7 @@ fn collect_nodes(projection: &DocumentStateProjection) -> Vec<ProjectionNodeReco
     }
 
     // Route document singleton is emitted once route state is observed.
-    let has_route_state = projection
-        .route
-        .generation
-        .is_some()
+    let has_route_state = projection.route.generation.is_some()
         || projection.route.pane_id.is_some()
         || !matches!(
             projection.route.readiness,
@@ -378,8 +376,10 @@ fn collect_edges(
         .as_deref()
         .and_then(|cycle_id| slot_of(AgentDocNodeType::CloseoutCycle, cycle_id));
     let route_slot = slot_of(AgentDocNodeType::Route, document_hash);
-    let route_owner_slot =
-        slot_of(AgentDocNodeType::SupervisorOwner, owner_entity_key(StateOwner::RouteDispatch));
+    let route_owner_slot = slot_of(
+        AgentDocNodeType::SupervisorOwner,
+        owner_entity_key(StateOwner::RouteDispatch),
+    );
     let editor_owner_slot = slot_of(
         AgentDocNodeType::SupervisorOwner,
         owner_entity_key(StateOwner::EditorIpcBridge),
@@ -396,9 +396,7 @@ fn collect_edges(
     // queue.head → closeout.cycle (head selected within a cycle)
     if let Some(cycle) = cycle_slot {
         for node_key in projection.queue.heads.keys() {
-            if let Some(head_slot) =
-                slot_of(AgentDocNodeType::QueueHead, node_key)
-            {
+            if let Some(head_slot) = slot_of(AgentDocNodeType::QueueHead, node_key) {
                 edges.push(WireEdgeSnapshot {
                     dependent: head_slot,
                     dependency: cycle,
@@ -410,9 +408,7 @@ fn collect_edges(
     // transport.patch → closeout.cycle (patch within a cycle)
     if let Some(cycle) = cycle_slot {
         for patch_id in projection.transport.patches.keys() {
-            if let Some(patch_slot) =
-                slot_of(AgentDocNodeType::TransportPatch, patch_id)
-            {
+            if let Some(patch_slot) = slot_of(AgentDocNodeType::TransportPatch, patch_id) {
                 edges.push(WireEdgeSnapshot {
                     dependent: patch_slot,
                     dependency: cycle,
@@ -432,9 +428,7 @@ fn collect_edges(
     // supervisor.owner[EditorIpcBridge] → transport.patch (patches owned by editor gen)
     if let Some(editor_owner) = editor_owner_slot {
         for patch_id in projection.transport.patches.keys() {
-            if let Some(patch_slot) =
-                slot_of(AgentDocNodeType::TransportPatch, patch_id)
-            {
+            if let Some(patch_slot) = slot_of(AgentDocNodeType::TransportPatch, patch_id) {
                 edges.push(WireEdgeSnapshot {
                     dependent: patch_slot,
                     dependency: editor_owner,
@@ -546,10 +540,14 @@ pub fn build_delta(
     // Edges (diff in canonical emission order):
     let before_edges = collect_edges(document_hash, before, &before_nodes);
     let after_edges = collect_edges(document_hash, after, &after_nodes);
-    let before_edge_set: BTreeSet<(u64, u64)> =
-        before_edges.iter().map(|e| (e.dependent, e.dependency)).collect();
-    let after_edge_set: BTreeSet<(u64, u64)> =
-        after_edges.iter().map(|e| (e.dependent, e.dependency)).collect();
+    let before_edge_set: BTreeSet<(u64, u64)> = before_edges
+        .iter()
+        .map(|e| (e.dependent, e.dependency))
+        .collect();
+    let after_edge_set: BTreeSet<(u64, u64)> = after_edges
+        .iter()
+        .map(|e| (e.dependent, e.dependency))
+        .collect();
     for (dependent, dependency) in &after_edge_set {
         if !before_edge_set.contains(&(*dependent, *dependency)) {
             ops.push(WireDeltaOp::EdgeAdd {
@@ -585,21 +583,13 @@ pub fn build_delta(
 ///
 /// Because the ledger is append-only and never prunes within a process
 /// lifetime, any `last_epoch <= current_epoch` is satisfiable without a resync.
-pub fn subscribe(
-    ledger: &EventLedger,
-    document_hash: &str,
-    last_epoch: u64,
-) -> WireSubscribe {
+pub fn subscribe(ledger: &EventLedger, document_hash: &str, last_epoch: u64) -> WireSubscribe {
     let current_epoch = ledger.document_epoch(document_hash);
     if last_epoch == 0 {
         let projection = ledger
             .project_document(document_hash)
             .unwrap_or_else(|| DocumentStateProjection::new(document_hash));
-        return WireSubscribe::Snapshot(build_snapshot(
-            document_hash,
-            &projection,
-            current_epoch,
-        ));
+        return WireSubscribe::Snapshot(build_snapshot(document_hash, &projection, current_epoch));
     }
     if last_epoch >= current_epoch {
         // Caller is current (or ahead of a stale cache): emit an empty delta so
@@ -660,6 +650,7 @@ mod tests {
                 document_hash: doc.to_string(),
                 node_key: key.to_string(),
                 backlog_id: None,
+                prompt_text: None,
                 drainable: true,
                 hosting_epoch: None,
             },
@@ -678,7 +669,12 @@ mod tests {
         )
     }
 
-    fn owner_generation_event(id: &str, doc: &str, owner: StateOwner, generation: u64) -> StateEvent {
+    fn owner_generation_event(
+        id: &str,
+        doc: &str,
+        owner: StateOwner,
+        generation: u64,
+    ) -> StateEvent {
         StateEvent::new(
             id,
             StateFact::OwnerGenerationChanged {
@@ -704,13 +700,12 @@ mod tests {
     fn slot_id_is_stable_and_distinct() {
         let a = slot_id("doc-a", AgentDocNodeType::Queue.type_tag(), "");
         let b = slot_id("doc-b", AgentDocNodeType::Queue.type_tag(), "");
-        let head = slot_id(
-            "doc-a",
-            AgentDocNodeType::QueueHead.type_tag(),
-            "node-1",
-        );
+        let head = slot_id("doc-a", AgentDocNodeType::QueueHead.type_tag(), "node-1");
         assert_ne!(a, b, "different documents must address different slots");
-        assert_ne!(a, head, "different entity keys must address different slots");
+        assert_ne!(
+            a, head,
+            "different entity keys must address different slots"
+        );
         // Stable across calls (pure function):
         assert_eq!(a, slot_id("doc-a", AgentDocNodeType::Queue.type_tag(), ""));
     }
@@ -753,8 +748,10 @@ mod tests {
         let baseline_slot = slot_id(doc, AgentDocNodeType::DocumentBaseline.type_tag(), doc);
         let cycle_slot = slot_id(doc, AgentDocNodeType::CloseoutCycle.type_tag(), "cycle-1");
         assert!(
-            snapshot.edges.iter().any(|e| e.dependent == cycle_slot
-                && e.dependency == baseline_slot),
+            snapshot
+                .edges
+                .iter()
+                .any(|e| e.dependent == cycle_slot && e.dependency == baseline_slot),
             "cycle→baseline derivation edge must be emitted"
         );
         // Baseline + cycle are roots.
@@ -852,8 +849,10 @@ mod tests {
         )
         .expect("route owner node present");
         assert!(
-            snapshot.edges.iter().any(|e| e.dependent == route_slot
-                && e.dependency == route_owner_slot),
+            snapshot
+                .edges
+                .iter()
+                .any(|e| e.dependent == route_slot && e.dependency == route_owner_slot),
             "route → route_dispatch owner derivation edge must be present"
         );
     }
@@ -1022,6 +1021,7 @@ mod tests {
                     document_hash: doc.to_string(),
                     node_key: "#gww8".to_string(),
                     backlog_id: Some("#gww8".to_string()),
+                    prompt_text: None,
                     drainable: true,
                     hosting_epoch: None,
                 },
@@ -1041,10 +1041,7 @@ mod tests {
                 .heads
                 .get("#gww8")
                 .expect("queue head present");
-            assert_eq!(
-                head.phase,
-                crate::state_backbone::QueueHeadPhase::Selected
-            );
+            assert_eq!(head.phase, crate::state_backbone::QueueHeadPhase::Selected);
 
             // --- delta to epoch 6 (3 more accepted events) ---
             ledger.append(StateEvent::new(
@@ -1128,8 +1125,7 @@ mod tests {
             // mirror: build a snapshot and confirm the cycle/head/patch payloads
             // decode to committed/completed/acked. This is the exact wire the
             // kt/js mirrors apply, so it ties the ledger pin to the mirror pin.
-            let wire =
-                build_snapshot(doc, &after, ledger.document_epoch(doc));
+            let wire = build_snapshot(doc, &after, ledger.document_epoch(doc));
             let decode = |type_tag: &str| -> serde_json::Value {
                 let node = wire
                     .nodes
@@ -1140,18 +1136,9 @@ mod tests {
                 let bytes = BASE64_STANDARD.decode(payload).unwrap();
                 serde_json::from_slice(&bytes).unwrap()
             };
-            assert_eq!(
-                decode("agent_doc.closeout.cycle")["phase"],
-                "committed"
-            );
-            assert_eq!(
-                decode("agent_doc.queue.head")["phase"],
-                "completed"
-            );
-            assert_eq!(
-                decode("agent_doc.transport.patch")["phase"],
-                "acked"
-            );
+            assert_eq!(decode("agent_doc.closeout.cycle")["phase"], "committed");
+            assert_eq!(decode("agent_doc.queue.head")["phase"], "completed");
+            assert_eq!(decode("agent_doc.transport.patch")["phase"], "acked");
         }
     }
 

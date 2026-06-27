@@ -904,12 +904,10 @@ impl SimWorld {
         // `mismatched_authoritative_actor_can_be_replaced` rule: replaceable ONLY
         // when the supervisor is unhealthy OR the actor is Closed. A healthy
         // Ready/Busy/WaitingInput old-harness actor is still authoritative → defer.
-        let actor_closed =
-            matches!(self.route.durable.lifecycle, SupervisorLifecycle::Closed);
-        let supervisor_unhealthy = matches!(
-            self.route.durable.lifecycle,
-            SupervisorLifecycle::Starting
-        ) && self.route.supervisor_lease_generation.is_none();
+        let actor_closed = matches!(self.route.durable.lifecycle, SupervisorLifecycle::Closed);
+        let supervisor_unhealthy =
+            matches!(self.route.durable.lifecycle, SupervisorLifecycle::Starting)
+                && self.route.supervisor_lease_generation.is_none();
         let can_replace = actor_closed || supervisor_unhealthy;
         if can_replace {
             // Not the deferred path: a stale/closed actor is replaced by the normal
@@ -936,8 +934,7 @@ impl SimWorld {
         // flight or the queue is paused — the boundary restart cannot fire yet, so
         // the bail must carry the `restart-supervisor` recovery suffix and the switch
         // must be held pending (no silent drop).
-        let queue_paused =
-            matches!(self.route.queue_control, QueueControlState::Paused);
+        let queue_paused = matches!(self.route.queue_control, QueueControlState::Paused);
         let turn_active = matches!(
             self.route.durable.lifecycle,
             SupervisorLifecycle::Busy | SupervisorLifecycle::WaitingInput
@@ -971,16 +968,14 @@ impl SimWorld {
         if !pending_switch {
             return;
         }
-        let prompt_visible =
-            matches!(self.route.durable.lifecycle, SupervisorLifecycle::Ready);
+        let prompt_visible = matches!(self.route.durable.lifecycle, SupervisorLifecycle::Ready);
         let turn_active = matches!(
             self.route.durable.lifecycle,
             SupervisorLifecycle::Busy | SupervisorLifecycle::WaitingInput
         );
         // A paused queue means the supervisor idle-watch does not tick the drain
         // boundary; model it as "no dispatch-ready boundary reached".
-        let queue_paused =
-            matches!(self.route.queue_control, QueueControlState::Paused);
+        let queue_paused = matches!(self.route.queue_control, QueueControlState::Paused);
         let boundary_prompt_visible = prompt_visible && !queue_paused;
 
         let decision = agent_change_restart_decision(
@@ -1239,10 +1234,8 @@ impl SimWorld {
             MAX_CYCLE_OPEN_DEFER_TICKS, cycle_open_defer_escalates,
         };
         if self.recycle_clear.cycle_open && turn_boundary {
-            self.recycle_clear.cycle_open_defer_streak = self
-                .recycle_clear
-                .cycle_open_defer_streak
-                .saturating_add(1);
+            self.recycle_clear.cycle_open_defer_streak =
+                self.recycle_clear.cycle_open_defer_streak.saturating_add(1);
         } else {
             self.recycle_clear.cycle_open_defer_streak = 0;
         }

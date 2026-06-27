@@ -284,6 +284,24 @@ pub fn run_with_reap_policy(
             format!("[start] actor gc warning: {e}"),
         ),
     }
+    match crate::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
+        &project_root,
+        false,
+        "start",
+        "stale_dead_pane_actor",
+    ) {
+        Ok((closed, kept)) if closed > 0 => start_console_status(
+            &mut session_log,
+            route_owned,
+            format!("[start] actors: {closed} stale dead-pane closed, {kept} still active"),
+        ),
+        Ok(_) => {}
+        Err(e) => start_console_status(
+            &mut session_log,
+            route_owned,
+            format!("[start] dead-pane actor gc warning: {e}"),
+        ),
+    }
 
     // Resolve harness config from frontmatter agent > config default_agent > claude
     let harness = crate::harness::HarnessConfig::from_context(&fm, &global_config);
@@ -886,7 +904,9 @@ pub fn run_with_reap_policy(
             .flatten()
             .map(|state| state.recycle_resume_consumed)
             .unwrap_or(false);
-        let child_survived = pending_adopt.map(|state| state.child_survived()).unwrap_or(false);
+        let child_survived = pending_adopt
+            .map(|state| state.child_survived())
+            .unwrap_or(false);
         let resume_action = crate::start::decisions::boot_resume_action(
             is_recycle_boot,
             cycle_open,

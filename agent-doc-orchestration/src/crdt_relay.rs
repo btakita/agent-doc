@@ -35,7 +35,7 @@
 //! [`RelayHub::recover_from_projection`], [`RelayHub::reconcile_disk_projection`],
 //! and [`DISK_IS_RECOVERY_PROJECTION_ONLY`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -61,6 +61,9 @@ struct Member {
     /// skipped by broadcasts and the commit barrier (no deadlock on a slow /
     /// offline editor) and catches up on [`RelayHub::reconnect`].
     live: bool,
+    generation: u64,
+    last_ack_generation: u64,
+    pending: VecDeque<PendingReplicaUpdate>,
 }
 
 /// A fan-out packet: an `update` (delta) originating from `origin` that must be
@@ -75,6 +78,26 @@ pub struct BroadcastPacket {
     pub update: Vec<u8>,
     /// The currently-live OTHER replicas that should receive `update`.
     pub targets: Vec<u64>,
+}
+
+/// One supervisor-to-editor delivery awaiting an explicit editor ACK.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingReplicaUpdate {
+    pub patch_id: String,
+    pub origin: u64,
+    pub target: u64,
+    pub generation: u64,
+    pub update: Vec<u8>,
+}
+
+/// Delivery/ACK state for one registered editor replica.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplicaDeliverySnapshot {
+    pub client_id: u64,
+    pub live: bool,
+    pub pending_updates: usize,
+    pub current_generation: u64,
+    pub last_ack_generation: u64,
 }
 
 /// Star-topology relay hub: one canonical replica + N registered editor replicas.
@@ -104,6 +127,18 @@ impl RelayHub {
             awareness: AwarenessChannel::new(),
             last_committed_text: None,
         }
+    }
+
+    /// Create a hub whose canonical replica is already seeded from the current
+    /// editor-visible document text. File-backed live sessions use this on first
+    /// allocation so the first editor delta is never applied to an empty replica.
+    pub fn from_text(canonical_id: u64, text: &str) -> Self {
+        let mut hub = Self::new(canonical_id);
+        if !text.is_empty() {
+            hub.canonical.apply_local_edit(0, 0, text);
+        }
+        hub.last_committed_text = Some(text.to_string());
+        hub
     }
 
     /// Recover a hub from a durable disk **recovery projection** (plan phase 6):
@@ -172,7 +207,16 @@ impl RelayHub {
     pub fn register(&mut self, client_id: u64) -> Result<()> {
         self.validate_unique(client_id)?;
         let replica = ReplicaState::from_encoded(client_id, &self.canonical.encode_state())?;
-        self.members.insert(client_id, Member { replica, live: true });
+        self.members.insert(
+            client_id,
+            Member {
+                replica,
+                live: true,
+                generation: 0,
+                last_ack_generation: 0,
+                pending: VecDeque::new(),
+            },
+        );
         Ok(())
     }
 
@@ -193,6 +237,7 @@ impl RelayHub {
         match self.members.get_mut(&client_id) {
             Some(m) => {
                 m.live = false;
+                m.pending.clear();
                 true
             }
             None => false,
@@ -209,6 +254,7 @@ impl RelayHub {
             .get_mut(&client_id)
             .ok_or_else(|| anyhow!("replica {client_id} is not registered"))?;
         member.live = true;
+        member.pending.clear();
         // Pull the member's offline ops into canonical, then push back everything
         // the member missed. Both directions are state-vector deltas.
         let to_canonical = member.replica.diff(&self.canonical.state_vector())?;
@@ -245,7 +291,7 @@ impl RelayHub {
     /// **without delivering it** (the caller controls delivery timing / ordering —
     /// used to model fan-out lag and out-of-order delivery). Use [`Self::relay`]
     /// for the immediate-delivery live path.
-    pub fn relay_capture(&self, client_id: u64) -> Result<BroadcastPacket> {
+    pub fn relay_capture(&mut self, client_id: u64) -> Result<BroadcastPacket> {
         let member = self
             .members
             .get(&client_id)
@@ -261,11 +307,13 @@ impl RelayHub {
             .filter(|(id, m)| **id != client_id && m.live)
             .map(|(id, _)| *id)
             .collect();
-        Ok(BroadcastPacket {
+        let packet = BroadcastPacket {
             origin: client_id,
             update,
             targets,
-        })
+        };
+        self.enqueue_delivery(&packet);
+        Ok(packet)
     }
 
     /// Apply a **raw encoded yrs update** from member `client_id` to that
@@ -282,7 +330,11 @@ impl RelayHub {
     /// (`agent_doc_replica_diff`) so the editor — not the hub — owns the local
     /// edit. yrs guarantees the apply is idempotent + causal-buffered, so a
     /// duplicate or out-of-order update converges rather than corrupting.
-    pub fn relay_update_capture(&self, client_id: u64, update: &[u8]) -> Result<BroadcastPacket> {
+    pub fn relay_update_capture(
+        &mut self,
+        client_id: u64,
+        update: &[u8],
+    ) -> Result<BroadcastPacket> {
         let member = self
             .members
             .get(&client_id)
@@ -300,11 +352,13 @@ impl RelayHub {
             .filter(|(id, m)| **id != client_id && m.live)
             .map(|(id, _)| *id)
             .collect();
-        Ok(BroadcastPacket {
+        let packet = BroadcastPacket {
             origin: client_id,
             update: delta,
             targets,
-        })
+        };
+        self.enqueue_delivery(&packet);
+        Ok(packet)
     }
 
     /// Apply a raw encoded yrs update from `client_id` and **immediately
@@ -312,7 +366,7 @@ impl RelayHub {
     /// mirror (the normal live IPC path). Returns the delivered packet so the
     /// caller can also relay the per-target delta out over the socket to the
     /// peers' FFI nodes.
-    pub fn relay_update(&self, client_id: u64, update: &[u8]) -> Result<BroadcastPacket> {
+    pub fn relay_update(&mut self, client_id: u64, update: &[u8]) -> Result<BroadcastPacket> {
         let packet = self.relay_update_capture(client_id, update)?;
         for target in &packet.targets {
             self.deliver(*target, &packet.update)?;
@@ -339,7 +393,7 @@ impl RelayHub {
     /// Relay member `client_id`'s pending local ops and **immediately broadcast**
     /// them to every other live member (the normal live path). Returns the packet
     /// that was delivered.
-    pub fn relay(&self, client_id: u64) -> Result<BroadcastPacket> {
+    pub fn relay(&mut self, client_id: u64) -> Result<BroadcastPacket> {
         let packet = self.relay_capture(client_id)?;
         for target in &packet.targets {
             self.deliver(*target, &packet.update)?;
@@ -350,7 +404,7 @@ impl RelayHub {
     /// Apply a local edit and immediately relay + broadcast it (the normal live
     /// path = [`Self::local_edit`] + [`Self::relay`]). Returns the delivered packet.
     pub fn apply_local(
-        &self,
+        &mut self,
         client_id: u64,
         offset: u32,
         delete_len: u32,
@@ -358,6 +412,85 @@ impl RelayHub {
     ) -> Result<BroadcastPacket> {
         self.local_edit(client_id, offset, delete_len, insert)?;
         self.relay(client_id)
+    }
+
+    fn enqueue_delivery(&mut self, packet: &BroadcastPacket) {
+        if packet.update.is_empty() {
+            return;
+        }
+        for target in &packet.targets {
+            let Some(member) = self.members.get_mut(target) else {
+                continue;
+            };
+            member.generation += 1;
+            let generation = member.generation;
+            member.pending.push_back(PendingReplicaUpdate {
+                patch_id: format!("crdt:{}:{}:{}", packet.origin, target, generation),
+                origin: packet.origin,
+                target: *target,
+                generation,
+                update: packet.update.clone(),
+            });
+        }
+    }
+
+    /// Pull pending supervisor-to-editor updates for `client_id`. Updates remain in
+    /// the queue until [`Self::ack_delivery`] confirms the editor applied them.
+    pub fn pending_updates(&self, client_id: u64) -> Result<Vec<PendingReplicaUpdate>> {
+        let member = self
+            .members
+            .get(&client_id)
+            .ok_or_else(|| anyhow!("replica {client_id} is not registered"))?;
+        Ok(member.pending.iter().cloned().collect())
+    }
+
+    /// ACK one delivered update. Returns `Ok(false)` when the ACK is stale or
+    /// unknown; this is non-fatal because editors may retry idempotent deliveries.
+    pub fn ack_delivery(
+        &mut self,
+        client_id: u64,
+        patch_id: &str,
+        generation: u64,
+    ) -> Result<bool> {
+        let member = self
+            .members
+            .get_mut(&client_id)
+            .ok_or_else(|| anyhow!("replica {client_id} is not registered"))?;
+        let Some(pos) = member
+            .pending
+            .iter()
+            .position(|update| update.patch_id == patch_id && update.generation == generation)
+        else {
+            return Ok(false);
+        };
+        member.pending.remove(pos);
+        member.last_ack_generation = member.last_ack_generation.max(generation);
+        Ok(true)
+    }
+
+    /// True when every currently-live editor has ACKed all queued fan-out updates.
+    /// Disconnected editors are excluded from this live convergence cut.
+    pub fn delivery_converged(&self) -> bool {
+        self.members
+            .values()
+            .filter(|member| member.live)
+            .all(|member| member.pending.is_empty())
+    }
+
+    pub fn delivery_snapshot(&self) -> Vec<ReplicaDeliverySnapshot> {
+        let mut snapshot = self
+            .members
+            .iter()
+            .map(|(client_id, member)| ReplicaDeliverySnapshot {
+                client_id: *client_id,
+                live: member.live,
+                pending_updates: member.pending.len(),
+                current_generation: member.generation,
+                last_ack_generation: member.last_ack_generation,
+            })
+            .collect::<Vec<_>>();
+        snapshot.sort_by_key(|entry| entry.client_id);
+        snapshot
     }
 
     /// The currently-live member replicas (the consistent-cut set for the commit
@@ -662,6 +795,63 @@ mod tests {
     }
 
     #[test]
+    fn relay_update_requires_target_ack_before_delivery_converges() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+
+        let editor2 = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        editor2.apply_local_edit(0, 0, "needs-ack");
+        let update = editor2.diff(&ReplicaState::new(99).state_vector()).unwrap();
+
+        let packet = hub.relay_update(2, &update).unwrap();
+        assert_eq!(packet.targets, vec![3]);
+        assert!(
+            !hub.delivery_converged(),
+            "a live target with an unacked delivery blocks convergence"
+        );
+
+        let pending = hub.pending_updates(3).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].origin, 2);
+        assert_eq!(pending[0].target, 3);
+        assert_eq!(pending[0].generation, 1);
+        assert!(pending[0].patch_id.starts_with("crdt:2:3:1"));
+
+        assert!(
+            hub.ack_delivery(3, &pending[0].patch_id, pending[0].generation)
+                .unwrap()
+        );
+        assert!(hub.pending_updates(3).unwrap().is_empty());
+        assert!(hub.delivery_converged());
+
+        let snapshot = hub.delivery_snapshot();
+        let target = snapshot
+            .iter()
+            .find(|entry| entry.client_id == 3)
+            .expect("target delivery snapshot");
+        assert_eq!(target.current_generation, 1);
+        assert_eq!(target.last_ack_generation, 1);
+    }
+
+    #[test]
+    fn from_text_seeds_canonical_and_registered_members() {
+        let mut hub = RelayHub::from_text(1, "# plan\n\nexisting queue\n");
+        assert_eq!(hub.canonical_text(), "# plan\n\nexisting queue\n");
+
+        hub.register(2).unwrap();
+        assert_eq!(
+            hub.member_text(2).unwrap(),
+            "# plan\n\nexisting queue\n",
+            "a fresh editor replica bootstraps from the seeded canonical"
+        );
+        assert_eq!(
+            hub.last_committed_text_for_test(),
+            Some("# plan\n\nexisting queue\n")
+        );
+    }
+
+    #[test]
     fn register_rejects_client_id_collision() {
         let mut hub = RelayHub::new(1);
         hub.register(2).unwrap();
@@ -831,7 +1021,11 @@ mod tests {
         // last disk recovery projection (members re-register / re-sync after).
         let recovered = RelayHub::recover_from_projection(1, &projection).unwrap();
         assert_eq!(recovered.canonical_text(), "durable");
-        assert_eq!(recovered.live_count(), 0, "members re-register after restart");
+        assert_eq!(
+            recovered.live_count(),
+            0,
+            "members re-register after restart"
+        );
     }
 
     #[test]
@@ -873,8 +1067,7 @@ mod tests {
         let mut hub = RelayHub::new(1);
         hub.canonical.apply_local_edit(0, 0, "live content");
         assert!(
-            !hub
-                .reconcile_canonical_against_baseline("disk content")
+            !hub.reconcile_canonical_against_baseline("disk content")
                 .unwrap(),
             "no rebuild on first contact"
         );
@@ -934,8 +1127,7 @@ mod tests {
         // An editor typed more since the commit; canonical is ahead of disk.
         hub.canonical.apply_local_edit(0, 0, "PREFIX ");
         assert!(
-            !hub
-                .reconcile_canonical_against_baseline("committed body")
+            !hub.reconcile_canonical_against_baseline("committed body")
                 .unwrap(),
             "disk == last commit → no rebuild"
         );
@@ -955,14 +1147,13 @@ mod tests {
         let editor = mint_client_id("intellij:rebuild-test");
         hub.register(editor).unwrap();
         // Canonical + the editor mirror hold the "corrupt" committed state.
-        hub.apply_local(editor, 0, 0, "GOOD\nCORRUPT-RESPONSE\n").unwrap();
+        hub.apply_local(editor, 0, 0, "GOOD\nCORRUPT-RESPONSE\n")
+            .unwrap();
         hub.record_committed_baseline("GOOD\nCORRUPT-RESPONSE\n");
         assert!(hub.canonical_text().contains("CORRUPT-RESPONSE"));
 
         // Operator corrects disk out of band (drops the corrupt block).
-        let rebuilt = hub
-            .reconcile_canonical_against_baseline("GOOD\n")
-            .unwrap();
+        let rebuilt = hub.reconcile_canonical_against_baseline("GOOD\n").unwrap();
         assert!(rebuilt, "an out-of-band correction rebuilds the canonical");
         assert_eq!(hub.canonical_text(), "GOOD\n", "disk wins on rebuild");
         assert!(

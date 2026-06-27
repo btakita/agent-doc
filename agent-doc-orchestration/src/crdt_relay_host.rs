@@ -40,16 +40,12 @@
 //!   ([`reconcile_disk_projection_for_file`]), supervisor-restart recovery of the
 //!   canonical replica from the disk projection ([`recover_hub_from_disk`]), and
 //!   the per-document hub registry ([`with_hub`]).
-//! - **Deferred (reported, not forced):** fan-out of editor yrs deltas over a
-//!   *live socket*. Today editor writes reach the supervisor as markdown patch
-//!   files (`.agent-doc/patches/<hash>.json`) + ack sidecars, not as yrs updates,
-//!   and the supervisor IPC socket carries a fixed control-message enum
-//!   ([`crate::supervisor::ipc::IpcMethod`]), not document deltas. A live
-//!   delta-fan-out path needs a new IPC message family plus plugin-side yrs-delta
-//!   forwarding — a structural change beyond this additive, authority-gated
-//!   cutover. The relay hub is wired so that *when* deltas arrive (via FFI replica
-//!   ABI or a future delta message) they flow through [`with_hub`]; the barrier
-//!   already flushes whatever replicas are registered.
+//! - **Wired:** editor-replica lifecycle and delta transport through the
+//!   supervisor IPC family (`replica_register`, `replica_update`, `replica_pull`,
+//!   `replica_ack`, `replica_deregister`). Fan-out is target-owned: peer updates
+//!   remain queued until the target editor applies them to its FFI replica/buffer
+//!   and ACKs the delivery. The commit barrier refuses a MultiReplica closeout
+//!   while any live target has unacknowledged delivery.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -58,7 +54,7 @@ use std::sync::{Mutex, OnceLock};
 use anyhow::Result;
 
 use crate::crdt_authority::{CrdtAuthority, authority_for_file};
-use crate::crdt_relay::RelayHub;
+use crate::crdt_relay::{PendingReplicaUpdate, RelayHub, ReplicaDeliverySnapshot};
 
 /// The canonical replica's reserved yrs client-id for every per-document hub. The
 /// supervisor's canonical replica is the hub authority; editor replicas mint
@@ -94,6 +90,30 @@ pub fn with_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T>
     Ok(f(hub))
 }
 
+/// [`with_hub`] for live file-backed authority paths. A newly allocated hub must
+/// start from the current document text, not an empty CRDT, or the first editor
+/// delta can be applied at a clamped offset and later overwrite the buffer.
+fn with_hub_seeded_from_file<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T> {
+    let hash = crate::snapshot::doc_hash(file)?;
+    {
+        let mut registry = hub_registry()
+            .lock()
+            .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+        if let Some(hub) = registry.get_mut(&hash) {
+            return Ok(f(hub));
+        }
+    }
+    let seed_text = std::fs::read_to_string(file)
+        .map_err(|e| anyhow::anyhow!("failed to seed relay hub from {}: {e}", file.display()))?;
+    let mut registry = hub_registry()
+        .lock()
+        .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+    let hub = registry
+        .entry(hash)
+        .or_insert_with(|| RelayHub::from_text(CANONICAL_CLIENT_ID, &seed_text));
+    Ok(f(hub))
+}
+
 /// Whether a relay hub has been allocated for `doc_hash` (test-only assertion
 /// helper, e.g. proving the Detached path allocates no hub).
 pub fn hub_is_allocated_for_test(doc_hash: &str) -> bool {
@@ -118,6 +138,14 @@ pub struct FanOut {
     pub canonical_len: usize,
 }
 
+/// Pending updates plus delivery state for one editor replica.
+#[derive(Debug, Clone)]
+pub struct ReplicaPull {
+    pub client_id: u64,
+    pub updates: Vec<PendingReplicaUpdate>,
+    pub delivery: ReplicaDeliverySnapshot,
+}
+
 /// Register an editor replica with the document's per-document hub on the live
 /// IPC path (`#crdtauth5`, plan phase 5), authority-gated.
 ///
@@ -133,21 +161,19 @@ pub struct FanOut {
 ///
 /// A client-id collision (already registered, or canonical-id collision) is a
 /// hard error per the plan's unique-stable-client-id rule.
-pub fn register_replica_for_file(
-    file: &Path,
-    identity: &str,
-) -> Result<Option<(u64, Vec<u8>)>> {
+pub fn register_replica_for_file(file: &Path, identity: &str) -> Result<Option<(u64, Vec<u8>)>> {
     let authority = authority_for_file(&file.display().to_string());
     if !authority.editor_attached() {
         return Ok(None);
     }
     let client_id = crate::crdt_relay::mint_client_id(identity);
-    let bootstrap = with_hub(file, |hub| {
+    let bootstrap = with_hub_seeded_from_file(file, |hub| {
         if hub.is_registered(client_id) {
             // Idempotent re-register (e.g. an editor reconnect that re-announces
-            // the same stable identity): keep the existing mirror, just return
-            // the current canonical bootstrap state.
-            Ok(hub.canonical_encoded_state())
+            // the same stable identity): reconnect/sync the existing mirror, then
+            // return the current canonical bootstrap state.
+            hub.reconnect(client_id)
+                .map(|()| hub.canonical_encoded_state())
         } else {
             hub.register(client_id)
                 .map(|()| hub.canonical_encoded_state())
@@ -175,7 +201,7 @@ pub fn deregister_replica_for_file(file: &Path, identity: &str) -> Result<bool> 
         return Ok(false);
     }
     let client_id = crate::crdt_relay::mint_client_id(identity);
-    let removed = with_hub(file, |hub| hub.deregister(client_id))?;
+    let removed = with_hub_seeded_from_file(file, |hub| hub.deregister(client_id))?;
     crate::ops_log::log_op(
         file,
         &format!(
@@ -212,8 +238,11 @@ pub fn relay_replica_update_for_file(
         return Ok(None);
     }
     let client_id = crate::crdt_relay::mint_client_id(identity);
-    let packet = with_hub(file, |hub| hub.relay_update(client_id, update))??;
-    let canonical_len = with_hub(file, |hub| hub.canonical_text().chars().count())?;
+    let packet = with_hub_seeded_from_file(file, |hub| {
+        hub.relay_update(client_id, update)
+    })??;
+    let canonical_len =
+        with_hub_seeded_from_file(file, |hub| hub.canonical_text().chars().count())?;
     crate::ops_log::log_op(
         file,
         &format!(
@@ -233,6 +262,72 @@ pub fn relay_replica_update_for_file(
     }))
 }
 
+/// Pull supervisor-to-editor updates queued for this replica. The returned
+/// updates remain pending until [`ack_replica_update_for_file`] confirms the
+/// editor applied them.
+pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Option<ReplicaPull>> {
+    let authority = authority_for_file(&file.display().to_string());
+    if !authority.editor_attached() {
+        return Ok(None);
+    }
+    let client_id = crate::crdt_relay::mint_client_id(identity);
+    let updates = with_hub_seeded_from_file(file, |hub| {
+        hub.pending_updates(client_id)
+    })??;
+    let delivery = with_hub_seeded_from_file(file, |hub| {
+        hub.delivery_snapshot()
+            .into_iter()
+            .find(|entry| entry.client_id == client_id)
+    })?
+    .ok_or_else(|| anyhow::anyhow!("replica {client_id} is not registered"))?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "crdt_replica_pull file={} authority=multi_replica client_id={} updates={} current_generation={} last_ack_generation={}",
+            file.display(),
+            client_id,
+            updates.len(),
+            delivery.current_generation,
+            delivery.last_ack_generation,
+        ),
+    );
+    Ok(Some(ReplicaPull {
+        client_id,
+        updates,
+        delivery,
+    }))
+}
+
+/// ACK one pulled update after the editor applied it to the local document
+/// replica/buffer.
+pub fn ack_replica_update_for_file(
+    file: &Path,
+    identity: &str,
+    patch_id: &str,
+    generation: u64,
+) -> Result<Option<bool>> {
+    let authority = authority_for_file(&file.display().to_string());
+    if !authority.editor_attached() {
+        return Ok(None);
+    }
+    let client_id = crate::crdt_relay::mint_client_id(identity);
+    let acknowledged = with_hub_seeded_from_file(file, |hub| {
+        hub.ack_delivery(client_id, patch_id, generation)
+    })??;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "crdt_replica_ack file={} authority=multi_replica client_id={} patch_id={} generation={} acknowledged={}",
+            file.display(),
+            client_id,
+            patch_id,
+            generation,
+            acknowledged,
+        ),
+    );
+    Ok(Some(acknowledged))
+}
+
 /// Push an ephemeral awareness/presence update for an editor replica through the
 /// document's hub (`#crdtauth5`). Authority-gated; presence is NOT part of the
 /// document CRDT, never persisted, never committed. Returns the deterministic
@@ -247,7 +342,7 @@ pub fn set_replica_awareness_for_file(
         return Ok(None);
     }
     let client_id = crate::crdt_relay::mint_client_id(identity);
-    let snapshot = with_hub(file, |hub| {
+    let snapshot = with_hub_seeded_from_file(file, |hub| {
         hub.set_awareness(client_id, state);
         hub.awareness_snapshot()
     })?;
@@ -330,7 +425,9 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
     // clears the process-global hub. Rebuilding the canonical from the corrected
     // disk baseline makes the correction stick without a restart.
     if let Ok(on_disk) = std::fs::read_to_string(file) {
-        match with_hub(file, |hub| hub.reconcile_canonical_against_baseline(&on_disk)) {
+        match with_hub_seeded_from_file(file, |hub| {
+            hub.reconcile_canonical_against_baseline(&on_disk)
+        }) {
             Ok(Ok(true)) => crate::ops_log::log_op(
                 file,
                 &format!(
@@ -358,18 +455,23 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
             ),
         }
     }
-    match with_hub(file, |hub| hub.commit_barrier_under_authority(authority)) {
+    match with_hub_seeded_from_file(file, |hub| {
+        hub.commit_barrier_under_authority(authority)
+    }) {
         Ok(Ok(ready)) => {
+            let delivery_converged =
+                with_hub_seeded_from_file(file, |hub| hub.delivery_converged()).unwrap_or(false);
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "crdt_commit_barrier file={} authority=multi_replica ready={} live_editors={}",
+                    "crdt_commit_barrier file={} authority=multi_replica ready={} delivery_converged={} live_editors={}",
                     file.display(),
                     ready,
-                    with_hub(file, |hub| hub.live_count()).unwrap_or(0),
+                    delivery_converged,
+                    with_hub_seeded_from_file(file, |hub| hub.live_count()).unwrap_or(0),
                 ),
             );
-            ready
+            ready && delivery_converged
         }
         Ok(Err(e)) => {
             // A barrier error must never wedge a live closeout — log and proceed
@@ -449,7 +551,11 @@ pub fn record_committed_baseline_for_file(file: &Path) {
         }
         Err(e) => crate::ops_log::log_op(
             file,
-            &format!("crdt_record_committed_baseline_registry_error file={} error={}", file.display(), e),
+            &format!(
+                "crdt_record_committed_baseline_registry_error file={} error={}",
+                file.display(),
+                e
+            ),
         ),
     }
 }
@@ -479,7 +585,9 @@ pub fn reconcile_disk_projection_for_file(file: &Path, projection: &[u8]) -> Res
         // baseline-wins load path in snapshot.rs already handles stale disk.
         return Ok(None);
     }
-    let changed = with_hub(file, |hub| hub.reconcile_disk_projection(projection))??;
+    let changed = with_hub_seeded_from_file(file, |hub| {
+        hub.reconcile_disk_projection(projection)
+    })??;
     crate::ops_log::log_op(
         file,
         &format!(
@@ -507,6 +615,30 @@ mod tests {
         let mut f = std::fs::File::create(&path).unwrap();
         writeln!(f, "# {name}\n\nbody").unwrap();
         (dir, path)
+    }
+
+    #[test]
+    fn register_replica_seeds_fresh_hub_from_current_document_text() {
+        let (_dir, doc) = temp_doc("seed-register.md");
+        let file_str = doc.display().to_string();
+        crate::plugin_owner::write_plugin_owner_lease_for_test(&file_str, std::process::id());
+        let on_disk = std::fs::read_to_string(&doc).unwrap();
+
+        let (client_id, bootstrap) = register_replica_for_file(&doc, "intellij:seed")
+            .unwrap()
+            .expect("editor-attached register should return a bootstrap");
+        let replica =
+            agent_doc_core::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
+        assert_eq!(
+            replica.text(),
+            on_disk,
+            "a first live editor must not attach to an empty canonical replica"
+        );
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), on_disk);
+            assert_eq!(hub.member_text(client_id).unwrap(), on_disk);
+        })
+        .unwrap();
     }
 
     #[test]

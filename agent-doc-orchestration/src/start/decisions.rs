@@ -678,8 +678,7 @@ pub fn supervisor_recycle_action(
     // open cycle — binary current enough to commit, or no admin/wedge/reexec proof of
     // a bad binary — still defers, preserving the `#midturn-recycle-resume` and
     // `#wd40` (fresh-binary state flush) guarantees.
-    let cycle_wedged_on_stale_binary =
-        stale && (explicit_admin || write_wedged || reexec_failed);
+    let cycle_wedged_on_stale_binary = stale && (explicit_admin || write_wedged || reexec_failed);
     if cycle_open && !cycle_wedged_on_stale_binary {
         return SupervisorRecycleAction::DeferCycleOpen;
     }
@@ -1442,10 +1441,16 @@ mod tests {
 
         // Recycle boot, cycle OPEN, child SURVIVED → adopt without re-trigger
         // (idempotency: the surviving child is still running the turn).
-        assert_eq!(boot_resume_action(true, true, true, false), AdoptSurvivingChild);
+        assert_eq!(
+            boot_resume_action(true, true, true, false),
+            AdoptSurvivingChild
+        );
         // The surviving-child adopt wins even if a prior consume latched — a live
         // child must never be double-run by re-dispatch.
-        assert_eq!(boot_resume_action(true, true, true, true), AdoptSurvivingChild);
+        assert_eq!(
+            boot_resume_action(true, true, true, true),
+            AdoptSurvivingChild
+        );
 
         // Recycle boot, cycle OPEN, child DIED, NOT yet consumed → re-dispatch the
         // genuinely-interrupted turn. The ONLY arm that re-dispatches.

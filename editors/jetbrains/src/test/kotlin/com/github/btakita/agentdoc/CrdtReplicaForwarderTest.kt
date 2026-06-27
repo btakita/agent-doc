@@ -67,6 +67,8 @@ class CrdtReplicaForwarderTest {
         var registered = false
         var deregistered = false
         val sentUpdates = mutableListOf<ByteArray>()
+        val pendingUpdates = mutableListOf<ReplicaRemoteUpdate>()
+        val ackedUpdates = mutableListOf<String>()
 
         override fun register(filePath: String, identity: String): ReplicaRegisterAck? {
             if (refuseRegister) return null
@@ -76,6 +78,15 @@ class CrdtReplicaForwarderTest {
 
         override fun broadcastUpdate(filePath: String, identity: String, update: ByteArray) {
             sentUpdates.add(update)
+        }
+
+        override fun pullUpdates(filePath: String, identity: String): List<ReplicaRemoteUpdate> =
+            pendingUpdates.toList()
+
+        override fun ackUpdate(filePath: String, identity: String, patchId: String, generation: Long): Boolean {
+            ackedUpdates.add("$patchId:$generation")
+            pendingUpdates.removeIf { it.patchId == patchId && it.generation == generation }
+            return true
         }
 
         override fun deregister(filePath: String, identity: String) {
@@ -112,6 +123,20 @@ class CrdtReplicaForwarderTest {
     }
 
     @Test
+    fun `new replica can be aligned to the live editor buffer before first delta`() {
+        val node = FakeNode()
+        val transport = CapturingTransport(bootstrap = "DISK".toByteArray())
+        val fwd = CrdtReplicaForwarder("plan.md", "intellij:1", node, transport)
+        fwd.register()
+
+        fwd.ensureEditorText("BUFFER")
+
+        assertEquals("BUFFER", node.text())
+        assertEquals(1, transport.sentUpdates.size)
+        assertEquals("BUFFER", String(transport.sentUpdates[0]))
+    }
+
+    @Test
     fun `remote update applies back into the replica and returns converged text`() {
         val node = FakeNode()
         val transport = CapturingTransport()
@@ -121,6 +146,51 @@ class CrdtReplicaForwarderTest {
         val converged = fwd.applyRemoteUpdate("FROM-PEER".toByteArray())
         assertEquals("FROM-PEER", converged)
         assertEquals("FROM-PEER", node.text())
+    }
+
+    @Test
+    fun `remote pull applies only after caller acks the applied update`() {
+        val node = FakeNode()
+        val transport = CapturingTransport()
+        transport.pendingUpdates.add(
+            ReplicaRemoteUpdate(
+                patchId = "crdt:1:2:1",
+                origin = 1L,
+                target = 2L,
+                generation = 1L,
+                update = "FROM-PEER".toByteArray(),
+            ),
+        )
+        val fwd = CrdtReplicaForwarder("plan.md", "intellij:2", node, transport)
+        fwd.register()
+
+        val pulled = fwd.pullRemoteUpdates()
+        assertEquals(1, pulled.size)
+        assertEquals("FROM-PEER", fwd.applyRemoteUpdate(pulled[0].update))
+        assertTrue(fwd.ackRemoteUpdate(pulled[0]))
+
+        assertEquals(listOf("crdt:1:2:1:1"), transport.ackedUpdates)
+        assertTrue(transport.pendingUpdates.isEmpty())
+    }
+
+    @Test
+    fun `remote update decision applies peer edits but suppresses self echo`() {
+        val peerUpdate = ReplicaRemoteUpdate(
+            patchId = "crdt:1:42:1",
+            origin = 1L,
+            target = 42L,
+            generation = 1L,
+            update = "peer".toByteArray(),
+        )
+        val selfEcho = peerUpdate.copy(
+            patchId = "crdt:42:42:2",
+            origin = 42L,
+            target = 42L,
+            generation = 2L,
+        )
+
+        assertTrue(shouldApplyRemoteCrdtUpdateUtil(peerUpdate, clientId = 42L))
+        assertFalse(shouldApplyRemoteCrdtUpdateUtil(selfEcho, clientId = 42L))
     }
 
     @Test

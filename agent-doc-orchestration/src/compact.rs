@@ -106,6 +106,7 @@ pub fn run(
     message: Option<&str>,
     tag: Option<&str>,
     commit: bool,
+    force_disk: bool,
 ) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -155,8 +156,12 @@ pub fn run(
         let target = component_name.unwrap_or("exchange");
         let is_crdt = resolved.is_crdt();
         match keep {
-            Some(n) => run_component_compact_partial(file, &content, target, n, message, is_crdt),
-            None => run_component_compact(file, &content, target, message, is_crdt),
+            Some(n) => run_component_compact_partial(
+                file, &content, target, n, message, is_crdt, force_disk,
+            ),
+            None => run_component_compact_with_options(
+                file, &content, target, message, is_crdt, force_disk,
+            ),
         }?;
     } else {
         let keep_n = keep.unwrap_or(2);
@@ -191,7 +196,7 @@ pub fn run(
             compacted = reconciled;
         }
 
-        apply_compacted_document(file, &compacted, &compacted, &content, false)?;
+        apply_compacted_document(file, &compacted, &compacted, &content, false, force_disk)?;
         discard_archived_captures(file, &archive_content);
 
         eprintln!(
@@ -478,6 +483,7 @@ fn apply_compacted_document(
     snapshot_content: &str,
     source_content: &str,
     refresh_crdt: bool,
+    force_disk: bool,
 ) -> Result<()> {
     // Fail closed before any write if the rebuilt exchange is structurally
     // malformed (#jb-compact-malformed-response-commit).
@@ -492,18 +498,23 @@ fn apply_compacted_document(
     // (#compactqattr).
     assert_non_exchange_markers_preserved(file, source_content, compacted, "apply")?;
 
-    // `#w42v`: when a JB editor listener is active, converge the compacted
-    // content through the editor (component `op:replace`) so it does not diverge
-    // from the open buffer and raise a `File Cache Conflict`. The guarded disk
-    // write is only the no-listener fallback; active-listener convergence
-    // failures fail closed instead of writing behind the editor.
-    if !crate::write::try_editor_converge(file, compacted, source_content, "compact")? {
-        crate::write::atomic_write_if_current_pub(
+    if force_disk {
+        crate::write::atomic_write_pub(file, compacted)?;
+        crate::ops_log::log_op(
             file,
-            compacted,
-            source_content,
-            "compact_exchange_direct_write",
-        )?;
+            &format!(
+                "compact_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
+                file.display(),
+                compacted.len(),
+                crate::ops_log::content_hash(compacted)
+            ),
+        );
+    } else {
+        // `#w42v`: converge the compacted content through the editor path so it does
+        // not diverge from the visible buffer and raise a `File Cache Conflict`.
+        // Missing or unproven editor convergence fails closed instead of writing the
+        // compacted bytes directly to disk.
+        crate::write::try_editor_converge(file, compacted, source_content, "compact")?;
     }
 
     snapshot::save(file, snapshot_content)?;
@@ -521,12 +532,35 @@ fn apply_compacted_document(
 ///
 /// Archives the component content and replaces it with a summary marker.
 /// Single atomic write — no intermediate state.
+#[cfg(test)]
 fn run_component_compact(
     file: &Path,
     content: &str,
     target: &str,
     message: Option<&str>,
     is_crdt: bool,
+) -> Result<()> {
+    run_component_compact_with_options(file, content, target, message, is_crdt, false)
+}
+
+#[cfg(test)]
+fn run_component_compact_force_disk(
+    file: &Path,
+    content: &str,
+    target: &str,
+    message: Option<&str>,
+    is_crdt: bool,
+) -> Result<()> {
+    run_component_compact_with_options(file, content, target, message, is_crdt, true)
+}
+
+fn run_component_compact_with_options(
+    file: &Path,
+    content: &str,
+    target: &str,
+    message: Option<&str>,
+    is_crdt: bool,
+    force_disk: bool,
 ) -> Result<()> {
     let components = component::parse(content)?;
     let comp = components
@@ -593,7 +627,14 @@ fn run_component_compact(
     {
         snapshot_compacted = reconciled;
     }
-    apply_compacted_document(file, &compacted, &snapshot_compacted, content, is_crdt)?;
+    apply_compacted_document(
+        file,
+        &compacted,
+        &snapshot_compacted,
+        content,
+        is_crdt,
+        force_disk,
+    )?;
     discard_archived_captures(file, &archive_content);
 
     let line_count = archive_content.lines().count();
@@ -618,6 +659,7 @@ fn run_component_compact_partial(
     keep: usize,
     message: Option<&str>,
     is_crdt: bool,
+    force_disk: bool,
 ) -> Result<()> {
     let components = component::parse(content)?;
     let comp = components
@@ -719,7 +761,14 @@ fn run_component_compact_partial(
     {
         snapshot_compacted = reconciled;
     }
-    apply_compacted_document(file, &compacted, &snapshot_compacted, content, is_crdt)?;
+    apply_compacted_document(
+        file,
+        &compacted,
+        &snapshot_compacted,
+        content,
+        is_crdt,
+        force_disk,
+    )?;
     discard_archived_captures(file, &archive_body);
 
     eprintln!(
@@ -1362,6 +1411,20 @@ mod tests {
         "<!-- /agent:review -->\n",
     );
 
+    fn assert_no_listener_compact_refusal(err: &anyhow::Error, ops_log: &str) {
+        let err = err.to_string();
+        assert!(
+            err.contains("editor convergence is unproven") && err.contains("reason=no_listener"),
+            "compact without a live editor listener must fail closed: {err}"
+        );
+        assert!(
+            ops_log.contains("compact_writeback")
+                && ops_log.contains("transport=blocked")
+                && ops_log.contains("reason=no_listener"),
+            "no-listener compact refusal should be logged:\n{ops_log}"
+        );
+    }
+
     #[test]
     fn non_exchange_list_item_counts_counts_backlog_and_review() {
         let counts = non_exchange_list_item_counts(COMPACTDROPITEM_DOC);
@@ -1418,7 +1481,7 @@ mod tests {
 
         // Full exchange compact must leave backlog (3) and review (1) intact and
         // must NOT trip the #compactdropitem guard.
-        run_component_compact(
+        run_component_compact_force_disk(
             &file,
             COMPACTDROPITEM_DOC,
             "exchange",
@@ -1581,7 +1644,7 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         snapshot::save(&file, doc).unwrap();
 
-        run_component_compact_partial(&file, doc, "exchange", 1, None, false).unwrap();
+        run_component_compact_partial(&file, doc, "exchange", 1, None, false, true).unwrap();
 
         let result = std::fs::read_to_string(&file).unwrap();
         let exchange = crate::component::parse(&result)
@@ -1628,7 +1691,7 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         snapshot::save(&file, &doc).unwrap();
 
-        run_component_compact(&file, &doc, "exchange", None, false).unwrap();
+        run_component_compact_force_disk(&file, &doc, "exchange", None, false).unwrap();
 
         let result = std::fs::read_to_string(&file).unwrap();
         let exchange = crate::component::parse(&result)
@@ -1712,7 +1775,8 @@ mod tests {
             .to_string();
 
         // Run compact on exchange only
-        run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false).unwrap();
+        run_component_compact_force_disk(&file, doc, "exchange", Some("Compacted summary."), false)
+            .unwrap();
 
         // Read the result and verify non-target components are byte-identical
         let result = std::fs::read_to_string(&file).unwrap();
@@ -1771,7 +1835,7 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         snapshot::save(&file, doc).unwrap();
 
-        run_component_compact(
+        run_component_compact_force_disk(
             &file,
             doc,
             "exchange",
@@ -1835,7 +1899,14 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         snapshot::save(&file, &doc).unwrap();
 
-        run_component_compact(&file, &doc, "exchange", Some("Compacted summary."), false).unwrap();
+        run_component_compact_force_disk(
+            &file,
+            &doc,
+            "exchange",
+            Some("Compacted summary."),
+            false,
+        )
+        .unwrap();
 
         let result = std::fs::read_to_string(&file).unwrap();
         assert!(
@@ -1872,7 +1943,8 @@ mod tests {
         std::fs::create_dir_all(&patches_dir).unwrap();
         snapshot::save(&file, doc).unwrap();
 
-        run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false).unwrap();
+        run_component_compact_force_disk(&file, doc, "exchange", Some("Compacted summary."), false)
+            .unwrap();
         let compacted = std::fs::read_to_string(&file).unwrap();
         let patch_count = std::fs::read_dir(&patches_dir)
             .unwrap()
@@ -1922,7 +1994,8 @@ mod tests {
         crate::cycle_state::mark_write_applied(&file, "test", Some(doc), Some(doc)).unwrap();
         crate::cycle_state::mark_committed(&file, "test", Some(doc), Some(doc)).unwrap();
 
-        run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false).unwrap();
+        run_component_compact_force_disk(&file, doc, "exchange", Some("Compacted summary."), false)
+            .unwrap();
         let compacted = std::fs::read_to_string(&file).unwrap();
         let patch_count = std::fs::read_dir(&patches_dir)
             .unwrap()
@@ -1945,7 +2018,7 @@ mod tests {
     }
 
     #[test]
-    fn component_compact_direct_fallback_rejects_late_visible_edit() {
+    fn component_compact_without_listener_rejects_late_visible_edit() {
         let doc = concat!(
             "---\nagent_doc_session: test-compact-cas\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
@@ -1970,30 +2043,22 @@ mod tests {
         let err = run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
             .unwrap_err();
 
-        assert!(
-            err.to_string().contains("document changed after"),
-            "compact fallback should fail with visible-current CAS error: {err}"
-        );
         assert_eq!(
             std::fs::read_to_string(&file).unwrap(),
             live,
-            "compact fallback must not overwrite a prompt typed after compaction was computed"
+            "no-listener compact must not overwrite a prompt typed after compaction was computed"
         );
         assert_eq!(
             snapshot::load(&file).unwrap().unwrap(),
             doc,
-            "failed compact fallback must not advance the snapshot"
+            "failed compact must not advance the snapshot"
         );
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            ops_log.contains("visible_write_deferred_current_changed")
-                && ops_log.contains("source=compact_exchange_direct_write"),
-            "compact CAS rejection should be logged:\n{ops_log}"
-        );
+        assert_no_listener_compact_refusal(&err, &ops_log);
     }
 
     #[test]
-    fn component_compact_direct_fallback_rejects_idle_unsaved_editor_buffer() {
+    fn component_compact_without_listener_rejects_idle_unsaved_editor_buffer() {
         let doc = concat!(
             "---\nagent_doc_session: test-compact-live-buffer\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
@@ -2026,14 +2091,10 @@ mod tests {
         let err = run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
             .unwrap_err();
 
-        assert!(
-            err.to_string().contains("visible editor buffer"),
-            "compact should reject idle unsaved editor drift before disk write: {err}"
-        );
         assert_eq!(
             std::fs::read_to_string(&file).unwrap(),
             doc,
-            "compact must not rewrite disk while the editor-visible buffer is unsaved"
+            "no-listener compact must not rewrite disk while the editor-visible buffer is unsaved"
         );
         assert_eq!(
             snapshot::load(&file).unwrap().unwrap(),
@@ -2041,15 +2102,11 @@ mod tests {
             "failed compact must not advance the snapshot"
         );
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            ops_log.contains("visible_write_deferred_live_buffer_changed")
-                && ops_log.contains("source=compact_exchange_direct_write"),
-            "compact live-buffer rejection should be logged:\n{ops_log}"
-        );
+        assert_no_listener_compact_refusal(&err, &ops_log);
     }
 
     #[test]
-    fn component_compact_rejects_stale_editor_cache_when_snapshot_is_stale() {
+    fn component_compact_without_listener_rejects_stale_editor_cache_when_snapshot_is_stale() {
         let stale_snapshot = concat!(
             "---\nagent_doc_session: test-compact-stale-cache\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
@@ -2088,10 +2145,6 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(
-            err.to_string().contains("visible editor buffer"),
-            "compact should reject a stale editor cache before writing: {err}"
-        );
         assert_eq!(
             std::fs::read_to_string(&file).unwrap(),
             current,
@@ -2103,11 +2156,7 @@ mod tests {
             "failed compact must not advance a stale snapshot"
         );
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            ops_log.contains("visible_write_deferred_live_buffer_changed")
-                && ops_log.contains("source=compact_exchange_direct_write"),
-            "stale-cache compact rejection should be logged:\n{ops_log}"
-        );
+        assert_no_listener_compact_refusal(&err, &ops_log);
     }
 
     #[test]
@@ -2131,7 +2180,7 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         snapshot::save(&file, doc).unwrap();
 
-        run_component_compact(&file, doc, "exchange", Some(""), false).unwrap();
+        run_component_compact_force_disk(&file, doc, "exchange", Some(""), false).unwrap();
 
         let cleared = std::fs::read_to_string(&file).unwrap();
         assert!(
@@ -2181,7 +2230,8 @@ mod tests {
         snapshot::save_document_crdt(&file, &legacy, &doc).unwrap();
 
         // Full compact (keep=None) in CRDT mode.
-        run_component_compact(&file, &doc, "exchange", Some("Session compacted."), true).unwrap();
+        run_component_compact_force_disk(&file, &doc, "exchange", Some("Session compacted."), true)
+            .unwrap();
 
         let visible = std::fs::read_to_string(&file).unwrap();
         assert!(
@@ -2238,7 +2288,7 @@ mod tests {
     }
 
     #[test]
-    fn component_compact_direct_fallback_rejects_late_post_exchange_scratch_comment() {
+    fn component_compact_without_listener_rejects_late_post_exchange_scratch_comment() {
         let prompt = "The post-exchange scratch comment was typed while compact exchange was being computed. #spec-test-build-install-commit-push";
         let doc = concat!(
             "---\nagent_doc_session: test-compact-comment-cas\nagent_doc_format: template\n---\n\n",
@@ -2264,26 +2314,18 @@ mod tests {
         let err = run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
             .unwrap_err();
 
-        assert!(
-            err.to_string().contains("document changed after"),
-            "compact fallback should fail with visible-current CAS error: {err}"
-        );
         assert_eq!(
             std::fs::read_to_string(&file).unwrap(),
             live,
-            "compact fallback must not overwrite scratch comments typed after compaction was computed"
+            "no-listener compact must not overwrite scratch comments typed after compaction was computed"
         );
         assert_eq!(
             snapshot::load(&file).unwrap().unwrap(),
             doc,
-            "failed compact fallback must not advance the snapshot"
+            "failed compact must not advance the snapshot"
         );
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            ops_log.contains("visible_write_deferred_current_changed")
-                && ops_log.contains("source=compact_exchange_direct_write"),
-            "compact CAS rejection should be logged:\n{ops_log}"
-        );
+        assert_no_listener_compact_refusal(&err, &ops_log);
     }
 
     #[test]
@@ -2326,14 +2368,10 @@ mod tests {
         let err = run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
             .unwrap_err();
 
-        assert!(
-            err.to_string().contains("document changed after"),
-            "compact fallback should fail with visible-current CAS error: {err}"
-        );
         let file_after = std::fs::read_to_string(&file).unwrap();
         assert_eq!(
             file_after, live,
-            "compact fallback must not overwrite cycle-1779845677327 scratch directives"
+            "no-listener compact must not overwrite cycle-1779845677327 scratch directives"
         );
         assert_eq!(
             file_after.matches(scratch_prompt).count(),
@@ -2348,7 +2386,7 @@ mod tests {
         assert_eq!(
             snapshot::load(&file).unwrap().unwrap(),
             doc,
-            "failed compact fallback must not advance the snapshot to the shorter or live buffer"
+            "failed compact must not advance the snapshot to the shorter or live buffer"
         );
         let patch_count = std::fs::read_dir(&patches_dir)
             .unwrap()
@@ -2362,11 +2400,7 @@ mod tests {
             "compact race handling must not emit file IPC or fullContent payloads"
         );
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            ops_log.contains("visible_write_deferred_current_changed")
-                && ops_log.contains("source=compact_exchange_direct_write"),
-            "compact CAS rejection should be logged:\n{ops_log}"
-        );
+        assert_no_listener_compact_refusal(&err, &ops_log);
         assert!(
             !ops_log.contains("snapshot_absorb"),
             "compact race handling must not silently absorb a shorter disk snapshot:\n{ops_log}"
@@ -2408,7 +2442,7 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         snapshot::save(&file, doc).unwrap();
 
-        run_component_compact(&file, doc, "exchange", None, false).unwrap();
+        run_component_compact_force_disk(&file, doc, "exchange", None, false).unwrap();
 
         let result = std::fs::read_to_string(&file).unwrap();
         let components = component::parse(&result).unwrap();
@@ -2482,7 +2516,7 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         snapshot::save(&file, doc).unwrap();
 
-        run_component_compact(&file, doc, "exchange", None, false).unwrap();
+        run_component_compact_force_disk(&file, doc, "exchange", None, false).unwrap();
 
         let result = std::fs::read_to_string(&file).unwrap();
         let exchange = component::parse(&result)
@@ -2537,7 +2571,8 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         snapshot::save(&file, doc).unwrap();
 
-        run_component_compact(&file, doc, "exchange", Some("Compacted."), false).unwrap();
+        run_component_compact_force_disk(&file, doc, "exchange", Some("Compacted."), false)
+            .unwrap();
 
         let result = std::fs::read_to_string(&file).unwrap();
         assert!(result.contains("No open backlog items."));
@@ -2590,7 +2625,7 @@ mod tests {
             .to_string();
 
         // Run compact with CRDT mode enabled (is_crdt=true)
-        run_component_compact(&file, doc, "exchange", Some("Compacted."), true).unwrap();
+        run_component_compact_force_disk(&file, doc, "exchange", Some("Compacted."), true).unwrap();
 
         // Read result and verify pending survives
         let result = std::fs::read_to_string(&file).unwrap();
@@ -2646,7 +2681,7 @@ mod tests {
             .content(doc)
             .to_string();
 
-        run_component_compact(&file, doc, "exchange", Some("Archived."), false).unwrap();
+        run_component_compact_force_disk(&file, doc, "exchange", Some("Archived."), false).unwrap();
 
         // Verify ❯ marker preserved in non-target component
         let result = std::fs::read_to_string(&file).unwrap();
@@ -2698,7 +2733,7 @@ mod tests {
             "<!-- agent:queue priority preset=\"#spec-test-build-install-commit-push\" go -->";
         assert!(doc.contains(queue_marker));
 
-        run_component_compact(&file, doc, "exchange", Some("Archived."), true).unwrap();
+        run_component_compact_force_disk(&file, doc, "exchange", Some("Archived."), true).unwrap();
 
         let result = std::fs::read_to_string(&file).unwrap();
         assert!(
@@ -2776,7 +2811,7 @@ mod tests {
 
         let file_before = std::fs::read_to_string(&file).unwrap();
 
-        run_component_compact(&file, doc, "exchange", Some("Summary."), false).unwrap();
+        run_component_compact_force_disk(&file, doc, "exchange", Some("Summary."), false).unwrap();
 
         // After compact: file and snapshot should match
         let file_after = std::fs::read_to_string(&file).unwrap();
@@ -2862,6 +2897,7 @@ mod tests {
             Some("Compacted summary."),
             Some("skip"),
             true,
+            true,
         )
         .unwrap();
 
@@ -2939,6 +2975,7 @@ mod tests {
             Some("Compacted summary."),
             Some("skip"),
             true,
+            false,
         )
         .expect("compact --commit must not reject a clean exchange-only historical response");
 
@@ -3025,6 +3062,7 @@ mod tests {
             malformed_compacted,
             source,
             false,
+            false,
         )
         .unwrap_err();
         assert!(
@@ -3066,6 +3104,7 @@ mod tests {
             Some("Compacted summary."),
             Some("skip"),
             false, // no --commit
+            true,
         )
         .unwrap();
 

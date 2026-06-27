@@ -187,10 +187,10 @@ class PromptPoller(private val project: Project) : Disposable {
     /**
      * Merge user's unsaved editor edits with external disk changes (Claude's response).
      *
-     * Task 1 (PromptPoller fires during IPC write): PatchWatcher writes via Document API
-     * then calls saveDocument(), changing the VFS modificationStamp. PromptPoller detects
-     * this and calls mergeOrReload. When the doc has no unsaved changes and already matches
-     * disk (normal after PatchWatcher), skip the reload — reloadFiles() would be a no-op
+     * Task 1 (PromptPoller fires during IPC write): PatchWatcher writes via Document API,
+     * changing the document modificationStamp. PromptPoller detects this and calls
+     * mergeOrReload. When the doc has no unsaved changes and already matches disk
+     * (normal after PatchWatcher), skip the reload — reloadFiles() would be a no-op
      * but triggers unnecessary IDE notifications.
      *
      * Task 2 (merge failure): preserve editor content instead of discarding via reloadFiles().

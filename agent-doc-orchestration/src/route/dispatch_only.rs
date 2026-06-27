@@ -1342,7 +1342,13 @@ mod tests {
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
                 IpcMethod::Restart { .. }
                 | IpcMethod::Stop { .. }
-                | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+                | IpcMethod::StopAgent { .. }
+                | IpcMethod::ReplicaRegister { .. }
+                | IpcMethod::ReplicaDeregister { .. }
+                | IpcMethod::ReplicaUpdate { .. }
+                | IpcMethod::ReplicaPull { .. }
+                | IpcMethod::ReplicaAck { .. }
+                | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
             },
         )
         .unwrap();

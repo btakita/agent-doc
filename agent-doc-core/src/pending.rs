@@ -4317,7 +4317,8 @@ mod tests {
         .unwrap();
         assert_eq!(id, "mergestatemachine3");
         assert!(
-            new_body.contains("- [ ] [#mergestatemachine3] JB+VSCode report attach/detach through SM"),
+            new_body
+                .contains("- [ ] [#mergestatemachine3] JB+VSCode report attach/detach through SM"),
             "got: {}",
             new_body
         );
@@ -4328,7 +4329,8 @@ mod tests {
         // A compound topic label like `#lazilyspecpin=Pin …` is NOT an id
         // request — the `=` terminator disqualifies promotion, so the item
         // keeps an auto hash id and the full text is preserved.
-        let (new_body, id) = op_add("", "#lazilyspecpin=Pin the vocabulary", DOC_ID, false).unwrap();
+        let (new_body, id) =
+            op_add("", "#lazilyspecpin=Pin the vocabulary", DOC_ID, false).unwrap();
         assert_ne!(id, "lazilyspecpin");
         assert!(
             new_body.contains("#lazilyspecpin=Pin the vocabulary"),
@@ -4343,11 +4345,7 @@ mod tests {
         // request: it must be left untouched and get an auto hash id.
         let (new_body, id) = op_add("", "#somereference", DOC_ID, false).unwrap();
         assert_ne!(id, "somereference");
-        assert!(
-            new_body.contains("#somereference"),
-            "got: {}",
-            new_body
-        );
+        assert!(new_body.contains("#somereference"), "got: {}", new_body);
     }
 
     #[test]

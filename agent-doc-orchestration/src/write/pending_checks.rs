@@ -603,7 +603,20 @@ pub(crate) fn prewrite_pending_capture_check(
     );
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct PendingDoneCheckOptions {
+    pub force_disk: bool,
+}
+
+#[cfg(test)]
 pub(crate) fn precommit_pending_done_check(file: &Path) -> Result<()> {
+    precommit_pending_done_check_with_options(file, PendingDoneCheckOptions::default())
+}
+
+pub(crate) fn precommit_pending_done_check_with_options(
+    file: &Path,
+    options: PendingDoneCheckOptions,
+) -> Result<()> {
     let mode = crate::session_check::resolve_pending_done_guard_mode(file)?;
     if mode != crate::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
@@ -648,9 +661,12 @@ pub(crate) fn precommit_pending_done_check(file: &Path) -> Result<()> {
     }
 
     if crate::session_check::resolve_auto_done(file)? {
-        for id in &missing {
-            auto_apply_pending_done_id(file, id)?;
-        }
+        crate::pending_cmd::with_force_disk_pending_writes(options.force_disk, || {
+            for id in &missing {
+                auto_apply_pending_done_id(file, id)?;
+            }
+            Ok(())
+        })?;
         crate::cycle_state::record_pending_done_ids(file, &missing)?;
         crate::cycle_state::mark_pending_mutations(file)?;
         eprintln!(
@@ -820,9 +836,12 @@ pub(crate) fn auto_apply_pending_done_if_enabled(
         return Ok(());
     }
 
-    for id in &missing {
-        auto_apply_pending_done_id(file, id)?;
-    }
+    crate::pending_cmd::with_force_disk_pending_writes(flags.force_disk, || {
+        for id in &missing {
+            auto_apply_pending_done_id(file, id)?;
+        }
+        Ok(())
+    })?;
     crate::cycle_state::record_pending_done_ids(file, &missing)?;
     crate::cycle_state::mark_pending_mutations(file)?;
     *current_content = std::fs::read_to_string(file)
@@ -1467,8 +1486,11 @@ mod precommit_pending_capture_tests {
             &[],
         );
 
-        super::precommit_pending_done_check(&doc)
-            .expect("auto_done should record and apply missing --done mutations");
+        super::precommit_pending_done_check_with_options(
+            &doc,
+            super::PendingDoneCheckOptions { force_disk: true },
+        )
+        .expect("auto_done should record and apply missing --done mutations");
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("- [x] [#4qja] Stream orchestrate patchback"));
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();

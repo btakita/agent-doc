@@ -192,6 +192,25 @@ pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
     total_deleted += actors_closed;
     total_skipped += actors_kept;
 
+    // Close stale actor bindings whose tmux pane is already gone. These are the
+    // `admin detect` `stale_dead_pane` rows; leaving them open keeps routing
+    // pointed at a dead pane until an operator reaps them manually.
+    let (dead_pane_closed, dead_pane_kept) =
+        crate::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
+            &project_root,
+            dry_run,
+            "gc",
+            "stale_dead_pane_actor",
+        )?;
+    if dead_pane_closed > 0 {
+        eprintln!(
+            "[gc] actors: {} stale dead-pane closed, {} still active",
+            dead_pane_closed, dead_pane_kept
+        );
+    }
+    total_deleted += dead_pane_closed;
+    total_skipped += dead_pane_kept;
+
     // Prune long-dead `Closed` actor records (#actorprune). `close_stale_starting`
     // only TRANSITIONS `Starting`→`Closed`; nothing removes `Closed` rows, so the
     // actor store / `admin list` grows without bound (operator observed 251). Remove

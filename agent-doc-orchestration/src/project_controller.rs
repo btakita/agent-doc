@@ -1653,6 +1653,9 @@ pub(crate) fn state_fact_label(fact: &crate::state_backbone::StateFact) -> &'sta
         crate::state_backbone::StateFact::QueueHeadSelected { .. } => "queue_head_selected",
         crate::state_backbone::StateFact::QueueHeadDeferred { .. } => "queue_head_deferred",
         crate::state_backbone::StateFact::QueueHeadCompleted { .. } => "queue_head_completed",
+        crate::state_backbone::StateFact::QueueWorklistProjected { .. } => {
+            "queue_worklist_projected"
+        }
         crate::state_backbone::StateFact::SupervisorHosting { .. } => "supervisor_hosting",
         crate::state_backbone::StateFact::ResponseCaptured { .. } => "response_captured",
         crate::state_backbone::StateFact::WriteApplied { .. } => "write_applied",
@@ -1895,6 +1898,128 @@ pub fn close_stale_starting_actors(
     dry_run: bool,
 ) -> Result<(usize, usize)> {
     close_stale_starting_actors_for_caller(project_root, stale_after, dry_run, "gc")
+}
+
+/// Close non-`Closed` actor records whose tmux pane is no longer alive.
+///
+/// `admin detect` reports this shape as `stale_dead_pane`: the actor store still
+/// believes a document owns a pane, but tmux can no longer address that pane.
+/// Route/sync/start should not keep routing work through that dead binding, so
+/// this helper transitions the record to `Closed` and clears the pane/window
+/// projection through the same actor-store CAS used by manual admin reaps.
+///
+/// `pane_alive` is injected so tests can stay deterministic and callers can use
+/// the same liveness backend they already trust for actor diagnostics.
+pub fn close_stale_dead_pane_actors_for_caller<F>(
+    project_root: &Path,
+    mut pane_alive: F,
+    dry_run: bool,
+    caller: &str,
+    reason: &str,
+) -> Result<(usize, usize)>
+where
+    F: FnMut(&str) -> bool,
+{
+    let now = timestamp_secs();
+    let store = load_actor_store(project_root)?;
+    let mut closed = 0;
+    let mut kept = 0;
+
+    for record in store.values() {
+        if record.state == crate::session_actor::ActorState::Closed || record.pane_id.is_empty() {
+            continue;
+        }
+        if pane_alive(&record.pane_id) {
+            kept += 1;
+            continue;
+        }
+
+        if dry_run {
+            eprintln!(
+                "[{}] would close stale dead-pane actor: {} session={} pane={} generation={} state={} reason={}",
+                caller,
+                record.document_id,
+                record.session_id,
+                record.pane_id,
+                record.generation,
+                record.state.as_str(),
+                reason
+            );
+            closed += 1;
+            continue;
+        }
+
+        let mut next = record.clone();
+        next.state = crate::session_actor::ActorState::Closed;
+        next.pane_id.clear();
+        next.window_id.clear();
+        next.last_transition = crate::session_actor::ActorLastTransition {
+            caller: caller.to_string(),
+            reason: reason.to_string(),
+            timestamp: now,
+            prior_generation: record.generation,
+            new_generation: record.generation,
+        };
+        match store_actor_record(project_root, Some(record.generation), &next) {
+            Ok(_) => {
+                crate::ops_log::log_op(
+                    Path::new(&record.document_id),
+                    &format!(
+                        "{}_closed_stale_dead_pane_actor file={} session={} pane={} generation={} prior_state={} reason={}",
+                        caller,
+                        record.document_id,
+                        record.session_id,
+                        record.pane_id,
+                        record.generation,
+                        record.state.as_str(),
+                        reason
+                    ),
+                );
+                closed += 1;
+            }
+            Err(err) => {
+                crate::ops_log::log_op(
+                    Path::new(&record.document_id),
+                    &format!(
+                        "{}_close_stale_dead_pane_actor_skipped file={} pane={} generation={} error={}",
+                        caller, record.document_id, record.pane_id, record.generation, err
+                    ),
+                );
+                kept += 1;
+            }
+        }
+    }
+
+    Ok((closed, kept))
+}
+
+pub fn close_stale_dead_pane_actors_with_tmux_for_caller(
+    project_root: &Path,
+    dry_run: bool,
+    caller: &str,
+    reason: &str,
+) -> Result<(usize, usize)> {
+    let tmux = crate::sessions::Tmux::default_server();
+    if let Err(err) = <crate::sessions::Tmux as crate::sessions::Multiplexer>::list_panes(
+        &tmux,
+        None,
+        "#{pane_id}",
+    ) {
+        crate::ops_log::log_op(
+            project_root,
+            &format!(
+                "{caller}_stale_dead_pane_actor_gc_skipped reason=tmux_unavailable error={err}"
+            ),
+        );
+        return Ok((0, 0));
+    }
+    close_stale_dead_pane_actors_for_caller(
+        project_root,
+        |pane| tmux.pane_alive(pane),
+        dry_run,
+        caller,
+        reason,
+    )
 }
 
 /// Default age threshold for pruning dead `Closed` actor records (`#actorprune`).
@@ -2296,17 +2421,38 @@ pub fn reap_orphaned_preparing_controllers(
 /// regardless of which project it belongs to. The project-scoped
 /// [`args_match_same_project_controller`] only answers "is this MY project's
 /// controller?"; M5 needs "is this ANY project's controller, and which one?".
+fn arg_file_name_is(arg: &str, expected: &str) -> bool {
+    Path::new(arg)
+        .file_name()
+        .is_some_and(|name| name == expected)
+}
+
+fn is_shell_c_controller_sentinel(args: &[String], agent_doc_idx: usize) -> bool {
+    agent_doc_idx >= 3
+        && args
+            .get(agent_doc_idx - 2)
+            .is_some_and(|arg| arg == "-c")
+        && args.first().is_some_and(|arg| {
+            ["sh", "bash", "dash", "zsh"]
+                .iter()
+                .any(|shell| arg_file_name_is(arg, shell))
+        })
+}
+
+fn agent_doc_controller_serve_arg_index(args: &[String]) -> Option<usize> {
+    args.windows(3).enumerate().find_map(|(idx, window)| {
+        (arg_file_name_is(&window[0], "agent-doc")
+            && window[1] == "controller"
+            && window[2] == "serve"
+            && (idx == 0 || is_shell_c_controller_sentinel(args, idx)))
+        .then_some(idx)
+    })
+}
+
 fn controller_serve_project_root_from_args(args: &[String]) -> Option<PathBuf> {
-    if !args.iter().any(|arg| arg.ends_with("agent-doc")) {
-        return None;
-    }
-    if !args
+    let controller_idx = agent_doc_controller_serve_arg_index(args)?;
+    args[controller_idx + 3..]
         .windows(2)
-        .any(|window| window[0] == "controller" && window[1] == "serve")
-    {
-        return None;
-    }
-    args.windows(2)
         .find_map(|window| (window[0] == "--project-root").then(|| PathBuf::from(&window[1])))
 }
 
@@ -3117,6 +3263,81 @@ mod tests {
                 .is_some(),
             "dry-run must NOT delete the record"
         );
+    }
+
+    #[test]
+    fn close_stale_dead_pane_actors_closes_and_clears_dead_binding() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let dead_doc = dir.path().join("tasks/dead-pane.md");
+        let live_doc = dir.path().join("tasks/live-pane.md");
+        std::fs::create_dir_all(dead_doc.parent().unwrap()).unwrap();
+        std::fs::write(&dead_doc, "body").unwrap();
+        std::fs::write(&live_doc, "body").unwrap();
+        let dead_id = dead_doc.to_string_lossy().to_string();
+        let live_id = live_doc.to_string_lossy().to_string();
+        let mut dead = actor_record(&dead_id, "%dead", "@1");
+        dead.state = crate::session_actor::ActorState::Ready;
+        let mut live = actor_record(&live_id, "%live", "@1");
+        live.state = crate::session_actor::ActorState::Busy;
+        store_actor_record(dir.path(), Some(0), &dead).unwrap();
+        store_actor_record(dir.path(), Some(0), &live).unwrap();
+
+        let (closed, kept) = close_stale_dead_pane_actors_for_caller(
+            dir.path(),
+            |pane| pane == "%live",
+            false,
+            "test",
+            "stale_dead_pane_actor",
+        )
+        .unwrap();
+        assert_eq!(closed, 1);
+        assert_eq!(kept, 1);
+
+        let closed_record = load_actor_record(dir.path(), &dead_id).unwrap().unwrap();
+        assert_eq!(
+            closed_record.state,
+            crate::session_actor::ActorState::Closed
+        );
+        assert_eq!(closed_record.pane_id, "");
+        assert_eq!(closed_record.window_id, "");
+        assert_eq!(closed_record.last_transition.caller, "test");
+        assert_eq!(
+            closed_record.last_transition.reason,
+            "stale_dead_pane_actor"
+        );
+
+        let live_record = load_actor_record(dir.path(), &live_id).unwrap().unwrap();
+        assert_eq!(live_record.state, crate::session_actor::ActorState::Busy);
+        assert_eq!(live_record.pane_id, "%live");
+    }
+
+    #[test]
+    fn close_stale_dead_pane_actors_dry_run_preserves_binding() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/dry-dead-pane.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        let mut record = actor_record(&document_id, "%dead", "@1");
+        record.state = crate::session_actor::ActorState::Ready;
+        store_actor_record(dir.path(), Some(0), &record).unwrap();
+
+        let (closed, kept) = close_stale_dead_pane_actors_for_caller(
+            dir.path(),
+            |_| false,
+            true,
+            "test",
+            "stale_dead_pane_actor",
+        )
+        .unwrap();
+        assert_eq!(closed, 1);
+        assert_eq!(kept, 0);
+
+        let current = load_actor_record(dir.path(), &document_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(current.state, crate::session_actor::ActorState::Ready);
+        assert_eq!(current.pane_id, "%dead");
     }
 
     #[test]
@@ -6628,6 +6849,34 @@ agent:queue\n\
             controller_serve_project_root_from_args(&args),
             Some(PathBuf::from("/home/me/work/boost-client"))
         );
+
+        let shell_sentinel = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            "sleep 30; :".to_string(),
+            "/home/me/work/boost-client/agent-doc".to_string(),
+            "controller".to_string(),
+            "serve".to_string(),
+            "--project-root".to_string(),
+            "/home/me/work/boost-client".to_string(),
+            "--handoff-state".to_string(),
+            "preparing".to_string(),
+        ];
+        assert_eq!(
+            controller_serve_project_root_from_args(&shell_sentinel),
+            Some(PathBuf::from("/home/me/work/boost-client"))
+        );
+
+        let tmux_launcher = vec![
+            "tmux".to_string(),
+            "new-session".to_string(),
+            "agent-doc".to_string(),
+            "controller".to_string(),
+            "serve".to_string(),
+            "--project-root".to_string(),
+            "/home/me/work/boost-client".to_string(),
+        ];
+        assert_eq!(controller_serve_project_root_from_args(&tmux_launcher), None);
     }
     #[test]
     #[ignore = "global /proc preparing-controller sweep: would reap the per-project M3 \

@@ -971,6 +971,47 @@ fn marker_has_unterminated_quote(marker: &str) -> bool {
     open
 }
 
+fn byte_in_ranges(offset: usize, ranges: &[(usize, usize)]) -> bool {
+    ranges.iter().any(|&(start, end)| offset >= start && offset < end)
+}
+
+/// Detect agent-looking HTML comment markers that were truncated before their
+/// same-line `-->` terminator. The normal parser only sees complete comments,
+/// so a CRDT/editor split like `<!-- /agent:exchange --` can otherwise be
+/// skipped or consume a later unrelated terminator.
+pub fn malformed_agent_comment_reason(doc: &str) -> Option<String> {
+    let code_ranges = find_code_ranges(doc);
+    let quoted_ranges = find_quoted_ranges(doc);
+    let mut offset = 0usize;
+    for (line_idx, raw_line) in doc.split_inclusive('\n').enumerate() {
+        let line = raw_line.trim_end_matches(['\n', '\r']);
+        let leading = line.len() - line.trim_start_matches([' ', '\t']).len();
+        let marker_start = offset + leading;
+        let trimmed = &line[leading..];
+        offset += raw_line.len();
+
+        if !trimmed.starts_with("<!--") {
+            continue;
+        }
+        if byte_in_ranges(marker_start, &code_ranges)
+            || byte_in_ranges(marker_start, &quoted_ranges)
+        {
+            continue;
+        }
+        let inner = trimmed["<!--".len()..].trim_start();
+        if (inner.starts_with("agent:") || inner.starts_with("/agent:"))
+            && !trimmed.contains("-->")
+        {
+            let preview = trimmed.chars().take(80).collect::<String>();
+            return Some(format!(
+                "malformed_agent_comment:line{}:{preview}",
+                line_idx + 1
+            ));
+        }
+    }
+    None
+}
+
 /// Detect structural corruption that must never be adopted as a snapshot base
 /// (`#dupcontent`). Returns `Some(reason)` when the document is corrupt:
 /// - a parse failure (mismatched / unclosed markers),
@@ -982,6 +1023,10 @@ fn marker_has_unterminated_quote(marker: &str) -> bool {
 /// prior CRDT merge produced duplicate singleton blocks or a split attribute,
 /// so the corrupt buffer never reaches disk.
 pub fn structural_corruption_reason(doc: &str) -> Option<String> {
+    if let Some(reason) = malformed_agent_comment_reason(doc) {
+        return Some(reason);
+    }
+
     let components = match parse(doc) {
         Ok(c) => c,
         Err(e) => return Some(format!("parse_error: {e}")),
@@ -2385,6 +2430,30 @@ Fix applied to skip non-agent <!-- sequences.
             reason.starts_with("malformed_attr:queue"),
             "reason was: {reason}"
         );
+    }
+
+    #[test]
+    fn structural_corruption_flags_truncated_agent_comment() {
+        let doc = "<!-- agent:queue -->\n- a\n<!-- /agent:queue ->\n\
+<!-- /agent:exchange --\n";
+        let reason =
+            structural_corruption_reason(doc).expect("truncated agent marker must be flagged");
+        assert!(
+            reason.starts_with("malformed_agent_comment:"),
+            "reason was: {reason}"
+        );
+    }
+
+    #[test]
+    fn structural_corruption_ignores_truncated_agent_comment_inside_code_fence() {
+        let doc = "```md\n<!-- /agent:queue ->\n<!-- /agent:exchange --\n```\n";
+        assert_eq!(structural_corruption_reason(doc), None);
+    }
+
+    #[test]
+    fn structural_corruption_ignores_truncated_agent_comment_inside_quotes() {
+        let doc = "\"<!-- /agent:queue ->\"\n";
+        assert_eq!(structural_corruption_reason(doc), None);
     }
 
     #[test]

@@ -2266,7 +2266,9 @@ fn route_sim_harness_switch_defers_then_idle_watch_drives_fresh_restart() {
     // (b) The supervisor idle-watch drives the restart sequence. At a quiet
     // dispatch-ready boundary (actor Ready, queue resumed) the gate returns
     // `Restart`, emitting harness_change_detected → agent_restart_triggered.
-    world.apply(SimCommand::SupervisorHarnessSwitchTick).unwrap();
+    world
+        .apply(SimCommand::SupervisorHarnessSwitchTick)
+        .unwrap();
     assert_eq!(
         world.coverage.actor_switch_changes_detected, 1,
         "the idle-watch must DETECT the harness change"
@@ -2309,7 +2311,9 @@ fn route_sim_harness_switch_defers_then_idle_watch_drives_fresh_restart() {
     // After the switch the supervisor now runs opencode — a further tick is a no-op
     // (no standing change), proving the switch is fully resolved (not stuck pending).
     let detected_before = world.coverage.actor_switch_changes_detected;
-    world.apply(SimCommand::SupervisorHarnessSwitchTick).unwrap();
+    world
+        .apply(SimCommand::SupervisorHarnessSwitchTick)
+        .unwrap();
     assert_eq!(
         world.coverage.actor_switch_changes_detected, detected_before,
         "once launch==frontmatter the switch is resolved; no further change is detected"
@@ -2364,7 +2368,9 @@ fn route_sim_harness_switch_paused_supervisor_holds_pending_no_silent_drop() {
     // time (so the switch is never silently lost) but NEVER trigger a restart into
     // the paused supervisor — the switch is held pending the boundary.
     for _ in 0..5 {
-        world.apply(SimCommand::SupervisorHarnessSwitchTick).unwrap();
+        world
+            .apply(SimCommand::SupervisorHarnessSwitchTick)
+            .unwrap();
     }
     assert_eq!(
         world.coverage.actor_switch_changes_detected, 5,
@@ -2385,7 +2391,9 @@ fn route_sim_harness_switch_paused_supervisor_holds_pending_no_silent_drop() {
     // tick drives the held switch through to a fresh restart — the dead-end recovers.
     world.apply(SimCommand::AdminResumeQueue).unwrap();
     world.apply(SimCommand::SupervisorReady).unwrap();
-    world.apply(SimCommand::SupervisorHarnessSwitchTick).unwrap();
+    world
+        .apply(SimCommand::SupervisorHarnessSwitchTick)
+        .unwrap();
     assert_eq!(
         world.coverage.actor_switch_restarts_triggered, 1,
         "after resume the held switch must finally trigger the fresh restart"
@@ -2453,7 +2461,9 @@ fn route_sim_harness_switch_disabled_restart_bails_explicitly_no_silent_proceed(
     // Even if the idle-watch ticks, the knob-off gate is a no-op: the change is
     // detected (observable) but NO restart is ever triggered/performed.
     for _ in 0..3 {
-        world.apply(SimCommand::SupervisorHarnessSwitchTick).unwrap();
+        world
+            .apply(SimCommand::SupervisorHarnessSwitchTick)
+            .unwrap();
     }
     assert_eq!(
         world.coverage.actor_switch_restarts_triggered, 0,
@@ -2733,7 +2743,8 @@ fn route_sim_dead_supervisor_own_ancestor_caller_refuses_with_guidance_no_raw_ec
     );
     let ops_log = world.ops_log.join("\n");
     assert!(
-        ops_log.contains("dead_supervisor_recovery decision=Guidance action=refuse_unsafe_cold_start"),
+        ops_log
+            .contains("dead_supervisor_recovery decision=Guidance action=refuse_unsafe_cold_start"),
         "the refusal must be logged as a guidance decision:\n{ops_log}"
     );
     assert!(
@@ -2766,8 +2777,7 @@ fn route_sim_dead_supervisor_no_tmux_target_refuses_with_actionable_guidance() {
         "the guidance must explain why the cold-start could not run:\n{message}"
     );
     assert!(
-        message.contains("Run Agent Doc")
-            || message.contains("agent-doc start --route-owned"),
+        message.contains("Run Agent Doc") || message.contains("agent-doc start --route-owned"),
         "the guidance must hand back an actionable recovery command:\n{message}"
     );
     assert!(
@@ -3199,9 +3209,7 @@ fn open_agent_doc_cycle_defers_self_recycle_until_finalize_commits() {
     world
         .apply(SimCommand::EnableSupervisorAutoRecycle)
         .unwrap();
-    world
-        .apply(SimCommand::SetAgentDocCycleOpen(true))
-        .unwrap();
+    world.apply(SimCommand::SetAgentDocCycleOpen(true)).unwrap();
 
     // Idle ticks at a harness turn boundary while the cycle is open must DEFER the
     // recycle: no execve, generation unchanged, binary stays stale (pending).
@@ -3264,9 +3272,7 @@ fn never_closing_cycle_escalates_recycle_then_boot_redispatches_interrupted_turn
     world
         .apply(SimCommand::EnableSupervisorAutoRecycle)
         .unwrap();
-    world
-        .apply(SimCommand::SetAgentDocCycleOpen(true))
-        .unwrap();
+    world.apply(SimCommand::SetAgentDocCycleOpen(true)).unwrap();
 
     // Tick just under the threshold: every tick DEFERS, no recycle, no escalation.
     for _ in 0..(MAX_CYCLE_OPEN_DEFER_TICKS - 1) {
@@ -3341,9 +3347,7 @@ fn recycle_boot_with_surviving_child_adopts_without_redispatch() {
     world.apply(SimCommand::SupervisorReady).unwrap();
 
     // Cycle open, child survived (the default — no MarkHarnessChildDiedAcrossRecycle).
-    world
-        .apply(SimCommand::SetAgentDocCycleOpen(true))
-        .unwrap();
+    world.apply(SimCommand::SetAgentDocCycleOpen(true)).unwrap();
     world.apply(SimCommand::SupervisorRecycleBoot).unwrap();
 
     assert_eq!(
@@ -4318,15 +4322,25 @@ fn brtc_reemit_storm_converges_to_one_item_per_identity_and_preserves_operator_p
     let count_id = |id: &str| {
         converged
             .iter()
-            .filter(|e| matches!(e, QueueEntry::Prompt(p) if {
-                use agent_doc_orchestration::queue_item_state_machine::QueueItemIdentity;
-                QueueItemIdentity::from_prompt(&p.text)
-                    == QueueItemIdentity::Id(id.to_string())
-            }))
+            .filter(|e| {
+                matches!(e, QueueEntry::Prompt(p) if {
+                    use agent_doc_orchestration::queue_item_state_machine::QueueItemIdentity;
+                    QueueItemIdentity::from_prompt(&p.text)
+                        == QueueItemIdentity::Id(id.to_string())
+                })
+            })
             .count()
     };
-    assert_eq!(count_id("alpha"), 1, "alpha must converge to one head:\n{converged:?}");
-    assert_eq!(count_id("beta"), 1, "beta must converge to one head:\n{converged:?}");
+    assert_eq!(
+        count_id("alpha"),
+        1,
+        "alpha must converge to one head:\n{converged:?}"
+    );
+    assert_eq!(
+        count_id("beta"),
+        1,
+        "beta must converge to one head:\n{converged:?}"
+    );
 
     let free_text_count = converged
         .iter()
@@ -4759,7 +4773,7 @@ fn reconnect_buffer_sim_rereads_stale_then_keeps_user_edits() {
 }
 
 #[test]
-fn editorless_cli_sim_force_disk_but_live_editor_fail_closed() {
+fn editorless_cli_sim_requires_force_disk_and_live_editor_fail_closed() {
     use agent_doc_orchestration::flow::document_mutation::{
         EditorlessDiskFallbackDecision, decide_editorless_disk_fallback,
     };
@@ -4767,13 +4781,21 @@ fn editorless_cli_sim_force_disk_but_live_editor_fail_closed() {
     world.append_to_exchange("❯ finalize me\n").unwrap();
     let threshold = 3;
 
-    // #kcb5 CLI-only actor: connectable controller socket, NO editor endpoint,
-    // every send no_acks → route to the controller-host disk write.
-    let cli = decide_editorless_disk_fallback(true, false, threshold, threshold, false);
+    // #kcb5 realtime cutover: a CLI-only actor with a connectable controller
+    // socket but no editor endpoint still fails closed unless the operator made
+    // the disk write explicit.
+    let cli_unforced = decide_editorless_disk_fallback(true, false, threshold, threshold, false);
+    assert_eq!(
+        cli_unforced,
+        EditorlessDiskFallbackDecision::FailClosed,
+        "an editor-less CLI actor must not silently route finalize to disk"
+    );
+
+    let cli = decide_editorless_disk_fallback(true, false, threshold, threshold, true);
     assert_eq!(
         cli,
         EditorlessDiskFallbackDecision::ForceDiskNoEditor,
-        "an editor-less CLI actor must route finalize to disk, not wedge on no_ack"
+        "an editor-less CLI actor routes finalize to disk only with explicit force_disk"
     );
     if cli == EditorlessDiskFallbackDecision::ForceDiskNoEditor {
         world.coverage.editorless_disk_fallbacks += 1;
@@ -5929,12 +5951,13 @@ fn halt_response_does_not_strike_queue_head_but_done_flag_does() {
     );
 
     // An explicit --done strikes the head, leaving #beta as the next head.
-    let outcome = agent_doc_orchestration::write::consume_queue_prompts_for_done_ids_with_outcome(
-        &doc,
-        &["alpha".to_string()],
-    )
-    .unwrap()
-    .expect("explicit --done should consume the queue head");
+    let outcome =
+        agent_doc_orchestration::write::consume_queue_prompts_for_done_ids_force_disk_with_outcome(
+            &doc,
+            &["alpha".to_string()],
+        )
+        .unwrap()
+        .expect("explicit --done should consume the queue head");
     assert_eq!(outcome.consumed_count, 1);
     assert_eq!(outcome.remaining, 1);
     let after = std::fs::read_to_string(&doc).unwrap();
@@ -7139,6 +7162,7 @@ mod hosting_sim {
                     document_hash: document_hash.to_string(),
                     node_key: node_key.to_string(),
                     backlog_id: None,
+                    prompt_text: None,
                     drainable: true,
                     hosting_epoch,
                 },
@@ -7218,7 +7242,10 @@ mod hosting_sim {
         world.select_head("doc-b", "b-free-text-head");
 
         // B sees only its own head; A is not contaminated.
-        assert_eq!(world.active_head("doc-b").as_deref(), Some("b-free-text-head"));
+        assert_eq!(
+            world.active_head("doc-b").as_deref(),
+            Some("b-free-text-head")
+        );
         assert!(
             world.completed_heads("doc-b").is_empty(),
             "doc-b's first cycle must not inherit doc-a's answered head"
@@ -7318,7 +7345,7 @@ mod hosting_sim {
 /// stale-overlay replay for one document cannot flip another's authority — no live
 /// editor / tmux required.
 mod crdt_authority_sim {
-    use agent_doc_orchestration::crdt_authority::{authority_for_document, CrdtAuthority};
+    use agent_doc_orchestration::crdt_authority::{CrdtAuthority, authority_for_document};
     use agent_doc_orchestration::state_backbone::{
         ActorLifecycleEvent, EventLedger, StateEvent, StateFact, StateOwner,
     };
@@ -7414,7 +7441,12 @@ mod crdt_authority_sim {
         /// write (the terminal force-disk fallback). This is the
         /// MultiReplica → GitAuthoritative authority transition, mirroring the
         /// `disk_write_permitted_for_file` Detached fallback.
-        fn editor_force_disk_fallback(&mut self, document_hash: &str, patch_id: &str, reason: &str) {
+        fn editor_force_disk_fallback(
+            &mut self,
+            document_hash: &str,
+            patch_id: &str,
+            reason: &str,
+        ) {
             let generation = self.editor_generation;
             // The fallback needs an existing patch to terminalize.
             let queued = self.event_id("fb-queued");
@@ -7662,7 +7694,9 @@ mod crdt_relay_sim {
 
         /// An editor edit that relays + broadcasts immediately (the normal live path).
         fn edit_now(&mut self, id: u64, offset: u32, delete_len: u32, insert: &str) {
-            self.hub.apply_local(id, offset, delete_len, insert).unwrap();
+            self.hub
+                .apply_local(id, offset, delete_len, insert)
+                .unwrap();
         }
 
         /// An editor edit relayed to the hub but whose fan-out packets to peers are
@@ -7691,11 +7725,7 @@ mod crdt_relay_sim {
         }
 
         fn append_len(&self, id: u64) -> u32 {
-            self.hub
-                .member_text(id)
-                .unwrap_or_default()
-                .chars()
-                .count() as u32
+            self.hub.member_text(id).unwrap_or_default().chars().count() as u32
         }
     }
 
@@ -7732,7 +7762,10 @@ mod crdt_relay_sim {
         world.edit_lagged(a, len, 0, " second");
 
         // `b` has not seen either yet (lagged).
-        assert_ne!(world.hub.member_text(b).unwrap(), world.hub.canonical_text());
+        assert_ne!(
+            world.hub.member_text(b).unwrap(),
+            world.hub.canonical_text()
+        );
 
         // Deliver REVERSED (the dependent op before its dependency) — converges.
         world.deliver_reversed();
@@ -7878,7 +7911,11 @@ mod crdt_relay_sim {
         world.edit_now(a, len, 0, " v2");
         let changed = world.hub.reconcile_disk_projection(&projection).unwrap();
         assert!(!changed);
-        assert_eq!(world.hub.canonical_text(), "v1 v2", "in-memory replica wins");
+        assert_eq!(
+            world.hub.canonical_text(),
+            "v1 v2",
+            "in-memory replica wins"
+        );
     }
 
     #[test]
@@ -7947,7 +7984,10 @@ mod crdt_relay_host_sim {
         with_hub(&attached, |hub| {
             hub.register(editor).unwrap();
             hub.local_edit(editor, 0, 0, "keystroke").unwrap();
-            assert!(!hub.canonical_text().contains("keystroke"), "not relayed yet");
+            assert!(
+                !hub.canonical_text().contains("keystroke"),
+                "not relayed yet"
+            );
         })
         .unwrap();
         assert!(commit_barrier_for_file_with_authority(
@@ -7999,7 +8039,10 @@ mod crdt_relay_host_sim {
         with_hub(&doc, |hub| {
             let cut = hub.canonical_text();
             assert!(cut.contains("LIVE"));
-            assert!(!cut.contains("SLOW"), "disconnected op excluded, no deadlock");
+            assert!(
+                !cut.contains("SLOW"),
+                "disconnected op excluded, no deadlock"
+            );
         })
         .unwrap();
     }

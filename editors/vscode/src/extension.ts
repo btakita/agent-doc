@@ -7,7 +7,7 @@ import { execFile } from 'child_process';
 import * as native from './native';
 import * as stateMirror from './stateMirror';
 import { createEditorApplyProof, consumeClaimedPatch, isEditorApplyProofCurrent, isPatchAlreadyApplied } from './patchGuard';
-import { appendPatchAlreadyPresent, calculateMinimalReplacement, isPureRepositionSignal } from './patchPlan';
+import { appendPatchAlreadyPresent, calculateMinimalReplacement, isFullDocumentReplacement, isPureRepositionSignal } from './patchPlan';
 import { parseCrossSessionReject, CrossSessionReject } from './crossSession';
 import { parseSaveDocumentSignal, ackContentSidecarPath } from './saveSignal';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
@@ -53,6 +53,7 @@ import {
     EditorCommandKind,
     EditorCommandRegistry,
 } from './editorCommandState';
+import { CrdtReplicaManager, type ReplicaTextChange } from './crdtReplica';
 
 // ---------------------------------------------------------------------------
 // CLI Resolution (Feature 9)
@@ -722,10 +723,14 @@ function buildEditorCommandRouteKey(cwd: string, relativePath: string): string {
     return `${cwd}\0${relativePath}`;
 }
 
-async function saveMarkdownDocument(filePath: string): Promise<void> {
+async function ensureDocumentCleanForCommand(filePath: string, commandLabel: string): Promise<boolean> {
     const document = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === filePath)
         ?? await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
-    await document.save();
+    if (document.isDirty) {
+        showError(`${commandLabel}: document has unsaved editor changes; synchronize the buffer before running this command`);
+        return false;
+    }
+    return true;
 }
 
 async function startRunForDocument(cwd: string, rel: string, filePath: string): Promise<void> {
@@ -764,7 +769,7 @@ async function executeRunForDocument(
         settled,
     });
     try {
-        await saveMarkdownDocument(filePath);
+        if (!(await ensureDocumentCleanForCommand(filePath, 'Run'))) return;
         routeGeneration = native.recordRouteDispatchStarted(filePath, routeKey, cwd);
         const output = await runCli(
             buildRunRouteCommandArgs(rel, collectVisibleMarkdownColumns(cwd), rel),
@@ -832,7 +837,6 @@ async function runSessionCommandForActiveFile(
     let rel = '';
     let cwd = root;
     try {
-        await editor.document.save();
         const resolved = resolveProject(root, editor.document.uri.fsPath);
         cwd = resolved.cwd;
         rel = resolved.relativePath;
@@ -973,7 +977,6 @@ async function killSupervisorAction(): Promise<void> {
     }
 
     try {
-        await editor.document.save();
         const { cwd, relativePath } = resolveProject(root, editor.document.uri.fsPath);
         const output = await runCli(['admin', 'kill-supervisor', relativePath], cwd);
         showHint(output.trim() || `Killed supervisor for ${relativePath}`);
@@ -1030,7 +1033,7 @@ async function fixDocumentAction(): Promise<void> {
     }
 
     try {
-        await editor.document.save();
+        if (!(await ensureDocumentCleanForCommand(editor.document.uri.fsPath, 'Fix document'))) return;
         const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
         const output = await runCli(['fix', rel], cwd, { timeoutMs: 30_000 });
         showHint(output || `Fixed ${rel}`);
@@ -1065,7 +1068,7 @@ async function compactExchangeAction(): Promise<void> {
     }
 
     try {
-        await editor.document.save();
+        if (!(await ensureDocumentCleanForCommand(editor.document.uri.fsPath, 'Compact exchange'))) return;
         const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
         const output = await runCli(['compact', rel, '--component', 'exchange', '--commit'], cwd);
         showHint(output || `Compacted exchange for ${rel}`);
@@ -1085,7 +1088,7 @@ async function runWithJunieAction(): Promise<void> {
     }
 
     try {
-        await editor.document.save();
+        if (!(await ensureDocumentCleanForCommand(editor.document.uri.fsPath, 'Run with Junie'))) return;
         const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
         const output = await runCli(['run', '--agent', 'junie', rel], cwd);
         showHint(output || `Ran Junie for ${rel}`);
@@ -1133,7 +1136,7 @@ async function executeClearSessionContext(
     routeKey: string,
 ): Promise<void> {
     try {
-        await saveMarkdownDocument(filePath);
+        if (!(await ensureDocumentCleanForCommand(filePath, 'Clear Session Context'))) return;
         const output = await runCli(buildSessionCommandArgs('clear', rel), cwd);
         showHint(buildSessionSuccessHint('clear', rel, output));
     } catch (err: any) {
@@ -1238,7 +1241,6 @@ async function interruptClearSessionContextAction(): Promise<void> {
         return;
     }
 
-    await editor.document.save();
     const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
     await interruptAndClearSessionContext(cwd, rel);
 }
@@ -1625,11 +1627,10 @@ function stopPromptPolling(): void {
 }
 
 async function pollPrompts(root: string): Promise<void> {
-    // Auto-save tracked files before polling
     for (const fsPath of trackedFiles) {
         const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === fsPath);
         if (doc && doc.isDirty) {
-            try { await doc.save(); } catch { /* best effort */ }
+            return;
         }
     }
 
@@ -1850,6 +1851,8 @@ class PatchWatcher implements vscode.Disposable {
     private signalWatcher: vscode.FileSystemWatcher | undefined;
     private saveSignalWatcher: vscode.FileSystemWatcher | undefined;
     private typingListener: vscode.Disposable | undefined;
+    private openListener: vscode.Disposable | undefined;
+    private crdtReplicas: CrdtReplicaManager | undefined;
     private patchesDir: string | undefined;
     private outputChannel: vscode.OutputChannel;
     /** Track last typing time per file for debounce */
@@ -1898,24 +1901,57 @@ class PatchWatcher implements vscode.Disposable {
         this.saveSignalWatcher.onDidCreate(() => this.onSaveDocumentSignal(patchesDir));
         this.saveSignalWatcher.onDidChange(() => this.onSaveDocumentSignal(patchesDir));
 
+        const projectRoot = path.dirname(path.dirname(patchesDir));
+        this.crdtReplicas = new CrdtReplicaManager({
+            projectRoot,
+            identity: EDITOR_ID,
+            listDocuments: () => vscode.workspace.textDocuments
+                .filter((document) => this.targetsProjectMarkdown(document, projectRoot))
+                .map((document) => ({ filePath: document.uri.fsPath, text: document.getText() })),
+            applyText: (filePath, text) => this.applyCrdtReplicaText(filePath, text),
+            logger: {
+                debug: (message) => this.outputChannel.appendLine(message),
+                warn: (message) => this.outputChannel.appendLine(message),
+            },
+        });
+        this.crdtReplicas.start();
+        this.openListener = vscode.workspace.onDidOpenTextDocument((document) => {
+            if (!this.targetsProjectMarkdown(document, projectRoot)) return;
+            void this.crdtReplicas?.attachDocument(document.uri.fsPath, document.getText());
+        });
+
         // Track typing events for debounce (TS fallback + FFI)
         this.typingListener = vscode.workspace.onDidChangeTextDocument((e) => {
             if (e.document.languageId === 'markdown' && e.contentChanges.length > 0) {
                 const fsPath = e.document.uri.fsPath;
-                this.lastTypingTime.set(fsPath, Date.now());
                 const text = e.document.getText();
+                const remoteCrdtApply = this.crdtReplicas?.isApplyingRemote(fsPath) ?? false;
+                if (!remoteCrdtApply) {
+                    this.lastTypingTime.set(fsPath, Date.now());
+                }
                 // Also record in FFI debounce tracker (shared with JB plugin).
                 // #pcp6: send the FULL editor buffer content (not just len/hash) so
                 // the CLI visible-write reconcile guard can positively confirm the
                 // editor buffer equals on-disk content instead of inferring from a
                 // digest. Mirrors TypingTracker.documentChanged in the JB plugin.
-                const projectRoot = this.patchesDir
+                const eventProjectRoot = this.patchesDir
                     ? path.dirname(path.dirname(this.patchesDir))
                     : undefined;
-                native.documentChangedDigestContent(fsPath, text, projectRoot, EDITOR_ID);
+                native.documentChangedDigestContent(fsPath, text, eventProjectRoot, EDITOR_ID);
+                const changes: ReplicaTextChange[] = e.contentChanges.map((change) => ({
+                    rangeOffset: change.rangeOffset,
+                    rangeLength: change.rangeLength,
+                    text: change.text,
+                }));
+                const crdtForward = this.crdtReplicas?.handleLocalChange(fsPath, text, changes);
+                crdtForward?.catch((err: any) => {
+                    this.outputChannel.appendLine(`crdt-replica: local change skipped for ${fsPath}: ${err?.message ?? err}`);
+                });
                 // #qnodemerge4wire Phase 4: report the real editor op so a concurrent
                 // agent merge aligns to the user's actual edit boundaries.
-                reportEditorChange(fsPath, text, e.contentChanges, projectRoot);
+                if (!remoteCrdtApply) {
+                    reportEditorChange(fsPath, text, e.contentChanges, eventProjectRoot);
+                }
             }
         });
 
@@ -1929,20 +1965,18 @@ class PatchWatcher implements vscode.Disposable {
         // #yzer / #evmhplugin: activation is the VS Code analog of the JB plugin's
         // IPC (re)connect — the editor just opened a buffer the binary may have
         // advanced past (committed content the buffer never saw) while VS Code was
-        // closed. Reconcile any provably-stale buffer so a later save_document
-        // cannot revert the binary's committed writes. Binary FFI owns the
-        // staleness decision; we only re-read when told to (editor wins otherwise).
+        // closed. Realtime cutover keeps visible buffers editor-owned here: the
+        // binary FFI may report stale state, but this extension no longer mutates
+        // open buffers as a reconnect repair.
         void this.reconcileStaleBuffersOnReconnect(patchesDir);
     }
 
     /**
      * #yzer / #evmhplugin: reconcile every open markdown buffer under this
      * patches-dir root whose editor buffer is PROVABLY stale committed content
-     * (the binary advanced disk/HEAD while VS Code was closed). The binary FFI
-     * (`agent_doc_reconnect_buffer_decision`) owns the staleness decision; this
-     * only applies a re-read when told to, so genuine unsynced user edits are
-     * never clobbered (editor wins, #editorbufwin). VS Code parity for the JB
-     * plugin's `reconcileStaleBuffersOnReconnect`.
+     * (the binary advanced disk/HEAD while VS Code was closed). Realtime cutover
+     * disables editor-open reconnect repair writes; `reread_disk` decisions are
+     * logged and the buffer is kept editor-owned.
      */
     private async reconcileStaleBuffersOnReconnect(patchesDir: string): Promise<void> {
         const root = path.dirname(path.dirname(patchesDir));
@@ -1963,25 +1997,7 @@ class PatchWatcher implements vscode.Disposable {
                 }
                 continue;
             }
-            await this.applyReconnectReread(doc, decision.content);
-        }
-    }
-
-    /**
-     * Re-read committed disk/HEAD content into a stale editor buffer on reconnect
-     * (#yzer). The staleness proof was already established by the binary FFI; this
-     * re-checks the buffer is unchanged before replacing it to avoid racing a
-     * concurrent edit. Mirrors the JB plugin's `applyReconnectReread`.
-     */
-    private async applyReconnectReread(doc: vscode.TextDocument, content: string): Promise<void> {
-        const before = doc.getText();
-        if (before === content) return;
-        // Race guard: bail if the buffer changed since we read it (a concurrent
-        // user edit) so editor-wins still holds.
-        if (doc.getText() !== before) return;
-        const ok = await this.applyMinimalTextEdit(doc, content);
-        if (ok) {
-            this.outputChannel.appendLine(`reconnect: reread disk into stale buffer ${doc.uri.fsPath} #yzer`);
+            this.outputChannel.appendLine(`reconnect: reread_disk repair is disabled for ${filePath}; buffer kept #yzer`);
         }
     }
 
@@ -2028,15 +2044,9 @@ class PatchWatcher implements vscode.Disposable {
     }
 
     /**
-     * Handle a `save-document.signal` file written by the binary
-     * (#jbeditorsavedrift-vscode). The binary detected the editor buffer is ahead
-     * of disk (a post-commit carry-forward superset that re-triggers
-     * `live_prompt_drift`), so flush the matching editor buffer to disk and clear
-     * its dirty flag, then hand the saved content back via the ack-content sidecar
-     * (keyed by patch_id) so the binary can adopt it as a clean snapshot.
-     *
-     * VS Code parity for the JB plugin's socket `save_document` handler
-     * (`saveDocumentViaDocument`): same behavior, file-signal transport.
+     * Handle a legacy `save-document.signal` file written by the binary. Realtime
+     * cutover disables plugin-driven saves; the signal is consumed and logged so
+     * a stale repair surface cannot flush a visible buffer behind the controller.
      */
     private async processSaveDocumentSignal(patchesDir: string): Promise<void> {
         const signalFile = path.join(patchesDir, 'save-document.signal');
@@ -2059,47 +2069,12 @@ class PatchWatcher implements vscode.Disposable {
             this.outputChannel.appendLine('save_document: malformed or empty signal payload, ignoring');
             return;
         }
-        await this.saveDocumentToDisk(signal.file, signal.patchId, patchesDir);
+        this.outputChannel.appendLine(`save_document IPC is disabled for ${signal.file}`);
     }
 
     /**
-     * Flush the live editor buffer for [filePath] to disk and clear its dirty
-     * flag, resolving a `live_prompt_drift` where the editor holds unsaved edits
-     * ahead of disk. Writes the saved buffer to the ack-content sidecar (keyed by
-     * [patchId]) so the binary reads exactly what was persisted. Mirrors the JB
-     * plugin's `saveDocumentViaDocument`.
-     */
-    private async saveDocumentToDisk(
-        filePath: string,
-        patchId: string | undefined,
-        patchesDir: string,
-    ): Promise<boolean> {
-        const target = vscode.workspace.textDocuments.find(
-            (d) => d.uri.fsPath === filePath,
-        );
-        if (!target) {
-            this.outputChannel.appendLine(`save_document: no open document for ${filePath}`);
-            return false;
-        }
-        if (target.isDirty) {
-            const saved = await target.save();
-            if (!saved) {
-                this.outputChannel.appendLine(`save_document: save() failed for ${filePath}`);
-                return false;
-            }
-        }
-        // Buffer is now on disk (or was already clean); hand it back to the binary.
-        const content = target.getText();
-        this.outputChannel.appendLine(
-            `save_document: flushed ${content.length} chars to disk for ${filePath}`,
-        );
-        return this.writeAckContent(patchId, content, patchesDir);
-    }
-
-    /**
-     * Write the saved document content to the ack-content sidecar
-     * (`.agent-doc/ack-content/<patch_id>.md`) so the binary adopts exactly what
-     * was persisted instead of re-reading/polling disk. No-op without a patch_id.
+     * Write proven editor-apply content to the ack-content sidecar
+     * (`.agent-doc/ack-content/<patch_id>.md`). No-op without a patch_id.
      */
     private writeAckContent(
         patchId: string | undefined,
@@ -2434,6 +2409,10 @@ class PatchWatcher implements vscode.Disposable {
         if (replacement == null) {
             return true;
         }
+        if (isFullDocumentReplacement(before, replacement)) {
+            this.outputChannel.appendLine(`PatchWatcher: full-document WorkspaceEdit replacement is disabled for ${document.uri.fsPath}`);
+            return false;
+        }
         const range = new vscode.Range(
             document.positionAt(replacement.start),
             document.positionAt(replacement.start + replacement.deleteLength),
@@ -2441,6 +2420,34 @@ class PatchWatcher implements vscode.Disposable {
         const edit = new vscode.WorkspaceEdit();
         edit.replace(document.uri, range, replacement.text);
         return vscode.workspace.applyEdit(edit);
+    }
+
+    private async applyCrdtReplicaText(filePath: string, targetContent: string): Promise<boolean> {
+        const document = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === filePath);
+        if (!document) return false;
+        const projectRoot = this.patchesDir
+            ? path.dirname(path.dirname(this.patchesDir))
+            : undefined;
+        const normalized = native.normalizeTemplateStructure(targetContent, projectRoot);
+        if (normalized == null) {
+            this.outputChannel.appendLine(`PatchWatcher: CRDT remote update rejected by template-structure guard for ${filePath}`);
+            return false;
+        }
+        if (normalized !== targetContent) {
+            this.outputChannel.appendLine(`PatchWatcher: CRDT remote update requires template-structure repair for ${filePath}; rejecting to keep replica state coherent`);
+            return false;
+        }
+        return this.applyMinimalTextEdit(document, targetContent);
+    }
+
+    private targetsProjectMarkdown(document: vscode.TextDocument, projectRoot: string): boolean {
+        return document.languageId === 'markdown'
+            && document.uri.scheme === 'file'
+            && document.uri.fsPath.startsWith(projectRoot + path.sep);
+    }
+
+    handleDocumentClosed(filePath: string): void {
+        void this.crdtReplicas?.handleDocumentClosed(filePath);
     }
 
     private verifyApplyProof(
@@ -2747,6 +2754,8 @@ class PatchWatcher implements vscode.Disposable {
         this.signalWatcher?.dispose();
         this.saveSignalWatcher?.dispose();
         this.typingListener?.dispose();
+        this.openListener?.dispose();
+        this.crdtReplicas?.dispose();
         this.outputChannel.dispose();
     }
 }
@@ -2871,6 +2880,7 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.workspace.onDidCloseTextDocument((document) => {
             if (document.languageId !== 'markdown') return;
             native.documentClosedForEditor(document.uri.fsPath, getWorkspaceRoot(document.uri), EDITOR_ID);
+            patchWatcher?.handleDocumentClosed(document.uri.fsPath);
             // #r5at: evict the per-document reactive mirror so a reused path
             // (move/symlink/reopen) does not surface stale projection state.
             native.evictStateMirrorForFile(document.uri.fsPath);

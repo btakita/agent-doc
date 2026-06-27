@@ -2,6 +2,13 @@ package com.github.btakita.agentdoc
 
 import com.sun.jna.Pointer
 import com.sun.jna.ptr.LongByReference
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import java.io.File
+import java.net.UnixDomainSocketAddress
+import java.nio.channels.Channels
+import java.nio.channels.SocketChannel
+import java.util.Base64
 
 /**
  * Thin editor-as-replica forwarding seam (`#crdtauth5`, plan phase 3/5).
@@ -22,10 +29,10 @@ import com.sun.jna.ptr.LongByReference
  * Both the FFI replica binding ([ReplicaNode]) and the supervisor transport
  * ([ReplicaTransport]) are injected so the seam is unit-testable without loading
  * the native library or opening a real Unix-domain socket. The production wiring
- * (a [ReplicaNode] backed by [AgentDocLib] + a [ReplicaTransport] backed by the
- * supervisor socket + an IntelliJ `DocumentListener`) is the operator's live
- * hookup — see [NativeReplicaNode] and the doc comment at the bottom.
- */
+* (a [ReplicaNode] backed by [AgentDocLib] + a [ReplicaTransport] backed by the
+* supervisor socket + an IntelliJ `DocumentListener`) is the operator's live
+* hookup — see [NativeReplicaNode] and [CrdtReplicaManager].
+*/
 class CrdtReplicaForwarder(
     private val filePath: String,
     private val identity: String,
@@ -37,7 +44,8 @@ class CrdtReplicaForwarder(
     var attached: Boolean = false
         private set
 
-    private var clientId: Long = 0
+    var clientId: Long = 0
+        private set
 
     /**
      * Register this editor as a replica with the supervisor hub and open the
@@ -69,6 +77,22 @@ class CrdtReplicaForwarder(
     }
 
     /**
+     * Align a newly attached native replica with the live editor buffer before
+     * forwarding the first real `DocumentEvent` delta. The supervisor bootstrap is
+     * seeded from disk, while JetBrains can already hold unsaved edits; applying
+     * an event offset against that stale bootstrap can otherwise clamp/truncate.
+     */
+    fun ensureEditorText(editorText: String) {
+        if (!attached) return
+        val current = node.text() ?: return
+        if (current == editorText) return
+        val deleteLen = current.codePointCount(0, current.length)
+        if (!node.applyLocal(clientId, 0, deleteLen, editorText)) return
+        val update = node.encodeState() ?: return
+        transport.broadcastUpdate(filePath, identity, update)
+    }
+
+    /**
      * Apply a remote update (a peer's ops fanned out by the supervisor hub) into
      * the local replica. Returns the converged text the caller should write back
      * into the IntelliJ Document (cursor/undo preserving), or null on failure /
@@ -78,6 +102,18 @@ class CrdtReplicaForwarder(
         if (!attached) return null
         if (!node.applyUpdate(clientId, update)) return null
         return node.text()
+    }
+
+    /** Pull remote updates the supervisor queued for this replica. */
+    fun pullRemoteUpdates(): List<ReplicaRemoteUpdate> {
+        if (!attached) return emptyList()
+        return transport.pullUpdates(filePath, identity)
+    }
+
+    /** ACK a remote update after the caller has applied [applyRemoteUpdate]'s text to the editor buffer. */
+    fun ackRemoteUpdate(update: ReplicaRemoteUpdate): Boolean {
+        if (!attached) return false
+        return transport.ackUpdate(filePath, identity, update.patchId, update.generation)
     }
 
     /** Deregister the replica from the hub and close the local FFI replica. */
@@ -92,6 +128,15 @@ class CrdtReplicaForwarder(
 /** The supervisor `register` ack: the minted client-id + canonical bootstrap state. */
 data class ReplicaRegisterAck(val clientId: Long, val bootstrap: ByteArray?)
 
+/** One queued supervisor-to-editor CRDT update owned by this replica. */
+data class ReplicaRemoteUpdate(
+    val patchId: String,
+    val origin: Long,
+    val target: Long,
+    val generation: Long,
+    val update: ByteArray,
+)
+
 /**
  * Transport to the supervisor's per-document relay hub over the new
  * `#crdtauth5` IPC family (`replica_register` / `replica_deregister` /
@@ -104,8 +149,136 @@ interface ReplicaTransport {
     /** `replica_update`: ship a local yrs update to the hub for fan-out. */
     fun broadcastUpdate(filePath: String, identity: String, update: ByteArray)
 
+    /** `replica_pull`: fetch pending peer updates queued for this replica. */
+    fun pullUpdates(filePath: String, identity: String): List<ReplicaRemoteUpdate> = emptyList()
+
+    /** `replica_ack`: confirm a pulled update has been applied to the local editor. */
+    fun ackUpdate(filePath: String, identity: String, patchId: String, generation: Long): Boolean = false
+
     /** `replica_deregister`. */
     fun deregister(filePath: String, identity: String)
+}
+
+/**
+ * Production transport over the supervisor's NDJSON Unix-domain socket.
+ *
+ * The transport is intentionally conservative: it tries the latest supervisor
+ * sockets under `.agent-doc/supervisor/` and treats refusal/no socket as a soft
+ * detached fallback so the legacy patch-file path remains available.
+ */
+class SupervisorSocketReplicaTransport(private val projectRoot: String) : ReplicaTransport {
+    private val log = com.intellij.openapi.diagnostic.Logger.getInstance(SupervisorSocketReplicaTransport::class.java)
+    @Volatile private var cachedSocket: File? = null
+
+    override fun register(filePath: String, identity: String): ReplicaRegisterAck? {
+        val response = send(
+            jsonRequest("replica_register", filePath, identity),
+        ) ?: return null
+        if (!response.ok) return null
+        val data = response.data ?: return null
+        val clientId = data.get("client_id")?.asLong ?: return null
+        val bootstrap = data.get("bootstrap_b64")?.asString?.let { decodeBase64(it) }
+        return ReplicaRegisterAck(clientId, bootstrap)
+    }
+
+    override fun broadcastUpdate(filePath: String, identity: String, update: ByteArray) {
+        val request = jsonRequest("replica_update", filePath, identity)
+        request.addProperty("update_b64", Base64.getEncoder().encodeToString(update))
+        send(request)
+    }
+
+    override fun pullUpdates(filePath: String, identity: String): List<ReplicaRemoteUpdate> {
+        val response = send(jsonRequest("replica_pull", filePath, identity)) ?: return emptyList()
+        if (!response.ok) return emptyList()
+        val updates = response.data?.getAsJsonArray("updates") ?: return emptyList()
+        return updates.mapNotNull { element ->
+            val item = element.asJsonObject
+            val patchId = item.get("patch_id")?.asString ?: return@mapNotNull null
+            val updateB64 = item.get("update_b64")?.asString ?: return@mapNotNull null
+            ReplicaRemoteUpdate(
+                patchId = patchId,
+                origin = item.get("origin")?.asLong ?: 0L,
+                target = item.get("target")?.asLong ?: 0L,
+                generation = item.get("generation")?.asLong ?: return@mapNotNull null,
+                update = decodeBase64(updateB64) ?: return@mapNotNull null,
+            )
+        }
+    }
+
+    override fun ackUpdate(filePath: String, identity: String, patchId: String, generation: Long): Boolean {
+        val request = jsonRequest("replica_ack", filePath, identity)
+        request.addProperty("patch_id", patchId)
+        request.addProperty("generation", generation)
+        val response = send(request) ?: return false
+        return response.ok && (response.data?.get("acknowledged")?.asBoolean ?: false)
+    }
+
+    override fun deregister(filePath: String, identity: String) {
+        send(jsonRequest("replica_deregister", filePath, identity))
+    }
+
+    private data class SupervisorResponse(
+        val ok: Boolean,
+        val data: JsonObject?,
+        val error: String?,
+    )
+
+    private fun jsonRequest(method: String, filePath: String, identity: String): JsonObject {
+        val obj = JsonObject()
+        obj.addProperty("method", method)
+        obj.addProperty("file", filePath)
+        obj.addProperty("identity", identity)
+        return obj
+    }
+
+    private fun send(request: JsonObject): SupervisorResponse? {
+        val candidates = socketCandidates()
+        for (socket in candidates) {
+            try {
+                val response = sendToSocket(socket, request)
+                cachedSocket = socket
+                return response
+            } catch (e: Exception) {
+                if (socket == cachedSocket) cachedSocket = null
+                log.debug("[crdt-replica] supervisor socket ${socket.path} unavailable: ${e.message}")
+            }
+        }
+        return null
+    }
+
+    private fun socketCandidates(): List<File> {
+        val cached = cachedSocket?.takeIf { it.exists() }
+        val dir = File(projectRoot, ".agent-doc/supervisor")
+        val discovered = dir.listFiles { file -> file.extension == "sock" }
+            ?.sortedByDescending { it.lastModified() }
+            ?: emptyList()
+        return if (cached != null) listOf(cached) + discovered.filter { it != cached } else discovered
+    }
+
+    private fun sendToSocket(socket: File, request: JsonObject): SupervisorResponse {
+        SocketChannel.open(UnixDomainSocketAddress.of(socket.toPath())).use { channel ->
+            val writer = Channels.newWriter(channel, Charsets.UTF_8)
+            writer.write(request.toString())
+            writer.write("\n")
+            writer.flush()
+            val reader = Channels.newReader(channel, Charsets.UTF_8).buffered()
+            val line = reader.readLine() ?: return SupervisorResponse(false, null, "empty response")
+            val root = JsonParser.parseString(line).asJsonObject
+            val data = root.get("data")?.takeIf { it.isJsonObject }?.asJsonObject
+            return SupervisorResponse(
+                ok = root.get("ok")?.asBoolean ?: false,
+                data = data,
+                error = root.get("error")?.asString,
+            )
+        }
+    }
+
+    private fun decodeBase64(value: String): ByteArray? = try {
+        Base64.getDecoder().decode(value)
+    } catch (e: IllegalArgumentException) {
+        log.debug("[crdt-replica] bad base64 update: ${e.message}")
+        null
+    }
 }
 
 /**
@@ -212,25 +385,7 @@ class NativeReplicaNode : ReplicaNode {
 }
 
 /*
- * OPERATOR LIVE HOOKUP (not wired here — see the report):
- *
- * Two thin pieces remain for the live multi-editor repro, both pure plumbing
- * around this tested seam (no new CRDT logic):
- *
- *  1. A `DocumentListener` on the agent-doc VirtualFile's `Document` that, on
- *     each `documentChanged` event, converts the IntelliJ UTF-16 offset/length to
- *     yrs char units and calls `forwardLocalDelta(...)`. (Mirror the existing
- *     `agent_doc_record_editor_op` UTF-16→char conversion already used by the
- *     op-replay reporter.)
- *
- *  2. A Kotlin supervisor-socket client implementing [ReplicaTransport] that
- *     writes the `{"method":"replica_register|replica_update|replica_deregister",
- *     ...}` NDJSON to `.agent-doc/supervisor/<session>.sock` and, on the inbound
- *     side, delivers each fanned-out `update_b64` from the ack `targets` (and any
- *     server-pushed peer updates) to `applyRemoteUpdate(...)`, then writes the
- *     returned converged text back through the Document API inside a
- *     write-action (preserving cursor/undo).
- *
- * The supervisor side of (2) is fully wired and end-to-end tested in Rust
- * (`crdtauth5_end_to_end_fan_out_over_the_ipc_path`).
+ * Production live hookup lives in CrdtReplicaManager: it owns the DocumentListener,
+ * supervisor-socket transport, pull/ACK loop, and minimal editor-buffer apply.
+ * This file stays the testable seam around the native replica node and transport.
  */

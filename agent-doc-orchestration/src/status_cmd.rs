@@ -31,13 +31,32 @@ fn find_status_component(file: &Path) -> Result<(String, component::Component)> 
 
 /// Replace the status component content with the provided text.
 pub fn set(file: &Path, text: &str) -> Result<()> {
+    set_with_options(file, text, false)
+}
+
+pub fn set_with_options(file: &Path, text: &str, force_disk: bool) -> Result<()> {
     let (full_content, comp) = find_status_component(file)?;
     let new_content = format!("\n{}\n", text);
     let new_doc = comp.replace_content(&full_content, &new_content);
+    if force_disk {
+        std::fs::write(file, &new_doc)
+            .with_context(|| format!("status_set: failed to write {}", file.display()))?;
+        crate::write::record_document_write_provenance(file, &new_doc);
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "status_set_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
+                file.display(),
+                new_doc.len(),
+                crate::ops_log::content_hash(&new_doc)
+            ),
+        );
+        return Ok(());
+    }
     // #fccaudit: route the status mutation through the editor-IPC converge gate
     // so it never writes the session document behind a live JB editor buffer
-    // (File Cache Conflict). With no listener this falls back to the same plain
-    // disk write as before — byte-identical without an attached editor.
+    // (File Cache Conflict). With no listener this fails closed unless the
+    // caller explicitly selected the force-disk recovery path above.
     crate::write::converge_or_disk_write(file, &full_content, &new_doc, "status_set")?;
     Ok(())
 }
@@ -207,11 +226,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn set_writes_status_to_disk_without_listener() {
-        // #fccaudit: `set` now routes through `converge_or_disk_write`. With no
-        // editor IPC listener (no `.agent-doc/ipc.sock`) it must fall back to the
-        // same plain disk write as before — byte-identical without an attached
-        // editor — so the status component reflects the new text on disk.
+    fn set_blocks_status_write_without_listener() {
+        // Realtime cutover: `set` routes through `converge_or_disk_write`. With
+        // no editor IPC listener it must fail closed instead of falling back to a
+        // plain disk write of the visible document.
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("plan.md");
         std::fs::write(
@@ -225,16 +243,51 @@ mod tests {
         )
         .unwrap();
 
-        set(&doc, "new status").unwrap();
+        let err = set(&doc, "new status").unwrap_err().to_string();
+        assert!(
+            err.contains("no_listener"),
+            "status write without an editor listener must fail closed: {err}"
+        );
 
         let on_disk = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            on_disk.contains("new status"),
-            "status not written: {on_disk}"
+            !on_disk.contains("new status"),
+            "status should not be written without listener: {on_disk}"
         );
         assert!(
-            !on_disk.contains("old status"),
-            "old status not replaced: {on_disk}"
+            on_disk.contains("old status"),
+            "old status should remain unchanged: {on_disk}"
+        );
+    }
+
+    #[test]
+    fn force_disk_set_writes_status_without_listener() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        std::fs::write(
+            &doc,
+            concat!(
+                "## Status\n\n",
+                "<!-- agent:status patch=replace -->\n",
+                "old status\n",
+                "<!-- /agent:status -->\n",
+            ),
+        )
+        .unwrap();
+
+        set_with_options(&doc, "new status", true)
+            .expect("force-disk status update should write without listener");
+
+        let on_disk = std::fs::read_to_string(&doc).unwrap();
+        assert!(on_disk.contains("new status"));
+        assert!(!on_disk.contains("old status"));
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("status_set_writeback")
+                && log.contains("transport=disk_force")
+                && log.contains("reason=force_disk"),
+            "force-disk status write should be attributable:\n{log}"
         );
     }
 

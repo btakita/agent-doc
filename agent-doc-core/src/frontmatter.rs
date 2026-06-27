@@ -1456,21 +1456,21 @@ pub fn merge_frontmatter_3way(
         }
     };
 
-    let (base_m, ours_m, theirs_m) =
-        match (parse(base_yaml), parse(ours_yaml), parse(theirs_yaml)) {
-            (Some(b), Some(o), Some(t)) => (b, o, t),
-            _ => {
-                // Conservative whole-block fallback: operator wins if it changed
-                // the block; otherwise keep the agent block, else operator, else base.
-                let operator_changed = base_yaml != theirs_yaml;
-                let chosen = if operator_changed {
-                    theirs_yaml
-                } else {
-                    ours_yaml.or(theirs_yaml)
-                };
-                return chosen.or(base_yaml).map(wrap);
-            }
-        };
+    let (base_m, ours_m, theirs_m) = match (parse(base_yaml), parse(ours_yaml), parse(theirs_yaml))
+    {
+        (Some(b), Some(o), Some(t)) => (b, o, t),
+        _ => {
+            // Conservative whole-block fallback: operator wins if it changed
+            // the block; otherwise keep the agent block, else operator, else base.
+            let operator_changed = base_yaml != theirs_yaml;
+            let chosen = if operator_changed {
+                theirs_yaml
+            } else {
+                ours_yaml.or(theirs_yaml)
+            };
+            return chosen.or(base_yaml).map(wrap);
+        }
+    };
 
     let base_m = base_m.unwrap_or_default();
     // A side with no frontmatter at all is treated as "unchanged from base" so it
@@ -1511,7 +1511,10 @@ pub fn merge_frontmatter_3way(
         } else if agent_changed && operator_changed {
             if o == t {
                 t
-            } else if key_str(key).as_deref().is_some_and(is_agent_managed_frontmatter_key) {
+            } else if key_str(key)
+                .as_deref()
+                .is_some_and(is_agent_managed_frontmatter_key)
+            {
                 o
             } else {
                 t
@@ -1684,8 +1687,7 @@ mod tests {
         let base = "agent_doc_format: template\nclaude_model: sonnet";
         let ours = base; // agent untouched
         let theirs = "agent_doc_format: template\nclaude_model: opus"; // operator edit
-        let merged =
-            merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
+        let merged = merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
         let m = yaml_of(&merged);
         assert_eq!(m["claude_model"].as_str(), Some("opus"));
     }
@@ -1695,8 +1697,7 @@ mod tests {
         let base = "agent_doc_session: sid\nclaude_model: sonnet";
         let ours = "agent_doc_session: sid\nresume: conv-1\nclaude_model: sonnet";
         let theirs = base; // operator untouched
-        let merged =
-            merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
+        let merged = merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
         let m = yaml_of(&merged);
         assert_eq!(m["resume"].as_str(), Some("conv-1"));
         assert_eq!(m["claude_model"].as_str(), Some("sonnet"));
@@ -1707,11 +1708,14 @@ mod tests {
         let base = "agent_doc_session: sid\nclaude_model: sonnet";
         let ours = "agent_doc_session: sid\nresume: conv-1\nclaude_model: sonnet"; // agent wrote resume
         let theirs = "agent_doc_session: sid\nclaude_model: opus"; // operator edited model
-        let merged =
-            merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
+        let merged = merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
         let m = yaml_of(&merged);
         assert_eq!(m["resume"].as_str(), Some("conv-1"), "agent write kept");
-        assert_eq!(m["claude_model"].as_str(), Some("opus"), "operator edit kept");
+        assert_eq!(
+            m["claude_model"].as_str(),
+            Some("opus"),
+            "operator edit kept"
+        );
     }
 
     #[test]
@@ -1720,8 +1724,7 @@ mod tests {
         let base = "claude_model: sonnet";
         let ours = "claude_model: haiku"; // agent
         let theirs = "claude_model: opus"; // operator
-        let merged =
-            merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
+        let merged = merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
         let m = yaml_of(&merged);
         assert_eq!(m["claude_model"].as_str(), Some("opus"));
     }
@@ -1732,8 +1735,7 @@ mod tests {
         let base = "resume: c0";
         let ours = "resume: agent-new"; // agent
         let theirs = "resume: operator-typo"; // operator (rare/unintended)
-        let merged =
-            merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
+        let merged = merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
         let m = yaml_of(&merged);
         assert_eq!(m["resume"].as_str(), Some("agent-new"));
     }
@@ -1743,8 +1745,7 @@ mod tests {
         let base = "agent_doc_format: template";
         let ours = base;
         let theirs = "agent_doc_format: template\nmy_custom_key: hello";
-        let merged =
-            merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
+        let merged = merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
         let m = yaml_of(&merged);
         assert_eq!(m["my_custom_key"].as_str(), Some("hello"));
     }
@@ -1754,10 +1755,12 @@ mod tests {
         let base = "agent_doc_format: template\nbranch: feature";
         let ours = base; // agent untouched
         let theirs = "agent_doc_format: template"; // operator removed branch
-        let merged =
-            merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
+        let merged = merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
         let m = yaml_of(&merged);
-        assert!(!m.contains_key("branch"), "operator deletion honored: {merged}");
+        assert!(
+            !m.contains_key("branch"),
+            "operator deletion honored: {merged}"
+        );
         assert!(m.contains_key("agent_doc_format"));
     }
 

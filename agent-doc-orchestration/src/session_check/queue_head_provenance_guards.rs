@@ -793,7 +793,10 @@ mod tests {
             GuardResult::Error(message) => {
                 assert!(message.contains("completed free-text"), "got: {message}");
                 assert!(message.contains("#qheadresidue"), "got: {message}");
-                assert!(message.contains("explain the queue churn"), "got: {message}");
+                assert!(
+                    message.contains("explain the queue churn"),
+                    "got: {message}"
+                );
             }
             other => panic!("completed queue residue must interrupt, got {other:?}"),
         }

@@ -2002,8 +2002,12 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
     // Re-read disk (now the flushed editor buffer) and refuse to trust a buffer that
     // itself dropped the committed response — that case falls through to the safe bail
     // rather than auto-committing a response-less document.
-    let flushed = std::fs::read_to_string(&canonical)
-        .with_context(|| format!("ipc-truncation recover: re-read failed {}", canonical.display()))?;
+    let flushed = std::fs::read_to_string(&canonical).with_context(|| {
+        format!(
+            "ipc-truncation recover: re-read failed {}",
+            canonical.display()
+        )
+    })?;
     if !crate::write::editor_buffer_preserved_head_exchange(&flushed, &head) {
         crate::ops_log::log_op(
             file,
@@ -2333,8 +2337,9 @@ fn sweep_owner_for_doc(
 ) -> Option<SweepOwner> {
     match actor_sweep_owner(audit_file, root, doc_path) {
         ActorSweepOwner::Active(owner) => Some(owner),
-        ActorSweepOwner::Inactive => None,
-        ActorSweepOwner::Unknown => registry_sweep_owner(root, registry, doc_path),
+        ActorSweepOwner::Inactive | ActorSweepOwner::Unknown => {
+            registry_sweep_owner(root, registry, doc_path)
+        }
     }
 }
 
@@ -3992,10 +3997,9 @@ mod tests {
                 .expect("expected a non-empty diff after appending the note");
             let changes = crate::diff::classify_prompt_bearing_changes(&diff_text);
             assert!(
-                !changes.iter().any(|c| matches!(
-                    c.kind,
-                    crate::diff::PromptBearingChangeKind::PromptTarget
-                )),
+                !changes
+                    .iter()
+                    .any(|c| matches!(c.kind, crate::diff::PromptBearingChangeKind::PromptTarget)),
                 "dogfood note must not classify as a PromptTarget for {diagnostic}: {changes:?}"
             );
             assert!(

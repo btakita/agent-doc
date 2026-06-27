@@ -89,9 +89,7 @@ impl QueueItemIdentity {
 /// Declared in lifecycle order so the derived [`Ord`] is the lifecycle order;
 /// [`QueueItemState::rank`] exposes the same order as a stable index for the
 /// transition join and the property tests.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QueueItemState {
     /// The operator authored the item (in `agent:backlog` or directly in the
@@ -234,10 +232,7 @@ impl QueueItemMachine {
 
     /// One-shot pure transition, mirroring
     /// [`crate::merge_control_state_machine::MergeOwnershipMachine::transition`].
-    pub fn transition(
-        initial: QueueItemState,
-        event: QueueItemEvent,
-    ) -> Option<QueueItemState> {
+    pub fn transition(initial: QueueItemState, event: QueueItemEvent) -> Option<QueueItemState> {
         let machine = Self::new(initial);
         if machine.send(event) {
             Some(machine.state())
@@ -412,7 +407,10 @@ mod tests {
     /// anti-resurrection guarantee the convergence enforces over rendered text.
     #[test]
     fn struck_lifecycle_absorbs_stale_live_reemit() {
-        assert_eq!(QueueItemState::Struck.lifecycle(), QueueItemLifecycle::Struck);
+        assert_eq!(
+            QueueItemState::Struck.lifecycle(),
+            QueueItemLifecycle::Struck
+        );
         assert_eq!(
             QueueItemState::Struck
                 .lifecycle()

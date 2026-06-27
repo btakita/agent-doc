@@ -551,7 +551,10 @@ mod tests {
 
         // The add was later worked and struck on disk — replay must treat it as
         // present (consumed), never resurrect it.
-        let struck = doc(dir.path(), &["- do [#alpha]", "- ~~review the migration plan~~"]);
+        let struck = doc(
+            dir.path(),
+            &["- do [#alpha]", "- ~~review the migration plan~~"],
+        );
         let missing = replay_missing(&struck, &content_of(&struck));
         assert!(
             missing.is_empty(),

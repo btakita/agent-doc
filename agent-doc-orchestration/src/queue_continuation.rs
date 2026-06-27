@@ -940,13 +940,12 @@ pub(crate) fn is_recurring_imperative_head(text: &str) -> bool {
     // is an executable directive: treat it as recurring when its id segments are
     // all recurring-imperative verbs (ignore generic glue like `spec`).
     if let Some(id) = extract_head_id(&normalized) {
-        let segments: Vec<&str> = id
-            .split(['-', '_'])
-            .filter(|s| !s.is_empty())
-            .collect();
+        let segments: Vec<&str> = id.split(['-', '_']).filter(|s| !s.is_empty()).collect();
         let verb_segments = segments
             .iter()
-            .filter(|s| RECURRING_IMPERATIVE_COMMAND_VERBS.contains(&s.to_ascii_lowercase().as_str()))
+            .filter(|s| {
+                RECURRING_IMPERATIVE_COMMAND_VERBS.contains(&s.to_ascii_lowercase().as_str())
+            })
             .count();
         // A preset built from at least two recurring verbs (`commit-push`,
         // `spec-test-commit-push`) is a recurring-command preset.

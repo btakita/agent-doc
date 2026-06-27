@@ -169,11 +169,10 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         startSocketListenerViaFfi(state)
         processPendingPatches(patchesDir)
-        // #yzer / #evmhplugin: a (re)connect is the moment to reconcile any
-        // editor buffer the binary advanced past while this plugin was
-        // disconnected (committed content the buffer never saw). Re-read disk
-        // into provably-stale buffers so a later save_document cannot revert the
-        // binary's committed writes. Runs off-EDT (it blocks on idle + git).
+        // #yzer / #evmhplugin: a (re)connect may reveal editor buffers the
+        // binary advanced past while this plugin was disconnected. Realtime
+        // cutover keeps those visible buffers editor-owned here; stale
+        // reconnect repair writes are disabled and logged.
         Thread({
             try {
                 reconcileStaleBuffersOnReconnect(state)
@@ -189,11 +188,10 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     /**
      * #yzer / #evmhplugin: on IPC (re)connect, reconcile every open session
-     * document under [state].root whose editor buffer is PROVABLY stale committed
+     * document under [state].root whose editor buffer may be stale committed
      * content (the binary advanced disk/HEAD while the plugin was disconnected).
-     * The binary FFI owns the staleness decision; the plugin only applies a
-     * re-read when told to, so genuine unsynced user edits are never clobbered
-     * (editor wins, per #editorbufwin).
+     * Realtime cutover disables editor-open reconnect repair writes; `reread_disk`
+     * decisions are logged and the buffer is kept editor-owned.
      */
     private fun reconcileStaleBuffersOnReconnect(state: RootState) {
         val lib = AgentDocLib.get() ?: return
@@ -229,45 +227,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 }
                 continue
             }
-            val content = extractStringField(json, "content") ?: continue
-            applyReconnectReread(path, content)
-        }
-    }
-
-    /**
-     * Re-read committed disk/HEAD content into a stale editor buffer on reconnect
-     * (#yzer). Mirrors [refreshContentViaDocument] but the staleness proof was
-     * already established by the binary FFI, so this only re-checks the live
-     * editor generation before applying the range edit to avoid racing a concurrent edit.
-     */
-    private fun applyReconnectReread(filePath: String, content: String) {
-        if (!awaitIdleBeforeDocumentMutation(filePath, "reconnect stale-buffer reread")) {
-            return
-        }
-        ApplicationManager.getApplication().invokeAndWait {
-            val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeAndWait
-            val fdm = FileDocumentManager.getInstance()
-            val document = fdm.getDocument(targetFile) ?: return@invokeAndWait
-            // #p2j4 / #jbcfdiag — skip the content-bearing VFS refresh when the buffer
-            // is unsaved (the reread applies the proven-stale content via the
-            // Document API regardless). See shouldRefreshVfsBeforeApplyUtil.
-            if (shouldRefreshVfsBeforeApplyUtil(fdm.isDocumentUnsaved(document))) {
-                targetFile.refresh(false, false)
-            }
-            if (document.text == content) {
-                return@invokeAndWait
-            }
-            val proof = EditorApplyProof(document.text, document.modificationStamp)
-            WriteCommandAction.runWriteCommandAction(project, "Agent Doc Reconnect Reread", null, {
-                if (!editorApplyProofStillCurrentUtil(proof, document.text, document.modificationStamp)) {
-                    LOG.warn("[reconnect] stale editor generation during reread for $filePath; rejecting")
-                    return@runWriteCommandAction
-                }
-                applyMinimalDocumentEditUtil(document, proof.content, content)
-                LOG.info(
-                    "[reconnect] re-read disk/HEAD into stale buffer for $filePath (${content.length} chars) #yzer",
-                )
-            })
+            LOG.warn("[reconnect] reread_disk repair is disabled for $path; buffer kept #yzer")
         }
     }
 
@@ -570,58 +530,20 @@ class PatchWatcher(private val project: Project) : Disposable {
                 APPLY_APPLIED
             }
             "save_document" -> {
-                // #jb-editor-save-resolves-drift: the binary detected the editor
-                // buffer is ahead of disk (unsaved edits causing
-                // live_prompt_drift_after_preflight). Flush our buffer to disk so
-                // disk catches up AND the editor's dirty flag clears, then hand the
-                // saved content back via the ack-content sidecar so the binary can
-                // adopt it as a clean on-disk snapshot instead of stalling.
+                // Realtime cutover: plugin-driven save_document is disabled. A
+                // live editor buffer must be reconciled through CRDT/editor ACKs
+                // or an explicit operator action, never by a socket repair save.
                 val file = extractStringField(json, "file") ?: return APPLY_FAILED
                 val patchId = extractStringField(json, "patch_id")
-                if (saveDocumentViaDocument(file, patchId)) {
-                    APPLY_APPLIED
-                } else {
-                    APPLY_FAILED
-                }
+                LOG.warn("[socket] save_document IPC is disabled for $file")
+                recordEditorSurfaceOps(file, "vcs_refresh_save", "save_document", "save_document", patchId, "disabled")
+                APPLY_FAILED
             }
             else -> {
                 LOG.warn("[socket] Unknown message type: $type")
                 APPLY_FAILED
             }
         }
-    }
-
-    /**
-     * Flush the live editor buffer for [filePath] to disk via
-     * [FileDocumentManager.saveDocument], resolving a `live_prompt_drift` where
-     * the editor holds unsaved edits ahead of disk. Writes the saved buffer to
-     * the ack-content sidecar (keyed by [patchId]) so the binary reads exactly
-     * what was persisted and adopts it as a clean snapshot. Saving also clears
-     * the editor's dirty flag, so the same drift does not recur next cycle and no
-     * File Cache Conflict fires when the binary later touches disk.
-     */
-    private fun saveDocumentViaDocument(filePath: String, patchId: String?): Boolean {
-        var savedContent: String? = null
-        ApplicationManager.getApplication().invokeAndWait {
-            val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath)
-                ?: run {
-                    LOG.warn("[socket] save_document: no VirtualFile for $filePath")
-                    return@invokeAndWait
-                }
-            val fdm = FileDocumentManager.getInstance()
-            val document = fdm.getDocument(targetFile)
-                ?: run {
-                    LOG.warn("[socket] save_document: no Document for $filePath")
-                    recordEditorSurfaceOps(filePath, "vcs_refresh_save", "save_document", "save_document", patchId, "missing_document")
-                    return@invokeAndWait
-                }
-            fdm.saveDocument(document)
-            savedContent = document.text
-            LOG.info("[socket] save_document: flushed ${document.textLength} chars to disk for $filePath")
-            recordEditorSurfaceOps(filePath, "vcs_refresh_save", "save_document", "save_document", patchId, "saved")
-        }
-        val content = savedContent ?: return false
-        return writeAckContent(patchId, content, filePath)
     }
 
     /**
@@ -785,8 +707,8 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     /**
      * #8bfz / #fcconeowner: returns true if THIS instance holds (or just won)
-     * the single-owner lease for [filePath] and should apply the patch +
-     * saveDocument. Fails open (returns true) when the FFI is unavailable or the
+     * the single-owner lease for [filePath] and should apply/ACK the patch.
+     * Fails open (returns true) when the FFI is unavailable or the
      * symbol is missing on an older binary, so single-instance setups never
      * regress below the pre-lease behavior. Tracks won docs in [ownedDocs] so
      * [dispose] can release them for a live sibling.
@@ -866,8 +788,8 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
             // #8bfz / #fcconeowner: single live-owner election for untargeted
             // (broadcast) patches. When N windows have the project open they all
-            // watch .agent-doc/patches/ and would each apply + saveDocument this
-            // untargeted patch, racing into a File Cache Conflict. Editor-TARGETED
+            // watch .agent-doc/patches/ and could each apply/ACK this untargeted
+            // patch, racing the live buffer. Editor-TARGETED
             // patches already have a unique consumer (the binary picked the
             // editor_id), so they bypass this gate. Non-owners leave the file for
             // the owner instance to apply + delete.
@@ -1517,9 +1439,9 @@ class PatchWatcher(private val project: Project) : Disposable {
     }
 
     /**
-     * Apply patches via VFS for files not open in the editor.
-     * Reads content from disk, applies patches in memory, writes back through VFS.
-     * This avoids the "externally modified" dialog since it goes through IntelliJ's VFS layer.
+     * Closed-file VFS patch handling is read-only during realtime cutover.
+     * It may ACK a stale replay already present on disk/HEAD, but it must not
+     * synthesize and write a whole-buffer replacement outside editor convergence.
      */
     private fun applyPatchViaVfs(targetFile: com.intellij.openapi.vfs.VirtualFile, patch: IpcPatch): Boolean {
         try {
@@ -1530,8 +1452,6 @@ class PatchWatcher(private val project: Project) : Disposable {
                 return false
             }
 
-            // Component-based patching
-            var result = content
             if (patchReplayAlreadyPresentUtil(
                     patch,
                     listOf(content),
@@ -1545,97 +1465,8 @@ class PatchWatcher(private val project: Project) : Disposable {
                 return true
             }
 
-            if (!patch.frontmatter.isNullOrBlank()) {
-                result = NativePatching.mergeFrontmatter(result, patch.frontmatter)
-                    ?: applyFrontmatterPatchKotlin(result, patch.frontmatter)
-            }
-
-            // Converge the queue opening-tag `auto` attribute if requested
-            // (#adoc-queue-ipc-buffer-divergence).
-            if (patch.queueAuto != null) {
-                result = NativePatching.convergeQueueAuto(result, patch.queueAuto) ?: result
-            }
-
-            val nodePatchNativeAvailable = patch.nodePatches.isNotEmpty() && NativePatching.canApplyNodePatches()
-            val nodePatchedComponents = patch.nodePatches.map { it.component }.toSet()
-            if (nodePatchNativeAvailable) {
-                result = NativePatching.applyNodePatches(result, nodePatchesJson(patch.nodePatches)) ?: run {
-                    LOG.warn("[patch-watcher] native VFS node-patch apply rejected patch_id ${patch.patchId} for ${patch.file}")
-                    return false
-                }
-            }
-
-            for (p in patch.patches) {
-                if (nodePatchNativeAvailable && p.component in nodePatchedComponents) {
-                    LOG.info("[patch-watcher] skipping legacy VFS component patch for node-patched component ${p.component}")
-                    continue
-                }
-                val effectiveBoundaryId = if (p.ensureBoundary && p.boundaryId == null) {
-                    findBoundaryInComponent(result, p.component)
-                } else {
-                    p.boundaryId
-                }
-                result = applyComponentPatchNative(result, p.component, p.content, null, effectiveBoundaryId, p.op)
-            }
-
-            if (patch.unmatched.isNotBlank()) {
-                val exchangeResult = applyComponentPatchNative(result, "exchange", patch.unmatched, null)
-                result = if (exchangeResult != result) exchangeResult
-                    else applyComponentPatchNative(result, "output", patch.unmatched, null)
-            }
-
-            if (patch.repositionBoundary) {
-                result = if (patch.preserveHead) {
-                    NativePatching.repositionBoundaryToEndPreserveHead(result, patch.repositionBoundaryId)
-                        ?: repositionBoundaryToEnd(result, "exchange", patch.repositionBoundaryId, preserveHead = true)
-                        ?: result
-                } else {
-                    NativePatching.repositionBoundaryToEnd(result, patch.repositionBoundaryId)
-                        ?: repositionBoundaryToEnd(result, "exchange", patch.repositionBoundaryId)
-                        ?: result
-                }
-            }
-
-            // Normalize after patches and boundary reposition so prompts typed
-            // after the prior boundary are included in the user region.
-            if (patch.normalizePrefixLines.isNotEmpty()) {
-                result = normalizeExchangePrefixes(result, patch.normalizePrefixLines)
-            }
-            result = annotateExchangeHeadingsAgainstBaselineUtil(result, "exchange", content) ?: result
-            result = NativePatching.normalizeTemplateStructure(result) ?: run {
-                LOG.warn("VFS patch rejected by native template-structure guard for ${patch.file}")
-                return false
-            }
-
-            if (result != content) {
-                var wrote = false
-                ApplicationManager.getApplication().runWriteAction {
-                    // Re-read disk immediately before the whole-buffer write. `result`
-                    // was computed from `content` captured at the top of this apply; if
-                    // disk changed since (file opened + typed into, or another writer),
-                    // fail closed instead of clobbering the newer bytes
-                    // (#ipcfullprompt-recur2). The binary retries from the patch file.
-                    val currentDisk = try {
-                        String(targetFile.contentsToByteArray(), targetFile.charset)
-                    } catch (_: Exception) {
-                        content
-                    }
-                    if (!vfsDiskContentStillCurrentUtil(content, currentDisk)) {
-                        LOG.warn("[patch-watcher] stale disk content before VFS write for ${patch.file}; rejecting patch_id ${patch.patchId}")
-                        return@runWriteAction
-                    }
-                    targetFile.setBinaryContent(result.toByteArray(targetFile.charset))
-                    wrote = true
-                }
-                if (!wrote) {
-                    return false
-                }
-                LOG.info("VFS patch applied to ${patch.file} (${result.length - content.length} chars changed)")
-            } else {
-                LOG.warn("VFS patch produced no changes for ${patch.file}")
-                lastApplyWasNoOp = true
-            }
-            return writeAckContent(patch.patchId, result, patch.file)
+            LOG.warn("[patch-watcher] VFS whole-buffer patch apply is disabled; rejecting patch_id ${patch.patchId} for ${patch.file}")
+            return false
         } catch (e: Exception) {
             LOG.warn("Failed to apply patch via VFS for ${patch.file}", e)
             return false

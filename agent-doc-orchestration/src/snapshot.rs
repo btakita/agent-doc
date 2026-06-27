@@ -1845,8 +1845,7 @@ mod tests {
         );
         // The overlay sidecar is left intact (not rebuilt) so the deletion survives.
         let overlay = load_overlay_crdt(&doc).unwrap().unwrap();
-        let overlay =
-            agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state(&overlay).unwrap();
+        let overlay = agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state(&overlay).unwrap();
         assert_eq!(overlay.to_markdown().unwrap(), deleted_overlay);
     }
 
@@ -1996,11 +1995,15 @@ Steps to take:
 
         let merged = crate::crdt::merge(Some(&base.state), &ours, &theirs).unwrap();
 
-        let s1 = merged.find("1. First step.").expect("ordered item 1 missing");
+        let s1 = merged
+            .find("1. First step.")
+            .expect("ordered item 1 missing");
         let s2 = merged
             .find("2. Second step.")
             .expect("ordered item 2 missing");
-        let s3 = merged.find("3. Third step.").expect("ordered item 3 missing");
+        let s3 = merged
+            .find("3. Third step.")
+            .expect("ordered item 3 missing");
         assert!(
             s1 < s2 && s2 < s3,
             "ordered list reversed under overlay base (s1={s1} s2={s2} s3={s3}):\n{merged}"
@@ -2122,8 +2125,7 @@ Steps to take:
             "{FM_HEADER}<!-- agent:queue -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n"
         );
         // Overlay holds the OLDER content (one item, before the agent appended #b).
-        let stale =
-            format!("{FM_HEADER}<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n");
+        let stale = format!("{FM_HEADER}<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n");
         save_overlay_md(&doc, &stale);
 
         let base = crdt_merge_base_state(&doc, &baseline).unwrap();

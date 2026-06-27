@@ -478,8 +478,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
         );
     } else {
         eprintln!("[route] Waiting for {} to initialize...", harness.binary);
-        let ready =
-            wait_for_agent_ready(tmux, &new_pane, FRESH_ROUTE_AGENT_READY_TIMEOUT, harness);
+        let ready = wait_for_agent_ready(tmux, &new_pane, FRESH_ROUTE_AGENT_READY_TIMEOUT, harness);
         // Fresh-start recovery can clear the early geometry-only binding while
         // the harness is still booting. Re-validate the registration before we
         // dispatch, but keep the deliberately created fresh pane authoritative
@@ -2041,7 +2040,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                     IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
-                    IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+                    IpcMethod::Stop { .. }
+                    | IpcMethod::StopAgent { .. }
+                    | IpcMethod::ReplicaRegister { .. }
+                    | IpcMethod::ReplicaDeregister { .. }
+                    | IpcMethod::ReplicaUpdate { .. }
+                    | IpcMethod::ReplicaPull { .. }
+                    | IpcMethod::ReplicaAck { .. }
+                    | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
                 }
             })
             .unwrap();
@@ -2176,9 +2182,15 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             }
             IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => {
-                IpcResponse::ok_empty()
-            }
+            IpcMethod::Restart { .. }
+            | IpcMethod::Stop { .. }
+            | IpcMethod::StopAgent { .. }
+            | IpcMethod::ReplicaRegister { .. }
+            | IpcMethod::ReplicaDeregister { .. }
+            | IpcMethod::ReplicaUpdate { .. }
+            | IpcMethod::ReplicaPull { .. }
+            | IpcMethod::ReplicaAck { .. }
+            | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
         crate::startup_miss::record(
@@ -2294,7 +2306,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                         }
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
-                    IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+                    IpcMethod::Stop { .. }
+                    | IpcMethod::StopAgent { .. }
+                    | IpcMethod::ReplicaRegister { .. }
+                    | IpcMethod::ReplicaDeregister { .. }
+                    | IpcMethod::ReplicaUpdate { .. }
+                    | IpcMethod::ReplicaPull { .. }
+                    | IpcMethod::ReplicaAck { .. }
+                    | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
                 }
             })
             .unwrap();
@@ -2442,7 +2461,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                     IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
-                    IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+                    IpcMethod::Stop { .. }
+                    | IpcMethod::StopAgent { .. }
+                    | IpcMethod::ReplicaRegister { .. }
+                    | IpcMethod::ReplicaDeregister { .. }
+                    | IpcMethod::ReplicaUpdate { .. }
+                    | IpcMethod::ReplicaPull { .. }
+                    | IpcMethod::ReplicaAck { .. }
+                    | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
                 }
             })
             .unwrap();
@@ -2590,7 +2616,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                         injects_for_ipc.lock().unwrap().push(bytes.clone());
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
-                    IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+                    IpcMethod::Stop { .. }
+                    | IpcMethod::StopAgent { .. }
+                    | IpcMethod::ReplicaRegister { .. }
+                    | IpcMethod::ReplicaDeregister { .. }
+                    | IpcMethod::ReplicaUpdate { .. }
+                    | IpcMethod::ReplicaPull { .. }
+                    | IpcMethod::ReplicaAck { .. }
+                    | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
                 }
             })
             .unwrap();
@@ -2840,7 +2873,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. }
+            | IpcMethod::StopAgent { .. }
+            | IpcMethod::ReplicaRegister { .. }
+            | IpcMethod::ReplicaDeregister { .. }
+            | IpcMethod::ReplicaUpdate { .. }
+            | IpcMethod::ReplicaPull { .. }
+            | IpcMethod::ReplicaAck { .. }
+            | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -2972,7 +3012,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. }
+            | IpcMethod::StopAgent { .. }
+            | IpcMethod::ReplicaRegister { .. }
+            | IpcMethod::ReplicaDeregister { .. }
+            | IpcMethod::ReplicaUpdate { .. }
+            | IpcMethod::ReplicaPull { .. }
+            | IpcMethod::ReplicaAck { .. }
+            | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -3105,7 +3152,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 IpcResponse::ok_empty()
             }
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. }
+            | IpcMethod::StopAgent { .. }
+            | IpcMethod::ReplicaRegister { .. }
+            | IpcMethod::ReplicaDeregister { .. }
+            | IpcMethod::ReplicaUpdate { .. }
+            | IpcMethod::ReplicaPull { .. }
+            | IpcMethod::ReplicaAck { .. }
+            | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -3232,7 +3286,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 IpcResponse::ok_empty()
             }
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. }
+            | IpcMethod::StopAgent { .. }
+            | IpcMethod::ReplicaRegister { .. }
+            | IpcMethod::ReplicaDeregister { .. }
+            | IpcMethod::ReplicaUpdate { .. }
+            | IpcMethod::ReplicaPull { .. }
+            | IpcMethod::ReplicaAck { .. }
+            | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -3332,7 +3393,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                     }
                     IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
                     IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                    IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+                    IpcMethod::Stop { .. }
+                    | IpcMethod::StopAgent { .. }
+                    | IpcMethod::ReplicaRegister { .. }
+                    | IpcMethod::ReplicaDeregister { .. }
+                    | IpcMethod::ReplicaUpdate { .. }
+                    | IpcMethod::ReplicaPull { .. }
+                    | IpcMethod::ReplicaAck { .. }
+                    | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
                 })
                 .unwrap();
 
@@ -3432,7 +3500,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. }
+            | IpcMethod::StopAgent { .. }
+            | IpcMethod::ReplicaRegister { .. }
+            | IpcMethod::ReplicaDeregister { .. }
+            | IpcMethod::ReplicaUpdate { .. }
+            | IpcMethod::ReplicaPull { .. }
+            | IpcMethod::ReplicaAck { .. }
+            | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -3562,7 +3637,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. }
+            | IpcMethod::StopAgent { .. }
+            | IpcMethod::ReplicaRegister { .. }
+            | IpcMethod::ReplicaDeregister { .. }
+            | IpcMethod::ReplicaUpdate { .. }
+            | IpcMethod::ReplicaPull { .. }
+            | IpcMethod::ReplicaAck { .. }
+            | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -3683,7 +3765,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. }
+            | IpcMethod::StopAgent { .. }
+            | IpcMethod::ReplicaRegister { .. }
+            | IpcMethod::ReplicaDeregister { .. }
+            | IpcMethod::ReplicaUpdate { .. }
+            | IpcMethod::ReplicaPull { .. }
+            | IpcMethod::ReplicaAck { .. }
+            | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -3783,7 +3872,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. }
+            | IpcMethod::StopAgent { .. }
+            | IpcMethod::ReplicaRegister { .. }
+            | IpcMethod::ReplicaDeregister { .. }
+            | IpcMethod::ReplicaUpdate { .. }
+            | IpcMethod::ReplicaPull { .. }
+            | IpcMethod::ReplicaAck { .. }
+            | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -3905,7 +4001,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. }
+            | IpcMethod::StopAgent { .. }
+            | IpcMethod::ReplicaRegister { .. }
+            | IpcMethod::ReplicaDeregister { .. }
+            | IpcMethod::ReplicaUpdate { .. }
+            | IpcMethod::ReplicaPull { .. }
+            | IpcMethod::ReplicaAck { .. }
+            | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -3988,9 +4091,15 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 injects_for_ipc.lock().unwrap().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
-            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } | IpcMethod::ReplicaRegister { .. } | IpcMethod::ReplicaDeregister { .. } | IpcMethod::ReplicaUpdate { .. } | IpcMethod::ReplicaAwareness { .. } => {
-                IpcResponse::ok_empty()
-            }
+            IpcMethod::Restart { .. }
+            | IpcMethod::Stop { .. }
+            | IpcMethod::StopAgent { .. }
+            | IpcMethod::ReplicaRegister { .. }
+            | IpcMethod::ReplicaDeregister { .. }
+            | IpcMethod::ReplicaUpdate { .. }
+            | IpcMethod::ReplicaPull { .. }
+            | IpcMethod::ReplicaAck { .. }
+            | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 

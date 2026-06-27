@@ -5,7 +5,7 @@
 //!   `--from-file`, and/or `--from-exchange`, then dispatches by
 //!   `OrchestrateMode`.
 //! - `--mode sequential` injects each task into the document exchange as a
-//!   fresh prompt, runs `preflight`, sends one fresh agent request with no
+//!   fresh prompt, admits the response cycle, sends one fresh agent request with no
 //!   resume/session reuse, streams step responses into `exchange` for CRDT docs
 //!   when the backend supports streaming, then persists the response through
 //!   `finalize` followed by `session-check`.
@@ -160,6 +160,11 @@ pub(crate) struct ScheduledDagRunOptions<'a> {
 }
 
 pub(crate) trait LifecycleOps {
+    fn admit(&self, file: &Path) -> Result<()> {
+        let _ = self.preflight(file)?;
+        Ok(())
+    }
+
     fn preflight(&self, file: &Path) -> Result<PreflightOutput>;
     fn finalize(
         &self,
@@ -235,6 +240,12 @@ impl CliLifecycleOps {
 }
 
 impl LifecycleOps for CliLifecycleOps {
+    fn admit(&self, file: &Path) -> Result<()> {
+        let file_arg = file.to_string_lossy().into_owned();
+        let _: serde_json::Value = self.run_output_json(&["admit", &file_arg])?;
+        Ok(())
+    }
+
     fn preflight(&self, file: &Path) -> Result<PreflightOutput> {
         let file_arg = file.to_string_lossy().into_owned();
         self.run_output_json(&["preflight", &file_arg])
@@ -722,7 +733,7 @@ fn resolve_task_batch(file: &Path, config: &OrchestrateConfig) -> Result<Resolve
     if config.from_queue {
         let doc = fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
-        merge_task_batch(&mut batch, queue_task_batch(&doc)?);
+        merge_task_batch(&mut batch, queue_task_batch(file, &doc)?);
     }
 
     canonicalize_prompt_preset_requests(file, &mut batch.requested_presets)?;
@@ -790,7 +801,7 @@ fn exchange_text(doc: &str) -> Result<&str> {
     Ok(exchange.content(doc))
 }
 
-fn queue_task_batch(doc: &str) -> Result<ResolvedTaskBatch> {
+fn active_queue_hash(doc: &str) -> Result<Option<String>> {
     let components = component::parse(doc).context("failed to parse document components")?;
     let queue = components
         .iter()
@@ -806,30 +817,80 @@ fn queue_task_batch(doc: &str) -> Result<ResolvedTaskBatch> {
         fm.queue_active.unwrap_or(false),
     );
     if !activation.active {
+        return Ok(None);
+    }
+    Ok(Some(agent_doc_orchestration::ops_log::content_hash(
+        &agent_doc_orchestration::queue::render(&activation.entries_after),
+    )))
+}
+
+fn queue_task_batch(file: &Path, doc: &str) -> Result<ResolvedTaskBatch> {
+    let Some(current_queue_hash) = active_queue_hash(doc)? else {
         anyhow::bail!(
             "agent:queue is not active; add `auto`, a start fence, or queue_active=true before --from-queue dispatch"
         );
+    };
+    let canonical = file.canonicalize().with_context(|| {
+        format!(
+            "failed to canonicalize {} for typed queue dispatch",
+            file.display()
+        )
+    })?;
+    let project_root = snapshot::find_project_root(&canonical).ok_or_else(|| {
+        anyhow::anyhow!(
+            "typed queue dispatch requires a .agent-doc project root for {}",
+            file.display()
+        )
+    })?;
+    let document_hash = snapshot::doc_hash(&canonical)?;
+    let ledger =
+        agent_doc_orchestration::project_controller::load_state_event_ledger(&project_root)
+            .with_context(|| {
+                format!(
+                    "failed to load typed queue state ledger under {}",
+                    project_root.display()
+                )
+            })?;
+    let projection = ledger.project_document(&document_hash).ok_or_else(|| {
+        anyhow::anyhow!(
+            "typed queue worklist is unavailable for {}; run queue maintenance/admission before --from-queue dispatch",
+            file.display()
+        )
+    })?;
+    if !projection.queue.worklist_active {
+        anyhow::bail!(
+            "typed queue worklist is inactive for {}; run queue maintenance/admission before --from-queue dispatch",
+            file.display()
+        );
+    }
+    if projection.queue.worklist_queue_hash.as_deref() != Some(current_queue_hash.as_str()) {
+        anyhow::bail!(
+            "typed queue worklist is stale for {}; current queue hash {} does not match projected hash {}",
+            file.display(),
+            current_queue_hash,
+            projection
+                .queue
+                .worklist_queue_hash
+                .as_deref()
+                .unwrap_or("<missing>")
+        );
     }
     let mut batch = ResolvedTaskBatch::default();
-    for entry in activation.entries_after {
-        match entry {
-            agent_doc_orchestration::queue::QueueEntry::Prompt(prompt) => {
-                batch.tasks.push(normalize_task(&prompt.text));
+    for entry in projection.queue.worklist {
+        match entry.kind {
+            agent_doc_orchestration::state_backbone::QueueWorklistEntryKind::Prompt => {
+                batch.tasks.push(normalize_task(&entry.text));
             }
-            agent_doc_orchestration::queue::QueueEntry::Preset(preset)
-            | agent_doc_orchestration::queue::QueueEntry::Dispatch(preset) => {
+            agent_doc_orchestration::state_backbone::QueueWorklistEntryKind::Preset
+            | agent_doc_orchestration::state_backbone::QueueWorklistEntryKind::Dispatch => {
                 if !batch
                     .requested_presets
                     .iter()
-                    .any(|existing| existing == &preset)
+                    .any(|existing| existing == &entry.text)
                 {
-                    batch.requested_presets.push(preset);
+                    batch.requested_presets.push(entry.text);
                 }
             }
-            agent_doc_orchestration::queue::QueueEntry::Completed(_)
-            | agent_doc_orchestration::queue::QueueEntry::StartFence(_)
-            | agent_doc_orchestration::queue::QueueEntry::StopFence
-            | agent_doc_orchestration::queue::QueueEntry::Freeform(_) => {}
         }
     }
     Ok(batch)
@@ -1140,7 +1201,7 @@ fn finalize_orchestration_batch_changed(
         "[orchestrate] source task list changed after step {}/{}; stopping before next step",
         completed_steps, total_steps
     );
-    let preflight = lifecycle.preflight(file)?;
+    lifecycle.admit(file)?;
     let doc =
         fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
     let (fm, _) = frontmatter::parse(&doc)?;
@@ -1150,17 +1211,13 @@ fn finalize_orchestration_batch_changed(
 Stopped sequential orchestration after {completed_steps} of {total_steps} step(s) because the source task list changed while the batch was running. The remaining and newly added tasks are still open for the next explicit orchestration run.\n\
 <!-- /patch:exchange -->\n"
     );
-    lifecycle.finalize(
-        file,
-        preflight.baseline_file.as_deref(),
-        &response,
-        fm.resolve_mode(),
-    )
-    .with_context(|| {
-        format!(
-            "failed parent orchestration batch-change closeout after {completed_steps}/{total_steps} step(s)"
-        )
-    })?;
+    lifecycle
+        .finalize(file, None, &response, fm.resolve_mode())
+        .with_context(|| {
+            format!(
+                "failed parent orchestration batch-change closeout after {completed_steps}/{total_steps} step(s)"
+            )
+        })?;
     lifecycle.session_check(file)?;
     anyhow::bail!(
         "orchestration batch changed during run after {}/{} step(s); stopped before launching the next step",
@@ -1540,7 +1597,7 @@ fn inject_prompt_into_doc(doc: &str, task: &str) -> Result<String> {
 mod th {
     use super::*;
     use std::cell::RefCell;
-    use tempfile::TempDir;
+
     pub(crate) struct EnvGuard {
         pub(crate) key: &'static str,
         pub(crate) prev: Option<String>,
@@ -1569,11 +1626,18 @@ mod th {
     }
     pub(crate) struct FakeLifecycleOps {
         pub(crate) baseline_file: String,
+        pub(crate) admit_calls: RefCell<usize>,
         pub(crate) preflight_calls: RefCell<usize>,
         pub(crate) finalize_calls: RefCell<Vec<String>>,
         pub(crate) session_checks: RefCell<usize>,
     }
     impl LifecycleOps for FakeLifecycleOps {
+        fn admit(&self, file: &Path) -> Result<()> {
+            *self.admit_calls.borrow_mut() += 1;
+            ensure_git_baseline_commit(file)?;
+            Ok(())
+        }
+
         fn preflight(&self, file: &Path) -> Result<PreflightOutput> {
             *self.preflight_calls.borrow_mut() += 1;
             let doc = fs::read_to_string(file)?;
@@ -1593,16 +1657,115 @@ mod th {
             file: &Path,
             _baseline_file: Option<&str>,
             response: &str,
-            _mode: ResolvedMode,
+            mode: ResolvedMode,
         ) -> Result<()> {
             self.finalize_calls.borrow_mut().push(response.to_string());
-            write::apply_template_from_string(file, response)
+            write::run_command_with_response(
+                write::CommandOptions {
+                    file: file.to_path_buf(),
+                    baseline_file: None,
+                    is_template: mode.is_template(),
+                    is_stream: mode.is_crdt(),
+                    is_ipc: false,
+                    force_disk: true,
+                    origin: Some("orchestrate_test".to_string()),
+                    pending_add: Vec::new(),
+                    pending_add_to: Vec::new(),
+                    pending_add_gated: Vec::new(),
+                    pending_add_after: Vec::new(),
+                    pending_add_before: Vec::new(),
+                    pending_add_back: Vec::new(),
+                    pending_done: Vec::new(),
+                    pending_edit: Vec::new(),
+                    pending_clear: false,
+                    pending_reorder: None,
+                    pending_gate: Vec::new(),
+                    pending_ungate: Vec::new(),
+                    pending_resolve_gate: Vec::new(),
+                    pending_set_gate_type: Vec::new(),
+                    pending_set_verify: Vec::new(),
+                    review_add: Vec::new(),
+                    review_edit: Vec::new(),
+                    review_remove: Vec::new(),
+                    review_resolve: Vec::new(),
+                    queue_completion_ids: Vec::new(),
+                    allow_replace_pending: false,
+                    pending_only: false,
+                    status: None,
+                    lint_override: None,
+                    commit_sibling: Vec::new(),
+                    commit_sibling_message: Vec::new(),
+                },
+                write::CommitMode::BestEffort,
+                response.to_string(),
+            )
         }
 
         fn session_check(&self, _file: &Path) -> Result<()> {
             *self.session_checks.borrow_mut() += 1;
             Ok(())
         }
+    }
+
+    fn ensure_git_baseline_commit(file: &Path) -> Result<()> {
+        let repo = file
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("test document has no parent: {}", file.display()))?;
+        if !repo.join(".git").exists() {
+            run_git(repo, ["init"])?;
+            run_git(repo, ["config", "user.email", "test@example.com"])?;
+            run_git(repo, ["config", "user.name", "Agent Doc Test"])?;
+        }
+
+        let add_status = Command::new("git")
+            .current_dir(repo)
+            .arg("add")
+            .arg(file)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .with_context(|| format!("failed to git add {}", file.display()))?;
+        if !add_status.success() {
+            anyhow::bail!("git add {} failed with {}", file.display(), add_status);
+        }
+        let staged_status = Command::new("git")
+            .current_dir(repo)
+            .args(["diff", "--cached", "--quiet", "--exit-code"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .with_context(|| format!("failed to inspect staged diff for {}", file.display()))?;
+        if staged_status.success() {
+            return Ok(());
+        }
+
+        let output = Command::new("git")
+            .current_dir(repo)
+            .args(["commit", "-m", "test baseline", "--no-verify"])
+            .output()
+            .with_context(|| format!("failed to git commit {}", file.display()))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("nothing to commit") || stderr.contains("no changes added") {
+            return Ok(());
+        }
+        anyhow::bail!("git commit {} failed: {}", file.display(), stderr.trim());
+    }
+
+    fn run_git<const N: usize>(repo: &Path, args: [&str; N]) -> Result<()> {
+        let status = Command::new("git")
+            .current_dir(repo)
+            .args(args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .with_context(|| format!("failed to run git in {}", repo.display()))?;
+        if !status.success() {
+            anyhow::bail!("git command failed with {}", status);
+        }
+        Ok(())
     }
     type AgentEnv = Vec<(String, Option<String>)>;
     type ParallelRunCall = (
@@ -1876,10 +2039,12 @@ mod th {
             _env: Vec<(String, Option<String>)>,
             _model: Option<&str>,
         ) -> Result<String> {
-            *self.fresh_calls.borrow_mut() += 1;
+            let mut calls = self.fresh_calls.borrow_mut();
+            *calls += 1;
+            let call = *calls;
             self.prompts.borrow_mut().push(prompt.to_string());
             self.envs.borrow_mut().push(_env);
-            Ok(self.response.clone())
+            Ok(numbered_fake_response(&self.response, call))
         }
 
         fn send_fresh_streaming(
@@ -1921,6 +2086,22 @@ mod th {
                 fs::write(file, updated)?;
             }
             Ok(self.response.clone())
+        }
+    }
+
+    fn numbered_fake_response(response: &str, call: usize) -> String {
+        if call <= 1 {
+            return response.to_string();
+        }
+        let marker = format!("<!-- agent-doc-test-call:{call} -->\n");
+        if let Some(idx) = response.rfind("<!-- /patch:exchange -->") {
+            let mut numbered = String::with_capacity(response.len() + marker.len());
+            numbered.push_str(&response[..idx]);
+            numbered.push_str(&marker);
+            numbered.push_str(&response[idx..]);
+            numbered
+        } else {
+            format!("{response}\n{marker}")
         }
     }
     pub(crate) struct CaptureAgent {
@@ -1985,6 +2166,28 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
     use tempfile::TempDir;
+
+    fn seed_typed_queue_worklist(
+        root: &Path,
+        doc: &Path,
+        queue_hash: &str,
+        entries: Vec<agent_doc_orchestration::state_backbone::QueueWorklistEntry>,
+    ) {
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let document_hash = snapshot::doc_hash(&doc.canonicalize().unwrap()).unwrap();
+        let event = agent_doc_orchestration::state_backbone::StateEvent::new(
+            format!("test-queue-worklist:{queue_hash}"),
+            agent_doc_orchestration::state_backbone::StateFact::QueueWorklistProjected {
+                document_hash,
+                queue_hash: queue_hash.to_string(),
+                entries,
+                active: true,
+                hosting_epoch: None,
+            },
+        );
+        agent_doc_orchestration::project_controller::append_state_event(root, &event).unwrap();
+    }
+
     #[test]
     fn agent_doc_binary_resolution_works_without_path_when_current_exe_exists() {
         let dir = TempDir::new().unwrap();
@@ -2118,11 +2321,37 @@ mod tests {
     fn resolve_task_batch_collects_active_queue_for_auto_dag() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("session.md");
-        fs::write(
-        &doc,
-        "---\nqueue_active: true\nprompt_presets:\n  \"#spec-test\": |\n    Run checks.\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\npreset spec-test\n- do #prep\n- do #report after #prep\n<!-- /agent:queue -->\n",
-    )
-    .unwrap();
+        let content = "---\nqueue_active: true\nprompt_presets:\n  \"#spec-test\": |\n    Run checks.\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\npreset spec-test\n- do #prep\n- do #report after #prep\n<!-- /agent:queue -->\n";
+        fs::write(&doc, content).unwrap();
+        let queue_hash = active_queue_hash(content).unwrap().unwrap();
+        seed_typed_queue_worklist(
+            dir.path(),
+            &doc,
+            &queue_hash,
+            vec![
+                agent_doc_orchestration::state_backbone::QueueWorklistEntry {
+                    kind: agent_doc_orchestration::state_backbone::QueueWorklistEntryKind::Preset,
+                    text: "spec-test".to_string(),
+                    node_key: None,
+                    backlog_id: None,
+                    drainable: false,
+                },
+                agent_doc_orchestration::state_backbone::QueueWorklistEntry {
+                    kind: agent_doc_orchestration::state_backbone::QueueWorklistEntryKind::Prompt,
+                    text: "do #prep".to_string(),
+                    node_key: Some("queue:entry:0:prep".to_string()),
+                    backlog_id: Some("prep".to_string()),
+                    drainable: true,
+                },
+                agent_doc_orchestration::state_backbone::QueueWorklistEntry {
+                    kind: agent_doc_orchestration::state_backbone::QueueWorklistEntryKind::Prompt,
+                    text: "do #report after #prep".to_string(),
+                    node_key: Some("queue:entry:1:report".to_string()),
+                    backlog_id: Some("report".to_string()),
+                    drainable: true,
+                },
+            ],
+        );
 
         let batch = resolve_task_batch(
             &doc,
@@ -2150,6 +2379,57 @@ mod tests {
         );
         assert_eq!(batch.requested_presets, vec!["#spec-test".to_string()]);
     }
+
+    #[test]
+    fn resolve_task_batch_rejects_stale_typed_queue_worklist() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let original = "---\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- do #old\n<!-- /agent:queue -->\n";
+        fs::write(&doc, original).unwrap();
+        let old_hash = active_queue_hash(original).unwrap().unwrap();
+        seed_typed_queue_worklist(
+            dir.path(),
+            &doc,
+            &old_hash,
+            vec![
+                agent_doc_orchestration::state_backbone::QueueWorklistEntry {
+                    kind: agent_doc_orchestration::state_backbone::QueueWorklistEntryKind::Prompt,
+                    text: "do #old".to_string(),
+                    node_key: Some("queue:entry:0:old".to_string()),
+                    backlog_id: Some("old".to_string()),
+                    drainable: true,
+                },
+            ],
+        );
+        let changed = original.replace("do #old", "do #new");
+        fs::write(&doc, changed).unwrap();
+
+        let err = resolve_task_batch(
+            &doc,
+            &OrchestrateConfig {
+                mode: OrchestrateMode::Dag,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: false,
+                from_queue: true,
+                resume_schedule: None,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+                plan: false,
+            },
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string().contains("typed queue worklist is stale"),
+            "unexpected error: {err:#}"
+        );
+    }
+
     #[test]
     fn apply_prompt_preset_block_prefixes_task_prompt() {
         let rendered = apply_prompt_preset_block(

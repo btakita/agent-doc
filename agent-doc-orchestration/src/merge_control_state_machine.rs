@@ -143,9 +143,9 @@ pub fn disk_write_permitted(phase: MergeOwnershipPhase) -> bool {
 /// is permitted for a document from its current editor-attachment facts,
 /// expressed through the ownership SM. The converge/commit disk-write refusal
 /// points ([`crate::write::converge`]) consult this instead of a raw
-/// listener-active check, so a **stale listener** (`#6b5h`: a connectable
-/// controller-hosted socket with no live editor behind it) routes to the
-/// controller-host disk write instead of wedging on `no_ack` / `ack_mismatch`.
+/// listener-active check. A no-listener direct disk write can proceed, while a
+/// connectable editor path with unproven ACK delivery is blocked by the
+/// converger before it reaches a disk fallback.
 ///
 /// The write path observes ownership fresh each write (no persistent phase is
 /// stored yet): it starts from the ambiguous [`MergeOwnershipPhase::Attached`]
@@ -220,8 +220,7 @@ pub fn transition_merge_ownership(
             | MergeOwnershipPhase::Committed => None,
         },
         MergeOwnershipEvent::BinaryWriteRequested => match current {
-            MergeOwnershipPhase::EditorOwnsBuffer
-            | MergeOwnershipPhase::BinaryWriteRequested => {
+            MergeOwnershipPhase::EditorOwnsBuffer | MergeOwnershipPhase::BinaryWriteRequested => {
                 Some(MergeOwnershipPhase::BinaryWriteRequested)
             }
             MergeOwnershipPhase::Detached
@@ -230,8 +229,9 @@ pub fn transition_merge_ownership(
             | MergeOwnershipPhase::Committed => None,
         },
         MergeOwnershipEvent::PatchAckObserved => match current {
-            MergeOwnershipPhase::BinaryWriteRequested
-            | MergeOwnershipPhase::IpcAckProven => Some(MergeOwnershipPhase::IpcAckProven),
+            MergeOwnershipPhase::BinaryWriteRequested | MergeOwnershipPhase::IpcAckProven => {
+                Some(MergeOwnershipPhase::IpcAckProven)
+            }
             MergeOwnershipPhase::Detached
             | MergeOwnershipPhase::Attached
             | MergeOwnershipPhase::EditorOwnsBuffer
@@ -277,7 +277,9 @@ impl OwnershipLiveness {
                 lease_present: true,
                 pid_live: is_pid_live(l.pid),
                 heartbeat_fresh: plugin_owner::plugin_owner_lease_is_fresh(
-                    l.heartbeat_secs, now, ttl,
+                    l.heartbeat_secs,
+                    now,
+                    ttl,
                 ),
             },
             None => Self::default(),
@@ -626,18 +628,29 @@ mod tests {
             pid: 42,
             heartbeat_secs: 100,
         };
-        let facts = OwnershipLiveness::from_lease(Some(&live), |pid| pid == 42, 100, Duration::from_secs(30));
+        let facts = OwnershipLiveness::from_lease(
+            Some(&live),
+            |pid| pid == 42,
+            100,
+            Duration::from_secs(30),
+        );
         assert!(facts.lease_present);
         assert!(facts.pid_live);
         assert!(facts.heartbeat_fresh);
 
         // Stale heartbeat (age beyond ttl) still reports pid_live separately.
-        let facts = OwnershipLiveness::from_lease(Some(&live), |pid| pid == 42, 200, Duration::from_secs(30));
+        let facts = OwnershipLiveness::from_lease(
+            Some(&live),
+            |pid| pid == 42,
+            200,
+            Duration::from_secs(30),
+        );
         assert!(facts.pid_live);
         assert!(!facts.heartbeat_fresh);
 
         // Dead pid.
-        let facts = OwnershipLiveness::from_lease(Some(&live), |_| false, 100, Duration::from_secs(30));
+        let facts =
+            OwnershipLiveness::from_lease(Some(&live), |_| false, 100, Duration::from_secs(30));
         assert!(facts.lease_present);
         assert!(!facts.pid_live);
 
@@ -653,7 +666,8 @@ mod tests {
             MergeOwnershipPhase::Attached,
             MergeOwnershipPhase::EditorOwnsBuffer,
         ] {
-            let next = MergeOwnershipMachine::transition(phase, MergeOwnershipEvent::EditorDetached);
+            let next =
+                MergeOwnershipMachine::transition(phase, MergeOwnershipEvent::EditorDetached);
             assert_eq!(next, Some(MergeOwnershipPhase::Detached));
         }
     }
@@ -662,9 +676,7 @@ mod tests {
     fn disk_write_permitted_for_file_matches_live_editor_endpoint_attached() {
         // The SM write-path gate must be decision-equivalent to the inverted
         // live-editor check: a live editor → refuse; no editor → permit.
-        use crate::plugin_owner::{
-            self, editor_endpoint_attached_for_lease, PluginOwnerLease,
-        };
+        use crate::plugin_owner::{self, PluginOwnerLease, editor_endpoint_attached_for_lease};
 
         let cases = [
             // (lease_pid, pid_live_injected) -> editor attached, disk permitted

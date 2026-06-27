@@ -387,15 +387,10 @@ pub fn run_template(
     // Visible-write guard already reconciled above (see #ipc-drift-visbuf-reconcile).
     snapshot::save(file, snapshot_content)?;
 
-    // `#fcc0`: template (non-CRDT) mode writes the merged document straight to
-    // disk — the only response path with no prior IPC attempt. Converge through
-    // the editor when a JB listener is active (no `File Cache Conflict` dialog).
-    // If the listener cannot prove the mutation, `try_editor_converge` fails
-    // closed. The no-listener fallback is the bare disk write rather than the
-    // double-guarded converger entry point because the guard already ran above.
-    if !try_editor_converge(file, &final_content, &content_current, "write_template")? {
-        atomic_write(file, &final_content)?;
-    }
+    // `#fcc0`: template (non-CRDT) mode must converge through the editor path;
+    // if editor convergence is unavailable or unproven, fail closed instead of
+    // writing the merged document straight to disk.
+    try_editor_converge(file, &final_content, &content_current, "write_template")?;
 
     crate::ops_log::log_cycle(
         file,
@@ -936,7 +931,7 @@ pub fn run_stream(
     // captured response against a foreign disk append landed after the merge
     // was computed instead of failing closed and stranding the response
     // outside HEAD (#ipc-drift-visbuf-reconcile).
-    let (content_current, (final_content, crdt_state, cleaned_resolved_backlog_prompts_applied)) =
+    let (content_current, (final_content, _crdt_state, cleaned_resolved_backlog_prompts_applied)) =
         reconcile_visible_write(
             file,
             content_current,
@@ -976,14 +971,25 @@ pub fn run_stream(
             &final_content,
         )
     };
-    let snapshot_content =
-        snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
-    let snapshot_crdt_state = match snapshot_mode {
-        SnapshotPersistMode::FinalContent => crdt_state,
-        SnapshotPersistMode::ContentOurs => {
-            crate::crdt::CrdtDoc::from_text(&content_ours).encode_state()
-        }
+    let mut final_content = final_content;
+    let mut snapshot_content =
+        snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content).to_string();
+    let integrated_queue_plan = if flags.queue_completion_ids.is_empty() {
+        None
+    } else {
+        plan_queue_prompt_consumption_with_snapshot(
+            file,
+            &final_content,
+            Some(&snapshot_content),
+            &flags.queue_completion_ids,
+        )?
     };
+    if let Some(plan) = integrated_queue_plan.as_ref() {
+        record_queue_consumption_proofs(file, plan, QueueConsumptionProofStage::BeforeMutation)?;
+        final_content = plan.new_document.clone();
+        snapshot_content = plan.new_snapshot.clone();
+    }
+    let snapshot_crdt_state = crate::crdt::CrdtDoc::from_text(&snapshot_content).encode_state();
 
     // Save snapshot BEFORE document write (#wcf5): external watchers (IDE
     // file-change listeners, git hooks) trigger on the document rename and may
@@ -1001,10 +1007,41 @@ pub fn run_stream(
         &unmatched,
     );
     // Visible-write guard already reconciled above (see #ipc-drift-visbuf-reconcile).
-    snapshot::save(file, snapshot_content)?;
-    snapshot::save_document_crdt(file, &snapshot_crdt_state, snapshot_content)?;
+    snapshot::save(file, &snapshot_content)?;
+    snapshot::save_document_crdt(file, &snapshot_crdt_state, &snapshot_content)?;
 
     atomic_write(file, &final_content)?;
+    if let Some(plan) = integrated_queue_plan.as_ref() {
+        record_queue_consumption_proofs(file, plan, QueueConsumptionProofStage::AfterMutation)?;
+        if plan.consumed_texts.len() == 1 {
+            eprintln!(
+                "[queue] consumed: {:?} (remaining: {})",
+                plan.consumed_text, plan.remaining
+            );
+        } else {
+            eprintln!(
+                "[queue] consumed {} item(s): {:?} (remaining: {})",
+                plan.consumed_texts.len(),
+                plan.consumed_texts,
+                plan.remaining
+            );
+        }
+        if plan.drained {
+            eprintln!("[queue] drained — cleared queue_active");
+        } else if plan.auto {
+            eprintln!(
+                "[queue] auto queue has {} prompt(s) remaining after this closeout",
+                plan.remaining
+            );
+        }
+        if let Err(err) = crate::recguard_wedge::clear(file) {
+            eprintln!(
+                "[recguard-wedge] WARNING: failed to clear wedge counter for {}: {}",
+                file.display(),
+                err
+            );
+        }
+    }
     crate::ops_log::log_cycle(
         file,
         "write_stream",
@@ -1454,6 +1491,19 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
 /// Apply template-mode patches from a string (not stdin).
 /// Used by `repair` to apply orphaned template responses.
 pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
+    apply_template_from_string_with_options(file, response, TemplateApplyOptions::default())
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TemplateApplyOptions {
+    pub force_disk: bool,
+}
+
+pub fn apply_template_from_string_with_options(
+    file: &Path,
+    response: &str,
+    options: TemplateApplyOptions,
+) -> Result<()> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let use_crdt = content_uses_crdt_write(&content);
@@ -1531,15 +1581,23 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
         Some(response.as_str()),
     )?;
 
-    guard_visible_write_idle_and_current(file, "apply_template_from_string", &content_current)?;
-    // `#fcc0`: this repair recovery applies template (component) patches straight
-    // to disk with no prior IPC attempt — the same direct-disk-no-IPC class as
-    // queue consume. Converge through the editor when a JB listener is active (no
-    // `File Cache Conflict` dialog). If the listener cannot prove the mutation,
-    // `try_editor_converge` fails closed. The guard already ran above, so the
-    // no-listener fallback is the bare disk write.
-    if !try_editor_converge(file, &final_content, &content_current, "apply_template")? {
+    if options.force_disk {
         atomic_write(file, &final_content)?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "apply_template_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
+                file.display(),
+                final_content.len(),
+                crate::ops_log::content_hash(&final_content)
+            ),
+        );
+    } else {
+        guard_visible_write_idle_and_current(file, "apply_template_from_string", &content_current)?;
+        // `#fcc0`: repair recovery applies template (component) patches through
+        // the editor path; if editor convergence is unavailable or unproven,
+        // fail closed instead of writing the repaired document straight to disk.
+        try_editor_converge(file, &final_content, &content_current, "apply_template")?;
     }
     // Save snapshot as the repaired/merged final content.
     save_recovery_snapshot(file, &final_content, use_crdt)?;
@@ -1588,7 +1646,12 @@ mod tests {
         snapshot::save(&doc, snapshot_content).unwrap();
 
         let response = "<!-- patch:exchange -->\nCompacted summary.\n<!-- /patch:exchange -->\n";
-        apply_template_from_string(&doc, response).unwrap();
+        apply_template_from_string_with_options(
+            &doc,
+            response,
+            TemplateApplyOptions { force_disk: true },
+        )
+        .unwrap();
 
         let result = fs::read_to_string(&doc).unwrap();
         assert!(result.contains("Compacted summary.\n"));
@@ -1624,7 +1687,12 @@ mod tests {
             "The `spec-test-build-install-commit-push` request is complete in the response above.\n",
             "<!-- /patch:exchange -->\n",
         );
-        apply_template_from_string(&doc, response).unwrap();
+        apply_template_from_string_with_options(
+            &doc,
+            response,
+            TemplateApplyOptions { force_disk: true },
+        )
+        .unwrap();
 
         let result = fs::read_to_string(&doc).unwrap();
         assert_eq!(
@@ -1699,7 +1767,12 @@ mod tests {
             "<!-- /patch:exchange -->\n",
         );
 
-        apply_template_from_string(&doc, response).unwrap();
+        apply_template_from_string_with_options(
+            &doc,
+            response,
+            TemplateApplyOptions { force_disk: true },
+        )
+        .unwrap();
 
         let result = fs::read_to_string(&doc).unwrap();
         assert!(result.contains("### Re: rspdigest — gpt-5"));

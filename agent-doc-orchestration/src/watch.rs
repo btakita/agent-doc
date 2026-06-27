@@ -18,8 +18,8 @@
 //!   - `StreamCapture` — CRDT mode: polled by capturing the associated tmux pane.
 //! - File-watch path: events are debounced (`debounce_ms`). After debounce, the
 //!   controller-owned document watcher gate routes the change through the
-//!   per-document session actor; the legacy submit still runs behind that actor
-//!   until admission replaces it.
+//!   per-document session actor. It records the change; it no longer starts the
+//!   legacy run/preflight loop directly.
 //! - Loop prevention for file-watch: agent-triggered changes (within `debounce * 3` of
 //!   last run) increment a per-file cycle counter; hard cap at `max_cycles`. Content hash
 //!   equality stops the loop early (convergence detection).
@@ -309,7 +309,8 @@ pub fn ensure_running() -> Result<bool> {
 /// Start the watch daemon.
 ///
 /// Watches files registered in sessions.json for changes. On file change
-/// (after debounce), runs `run::run()` on the changed file.
+/// (after debounce), records the event through the controller-owned document
+/// watcher instead of launching the legacy run/preflight loop directly.
 /// For stream-mode documents, polls tmux panes and flushes new output.
 ///
 /// Loop prevention:
@@ -376,7 +377,7 @@ fn signal_wait() {
 
 /// The main event loop.
 fn run_event_loop(
-    config: &Config,
+    _config: &Config,
     watch_config: &WatchConfig,
     running: &std::sync::atomic::AtomicBool,
 ) -> Result<()> {
@@ -752,7 +753,9 @@ fn run_event_loop(
                 continue;
             }
 
-            // Submit
+            // Route the settled change through the controller-owned document
+            // watcher. The legacy direct submit/preflight loop is disabled for
+            // realtime cutover; admission/closeout owns follow-up work.
             eprintln!("Change detected: {}", path.display());
             let ac = actor_contexts
                 .entry(path.clone())
@@ -770,18 +773,17 @@ fn run_event_loop(
                 }
             };
             let raw = RawWatchEvent::modify(path.clone());
-            let config_owned = config.clone();
-            match crate::document_watcher::route_legacy_submit(
+            match crate::document_watcher::route_event(
                 &base_dir,
                 &file_str,
                 &file_str,
                 &raw,
                 &current_content,
-                config_owned,
+                || Ok(()),
             ) {
                 Ok(WatchDelivery::Change { .. }) => {
                     state.last_run = Some(Instant::now());
-                    eprintln!("Submit complete: {}", path.display());
+                    eprintln!("Change routed: {}", path.display());
                 }
                 Ok(delivery) => {
                     eprintln!(

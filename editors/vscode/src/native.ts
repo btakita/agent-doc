@@ -120,6 +120,7 @@ function resetBindings(): void {
     _document_changed_digest_content_for_editor = null;
     _document_closed_for_editor = null;
     _resolve_project_path = null;
+    _free_state = null;
     _free_string = null;
     _version = null;
     _state_projection = null;
@@ -127,6 +128,12 @@ function resetBindings(): void {
     _record_state_event = null;
     _record_editor_op = null;
     _document_base_hash = null;
+    _replica_open = null;
+    _replica_apply_local = null;
+    _replica_apply_update = null;
+    _replica_encode_state = null;
+    _replica_text = null;
+    _replica_close = null;
 }
 
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
@@ -232,6 +239,7 @@ let _document_changed_digest_content_for_editor: any = null;
 let _document_closed_for_editor: any = null;
 let _is_tracked: any = null;
 let _resolve_project_path: any = null;
+let _free_state: any = null;
 let _free_string: any = null;
 let _version: any = null;
 let _state_projection: any = null;
@@ -240,6 +248,12 @@ let _record_state_event: any = null;
 let _reconnect_buffer_decision: any = null;
 let _record_editor_op: any = null;
 let _document_base_hash: any = null;
+let _replica_open: any = null;
+let _replica_apply_local: any = null;
+let _replica_apply_update: any = null;
+let _replica_encode_state: any = null;
+let _replica_text: any = null;
+let _replica_close: any = null;
 
 function bindFunctions(): void {
     if (_reposition_boundary_to_end && _normalize_template_structure) return;
@@ -343,6 +357,7 @@ function bindFunctions(): void {
     }
     _is_tracked = lib.func('agent_doc_is_tracked', 'bool', ['str']);
     _resolve_project_path = lib.func('agent_doc_resolve_project_path', FfiProjectPathType, ['str']);
+    _free_state = lib.func('agent_doc_free_state', 'void', ['void*', 'size_t']);
     _free_string = lib.func('agent_doc_free_string', 'void', ['char*']);
     _version = lib.func('agent_doc_version', 'char*', []);
     try {
@@ -387,6 +402,37 @@ function bindFunctions(): void {
         console.log(`[agent-doc/native] editor-op capture ABI unavailable: ${e.message}`);
         _record_editor_op = null;
         _document_base_hash = null;
+    }
+    try {
+        // #crdtauth5 editor-as-replica node. Optional so an older cdylib keeps
+        // the extension on the existing patch-file path.
+        _replica_open = lib.func('agent_doc_replica_open', 'int32', ['uint64', 'void*', 'size_t']);
+        _replica_apply_local = lib.func('agent_doc_replica_apply_local', 'int32', [
+            'uint64',
+            'uint32',
+            'uint32',
+            'str',
+        ]);
+        _replica_apply_update = lib.func('agent_doc_replica_apply_update', 'int32', [
+            'uint64',
+            'void*',
+            'size_t',
+        ]);
+        _replica_encode_state = lib.func(
+            'agent_doc_replica_encode_state',
+            'void*',
+            ['uint64', koffi.out(koffi.pointer('size_t'))],
+        );
+        _replica_text = lib.func('agent_doc_replica_text', 'char*', ['uint64']);
+        _replica_close = lib.func('agent_doc_replica_close', 'int32', ['uint64']);
+    } catch (e: any) {
+        console.log(`[agent-doc/native] replica ABI unavailable: ${e.message}`);
+        _replica_open = null;
+        _replica_apply_local = null;
+        _replica_apply_update = null;
+        _replica_encode_state = null;
+        _replica_text = null;
+        _replica_close = null;
     }
 }
 
@@ -527,10 +573,114 @@ export function recordEditorOp(
     }
 }
 
+function copyStateBuffer(ptr: any, len: number): Uint8Array | null {
+    if (!ptr) return null;
+    try {
+        if (len <= 0) return Buffer.alloc(0);
+        return Buffer.from(koffi.view(ptr, len));
+    } finally {
+        if (_free_state) _free_state(ptr, len);
+    }
+}
+
+export class NativeReplicaNode {
+    private clientId: number | null = null;
+
+    constructor(private readonly projectRoot?: string) {}
+
+    open(clientId: number, initState?: Uint8Array | null): boolean {
+        if (!ensureLoaded(this.projectRoot)) return false;
+        bindFunctions();
+        if (!_replica_open) return false;
+        const init = initState && initState.length > 0 ? Buffer.from(initState) : null;
+        try {
+            const ok = _replica_open(clientId, init, init?.length ?? 0) === 0;
+            if (ok) this.clientId = clientId;
+            return ok;
+        } catch (e: any) {
+            console.warn(`[agent-doc/native] replica_open error: ${e.message}`);
+            return false;
+        }
+    }
+
+    applyLocal(clientId: number, offset: number, deleteLen: number, insert: string): boolean {
+        if (!ensureLoaded(this.projectRoot)) return false;
+        bindFunctions();
+        if (!_replica_apply_local) return false;
+        try {
+            return _replica_apply_local(clientId, offset, deleteLen, insert) === 0;
+        } catch (e: any) {
+            console.warn(`[agent-doc/native] replica_apply_local error: ${e.message}`);
+            return false;
+        }
+    }
+
+    applyUpdate(clientId: number, update: Uint8Array): boolean {
+        if (update.length === 0) return true;
+        if (!ensureLoaded(this.projectRoot)) return false;
+        bindFunctions();
+        if (!_replica_apply_update) return false;
+        try {
+            const bytes = Buffer.from(update);
+            return _replica_apply_update(clientId, bytes, bytes.length) === 0;
+        } catch (e: any) {
+            console.warn(`[agent-doc/native] replica_apply_update error: ${e.message}`);
+            return false;
+        }
+    }
+
+    encodeState(): Uint8Array | null {
+        if (this.clientId == null) return null;
+        if (!ensureLoaded(this.projectRoot)) return null;
+        bindFunctions();
+        if (!_replica_encode_state) return null;
+        const lenOut = [0];
+        try {
+            const ptr = _replica_encode_state(this.clientId, lenOut);
+            return copyStateBuffer(ptr, Number(lenOut[0] ?? 0));
+        } catch (e: any) {
+            console.warn(`[agent-doc/native] replica_encode_state error: ${e.message}`);
+            return null;
+        }
+    }
+
+    text(): string | null {
+        if (this.clientId == null) return null;
+        if (!ensureLoaded(this.projectRoot)) return null;
+        bindFunctions();
+        if (!_replica_text) return null;
+        let ptr: any = null;
+        try {
+            ptr = _replica_text(this.clientId);
+            if (!ptr) return null;
+            return koffi.decode(ptr, 'char', -1);
+        } catch (e: any) {
+            console.warn(`[agent-doc/native] replica_text error: ${e.message}`);
+            return null;
+        } finally {
+            if (ptr) _free_string(ptr);
+        }
+    }
+
+    close(clientId?: number): void {
+        const id = clientId ?? this.clientId;
+        if (id == null) return;
+        this.clientId = null;
+        if (!ensureLoaded(this.projectRoot)) return;
+        bindFunctions();
+        if (!_replica_close) return;
+        try {
+            _replica_close(id);
+        } catch (e: any) {
+            console.warn(`[agent-doc/native] replica_close error: ${e.message}`);
+        }
+    }
+}
+
 export function documentHash(filePath: string): string {
-  let canonical: string;
-  try {
-    canonical = fs.realpathSync(filePath);
+    let canonical: string;
+    try {
+        canonical = fs.realpathSync(filePath);
   } catch {
     canonical = path.resolve(filePath);
   }

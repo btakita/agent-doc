@@ -12,7 +12,10 @@
 //!   normalization before pending cleanup, then `run(file)` returns `RepairOutcome::AlreadyApplied`.
 //!   When replaying from a durable capture, requires the current document and snapshot hashes to
 //!   still match the captured baseline; otherwise fails closed.
-//!   Template/CRDT documents always replay through the template write path
+//!   Template/CRDT patchback responses replay through the normal strict stream
+//!   write path so recovery reuses the same response capture, materialization,
+//!   queue-consumption, snapshot, and commit closeout as `finalize`.
+//!   Other template documents replay through the template repair write path
 //!   (`write::apply_template_from_string`) even when the captured response is raw text
 //!   without `<!-- patch:... -->` fences (for example `compact exchange` closeouts).
 //!   Template replay first passes through `replay_guard`; blocked transcript/full-document
@@ -1548,6 +1551,13 @@ fn respect_manual_exchange_tail_removal_if_safe(
 
 /// Check for a pending response and apply it if found.
 pub fn run(file: &Path) -> Result<RepairOutcome> {
+    run_with_queue_completion_ids(file, &[])
+}
+
+pub(crate) fn run_with_queue_completion_ids(
+    file: &Path,
+    queue_completion_ids: &[String],
+) -> Result<RepairOutcome> {
     // Canonicalize first to handle CWD drift (e.g., when CWD is in a submodule)
     let canonical = file
         .canonicalize()
@@ -1705,6 +1715,15 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
         crate::capture::validate_replay(&canonical, capture)?;
     }
 
+    if replay_crdt_patchback_through_strict_write(
+        file,
+        &doc_content,
+        &response,
+        queue_completion_ids,
+    )? {
+        return Ok(RepairOutcome::ReplayedResponse);
+    }
+
     eprintln!(
         "[repair] Found orphaned response for {} ({} bytes). Applying...",
         file.display(),
@@ -1729,9 +1748,33 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
         response.clone()
     };
     if use_template_write {
-        write::apply_template_from_string(file, &response_to_write)?;
+        if crate::git::is_in_git_repo(file) {
+            replay_orphaned_response_through_strict_write(
+                file,
+                &response_to_write,
+                true,
+                queue_completion_ids,
+            )?;
+        } else {
+            write::apply_template_from_string_with_options(
+                file,
+                &response_to_write,
+                write::TemplateApplyOptions {
+                    force_disk: repair_replay_force_disk(file),
+                },
+            )?;
+        }
     } else {
-        write::apply_append_from_string(file, &response_to_write)?;
+        if crate::git::is_in_git_repo(file) {
+            replay_orphaned_response_through_strict_write(
+                file,
+                &response_to_write,
+                false,
+                queue_completion_ids,
+            )?;
+        } else {
+            write::apply_append_from_string(file, &response_to_write)?;
+        }
     }
 
     let final_doc_after_write = std::fs::read_to_string(file)
@@ -1830,6 +1873,127 @@ fn strike_recovered_free_text_queue_head(file: &Path) {
 /// repair wrongly struck the next open id-backed head by position.
 fn first_queue_head_is_free_text(content: &str) -> bool {
     crate::write::queue_head_is_free_text_prompt(content).unwrap_or(false)
+}
+
+fn repair_replay_command_options(
+    file: &Path,
+    is_template: bool,
+    is_stream: bool,
+    force_disk: bool,
+    queue_completion_ids: &[String],
+) -> write::CommandOptions {
+    write::CommandOptions {
+        file: file.to_path_buf(),
+        baseline_file: None,
+        is_template,
+        is_stream,
+        is_ipc: false,
+        force_disk,
+        origin: Some("repair_replay".to_string()),
+        pending_add: Vec::new(),
+        pending_add_to: Vec::new(),
+        pending_add_gated: Vec::new(),
+        pending_add_after: Vec::new(),
+        pending_add_before: Vec::new(),
+        pending_add_back: Vec::new(),
+        pending_done: Vec::new(),
+        pending_edit: Vec::new(),
+        pending_clear: false,
+        pending_reorder: None,
+        pending_gate: Vec::new(),
+        pending_ungate: Vec::new(),
+        pending_resolve_gate: Vec::new(),
+        pending_set_gate_type: Vec::new(),
+        pending_set_verify: Vec::new(),
+        review_add: Vec::new(),
+        review_edit: Vec::new(),
+        review_remove: Vec::new(),
+        review_resolve: Vec::new(),
+        queue_completion_ids: queue_completion_ids.to_vec(),
+        allow_replace_pending: false,
+        pending_only: false,
+        status: None,
+        lint_override: None,
+        commit_sibling: Vec::new(),
+        commit_sibling_message: Vec::new(),
+    }
+}
+
+fn replay_orphaned_response_through_strict_write(
+    file: &Path,
+    response: &str,
+    is_template: bool,
+    queue_completion_ids: &[String],
+) -> Result<()> {
+    let force_disk = repair_replay_force_disk(file);
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "repair_replay_via_strict_write file={} mode={} force_disk={} response_hash={}",
+            file.display(),
+            if is_template { "template" } else { "append" },
+            force_disk,
+            crate::ops_log::content_hash(response)
+        ),
+    );
+    write::run_command_with_response(
+        repair_replay_command_options(file, is_template, false, force_disk, queue_completion_ids),
+        repair_replay_commit_mode(file),
+        response.to_string(),
+    )
+}
+
+fn repair_replay_force_disk(file: &Path) -> bool {
+    !crate::crdt_authority::authority_for_file(&file.display().to_string()).editor_attached()
+}
+
+fn repair_replay_commit_mode(file: &Path) -> write::CommitMode {
+    if crate::git::is_in_git_repo(file) {
+        write::CommitMode::Required
+    } else {
+        write::CommitMode::None
+    }
+}
+
+fn replay_crdt_patchback_through_strict_write(
+    file: &Path,
+    doc_content: &str,
+    response: &str,
+    queue_completion_ids: &[String],
+) -> Result<bool> {
+    if !response.contains("<!-- patch:") {
+        return Ok(false);
+    }
+    if !crate::git::is_in_git_repo(file) {
+        return Ok(false);
+    }
+    let (fm, _) = frontmatter::parse(doc_content)
+        .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
+    if !fm.resolve_mode().is_crdt() {
+        return Ok(false);
+    }
+
+    let force_disk = repair_replay_force_disk(file);
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "repair_replay_via_strict_write file={} mode=crdt force_disk={} response_hash={}",
+            file.display(),
+            force_disk,
+            crate::ops_log::content_hash(response)
+        ),
+    );
+    eprintln!(
+        "[repair] replaying captured CRDT patchback through strict write closeout for {}",
+        file.display()
+    );
+
+    write::run_command_with_response(
+        repair_replay_command_options(file, false, true, force_disk, queue_completion_ids),
+        repair_replay_commit_mode(file),
+        response.to_string(),
+    )?;
+    Ok(true)
 }
 
 pub fn repair(file: &Path) -> Result<RepairOutcome> {
@@ -2537,7 +2701,7 @@ mod tests {
     fn recover_append_response() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");
-        let content = "---\nsession: test\nagent_doc_mode: append\n---\n\n## User\n\nHello\n";
+        let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
 
         // Save a pending response
@@ -2800,9 +2964,10 @@ mod tests {
     fn recover_replays_capture_without_pending() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");
-        let content = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
+        init_git_repo(dir.path(), &doc);
 
         save_pending(&doc, "Recovered from capture.").unwrap();
         clear_pending(&doc).unwrap();
@@ -3960,7 +4125,7 @@ mod tests {
     fn repair_crosses_commit_boundary_for_git_backed_replay() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");
-        let content = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
         init_git_repo(dir.path(), &doc);

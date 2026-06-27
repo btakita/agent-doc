@@ -96,7 +96,7 @@ fn initialize_result(params: Option<&Value>) -> Value {
             "title": "agent-doc MCP Server",
             "version": env!("CARGO_PKG_VERSION")
         },
-        "instructions": "Use agent_doc_finalize for binary-owned session document closeout; do not patch session documents directly."
+        "instructions": "Use agent_doc_admit before answering a live session prompt, then agent_doc_finalize for binary-owned closeout; do not patch session documents directly."
     })
 }
 
@@ -149,7 +149,9 @@ fn finalize_input_schema() -> Value {
     );
     properties.insert(
         "baseline_file".to_string(),
-        string_property(Some("Optional baseline file from agent_doc_preflight.")),
+        string_property(Some(
+            "Optional baseline file from agent_doc_preflight for legacy flows.",
+        )),
     );
     properties.insert(
         "template".to_string(),
@@ -232,6 +234,18 @@ fn tools_list_result() -> Value {
                 }
             },
             {
+                "name": "agent_doc_admit",
+                "title": "Admit agent-doc response turn",
+                "description": "Open a lightweight response-cycle checkpoint for a live session prompt without running legacy preflight maintenance.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file": { "type": "string", "description": "Path to the session document." }
+                    },
+                    "required": ["file"]
+                }
+            },
+            {
                 "name": "agent_doc_preflight",
                 "title": "Run agent-doc preflight",
                 "description": "Run preflight for a session document and return its JSON report plus captured diagnostics.",
@@ -298,6 +312,7 @@ fn handle_tools_call(params: Option<&Value>) -> std::result::Result<Value, McpPr
 
     let result = match name {
         "agent_doc_read" => tool_read(&args),
+        "agent_doc_admit" => tool_admit(&args),
         "agent_doc_preflight" => tool_preflight(&args),
         "agent_doc_plan" => tool_plan(&args),
         "agent_doc_session_check" => tool_session_check(&args),
@@ -326,6 +341,20 @@ fn tool_read(args: &Map<String, Value>) -> Result<Value> {
         "content": content,
     });
     Ok(tool_success_result(content, structured))
+}
+
+fn tool_admit(args: &Map<String, Value>) -> Result<Value> {
+    let file = required_path_arg(args, "file")?;
+    let admit = agent_doc_orchestration::admit::admit(&file)?;
+    let structured = json!({
+        "ok": true,
+        "file": file.display().to_string(),
+        "admission": admit,
+    });
+    Ok(tool_success_result(
+        serde_json::to_string_pretty(&structured)?,
+        structured,
+    ))
 }
 
 fn tool_preflight(args: &Map<String, Value>) -> Result<Value> {
@@ -451,6 +480,7 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
         review_edit: string_vec_arg(args, "review_edit")?,
         review_remove: string_vec_arg(args, "review_remove")?,
         review_resolve: string_vec_arg(args, "review_resolve")?,
+        queue_completion_ids: Vec::new(),
         allow_replace_pending: bool_arg(args, "allow_replace_pending", false)?,
         pending_only: false,
         status: optional_string_arg(args, "status")?,
@@ -644,6 +674,7 @@ mod tests {
             .filter_map(|tool| tool["name"].as_str())
             .collect();
         assert!(names.contains(&"agent_doc_read"));
+        assert!(names.contains(&"agent_doc_admit"));
         assert!(names.contains(&"agent_doc_preflight"));
         assert!(names.contains(&"agent_doc_plan"));
         assert!(names.contains(&"agent_doc_session_check"));
@@ -719,10 +750,46 @@ mod tests {
     }
 
     #[test]
-    fn tool_errors_are_tool_results() {
+    fn admit_tool_opens_lightweight_cycle() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let file = root.join("session.md");
+        let content = "---\nagent_doc_session: sid-1\n---\n\n# Session\n\n❯ Please inspect\n";
+        std::fs::write(&file, content).unwrap();
+
         let response = response_for(json!({
             "jsonrpc": "2.0",
             "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "agent_doc_admit",
+                "arguments": { "file": file.display().to_string() }
+            }
+        }));
+
+        assert_eq!(response["result"]["isError"], false);
+        let admission = &response["result"]["structuredContent"]["admission"];
+        assert_eq!(admission["admitted"], true);
+        assert_eq!(admission["source"], "admit");
+        assert_eq!(admission["maintenance_required"], false);
+        assert_eq!(admission["preflight_required"], false);
+        assert_eq!(admission["cycle_phase"], "preflight_started");
+
+        let state = agent_doc_orchestration::cycle_state::load(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            state.phase,
+            agent_doc_orchestration::cycle_state::CyclePhase::PreflightStarted
+        );
+    }
+
+    #[test]
+    fn tool_errors_are_tool_results() {
+        let response = response_for(json!({
+            "jsonrpc": "2.0",
+            "id": 5,
             "method": "tools/call",
             "params": {
                 "name": "agent_doc_read",

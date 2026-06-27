@@ -34,6 +34,11 @@ struct PendingMaintenanceOptions {
     force_disk: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct GateVerifyOptions {
+    force_disk: bool,
+}
+
 /// Run pending-component maintenance: lazy backfill, reap `[x]`, and reorder detection.
 ///
 /// Any write-through (backfill / reap) is persisted and committed in the same pass.
@@ -750,6 +755,19 @@ pub(crate) fn review_counts(content: &str) -> (usize, usize) {
 /// Returns the per-item results for the preflight output. Best-effort: a missing
 /// `ops.log`, no review component, or no predicates yields an empty vector.
 pub(crate) fn run_gate_verify(file: &Path, autoverify: bool) -> Result<Vec<GateVerifyResult>> {
+    run_gate_verify_with_options(file, autoverify, GateVerifyOptions::default())
+}
+
+#[cfg(test)]
+fn run_gate_verify_force_disk(file: &Path, autoverify: bool) -> Result<Vec<GateVerifyResult>> {
+    run_gate_verify_with_options(file, autoverify, GateVerifyOptions { force_disk: true })
+}
+
+fn run_gate_verify_with_options(
+    file: &Path,
+    autoverify: bool,
+    options: GateVerifyOptions,
+) -> Result<Vec<GateVerifyResult>> {
     let content = match std::fs::read_to_string(file) {
         Ok(c) => c,
         Err(_) => return Ok(Vec::new()),
@@ -853,9 +871,13 @@ pub(crate) fn run_gate_verify(file: &Path, autoverify: bool) -> Result<Vec<GateV
             new_body = crate::pending::op_done(&new_body, id)?;
         }
         let new_content = review.replace_content(&content, &new_body);
-        // `#fcc0`: converge the gate flip through the editor IPC when a live JB
-        // listener is active (no `File Cache Conflict`); plain disk write otherwise.
-        crate::write::converge_or_disk_write(file, &content, &new_content, "optverify_resolve")?;
+        persist_pending_maintenance_doc(
+            file,
+            &content,
+            &new_content,
+            "optverify_resolve",
+            options.force_disk,
+        )?;
         // Keep the snapshot in lockstep so the upcoming commit stages the flip.
         if let Some(snap) = snapshot::load(file)?
             && let Ok(snap_comps) = crate::component::parse(&snap)
@@ -1241,6 +1263,260 @@ pub(crate) fn dedup_queue_nodes_by_key(content: &str) -> Result<Option<(String, 
         })?;
     let dropped = before_nodes.len().saturating_sub(after_nodes.len());
     Ok(Some((updated, dropped)))
+}
+
+fn selected_queue_head_node_key(content: &str, head_text: &str) -> Option<String> {
+    if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+        && let Some(node) = nodes.into_iter().find(|node| !node.item.struck)
+    {
+        return Some(node.node_key);
+    }
+    let trimmed = head_text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let hash = crate::ops_log::content_hash(trimmed);
+    let short_hash = &hash[..hash.len().min(12)];
+    Some(format!("queue:entry:0:{short_hash}"))
+}
+
+fn record_selected_queue_head_state(
+    file: &Path,
+    content: &str,
+    head_text: &str,
+    drainable: bool,
+) -> Result<()> {
+    let canonical = file.canonicalize().with_context(|| {
+        format!(
+            "queue maintenance: failed to canonicalize {}",
+            file.display()
+        )
+    })?;
+    let Some(project_root) = crate::fs_util::find_project_root(&canonical) else {
+        return Ok(());
+    };
+    let Some(node_key) = selected_queue_head_node_key(content, head_text) else {
+        return Ok(());
+    };
+    let document_hash = crate::pending_cmd::doc_id_for(&canonical);
+    let content_hash = crate::ops_log::content_hash(head_text);
+    let event = crate::state_backbone::StateEvent::new(
+        format!("queue-head-selected:{document_hash}:{node_key}:0:{content_hash}"),
+        crate::state_backbone::StateFact::QueueHeadSelected {
+            document_hash: document_hash.clone(),
+            node_key: node_key.clone(),
+            backlog_id: queue_prompt_done_id(head_text),
+            prompt_text: Some(head_text.to_string()),
+            drainable,
+            hosting_epoch: None,
+        },
+    );
+    let inserted = crate::project_controller::append_state_event(&project_root, &event)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "queue_selected_state_event_recorded file={} event_id={} inserted={} document_hash={} node_id={} drainable={}",
+            file.display(),
+            event.event_id,
+            inserted,
+            document_hash,
+            node_key,
+            drainable
+        ),
+    );
+    Ok(())
+}
+
+fn record_deferred_queue_head_state(
+    file: &Path,
+    content: &str,
+    head_text: &str,
+    reason: &str,
+) -> Result<()> {
+    let canonical = file.canonicalize().with_context(|| {
+        format!(
+            "queue maintenance: failed to canonicalize {}",
+            file.display()
+        )
+    })?;
+    let Some(project_root) = crate::fs_util::find_project_root(&canonical) else {
+        return Ok(());
+    };
+    let Some(node_key) = selected_queue_head_node_key(content, head_text) else {
+        return Ok(());
+    };
+    let document_hash = crate::pending_cmd::doc_id_for(&canonical);
+    let content_hash = crate::ops_log::content_hash(head_text);
+    let selected_event = crate::state_backbone::StateEvent::new(
+        format!("queue-head-deferred-selected:{document_hash}:{node_key}:0:{content_hash}"),
+        crate::state_backbone::StateFact::QueueHeadSelected {
+            document_hash: document_hash.clone(),
+            node_key: node_key.clone(),
+            backlog_id: queue_prompt_done_id(head_text),
+            prompt_text: Some(head_text.to_string()),
+            drainable: false,
+            hosting_epoch: None,
+        },
+    );
+    let selected_inserted =
+        crate::project_controller::append_state_event(&project_root, &selected_event)?;
+    let reason_hash = crate::ops_log::content_hash(reason);
+    let deferred_event = crate::state_backbone::StateEvent::new(
+        format!("queue-head-deferred:{document_hash}:{node_key}:0:{reason_hash}:{content_hash}"),
+        crate::state_backbone::StateFact::QueueHeadDeferred {
+            document_hash: document_hash.clone(),
+            node_key: node_key.clone(),
+            reason: reason.to_string(),
+            hosting_epoch: None,
+        },
+    );
+    let deferred_inserted =
+        crate::project_controller::append_state_event(&project_root, &deferred_event)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "queue_deferred_state_event_recorded file={} selected_event_id={} selected_inserted={} deferred_event_id={} deferred_inserted={} document_hash={} node_id={} reason={}",
+            file.display(),
+            selected_event.event_id,
+            selected_inserted,
+            deferred_event.event_id,
+            deferred_inserted,
+            document_hash,
+            node_key,
+            reason
+        ),
+    );
+    Ok(())
+}
+
+fn queue_worklist_hash(entries: &[crate::queue::QueueEntry]) -> String {
+    crate::ops_log::content_hash(&crate::queue::render(entries))
+}
+
+fn queue_prompt_node_key(
+    nodes: &[agent_doc_markdown_ast::mutations::MutationItemNode],
+    used_nodes: &mut [bool],
+    prompt_text: &str,
+    index: usize,
+) -> Option<String> {
+    let normalized_prompt = crate::queue::strip_in_progress_marker(prompt_text)
+        .trim()
+        .to_string();
+    for (node_index, node) in nodes.iter().enumerate() {
+        if used_nodes.get(node_index).copied().unwrap_or(false) || node.item.struck {
+            continue;
+        }
+        let node_text = crate::queue::strip_in_progress_marker(node.item.text.trim());
+        if node_text.trim() == normalized_prompt {
+            if let Some(used) = used_nodes.get_mut(node_index) {
+                *used = true;
+            }
+            return Some(node.node_key.clone());
+        }
+    }
+    let trimmed = normalized_prompt.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let hash = crate::ops_log::content_hash(trimmed);
+    let short_hash = &hash[..hash.len().min(12)];
+    Some(format!("queue:entry:{index}:{short_hash}"))
+}
+
+fn queue_worklist_entries(
+    content: &str,
+    entries: &[crate::queue::QueueEntry],
+) -> Vec<crate::state_backbone::QueueWorklistEntry> {
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").unwrap_or_default();
+    let mut used_nodes = vec![false; nodes.len()];
+    let mut prompt_index = 0usize;
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            crate::queue::QueueEntry::Prompt(prompt) => {
+                let text = crate::queue::strip_in_progress_marker(&prompt.text);
+                let node_key = queue_prompt_node_key(&nodes, &mut used_nodes, &text, prompt_index);
+                prompt_index += 1;
+                Some(crate::state_backbone::QueueWorklistEntry {
+                    kind: crate::state_backbone::QueueWorklistEntryKind::Prompt,
+                    text,
+                    node_key,
+                    backlog_id: queue_prompt_done_id(&prompt.text),
+                    drainable: true,
+                })
+            }
+            crate::queue::QueueEntry::Preset(preset) => {
+                Some(crate::state_backbone::QueueWorklistEntry {
+                    kind: crate::state_backbone::QueueWorklistEntryKind::Preset,
+                    text: preset.clone(),
+                    node_key: None,
+                    backlog_id: None,
+                    drainable: false,
+                })
+            }
+            crate::queue::QueueEntry::Dispatch(preset) => {
+                Some(crate::state_backbone::QueueWorklistEntry {
+                    kind: crate::state_backbone::QueueWorklistEntryKind::Dispatch,
+                    text: preset.clone(),
+                    node_key: None,
+                    backlog_id: None,
+                    drainable: false,
+                })
+            }
+            crate::queue::QueueEntry::Completed(_)
+            | crate::queue::QueueEntry::StartFence(_)
+            | crate::queue::QueueEntry::StopFence
+            | crate::queue::QueueEntry::Freeform(_) => None,
+        })
+        .collect()
+}
+
+fn record_queue_worklist_state(
+    file: &Path,
+    content: &str,
+    entries: &[crate::queue::QueueEntry],
+    active: bool,
+) -> Result<()> {
+    let canonical = file.canonicalize().with_context(|| {
+        format!(
+            "queue maintenance: failed to canonicalize {}",
+            file.display()
+        )
+    })?;
+    let Some(project_root) = crate::fs_util::find_project_root(&canonical) else {
+        return Ok(());
+    };
+    let document_hash = crate::pending_cmd::doc_id_for(&canonical);
+    let queue_hash = queue_worklist_hash(entries);
+    let worklist_entries = if active {
+        queue_worklist_entries(content, entries)
+    } else {
+        Vec::new()
+    };
+    let event = crate::state_backbone::StateEvent::new(
+        format!("queue-worklist-projected:{document_hash}:{active}:{queue_hash}"),
+        crate::state_backbone::StateFact::QueueWorklistProjected {
+            document_hash: document_hash.clone(),
+            queue_hash: queue_hash.clone(),
+            entries: worklist_entries,
+            active,
+            hosting_epoch: None,
+        },
+    );
+    let inserted = crate::project_controller::append_state_event(&project_root, &event)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "queue_worklist_state_event_recorded file={} event_id={} inserted={} document_hash={} queue_hash={} active={}",
+            file.display(),
+            event.event_id,
+            inserted,
+            document_hash,
+            queue_hash,
+            active
+        ),
+    );
+    Ok(())
 }
 
 pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
@@ -2054,8 +2330,10 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 // `semantic_queue_strike_matches` scored. Normalized text is the
                 // stable free-text head identity (same key the `#qauthorder`
                 // dedup uses).
-                let mut by_norm: std::collections::HashMap<String, crate::memory_cmd::QueueStrikeMatch> =
-                    std::collections::HashMap::new();
+                let mut by_norm: std::collections::HashMap<
+                    String,
+                    crate::memory_cmd::QueueStrikeMatch,
+                > = std::collections::HashMap::new();
                 for m in strike_matches {
                     by_norm.entry(gate_norm(&m.candidate_text)).or_insert(m);
                 }
@@ -2226,6 +2504,11 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     }
                 }
             }
+            record_queue_worklist_state(file, &current_content, &after_stop, false)?;
+            if let Some(head) = crate::queue::first_prompt(&after_stop) {
+                let head_text = crate::queue::strip_in_progress_marker(&head.text);
+                record_deferred_queue_head_state(file, &current_content, &head_text, "stop_fence")?;
+            }
             return Ok(QueueState {
                 queue_prompts: vec![],
                 queue_active: Some(false),
@@ -2246,6 +2529,12 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         // Time gate at head → defer if not yet time
         if let Some(dt) = crate::queue::time_gate_at_head(&activation.entries_after) {
             eprintln!("[preflight] queue: deferred — time gate at head: {}", dt);
+            record_queue_worklist_state(file, &current_content, &activation.entries_after, false)?;
+            if let Some(head) = crate::queue::first_prompt(&activation.entries_after) {
+                let head_text = crate::queue::strip_in_progress_marker(&head.text);
+                let reason = format!("time_gate:{dt}");
+                record_deferred_queue_head_state(file, &current_content, &head_text, &reason)?;
+            }
             return Ok(QueueState {
                 queue_prompts: vec![],
                 queue_active: None,
@@ -2371,6 +2660,21 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                         {
                             eprintln!("[preflight] queue halt: snapshot sync warning: {}", e);
                         }
+                    }
+                    record_queue_worklist_state(
+                        file,
+                        &current_content,
+                        &activation.entries_after,
+                        false,
+                    )?;
+                    if let Some(head) = crate::queue::first_prompt(&activation.entries_after) {
+                        let head_text = crate::queue::strip_in_progress_marker(&head.text);
+                        record_deferred_queue_head_state(
+                            file,
+                            &current_content,
+                            &head_text,
+                            "item_modified",
+                        )?;
                     }
                     return Ok(QueueState {
                         queue_prompts: vec![],
@@ -2671,6 +2975,33 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // (or otherwise non-actionable) head stops perpetually reporting `no_changes:false`.
     let queue_supervisor_drainable = activation.active
         && crate::queue_continuation::live_drainable_continuation_head(file, &content).is_some();
+    record_queue_worklist_state(
+        file,
+        &current_content,
+        &activation.entries_after,
+        activation.active,
+    )?;
+    if activation.active
+        && let Some(head) = crate::queue::prompts(&activation.entries_after).first()
+    {
+        let head_text = crate::queue::strip_in_progress_marker(&head.text);
+        record_selected_queue_head_state(
+            file,
+            &current_content,
+            &head_text,
+            queue_supervisor_drainable,
+        )?;
+    } else if activation.deferred
+        && let Some(head) = crate::queue::first_prompt(&activation.entries_after)
+    {
+        let head_text = crate::queue::strip_in_progress_marker(&head.text);
+        let reason = activation
+            .start_at
+            .as_deref()
+            .map(|start_at| format!("time_gate:{start_at}"))
+            .unwrap_or_else(|| "deferred".to_string());
+        record_deferred_queue_head_state(file, &current_content, &head_text, &reason)?;
+    }
 
     Ok(QueueState {
         queue_prompts,
@@ -3977,6 +4308,72 @@ mod tests {
             "marker `stop` token must be stripped after halt:\n{updated}"
         );
     }
+
+    #[test]
+    fn run_queue_maintenance_stop_fence_records_typed_deferred_head() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n",
+            "agent_doc_write: crdt\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n--- stop\n- do [#alpha]\n<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(state.queue_halted.as_deref(), Some("stop_fence"));
+        assert_eq!(state.queue_active, Some(false));
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !updated.contains("--- stop"),
+            "stop fence should be consumed from halted queue:\n{updated}"
+        );
+        let node_key = agent_doc_markdown_ast::mutations::item_nodes(&updated, "queue")
+            .unwrap()
+            .into_iter()
+            .find(|node| !node.item.struck)
+            .expect("deferred queue head should retain a node key")
+            .node_key;
+        let document_hash = crate::pending_cmd::doc_id_for(&doc);
+        let ledger = crate::project_controller::load_state_event_ledger(dir.path()).unwrap();
+        let projection = ledger
+            .project_document(&document_hash)
+            .expect("deferred queue state should project for document");
+        assert_eq!(projection.queue.active_head, None);
+        let head = projection
+            .queue
+            .heads
+            .get(&node_key)
+            .expect("deferred queue head should be present in projection");
+        assert_eq!(head.phase, crate::state_backbone::QueueHeadPhase::Deferred);
+        assert_eq!(head.backlog_id.as_deref(), Some("alpha"));
+        assert_eq!(head.prompt_text.as_deref(), Some("do [#alpha]"));
+        assert_eq!(head.defer_reason.as_deref(), Some("stop_fence"));
+        assert!(!head.drainable);
+
+        record_selected_queue_head_state(&doc, &updated, "do [#alpha]", true).unwrap();
+        let ledger = crate::project_controller::load_state_event_ledger(dir.path()).unwrap();
+        let projection = ledger
+            .project_document(&document_hash)
+            .expect("reselected queue state should project for document");
+        assert_eq!(
+            projection.queue.active_head.as_deref(),
+            Some(node_key.as_str())
+        );
+        let head = projection
+            .queue
+            .heads
+            .get(&node_key)
+            .expect("reselected queue head should be present in projection");
+        assert_eq!(head.phase, crate::state_backbone::QueueHeadPhase::Selected);
+        assert_eq!(head.defer_reason, None);
+        assert!(head.drainable);
+    }
+
     #[test]
     fn run_queue_maintenance_excludes_done_ids_from_backlog_sync() {
         // #ynra: a lingering active backlog `[ ]` bullet whose id is also archived
@@ -4261,6 +4658,44 @@ mod tests {
         assert!(updated.contains("- [ ] 🚧 [#alpha] active work"));
         assert!(updated.contains("- [ ] [#beta] stale work"));
         assert!(updated.contains("- [ ] [#cold] stale parked work"));
+
+        let node_key = agent_doc_markdown_ast::mutations::item_nodes(&updated, "queue")
+            .unwrap()
+            .into_iter()
+            .find(|node| !node.item.struck)
+            .expect("active queue head should have a node key")
+            .node_key;
+        let document_hash = crate::pending_cmd::doc_id_for(&doc);
+        let ledger = crate::project_controller::load_state_event_ledger(dir.path()).unwrap();
+        let projection = ledger
+            .project_document(&document_hash)
+            .expect("selected queue state should project for document");
+        assert_eq!(
+            projection.queue.active_head.as_deref(),
+            Some(node_key.as_str())
+        );
+        let head = projection
+            .queue
+            .heads
+            .get(&node_key)
+            .expect("selected queue head should be present in projection");
+        assert_eq!(head.phase, crate::state_backbone::QueueHeadPhase::Selected);
+        assert_eq!(head.backlog_id.as_deref(), Some("alpha"));
+        assert_eq!(head.prompt_text.as_deref(), Some("do [#alpha]"));
+        assert!(head.drainable);
+        assert!(projection.queue.worklist_active);
+        assert_eq!(projection.queue.worklist.len(), 2);
+        assert_eq!(
+            projection.queue.worklist[0].kind,
+            crate::state_backbone::QueueWorklistEntryKind::Prompt
+        );
+        assert_eq!(projection.queue.worklist[0].text, "do [#alpha]");
+        assert_eq!(
+            projection.queue.worklist[1].kind,
+            crate::state_backbone::QueueWorklistEntryKind::Prompt
+        );
+        assert_eq!(projection.queue.worklist[1].text, "do [#beta]");
+        assert!(projection.queue.worklist_queue_hash.is_some());
     }
 
     #[test]
@@ -4452,10 +4887,11 @@ mod tests {
         );
 
         let done_ids = vec!["newhead".to_string()];
-        let outcome =
-            crate::write::consume_queue_prompts_for_done_ids_with_outcome(&doc, &done_ids)
-                .unwrap()
-                .expect("newly activated queue head should be consumable");
+        let outcome = crate::write::consume_queue_prompts_for_done_ids_force_disk_with_outcome(
+            &doc, &done_ids,
+        )
+        .unwrap()
+        .expect("newly activated queue head should be consumable");
         assert_eq!(outcome.consumed_count, 1);
         assert_eq!(outcome.remaining, 1);
 
@@ -5036,7 +5472,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        run_pending_maintenance(&doc).unwrap();
+        run_pending_maintenance_force_disk(&doc).unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -5070,7 +5506,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        let report = run_pending_maintenance(&doc).unwrap();
+        let report = run_pending_maintenance_force_disk(&doc).unwrap();
         assert!(!report.reordered);
         assert_eq!(report.pending_gated_count, 0);
 
@@ -5125,7 +5561,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        let report = run_pending_maintenance(&doc).unwrap();
+        let report = run_pending_maintenance_force_disk(&doc).unwrap();
         assert_eq!(report.pending_gated_count, 0);
         assert_eq!(report.review_count, 1);
         assert_eq!(report.review_gated_count, 1);
@@ -5189,7 +5625,7 @@ mod tests {
         crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
         crate::cycle_state::record_pending_added_ids(&doc, &["freshgate".to_string()]).unwrap();
 
-        run_pending_maintenance(&doc).unwrap();
+        run_pending_maintenance_force_disk(&doc).unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         // The freshly added gated item survives — not reaped on its first cycle.
@@ -5219,7 +5655,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        run_pending_maintenance(&doc).unwrap();
+        run_pending_maintenance_force_disk(&doc).unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         let backlog_after = crate::component::parse(&file_after)
@@ -5254,7 +5690,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        run_pending_maintenance(&doc).unwrap();
+        run_pending_maintenance_force_disk(&doc).unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -5295,7 +5731,7 @@ mod tests {
         std::fs::write(&doc, file_content).unwrap();
         snapshot::save(&doc, snapshot_content).unwrap();
 
-        run_pending_maintenance(&doc).unwrap();
+        run_pending_maintenance_force_disk(&doc).unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         let backlog_after = crate::component::parse(&file_after)
@@ -5339,7 +5775,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        let report = run_pending_maintenance(&doc).unwrap();
+        let report = run_pending_maintenance_force_disk(&doc).unwrap();
         assert_eq!(report.pending_gated_count, 0);
         assert_eq!(report.review_count, 1);
         assert_eq!(report.review_gated_count, 1);
@@ -5412,7 +5848,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        let report = run_pending_maintenance(&doc).unwrap();
+        let report = run_pending_maintenance_force_disk(&doc).unwrap();
         assert_eq!(report.review_count, 1);
         assert_eq!(report.review_gated_count, 1);
 
@@ -5481,7 +5917,7 @@ mod tests {
         std::fs::write(&doc, current).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(baseline), Some(current)).unwrap();
 
-        let report = run_pending_maintenance(&doc).unwrap();
+        let report = run_pending_maintenance_force_disk(&doc).unwrap();
         assert!(!report.reordered);
         assert_eq!(report.pending_gated_count, 0);
         let rc = crate::graph::RunContext::new(doc.clone());
@@ -5507,7 +5943,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        let report = run_pending_maintenance(&doc).unwrap();
+        let report = run_pending_maintenance_force_disk(&doc).unwrap();
         assert!(!report.reordered);
         assert_eq!(report.pending_gated_count, 0);
 
@@ -5574,7 +6010,7 @@ mod tests {
         std::fs::write(&doc, file_content).unwrap();
         snapshot::save(&doc, snapshot_content).unwrap();
 
-        run_pending_maintenance(&doc).unwrap();
+        run_pending_maintenance_force_disk(&doc).unwrap();
 
         let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
         let comps = crate::component::parse(&snapshot_after).unwrap();
@@ -5636,7 +6072,7 @@ mod tests {
         let doc = write_optverify_doc(&dir, &pred);
         write_ops_log(&dir, "[150] early_ack_pending emitted ok\n");
 
-        let results = run_gate_verify(&doc, true).unwrap();
+        let results = run_gate_verify_force_disk(&doc, true).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, "provable");
         assert!(results[0].auto_resolved);
@@ -5667,7 +6103,7 @@ mod tests {
             "[150] early_ack_pending emitted\n[160] looks like a manual cleanup\n",
         );
 
-        let results = run_gate_verify(&doc, true).unwrap();
+        let results = run_gate_verify_force_disk(&doc, true).unwrap();
         assert_eq!(results[0].status, "failed", "disproof wins");
         assert!(!results[0].auto_resolved);
         let after = std::fs::read_to_string(&doc).unwrap();
@@ -5681,7 +6117,7 @@ mod tests {
         let dir = setup_project();
         let doc = write_optverify_doc(&dir, "");
         write_ops_log(&dir, "[150] early_ack_pending emitted\n");
-        let results = run_gate_verify(&doc, true).unwrap();
+        let results = run_gate_verify_force_disk(&doc, true).unwrap();
         assert!(results.is_empty(), "no predicate → no results");
     }
     #[test]
@@ -5744,7 +6180,7 @@ mod tests {
             "[150] [s760] clear-decision optIn=true threshold=50 pct=50.0 clear=true\n",
         );
 
-        let results = run_gate_verify(&doc, true).unwrap();
+        let results = run_gate_verify_force_disk(&doc, true).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, "provable");
         assert!(results[0].auto_resolved);
@@ -5796,7 +6232,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        run_pending_maintenance(&doc).unwrap();
+        run_pending_maintenance_force_disk(&doc).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         let high = updated.find("[#high]").unwrap();

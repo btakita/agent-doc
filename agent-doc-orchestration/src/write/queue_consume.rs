@@ -3,15 +3,15 @@
 use super::*;
 
 pub(crate) struct QueueConsumptionPlan {
-    consumed_text: String,
-    consumed_texts: Vec<String>,
-    node_ops: Vec<IpcNodeOp>,
-    remaining: usize,
-    drained: bool,
-    auto: bool,
-    new_document: String,
-    new_snapshot: String,
-    save_snapshot: bool,
+    pub(crate) consumed_text: String,
+    pub(crate) consumed_texts: Vec<String>,
+    pub(crate) node_ops: Vec<IpcNodeOp>,
+    pub(crate) remaining: usize,
+    pub(crate) drained: bool,
+    pub(crate) auto: bool,
+    pub(crate) new_document: String,
+    pub(crate) new_snapshot: String,
+    pub(crate) save_snapshot: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +65,13 @@ pub fn consume_queue_prompts_for_done_ids_with_outcome(
     consume_queue_prompts_with_outcome(file, done_ids, false)
 }
 
+pub fn consume_queue_prompts_for_done_ids_force_disk_with_outcome(
+    file: &Path,
+    done_ids: &[String],
+) -> Result<Option<QueueConsumptionOutcome>> {
+    consume_queue_prompts_with_outcome(file, done_ids, true)
+}
+
 /// Strike the active queue head, **skipping the visible-write idle guard**, for
 /// the repair recovery path (`#repair-strike-consumed-head`). Repair already
 /// writes the recovered response straight to disk (bypassing IPC/IDE), so the
@@ -90,6 +97,8 @@ pub(crate) fn consume_queue_prompts_with_outcome(
         return Ok(None);
     };
 
+    record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::BeforeMutation)?;
+
     // `#fcc0`: converge the queue-consume write through the editor IPC when a JB
     // listener is active (no `File Cache Conflict` dialog); fall back to the
     // guarded disk write otherwise. The force-disk repair path keeps its raw
@@ -104,6 +113,7 @@ pub(crate) fn consume_queue_prompts_with_outcome(
     if plan.save_snapshot {
         snapshot::save(file, &plan.new_snapshot)?;
     }
+    record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::AfterMutation)?;
 
     let outcome = QueueConsumptionOutcome {
         consumed_text: plan.consumed_text.clone(),
@@ -147,6 +157,271 @@ pub(crate) fn consume_queue_prompts_with_outcome(
     }
 
     Ok(Some(outcome))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QueueConsumptionProofStage {
+    BeforeMutation,
+    AfterMutation,
+}
+
+pub(crate) fn record_queue_consumption_proofs(
+    file: &Path,
+    plan: &QueueConsumptionPlan,
+    stage: QueueConsumptionProofStage,
+) -> Result<()> {
+    let canonical = file
+        .canonicalize()
+        .with_context(|| format!("queue consume: failed to canonicalize {}", file.display()))?;
+    let Some(project_root) = crate::fs_util::find_project_root(&canonical) else {
+        eprintln!(
+            "[queue] warning: proof ledger unavailable for {}: project root not found",
+            file.display()
+        );
+        return Ok(());
+    };
+    let document_hash = queue_state_document_hash(&canonical);
+    for (index, consumed_text) in plan.consumed_texts.iter().enumerate() {
+        let content_hash = crate::ops_log::content_hash(consumed_text);
+        let node_id = plan
+            .node_ops
+            .get(index)
+            .map(|op| op.node_id.as_str())
+            .unwrap_or("<missing-node>");
+        let operation_id = format!("queue_head:{node_id}:{index}");
+        let (outcome, proof_kind, proof) = match stage {
+            QueueConsumptionProofStage::BeforeMutation => (
+                crate::flow::proof_ledger::ProofOutcome::Recorded,
+                crate::flow::proof_ledger::ProofEvidenceKind::QueueHeadIdentity,
+                format!(
+                    "phase=before_mutation node_id={} index={} consumed_count={} text_hash={} text={:?}",
+                    node_id,
+                    index,
+                    plan.consumed_texts.len(),
+                    content_hash,
+                    consumed_text
+                ),
+            ),
+            QueueConsumptionProofStage::AfterMutation => (
+                crate::flow::proof_ledger::ProofOutcome::Consumed,
+                crate::flow::proof_ledger::ProofEvidenceKind::WriteResult,
+                format!(
+                    "phase=after_mutation node_id={} index={} remaining={} drained={} auto={} save_snapshot={}",
+                    node_id, index, plan.remaining, plan.drained, plan.auto, plan.save_snapshot
+                ),
+            ),
+        };
+        let record = crate::flow::proof_ledger::OperationProofRecord::new(
+            crate::flow::proof_ledger::OperationProofInput {
+                operation_id,
+                operation_kind: crate::flow::proof_ledger::ProofOperationKind::QueueHead,
+                outcome,
+                subject_id: Some(node_id.to_string()),
+                content_hash,
+                proof_kind,
+                proof,
+                recorded_at_ms: now_millis(),
+            },
+        )?;
+        let path =
+            crate::flow::proof_ledger::append_operation_proof(&project_root, &canonical, &record)?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "queue_consume_proof_recorded file={} stage={:?} operation_id={} ledger={}",
+                file.display(),
+                stage,
+                record.operation_id,
+                path.display()
+            ),
+        );
+        record_queue_consumption_state_event(QueueConsumptionStateEvent {
+            file,
+            project_root: &project_root,
+            document_hash: &document_hash,
+            node_id,
+            index,
+            consumed_text,
+            content_hash: &record.content_hash,
+            stage,
+        })?;
+    }
+    if stage == QueueConsumptionProofStage::AfterMutation && !plan.drained {
+        record_next_queue_head_selected_state(
+            file,
+            &project_root,
+            &document_hash,
+            &plan.new_document,
+        )?;
+    }
+    Ok(())
+}
+
+fn queue_state_document_hash(file: &Path) -> String {
+    crate::pending_cmd::doc_id_for(file)
+}
+
+struct QueueConsumptionStateEvent<'a> {
+    file: &'a Path,
+    project_root: &'a Path,
+    document_hash: &'a str,
+    node_id: &'a str,
+    index: usize,
+    consumed_text: &'a str,
+    content_hash: &'a str,
+    stage: QueueConsumptionProofStage,
+}
+
+fn record_queue_consumption_state_event(args: QueueConsumptionStateEvent<'_>) -> Result<()> {
+    let QueueConsumptionStateEvent {
+        file,
+        project_root,
+        document_hash,
+        node_id,
+        index,
+        consumed_text,
+        content_hash,
+        stage,
+    } = args;
+    let backlog_id = queue_prompt_done_id(consumed_text);
+    let (event_id, fact) = match stage {
+        QueueConsumptionProofStage::BeforeMutation => (
+            format!("queue-head-selected:{document_hash}:{node_id}:{index}:{content_hash}"),
+            crate::state_backbone::StateFact::QueueHeadSelected {
+                document_hash: document_hash.to_string(),
+                node_key: node_id.to_string(),
+                backlog_id,
+                prompt_text: Some(consumed_text.to_string()),
+                drainable: true,
+                hosting_epoch: None,
+            },
+        ),
+        QueueConsumptionProofStage::AfterMutation => (
+            format!("queue-head-completed:{document_hash}:{node_id}:{index}:{content_hash}"),
+            crate::state_backbone::StateFact::QueueHeadCompleted {
+                document_hash: document_hash.to_string(),
+                node_key: node_id.to_string(),
+                backlog_id,
+                hosting_epoch: None,
+            },
+        ),
+    };
+    let event = crate::state_backbone::StateEvent::new(event_id, fact);
+    let inserted = crate::project_controller::append_state_event(project_root, &event)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "queue_consume_state_event_recorded file={} stage={:?} event_id={} inserted={} document_hash={} node_id={}",
+            file.display(),
+            stage,
+            event.event_id,
+            inserted,
+            document_hash,
+            node_id
+        ),
+    );
+    Ok(())
+}
+
+fn record_next_queue_head_selected_state(
+    file: &Path,
+    project_root: &Path,
+    document_hash: &str,
+    content: &str,
+) -> Result<()> {
+    let Some((node_key, head_text, stop_fence_at_head)) = next_queue_head_selection(content)?
+    else {
+        return Ok(());
+    };
+    let content_hash = crate::ops_log::content_hash(&head_text);
+    let drainable = !stop_fence_at_head
+        && crate::queue_continuation::live_drainable_continuation_head(file, content).is_some();
+    let selected_event = crate::state_backbone::StateEvent::new(
+        format!("queue-head-selected:{document_hash}:{node_key}:0:{content_hash}"),
+        crate::state_backbone::StateFact::QueueHeadSelected {
+            document_hash: document_hash.to_string(),
+            node_key: node_key.clone(),
+            backlog_id: queue_prompt_done_id(&head_text),
+            prompt_text: Some(head_text.clone()),
+            drainable,
+            hosting_epoch: None,
+        },
+    );
+    let inserted = crate::project_controller::append_state_event(project_root, &selected_event)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "queue_next_selected_state_event_recorded file={} event_id={} inserted={} document_hash={} node_id={} drainable={}",
+            file.display(),
+            selected_event.event_id,
+            inserted,
+            document_hash,
+            node_key,
+            drainable
+        ),
+    );
+    if stop_fence_at_head {
+        let reason = "stop_fence";
+        let reason_hash = crate::ops_log::content_hash(reason);
+        let deferred_event = crate::state_backbone::StateEvent::new(
+            format!(
+                "queue-head-deferred:{document_hash}:{node_key}:0:{reason_hash}:{content_hash}"
+            ),
+            crate::state_backbone::StateFact::QueueHeadDeferred {
+                document_hash: document_hash.to_string(),
+                node_key: node_key.clone(),
+                reason: reason.to_string(),
+                hosting_epoch: None,
+            },
+        );
+        let deferred_inserted =
+            crate::project_controller::append_state_event(project_root, &deferred_event)?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "queue_next_deferred_state_event_recorded file={} event_id={} inserted={} document_hash={} node_id={} reason={}",
+                file.display(),
+                deferred_event.event_id,
+                deferred_inserted,
+                document_hash,
+                node_key,
+                reason
+            ),
+        );
+    }
+    Ok(())
+}
+
+fn next_queue_head_selection(content: &str) -> Result<Option<(String, String, bool)>> {
+    let components = component::parse(content)?;
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(None);
+    };
+    let body = &content[queue_component.open_end..queue_component.close_start];
+    let entries =
+        crate::queue::parse(body).context("queue consume: failed to parse next queue head")?;
+    let stop_fence_at_head = crate::queue::has_stop_fence_at_head(&entries);
+    let Some(head_text) = first_n_queue_prompt_texts(&entries, 1).into_iter().next() else {
+        return Ok(None);
+    };
+    let Some(node_key) = queue_prompt_node_keys_for_count(content, 1)?
+        .keys
+        .into_iter()
+        .next()
+    else {
+        return Ok(None);
+    };
+    Ok(Some((node_key, head_text, stop_fence_at_head)))
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
 }
 
 pub fn should_consume_queue_prompt_for_diff(file: &Path, diff_text: Option<&str>) -> Result<bool> {
@@ -918,8 +1193,7 @@ pub(crate) fn answered_free_text_head_node_keys(
         // marker on an in-flight operator edit (head absent from the pre-turn
         // baseline) is never struck.
         let is_drain_target_marker_head = head_carries_in_progress_marker(text);
-        if !is_drain_target_marker_head
-            && !free_text_head_answered_by_response(response_body, text)
+        if !is_drain_target_marker_head && !free_text_head_answered_by_response(response_body, text)
         {
             continue;
         }
@@ -2256,6 +2530,21 @@ pub(crate) fn plan_queue_prompt_consumption(
     content: &str,
     done_ids: &[String],
 ) -> Result<Option<QueueConsumptionPlan>> {
+    let snapshot_content = snapshot::load(file)?;
+    plan_queue_prompt_consumption_with_snapshot(
+        file,
+        content,
+        snapshot_content.as_deref(),
+        done_ids,
+    )
+}
+
+pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
+    file: &Path,
+    content: &str,
+    snapshot_content: Option<&str>,
+    done_ids: &[String],
+) -> Result<Option<QueueConsumptionPlan>> {
     let (fm, _) = frontmatter::parse(content)?;
     if fm.queue_active != Some(true) {
         return Ok(None);
@@ -2327,10 +2616,10 @@ pub(crate) fn plan_queue_prompt_consumption(
                 current = frontmatter::merge_queue_state(&current, false)?;
             }
 
-            let snap = snapshot::load(file)?.ok_or_else(|| {
+            let snap = snapshot_content.ok_or_else(|| {
                 anyhow::anyhow!("queue consume: queue_active is true but snapshot is missing")
             })?;
-            let snap_comps = component::parse(&snap)?;
+            let snap_comps = component::parse(snap)?;
             let snap_queue = snap_comps
                 .iter()
                 .find(|c| c.name == "queue")
@@ -2355,7 +2644,7 @@ pub(crate) fn plan_queue_prompt_consumption(
                 );
             }
             let snapshot_node_keys =
-                queue_prompt_node_keys_for_done_ids(&snap, done_ids, &snapshot_consumed_texts);
+                queue_prompt_node_keys_for_done_ids(snap, done_ids, &snapshot_consumed_texts);
             let snap_remaining = crate::queue::prompts(&snap_completed_entries).len();
             let snap_new_entries = if snap_remaining == 0 {
                 Vec::new()
@@ -2379,9 +2668,9 @@ pub(crate) fn plan_queue_prompt_consumption(
 
             let mut new_snap =
                 if drained || snap_new_entries != new_entries || !snapshot_node_keys.ast_backed {
-                    snap_queue.replace_content(&snap, &new_body)
+                    snap_queue.replace_content(snap, &new_body)
                 } else {
-                    consume_queue_nodes_by_key(&snap, &snapshot_node_keys.keys)?
+                    consume_queue_nodes_by_key(snap, &snapshot_node_keys.keys)?
                 };
             if drained {
                 if snap_has_auto
@@ -2493,10 +2782,10 @@ pub(crate) fn plan_queue_prompt_consumption(
 
     // Update snapshot in sync. Required closeouts must be able to prove the
     // same head prompt was removed from both the file and the snapshot.
-    let snap = snapshot::load(file)?.ok_or_else(|| {
+    let snap = snapshot_content.ok_or_else(|| {
         anyhow::anyhow!("queue consume: queue_active is true but snapshot is missing")
     })?;
-    let snap_comps = component::parse(&snap)?;
+    let snap_comps = component::parse(snap)?;
     let snap_queue = snap_comps
         .iter()
         .find(|c| c.name == "queue")
@@ -2510,7 +2799,7 @@ pub(crate) fn plan_queue_prompt_consumption(
         crate::queue::parse(snap_body).context("queue consume: failed to parse snapshot queue")?;
     let snap_has_auto = crate::queue::has_auto_attr(&snap_queue.attrs);
     let snapshot_consumed_texts = first_n_queue_prompt_texts(&snap_entries, consume_count);
-    let snapshot_node_keys = queue_prompt_node_keys_for_count(&snap, consume_count)?;
+    let snapshot_node_keys = queue_prompt_node_keys_for_count(snap, consume_count)?;
     if snapshot_consumed_texts.len() != consumed_texts.len() {
         anyhow::bail!(
             "queue consume: snapshot has {} prompt(s) available but document consumed {}",
@@ -2617,9 +2906,9 @@ pub(crate) fn plan_queue_prompt_consumption(
 
     let mut new_snap =
         if drained || snap_new_entries != new_entries || !snapshot_node_keys.ast_backed {
-            snap_queue.replace_content(&snap, &new_body)
+            snap_queue.replace_content(snap, &new_body)
         } else {
-            consume_queue_nodes_by_key(&snap, &snapshot_node_keys.keys)?
+            consume_queue_nodes_by_key(snap, &snapshot_node_keys.keys)?
         };
     if drained {
         if snap_has_auto
@@ -3255,6 +3544,252 @@ mod core_tests {
             "id-backed head must remain runnable:\n{result}"
         );
     }
+
+    #[test]
+    fn queue_consume_records_proof_ledger_before_and_after_mutation() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: Run queued thing\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- Run queued thing\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let outcome = consume_queue_prompt_force_disk(&doc)
+            .unwrap()
+            .expect("free-text head should be consumed");
+
+        assert_eq!(outcome.consumed_text, "Run queued thing");
+        assert_eq!(outcome.consumed_count, 1);
+        assert!(outcome.drained);
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !updated.contains("- Run queued thing"),
+            "drained queue head should be removed:\n{updated}"
+        );
+
+        let canonical = doc.canonicalize().unwrap();
+        let ledger_path = crate::flow::proof_ledger::proof_ledger_path(root, &canonical);
+        let records = crate::flow::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
+        assert_eq!(records.len(), 2, "ledger records: {records:#?}");
+        assert_eq!(
+            records[0].operation_kind,
+            crate::flow::proof_ledger::ProofOperationKind::QueueHead
+        );
+        assert_eq!(
+            records[0].outcome,
+            crate::flow::proof_ledger::ProofOutcome::Recorded
+        );
+        assert_eq!(
+            records[0].proof_kind,
+            crate::flow::proof_ledger::ProofEvidenceKind::QueueHeadIdentity
+        );
+        assert!(records[0].proof.contains("phase=before_mutation"));
+        assert!(records[0].proof.contains("Run queued thing"));
+        assert_eq!(
+            records[0].content_hash,
+            crate::ops_log::content_hash("Run queued thing")
+        );
+        assert_eq!(
+            records[1].operation_kind,
+            crate::flow::proof_ledger::ProofOperationKind::QueueHead
+        );
+        assert_eq!(
+            records[1].outcome,
+            crate::flow::proof_ledger::ProofOutcome::Consumed
+        );
+        assert_eq!(
+            records[1].proof_kind,
+            crate::flow::proof_ledger::ProofEvidenceKind::WriteResult
+        );
+        assert_eq!(records[0].operation_id, records[1].operation_id);
+        assert!(records[1].proof.contains("phase=after_mutation"));
+        assert!(records[1].proof.contains("drained=true"));
+
+        let node_id = outcome
+            .node_ops
+            .first()
+            .expect("consumed queue head should carry a node op")
+            .node_id
+            .clone();
+        let state_ledger = crate::project_controller::load_state_event_ledger(root)
+            .expect("queue state events should reload from sqlite");
+        let queue_events = state_ledger
+            .events()
+            .iter()
+            .filter(|event| {
+                matches!(
+                    &event.fact,
+                    crate::state_backbone::StateFact::QueueHeadSelected { .. }
+                        | crate::state_backbone::StateFact::QueueHeadCompleted { .. }
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(queue_events.len(), 2, "queue events: {queue_events:#?}");
+        assert!(
+            matches!(
+                &queue_events[0].fact,
+                crate::state_backbone::StateFact::QueueHeadSelected { node_key, .. }
+                    if node_key == &node_id
+            ),
+            "first queue state event should select the consumed head: {queue_events:#?}"
+        );
+        assert!(
+            matches!(
+                &queue_events[1].fact,
+                crate::state_backbone::StateFact::QueueHeadCompleted { node_key, .. }
+                    if node_key == &node_id
+            ),
+            "second queue state event should complete the consumed head: {queue_events:#?}"
+        );
+
+        let document_hash = queue_state_document_hash(&canonical);
+        let projection = state_ledger
+            .project_document(&document_hash)
+            .expect("queue state events should project for document");
+        assert_eq!(projection.queue.active_head, None);
+        assert!(
+            projection.queue.completed_heads.contains(&node_id),
+            "completed head should be tracked in typed queue projection: {projection:#?}"
+        );
+        let head = projection
+            .queue
+            .heads
+            .get(&node_id)
+            .expect("completed head should be present in typed queue heads");
+        assert_eq!(head.phase, crate::state_backbone::QueueHeadPhase::Completed);
+        assert_eq!(head.backlog_id, None);
+        assert_eq!(head.prompt_text.as_deref(), Some("Run queued thing"));
+    }
+
+    #[test]
+    fn queue_consume_selects_next_remaining_head_in_typed_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: First queued thing\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- First queued thing\n",
+            "- do [#nextitem]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#nextitem] next item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let outcome = consume_queue_prompt_force_disk(&doc)
+            .unwrap()
+            .expect("first free-text head should be consumed");
+
+        assert_eq!(outcome.consumed_text, "First queued thing");
+        assert_eq!(outcome.remaining, 1);
+        let old_node = outcome.node_ops[0].node_id.clone();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !updated.contains("- First queued thing") && updated.contains("- do [#nextitem]"),
+            "only the first head should be consumed:\n{updated}"
+        );
+
+        let next_node = queue_prompt_node_keys_for_count(&updated, 1)
+            .unwrap()
+            .keys
+            .into_iter()
+            .next()
+            .expect("remaining head should have a node key");
+        let document_hash = queue_state_document_hash(&doc.canonicalize().unwrap());
+        let state_ledger = crate::project_controller::load_state_event_ledger(root)
+            .expect("queue state events should reload from sqlite");
+        let projection = state_ledger
+            .project_document(&document_hash)
+            .expect("queue state events should project for document");
+        assert!(
+            projection.queue.completed_heads.contains(&old_node),
+            "consumed head should be completed in typed projection: {projection:#?}"
+        );
+        assert_eq!(
+            projection.queue.active_head.as_deref(),
+            Some(next_node.as_str())
+        );
+        let next = projection
+            .queue
+            .heads
+            .get(&next_node)
+            .expect("remaining head should be selected in typed projection");
+        assert_eq!(next.phase, crate::state_backbone::QueueHeadPhase::Selected);
+        assert_eq!(next.backlog_id.as_deref(), Some("nextitem"));
+        assert_eq!(next.prompt_text.as_deref(), Some("do [#nextitem]"));
+        assert!(next.drainable);
+    }
+
+    #[test]
+    fn queue_consume_records_stop_fence_next_head_as_deferred_in_typed_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: First queued thing\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- First queued thing\n",
+            "--- stop\n",
+            "- do [#nextitem]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#nextitem] next item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let outcome = consume_queue_prompt_force_disk(&doc)
+            .unwrap()
+            .expect("first head should be consumed");
+
+        assert_eq!(outcome.consumed_text, "First queued thing");
+        assert_eq!(outcome.remaining, 1);
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let next_node = queue_prompt_node_keys_for_count(&updated, 1)
+            .unwrap()
+            .keys
+            .into_iter()
+            .next()
+            .expect("remaining head should have a node key");
+        let document_hash = queue_state_document_hash(&doc.canonicalize().unwrap());
+        let state_ledger = crate::project_controller::load_state_event_ledger(root)
+            .expect("queue state events should reload from sqlite");
+        let projection = state_ledger
+            .project_document(&document_hash)
+            .expect("queue state events should project for document");
+        assert_eq!(projection.queue.active_head, None);
+        let next = projection
+            .queue
+            .heads
+            .get(&next_node)
+            .expect("remaining head should be tracked in typed projection");
+        assert_eq!(next.phase, crate::state_backbone::QueueHeadPhase::Deferred);
+        assert_eq!(next.defer_reason.as_deref(), Some("stop_fence"));
+        assert_eq!(next.prompt_text.as_deref(), Some("do [#nextitem]"));
+        assert!(!next.drainable);
+    }
+
     #[test]
     fn queue_consume_reconciles_diverged_snapshot_instead_of_bailing() {
         // #finalize-divergence-orphans-committed-head / IPC-CRDT resilience: when
@@ -3416,11 +3951,14 @@ mod core_tests {
     }
 
     #[test]
-    fn strike_orphan_id_backed_queue_head_strikes_absent_backing_item() {
+    fn strike_orphan_id_backed_queue_head_fails_closed_without_listener() {
         // #orphanqhead: an id-backed head whose backing backlog item was reaped
         // (absent from agent:backlog) is undrainable — `queue consume` rejects it
-        // and `--done` is a no-op. The escape hatch strikes it in doc + snapshot.
+        // and `--done` is a no-op. The escape hatch must still route through
+        // editor-converged writeback; without a listener it fails closed instead
+        // of writing behind the editor.
         let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("s.md");
         let content = concat!(
             "---\nqueue_active: true\n---\n\n",
@@ -3438,22 +3976,17 @@ mod core_tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        let struck = strike_orphan_id_backed_queue_head(&doc, "orphangone").unwrap();
-        assert!(struck, "the orphaned head must be struck");
+        let keys = id_backed_head_node_keys(content, "orphangone").unwrap();
+        assert_eq!(keys.len(), 1, "the orphaned head must be targetable");
+        let err = strike_orphan_id_backed_queue_head(&doc, "orphangone").unwrap_err();
+        assert!(
+            err.to_string().contains("failed to write document"),
+            "unexpected error: {err:#}"
+        );
         let result = std::fs::read_to_string(&doc).unwrap();
-        assert!(
-            result.contains("~~do [#orphangone]~~"),
-            "orphaned id-backed head must be struck:\n{result}"
-        );
-        assert!(
-            result.contains("- do [#liveone]") && !result.contains("~~do [#liveone]~~"),
-            "the live id-backed head must stay runnable:\n{result}"
-        );
+        assert_eq!(result, content, "no-listener strike must not mutate disk");
         let snap = snapshot::load(&doc).unwrap().unwrap();
-        assert!(
-            snap.contains("~~do [#orphangone]~~"),
-            "snapshot must converge on the struck state:\n{snap}"
-        );
+        assert_eq!(snap, content, "no-listener strike must not mutate snapshot");
     }
     #[test]
     fn strike_orphan_id_backed_queue_head_refuses_open_backlog_item() {
@@ -3788,8 +4321,7 @@ mod core_tests {
         );
         // Plain-prose response with NO blockquote echo of the head: the legacy
         // prose/blockquote answer-match returns false for this head...
-        let prose_only =
-            "### Re: fixed it — opus\n\nI addressed the queue-strike behavior and shipped the fix.\n";
+        let prose_only = "### Re: fixed it — opus\n\nI addressed the queue-strike behavior and shipped the fix.\n";
         assert!(
             !free_text_head_answered_by_response(
                 prose_only,
@@ -3824,8 +4356,7 @@ mod core_tests {
             "<!-- /agent:queue -->\n",
         );
         let prose_only = "### Re: fixed it — opus\n\nDone.\n";
-        let gated =
-            answered_free_text_head_node_keys(content, prose_only, Some(baseline)).unwrap();
+        let gated = answered_free_text_head_node_keys(content, prose_only, Some(baseline)).unwrap();
         assert!(
             gated.is_empty(),
             "a 🚧 marker head absent from the pre-turn baseline must not be struck: {gated:?}"
@@ -4247,7 +4778,10 @@ Old.
             Some(vec!["foo".to_string()])
         );
         // Any free-text prose token makes the head free text (returns None).
-        assert_eq!(topic_resolves_to_only_id_directives("do #foo then ship it"), None);
+        assert_eq!(
+            topic_resolves_to_only_id_directives("do #foo then ship it"),
+            None
+        );
         assert_eq!(topic_resolves_to_only_id_directives("re [#id]"), None);
         assert_eq!(topic_resolves_to_only_id_directives("just prose"), None);
         assert_eq!(topic_resolves_to_only_id_directives(""), None);
@@ -4278,12 +4812,13 @@ Old.
     }
 
     #[test]
-    fn prune_noise_strikes_interleaved_noise_preserves_id_and_drainable_heads() {
+    fn prune_noise_plans_interleaved_noise_and_fails_closed_without_listener() {
         // #goqstall2: `queue prune-noise` strikes non-drainable NOISE at ANY
         // position — including noise interleaved BEHIND id-backed `do [#id]` heads,
         // which the leading-run `queue consume` stops at and can never reach — while
         // preserving id-backed directives and genuinely drainable free-text/prose heads.
         let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("s.md");
         let content = concat!(
             "---\nqueue_active: true\n---\n\n",
@@ -4301,63 +4836,63 @@ Old.
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        let struck = prune_noise_queue_heads(&doc).unwrap();
+        let (planned, struck) = strike_all_noise_queue_heads(content).unwrap();
         assert_eq!(
             struck, 3,
             "exactly the 3 artifact noise heads must be struck"
         );
-        let result = std::fs::read_to_string(&doc).unwrap();
 
         // id-backed directives preserved (incl. the one with noise behind it).
         assert!(
-            result.contains("- do [#keepme]\n") && !result.contains("~~do [#keepme]~~"),
-            "id-backed head must be preserved:\n{result}"
+            planned.contains("- do [#keepme]\n") && !planned.contains("~~do [#keepme]~~"),
+            "id-backed head must be preserved:\n{planned}"
         );
         assert!(
-            result.contains("- do [#keepme2]\n"),
-            "interleaved id-backed head must be preserved:\n{result}"
+            planned.contains("- do [#keepme2]\n"),
+            "interleaved id-backed head must be preserved:\n{planned}"
         );
         // Drainable free-text directive preserved.
         assert!(
-            result.contains("fix the tokenizer now") && !result.contains("~~fix the tokenizer"),
-            "drainable directive head must be preserved:\n{result}"
+            planned.contains("fix the tokenizer now") && !planned.contains("~~fix the tokenizer"),
+            "drainable directive head must be preserved:\n{planned}"
         );
         assert!(
-            result.contains("Queue items are being struck without being worked on.")
-                && !result.contains("~~Queue items are being struck"),
-            "operator prose report must be preserved:\n{result}"
+            planned.contains("Queue items are being struck without being worked on.")
+                && !planned.contains("~~Queue items are being struck"),
+            "operator prose report must be preserved:\n{planned}"
         );
         // All three artifact noise heads struck — including the one BEHIND `do [#keepme]`,
         // which a leading-run consume could never reach.
         assert!(
-            result.contains("~~[route] target tmux session: 0~~"),
-            "leading noise struck:\n{result}"
+            planned.contains("~~[route] target tmux session: 0~~"),
+            "leading noise struck:\n{planned}"
         );
         assert!(
-            result.contains("~~[error] dispatch blocked by stale pane~~"),
-            "noise interleaved behind an id head struck:\n{result}"
+            planned.contains("~~[error] dispatch blocked by stale pane~~"),
+            "noise interleaved behind an id head struck:\n{planned}"
         );
         assert!(
-            result.contains("~~[warning] stale queue marker~~"),
-            "tail noise struck:\n{result}"
+            planned.contains("~~[warning] stale queue marker~~"),
+            "tail noise struck:\n{planned}"
         );
 
-        // Idempotent: a second prune finds nothing left to strike.
-        assert_eq!(
-            prune_noise_queue_heads(&doc).unwrap(),
-            0,
-            "second prune must be a no-op"
+        let err = prune_noise_queue_heads(&doc).unwrap_err();
+        assert!(
+            err.to_string().contains("failed to write document"),
+            "unexpected error: {err:#}"
         );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
     }
 
     #[test]
-    fn prune_noise_strikes_orphan_id_heads_preserves_open_and_deferred_backlog_ids() {
+    fn prune_noise_plans_orphan_id_heads_and_fails_closed_without_listener() {
         // #orphanqhead / #qchurn: `queue prune-noise` strikes an orphan id-backed
         // head (id absent from the open backlog) — which `queue consume` rejects and
         // `--done` cannot reap — so it stops blocking the leading-run consume and
         // stops churning the go-mode loop. Open backlog ids, including deferred
         // `[operator-verify]` / `[focused-cycle]` items, are preserved.
         let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("s.md");
         let content = concat!(
             "---\nqueue_active: true\n---\n\n",
@@ -4375,33 +4910,32 @@ Old.
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        let struck = prune_noise_queue_heads(&doc).unwrap();
+        let (planned, struck) = strike_all_noise_queue_heads(content).unwrap();
         assert_eq!(struck, 1, "only the orphan #kcb5 head must be struck");
-        let result = std::fs::read_to_string(&doc).unwrap();
 
         assert!(
-            result.contains("~~:pushpin: [#kcb5]~~") || result.contains("~~[#kcb5]~~"),
-            "orphan id head must be struck:\n{result}"
+            planned.contains("~~:pushpin: [#kcb5]~~") || planned.contains("~~[#kcb5]~~"),
+            "orphan id head must be struck:\n{planned}"
         );
         assert!(
-            result.contains("- :pushpin: do [#6b5h]\n"),
-            "deferred-but-open backlog id head must be preserved:\n{result}"
+            planned.contains("- :pushpin: do [#6b5h]\n"),
+            "deferred-but-open backlog id head must be preserved:\n{planned}"
         );
         assert!(
-            result.contains("- do [#keepme]\n"),
-            "open backlog id head must be preserved:\n{result}"
+            planned.contains("- do [#keepme]\n"),
+            "open backlog id head must be preserved:\n{planned}"
         );
 
-        // Idempotent: a second prune is a no-op.
-        assert_eq!(
-            prune_noise_queue_heads(&doc).unwrap(),
-            0,
-            "second prune must be a no-op"
+        let err = prune_noise_queue_heads(&doc).unwrap_err();
+        assert!(
+            err.to_string().contains("failed to write document"),
+            "unexpected error: {err:#}"
         );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
     }
 
     #[test]
-    fn acknowledge_open_id_head_strikes_queue_only_and_preserves_backlog_item() {
+    fn acknowledge_open_id_head_fails_closed_without_listener() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("s.md");
@@ -4418,37 +4952,30 @@ Old.
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
+        let keys = id_backed_head_node_keys(content, "freshqueueauth").unwrap();
+        assert_eq!(
+            keys.len(),
+            1,
+            "exact id-backed correction head should be targetable"
+        );
+        let err = acknowledge_open_id_backed_queue_head(&doc, "freshqueueauth").unwrap_err();
         assert!(
-            acknowledge_open_id_backed_queue_head(&doc, "freshqueueauth").unwrap(),
-            "open-backlog acknowledgement should strike the queue head"
+            err.to_string().contains("failed to write document"),
+            "unexpected error: {err:#}"
         );
 
         let result = std::fs::read_to_string(&doc).unwrap();
-        assert!(
-            result.contains("~~[#freshqueueauth]~~"),
-            "exact id-backed correction head must be struck:\n{result}"
-        );
+        assert_eq!(result, content, "no-listener ack must not mutate disk");
+        let snap = snapshot::load(&doc).unwrap().expect("snapshot saved");
+        assert_eq!(snap, content, "no-listener ack must not mutate snapshot");
         assert!(
             result.contains("- [ ] [#freshqueueauth] preserve fresh operator queue heads"),
             "underlying backlog item must remain open:\n{result}"
         );
-        let snap = snapshot::load(&doc).unwrap().expect("snapshot saved");
-        assert!(
-            snap.contains("~~[#freshqueueauth]~~"),
-            "snapshot must converge on acknowledged queue head:\n{snap}"
-        );
-        assert!(
-            snap.contains("- [ ] [#freshqueueauth] preserve fresh operator queue heads"),
-            "snapshot must preserve open backlog item:\n{snap}"
-        );
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("open_id_head_ack")
-                && ops_log.contains("proof=operator_acknowledged_correction_preserve_open_backlog")
-                && ops_log.contains("base_hash=")
-                && ops_log.contains("source_component=queue")
-                && ops_log.contains("operation=strike_head"),
-            "acknowledgement must be auditable:\n{ops_log}"
+            ops_log.contains("open_id_head_ack_writeback") && ops_log.contains("transport=blocked"),
+            "blocked acknowledgement attempt must be auditable:\n{ops_log}"
         );
     }
 
@@ -4507,7 +5034,7 @@ Old.
     }
 
     #[test]
-    fn prune_noise_excises_only_all_log_multiline_blocks_under_a_preset() {
+    fn prune_noise_plans_all_log_multiline_blocks_and_fails_closed_without_listener() {
         // #qnoise-multiline-strike: operator-pasted console dumps
         // land in the queue as multiline `---`-fenced Prompt blocks. They are NOT
         // bulleted list items and contain a ``` fence, so the bullet-only
@@ -4517,6 +5044,7 @@ Old.
         // reports drainable even when followed by fenced diagnostics, so prune
         // must preserve those operator prompts and delete only all-log blocks.
         let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("s.md");
         let content = concat!(
             "---\nqueue_active: true\n---\n\n",
@@ -4545,29 +5073,28 @@ Old.
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        let struck = prune_noise_queue_heads(&doc).unwrap();
+        let (planned, struck) = strike_all_noise_queue_heads(content).unwrap();
         assert_eq!(struck, 1, "only the all-log pasted block must be excised");
 
-        let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            result.contains("- [#sqedit-race]\n") && result.contains("- [#keepme]\n"),
-            "id-backed heads must survive:\n{result}"
+            planned.contains("- [#sqedit-race]\n") && planned.contains("- [#keepme]\n"),
+            "id-backed heads must survive:\n{planned}"
         );
         assert!(
-            !result.contains("[route] target tmux session: 0") && !result.contains("#5eq8"),
-            "the all-log block must be gone:\n{result}"
+            !planned.contains("[route] target tmux session: 0") && !planned.contains("#5eq8"),
+            "the all-log block must be gone:\n{planned}"
         );
         assert!(
-            result.contains("JB `Run Agent Doc` on agent-loop.md")
-                && result.contains("bound to harness claude-code, not codex"),
-            "the prose diagnostic report must be preserved as drainable work:\n{result}"
+            planned.contains("JB `Run Agent Doc` on agent-loop.md")
+                && planned.contains("bound to harness claude-code, not codex"),
+            "the prose diagnostic report must be preserved as drainable work:\n{planned}"
         );
 
-        // Idempotent: a second prune finds nothing left to strike.
-        assert_eq!(
-            prune_noise_queue_heads(&doc).unwrap(),
-            0,
-            "second prune must be a no-op"
+        let err = prune_noise_queue_heads(&doc).unwrap_err();
+        assert!(
+            err.to_string().contains("failed to write document"),
+            "unexpected error: {err:#}"
         );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
     }
 }

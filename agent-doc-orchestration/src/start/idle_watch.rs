@@ -20,9 +20,9 @@ const FOCUSED_CYCLE_CONTEXT_RESET_REASON: &str = "active queue head is a [focuse
 /// (committed + editor buffer converged to HEAD + IPC inflight drained + actor
 /// idle) the supervisor defers the next dispatch; once this much wall-clock has
 /// elapsed at the gate (editor IPC wedged — exactly the `inflight=5` /
-/// `send_failed` state) the closeout falls back LOUDLY to a force-disk path so
-/// the drain is never permanently stuck. The idle-watch polls every 500ms
-/// (`AUTO_TRIGGER_POLL_INTERVAL`), so this is ~60 ticks.
+/// `send_failed` state) the boundary fails closed and records a loud playback
+/// artifact. The idle-watch polls every 500ms (`AUTO_TRIGGER_POLL_INTERVAL`), so
+/// this is ~60 ticks.
 const CONVERGENCE_GATE_TIMEOUT_MS: u64 = 30_000;
 
 /// `#fbwire` Phase 2 — is the session document's on-disk working tree converged
@@ -30,8 +30,8 @@ const CONVERGENCE_GATE_TIMEOUT_MS: u64 = 30_000;
 /// logs as `match=...`: normalize both blobs for replay and compare. A non-git
 /// document or an unreadable `HEAD`/working tree must NEVER wedge the drain, so
 /// those degenerate cases report `true` (converged) and the gate falls through to
-/// dispatch — the force-disk fallback exists for genuine editor wedges, not for
-/// missing git state.
+/// dispatch; the fail-closed blocked boundary is reserved for genuine editor
+/// wedges, not missing git state.
 fn editor_buffer_converged_to_head(file: &std::path::Path) -> bool {
     let head_doc = match crate::git::show_head(file) {
         Ok(Some(doc)) => doc,
@@ -48,7 +48,7 @@ fn editor_buffer_converged_to_head(file: &std::path::Path) -> bool {
 /// `#fbwire` Phase 2 — gather the four [`crate::convergence_gate::ConvergenceFacts`]
 /// the inter-item dispatch boundary needs from live runtime state. `deferring_since`
 /// is the instant the gate FIRST deferred for the current pending dispatch (reset to
-/// `None` on every `Dispatch`/`ForceDiskFallback`), so `elapsed_ms` measures only the
+/// `None` on every `Dispatch`), so `elapsed_ms` measures only the
 /// current boundary's wait. A missing cycle-state file (first drain) or a load error
 /// defaults `committed` to `true` so a brand-new drain is never blocked.
 fn gather_convergence_facts(
@@ -90,12 +90,11 @@ fn editor_typing_active_for_idle_queue(file: &std::path::Path) -> bool {
 /// `#fbwire` / `#fullboundary` Phase 2 — the convergence gate could not be
 /// satisfied within `CONVERGENCE_GATE_TIMEOUT_MS` (editor IPC wedged). Persist a
 /// replayable [`crate::convergence_playback::ConvergencePlayback`] artifact and
-/// emit the ERROR-level `convergence_gate_force_disk_fallback` ops-log line so a
-/// later agent can root-cause the wedge from the logs alone, then let the caller
-/// proceed so the drain is never permanently stuck. Best-effort: a failure to
-/// persist the artifact is logged (never silently swallowed) but must not block
-/// the un-sticking dispatch.
-fn record_convergence_force_disk_fallback(
+/// emit the ERROR-level `convergence_gate_blocked` ops-log line so a later agent
+/// can root-cause the wedge from the logs alone. Best-effort: a failure to persist
+/// the artifact is logged (never silently swallowed), but the boundary still fails
+/// closed.
+fn record_convergence_gate_blocked(
     file: &std::path::Path,
     facts: &crate::convergence_gate::ConvergenceFacts,
     unmet: &[&'static str],
@@ -122,21 +121,21 @@ fn record_convergence_force_disk_fallback(
         format!("elapsed_ms={}", facts.elapsed_ms),
         format!("timeout_ms={}", facts.timeout_ms),
     ]);
-    match crate::convergence_playback::record_force_disk_fallback(file, &playback) {
-        // `record_force_disk_fallback` already emits the canonical ERROR-level
-        // `convergence_gate_force_disk_fallback severity=error … playback=<path>`
+    match crate::convergence_playback::record_blocked_boundary(file, &playback) {
+        // `record_blocked_boundary` already emits the canonical ERROR-level
+        // `convergence_gate_blocked severity=error … playback=<path>`
         // ops-log line referencing the persisted artifact, so a successful persist
         // needs no additional ops record here (avoid double-logging the wedge).
         Ok(_) => {}
         Err(err) => {
             eprintln!(
-                "[agent-doc] warning: failed to persist convergence force-disk playback for {}: {err}",
+                "[agent-doc] warning: failed to persist convergence blocked-boundary playback for {}: {err}",
                 file.display()
             );
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "convergence_gate_force_disk_fallback severity=error file={} unmet={} inflight={} elapsed_ms={} timeout_ms={} playback=unwritten playback_error={} (#fbwire)",
+                    "convergence_gate_blocked severity=error file={} reason=editor_ipc_convergence_boundary_failed action=fail_closed unmet={} inflight={} elapsed_ms={} timeout_ms={} playback=unwritten playback_error={} (#fbwire)",
                     file.display(),
                     unmet.join(","),
                     facts.inflight,
@@ -558,10 +557,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut clear_settle_idle_ticks: u32 = 0;
             // `#fbwire` Phase 2: the instant the convergence gate FIRST deferred the
             // current pending inter-item dispatch. `None` ⇒ not currently deferring;
-            // set on the first `Defer`, cleared on `Dispatch`/`ForceDiskFallback`.
-            // Drives `elapsed_ms` so a wedged editor IPC trips the bounded
-            // `CONVERGENCE_GATE_TIMEOUT_MS` → loud force-disk fallback (`#fullboundary`).
+            // set on the first `Defer`, cleared on `Dispatch`.
+            // Drives `elapsed_ms` so a wedged editor IPC reaches the bounded
+            // `CONVERGENCE_GATE_TIMEOUT_MS` → loud fail-closed block (`#fullboundary`).
             let mut convergence_gate_deferring_since: Option<std::time::Instant> = None;
+            let mut convergence_gate_blocked_reported = false;
             // R3 (#ctlrecycle): capture this supervisor's launch binary identity (≈ the
             // installed binary at process start). A later `cargo install` makes
             // `current_binary_identity()` differ, marking this supervisor stale.
@@ -2589,6 +2589,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                         );
                                     }
                                     convergence_gate_deferring_since = None;
+                                    convergence_gate_blocked_reported = false;
                                     // fall through to the existing dispatch path below
                                 }
                                 crate::convergence_gate::ConvergenceGateDecision::Defer {
@@ -2597,6 +2598,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     if convergence_gate_deferring_since.is_none() {
                                         convergence_gate_deferring_since =
                                             Some(std::time::Instant::now());
+                                        convergence_gate_blocked_reported = false;
                                     }
                                     log_event(
                                         &mut session_log,
@@ -2623,21 +2625,27 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     );
                                     continue;
                                 }
-                                crate::convergence_gate::ConvergenceGateDecision::ForceDiskFallback {
+                                crate::convergence_gate::ConvergenceGateDecision::Blocked {
                                     unmet,
                                 } => {
-                                    convergence_gate_deferring_since = None;
-                                    record_convergence_force_disk_fallback(
-                                        &path,
-                                        &facts,
-                                        &unmet,
+                                    if convergence_gate_deferring_since.is_none() {
+                                        convergence_gate_deferring_since =
+                                            Some(std::time::Instant::now());
+                                    }
+                                    if !convergence_gate_blocked_reported {
+                                        record_convergence_gate_blocked(&path, &facts, &unmet);
+                                        convergence_gate_blocked_reported = true;
+                                    }
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
+                                            "idle_queue_watch_drain_blocked reason=convergence_gate_timeout unmet={} inflight={} elapsed_ms={} (#fbwire)",
+                                            unmet.join(","),
+                                            facts.inflight,
+                                            facts.elapsed_ms
+                                        ),
                                     );
-                                    // Proceed to dispatch: the bounded timeout means the
-                                    // editor IPC is wedged, but the drain must never be
-                                    // permanently stuck. The on-disk reconcile to HEAD is
-                                    // owned by the existing postcommit
-                                    // `disk_after_failed_editor_refresh` path; here we only
-                                    // emit the LOUD, fully-diagnosable record and un-stick.
+                                    continue;
                                 }
                             }
                         }
@@ -3392,10 +3400,10 @@ mod tests {
     }
 
     #[test]
-    fn convergence_gate_wedged_editor_trips_force_disk_after_timeout() {
+    fn convergence_gate_wedged_editor_blocks_after_timeout() {
         // SimWorld acceptance: a wedged editor never ACKs (editor_converged=false,
         // inflight pinned). Within the timeout the gate Defers; once elapsed crosses
-        // the bound it trips the LOUD force-disk fallback naming the unmet proofs.
+        // the bound it blocks dispatch naming the unmet proofs.
         let within = ConvergenceFacts {
             editor_converged: false,
             inflight: 5,
@@ -3411,17 +3419,17 @@ mod tests {
             ..within
         };
         match convergence_gate_decision(&wedged) {
-            ConvergenceGateDecision::ForceDiskFallback { unmet } => {
+            ConvergenceGateDecision::Blocked { unmet } => {
                 assert!(unmet.contains(&crate::convergence_gate::proof::EDITOR_CONVERGED));
                 assert!(unmet.contains(&crate::convergence_gate::proof::INFLIGHT_DRAINED));
             }
-            other => panic!("wedged editor past timeout must force-disk: {other:?}"),
+            other => panic!("wedged editor past timeout must block dispatch: {other:?}"),
         }
     }
 
     #[test]
-    fn record_convergence_force_disk_fallback_emits_loud_error_and_loadable_playback() {
-        // The fallback must be loud + fully diagnosable: an ERROR-level ops.log line
+    fn record_convergence_gate_blocked_emits_loud_error_and_loadable_playback() {
+        // The blocked boundary must be loud + fully diagnosable: an ERROR-level ops.log line
         // referencing a persisted, loadable playback artifact under
         // `.agent-doc/playback/<hash>/<cycle>.json`.
         let dir = tempfile::tempdir().unwrap();
@@ -3440,12 +3448,16 @@ mod tests {
             crate::convergence_gate::proof::EDITOR_CONVERGED,
             crate::convergence_gate::proof::INFLIGHT_DRAINED,
         ];
-        record_convergence_force_disk_fallback(&doc, &facts, &unmet);
+        record_convergence_gate_blocked(&doc, &facts, &unmet);
 
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("convergence_gate_force_disk_fallback severity=error"),
+            ops_log.contains("convergence_gate_blocked severity=error"),
             "must emit the loud ERROR line: {ops_log}"
+        );
+        assert!(
+            ops_log.contains("action=fail_closed"),
+            "blocked boundary must not be reported as a disk fallback: {ops_log}"
         );
         assert!(ops_log.contains("playback="), "must reference the artifact");
 

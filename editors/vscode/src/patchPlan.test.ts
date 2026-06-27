@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { appendPatchAlreadyPresent, calculateMinimalReplacement, isPureRepositionSignal } from './patchPlan';
+import { appendPatchAlreadyPresent, calculateMinimalReplacement, isFullDocumentReplacement, isPureRepositionSignal } from './patchPlan';
 
 describe('isPureRepositionSignal', () => {
     it('treats a bare reposition payload as pure reposition', () => {
@@ -116,5 +116,18 @@ describe('calculateMinimalReplacement', () => {
             calculateMinimalReplacement('alpha beta gamma', 'alpha gamma'),
             { start: 6, deleteLength: 5, text: '' },
         );
+    });
+
+    it('detects full-document replacements for visible write guards', () => {
+        const fullReplacement = calculateMinimalReplacement('abcdef', 'UVWXYZ');
+        const middleReplacement = calculateMinimalReplacement('alpha beta gamma', 'alpha BETA gamma');
+        const emptyInsertion = calculateMinimalReplacement('', 'new content');
+
+        assert.ok(fullReplacement);
+        assert.strictEqual(isFullDocumentReplacement('abcdef', fullReplacement), true);
+        assert.ok(middleReplacement);
+        assert.strictEqual(isFullDocumentReplacement('alpha beta gamma', middleReplacement), false);
+        assert.ok(emptyInsertion);
+        assert.strictEqual(isFullDocumentReplacement('', emptyInsertion), false);
     });
 });

@@ -586,6 +586,7 @@ mod tests {
         assert_eq!(ctx.prompt_text, "/clear");
         assert_eq!(ctx.slash_command.as_deref(), Some("/clear"));
 
+        let _force_disk_guard = super::super::ForceDiskRouteWritesGuard::set(true);
         let outcome =
             enqueue_exchange_slash_command_for_idle_drain(&doc, &ctx, "test_exchange_slash")
                 .unwrap()
@@ -641,6 +642,7 @@ mod tests {
         assert_eq!(ctx.prompt_text, "/clear");
         assert_eq!(ctx.slash_command.as_deref(), Some("/clear"));
 
+        let _force_disk_guard = super::super::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_exchange_slash_command_for_idle_drain(&doc, &ctx, "test_bare_slash")
             .unwrap()
             .expect("slash command should queue for idle drain");

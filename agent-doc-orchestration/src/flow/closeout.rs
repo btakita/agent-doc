@@ -23,6 +23,7 @@ pub enum CloseoutGuardReason {
     CommitBoundaryRecovered,
     StalePreflightLockRepaired,
     StalePreflightCycleAbandoned,
+    ReplicaDeliveryPending,
 }
 
 impl CloseoutGuardReason {
@@ -47,6 +48,7 @@ impl CloseoutGuardReason {
             Self::CommitBoundaryRecovered => "commit_boundary_recovered",
             Self::StalePreflightLockRepaired => "stale_preflight_lock_repaired",
             Self::StalePreflightCycleAbandoned => "stale_preflight_cycle_abandoned",
+            Self::ReplicaDeliveryPending => "replica_delivery_pending",
         }
     }
 }
@@ -104,7 +106,19 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
     // Under `CrdtAuthority::GitAuthoritative` (Detached / headless — most traffic)
     // this is a trivial no-op that touches no hub and leaves the commit path
     // byte-for-byte unchanged.
-    let _barrier_ready = crate::crdt_relay_host::commit_barrier_for_file(file);
+    let barrier_ready = crate::crdt_relay_host::commit_barrier_for_file(file);
+    if !barrier_ready {
+        log_closeout_guard_event(
+            file,
+            FlowStage::PreCommitGuard,
+            FlowOutcome::Blocked,
+            CloseoutGuardReason::ReplicaDeliveryPending,
+        );
+        anyhow::bail!(
+            "live editor replica delivery is still pending for {}; retry closeout after the editor applies and ACKs queued CRDT updates",
+            file.display()
+        );
+    }
 
     let mut did_commit = crate::git::commit(file)?;
     // `#staleinmem` — record the just-committed on-disk content as the hub baseline
@@ -125,7 +139,18 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
     // below stages the reap. It is idempotent — a no-op when nothing is `[x]`
     // (the direct path already reaped), so it only closes the historical reap gap. Errors
     // are non-fatal: the `completed_pending_reap` guard still catches a miss.
-    match crate::preflight::run_pending_maintenance(file) {
+    // During realtime cutover, the shared converge write gate fails closed when
+    // no editor endpoint proves delivery. Detached closeout has no editor buffer
+    // to protect, so use the explicit force-disk maintenance path there; keep
+    // editor-attached closeout on the guarded IPC convergence path.
+    let editor_attached =
+        crate::crdt_authority::authority_for_file(&file.display().to_string()).editor_attached();
+    let pending_maintenance = if editor_attached {
+        crate::preflight::run_pending_maintenance(file)
+    } else {
+        crate::preflight::run_pending_maintenance_force_disk(file)
+    };
+    match pending_maintenance {
         Ok(_) => {
             rc.invalidate_head_content();
             timer.mark("closeout_reap");
@@ -189,6 +214,8 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
     timer.mark("session_check");
     crate::project_controller::persist_session_actor_closeout(file)?;
     timer.mark("session_actor_closeout");
+    record_terminal_closeout_proof(file, did_commit)?;
+    timer.mark("terminal_proof");
     cleanup_fallback_patch_files(file);
     timer.mark("fallback_cleanup");
     timer.finish();
@@ -491,6 +518,120 @@ fn ensure_cycle_committed(file: &Path) -> Result<()> {
         );
     }
     Ok(())
+}
+
+pub(crate) fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> Result<()> {
+    let canonical = file
+        .canonicalize()
+        .with_context(|| format!("terminal proof: failed to canonicalize {}", file.display()))?;
+    let Some(project_root) = crate::fs_util::find_project_root(&canonical) else {
+        eprintln!(
+            "[commit] warning: terminal proof ledger unavailable for {}: project root not found",
+            file.display()
+        );
+        return Ok(());
+    };
+    let Some(state) = crate::cycle_state::load(&canonical)? else {
+        anyhow::bail!(
+            "terminal proof cannot record closeout for {}: missing cycle state",
+            file.display()
+        );
+    };
+    if state.phase != crate::cycle_state::CyclePhase::Committed {
+        anyhow::bail!(
+            "terminal proof cannot record closeout for {}: cycle `{}` is `{}`",
+            file.display(),
+            state.cycle_id,
+            cycle_phase_name(state.phase)
+        );
+    }
+    let file_content = std::fs::read_to_string(&canonical)
+        .with_context(|| format!("terminal proof: read {}", canonical.display()))?;
+    let snapshot_content = crate::snapshot::load(&canonical)?.with_context(|| {
+        format!(
+            "terminal proof: missing snapshot for {}",
+            canonical.display()
+        )
+    })?;
+    let head_content = crate::git::show_head(&canonical)?
+        .with_context(|| format!("terminal proof: missing HEAD for {}", canonical.display()))?;
+    let file_hash = crate::ops_log::content_hash(&file_content);
+    let snapshot_hash = crate::ops_log::content_hash(&snapshot_content);
+    let head_hash = crate::ops_log::content_hash(&head_content);
+    if snapshot_hash != head_hash {
+        anyhow::bail!(
+            "terminal proof mismatch for {}: file_hash={} snapshot_hash={} head_hash={}",
+            file.display(),
+            file_hash,
+            snapshot_hash,
+            head_hash
+        );
+    }
+    let agreement = if file_hash == snapshot_hash {
+        "file_snapshot_head"
+    } else {
+        "snapshot_head_visible_drift"
+    };
+    let state_file_hash_matches = state.file_hash.as_deref() == Some(file_hash.as_str());
+    let state_snapshot_hash_matches =
+        state.snapshot_hash.as_deref() == Some(snapshot_hash.as_str());
+    let content_hash = crate::ops_log::content_hash(&format!(
+        "cycle_id={}\nphase={}\nlast_event={}\nfile_hash={}\nsnapshot_hash={}\nhead_hash={}\ndid_commit={}\nstate_file_hash_matches={}\nstate_snapshot_hash_matches={}\nagreement={}\n",
+        state.cycle_id,
+        cycle_phase_name(state.phase),
+        state.last_event,
+        file_hash,
+        snapshot_hash,
+        head_hash,
+        did_commit,
+        state_file_hash_matches,
+        state_snapshot_hash_matches,
+        agreement
+    ));
+    let record = crate::flow::proof_ledger::OperationProofRecord::new(
+        crate::flow::proof_ledger::OperationProofInput {
+            operation_id: format!("terminal_closeout:{}", state.cycle_id),
+            operation_kind: crate::flow::proof_ledger::ProofOperationKind::TerminalProof,
+            outcome: crate::flow::proof_ledger::ProofOutcome::Recorded,
+            subject_id: Some(state.cycle_id.clone()),
+            content_hash,
+            proof_kind: crate::flow::proof_ledger::ProofEvidenceKind::TerminalStateObserved,
+            proof: format!(
+                "phase={} last_event={} did_commit={} file_hash={} snapshot_hash={} head_hash={} state_file_hash_matches={} state_snapshot_hash_matches={} capture_id={} response_sha256={} session_check=ok actor_closeout=persisted agreement={}",
+                cycle_phase_name(state.phase),
+                state.last_event,
+                did_commit,
+                file_hash,
+                snapshot_hash,
+                head_hash,
+                state_file_hash_matches,
+                state_snapshot_hash_matches,
+                state.capture_id.as_deref().unwrap_or("<none>"),
+                state.response_sha256.as_deref().unwrap_or("<none>"),
+                agreement
+            ),
+            recorded_at_ms: now_millis(),
+        },
+    )?;
+    let path =
+        crate::flow::proof_ledger::append_operation_proof(&project_root, &canonical, &record)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "terminal_closeout_proof_recorded file={} operation_id={} ledger={}",
+            file.display(),
+            record.operation_id,
+            path.display()
+        ),
+    );
+    Ok(())
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
 }
 
 pub fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
@@ -1766,11 +1907,11 @@ mod tests {
             "<!-- /agent:backlog -->\n\n",
             "<!-- agent:done -->\n<!-- /agent:done -->\n",
         );
-        let (_dir, doc) = setup_git_project_with_doc(base);
+        let (dir, doc) = setup_git_project_with_doc(base);
 
         // Committed response cycle (capture present), with the `[x]` already on
         // disk + in HEAD — exactly the exit-75 residual shape.
-        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        let state = crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
         let response = "<!-- patch:exchange -->\n### Re: close the loop — gpt-5\n\nImplemented and verified.\n<!-- /patch:exchange -->";
         crate::capture::capture_response(&doc, response).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(base), Some(base)).unwrap();
@@ -1803,6 +1944,77 @@ mod tests {
         )
         .then_some(())
         .expect("session-check must accept the atomic-reap closeout");
+
+        let root = dir.path().canonicalize().unwrap();
+        let canonical_doc = doc.canonicalize().unwrap();
+        let ledger_path = crate::flow::proof_ledger::proof_ledger_path(&root, &canonical_doc);
+        let records = crate::flow::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
+        let terminal = records
+            .iter()
+            .find(|record| {
+                record.operation_kind
+                    == crate::flow::proof_ledger::ProofOperationKind::TerminalProof
+                    && record.subject_id.as_deref() == Some(state.cycle_id.as_str())
+            })
+            .expect("closeout must record a terminal proof row");
+        assert_eq!(
+            terminal.proof_kind,
+            crate::flow::proof_ledger::ProofEvidenceKind::TerminalStateObserved
+        );
+        assert_eq!(
+            terminal.outcome,
+            crate::flow::proof_ledger::ProofOutcome::Recorded
+        );
+        assert!(terminal.proof.contains("phase=committed"));
+        assert!(terminal.proof.contains("session_check=ok"));
+        assert!(terminal.proof.contains("agreement=file_snapshot_head"));
+    }
+
+    #[test]
+    fn complete_required_closeout_blocks_until_live_replica_delivery_is_acked() {
+        use agent_doc_core::crdt_sync::ReplicaState;
+
+        let base = concat!(
+            "---\nagent_doc_format: template\nsession: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: base — gpt-5\n\nBase response.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        let file_str = doc.display().to_string();
+
+        // Make the document editor-attached (MultiReplica): a live owner lease
+        // for the current test process makes `authority_for_file` take the real
+        // editor-attached path.
+        crate::plugin_owner::write_plugin_owner_lease_for_test(&file_str, std::process::id());
+        assert!(crate::crdt_authority::authority_for_file(&file_str).editor_attached());
+
+        let (a_id, a_bootstrap) =
+            crate::crdt_relay_host::register_replica_for_file(&doc, "vscode:a")
+                .unwrap()
+                .expect("replica A should register");
+        crate::crdt_relay_host::register_replica_for_file(&doc, "vscode:b")
+            .unwrap()
+            .expect("replica B should register");
+
+        let a = ReplicaState::from_encoded(a_id, &a_bootstrap).unwrap();
+        a.apply_local_edit(0, 0, "typed before closeout\n");
+        crate::crdt_relay_host::relay_replica_update_for_file(&doc, "vscode:a", &a.encode_state())
+            .unwrap()
+            .expect("replica A update should relay");
+
+        let err = complete_required_closeout(&doc).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("live editor replica delivery is still pending"),
+            "closeout must wait for target ACK before commit: {err}"
+        );
+
+        let head = crate::git::show_head(&doc).unwrap().unwrap();
+        assert!(
+            !head.contains("typed before closeout"),
+            "pending replica delivery must not be materialized in HEAD before ACK:\n{head}"
+        );
     }
 
     #[test]

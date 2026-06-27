@@ -31,7 +31,11 @@ pub(crate) fn tombstone_path_for(doc: &Path) -> Option<PathBuf> {
     let hash = crate::snapshot::doc_hash_from_str(&canonical.to_string_lossy());
     let project_root = crate::fs_util::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-    Some(project_root.join(TOMBSTONE_DIR).join(format!("{hash}.json")))
+    Some(
+        project_root
+            .join(TOMBSTONE_DIR)
+            .join(format!("{hash}.json")),
+    )
 }
 
 /// Load the persisted operator-delete tombstone set (lowercased ids). Returns an

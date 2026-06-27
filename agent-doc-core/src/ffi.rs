@@ -1228,7 +1228,10 @@ mod tests {
         let path_c = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
 
         let src: u64 = 0x5151;
-        assert_eq!(unsafe { agent_doc_replica_open(src, std::ptr::null(), 0) }, 0);
+        assert_eq!(
+            unsafe { agent_doc_replica_open(src, std::ptr::null(), 0) },
+            0
+        );
         let ins = std::ffi::CString::new("crash-safe").unwrap();
         assert_eq!(
             unsafe { agent_doc_replica_apply_local(src, 0, 0, ins.as_ptr()) },
@@ -1271,6 +1274,9 @@ mod tests {
         );
         // recover from a missing file → bad arg / IO.
         let missing = std::ffi::CString::new("/nonexistent/dir/agent-doc-missing.yrs").unwrap();
-        assert_eq!(unsafe { agent_doc_replica_recover(id, missing.as_ptr()) }, -2);
+        assert_eq!(
+            unsafe { agent_doc_replica_recover(id, missing.as_ptr()) },
+            -2
+        );
     }
 }

@@ -87,10 +87,8 @@ pub(crate) fn run_ordered_task_step(
 ) -> Result<()> {
     close_open_preflight_handoff_cycle(file)?;
     inject_prompt(file, task)?;
-    let preflight = lifecycle.preflight(file)?;
-    if preflight.no_changes {
-        anyhow::bail!("orchestration step did not produce a prompt-bearing diff after injection");
-    }
+    lifecycle.admit(file)?;
+    let injected_diff = injected_prompt_diff(task);
 
     let doc =
         fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
@@ -111,7 +109,7 @@ pub(crate) fn run_ordered_task_step(
     let mut prompt = build_agent_prompt(
         file,
         mode,
-        preflight.diff.as_deref(),
+        Some(&injected_diff),
         &doc,
         session_accretion.as_ref(),
     );
@@ -214,9 +212,7 @@ pub(crate) fn run_ordered_task_step(
         write::strip_assistant_heading(&finalize_response)
     };
 
-    if let Some(diff_text) = preflight.diff.as_deref() {
-        write::enforce_imperative_response_contract_for_diff(file, diff_text, &response_text)?;
-    }
+    write::enforce_imperative_response_contract_for_diff(file, &injected_diff, &response_text)?;
 
     let finalize_text = if let Some(worker_result_line) =
         options.graph_evidence.and_then(|evidence| {
@@ -227,14 +223,24 @@ pub(crate) fn run_ordered_task_step(
         finalize_text
     };
 
-    lifecycle.finalize(
-        file,
-        preflight.baseline_file.as_deref(),
-        &finalize_text,
-        mode,
-    )?;
+    lifecycle.finalize(file, None, &finalize_text, mode)?;
     lifecycle.session_check(file)?;
     Ok(())
+}
+
+fn injected_prompt_diff(task: &str) -> String {
+    let task = super::normalize_task(task);
+    let mut diff = String::from("--- snapshot\n+++ document\n");
+    for (idx, line) in task.lines().enumerate() {
+        if idx == 0 {
+            diff.push_str("+❯ ");
+        } else {
+            diff.push('+');
+        }
+        diff.push_str(line);
+        diff.push('\n');
+    }
+    diff
 }
 
 pub(crate) fn close_open_preflight_handoff_cycle(file: &Path) -> Result<()> {
@@ -437,6 +443,19 @@ mod tests {
                 .phase,
             agent_doc_orchestration::cycle_state::CyclePhase::Abandoned
         );
+    }
+    #[test]
+    fn injected_prompt_diff_preserves_multiline_task_as_prompt_bearing_diff() {
+        let diff = injected_prompt_diff("(preset #1)\nKeep the work tree clean.\ndo #prep");
+
+        assert!(diff.contains("+❯ (preset #1)\n"));
+        assert!(diff.contains("+Keep the work tree clean.\n"));
+        assert!(diff.contains("+do #prep\n"));
+        assert_eq!(
+            diff::extract_imperative_directives(&diff),
+            vec!["do #prep".to_string()]
+        );
+        assert!(diff::format_prompt_bearing_changes(&diff).is_some());
     }
     #[test]
     fn render_streamed_exchange_inserts_response_before_boundary() {

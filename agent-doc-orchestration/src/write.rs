@@ -276,6 +276,9 @@ pub struct CommandOptions {
     pub review_remove: Vec<String>,
     /// `#reviewrm`: ids to resolve out of `agent:review` into `agent:done`.
     pub review_resolve: Vec<String>,
+    /// Queue-head completion ids proven by the response/route but not backed by
+    /// a `pending` mutation such as `--done`.
+    pub queue_completion_ids: Vec<String>,
     pub allow_replace_pending: bool,
     pub pending_only: bool,
     pub status: Option<String>,
@@ -297,8 +300,10 @@ pub struct WriteFlags {
     pub has_pending_done: bool,
     pub has_pending_mutation: bool,
     pub pending_done_ids: Vec<String>,
+    pub queue_completion_ids: Vec<String>,
     pub pending_kept_open_ids: Vec<String>,
     pub strict_closeout: bool,
+    pub force_disk: bool,
     pub rerun_command_base: Option<String>,
 }
 
@@ -1795,143 +1800,147 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     }
 
     if has_pending_ops {
-        let pending_kept_open_ids = pending_kept_open_ids_from_options(&options);
-        if options.pending_clear {
-            crate::pending_cmd::clear(file)?;
-        }
-        // `#opsproof-samecycle-add`: track ids added this cycle so post-commit
-        // ops-proof auto-completion never reaps a brand-new same-cycle add.
-        let mut same_cycle_added_ids: Vec<String> =
-            crate::pending_cmd::add_many(file, &options.pending_add, false)?;
-        let pending_add_targets = grouped_pending_add_to(&options.pending_add_to)?;
-        for (target, items) in &pending_add_targets {
-            ensure_pending_add_target(target)?;
-            crate::pending_cmd::add_many(target, items, false).with_context(|| {
-                format!(
-                    "failed to apply --pending-add-to target {}",
-                    target.display()
-                )
-            })?;
-        }
-        same_cycle_added_ids.extend(crate::pending_cmd::add_many(
-            file,
-            &options.pending_add_gated,
-            true,
-        )?);
-        // #ah0s: explicit-position adds (after/before <id>, tail). Applied after
-        // the front-insert default so anchor ids added this same cycle resolve.
-        for pair in options.pending_add_after.chunks(2) {
-            if let [anchor, text] = pair {
-                crate::pending_cmd::add_after(file, anchor, text)
-                    .with_context(|| format!("failed to apply --pending-add-after {anchor}"))?;
-            } else {
-                anyhow::bail!("--pending-add-after expects repeated ID TEXT pairs");
+        crate::pending_cmd::with_force_disk_pending_writes(options.force_disk, || {
+            let pending_kept_open_ids = pending_kept_open_ids_from_options(&options);
+            if options.pending_clear {
+                crate::pending_cmd::clear(file)?;
             }
-        }
-        for pair in options.pending_add_before.chunks(2) {
-            if let [anchor, text] = pair {
-                crate::pending_cmd::add_before(file, anchor, text)
-                    .with_context(|| format!("failed to apply --pending-add-before {anchor}"))?;
-            } else {
-                anyhow::bail!("--pending-add-before expects repeated ID TEXT pairs");
+            // `#opsproof-samecycle-add`: track ids added this cycle so post-commit
+            // ops-proof auto-completion never reaps a brand-new same-cycle add.
+            let mut same_cycle_added_ids: Vec<String> =
+                crate::pending_cmd::add_many(file, &options.pending_add, false)?;
+            let pending_add_targets = grouped_pending_add_to(&options.pending_add_to)?;
+            for (target, items) in &pending_add_targets {
+                ensure_pending_add_target(target)?;
+                crate::pending_cmd::add_many(target, items, false).with_context(|| {
+                    format!(
+                        "failed to apply --pending-add-to target {}",
+                        target.display()
+                    )
+                })?;
             }
-        }
-        for text in &options.pending_add_back {
-            crate::pending_cmd::add_back(file, text)?;
-        }
-        if !options.pending_add.is_empty()
-            || !options.pending_add_to.is_empty()
-            || !options.pending_add_gated.is_empty()
-            || !options.pending_add_after.is_empty()
-            || !options.pending_add_before.is_empty()
-            || !options.pending_add_back.is_empty()
-        {
+            same_cycle_added_ids.extend(crate::pending_cmd::add_many(
+                file,
+                &options.pending_add_gated,
+                true,
+            )?);
+            // #ah0s: explicit-position adds (after/before <id>, tail). Applied after
+            // the front-insert default so anchor ids added this same cycle resolve.
+            for pair in options.pending_add_after.chunks(2) {
+                if let [anchor, text] = pair {
+                    crate::pending_cmd::add_after(file, anchor, text)
+                        .with_context(|| format!("failed to apply --pending-add-after {anchor}"))?;
+                } else {
+                    anyhow::bail!("--pending-add-after expects repeated ID TEXT pairs");
+                }
+            }
+            for pair in options.pending_add_before.chunks(2) {
+                if let [anchor, text] = pair {
+                    crate::pending_cmd::add_before(file, anchor, text).with_context(|| {
+                        format!("failed to apply --pending-add-before {anchor}")
+                    })?;
+                } else {
+                    anyhow::bail!("--pending-add-before expects repeated ID TEXT pairs");
+                }
+            }
+            for text in &options.pending_add_back {
+                crate::pending_cmd::add_back(file, text)?;
+            }
+            if !options.pending_add.is_empty()
+                || !options.pending_add_to.is_empty()
+                || !options.pending_add_gated.is_empty()
+                || !options.pending_add_after.is_empty()
+                || !options.pending_add_before.is_empty()
+                || !options.pending_add_back.is_empty()
+            {
+                crate::cycle_state::mark_pending_mutations(file)?;
+                crate::cycle_state::mark_pending_added(file)?;
+            }
+            if !same_cycle_added_ids.is_empty() {
+                crate::cycle_state::record_pending_added_ids(file, &same_cycle_added_ids)?;
+            }
+            for pair in &options.pending_edit {
+                let (id, text) = pair
+                    .split_once('=')
+                    .with_context(|| format!("--pending-edit expects 'id=text', got: {}", pair))?;
+                crate::pending_cmd::edit(file, id, text)?;
+            }
+            for id in &options.pending_gate {
+                crate::pending_cmd::gate(file, id)?;
+            }
+            if !options.pending_gate.is_empty() {
+                crate::cycle_state::record_pending_gated_ids(file, &options.pending_gate)?;
+            }
+            for pair in &options.pending_set_gate_type {
+                let (id, gt) = pair.split_once('=').with_context(|| {
+                    format!("--pending-set-gate-type expects 'id=type', got: {}", pair)
+                })?;
+                crate::pending_cmd::set_gate_type(file, id, gt)?;
+            }
+            for pair in &options.pending_set_verify {
+                let (id, spec) = pair.split_once('=').with_context(|| {
+                    format!(
+                        "--pending-set-verify expects 'id=<verify/disproof predicate spec>', got: {}",
+                        pair
+                    )
+                })?;
+                crate::pending_cmd::set_gate_verify(file, id, spec)?;
+            }
+            let mut review_added_ids: Vec<String> = Vec::new();
+            for value in &options.review_add {
+                if let Some(id) = crate::pending_cmd::review_add(file, value)? {
+                    review_added_ids.push(id);
+                }
+            }
+            if !review_added_ids.is_empty() {
+                // `#opsproof-samecycle-add`: a freshly added gated review item must
+                // not be ops-proof auto-completed on the cycle it first appears.
+                crate::cycle_state::record_pending_added_ids(file, &review_added_ids)?;
+            }
+            for pair in &options.review_edit {
+                let (id, text) = pair
+                    .split_once('=')
+                    .with_context(|| format!("--review-edit expects 'id=text', got: {}", pair))?;
+                crate::pending_cmd::review_edit(file, id, text)?;
+            }
+            for id in &options.review_resolve {
+                crate::pending_cmd::review_resolve(file, id)?;
+            }
+            for id in &options.review_remove {
+                crate::pending_cmd::review_remove(file, id)?;
+            }
+            for id in &options.pending_ungate {
+                crate::pending_cmd::ungate(file, id)?;
+            }
+            for gt in &options.pending_resolve_gate {
+                crate::pending_cmd::resolve_gate(file, gt)?;
+            }
+            for id in &options.pending_done {
+                enforce_review_done_guard(file, id)?;
+                crate::pending_cmd::done(file, id)?;
+            }
+            if !options.pending_done.is_empty() {
+                crate::cycle_state::record_pending_done_ids(file, &options.pending_done)?;
+                crate::cycle_state::mark_pending_mutations(file)?;
+            }
+            if let Some(ref order) = options.pending_reorder {
+                let ids: Vec<String> = order
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                crate::pending_cmd::reorder(file, &ids)?;
+            }
+            if !pending_kept_open_ids.is_empty() {
+                crate::cycle_state::record_pending_kept_open_ids(file, &pending_kept_open_ids)?;
+            }
             crate::cycle_state::mark_pending_mutations(file)?;
-            crate::cycle_state::mark_pending_added(file)?;
-        }
-        if !same_cycle_added_ids.is_empty() {
-            crate::cycle_state::record_pending_added_ids(file, &same_cycle_added_ids)?;
-        }
-        for pair in &options.pending_edit {
-            let (id, text) = pair
-                .split_once('=')
-                .with_context(|| format!("--pending-edit expects 'id=text', got: {}", pair))?;
-            crate::pending_cmd::edit(file, id, text)?;
-        }
-        for id in &options.pending_gate {
-            crate::pending_cmd::gate(file, id)?;
-        }
-        if !options.pending_gate.is_empty() {
-            crate::cycle_state::record_pending_gated_ids(file, &options.pending_gate)?;
-        }
-        for pair in &options.pending_set_gate_type {
-            let (id, gt) = pair.split_once('=').with_context(|| {
-                format!("--pending-set-gate-type expects 'id=type', got: {}", pair)
-            })?;
-            crate::pending_cmd::set_gate_type(file, id, gt)?;
-        }
-        for pair in &options.pending_set_verify {
-            let (id, spec) = pair.split_once('=').with_context(|| {
-                format!(
-                    "--pending-set-verify expects 'id=<verify/disproof predicate spec>', got: {}",
-                    pair
-                )
-            })?;
-            crate::pending_cmd::set_gate_verify(file, id, spec)?;
-        }
-        let mut review_added_ids: Vec<String> = Vec::new();
-        for value in &options.review_add {
-            if let Some(id) = crate::pending_cmd::review_add(file, value)? {
-                review_added_ids.push(id);
-            }
-        }
-        if !review_added_ids.is_empty() {
-            // `#opsproof-samecycle-add`: a freshly added gated review item must
-            // not be ops-proof auto-completed on the cycle it first appears.
-            crate::cycle_state::record_pending_added_ids(file, &review_added_ids)?;
-        }
-        for pair in &options.review_edit {
-            let (id, text) = pair
-                .split_once('=')
-                .with_context(|| format!("--review-edit expects 'id=text', got: {}", pair))?;
-            crate::pending_cmd::review_edit(file, id, text)?;
-        }
-        for id in &options.review_resolve {
-            crate::pending_cmd::review_resolve(file, id)?;
-        }
-        for id in &options.review_remove {
-            crate::pending_cmd::review_remove(file, id)?;
-        }
-        for id in &options.pending_ungate {
-            crate::pending_cmd::ungate(file, id)?;
-        }
-        for gt in &options.pending_resolve_gate {
-            crate::pending_cmd::resolve_gate(file, gt)?;
-        }
-        for id in &options.pending_done {
-            enforce_review_done_guard(file, id)?;
-            crate::pending_cmd::done(file, id)?;
-        }
-        if !options.pending_done.is_empty() {
-            crate::cycle_state::record_pending_done_ids(file, &options.pending_done)?;
-            crate::cycle_state::mark_pending_mutations(file)?;
-        }
-        if let Some(ref order) = options.pending_reorder {
-            let ids: Vec<String> = order
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            crate::pending_cmd::reorder(file, &ids)?;
-        }
-        if !pending_kept_open_ids.is_empty() {
-            crate::cycle_state::record_pending_kept_open_ids(file, &pending_kept_open_ids)?;
-        }
-        crate::cycle_state::mark_pending_mutations(file)?;
+            Ok(())
+        })?;
     }
 
     if let Some(ref status_text) = options.status {
-        crate::status_cmd::set(file, status_text)?;
+        crate::status_cmd::set_with_options(file, status_text, options.force_disk)?;
     }
 
     if options.pending_only {
@@ -1951,8 +1960,10 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         has_pending_done: !options.pending_done.is_empty(),
         has_pending_mutation: has_pending_ops,
         pending_done_ids: options.pending_done.clone(),
+        queue_completion_ids: options.queue_completion_ids.clone(),
         pending_kept_open_ids: pending_kept_open_ids_from_options(&options),
         strict_closeout: commit_mode == CommitMode::Required,
+        force_disk: options.force_disk,
         rerun_command_base: build_rerun_command_base(&options, commit_mode),
     };
 
@@ -2066,7 +2077,12 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     // Phase 3b: pre-commit pending closeout gates (strict mode only).
     if write_result.is_ok() && commit_mode == CommitMode::Required {
         precommit_pending_capture_check(file)?;
-        precommit_pending_done_check(file)?;
+        precommit_pending_done_check_with_options(
+            file,
+            PendingDoneCheckOptions {
+                force_disk: options.force_disk,
+            },
+        )?;
     }
 
     // Phase 3b.1: tagpath agent-doc lint gate. Runs on the final file
@@ -2100,6 +2116,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             &options.pending_edit,
             &options.review_resolve,
         );
+        queue_completion_ids.extend(options.queue_completion_ids.iter().cloned());
         let queue_consumption_allowed = queue_consumption_allowed_for_response(
             file,
             baseline.as_deref(),
@@ -2271,7 +2288,20 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
                 // `#crdtauth4` — authority-gated commit barrier (plan phase 4).
                 // No-op under `GitAuthoritative` (Detached); under `MultiReplica`
                 // flushes live editor replicas to a consistent cut before commit.
-                let _barrier_ready = crate::crdt_relay_host::commit_barrier_for_file(file);
+                let barrier_ready = crate::crdt_relay_host::commit_barrier_for_file(file);
+                if !barrier_ready {
+                    log_closeout_guard(
+                        file,
+                        crate::flow::types::FlowStage::PreCommitGuard,
+                        crate::flow::types::FlowOutcome::Blocked,
+                        crate::flow::closeout::CloseoutGuardReason::ReplicaDeliveryPending,
+                    );
+                    eprintln!(
+                        "[commit] skipped: live editor replica delivery is still pending for {}",
+                        file.display()
+                    );
+                    return Ok(());
+                }
                 match crate::git::commit(file) {
                     // `#staleinmem` — record what we just committed so a later
                     // out-of-band disk correction is detectable at the next barrier.
@@ -4947,7 +4977,7 @@ mod tests {
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
         // `#6b5h`: a real editor is attached — seed a live plugin-owner lease so the
         // non-force consume fails closed (protects the buffer) rather than taking
-        // the editor-less disk fallback.
+        // an unproven editor-delivery disk fallback.
         crate::plugin_owner::write_plugin_owner_lease_for_test(
             doc.to_str().unwrap(),
             std::process::id(),

@@ -1829,7 +1829,7 @@ fn repair_spent_preset_pause_before_dispatch(
         return Ok(true);
     }
 
-    let outcome = crate::write::consume_queue_prompt_with_outcome(file).with_context(|| {
+    let outcome = crate::write::consume_queue_prompt_force_disk(file).with_context(|| {
         format!(
             "spent-preset pause repair: failed to consume #{}",
             preset_id
@@ -1925,16 +1925,10 @@ pub(crate) fn is_same_project_controller_pid(project_root: &Path, pid: u32) -> b
 }
 
 pub(crate) fn args_match_same_project_controller(args: &[String], project_root: &Path) -> bool {
-    if !args.iter().any(|arg| arg.ends_with("agent-doc")) {
+    let Some(controller_idx) = agent_doc_controller_serve_arg_index(args) else {
         return false;
-    }
-    if !args
-        .windows(2)
-        .any(|window| window[0] == "controller" && window[1] == "serve")
-    {
-        return false;
-    }
-    let Some(raw_root) = args
+    };
+    let Some(raw_root) = args[controller_idx + 3..]
         .windows(2)
         .find_map(|window| (window[0] == "--project-root").then(|| PathBuf::from(&window[1])))
     else {
@@ -4630,6 +4624,21 @@ mod tests {
         ];
         assert!(args_match_same_project_controller(&args, dir.path()));
 
+        let shell_sentinel = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            "sleep 30; :".to_string(),
+            dir.path().join("agent-doc").display().to_string(),
+            "controller".to_string(),
+            "serve".to_string(),
+            "--project-root".to_string(),
+            dir.path().display().to_string(),
+        ];
+        assert!(args_match_same_project_controller(
+            &shell_sentinel,
+            dir.path()
+        ));
+
         let other_dir = tempfile::TempDir::new().unwrap();
         assert!(!args_match_same_project_controller(&args, other_dir.path()));
 
@@ -4640,6 +4649,20 @@ mod tests {
         ];
         assert!(!args_match_same_project_controller(
             &non_controller,
+            dir.path()
+        ));
+
+        let tmux_launcher = vec![
+            "tmux".to_string(),
+            "new-session".to_string(),
+            "agent-doc".to_string(),
+            "controller".to_string(),
+            "serve".to_string(),
+            "--project-root".to_string(),
+            dir.path().display().to_string(),
+        ];
+        assert!(!args_match_same_project_controller(
+            &tmux_launcher,
             dir.path()
         ));
     }

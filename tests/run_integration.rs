@@ -1,5 +1,7 @@
 use agent_doc_core::turn_scope::{Address, TurnScope};
-use agent_doc_orchestration::{cycle_state, turn_scope_store};
+use agent_doc_orchestration::{
+    cycle_state, project_controller, snapshot, state_backbone, turn_scope_store,
+};
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
@@ -276,6 +278,30 @@ fn read_cycle_state(root: &Path) -> Value {
     serde_json::from_str(&fs::read_to_string(entry.path()).unwrap()).unwrap()
 }
 
+fn assert_terminal_closeout_proof(root: &Path, doc: &Path) {
+    let canonical_doc = doc.canonicalize().unwrap();
+    let ledger_path = agent_doc_orchestration::flow::proof_ledger::proof_ledger_path(
+        &root.canonicalize().unwrap(),
+        &canonical_doc,
+    );
+    let records =
+        agent_doc_orchestration::flow::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
+    assert!(
+        records.iter().any(|record| {
+            record.operation_kind
+                == agent_doc_orchestration::flow::proof_ledger::ProofOperationKind::TerminalProof
+                && record.proof_kind
+                    == agent_doc_orchestration::flow::proof_ledger::ProofEvidenceKind::TerminalStateObserved
+                && record.outcome
+                    == agent_doc_orchestration::flow::proof_ledger::ProofOutcome::Recorded
+                && record.proof.contains("phase=committed")
+                && record.proof.contains("agreement=file_snapshot_head")
+        }),
+        "expected committed terminal closeout proof in {}",
+        ledger_path.display()
+    );
+}
+
 fn seed_snapshot(root: &Path, doc: &Path) {
     let canonical = doc.canonicalize().unwrap();
     let mut hasher = Sha256::new();
@@ -283,6 +309,28 @@ fn seed_snapshot(root: &Path, doc: &Path) {
     let hash = hex::encode(hasher.finalize());
     let snapshot = root.join(".agent-doc/snapshots").join(format!("{hash}.md"));
     fs::write(snapshot, fs::read_to_string(doc).unwrap()).unwrap();
+}
+
+fn record_selected_queue_head(root: &Path, doc: &Path, content: &str, prompt_text: &str) {
+    let node_key = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+        .unwrap()
+        .into_iter()
+        .find(|node| !node.item.struck)
+        .expect("queue head should have a node key")
+        .node_key;
+    let document_hash = snapshot::doc_hash(&doc.canonicalize().unwrap()).unwrap();
+    let event = state_backbone::StateEvent::new(
+        format!("test-selected-queue-head:{node_key}"),
+        state_backbone::StateFact::QueueHeadSelected {
+            document_hash,
+            node_key,
+            backlog_id: None,
+            prompt_text: Some(prompt_text.to_string()),
+            drainable: true,
+            hosting_epoch: None,
+        },
+    );
+    project_controller::append_state_event(root, &event).unwrap();
 }
 
 fn template_doc_with_model() -> String {
@@ -324,7 +372,7 @@ fn run_template_mode_writes_inside_exchange_and_commits() {
     agent_doc()
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
-        .args(["run", doc.to_str().unwrap()])
+        .args(["run", "--force-disk", doc.to_str().unwrap()])
         .assert()
         .success();
 
@@ -396,9 +444,11 @@ fn bare_path_alias_uses_same_template_safe_path() {
 fn run_auto_queue_continues_until_drained() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
-    fs::write(&doc, active_auto_queue_doc()).unwrap();
+    let active_doc = active_auto_queue_doc();
+    fs::write(&doc, &active_doc).unwrap();
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
+    record_selected_queue_head(tmp.path(), &doc, &active_doc, "do #fix1");
 
     let (script, counter) = write_counting_queue_agent(tmp.path());
     let config_root = write_config(tmp.path(), &script);
@@ -406,7 +456,7 @@ fn run_auto_queue_continues_until_drained() {
     agent_doc()
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
-        .args(["run", doc.to_str().unwrap()])
+        .args(["run", "--force-disk", doc.to_str().unwrap()])
         .assert()
         .success()
         .stderr(predicate::str::contains(
@@ -463,9 +513,11 @@ fn run_auto_queue_continues_until_drained() {
 fn run_auto_queue_starts_fresh_backend_session_after_accretion_threshold() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
-    fs::write(&doc, active_large_auto_queue_doc_with_resume()).unwrap();
+    let active_doc = active_large_auto_queue_doc_with_resume();
+    fs::write(&doc, &active_doc).unwrap();
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
+    record_selected_queue_head(tmp.path(), &doc, &active_doc, "do #fix1");
 
     let (script, counter, args_log) = write_arg_logging_queue_agent(tmp.path());
     let config_root = write_config(tmp.path(), &script);
@@ -473,7 +525,7 @@ fn run_auto_queue_starts_fresh_backend_session_after_accretion_threshold() {
     let assert = agent_doc()
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
-        .args(["run", doc.to_str().unwrap()])
+        .args(["run", "--force-disk", doc.to_str().unwrap()])
         .assert()
         .success();
     let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
@@ -525,9 +577,11 @@ fn run_persisted_active_queue_continues_until_drained_without_auto() {
     // a start trigger only; `queue_active: true` is the continuation signal.
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
-    fs::write(&doc, active_persisted_queue_doc()).unwrap();
+    let active_doc = active_persisted_queue_doc();
+    fs::write(&doc, &active_doc).unwrap();
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
+    record_selected_queue_head(tmp.path(), &doc, &active_doc, "do #fix1");
 
     let (script, counter) = write_counting_queue_agent(tmp.path());
     let config_root = write_config(tmp.path(), &script);
@@ -535,7 +589,7 @@ fn run_persisted_active_queue_continues_until_drained_without_auto() {
     agent_doc()
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
-        .args(["run", doc.to_str().unwrap()])
+        .args(["run", "--force-disk", doc.to_str().unwrap()])
         .assert()
         .success()
         .stderr(predicate::str::contains(
@@ -583,13 +637,11 @@ fn run_persisted_active_queue_continues_until_drained_without_auto() {
 fn run_auto_queue_stop_fence_halts_continuation_before_next_prompt() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
-    fs::write(
-        &doc,
-        "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto -->\n- do #fix1\n--- stop\n- do #fix2\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
-    )
-    .unwrap();
+    let active_doc = "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto -->\n- do #fix1\n--- stop\n- do #fix2\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n";
+    fs::write(&doc, active_doc).unwrap();
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
+    record_selected_queue_head(tmp.path(), &doc, active_doc, "do #fix1");
 
     let (script, counter) = write_counting_queue_agent(tmp.path());
     let config_root = write_config(tmp.path(), &script);
@@ -597,7 +649,7 @@ fn run_auto_queue_stop_fence_halts_continuation_before_next_prompt() {
     agent_doc()
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
-        .args(["run", doc.to_str().unwrap()])
+        .args(["run", "--force-disk", doc.to_str().unwrap()])
         .assert()
         .success()
         .stderr(predicate::str::contains(
@@ -965,6 +1017,7 @@ fn codex_owned_pane_active_auto_queue_hands_off_without_drift() {
     fs::write(&doc, committed).unwrap();
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
+    record_selected_queue_head(tmp.path(), &doc, committed, "do something");
     fs::write(
         tmp.path().join(".agent-doc/sessions.json"),
         format!(
@@ -1299,13 +1352,17 @@ fn preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit() 
 fn orchestrate_handles_already_open_preflight_cycle_for_first_step() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
-    fs::write(&doc, template_doc_with_model()).unwrap();
+    let initial = template_doc_with_model().replace(
+        "❯ Please reply\n",
+        "### Re: prior — gpt-5\n\nDone.\n<!-- agent:boundary:keep -->\n",
+    );
+    fs::write(&doc, &initial).unwrap();
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
 
     let edited = fs::read_to_string(&doc).unwrap().replace(
-        "❯ Please reply\n",
-        "❯ Please reply\n\nSynchronous orchestra:\n",
+        "<!-- agent:boundary:keep -->\n",
+        "Synchronous orchestra:\n<!-- agent:boundary:keep -->\n",
     );
     fs::write(&doc, edited).unwrap();
 
@@ -1579,4 +1636,5 @@ fn interrupted_run_leaves_write_applied_and_preflight_finishes_commit() {
         head_blob.contains("### Re: interrupted closeout — gpt-5"),
         "HEAD should contain the recovered response"
     );
+    assert_terminal_closeout_proof(tmp.path(), &doc);
 }

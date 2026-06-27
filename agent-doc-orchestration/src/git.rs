@@ -594,7 +594,11 @@ fn strike_answered_free_text_heads_at_commit_seam(file: &Path) {
     if response_body.trim().is_empty() {
         return;
     }
-    match crate::write::strike_answered_free_text_queue_heads(file, &response_body, false) {
+    // The commit seam is already the binary-owned closeout boundary and runs
+    // before staging under the commit lock; use the force-disk strike branch so
+    // recovery commits do not silently leave answered free-text heads live when
+    // no editor listener is attached.
+    match crate::write::strike_answered_free_text_queue_heads(file, &response_body, true) {
         Ok(0) => {}
         Ok(n) => crate::ops_log::log_op(
             file,
@@ -2925,7 +2929,11 @@ fn submodule_paths(git_root: &Path) -> std::collections::HashSet<String> {
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         // ` <sha> <path> (<describe>)` / `+<sha> <path>` / `-<sha> <path>` /
         // `U<sha> <path>` — the path is the second whitespace-separated field.
-        if let Some(path) = line.trim_start_matches(['+', '-', 'U', ' ']).split_whitespace().nth(1) {
+        if let Some(path) = line
+            .trim_start_matches(['+', '-', 'U', ' '])
+            .split_whitespace()
+            .nth(1)
+        {
             set.insert(path.to_string());
         }
     }
@@ -4964,6 +4972,12 @@ Duplicate replay should stay live.
         assert!(
             snap.contains("~~fix the parser bug in the lexer~~"),
             "snapshot must also carry the strike:\n{snap}"
+        );
+        let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("commit_seam_free_text_strike")
+                && ops_log.contains("freetext_head_strike"),
+            "commit seam strike should be observable in ops.log:\n{ops_log}"
         );
     }
 

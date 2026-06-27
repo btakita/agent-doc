@@ -86,6 +86,30 @@ fn git_commit_count(root: &Path) -> usize {
         .unwrap()
 }
 
+fn assert_terminal_closeout_proof(root: &Path, doc: &Path) {
+    let canonical_doc = doc.canonicalize().unwrap();
+    let ledger_path = agent_doc_orchestration::flow::proof_ledger::proof_ledger_path(
+        &root.canonicalize().unwrap(),
+        &canonical_doc,
+    );
+    let records =
+        agent_doc_orchestration::flow::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
+    assert!(
+        records.iter().any(|record| {
+            record.operation_kind
+                == agent_doc_orchestration::flow::proof_ledger::ProofOperationKind::TerminalProof
+                && record.proof_kind
+                    == agent_doc_orchestration::flow::proof_ledger::ProofEvidenceKind::TerminalStateObserved
+                && record.outcome
+                    == agent_doc_orchestration::flow::proof_ledger::ProofOutcome::Recorded
+                && record.proof.contains("phase=committed")
+                && record.proof.contains("agreement=file_snapshot_head")
+        }),
+        "expected committed terminal closeout proof in {}",
+        ledger_path.display()
+    );
+}
+
 fn extract_preflight_baseline(output: &str) -> String {
     output
         .lines()
@@ -309,6 +333,81 @@ fn test_cli_admin_json_receipts_and_inspection_cover_controller_paths() {
 }
 
 #[test]
+fn test_cli_admin_reap_all_stale_reports_summary_and_guards_tmux_unavailable() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    fs::create_dir_all(root.join(".agent-doc")).unwrap();
+    let doc = root.join("tasks/admin-bulk-reap.md");
+    fs::create_dir_all(doc.parent().unwrap()).unwrap();
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: session-cli-bulk-reap\nagent: codex\n---\nBody\n",
+    )
+    .unwrap();
+    let record = agent_doc_orchestration::session_actor::record_session_start_direct(
+        &doc,
+        "session-cli-bulk-reap",
+        "%999999",
+        "@999999",
+        1,
+    )
+    .unwrap();
+    agent_doc_orchestration::session_actor::transition_state_direct(
+        &doc,
+        "session-cli-bulk-reap",
+        "%999999",
+        Some(1),
+        agent_doc_orchestration::session_actor::ActorState::Ready,
+        "supervisor",
+        "prompt_ready",
+    )
+    .unwrap();
+
+    let output = agent_doc_cmd()
+        .args([
+            "admin",
+            "reap",
+            "--all-stale",
+            "--project-root",
+            root.to_str().unwrap(),
+            "--reason",
+            "cli bulk reap",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let summary: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(summary["reason"], "manual_reap_all_stale cli bulk reap");
+    let reaped = summary["reaped"].as_u64().unwrap();
+    assert!(
+        reaped <= 1,
+        "single stale fixture can reap at most one actor: {summary}"
+    );
+
+    let current =
+        agent_doc_orchestration::project_controller::load_actor_record(root, &record.document_id)
+            .unwrap()
+            .unwrap();
+    if reaped == 1 {
+        assert_eq!(
+            current.state,
+            agent_doc_orchestration::session_actor::ActorState::Closed
+        );
+        assert_eq!(current.pane_id, "");
+        assert_eq!(current.window_id, "");
+    } else {
+        assert_eq!(
+            current.state,
+            agent_doc_orchestration::session_actor::ActorState::Ready
+        );
+        assert_eq!(current.pane_id, "%999999");
+    }
+}
+
+#[test]
 fn mcp_serve_handles_initialize_list_and_read() {
     let mut file = tempfile::NamedTempFile::new().unwrap();
     write!(
@@ -371,6 +470,13 @@ fn mcp_serve_handles_initialize_list_and_read() {
             .as_array()
             .unwrap()
             .iter()
+            .any(|tool| tool["name"] == "agent_doc_admit")
+    );
+    assert!(
+        responses[1]["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
             .any(|tool| tool["name"] == "agent_doc_preflight")
     );
     assert!(
@@ -383,6 +489,72 @@ fn mcp_serve_handles_initialize_list_and_read() {
     assert_eq!(
         responses[2]["result"]["structuredContent"]["content"],
         "MCP body\n"
+    );
+}
+
+#[test]
+fn mcp_serve_handles_admit_and_plan() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = template_doc(
+        "Session",
+        "❯ Please inspect\n<!-- agent:boundary:1234abcd -->\n",
+        "",
+        "",
+    );
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc, &content);
+
+    let admit = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "agent_doc_admit",
+            "arguments": {
+                "file": doc.display().to_string()
+            }
+        }
+    });
+    let plan = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "agent_doc_plan",
+            "arguments": {
+                "file": doc.display().to_string()
+            }
+        }
+    });
+
+    let assert = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .args(["mcp", "serve"])
+        .write_stdin(format!("{admit}\n{plan}\n"))
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let responses: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+
+    assert_eq!(responses.len(), 2);
+    assert_eq!(responses[0]["result"]["isError"], false);
+    assert_eq!(
+        responses[0]["result"]["structuredContent"]["admission"]["source"],
+        "admit"
+    );
+    assert_eq!(
+        responses[0]["result"]["structuredContent"]["admission"]["maintenance_required"],
+        false
+    );
+    assert_eq!(responses[1]["result"]["isError"], false);
+    assert_eq!(
+        responses[1]["result"]["structuredContent"]["plan"]["execution_scope"],
+        "normal"
     );
 }
 
@@ -563,6 +735,7 @@ fn mcp_finalize_close_after_capture_recovers_on_next_preflight_once() {
         check_stdout.contains("[session-check] ok"),
         "session-check should be clean after close-after-capture recovery:\n{check_stdout}"
     );
+    assert_terminal_closeout_proof(root, &doc);
 }
 
 #[test]
@@ -813,7 +986,9 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // the explicit operator escape hatch used by `finalize --force-disk` when
         // it bypasses a stale active editor listener instead of failing before
         // the binary-owned closeout boundary (#pzjy closeout recovery).
-        ("agent-doc-orchestration/src/preflight/maintenance.rs", "reason=") => 5,
+        // 5 -> 6 (`reason={}`): typed deferred queue-head projection records the
+        // owning defer reason for stop/time-gated heads.
+        ("agent-doc-orchestration/src/preflight/maintenance.rs", "reason=") => 6,
         ("agent-doc-orchestration/src/repair.rs", "guard_") => 10,
         ("agent-doc-orchestration/src/repair.rs", "reason=") => 5,
         ("agent-doc-orchestration/src/route.rs", "accepted_only") => 2,
@@ -848,7 +1023,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // consuming a head that is not backed by the committed snapshot (an
         // uncommitted editor-buffer-only operator edit), so route never feeds a
         // half-typed/uncommitted line into the agent prompt and loses it.
-        ("agent-doc-orchestration/src/route.rs", "reason=") => 9,
+        // +1 (`reason=force_disk`): route's explicit no-listener/headless
+        // escape hatch logs when `--force-disk` bypasses editor convergence for
+        // route-owned session/queue writes.
+        ("agent-doc-orchestration/src/route.rs", "reason=") => 10,
         ("agent-doc-orchestration/src/route/dispatch_only.rs", "guard_") => 4,
         // +1/+1 (#jbsimpleroute): the Codex accepted-only delivery regression
         // asserts the typed `proof=accepted proof_scope=accepted_only` log shape
@@ -1064,19 +1242,25 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // -2 `guard_`, -1 `reason=` (#nodiskipc): active IPC timeout/no-proof
         // paths no longer enter the direct document-write fallback, so the removed
         // visible-write guard/reason tokens are retired rather than rerouted.
-        ("agent-doc-orchestration/src/write/run_entry.rs", "guard_") => 10,
-        ("agent-doc-orchestration/src/write/run_entry.rs", "reason=") => 1,
+        // +1 `guard_` (#recguard-wedge-escape): the queue-consume success path
+        // clears `recguard_wedge`; substring comes from the module name, not a new
+        // flow guard boundary.
+        // +1 `reason=`: non-git repair template replay now uses an explicit
+        // `apply_template_writeback ... reason=force_disk` marker when the
+        // existing repair replay policy elects the audited force-disk transport.
+        ("agent-doc-orchestration/src/write/run_entry.rs", "guard_") => 11,
+        ("agent-doc-orchestration/src/write/run_entry.rs", "reason=") => 2,
         // queue-prompt consumption, IPC transport/repair, and live-prompt-drift
         // convergence extracted into write/queue_consume.rs, write/ipc.rs, and
         // write/converge.rs (#splitmods3 large-module split). The moved
         // `guard_`/`reason=` tokens are tracked against the new submodules,
         // not added anew.
         ("agent-doc-orchestration/src/write/queue_consume.rs", "guard_") => 1,
-        // +4 (#freshqueueauth): direct queue-head removals now log explicit
+        // +3 (#freshqueueauth): direct queue-head removals now log explicit
         // proof fields for prune/orphan/acknowledgement paths, and the new
         // acknowledgement regression asserts that proof marker. The operations
         // stay routed through the existing queue-consume/converge write boundary.
-        ("agent-doc-orchestration/src/write/queue_consume.rs", "proof=") => 4,
+        ("agent-doc-orchestration/src/write/queue_consume.rs", "proof=") => 3,
         // 1 -> 4 (#editorbufwin Fix A): the queue-consume head-equality check now
         // reconciles a benign live-buffer head divergence instead of hard-bailing,
         // mirroring the existing remaining-queue `reason=crdt_merge_authoritative`
@@ -1084,7 +1268,9 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // appears in the production ops_log line, its explanatory comment, and the
         // regression test assertion — gated on recorded dropped-queue evidence
         // (no evidence still bails, preserving the corruption guard).
-        ("agent-doc-orchestration/src/write/queue_consume.rs", "reason=") => 4,
+        // 4 -> 5 (#typed-stop-fence): post-consume next-head projection records
+        // typed stop-fence deferral as `QueueHeadDeferred` with the owning reason.
+        ("agent-doc-orchestration/src/write/queue_consume.rs", "reason=") => 5,
         // +4 `guard_` (#dupcontent: two `guard_adopts/refuses_*` adoption tests
         // + two `guard_ipc_snapshot_adoption_against_live_prompt_drift` calls in
         // those tests) and +2 `reason=` (the two `content_ours_adoption_refused_structural`
@@ -1293,7 +1479,10 @@ fn test_admin_recycle_accepts_document_target() {
     // session document (one with an `agent_doc_session` id). This fixture has no
     // frontmatter, so recycle must degrade to a clean no-op exit (not a hard
     // `restart` error) with `escalated_cold_start:false`.
-    assert!(stdout.contains("\"escalated_cold_start\":false"), "{stdout}");
+    assert!(
+        stdout.contains("\"escalated_cold_start\":false"),
+        "{stdout}"
+    );
 }
 
 #[test]
@@ -2368,6 +2557,7 @@ fn test_compact_commit_explains_commit_scope() {
         "--tag",
         "skip",
         "--commit",
+        "--force-disk",
     ]);
     cmd.assert().success().stderr(predicate::str::contains(
         "[compact] note: --commit persists only the compacted document state now in HEAD",
@@ -2620,6 +2810,7 @@ fn test_cli_route_generates_session_for_bare_file() {
     let mut cmd = agent_doc_cmd();
     cmd.arg("route");
     cmd.arg(&doc);
+    cmd.arg("--force-disk");
     cmd.current_dir(tmp.path());
     // Prevent auto-start from creating real tmux windows
     cmd.env("AGENT_DOC_NO_AUTOSTART", "1");
@@ -2650,6 +2841,7 @@ fn test_cli_route_rejects_plain_md_without_opt_in() {
     let mut cmd = agent_doc_cmd();
     cmd.arg("route");
     cmd.arg(&doc);
+    cmd.arg("--force-disk");
     cmd.current_dir(tmp.path());
     cmd.env("AGENT_DOC_NO_AUTOSTART", "1");
     let output = cmd.output().unwrap();
@@ -2672,6 +2864,7 @@ fn test_cli_route_generates_session_for_null_session() {
     let mut cmd = agent_doc_cmd();
     cmd.arg("route");
     cmd.arg(&doc);
+    cmd.arg("--force-disk");
     cmd.current_dir(tmp.path());
     // Prevent auto-start from creating real tmux windows
     cmd.env("AGENT_DOC_NO_AUTOSTART", "1");
@@ -3361,7 +3554,15 @@ fn test_compact_message_dash_reads_stdin() {
 
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(root);
-    cmd.args(["compact", "session.md", "--message", "-", "--tag", "skip"]);
+    cmd.args([
+        "compact",
+        "session.md",
+        "--message",
+        "-",
+        "--tag",
+        "skip",
+        "--force-disk",
+    ]);
     cmd.write_stdin("Summary from stdin pipe.");
     cmd.assert().success();
 

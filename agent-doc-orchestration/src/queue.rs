@@ -2136,7 +2136,10 @@ pub fn converge_queue_via_lifecycle(
             _ => unreachable!("id group index points at a Prompt"),
         };
         let first = prompt_at(idxs[0]);
-        if idxs.iter().all(|&i| is_intentional_directive_twin(first, prompt_at(i))) {
+        if idxs
+            .iter()
+            .all(|&i| is_intentional_directive_twin(first, prompt_at(i)))
+        {
             continue; // all identical — intentional duplicate, never collapse
         }
         let texts: Vec<&str> = idxs.iter().map(|&i| prompt_at(i).text.as_str()).collect();
@@ -4702,7 +4705,11 @@ mod tests {
     /// the pure reference, so an identity converges to exactly one visible head.
     #[test]
     fn converge_bare_reference_subsumed_by_directive() {
-        let entries = vec![p("[#sqedit-race]"), p("[#sqedit-race]"), p("do [#sqedit-race]")];
+        let entries = vec![
+            p("[#sqedit-race]"),
+            p("[#sqedit-race]"),
+            p("do [#sqedit-race]"),
+        ];
         let out = converge(&entries, &[]);
         assert_eq!(out, vec![p("do [#sqedit-race]")], "{out:?}");
     }
@@ -4726,7 +4733,11 @@ mod tests {
             p("queue items are not bubbled to the top"),
         ];
         let out = converge(&entries, &snapshot);
-        assert_eq!(out, vec![p("queue items are not bubbled to the top")], "{out:?}");
+        assert_eq!(
+            out,
+            vec![p("queue items are not bubbled to the top")],
+            "{out:?}"
+        );
     }
 
     /// A genuinely twice-authored free-text line keeps both copies.

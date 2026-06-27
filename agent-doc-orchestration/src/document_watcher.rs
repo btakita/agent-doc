@@ -39,7 +39,6 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 
-use crate::config::Config;
 use crate::session_actor::{SessionOpKind, document_actor_in};
 
 /// Minimal classification of a raw filesystem event, mirroring the
@@ -236,34 +235,6 @@ pub fn route_event(
         })??;
     }
     Ok(delivery)
-}
-
-/// Route a settled filesystem event through the document actor and, for the
-/// current cutover phase, run the legacy submit behind that actor. This keeps
-/// `watch.rs` out of the direct `run_with_context` path while admission and the
-/// realtime scheduler are still being built.
-pub fn route_legacy_submit(
-    base_dir: &Path,
-    doc_id: &str,
-    file: &str,
-    raw: &RawWatchEvent,
-    current_content: &str,
-    config: Config,
-) -> Result<WatchDelivery> {
-    let path = PathBuf::from(file);
-    route_event(base_dir, doc_id, file, raw, current_content, move || {
-        let run_context = crate::graph::ActorContext::new(path.clone());
-        crate::run::run_with_context(
-            &path,
-            false,
-            None,
-            None,
-            false,
-            false,
-            &config,
-            Some(run_context.context()),
-        )
-    })
 }
 
 fn file_watch_event_id(doc_id: &str, generation: u64, content_hash: &str) -> String {

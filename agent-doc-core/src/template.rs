@@ -339,6 +339,10 @@ pub use tail_repair::*;
 /// write path. Safe duplicate exchange-close scaffolds are dropped; ambiguous
 /// mixed user text remains an error so the editor can refuse the visible write.
 pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> {
+    if let Some(reason) = crate::component::malformed_agent_comment_reason(doc) {
+        anyhow::bail!("template structural corruption guard failed: {reason}");
+    }
+
     let mut normalized = crate::component::strip_backlog_patch_attr(doc);
     // #queue-completed-items-escape-below-component: scrub struck queue items
     // that drifted below `<!-- /agent:queue -->` into the parking-lot comment so
@@ -356,7 +360,10 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
         .context("template duplicate prompt residue guard failed")?;
 
     match guard_no_conversation_tail_outside_exchange(&normalized) {
-        Ok(()) => Ok(normalized),
+        Ok(()) => {
+            guard_editor_visible_structural_corruption(&normalized)?;
+            Ok(normalized)
+        }
         Err(err)
             if err.chain().any(|cause| {
                 cause
@@ -370,6 +377,7 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
                 guard_no_conversation_tail_outside_exchange(&repaired).with_context(
                     || "template structure guard failed after duplicate-scaffold repair",
                 )?;
+                guard_editor_visible_structural_corruption(&repaired)?;
                 return Ok(repaired);
             }
             if repair_duplicate_exchange_close_mixed_scaffold_tail(&normalized)?.is_some() {
@@ -384,12 +392,20 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
                 guard_no_conversation_tail_outside_exchange(&repaired).with_context(
                     || "template structure guard failed after duplicate-close repair",
                 )?;
+                guard_editor_visible_structural_corruption(&repaired)?;
                 return Ok(repaired);
             }
             Err(err).context("template structure guard failed")
         }
         Err(err) => Err(err).context("template structure guard failed"),
     }
+}
+
+fn guard_editor_visible_structural_corruption(doc: &str) -> Result<()> {
+    if let Some(reason) = crate::component::structural_corruption_reason(doc) {
+        anyhow::bail!("template structural corruption guard failed: {reason}");
+    }
+    Ok(())
 }
 
 /// True when a line is a displaced struck queue item — a `- ~~…~~`
@@ -1917,9 +1933,7 @@ All green.
     }
     // --- #npe1 / #codefencestrip reproduction: trailing code fence at exchange boundary ---
     fn npe1_doc(prompt: &str) -> String {
-        format!(
-            "# Session\n\n<!-- agent:exchange -->\n{prompt}\n<!-- /agent:exchange -->\n"
-        )
+        format!("# Session\n\n<!-- agent:exchange -->\n{prompt}\n<!-- /agent:exchange -->\n")
     }
 
     fn npe1_round_trip(response_body: &str, prompt: &str) -> String {
@@ -1927,9 +1941,8 @@ All green.
         let doc_path = dir.path().join("plan.md");
         let doc = npe1_doc(prompt);
         std::fs::write(&doc_path, &doc).unwrap();
-        let response = format!(
-            "<!-- patch:exchange -->\n{response_body}\n<!-- /patch:exchange -->\n"
-        );
+        let response =
+            format!("<!-- patch:exchange -->\n{response_body}\n<!-- /patch:exchange -->\n");
         let (patches, unmatched) = parse_patches(&response).unwrap();
         let applied = apply_patches_via_path(&doc, &patches, &unmatched, &doc_path).unwrap();
         // Boundary repositioning is the IPC write-path step; exercise it too.
@@ -1939,17 +1952,15 @@ All green.
     #[test]
     fn npe1_trailing_code_fence_survives_round_trip() {
         let prompt = "❯ show me the snippet";
-        let response = "### Re: show me the snippet\n\nHere is the code:\n\n```rust\nfn main() {}\n```";
+        let response =
+            "### Re: show me the snippet\n\nHere is the code:\n\n```rust\nfn main() {}\n```";
         let result = npe1_round_trip(response, prompt);
         let fences = result.matches("```").count();
         assert_eq!(
             fences, 2,
             "expected opening + closing fence to survive; got {fences} fences in:\n{result}"
         );
-        assert!(
-            result.contains("fn main() {}"),
-            "code body lost:\n{result}"
-        );
+        assert!(result.contains("fn main() {}"), "code body lost:\n{result}");
         assert!(
             result.contains("```rust\nfn main() {}\n```"),
             "fenced block mangled:\n{result}"
@@ -1980,16 +1991,28 @@ All green.
             2,
             "prior fence lost in cycle2:\n{result}"
         );
-        assert!(result.contains("```rust\nfn main() {}\n```"), "cycle2:\n{result}");
+        assert!(
+            result.contains("```rust\nfn main() {}\n```"),
+            "cycle2:\n{result}"
+        );
     }
 
     #[test]
     fn npe1_adjacent_fence_cases_survive_round_trip() {
         let cases = [
             ("only-fence", "### Re: q\n```\nplain\n```"),
-            ("fence+trailing-nl", "### Re: q\n\n```rust\nfn main() {}\n```\n"),
-            ("indented-fence", "### Re: q\n\n- item:\n  ```rust\n  fn main() {}\n  ```"),
-            ("multi-fence", "### Re: q\n\n```a\none\n```\n\nthen\n\n```b\ntwo\n```"),
+            (
+                "fence+trailing-nl",
+                "### Re: q\n\n```rust\nfn main() {}\n```\n",
+            ),
+            (
+                "indented-fence",
+                "### Re: q\n\n- item:\n  ```rust\n  fn main() {}\n  ```",
+            ),
+            (
+                "multi-fence",
+                "### Re: q\n\n```a\none\n```\n\nthen\n\n```b\ntwo\n```",
+            ),
             ("no-heading-fence", "Here:\n\n```rust\nfn main() {}\n```"),
         ];
         for (name, response) in cases {

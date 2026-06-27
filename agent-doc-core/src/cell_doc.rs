@@ -2679,7 +2679,10 @@ working on it
         assert!(c.ours.contains("OURS-VERSION"));
         assert!(c.theirs.contains("THEIRS-VERSION"));
         // queue is operator-owned ⇒ theirs-wins (#provauth1/#provauth4).
-        assert!(c.chosen.contains("THEIRS-VERSION"), "operator-owned theirs-wins");
+        assert!(
+            c.chosen.contains("THEIRS-VERSION"),
+            "operator-owned theirs-wins"
+        );
         assert!(out.merged_text.contains("THEIRS-VERSION"));
         assert!(
             !out.merged_text.contains("OURS-VERSION"),
@@ -2776,8 +2779,7 @@ working on it
         let out = merge_3way(base, ours, theirs);
         assert!(!out.fell_back, "should not fall back: {out:?}");
         assert!(
-            out.merged_text
-                .contains("<!-- agent:queue priority go -->"),
+            out.merged_text.contains("<!-- agent:queue priority go -->"),
             "operator marker attribute lost (reverted to ours' marker): {}",
             out.merged_text
         );
@@ -2874,7 +2876,10 @@ working on it
         );
         assert_eq!(out.conflicts[0].kind, ConflictKind::Content);
         // queue is operator-owned ⇒ theirs-wins (#provauth1/#provauth4).
-        assert!(out.merged_text.contains("THEIRS-ONLY"), "operator-owned theirs-wins");
+        assert!(
+            out.merged_text.contains("THEIRS-ONLY"),
+            "operator-owned theirs-wins"
+        );
         assert!(
             !out.merged_text.contains("OURS-ONLY"),
             "no blend on a real overlap: {}",
@@ -2908,7 +2913,10 @@ working on it
         );
         // queue is operator-owned ⇒ theirs-wins (#provauth1/#provauth4); with
         // opcapture OFF the disjoint ours edit is dropped, not blended.
-        assert!(out.merged_text.contains("THERE!"), "operator-owned theirs-wins");
+        assert!(
+            out.merged_text.contains("THERE!"),
+            "operator-owned theirs-wins"
+        );
         assert!(
             !out.merged_text.contains("EDITED"),
             "OFF: losing ours disjoint edit is dropped (no op-merge): {}",

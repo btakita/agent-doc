@@ -25,6 +25,8 @@ class PluginLifecycleListener : ProjectManagerListener {
     override fun projectOpened(project: Project) {
         // Track document changes for typing debounce in SubmitAction
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(TypingTracker, project)
+        // Attach markdown buffers as CRDT replicas when the supervisor supports it.
+        CrdtReplicaManager.getInstance(project)
         // Start watching for IPC patch files from agent-doc write --ipc
         PatchWatcher.getInstance(project)
         // Highlight agent-doc-specific markdown structures in the editor.
@@ -98,6 +100,7 @@ class PluginLifecycleListener : ProjectManagerListener {
     override fun projectClosed(project: Project) {
         PromptPanel.dismiss(project)
         PromptPoller.disposeProject(project)
+        CrdtReplicaManager.disposeProject(project)
         PatchWatcher.disposeProject(project)
         LayoutChangeDetector.disposeProject(project)
         VisualHighlighterManager.disposeProject(project)

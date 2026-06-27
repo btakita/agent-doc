@@ -286,6 +286,7 @@ fn current_epoch_secs() -> u64 {
         .as_secs()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     file: &Path,
     branch: bool,
@@ -293,10 +294,11 @@ pub fn run(
     model: Option<&str>,
     dry_run: bool,
     no_git: bool,
+    force_disk: bool,
     config: &Config,
 ) -> Result<()> {
     run_with_context(
-        file, branch, agent_name, model, dry_run, no_git, config, None,
+        file, branch, agent_name, model, dry_run, no_git, force_disk, config, None,
     )
 }
 
@@ -308,6 +310,7 @@ pub fn run_with_context(
     model: Option<&str>,
     dry_run: bool,
     no_git: bool,
+    force_disk: bool,
     config: &Config,
     run_context: Option<&crate::graph::RunContext>,
 ) -> Result<()> {
@@ -336,6 +339,7 @@ pub fn run_with_context(
             model,
             dry_run,
             no_git,
+            force_disk,
             config,
             run_context,
             force_fresh_agent_session,
@@ -454,6 +458,7 @@ fn run_once(
     model: Option<&str>,
     dry_run: bool,
     no_git: bool,
+    force_disk: bool,
     config: &Config,
     run_context: Option<&crate::graph::RunContext>,
     force_fresh_agent_session: bool,
@@ -809,10 +814,11 @@ fn run_once(
                 .clone()
                 .into_iter()
                 .collect::<Vec<_>>();
-            queue_consumption = write::consume_queue_prompts_for_done_ids_with_outcome(
-                file,
-                &queue_completion_ids,
-            )?;
+            queue_consumption = if force_disk {
+                write::consume_queue_prompts_with_outcome(file, &queue_completion_ids, true)?
+            } else {
+                write::consume_queue_prompts_for_done_ids_with_outcome(file, &queue_completion_ids)?
+            };
         } else {
             eprintln!("{}", write::queue_skip_diagnostic_for_file(file)?);
         }
@@ -871,6 +877,10 @@ enum ActiveQueuePromptState {
         snapshot_head: Option<String>,
         document_head: Option<String>,
     },
+    Unproven {
+        reason: String,
+        document_head: Option<String>,
+    },
     Empty,
 }
 
@@ -898,59 +908,68 @@ fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {
     if !activation.active {
         return Ok(ActiveQueuePromptState::Inactive);
     }
-    if crate::queue::has_stop_fence_at_head(&activation.entries_after) {
-        eprintln!("[run] active queue halted by stop fence at head");
-        return Ok(ActiveQueuePromptState::StopFence {
-            next_prompt: crate::queue::first_prompt(&activation.entries_after)
-                .map(|prompt| prompt.text.clone()),
-        });
-    }
-    if let Some(start_at) = crate::queue::time_gate_at_head(&activation.entries_after) {
-        eprintln!("[run] active queue deferred by time gate at head: {start_at}");
-        return Ok(ActiveQueuePromptState::TimeGate {
-            start_at: start_at.to_string(),
-            next_prompt: crate::queue::first_prompt(&activation.entries_after)
-                .map(|prompt| prompt.text.clone()),
-        });
-    }
-
-    if let Some(snapshot_content) = snapshot::load(file)?
-        && let Ok(snapshot_components) = component::parse(&snapshot_content)
-        && let Some(snapshot_queue) = snapshot_components
-            .iter()
-            .find(|component| component.name == "queue")
-    {
-        let snapshot_body = &snapshot_content[snapshot_queue.open_end..snapshot_queue.close_start];
-        if let Ok(snapshot_entries) = crate::queue::parse(snapshot_body) {
-            let snapshot_has_auto = crate::queue::has_auto_attr(&snapshot_queue.attrs);
-            let snapshot_activation =
-                crate::queue::resolve_activation(&snapshot_entries, snapshot_has_auto, false, true);
-            if crate::queue::detect_head_prompt_modified(
-                &snapshot_activation.entries_after,
-                &activation.entries_after,
-            ) {
-                let snapshot_head = crate::queue::first_prompt(&snapshot_activation.entries_after)
-                    .map(|prompt| prompt.text.clone());
-                let document_head = crate::queue::first_prompt(&activation.entries_after)
-                    .map(|prompt| prompt.text.clone());
-                eprintln!(
-                    "[run] active queue halted because the head prompt changed since the snapshot"
-                );
-                return Ok(ActiveQueuePromptState::ItemModified {
-                    snapshot_head,
-                    document_head,
-                });
-            }
-        }
-    }
-
-    let prompts = crate::queue::prompts(&activation.entries_after);
-    let Some(prompt) = prompts.first() else {
+    let document_head = crate::queue::first_prompt(&activation.entries_after)
+        .map(|prompt| crate::queue::strip_in_progress_marker(&prompt.text));
+    if document_head.is_none() {
         return Ok(ActiveQueuePromptState::Empty);
     };
-    Ok(ActiveQueuePromptState::Ready {
-        prompt: prompt.text.clone(),
+
+    if let Some(state) = typed_queue_prompt_state(file, &content) {
+        return Ok(state);
+    }
+
+    eprintln!(
+        "[run] active queue has no current typed selected/deferred head; refusing markdown fallback"
+    );
+    Ok(ActiveQueuePromptState::Unproven {
+        reason: "missing_or_stale_typed_queue_head".to_string(),
+        document_head,
     })
+}
+
+fn typed_queue_prompt_state(file: &Path, content: &str) -> Option<ActiveQueuePromptState> {
+    let canonical = file.canonicalize().ok()?;
+    let project_root = snapshot::find_project_root(&canonical)?;
+    let document_hash = snapshot::doc_hash(&canonical).ok()?;
+    let ledger = crate::project_controller::load_state_event_ledger(&project_root).ok()?;
+    let projection = ledger.project_document(&document_hash)?;
+    let current_nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").ok()?;
+    let current_head = current_nodes.iter().find(|node| !node.item.struck)?;
+    let head = projection.queue.heads.get(&current_head.node_key)?;
+    match head.phase {
+        crate::state_backbone::QueueHeadPhase::Selected => {
+            if projection.queue.active_head.as_deref() != Some(current_head.node_key.as_str()) {
+                return None;
+            }
+            let prompt = head.prompt_text.clone()?;
+            Some(ActiveQueuePromptState::Ready { prompt })
+        }
+        crate::state_backbone::QueueHeadPhase::Deferred => {
+            let reason = head.defer_reason.as_deref()?;
+            if reason == "stop_fence" {
+                eprintln!("[run] active queue halted by typed stop-fence state");
+                return Some(ActiveQueuePromptState::StopFence {
+                    next_prompt: head.prompt_text.clone(),
+                });
+            }
+            if let Some(start_at) = reason.strip_prefix("time_gate:") {
+                eprintln!("[run] active queue deferred by typed time-gate state: {start_at}");
+                return Some(ActiveQueuePromptState::TimeGate {
+                    start_at: start_at.to_string(),
+                    next_prompt: head.prompt_text.clone(),
+                });
+            }
+            if reason == "item_modified" {
+                eprintln!("[run] active queue halted by typed item-modified state");
+                return Some(ActiveQueuePromptState::ItemModified {
+                    snapshot_head: None,
+                    document_head: head.prompt_text.clone(),
+                });
+            }
+            None
+        }
+        _ => None,
+    }
 }
 
 fn should_continue_auto_queue(
@@ -966,12 +985,12 @@ fn should_continue_auto_queue(
     let Some(queue) = outcome.queue_consumption.as_ref() else {
         return Ok(AutoQueueContinuation::Stop);
     };
-    // `auto` is a start trigger only. Continuation is driven by the active queue
-    // state: consumption only runs when `queue_active: true`, so an active
+    // `auto` is a start trigger only. Continuation is driven by typed active
+    // queue state: consumption only runs when `queue_active: true`, so an active
     // persisted queue (no `auto`) continues on the same evidence as `auto`
     // (`#active-queue-persisted-no-continue`). The `active_queue_prompt_state`
-    // re-check below still halts on stop fence / time gate / head-modified /
-    // inactive / empty.
+    // re-check below still halts on typed stop fence / time gate /
+    // head-modified / inactive / empty, and refuses markdown-only fallback.
     if queue.drained || queue.remaining == 0 {
         return Ok(AutoQueueContinuation::Stop);
     }
@@ -1032,6 +1051,16 @@ fn should_continue_auto_queue(
             eprintln!(
                 "[queue] queue continuation stopped after {} completed item(s): item_modified snapshot_head={:?} document_head={:?}",
                 completed_queue_items, snapshot_head, document_head
+            );
+            Ok(AutoQueueContinuation::Stop)
+        }
+        ActiveQueuePromptState::Unproven {
+            reason,
+            document_head,
+        } => {
+            eprintln!(
+                "[queue] queue continuation stopped after {} completed item(s): unproven_typed_queue_state reason={} document_head={:?}",
+                completed_queue_items, reason, document_head
             );
             Ok(AutoQueueContinuation::Stop)
         }
@@ -1156,10 +1185,7 @@ fn mark_run_write_applied(file: &Path, event: &str) -> Result<()> {
 }
 
 fn start_run_cycle(file: &Path) -> Result<()> {
-    let file_content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {} before run dispatch", file.display()))?;
-    let snapshot_content = snapshot::load(file)?;
-    crate::cycle_state::start_preflight(file, snapshot_content.as_deref(), Some(&file_content))?;
+    crate::admit::admit(file)?;
     Ok(())
 }
 
@@ -2010,12 +2036,71 @@ mod tests {
     use std::sync::{Arc, Barrier};
     use tempfile::TempDir;
 
+    fn first_queue_node_key(content: &str) -> String {
+        agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+            .unwrap()
+            .into_iter()
+            .find(|node| !node.item.struck)
+            .expect("queue head should have a node key")
+            .node_key
+    }
+
+    fn append_typed_selected_queue_head(
+        root: &Path,
+        doc: &Path,
+        node_key: &str,
+        prompt_text: &str,
+        drainable: bool,
+    ) {
+        let document_hash = snapshot::doc_hash(&doc.canonicalize().unwrap()).unwrap();
+        let prompt_hash = crate::ops_log::content_hash(prompt_text);
+        let event = crate::state_backbone::StateEvent::new(
+            format!("test-typed-selected-head:{node_key}:{prompt_hash}"),
+            crate::state_backbone::StateFact::QueueHeadSelected {
+                document_hash,
+                node_key: node_key.to_string(),
+                backlog_id: None,
+                prompt_text: Some(prompt_text.to_string()),
+                drainable,
+                hosting_epoch: None,
+            },
+        );
+        crate::project_controller::append_state_event(root, &event).unwrap();
+    }
+
     #[test]
     fn run_stderr_redirect_harnesses_include_claude_codex_and_opencode() {
         assert!(run_stderr_redirect_harness("claude"));
         assert!(run_stderr_redirect_harness("codex"));
         assert!(run_stderr_redirect_harness("opencode"));
         assert!(!run_stderr_redirect_harness("unknown"));
+    }
+
+    #[test]
+    fn start_run_cycle_routes_through_realtime_admit() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("session.md");
+        let content = "---\nagent_doc_session: run-admit\n---\n\n# Session\n\nRun this.\n";
+        std::fs::write(&doc, content).unwrap();
+
+        start_run_cycle(&doc).unwrap();
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        );
+        assert_eq!(state.last_event, "preflight_started");
+
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("realtime_admit"), "ops log:\n{log}");
+        assert!(log.contains("source=admit"), "ops log:\n{log}");
+        assert!(
+            !log.contains("preflight_diff_start"),
+            "run cycle admission must not call preflight start:\n{log}"
+        );
     }
 
     #[test]
@@ -2086,11 +2171,241 @@ mod tests {
         );
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
+        let node_key = first_queue_node_key(content);
+        append_typed_selected_queue_head(dir.path(), &doc, &node_key, "  /clear  ", true);
 
         assert_eq!(
             active_queue_prompt_diff(&doc).unwrap(),
             None,
             "slash-only active queue heads are command handoffs, not child-agent prompts"
+        );
+    }
+
+    #[test]
+    fn active_queue_prompt_state_refuses_markdown_prompt_without_typed_head() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#markdownhead]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        assert_eq!(
+            active_queue_prompt_state(&doc).unwrap(),
+            ActiveQueuePromptState::Unproven {
+                reason: "missing_or_stale_typed_queue_head".to_string(),
+                document_head: Some("do [#markdownhead]".to_string())
+            }
+        );
+        assert_eq!(
+            active_queue_prompt_diff(&doc).unwrap(),
+            None,
+            "markdown-only queue heads must not synthesize child-agent prompt diffs"
+        );
+    }
+
+    #[test]
+    fn should_continue_auto_queue_stops_without_typed_head_projection() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#markdownhead]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        let outcome = RunCycleOutcome {
+            dispatched: true,
+            queue_synthetic_diff: true,
+            queue_consumption: Some(crate::write::QueueConsumptionOutcome {
+                consumed_text: "do [#prior]".to_string(),
+                consumed_count: 1,
+                node_ops: Vec::new(),
+                remaining: 1,
+                drained: false,
+                auto: true,
+            }),
+        };
+
+        assert_eq!(
+            should_continue_auto_queue(&doc, &outcome, 1, false, None).unwrap(),
+            AutoQueueContinuation::Stop,
+            "auto continuation must stop instead of falling back to markdown queue text"
+        );
+    }
+
+    #[test]
+    fn active_queue_prompt_state_refuses_stale_typed_head_for_different_node() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#markdownhead]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        append_typed_selected_queue_head(
+            dir.path(),
+            &doc,
+            "queue:stale-node",
+            "do [#typedhead]",
+            true,
+        );
+
+        assert_eq!(
+            active_queue_prompt_state(&doc).unwrap(),
+            ActiveQueuePromptState::Unproven {
+                reason: "missing_or_stale_typed_queue_head".to_string(),
+                document_head: Some("do [#markdownhead]".to_string())
+            }
+        );
+        assert_eq!(
+            active_queue_prompt_diff(&doc).unwrap(),
+            None,
+            "stale typed queue heads must not fall back to markdown prompt text"
+        );
+    }
+
+    #[test]
+    fn active_queue_prompt_state_prefers_typed_selected_prompt_when_node_matches() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#markdownhead]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        let node_key = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+            .unwrap()
+            .into_iter()
+            .find(|node| !node.item.struck)
+            .expect("queue head should have a node key")
+            .node_key;
+        let document_hash = crate::pending_cmd::doc_id_for(&doc);
+        let event = crate::state_backbone::StateEvent::new(
+            "typed-selected-head",
+            crate::state_backbone::StateFact::QueueHeadSelected {
+                document_hash,
+                node_key,
+                backlog_id: Some("typedhead".to_string()),
+                prompt_text: Some("do [#typedhead]".to_string()),
+                drainable: true,
+                hosting_epoch: None,
+            },
+        );
+        crate::project_controller::append_state_event(dir.path(), &event).unwrap();
+
+        assert_eq!(
+            active_queue_prompt_state(&doc).unwrap(),
+            ActiveQueuePromptState::Ready {
+                prompt: "do [#typedhead]".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn active_queue_prompt_state_prefers_typed_deferred_stop_guard_when_node_matches() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#markdownhead]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        let node_key = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+            .unwrap()
+            .into_iter()
+            .find(|node| !node.item.struck)
+            .expect("queue head should have a node key")
+            .node_key;
+        let document_hash = crate::pending_cmd::doc_id_for(&doc);
+        let selected = crate::state_backbone::StateEvent::new(
+            "typed-selected-before-deferred",
+            crate::state_backbone::StateFact::QueueHeadSelected {
+                document_hash: document_hash.clone(),
+                node_key: node_key.clone(),
+                backlog_id: Some("typedhead".to_string()),
+                prompt_text: Some("do [#typedhead]".to_string()),
+                drainable: false,
+                hosting_epoch: None,
+            },
+        );
+        crate::project_controller::append_state_event(dir.path(), &selected).unwrap();
+        let deferred = crate::state_backbone::StateEvent::new(
+            "typed-deferred-stop-head",
+            crate::state_backbone::StateFact::QueueHeadDeferred {
+                document_hash,
+                node_key,
+                reason: "stop_fence".to_string(),
+                hosting_epoch: None,
+            },
+        );
+        crate::project_controller::append_state_event(dir.path(), &deferred).unwrap();
+
+        assert_eq!(
+            active_queue_prompt_state(&doc).unwrap(),
+            ActiveQueuePromptState::StopFence {
+                next_prompt: Some("do [#typedhead]".to_string())
+            }
         );
     }
 
@@ -2872,8 +3187,17 @@ old status\n\
         std::fs::write(&doc, current).unwrap();
         snapshot::save(&doc, baseline).unwrap();
 
-        let err = run(&doc, false, None, None, true, true, &Config::default())
-            .expect_err("run should fail closed on unresolved compaction directive");
+        let err = run(
+            &doc,
+            false,
+            None,
+            None,
+            true,
+            true,
+            false,
+            &Config::default(),
+        )
+        .expect_err("run should fail closed on unresolved compaction directive");
         let msg = err.to_string();
         assert!(msg.contains("compact exchange"));
         assert!(msg.contains("agent-doc compact"));

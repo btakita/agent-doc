@@ -418,6 +418,9 @@ enum Commands {
         /// Skip git commit after submit
         #[arg(long)]
         no_git: bool,
+        /// Allow run closeout recovery writes to bypass editor IPC when no listener is attached
+        #[arg(long)]
+        force_disk: bool,
     },
     /// List or restore exchange component versions from git history
     History {
@@ -508,6 +511,10 @@ enum Commands {
         /// With --from-current, preserve resume/session metadata and capture history
         #[arg(long)]
         preserve_session: bool,
+        /// Bypass editor convergence and write reset-owned document mutations
+        /// directly to disk. Intended for explicit recovery/headless invocations.
+        #[arg(long)]
+        force_disk: bool,
     },
     /// Squash session git history into one commit
     Clean {
@@ -599,6 +606,10 @@ enum Commands {
         /// the supervisor is still booting. Capped at 600s.
         #[arg(long)]
         wait_for_ready: Option<u64>,
+        /// Bypass editor convergence and write route-owned document mutations
+        /// directly to disk. Intended for headless/no-listener invocations.
+        #[arg(long)]
+        force_disk: bool,
     },
     /// Detect permission prompts from a Claude Code or OpenCode session
     Prompt {
@@ -849,6 +860,11 @@ enum Commands {
         #[arg(long)]
         apply_recovery: bool,
     },
+    /// Admit a live agent request by opening a lightweight response-cycle checkpoint
+    Admit {
+        /// Path to the session document
+        file: PathBuf,
+    },
     /// Run all pre-agent steps (repair, commit, claims, diff, document HEAD) and output JSON
     Preflight {
         /// Path to the session document
@@ -1055,6 +1071,9 @@ enum Commands {
         /// Close out compaction via the agent-doc commit path and verify VCS refresh when available
         #[arg(long)]
         commit: bool,
+        /// Allow compact to bypass editor IPC when no listener is attached
+        #[arg(long)]
+        force_disk: bool,
     },
     /// Convert a document between append and template modes
     Convert {
@@ -1336,6 +1355,9 @@ enum Commands {
     Backlog {
         /// Path to the session document
         file: PathBuf,
+        /// Bypass editor convergence for explicit recovery/headless writes.
+        #[arg(long)]
+        force_disk: bool,
         #[command(subcommand)]
         action: PendingAction,
     },
@@ -1443,6 +1465,9 @@ enum AdminAction {
     Reap {
         /// Document to reap
         document: Option<PathBuf>,
+        /// Reap every non-closed actor whose pane is no longer alive
+        #[arg(long)]
+        all_stale: bool,
         /// Reap by session id instead of document
         #[arg(long)]
         session: Option<String>,
@@ -1454,9 +1479,9 @@ enum AdminAction {
         project_root: Option<PathBuf>,
         /// Generation observed by the operator before mutating actor state
         #[arg(long)]
-        observed_generation: u64,
+        observed_generation: Option<u64>,
         /// Operator reason recorded in the durable receipt
-        #[arg(long)]
+        #[arg(long, default_value = "manual reap")]
         reason: String,
         /// Emit JSON instead of a human-readable report
         #[arg(long)]
@@ -1938,6 +1963,10 @@ enum QueueAction {
         /// Number of leading free-text heads to strike (default 1)
         #[arg(long, default_value_t = 1)]
         count: usize,
+        /// Bypass editor convergence and write directly to disk. Only valid for
+        /// free-text consume; id-backed heads still use their guarded commands.
+        #[arg(long, conflicts_with = "id", conflicts_with = "ack_id")]
+        force_disk: bool,
         /// Escape hatch (#orphanqhead): strike the orphaned id-backed head
         /// `[#id]` whose backing backlog item was already reaped (`--done`
         /// reports "already resolved") or is gone, leaving the phantom head
@@ -2261,6 +2290,7 @@ fn main() -> anyhow::Result<()> {
             model,
             dry_run,
             no_git,
+            force_disk,
         } => agent_doc_orchestration::run::run(
             &file,
             branch,
@@ -2268,6 +2298,7 @@ fn main() -> anyhow::Result<()> {
             model.as_deref(),
             dry_run,
             no_git,
+            force_disk,
             &config,
         ),
         Commands::History { file, restore } => match restore {
@@ -2343,7 +2374,8 @@ fn main() -> anyhow::Result<()> {
             file,
             from_current,
             preserve_session,
-        } => reset::run(&file, from_current, preserve_session),
+            force_disk,
+        } => reset::run(&file, from_current, preserve_session, force_disk),
         Commands::Clean { file, archive } => clean::run(&file, archive),
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
         Commands::Checkpoint {
@@ -2386,6 +2418,7 @@ fn main() -> anyhow::Result<()> {
             focus: _focus,
             debounce,
             wait_for_ready,
+            force_disk,
         } => {
             // NOTE: agent_doc_orchestration::sync::run_layout_only was previously called here after route when
             // --col args were provided. Removed because the JB plugin calls `agent-doc sync`
@@ -2399,7 +2432,7 @@ fn main() -> anyhow::Result<()> {
             };
             let wait_for_ready =
                 wait_for_ready.map(|secs| std::time::Duration::from_secs(secs.min(600)));
-            agent_doc_orchestration::route::run(
+            agent_doc_orchestration::route::run_with_force_disk(
                 &file,
                 pane.as_deref(),
                 debounce,
@@ -2407,6 +2440,7 @@ fn main() -> anyhow::Result<()> {
                 mode,
                 plain_trigger,
                 wait_for_ready,
+                force_disk,
             )
         }
         Commands::Prompt { file, answer, all } => {
@@ -2650,6 +2684,7 @@ fn main() -> anyhow::Result<()> {
                     review_edit: args.review_edit,
                     review_remove: args.review_remove,
                     review_resolve: args.review_resolve,
+                    queue_completion_ids: Vec::new(),
                     allow_replace_pending: args.allow_replace_pending,
                     pending_only: args.pending_only,
                     status: args.status,
@@ -2700,6 +2735,7 @@ fn main() -> anyhow::Result<()> {
                     review_edit: args.review_edit,
                     review_remove: args.review_remove,
                     review_resolve: args.review_resolve,
+                    queue_completion_ids: Vec::new(),
                     allow_replace_pending: args.allow_replace_pending,
                     pending_only: args.pending_only,
                     status: args.status,
@@ -2785,6 +2821,7 @@ fn main() -> anyhow::Result<()> {
                 agent_doc_orchestration::preflight::PreflightOptions { probe },
             )
         }
+        Commands::Admit { file } => agent_doc_orchestration::admit::run(&file),
         Commands::Doctor {
             file,
             preflight_json,
@@ -2945,6 +2982,7 @@ fn main() -> anyhow::Result<()> {
             message,
             tag,
             commit,
+            force_disk,
         } => agent_doc_orchestration::compact::run(
             &file,
             keep,
@@ -2952,6 +2990,7 @@ fn main() -> anyhow::Result<()> {
             message.as_deref(),
             tag.as_deref(),
             commit,
+            force_disk,
         ),
         Commands::Convert {
             file,
@@ -3327,15 +3366,15 @@ fn main() -> anyhow::Result<()> {
                     // message instead of hard-failing the `restart` cold-start, so
                     // `admin recycle <anything>` never errors out where the old no-op
                     // silently succeeded.
-                    let escalate = recycle_should_escalate_dead_supervisor(
-                        recycled,
-                        target.as_deref(),
-                    ) && target
-                        .as_deref()
-                        .map(|p| {
-                            agent_doc_orchestration::frontmatter_io::read_session_id(p).is_some()
-                        })
-                        .unwrap_or(false);
+                    let escalate =
+                        recycle_should_escalate_dead_supervisor(recycled, target.as_deref())
+                            && target
+                                .as_deref()
+                                .map(|p| {
+                                    agent_doc_orchestration::frontmatter_io::read_session_id(p)
+                                        .is_some()
+                                })
+                                .unwrap_or(false);
                     if json {
                         println!(
                             "{}",
@@ -3363,9 +3402,9 @@ fn main() -> anyhow::Result<()> {
                         );
                     }
                     if escalate {
-                        let file = target.as_deref().expect(
-                            "recycle_should_escalate_dead_supervisor guarantees a target",
-                        );
+                        let file = target
+                            .as_deref()
+                            .expect("recycle_should_escalate_dead_supervisor guarantees a target");
                         eprintln!(
                             "[admin] recycle: no live controller for {} — escalating to a kill+cold-start via `session restart-supervisor {}`",
                             root.display(),
@@ -3506,21 +3545,46 @@ fn main() -> anyhow::Result<()> {
             },
             AdminAction::Reap {
                 document,
+                all_stale,
                 session,
                 pane,
                 project_root,
                 observed_generation,
                 reason,
                 json,
-            } => agent_doc_orchestration::admin::reap(
-                project_root.as_deref(),
-                document.as_deref(),
-                session.as_deref(),
-                pane.as_deref(),
-                observed_generation,
-                &reason,
-                json,
-            ),
+            } => {
+                if all_stale {
+                    if document.is_some()
+                        || session.is_some()
+                        || pane.is_some()
+                        || observed_generation.is_some()
+                    {
+                        anyhow::bail!(
+                            "admin reap --all-stale cannot be combined with a document, --session, --pane, or --observed-generation"
+                        );
+                    }
+                    agent_doc_orchestration::admin::reap_all_stale(
+                        project_root.as_deref(),
+                        &reason,
+                        json,
+                    )
+                } else {
+                    let observed_generation = observed_generation.ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "admin reap requires --observed-generation unless --all-stale is used"
+                        )
+                    })?;
+                    agent_doc_orchestration::admin::reap(
+                        project_root.as_deref(),
+                        document.as_deref(),
+                        session.as_deref(),
+                        pane.as_deref(),
+                        observed_generation,
+                        &reason,
+                        json,
+                    )
+                }
+            }
             AdminAction::Handoff {
                 document,
                 to_pane,
@@ -3584,43 +3648,55 @@ fn main() -> anyhow::Result<()> {
             poll_interval,
             fallback_model,
         } => cleanup_cmd::run(&file, timeout, poll_interval, &fallback_model),
-        Commands::Backlog { file, action } => match action {
-            PendingAction::Add { item } => {
-                agent_doc_orchestration::pending_cmd::add(&file, &item, false)
-            }
-            PendingAction::AddGated { item } => {
-                agent_doc_orchestration::pending_cmd::add(&file, &item, true)
-            }
-            PendingAction::Remove { target, contains } => {
-                agent_doc_orchestration::pending_cmd::remove(&file, &target, contains)
-            }
-            PendingAction::Prune => agent_doc_orchestration::pending_cmd::reap(&file),
-            PendingAction::Reap => agent_doc_orchestration::pending_cmd::reap(&file),
-            PendingAction::Backfill => agent_doc_orchestration::pending_cmd::backfill(&file),
-            PendingAction::Done { id } => agent_doc_orchestration::pending_cmd::done(&file, &id),
-            PendingAction::Edit { id, text } => {
-                agent_doc_orchestration::pending_cmd::edit(&file, &id, &text)
-            }
-            PendingAction::Clear => agent_doc_orchestration::pending_cmd::clear(&file),
-            PendingAction::Reorder { ids } => {
-                let ids: Vec<String> = ids
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                agent_doc_orchestration::pending_cmd::reorder(&file, &ids)
-            }
-            PendingAction::List => agent_doc_orchestration::pending_cmd::list(&file),
-            PendingAction::ResolveGate { gate_type } => {
-                agent_doc_orchestration::pending_cmd::resolve_gate(&file, &gate_type)
-            }
-            PendingAction::SetGateType { id, gate_type } => {
-                agent_doc_orchestration::pending_cmd::set_gate_type(&file, &id, &gate_type)
-            }
-            PendingAction::SetVerify { id, spec } => {
-                agent_doc_orchestration::pending_cmd::set_gate_verify(&file, &id, &spec)
-            }
-        },
+        Commands::Backlog {
+            file,
+            force_disk,
+            action,
+        } => {
+            agent_doc_orchestration::pending_cmd::with_force_disk_pending_writes(force_disk, || {
+                match action {
+                    PendingAction::Add { item } => {
+                        agent_doc_orchestration::pending_cmd::add(&file, &item, false)
+                    }
+                    PendingAction::AddGated { item } => {
+                        agent_doc_orchestration::pending_cmd::add(&file, &item, true)
+                    }
+                    PendingAction::Remove { target, contains } => {
+                        agent_doc_orchestration::pending_cmd::remove(&file, &target, contains)
+                    }
+                    PendingAction::Prune => agent_doc_orchestration::pending_cmd::reap(&file),
+                    PendingAction::Reap => agent_doc_orchestration::pending_cmd::reap(&file),
+                    PendingAction::Backfill => {
+                        agent_doc_orchestration::pending_cmd::backfill(&file)
+                    }
+                    PendingAction::Done { id } => {
+                        agent_doc_orchestration::pending_cmd::done(&file, &id)
+                    }
+                    PendingAction::Edit { id, text } => {
+                        agent_doc_orchestration::pending_cmd::edit(&file, &id, &text)
+                    }
+                    PendingAction::Clear => agent_doc_orchestration::pending_cmd::clear(&file),
+                    PendingAction::Reorder { ids } => {
+                        let ids: Vec<String> = ids
+                            .split(',')
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        agent_doc_orchestration::pending_cmd::reorder(&file, &ids)
+                    }
+                    PendingAction::List => agent_doc_orchestration::pending_cmd::list(&file),
+                    PendingAction::ResolveGate { gate_type } => {
+                        agent_doc_orchestration::pending_cmd::resolve_gate(&file, &gate_type)
+                    }
+                    PendingAction::SetGateType { id, gate_type } => {
+                        agent_doc_orchestration::pending_cmd::set_gate_type(&file, &id, &gate_type)
+                    }
+                    PendingAction::SetVerify { id, spec } => {
+                        agent_doc_orchestration::pending_cmd::set_gate_verify(&file, &id, &spec)
+                    }
+                }
+            })
+        }
         Commands::Review { action } => match action {
             ReviewAction::UngateTasks { file } => {
                 let report =
@@ -3688,6 +3764,7 @@ fn main() -> anyhow::Result<()> {
             QueueAction::Consume {
                 file,
                 count,
+                force_disk,
                 id,
                 ack_id,
             } => {
@@ -3696,7 +3773,11 @@ fn main() -> anyhow::Result<()> {
                 } else if let Some(id) = ack_id {
                     agent_doc_orchestration::queue_cmd::acknowledge_open_id(&file, &id)
                 } else {
-                    agent_doc_orchestration::queue_cmd::consume(&file, count)
+                    agent_doc_orchestration::queue_cmd::consume_with_options(
+                        &file,
+                        count,
+                        agent_doc_orchestration::queue_cmd::ConsumeOptions { force_disk },
+                    )
                 }
             }
             QueueAction::PruneNoise { file } => {

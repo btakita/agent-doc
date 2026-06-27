@@ -2982,7 +2982,9 @@ Second answer line three.
         // base marker. The merge MUST keep the operator's marker attributes — never
         // revert them to ours' marker (the "adding an attribute deletes it" bug).
         let mk = |marker: &str| -> String {
-            format!("---\nagent_doc_format: template\n---\n\n## Queue\n\n{marker}\n- do [#a1]\n<!-- /agent:queue -->\n")
+            format!(
+                "---\nagent_doc_format: template\n---\n\n## Queue\n\n{marker}\n- do [#a1]\n<!-- /agent:queue -->\n"
+            )
         };
         let base = mk("<!-- agent:queue -->");
         let base_state = CrdtDoc::from_text(&base).encode_state();

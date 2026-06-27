@@ -21,6 +21,11 @@ use crate::pending;
 use crate::queue;
 use crate::snapshot;
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ConsumeOptions {
+    pub force_disk: bool,
+}
+
 /// Classification of the active `agent:queue` head for `consume`.
 enum HeadKind {
     /// No queue component, or no live prompt to strike.
@@ -103,6 +108,79 @@ fn classify_active_head(content: &str) -> Result<HeadKind> {
 /// guidance to use `--done`, so it can never silently desync a head from its
 /// still-open backlog item. Writes document + snapshot like `sync`; the caller
 /// closes out through the normal commit path.
+pub fn consume_with_options(file: &Path, count: usize, options: ConsumeOptions) -> Result<()> {
+    // #sqedit-race Phase 2: hold the queue-edit lease for the whole strike loop so
+    // preflight queue maintenance and the supervisor idle-watch defer instead of
+    // round-tripping a torn intermediate queue. Released on drop (incl. early
+    // return / `bail!`).
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    let target = count.max(1);
+    let mut struck: Vec<String> = Vec::new();
+    let mut last_remaining = 0usize;
+    let mut drained = false;
+
+    for _ in 0..target {
+        let content = std::fs::read_to_string(file)
+            .with_context(|| format!("failed to read {}", file.display()))?;
+        match classify_active_head(&content)? {
+            HeadKind::None => break, // no queue component or no prompt left to strike
+            HeadKind::IdBacked => {
+                if struck.is_empty() {
+                    bail!(
+                        "{}: queue head is an id-backed directive, not a free-text prompt. \
+                        If it represents completed or gated work, reap it through the normal closeout with \
+                        `--done <id>` / `--pending-gate <id>` so the backlog item stays in sync. \
+                        If it is only an acknowledgement/correction for still-open work, use \
+                        `agent-doc queue consume <FILE> --ack-id <id>` to strike the head without closing \
+                        the backlog item. Otherwise leave it queued.",
+                        file.display()
+                    );
+                }
+                // Already struck some free-text heads this run; stop cleanly at
+                // the first id-backed head rather than desyncing it.
+                break;
+            }
+            HeadKind::FreeText => {}
+        }
+        let outcome = if options.force_disk {
+            crate::write::consume_queue_prompt_force_disk(file)?
+        } else {
+            crate::write::consume_queue_prompt_with_outcome(file)?
+        };
+        match outcome {
+            Some(outcome) => {
+                struck.push(outcome.consumed_text);
+                last_remaining = outcome.remaining;
+                if outcome.drained {
+                    drained = true;
+                    break;
+                }
+            }
+            None => break,
+        }
+    }
+
+    if struck.is_empty() {
+        println!(
+            "{}: no free-text queue head to consume (queue inactive, empty, or id-backed head).",
+            file.display()
+        );
+    } else {
+        println!(
+            "{}: consumed {} free-text queue head(s) (remaining: {}){}",
+            file.display(),
+            struck.len(),
+            last_remaining,
+            if drained {
+                ", drained — cleared queue_active"
+            } else {
+                ""
+            }
+        );
+    }
+    Ok(())
+}
+
 /// Escape hatch (#orphanqhead): strike an orphaned id-backed queue head by id.
 /// Delegates to the write-layer striker, which guards against desyncing live
 /// open backlog work and keeps the document and snapshot in sync.
@@ -143,71 +221,7 @@ pub fn acknowledge_open_id(file: &Path, id: &str) -> Result<()> {
 }
 
 pub fn consume(file: &Path, count: usize) -> Result<()> {
-    // #sqedit-race Phase 2: hold the queue-edit lease for the whole strike loop so
-    // preflight queue maintenance and the supervisor idle-watch defer instead of
-    // round-tripping a torn intermediate queue. Released on drop (incl. early
-    // return / `bail!`).
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
-    let target = count.max(1);
-    let mut struck: Vec<String> = Vec::new();
-    let mut last_remaining = 0usize;
-    let mut drained = false;
-
-    for _ in 0..target {
-        let content = std::fs::read_to_string(file)
-            .with_context(|| format!("failed to read {}", file.display()))?;
-        match classify_active_head(&content)? {
-            HeadKind::None => break, // no queue component or no prompt left to strike
-            HeadKind::IdBacked => {
-                if struck.is_empty() {
-                    bail!(
-                        "{}: queue head is an id-backed directive, not a free-text prompt. \
-                        If it represents completed or gated work, reap it through the normal closeout with \
-                        `--done <id>` / `--pending-gate <id>` so the backlog item stays in sync. \
-                        If it is only an acknowledgement/correction for still-open work, use \
-                        `agent-doc queue consume <FILE> --ack-id <id>` to strike the head without closing \
-                        the backlog item. Otherwise leave it queued.",
-                        file.display()
-                    );
-                }
-                // Already struck some free-text heads this run; stop cleanly at
-                // the first id-backed head rather than desyncing it.
-                break;
-            }
-            HeadKind::FreeText => {}
-        }
-        match crate::write::consume_queue_prompt_with_outcome(file)? {
-            Some(outcome) => {
-                struck.push(outcome.consumed_text);
-                last_remaining = outcome.remaining;
-                if outcome.drained {
-                    drained = true;
-                    break;
-                }
-            }
-            None => break,
-        }
-    }
-
-    if struck.is_empty() {
-        println!(
-            "{}: no free-text queue head to consume (queue inactive, empty, or id-backed head).",
-            file.display()
-        );
-    } else {
-        println!(
-            "{}: consumed {} free-text queue head(s) (remaining: {}){}",
-            file.display(),
-            struck.len(),
-            last_remaining,
-            if drained {
-                ", drained — cleared queue_active"
-            } else {
-                ""
-            }
-        );
-    }
-    Ok(())
+    consume_with_options(file, count, ConsumeOptions::default())
 }
 
 /// `agent-doc queue prune-noise <FILE>` — strike every non-drainable noise queue
@@ -429,7 +443,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        consume(&doc, 2).expect("consume two answered free-text heads");
+        consume_with_options(&doc, 2, ConsumeOptions { force_disk: true })
+            .expect("consume two answered free-text heads");
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
             result.contains("~head one free text~"),
@@ -462,7 +477,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        consume(&doc, 5).expect("consume should stop at the id-backed head");
+        consume_with_options(&doc, 5, ConsumeOptions { force_disk: true })
+            .expect("consume should stop at the id-backed head");
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
             result.contains("~only free head~"),

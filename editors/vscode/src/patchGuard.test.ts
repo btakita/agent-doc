@@ -98,7 +98,44 @@ describe('patchGuard', () => {
         assert.strictEqual(applyPatchBody.includes('document.save()'), false);
         assert.ok(source.includes('private writeAckContent('));
         assert.ok(source.includes('): boolean {'));
-        assert.ok(source.includes('return this.writeAckContent(patchId, content, patchesDir);'));
+        assert.ok(source.includes('return this.writeAckContent(patch.patch_id, document.getText(), patchesDir);'));
+        assert.ok(source.includes('ackContentSidecarPath(patchesDir, patchId)'));
+    });
+
+    it('does not autosave command paths', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        const sessionCommandStart = source.indexOf('async function runSessionCommandForActiveFile(');
+        const sessionCommandEnd = source.indexOf('function showSessionOutput', sessionCommandStart);
+        const killStart = source.indexOf('async function killSupervisorAction()');
+        const killEnd = source.indexOf('function resolveCleanupCwd()', killStart);
+        const interruptClearStart = source.indexOf('async function interruptClearSessionContextAction()');
+        const interruptClearEnd = source.indexOf('// ---------------------------------------------------------------------------\n// Feature 2: Claim', interruptClearStart);
+
+        assert.strictEqual(source.includes('document.save()'), false);
+        assert.strictEqual(/\.save\(/.test(source), false);
+        assert.ok(source.includes('async function ensureDocumentCleanForCommand('));
+        assert.ok(source.includes("ensureDocumentCleanForCommand(filePath, 'Run')"));
+        assert.ok(source.includes("ensureDocumentCleanForCommand(editor.document.uri.fsPath, 'Fix document')"));
+        assert.ok(source.includes("ensureDocumentCleanForCommand(editor.document.uri.fsPath, 'Compact exchange')"));
+        assert.ok(source.includes("ensureDocumentCleanForCommand(editor.document.uri.fsPath, 'Run with Junie')"));
+        assert.ok(source.includes("ensureDocumentCleanForCommand(filePath, 'Clear Session Context')"));
+        assert.ok(sessionCommandStart >= 0 && sessionCommandEnd > sessionCommandStart);
+        assert.ok(killStart >= 0 && killEnd > killStart);
+        assert.ok(interruptClearStart >= 0 && interruptClearEnd > interruptClearStart);
+        assert.strictEqual(source.slice(sessionCommandStart, sessionCommandEnd).includes('document.save()'), false);
+        assert.strictEqual(source.slice(killStart, killEnd).includes('document.save()'), false);
+        assert.strictEqual(source.slice(interruptClearStart, interruptClearEnd).includes('document.save()'), false);
+    });
+
+    it('keeps legacy save and reconnect repair paths disabled', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+
+        assert.ok(source.includes('save_document IPC is disabled'));
+        assert.ok(source.includes('reread_disk repair is disabled'));
+        assert.strictEqual(source.includes('saveDocumentToDisk'), false);
+        assert.strictEqual(source.includes('applyReconnectReread'), false);
+        assert.strictEqual(source.includes('reread disk into stale buffer'), false);
+        assert.strictEqual(/\.save\(/.test(source), false);
     });
 
     it('rejects stale editor apply proofs when content or version changed', () => {
@@ -126,12 +163,16 @@ describe('patchGuard', () => {
         const fullContentProofIdx = source.indexOf("this.verifyApplyProof(document, proof, patch.file, 'full content'");
         const componentProofIdx = source.indexOf("this.verifyApplyProof(document, proof, patch.file, 'component patch'");
         const componentEditIdx = source.indexOf('this.applyMinimalTextEdit(document, content)');
+        const fullDocumentEditGuardIdx = source.indexOf('isFullDocumentReplacement(before, replacement)');
+        const rangeCreationIdx = source.indexOf('const range = new vscode.Range(', source.indexOf('private async applyMinimalTextEdit('));
 
         assert.ok(fullContentDeleteIdx >= 0);
         assert.ok(fullContentRejectIdx >= 0);
         assert.strictEqual(fullContentVisibleEditIdx, -1);
         assert.strictEqual(fullContentProofIdx, -1);
         assert.ok(componentProofIdx >= 0 && componentProofIdx < componentEditIdx);
+        assert.ok(fullDocumentEditGuardIdx >= 0 && fullDocumentEditGuardIdx < rangeCreationIdx);
+        assert.strictEqual(source.includes('document.lineCount'), false);
     });
 
     it('keeps cycle 1779845677327 full-content fixture off visible write paths', () => {
@@ -153,6 +194,7 @@ describe('patchGuard', () => {
         assert.ok(socketFullContentGuardIdx >= 0 && socketFullContentGuardIdx < componentEditIdx);
         assert.strictEqual(source.indexOf('fullRange, patch.fullContent'), -1);
         assert.strictEqual(source.indexOf('edit.replace(fileUri, fullRange, content)'), -1);
+        assert.ok(source.includes('full-document WorkspaceEdit replacement is disabled'));
     });
 
     it('honors explicit component op overrides for convergence patches', () => {

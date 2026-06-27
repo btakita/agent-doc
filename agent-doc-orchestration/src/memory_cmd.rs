@@ -425,7 +425,9 @@ pub fn semantic_queue_strike_matches(
         // Score against both corpora; keep the single best match across both,
         // preferring a completed (done) match on a tie since "already complete"
         // is the stronger statement than "tracked".
-        let best_done = rank_events(&candidate.text, &done_events).into_iter().next();
+        let best_done = rank_events(&candidate.text, &done_events)
+            .into_iter()
+            .next();
         let best_backlog = rank_events(&candidate.text, &backlog_events)
             .into_iter()
             .next();

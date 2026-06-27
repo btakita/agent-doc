@@ -241,7 +241,24 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
         }
         crate::session_check::SessionCheckStatus::Interrupted(reason) => {
             if !input.stop_hook_active {
-                match attempt_stop_closeout(&file, &state, input)? {
+                let stop_closeout = match attempt_stop_closeout(&file, &state, input) {
+                    Ok(stop_closeout) => stop_closeout,
+                    Err(err) => {
+                        crate::ops_log::log_op(
+                            &file,
+                            &format!("codex_stop_auto_close_failed err={err}"),
+                        );
+                        return Ok(StopResponse::Block {
+                            decision: "block",
+                            reason: format!(
+                                "agent-doc Stop hook intercepted an unfinished document cycle for {}. The hook wrote or recovered the response but could not finish the required commit boundary: {err}. Do not send the final answer yet. Finish the commit boundary for this turn and end with `agent-doc session-check {}`.",
+                                file.display(),
+                                file.display()
+                            ),
+                        });
+                    }
+                };
+                match stop_closeout {
                     StopCloseAttempt::Closed => {
                         if let Some(response) = auto_queue_continuation_response(
                             &file,
@@ -513,7 +530,7 @@ fn continuation_closeout_instruction(file: &Path, context_reset_reason: Option<&
 
     if agent_doc_mcp_configured_for(file) {
         format!(
-            "Continue THIS turn in-pane via the configured `agent-doc` MCP server: call `agent_doc_preflight` for {disp}, use `agent_doc_plan` / `agent_doc_read` as needed, answer that prompt in the response passed to `agent_doc_finalize`, and verify the result with `agent_doc_session_check`. If the MCP tools are unavailable in this Codex run, answer that prompt in {disp} and persist with `agent-doc finalize {disp}` (or `agent-doc write --commit {disp}`). Do NOT run `agent-doc {disp}` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet.",
+            "Continue THIS turn in-pane via the configured `agent-doc` MCP server: call `agent_doc_admit` for {disp}, use `agent_doc_plan` / `agent_doc_read` as needed, answer that prompt in the response passed to `agent_doc_finalize`, and verify the result with `agent_doc_session_check`. If the MCP tools are unavailable in this Codex run, answer that prompt in {disp} and persist with `agent-doc finalize {disp}` (or `agent-doc write --commit {disp}`). Do NOT run `agent-doc {disp}` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet.",
             disp = file.display()
         )
     } else {
@@ -606,12 +623,36 @@ fn wrap_repeated_queue_response_patch(prompt: &str, response: &str) -> String {
         .filter(|line| !line.is_empty())
         .unwrap_or("active queue head");
     let mut patch = format!("<!-- patch:exchange -->\n### Re: {heading} — gpt-5\n\n");
+    patch.push_str(&crate::write::format_consumed_prompt_echo(
+        &[prompt.to_string()],
+        None,
+    ));
+    patch.push('\n');
     patch.push_str(response.trim());
     if !patch.ends_with('\n') {
         patch.push('\n');
     }
     patch.push_str("<!-- /patch:exchange -->\n");
     patch
+}
+
+fn consume_recovered_queue_head(
+    file: &Path,
+    queue_completion_ids: &[String],
+) -> Result<Option<crate::write::QueueConsumptionOutcome>> {
+    let force_disk_without_listener = file
+        .canonicalize()
+        .ok()
+        .map(|canonical| {
+            let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
+            !crate::ipc_socket::is_listener_active(&project_root)
+        })
+        .unwrap_or(false);
+    crate::write::consume_queue_prompts_with_outcome(
+        file,
+        queue_completion_ids,
+        force_disk_without_listener,
+    )
 }
 
 fn repeated_queue_response_for_write(
@@ -689,7 +730,7 @@ fn try_recover_repeated_queue_head_response(
         prompt
     );
 
-    let repair_outcome = crate::repair::run(file)?;
+    let repair_outcome = crate::repair::run_with_queue_completion_ids(file, &queue_completion_ids)?;
     if repair_outcome.replayed_response() {
         note.push_str(" The response was written through the normal repair/write path.");
     } else if repair_outcome == crate::repair::RepairOutcome::AlreadyApplied {
@@ -703,10 +744,7 @@ fn try_recover_repeated_queue_head_response(
     }
 
     if active_auto_queue_prompt(file)?.as_deref() == Some(prompt) {
-        match crate::write::consume_queue_prompts_for_done_ids_with_outcome(
-            file,
-            &queue_completion_ids,
-        ) {
+        match consume_recovered_queue_head(file, &queue_completion_ids) {
             Ok(Some(outcome)) => {
                 note.push_str(&format!(
                     " The hook consumed the completed queue head {:?} before commit.",
@@ -1126,7 +1164,7 @@ fn attempt_stop_closeout(
         crate::replay_guard::ReplayPayloadClassification::Empty => {}
     }
 
-    let repair_outcome = crate::repair::run(file)?;
+    let repair_outcome = crate::repair::run_with_queue_completion_ids(file, &queue_completion_ids)?;
     if repair_outcome.replayed_response() {
         note.push_str(" The hook replayed the response through the normal write path.");
     } else if repair_outcome.repaired() {
@@ -1136,10 +1174,7 @@ fn attempt_stop_closeout(
         && repair_outcome.replayed_response()
         && captured_response_targets_queue_head;
     if queue_repair_explicitly_closes_head {
-        match crate::write::consume_queue_prompts_for_done_ids_with_outcome(
-            file,
-            &queue_completion_ids,
-        ) {
+        match consume_recovered_queue_head(file, &queue_completion_ids) {
             Ok(Some(outcome)) => {
                 note.push_str(&format!(
                     " The hook consumed the completed queue head {:?} before commit.",
@@ -1759,6 +1794,20 @@ mod tests {
         doc
     }
 
+    fn write_template_doc(dir: &tempfile::TempDir) -> PathBuf {
+        let doc = dir.path().join("task.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Hello\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+        doc
+    }
+
     fn write_auto_queue_doc(dir: &tempfile::TempDir, prompts: &[&str]) -> PathBuf {
         let doc = dir.path().join("task.md");
         let queue = prompts
@@ -1818,6 +1867,22 @@ Done.\n\
         fs::create_dir_all(nested.join(".agent-doc")).unwrap();
         let doc = nested.join("task.md");
         let content = "---\nsession: sid\n---\n\n## User\n\nHello\n";
+        fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+        doc
+    }
+
+    fn write_nested_template_doc(dir: &tempfile::TempDir) -> PathBuf {
+        let nested = dir.path().join("nested");
+        fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        let doc = nested.join("task.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Hello\n",
+            "<!-- /agent:exchange -->\n",
+        );
         fs::write(&doc, content).unwrap();
         crate::snapshot::save(&doc, content).unwrap();
         doc
@@ -2042,7 +2107,7 @@ agent-doc {}\n",
     #[test]
     fn stop_auto_closes_open_cycle_from_last_assistant_message() {
         let dir = setup_project();
-        let doc = write_doc(&dir);
+        let doc = write_template_doc(&dir);
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
@@ -2052,7 +2117,8 @@ agent-doc {}\n",
             session_id: "codex-session".to_string(),
             turn_id: "turn-1".to_string(),
             cwd: dir.path().display().to_string(),
-            last_assistant_message: "Final assistant response.".to_string(),
+            last_assistant_message: "### Re: Hello — gpt-5\n\nFinal assistant response."
+                .to_string(),
             stop_hook_active: false,
         })
         .unwrap();
@@ -2089,10 +2155,13 @@ agent-doc {}\n",
     #[test]
     fn stop_auto_closes_prompt_bearing_diff_when_cycle_never_started() {
         let dir = setup_project();
-        let doc = write_doc(&dir);
+        let doc = write_template_doc(&dir);
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
-        let current = format!("{original}\n❯ Why was startup missed?\n");
+        let current = original.replace(
+            "<!-- /agent:exchange -->",
+            "❯ Why was startup missed?\n<!-- /agent:exchange -->",
+        );
         fs::write(&doc, &current).unwrap();
         track_doc(&dir, &doc, "turn-1");
 
@@ -2419,7 +2488,8 @@ agent-doc {}\n",
             "I have the plan context. Next I’m checking how this repo formats backlog items so the patch matches existing session-doc conventions instead of inventing a new shape.\n\n",
             "<!-- patch:exchange -->\n",
             "### Re: #next-steps — gpt-5\n\n",
-            "Added prioritized follow-up items.\n",
+            "What changed: added prioritized follow-up items.\n\n",
+            "Verification: backlog patch replayed through Stop hook closeout.\n",
             "<!-- /patch:exchange -->\n\n",
             "<!-- patch:backlog -->\n",
             "- [ ] [#bpcontract] Write the contract first.\n",
@@ -2531,7 +2601,8 @@ agent-doc {}\n",
         let payload = concat!(
             "<!-- patch:exchange -->\n",
             "### Re: #next-steps — gpt-5\n\n",
-            "Added prioritized follow-up items.\n",
+            "What changed: added prioritized follow-up items.\n\n",
+            "Verification: backlog patch replayed through Stop hook closeout.\n",
             "<!-- /patch:exchange -->\n\n",
             "<!-- patch:backlog -->\n",
             "### 1. Existing\n",
@@ -2572,7 +2643,7 @@ agent-doc {}\n",
     #[test]
     fn stop_auto_closes_active_session_post_commit_drift() {
         let dir = setup_project();
-        let doc = write_doc(&dir);
+        let doc = write_template_doc(&dir);
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
@@ -2602,7 +2673,8 @@ agent-doc {}\n",
             session_id: "codex-session".to_string(),
             turn_id: "turn-1".to_string(),
             cwd: dir.path().display().to_string(),
-            last_assistant_message: "Recovered post-closeout drift.".to_string(),
+            last_assistant_message:
+                "### Re: post-closeout drift — gpt-5\n\nRecovered post-closeout drift.".to_string(),
             stop_hook_active: false,
         })
         .unwrap();
@@ -2628,7 +2700,7 @@ agent-doc {}\n",
     #[test]
     fn stop_auto_closes_open_cycle_across_nested_roots_and_turn_drift() {
         let dir = setup_project();
-        let doc = write_nested_doc(&dir);
+        let doc = write_nested_template_doc(&dir);
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
@@ -2650,14 +2722,17 @@ agent-doc {}\n",
             "expected state to be mirrored into nested project root"
         );
 
-        let response = apply_stop(&StopInput {
-            session_id: "codex-session".to_string(),
-            turn_id: "turn-2".to_string(),
-            cwd: doc.parent().unwrap().display().to_string(),
-            last_assistant_message: "Recovered from nested root drift.".to_string(),
-            stop_hook_active: false,
-        })
-        .unwrap();
+        let response =
+            apply_stop(&StopInput {
+                session_id: "codex-session".to_string(),
+                turn_id: "turn-2".to_string(),
+                cwd: doc.parent().unwrap().display().to_string(),
+                last_assistant_message:
+                    "### Re: nested root drift — gpt-5\n\nRecovered from nested root drift."
+                        .to_string(),
+                stop_hook_active: false,
+            })
+            .unwrap();
 
         assert_eq!(response, StopResponse::Continue { continue_: true });
         let content = fs::read_to_string(&doc).unwrap();
@@ -2677,7 +2752,7 @@ agent-doc {}\n",
     #[test]
     fn stop_auto_closes_active_session_drift_when_prompt_has_instruction_preamble() {
         let dir = setup_project();
-        let doc = write_doc(&dir);
+        let doc = write_template_doc(&dir);
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
@@ -2721,7 +2796,9 @@ agent-doc {}\n",
             session_id: "codex-session".to_string(),
             turn_id: "turn-1".to_string(),
             cwd: dir.path().display().to_string(),
-            last_assistant_message: "Recovered after preamble prompt tracking.".to_string(),
+            last_assistant_message:
+                "### Re: preamble prompt tracking — gpt-5\n\nRecovered after preamble prompt tracking."
+                    .to_string(),
             stop_hook_active: false,
         })
         .unwrap();
@@ -3056,7 +3133,7 @@ agent-doc {}\n",
                     reason.contains("configured `agent-doc` MCP server"),
                     "{reason}"
                 );
-                assert!(reason.contains("agent_doc_preflight"), "{reason}");
+                assert!(reason.contains("agent_doc_admit"), "{reason}");
                 assert!(reason.contains("agent_doc_plan"), "{reason}");
                 assert!(reason.contains("agent_doc_finalize"), "{reason}");
                 assert!(reason.contains("agent_doc_session_check"), "{reason}");
@@ -3077,6 +3154,15 @@ agent-doc {}\n",
                 && ops_log.contains(&crate::ops_log::content_hash("do #fix2")),
             "Stop hook should log tracked queue-continuation proof:\n{ops_log}"
         );
+        assert!(
+            ops_log.contains("queue_consume_proof_recorded")
+                && ops_log.contains("stage=BeforeMutation")
+                && ops_log.contains("stage=AfterMutation"),
+            "Stop hook closeout should record queue-consumption proofs:\n{ops_log}"
+        );
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(!content.contains("- do #fix1"), "{content}");
+        assert!(content.contains("- do #fix2"), "{content}");
     }
 
     #[test]
@@ -3434,7 +3520,7 @@ agent-doc {}\n",
                     reason.contains("configured `agent-doc` MCP server"),
                     "{reason}"
                 );
-                assert!(reason.contains("agent_doc_preflight"), "{reason}");
+                assert!(reason.contains("agent_doc_admit"), "{reason}");
                 assert!(reason.contains("agent_doc_finalize"), "{reason}");
                 assert!(reason.contains("agent_doc_session_check"), "{reason}");
                 assert!(reason.contains("agent-doc write --commit"), "{reason}");

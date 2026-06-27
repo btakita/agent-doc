@@ -72,8 +72,9 @@ pub(crate) fn run(
     let report = build_report(file, max_git_versions)?;
     if let Some(patch_path) = restore_patch {
         let value = restore_patch_value(file, &report);
-        fs::write(patch_path, serde_json::to_string_pretty(&value)?)
-            .with_context(|| format!("failed to write restore patch to {}", patch_path.display()))?;
+        fs::write(patch_path, serde_json::to_string_pretty(&value)?).with_context(|| {
+            format!("failed to write restore patch to {}", patch_path.display())
+        })?;
         if !json {
             println!(
                 "restore_patch written={} restorable={} non_restorable={}",
@@ -480,9 +481,8 @@ fn is_foreign_owned(text: &str, file: &Path) -> bool {
 fn foreign_doc_reference(text: &str, file: &Path) -> Option<String> {
     let self_stem = file.file_stem().and_then(|stem| stem.to_str())?;
     for raw in text.split_whitespace() {
-        let token = raw.trim_matches(|c: char| {
-            !c.is_alphanumeric() && c != '-' && c != '_' && c != '.'
-        });
+        let token =
+            raw.trim_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_' && c != '.');
         if let Some(stem) = token.strip_suffix(".md")
             && !stem.is_empty()
             && stem != self_stem
@@ -499,8 +499,8 @@ fn restore_recommendation(text: &str, file: &Path, restorable: bool) -> String {
             into this document after operator review."
             .to_string();
     }
-    let foreign = foreign_doc_reference(text, file)
-        .unwrap_or_else(|| "a foreign document".to_string());
+    let foreign =
+        foreign_doc_reference(text, file).unwrap_or_else(|| "a foreign document".to_string());
     format!(
         "Non-restorable here: prompt references {foreign} and is likely \
             cross-document contamination; restore it under the owning document."
@@ -681,10 +681,12 @@ mod tests {
         // The restorable entry is the non-foreign prompt.
         assert_eq!(value["restorable"][0]["text"], "do [#fromgit]");
         // The foreign entry carries a non-restorable recommendation.
-        assert!(value["non_restorable"][0]["recommendation"]
-            .as_str()
-            .unwrap()
-            .contains("Non-restorable"));
+        assert!(
+            value["non_restorable"][0]["recommendation"]
+                .as_str()
+                .unwrap()
+                .contains("Non-restorable")
+        );
     }
 
     fn run_git(cwd: &Path, args: &[&str]) {

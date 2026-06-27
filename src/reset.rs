@@ -2,7 +2,7 @@
 //!
 //! ## Spec
 //! - Resets a session document to a clean state by clearing the agent conversation resume pointer and deleting or rebuilding associated state files.
-//! - `run(file, from_current, preserve_session)` performs three operations in sequence:
+//! - `run(file, from_current, preserve_session, force_disk)` performs three operations in sequence:
 //!   1. Reads YAML frontmatter, sets `resume` to `None` (clears the conversation ID), rewrites the frontmatter while preserving all other fields and the document body.
 //!   2. Deletes the snapshot file via `snapshot::delete`, or with `--from-current` saves the current markdown as the snapshot.
 //!   3. Deletes the CRDT state file via `snapshot::delete_crdt`, or with `--from-current` rebuilds it from the current markdown.
@@ -13,7 +13,7 @@
 //! - After reset, the next `agent-doc submit` or `agent-doc stream` starts a fresh agent conversation.
 //!
 //! ## Agentic Contracts
-//! - `run(file, from_current, preserve_session)` — returns `Err` if the file is missing or any I/O operation fails; returns `Ok(())` on success with a confirmation message on stderr.
+//! - `run(file, from_current, preserve_session, force_disk)` — returns `Err` if the file is missing or any I/O operation fails; returns `Ok(())` on success with a confirmation message on stderr.
 //! - Callers may rely on snapshot and CRDT state being absent after a default reset.
 //! - Callers may rely on snapshot and CRDT state matching the visible markdown after `--from-current`.
 //! - Callers may rely on `--from-current --preserve-session` not rewriting the
@@ -38,7 +38,12 @@ use std::path::Path;
 use crate::frontmatter;
 use agent_doc_orchestration::snapshot;
 
-pub fn run(file: &Path, from_current: bool, preserve_session: bool) -> Result<()> {
+pub fn run(
+    file: &Path,
+    from_current: bool,
+    preserve_session: bool,
+    force_disk: bool,
+) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -60,17 +65,29 @@ pub fn run(file: &Path, from_current: bool, preserve_session: bool) -> Result<()
     let (mut fm, body) = frontmatter::parse(&content)?;
     fm.resume = None;
     let updated = frontmatter::write(&fm, body)?;
-    // `#evmh`: route the resume-clear write through the listener-guarded
-    // converge seam so a live JB editor buffer stays in sync with the change
-    // instead of diverging from a bare disk write and raising a File Cache
-    // Conflict. When no editor listener is attached this falls back to the same
-    // unguarded CLI disk write as before, so headless `reset` is unchanged.
-    agent_doc_orchestration::write::converge_or_disk_write(
-        file,
-        &content,
-        &updated,
-        "reset_resume_clear",
-    )?;
+    if force_disk {
+        agent_doc_orchestration::write::atomic_write_pub(file, &updated)?;
+        agent_doc_orchestration::ops_log::log_op(
+            file,
+            &format!(
+                "reset_resume_clear_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
+                file.display(),
+                updated.len(),
+                agent_doc_orchestration::ops_log::content_hash(&updated)
+            ),
+        );
+    } else {
+        // `#evmh`: route the resume-clear write through the listener-guarded
+        // converge seam so a live JB editor buffer stays in sync with the change
+        // instead of diverging from a bare disk write and raising a File Cache
+        // Conflict. Without `--force-disk`, no-listener reset fails closed.
+        agent_doc_orchestration::write::converge_or_disk_write(
+            file,
+            &content,
+            &updated,
+            "reset_resume_clear",
+        )?;
+    }
     // Use the intended content directly: an editor convergence may apply
     // asynchronously, so re-reading disk could race the buffer. `updated` is the
     // authoritative post-reset document either way.
@@ -140,7 +157,7 @@ mod tests {
         snapshot::save(&doc, "stale snapshot").unwrap();
         snapshot::save_crdt(&doc, b"stale crdt").unwrap();
 
-        run(&doc, true, false).unwrap();
+        run(&doc, true, false, true).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(!updated.contains("resume: old"));
@@ -154,14 +171,10 @@ mod tests {
     }
 
     #[test]
-    fn from_current_routes_resume_clear_through_converge_seam() {
-        // `#evmh`: the default `reset --from-current` (resume-clear) write must
-        // route through the listener-guarded converge seam so a live JB editor
-        // buffer stays in sync instead of diverging from a bare disk write and
-        // raising a File Cache Conflict. With no listener attached it falls back
-        // to the CLI disk write and records the `reset_resume_clear` source-
-        // labelled disk fallback in ops.log — proving it went through the seam
-        // rather than a bare `std::fs::write`.
+    fn from_current_force_disk_records_audited_no_listener_write() {
+        // `#evmh` / realtime cutover: no-listener reset writes must be explicit.
+        // `--force-disk` preserves the headless recovery path while recording the
+        // audited bypass in ops.log.
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/crdt")).unwrap();
@@ -170,7 +183,7 @@ mod tests {
         let current = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nresume: old\n---\n\nBody\n";
         std::fs::write(&doc, current).unwrap();
 
-        run(&doc, true, false).unwrap();
+        run(&doc, true, false, true).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -185,9 +198,9 @@ mod tests {
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("reset_resume_clear_writeback")
-                && ops_log.contains("transport=disk_fallback"),
-            "reset must route the resume-clear write through the converge seam \
-             (source-labelled disk fallback), got:\n{ops_log}"
+                && ops_log.contains("transport=disk_force")
+                && ops_log.contains("reason=force_disk"),
+            "reset must record the explicit no-listener force-disk write, got:\n{ops_log}"
         );
     }
 
@@ -218,7 +231,7 @@ mod tests {
         let capture_state = r#"{"capture_id":"capture-keep","state":"committed"}"#;
         std::fs::write(&capture_path, capture_state).unwrap();
 
-        run(&doc, true, true).unwrap();
+        run(&doc, true, true, false).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(updated, current);
@@ -290,7 +303,7 @@ mod tests {
         let capture_state = r#"{"capture_id":"capture-keep","state":"committed"}"#;
         std::fs::write(&capture_path, capture_state).unwrap();
 
-        run(&doc, true, true).unwrap();
+        run(&doc, true, true, false).unwrap();
 
         // The journal is cleared: B,C no longer replay over the current file.
         let missing = queue_journal::replay_missing(&doc, only_a);
@@ -324,7 +337,7 @@ mod tests {
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "---\nagent_doc_session: test\n---\n\nBody\n").unwrap();
 
-        let err = run(&doc, false, true).unwrap_err();
+        let err = run(&doc, false, true, false).unwrap_err();
 
         assert!(
             err.to_string()

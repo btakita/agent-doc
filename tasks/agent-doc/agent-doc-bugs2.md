@@ -148,7 +148,13 @@ The queue is still stopped (`queue: stop`), so I did not drain or complete any b
 I ran normal preflight after the closeout repair. It classified the remaining exchange changes as recovery/boundary artifacts and the queue edits as inactive queue residue: the IPC proof diagnostic, the transient `(HEAD)` response markers, the preserved CRDT/JB route-refusal queue note, and the restored `do #closeoutstall` / `do #60ev` / `do #tmuxsynccrash` rows.
 
 Plan classified this as a prompt-response closeout with no repo actions. I did not start implementation, mark backlog items done, or run tests. Queue continuation is false because the document still has `queue: stop`.
-<!-- agent:boundary:aa3a65e2 -->
+
+### Re: unsafe user-content drift recovery via write --commit — gpt-5
+
+`agent-doc repair --apply-recovery` classified the remaining session-document diff as `unsafe_user_content_drift` and withheld metadata-only repair. I am closing it through the binary-owned `agent-doc write --commit` path with the preserved response body, as instructed, so the user/editor-authored diagnostic and queue edits are not committed by raw Git metadata.
+
+No repo implementation ran in this recovery step. Queue continuation remains false because frontmatter is still `queue: stop`.
+<!-- agent:boundary:54d86ffc -->
 <!-- /agent:exchange -->
 ## Queue
 

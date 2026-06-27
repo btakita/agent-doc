@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -140,7 +140,7 @@ This is binary-authored diagnostic content, not a user prompt, so it does not re
 Issue class: `ipc_proof_insufficient`
 Affected component: editor IPC / writeback
 
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=88ca9130-304a-4796-8632-ac873c33c1b1 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=32401 candidate_hash=fc0ecbf88c2f72feea8ee035c0d7f5647e401edfaa002c2bda906a9c35ff5ee6 content_ours_len=32351 content_ours_hash=14813962a19e6007117c35f8dd2e8a13c3f167a9f45fc20af7965abcf66fc6f2 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782534915164
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md 09source=socket_ack_content patch_id=88ca9130-304a-4796-8632-ac873c33c1b1 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=32401 candidate_hash=fc0ecbf88c2f72feea8ee035c0d7f5647e401edfaa002c2bda906a9c35ff5ee6 content_ours_len=32351 content_ours_hash=14813962a19e6007117c35f8dd2e8a13c3f167a9f45fc20af7965abcf66fc6f2 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782534915164
 ```
 
 ### Re: closeout repair for IPC drift and stopped queue — gpt-5
@@ -181,6 +181,18 @@ The Codex Stop hook was repeatedly treating inactive queue residue as active ses
 
 No source implementation ran in this closeout step, and no tests were run. This is a document-state repair so the already-answered CRDT/JB free-text prompt stops retriggering the Stop hook.
 
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=52640fd5-08d0-4b58-82cf-a3d6e6f91b7c invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=37948 candidate_hash=588f5ee963527349f3ed580cd1df0c9568f7de747b4de0680444fe6ea2930f7c content_ours_len=35694 content_ours_hash=f8f1a2f8dc8174152a3ef520f97ff66497756063471f678d9bdec0f4fb389b3b doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782583043832
+```
+
 ### Re: queue convergence and #closeoutstall handoff — gpt-5
 
 Preflight repaired the stale Codex cycle, appended the IPC proof diagnostic as recovery metadata, and converged the queue back to `queue: start` with `#closeoutstall` as the in-progress head. The `#closeoutstall` backlog item and plan path are present, so I refreshed that existing backlog capture rather than adding a duplicate.
@@ -188,12 +200,54 @@ Preflight repaired the stale Codex cycle, appended the IPC proof diagnostic as r
 `agent-doc plan` classified this turn as a prompt-response/document-state closeout with no repo actions beyond finalize. I left `#closeoutstall` open for the next executable drain cycle, did not mark any backlog item done or gated, and did not run source tests because no source files changed.
 
 Preflight also reported semantic-completion warnings for unrelated backlog/review items (`#kj5flive`, `#crdtauth6`, `#suptmuxstale`); I left those untouched.
-<!-- agent:boundary:3ec37c18 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=7ec8a4b8-3bfc-4537-a9f4-6062e9d3f7a8 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=39792 candidate_hash=770cbe95ebff8e2ffaf86a3cc7df8297ac5db92ca99b26143d879d493ecf292f content_ours_len=38558 content_ours_hash=0ca0698c2ed12259750ebaa5247bdcd87b3edc402184dfa2f6a546856e7199bb doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782586267820
+```
+
+### Re: Fix ipc_proof_insufficient — gpt-5
+
+> **Queue prompt:** Fix ipc_proof_insufficient
+
+This queue head matches the completed `#ipcproofnostall` entry in `tasks/agent-doc-bugs2.done.md`: on 2026-06-26, branch `ipcproofnostall-fix` fixed the `ipc_proof_insufficient` recovery diagnostic false-interrupt path by teaching the classifier to recognize binary-authored IPC proof diagnostics even when the structured line is separated from its heading.
+
+I did not change source files or rerun tests in this cycle because this is an already-resolved duplicate queue head. I am consuming the free-text queue prompt and leaving the open implementation backlog items untouched.
+
+<!-- agent:boundary:b9e9e5b4 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- ~~[#closeoutstall]~~
+- ~~Fix ipc_proof_insufficient~~
+---
+JB `Run Agent Doc` on monsterrodholders.md
+```text
+[route] target tmux session: 0
+Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %1 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Summarize recent commits"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782586439553-direct_pane_protected_prompt_input-codex-_1-a0c7b4c8e461.txt
+```
+---
+- JB `File Cache Conflict` occurences
+- do [#60ev]
+- do [#tmuxsynccrash]
+- do [#syncbarrier]
+- do [#qheadstrikeauto]
+- do [#suprestassoc]
+- do [#2y8j]
+- do [#cdtcutover]
+- do [#qeditdup]
+- do [#crdtauth6]
+- do [#nsfz]
+- do [#kj5flive]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

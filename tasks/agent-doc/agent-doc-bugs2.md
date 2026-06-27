@@ -72,7 +72,23 @@ Draining the go-queue on the fresh 0.34.57 supervisor. Took **#actorprune** — 
 **Also fixed:** 0.34.57's version bump moved only the top-level `[package]` version, leaving the sub-crate versions + inter-crate dep refs at 0.34.56 — which breaks `cargo publish` (`test_manifest_uses_publishable_dependency_contract`). All workspace versions are now bumped together to 0.34.58.
 
 Marking `#actorprune` done. Next: install 0.34.58 + recycle, push, then the loop continues on the fresh binary. Remaining drainable heads are #syncbarrier (large), #suprestassoc (needs live repro), the JB-flood dispatch bug, and the two resolved-by-provauth2 free-text reports (deleted-items-reappear / no-dup-adds — already closed by the 0.34.x tombstone+dedup, will strike them next).
-<!-- agent:boundary:3021daaf -->
+
+### Re: drain #qheadstrikeauto — free-text drain target now auto-strikes off the 🚧 marker, not agent prose (v0.34.59) — opus-4-8
+
+Drained **#qheadstrikeauto** — the most self-contained non-blocked id in the priority head (`#pcwcrt` is blocked on `#crdtauth6`, `#syncbarrier` is large, `#suprestassoc` needs a live repro, `#actorprune` shipped last cycle).
+
+**Shipped (`07403e17`, v0.34.59, `make check` green / 3 new tests):**
+- **Root cause:** the free-text strike only fired when the committed response *quoted* the head as a `> **Queue prompt:**` blockquote. `free_text_head_answered_by_response` (`queue_consume.rs`) matches a head only against `response_blockquote_text(response_body)` — the response's blockquote region — so a head answered in **plain prose** was never struck. Result: the operator had to manually quote every free-text head, and a plainly-answered head churned no-op `#qchurn` loop cycles until cleared by hand. Operator: *"the binary should do this automatically...not the agent."*
+- **Fix:** the binary already stamps the cycle's **drain target** with the in-progress `🚧` marker during preflight queue maintenance (`set_first_prompt_in_progress`). A **free-text** head carrying that marker IS the head this cycle was dispatched to drain, so on a committed (non-empty) response it is answered *by definition* — no agent prose required. New `head_carries_in_progress_marker` helper (cosmetic-marker-aware via the existing `strip_priority_markers`/`display_queue_prompt_text` path); `answered_free_text_head_node_keys` now strikes a head when it is the drain-target marker head **OR** the response prose-matches it (the secondary `#ftstrike` signal that still strikes non-marker free-text heads answered at any position).
+- **Safety preserved:** the `#qstrikeexplain` Phase-2 baseline gate still defers a `🚧` head that first appeared this turn (in-flight operator edit, never same-cycle struck); P4 still routes id-backed marker heads through `--done` (the free-text pass only ever strikes free-text marker heads).
+- **Coverage:** `marker_head_struck_without_blockquote_quote_qheadstrikeauto` (plain-prose response strikes the marker head; precondition asserts the legacy prose-match returns false), `marker_head_not_struck_when_absent_from_baseline_qheadstrikeauto`, `id_backed_marker_head_not_struck_by_free_text_pass_qheadstrikeauto`.
+
+**Deployed (agent-doable steps, `#deploy-just-do-it`):** version bumped (all workspace crates + `pyproject.toml` → 0.34.59), `VERSIONS.md` entry, `make check` green, `make install-full` (0.34.59 live, lib-install auto-recycle marked 2 controllers for the next idle boundary), committed + pushed (submodule `07403e17`, tag `v0.34.59`, superproject pointer `c1ff6ff5e`). Recycling the supervisor onto 0.34.59 next. **Not** published to crates.io/PyPI — the 0.34.x dogfood cadence batches publishing (PyPI is still 0.33.3); that stays a separate operator step.
+
+**Operator-verify (live eyeball):** after the supervisor recycles onto 0.34.59, drain a free-text queue head with a **plain-prose** response (no `> **Queue prompt:**` blockquote) and confirm the head auto-strikes (ops.log `freetext_head_strike` / `free_text_head_struck note=auto_struck_answered`) with `queue_drainable_head_count` dropping — no manual quoting needed.
+
+Remaining drainable heads: `#syncbarrier` (large), `#suprestassoc` (live repro), the JB-flood dispatch bug, and the free-text reports (deleted-items-reappear / no-dup-adds — already closed by the 0.34.x tombstone+dedup).
+<!-- agent:boundary:701baad6 -->
 <!-- /agent:exchange -->
 ## Queue
 

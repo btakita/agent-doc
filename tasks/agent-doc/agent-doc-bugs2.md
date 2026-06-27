@@ -136,7 +136,13 @@ The document frontmatter is still `queue: stop`, so these rows are inactive queu
 I reopened this Codex invocation as a closeout repair. Preflight repaired a stale `preflight_started` cycle, then found uncommitted document drift that needed the binary-owned write path: the auto-appended IPC proof diagnostic plus the preserved queue free-text row containing the JB `Run Agent Doc` route refusal log.
 
 I did not start repo implementation or mark any backlog item done in this cycle. The document frontmatter is still `queue: stop`, so the queue rows are inactive residue rather than executable drain work. No source files changed and no tests were run.
-<!-- agent:boundary:09816613 -->
+
+### Re: document drift commit repair — gpt-5
+
+The previous finalize committed my repair response but left the recovered IPC diagnostic and preserved queue row as session-document working-tree drift. I reopened closeout through `agent-doc finalize` again so the current session document state crosses the binary-owned write and commit boundary.
+
+The queue is still stopped (`queue: stop`), so I did not drain or complete any backlog item. No source files changed and no tests were run.
+<!-- agent:boundary:f7dc69ba -->
 <!-- /agent:exchange -->
 ## Queue
 

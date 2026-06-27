@@ -199,6 +199,10 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
         include_str!("../runbooks/harness-invocation.md"),
     ),
     (
+        "dynamic-context.md",
+        include_str!("../runbooks/dynamic-context.md"),
+    ),
+    (
         "split-spec-files.md",
         include_str!("../runbooks/split-spec-files.md"),
     ),
@@ -2152,6 +2156,20 @@ mod tests {
                 .iter()
                 .any(|(name, _)| *name == "harness-invocation.md"),
             "harness-invocation.md should be in BUNDLED_RUNBOOKS"
+        );
+    }
+
+    #[test]
+    fn bundled_runbooks_include_dynamic_context() {
+        assert!(
+            BUNDLED_RUNBOOKS
+                .iter()
+                .any(|(name, _)| *name == "dynamic-context.md"),
+            "dynamic-context.md should be in BUNDLED_RUNBOOKS"
+        );
+        assert!(
+            SKILL_TEMPLATE.contains("dynamic-context.md"),
+            "SKILL.md should list dynamic-context in the runbook catalog"
         );
     }
 

@@ -13,6 +13,10 @@ Interactive document session — respond to user edits in a markdown document.
 
 This shared hot path serves Claude Code, Codex, OpenCode, Cursor, and direct harnesses. Invocation wording is harness-specific; workflow and closeout are shared. Use [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for harness details and [runbooks/commit.md](runbooks/commit.md) for closeout.
 
+## Dynamic Context Map
+
+Use this SKILL.md as the hot-path router. Load linked files only when their branch is active: invocation and harness drift → [runbooks/harness-invocation.md](runbooks/harness-invocation.md); preflight planning → [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md); response and pending updates → [runbooks/respond.md](runbooks/respond.md) plus [runbooks/pending-ops.md](runbooks/pending-ops.md); persistence and manual repair → [runbooks/persist-closeout.md](runbooks/persist-closeout.md) plus [runbooks/commit.md](runbooks/commit.md); context-authoring policy → [runbooks/dynamic-context.md](runbooks/dynamic-context.md). Do not copy runbook detail back into this file unless it is required every cycle.
+
 ## Invocation
 
 ```
@@ -127,6 +131,6 @@ Non-vision models cannot read `![alt](path.png)` images. Delegate to `agent-doc 
 
 ## Runbooks
 
-Use runbooks for detail that is not needed every turn. Key runbooks: [runbooks/harness-invocation.md](runbooks/harness-invocation.md), [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md), [runbooks/pending-ops.md](runbooks/pending-ops.md), [runbooks/commit.md](runbooks/commit.md), [runbooks/split-spec-files.md](runbooks/split-spec-files.md). `split-spec-files` applies across agent-doc-managed surfaces; custom root files stay opt-in unless they still match the generated baseline. Full catalog: `compact-exchange`, `transfer-extract`, `model-tier-gate`, `command-synonyms`, `compound-task-steering`, `streaming-checkpoints`, `document-format`, `code-enforced-directives`, `jb-cache-conflict`, `baseline-drift`, `describe-image`.
+Use runbooks for detail that is not needed every turn. Key runbooks: [runbooks/dynamic-context.md](runbooks/dynamic-context.md), [runbooks/harness-invocation.md](runbooks/harness-invocation.md), [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md), [runbooks/pending-ops.md](runbooks/pending-ops.md), [runbooks/commit.md](runbooks/commit.md), [runbooks/split-spec-files.md](runbooks/split-spec-files.md). `split-spec-files` applies across agent-doc-managed surfaces; custom root files stay opt-in unless they still match the generated baseline. Full catalog: `compact-exchange`, `transfer-extract`, `model-tier-gate`, `command-synonyms`, `compound-task-steering`, `streaming-checkpoints`, `document-format`, `code-enforced-directives`, `jb-cache-conflict`, `baseline-drift`, `describe-image`.
 
 **Read each runbook at most once per session.** If you already opened a runbook earlier this session, its content is still in context — reuse it instead of re-reading. Re-open the same runbook only when its content changed or your earlier copy was compacted away. Redundant re-reads waste context tokens and are heaviest on per-cycle shell harnesses (for example Codex re-`cat`ing closeout runbooks every cycle).

@@ -39,6 +39,19 @@ done
 Compacted content:
 - Archived 34 response topic(s): do #provauth1 #provauth2 #provauth3; drain #actorprune; drain #qheadstrikeauto; 31 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
+- I also tried local clean `make tmux-ci`; it failed because the live test saw this active Codex pane `%0` as `alive-busy` and refused to clear it, so that local live sweep is not a clean signal in this interactive tmux session.
+- `src/agent-doc/specs/06-config.md`, `08-session-routing.md`, `08b-single-process-control-plane.md`, `12-deterministic-simulation.md`, and `process-topology.md` describe the prevention surfaces: append idempotence, editor-IPC queue writes, single-writer topology, and SimWorld coverage.
+- `src/agent-doc/specs/07-closeout-commands.md` records the closeout state-machine expectations for cancel recovery and accepted-conflict replay repair.
+- `src/agent-doc/runbooks/jb-cache-conflict.md` is the main runbook: Accept applies through the Document API; Cancel must fail closed or auto-recover through preflight/write-commit when the response already reached the working tree; Compact Exchange must use component editor IPC when a listener is active; late Accept can replay stale IPC and duplicate a response until the planned fix revalidates against HEAD.
+- Latest GitHub Actions CI run for `201270a4` is `28301694825`; repeated public Actions checks through 2026-06-27 17:20 America/New_York still showed `Status In progress`. `gh` cannot currently poll authenticated logs because its stored token is invalid and the unauthenticated API hit rate/permission limits.
+- `git push origin main` passed.
+- Clean committed worktree `make install-full` passed and installed `agent-doc`/`libagent_doc`.
+- Clean committed worktree `make check` passed: clippy, 5,480 nextest tests, doctests, medium simulation, and Lean build.
+- `cargo test -p agent-doc-orchestration run_queue_maintenance_restrikes_snapshot_struck_live_reemit` passed.
+- `cargo test -p agent-doc-orchestration queue::tests::converge` passed.
+- `cargo test -p agent-doc-orchestration stale_live_reemit` passed.
+- `agent-doc-orchestration/src/preflight/maintenance.rs`: added a maintenance regression for the `#qeditdup` / `#qftloss#qftloss` shape where a struck snapshot line reappears live during the preflight/writeback window.
+- `agent-doc-orchestration/src/queue.rs`: queue convergence now treats a struck snapshot/current representative for the same queue-head identity as authoritative over a stale live re-emit, so the unstruck copy is dropped or re-struck instead of resurrected.
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
@@ -74,8 +87,8 @@ Verification:
 - `cargo test -p agent-doc-orchestration stale_live_reemit` passed.
 - `cargo test -p agent-doc-orchestration queue::tests::converge` passed.
 - `cargo test -p agent-doc-orchestration run_queue_maintenance_restrikes_snapshot_struck_live_reemit` passed.
-- Clean committed worktree `make check` passed: clippy, 5,480 nextest tests, doctests, medium simulation, and Lean build.
-- Clean committed worktree `make install-full` passed and installed `agent-doc`/`libagent_doc`.
+❯ - Clean committed worktree `make check` passed: clippy, 5,480 nextest tests, doctests, medium simulation, and Lean build.
+❯ - Clean committed worktree `make install-full` passed and installed `agent-doc`/`libagent_doc`.
 - `git push origin main` passed.
 - Latest GitHub Actions CI run for `201270a4` is `28301694825`; repeated public Actions checks through 2026-06-27 17:20 America/New_York still showed `Status In progress`. `gh` cannot currently poll authenticated logs because its stored token is invalid and the unauthenticated API hit rate/permission limits.
 - I also tried local clean `make tmux-ci`; it failed because the live test saw this active Codex pane `%0` as `alive-busy` and refused to clear it, so that local live sweep is not a clean signal in this interactive tmux session.
@@ -110,14 +123,12 @@ Current active carrier: `#kj5flive`, which is still operator-verify work for liv
 The current source-of-truth surfaces are `src/agent-doc/runbooks/jb-cache-conflict.md`, `src/agent-doc/specs/07-closeout-commands.md`, `src/agent-doc/specs/06-config.md`, `src/agent-doc/specs/08-session-routing.md`, `src/agent-doc/specs/08b-single-process-control-plane.md`, `src/agent-doc/specs/12-deterministic-simulation.md`, and `src/agent-doc/specs/process-topology.md`. Historical occurrence clusters remain archived in `tasks/agent-doc-bugs2.done.md` under the `#jbcc*`, cancel-recovery, late-accept replay, syntax-loss, degraded-IPC, reconnect-staleness, trigger-instrumentation, and realtime-cutover entries.
 
 No source files changed for this queue item; verification was `agent_doc_read` for queue/exchange/backlog/review plus the targeted `rg` scan.
-<!-- agent:boundary:a15d191a -->
+<!-- agent:boundary:69cb1d36 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~`/clear` was autonomously added...blocking JB `Run Agent Doc`. As I was typing in this item, 2 duplicates of the next queue item were added before this item. And a stale copy of this prompt was duplicated above this item...and the last 3 characters I typed were deleted in this prompt. CRDT issues...~~
-- ~~~~Duplicate text document corruption occurred while I was typing into te queue.~~ — auto-struck: answered this cycle (#ftstrike)~~
 ~~~done
 :pushpin: JB `Run Agent Doc` on monsterrodholders.md
 ```text
@@ -142,7 +153,6 @@ Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/
 ---
 - ~~:pushpin: do [#qeditdup] [#qftloss#qftloss]~~
 - ~~:pushpin: JB `File Cache Conflict` occurrences~~ — auto-struck: answered this cycle (#ftstrike)
-- :pushpin: do [#60ev]
 - :pushpin: do [#syncbarrier]
 - :pushpin: do [#qheadstrikeauto]
 - :pushpin: do [#suprestassoc]
@@ -165,6 +175,7 @@ Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/
 - :pushpin: do [#provauth3bimpl]
 - :pushpin: do [#supstaledetectverify]
 - :pushpin: do [#suptmuxstaleverify]
+- :pushpin: do [#60ev]
 - ~~do [#qeditdupguard]~~
 <!-- /agent:queue -->
 <!--

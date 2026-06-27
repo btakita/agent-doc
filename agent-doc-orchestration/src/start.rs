@@ -245,11 +245,26 @@ const FAILED_RESUME_THRESHOLD: usize = 2;
 const AUTO_TRIGGER_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const AUTO_TRIGGER_POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// Auto-trigger no-prompt dispatch-ready deadline (`#startupdeadline` /
-/// `#waitmachine2`). Routed through the unified wait-machinery ceiling so the
-/// operator's "never hang > 10s" bound is enforced in one place: the historical
-/// 30s request is clamped to [`crate::wait_machine::GLOBAL_HANG_CEILING`] (10s).
-const AUTO_TRIGGER_TIMEOUT: Duration =
-    crate::wait_machine::clamp_to_ceiling(Duration::from_secs(30));
+/// `#waitmachine2` / `#contrestartdispatch`).
+///
+/// Bounds how long the auto-trigger thread waits for a freshly (re)launched
+/// harness child to finish starting up and show a dispatch-ready prompt before it
+/// gives up on re-injecting `agent-doc <FILE>`. It is deliberately NOT clamped to
+/// [`crate::wait_machine::GLOBAL_HANG_CEILING`] (10s): that ceiling bounds waits
+/// on peers expected to respond near-instantly (an IPC ack, an already-running
+/// shell prompt), but waiting on a cold-(re)starting harness *process* is a
+/// legitimately slow startup wait. A `claude --continue` resuming a large session
+/// plus heavy SessionStart hooks routinely needs well over 10s to reach its first
+/// prompt, so clamping to 10s made every continue-mode `restart-supervisor` time
+/// out before the prompt appeared: the re-dispatch never fired and the relaunched
+/// operator came up unclaimed, leaving the controller parked at `operator_ready`
+/// (`#contrestartdispatch`). Like the bounded [`crate::wait_machine::REINSTALL_BUDGET`]
+/// exemption, this stays bounded — a child that never becomes dispatch-ready
+/// still fails closed at this budget and records a `startup_miss`, never hanging
+/// forever. The auto-trigger runs on its own `AutoTriggerMonitor`, not the
+/// Lean-proofed `wait_machine::tick`, so the global `no_hang` theorem is
+/// unaffected.
+const AUTO_TRIGGER_TIMEOUT: Duration = Duration::from_secs(60);
 /// Consecutive idle-over-busy polls the idle-queue watch must observe before it
 /// reconciles a stale-busy actor back to ready (`#stale-busy-after-auto-inject-no-clear`).
 /// At `AUTO_TRIGGER_POLL_INTERVAL` (500ms) this is ~2s of proven idle pane
@@ -1598,8 +1613,8 @@ fn spawn_auto_trigger_thread(
                             log_event(
                                 &mut session_log,
                                 &format!(
-                                    "auto_trigger_timeout harness={} reason=clear_cooldown_after_30s",
-                                    harness.binary
+                                    "auto_trigger_timeout harness={} reason=clear_cooldown_after_{}s",
+                                    harness.binary, AUTO_TRIGGER_TIMEOUT.as_secs()
                                 ),
                             );
                             record_session_startup_miss(
@@ -1695,8 +1710,8 @@ fn spawn_auto_trigger_thread(
                         log_event(
                             &mut session_log,
                             &format!(
-                                "auto_trigger_timeout harness={} reason=no_prompt_after_30s",
-                                harness.binary
+                                "auto_trigger_timeout harness={} reason=no_prompt_after_{}s",
+                                harness.binary, AUTO_TRIGGER_TIMEOUT.as_secs()
                             ),
                         );
                         // Hard deadline: record startup-miss + fail closed instead of
@@ -4036,6 +4051,33 @@ Done.
             "fail-closed fires once; the caller returns after recording the startup-miss"
         );
         assert_eq!(monitor.stop_outcome(), AutoTriggerOutcome::Timeout);
+    }
+    #[test]
+    fn auto_trigger_timeout_exceeds_global_hang_ceiling_for_continue_restart() {
+        // `#contrestartdispatch`: the auto-trigger no-prompt deadline must be
+        // longer than the 10s `GLOBAL_HANG_CEILING`. A continue-mode
+        // `restart-supervisor` relaunches `claude --continue`, which resumes a
+        // potentially large prior session (plus SessionStart hooks) before showing
+        // its first prompt — routinely > 10s. When this budget was clamped to the
+        // ceiling, the auto-trigger always timed out before the prompt appeared,
+        // so the `agent-doc <FILE>` re-dispatch never fired and the relaunched
+        // operator came up unclaimed (controller stuck at `operator_ready`). Guard
+        // that it is generous enough for harness startup yet still bounded (fails
+        // closed, never an unbounded hang).
+        assert!(
+            AUTO_TRIGGER_TIMEOUT > crate::wait_machine::GLOBAL_HANG_CEILING,
+            "auto-trigger startup budget {:?} must exceed the 10s responsiveness ceiling so a \
+             continue-restart harness resume can reach its prompt before the re-dispatch is abandoned",
+            AUTO_TRIGGER_TIMEOUT
+        );
+        // Still bounded: a freshly relaunched harness that never shows a prompt
+        // must fail closed at this budget rather than hang forever.
+        let start = Instant::now();
+        let mut monitor = AutoTriggerMonitor::new(start, AUTO_TRIGGER_TIMEOUT);
+        assert_eq!(
+            auto_trigger_no_prompt_action(&mut monitor, start + AUTO_TRIGGER_TIMEOUT),
+            AutoTriggerNoPromptAction::FailClosed
+        );
     }
     #[test]
     fn auto_trigger_thread_cancels_cleanly_before_prompt_poll() {

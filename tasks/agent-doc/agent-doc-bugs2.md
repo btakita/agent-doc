@@ -166,7 +166,15 @@ Plan classified this as a prompt-response closeout with no repo actions. I did n
 `agent-doc repair --apply-recovery` classified the remaining session-document diff as `unsafe_user_content_drift` and withheld metadata-only repair. I am closing it through the binary-owned `agent-doc write --commit` path with the preserved response body, as instructed, so the user/editor-authored diagnostic and queue edits are not committed by raw Git metadata.
 
 No repo implementation ran in this recovery step. Queue continuation remains false because frontmatter is still `queue: stop`.
-<!-- agent:boundary:84739d25 -->
+
+### Re: CRDT queue corruption and JB route-refusal queue prompt — gpt-5
+
+> **Queue prompt:** Whe I delete queue items and type into the queue, I see the full set of CRDT sync issues. I deleted queue items but they reappeared. I tried deleting an item again and the queue downward duplicated corrupting the document. As I was typing in this prompt, 1 character was deleted twie...actually 3 times. See the missing characters in this prompt. JB `Run Agent Doc` error `resync: purged stash window @3 (all panes idle)`
+
+I treated this as an already-triaged queue report, not a fresh implementation cycle. The CRDT queue edit/delete/duplication portion maps to the existing open verification item `#qeditdup`; the closeout/IPC recovery failure maps to `#closeoutstall`; and the tmux/JB route instability is already represented by the existing tmux/JB route items in the backlog and done history. I did not mark those items done because they are still open or operator-verify work.
+
+No source files changed and no tests were run. This response is only to cross the binary-owned write boundary for the free-text queue prompt so it stops being re-served by the Codex Stop hook.
+<!-- agent:boundary:fe496493 -->
 <!-- /agent:exchange -->
 ## Queue
 

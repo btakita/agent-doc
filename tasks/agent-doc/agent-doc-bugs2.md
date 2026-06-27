@@ -127,7 +127,11 @@ No source files changed for this queue item; verification was `agent_doc_read` f
 ### Re: Queue residue repair — gpt-5
 
 The answered `JB File Cache Conflict` free-text queue row is now fully struck, so the queue parser no longer treats it as active residue. `session-check` advanced the next queue head to `#syncbarrier`; this repair only touched the session-document queue/closeout state and did not change source files.
-<!-- agent:boundary:d68f213e -->
+
+### Re: Queue repair closeout — gpt-5
+
+Closed the queue-residue repair after the answered `JB File Cache Conflict` row was fully struck. The queue now correctly presents `#syncbarrier` as the next active head; no source files changed in this repair.
+<!-- agent:boundary:32f1c9a4 -->
 <!-- /agent:exchange -->
 ## Queue
 

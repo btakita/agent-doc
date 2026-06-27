@@ -447,11 +447,6 @@ fn normalized_managed_instruction_surface_for_audit(content: &str) -> String {
         .to_string()
 }
 
-fn has_tsift_code_navigation_block(content: &str) -> bool {
-    content.contains("<!-- tsift:code-navigation")
-        && content.contains("<!-- /tsift:code-navigation -->")
-}
-
 fn extract_tsift_code_navigation_block(content: &str) -> Option<String> {
     const START: &str = "<!-- tsift:code-navigation";
     const END: &str = "<!-- /tsift:code-navigation -->";
@@ -557,11 +552,6 @@ pub(crate) fn audit_managed_instruction_surfaces(root: Option<&Path>) -> Result<
         let normalized_existing = normalized_managed_instruction_surface_for_audit(&existing);
         let normalized_expected = normalized_managed_instruction_surface_for_audit(&expected);
         if normalized_existing != normalized_expected {
-            if matches!(env, agent_kit::detect::Environment::Generic)
-                && has_tsift_code_navigation_block(&existing)
-            {
-                continue;
-            }
             anyhow::bail!(
                 "managed agent-doc instruction surface is stale: {}. Run `agent-doc skill install --all` or reinstall the active harness before release.",
                 path.display()

@@ -57,14 +57,29 @@ The fix consults a **recorded origin fact** instead of guessing:
 **Scope boundary (honest):** that's the binary-origin half — where origin is *known today*. The operator-origin half of #provauth3 ("an operator working-tree change IS authoritative; retire `content_ours` / stale-editor resurrection heuristics") needs the live operator-origin delta signal from the `#crdtauth6` seam, which isn't live yet — so I filed it as **#provauth3b** rather than fake it with more content heuristics.
 
 **Next (doing now, agent-doable):** `make install-full` → `admin recycle` so 0.34.57 goes live, then push. After recycle, the operator-eyeball proof is simply: this session no longer needs a manual compaction recovery and no `❯` appears on a Session Summary.
-<!-- agent:boundary:580ee6b0 -->
+
+### Re: drain #actorprune — dead actor records now pruned (v0.34.58) — opus-4-8
+
+Draining the go-queue on the fresh 0.34.57 supervisor. Took **#actorprune** — the most self-contained non-blocked id in the priority head (#pcwcrt is blocked on #crdtauth6, #syncbarrier is large, #suprestassoc needs a live repro).
+
+**Shipped (`23e0e4ff`, v0.34.58, `make check` green / 5438 tests):**
+- Root cause: `close_stale_starting_actors` only *transitions* `Starting`→`Closed`; nothing ever *removed* `Closed` records, so the controller actor store (`documents` table) and `admin list` grew without bound — your 251 dead `session=session-clear` rows.
+- New `prune_dead_actors` (`project_controller.rs`): hard-removes a record when **all** hold — state is `Closed`, `last_transition.timestamp` older than `DEAD_ACTOR_PRUNE_AFTER` (1h, matching the stale-`Starting` window), **and** no fresh/alive supervisor lease owns its document/generation (`supervisor_lease_is_fresh_or_alive`, whose pid-alive check means a dead supervisor's lingering lease never blocks the prune, and a live actor is never pruned).
+- New `delete_actor_document_tx` (`state_store.rs`): removes the `documents` + `actor_transitions` + `supervisor_leases` rows for one document_id in one transaction.
+- Wired into `gc.rs` default-on (dry-run honored), so **`agent-doc gc` cleans the accumulated 251 now**. Every prune is logged (`gc_pruned_dead_actor … reason=dead_closed_record`).
+- Subtlety caught by a test: the prune refreshes the legacy `session-actors.json` projection **directly from the post-delete db**, not via `emit_actor_projection`/`load_actor_store` — those re-run `migrate_legacy_actor_projection`, which once the prune empties `documents` would re-import the just-deleted rows from the stale json and *resurrect* them. 4 new tests cover remove/keep-recent/keep-live-lease/dry-run-preserves.
+
+**Also fixed:** 0.34.57's version bump moved only the top-level `[package]` version, leaving the sub-crate versions + inter-crate dep refs at 0.34.56 — which breaks `cargo publish` (`test_manifest_uses_publishable_dependency_contract`). All workspace versions are now bumped together to 0.34.58.
+
+Marking `#actorprune` done. Next: install 0.34.58 + recycle, push, then the loop continues on the fresh binary. Remaining drainable heads are #syncbarrier (large), #suprestassoc (needs live repro), the JB-flood dispatch bug, and the two resolved-by-provauth2 free-text reports (deleted-items-reappear / no-dup-adds — already closed by the 0.34.x tombstone+dedup, will strike them next).
+<!-- agent:boundary:4f2fbec6 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~🚧 [#f693] [#q9w3] [#fpyh] [#818s]~~
-- [#pcwcrt] [#syncbarrier] [#qheadstrikeauto] [#actorprune] [#suprestassoc] 
+- ~~[#f693] [#q9w3] [#fpyh] [#818s]~~
+- 🚧 [#pcwcrt] [#syncbarrier] [#qheadstrikeauto] [#actorprune] [#suprestassoc]
 - [#2y8j] [#cdtcutover] [#qeditdup] [#crdtauth6] [#nsfz] [#kj5flive]
 - I deleted items from the queue but they reappeared
 - When auto-adding queue items, verify that the item is not already in the queue. Do not add duplicates.

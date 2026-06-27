@@ -174,39 +174,12 @@ No repo implementation ran in this recovery step. Queue continuation remains fal
 I treated this as an already-triaged queue report, not a fresh implementation cycle. The CRDT queue edit/delete/duplication portion maps to the existing open verification item `#qeditdup`; the closeout/IPC recovery failure maps to `#closeoutstall`; and the tmux/JB route instability is already represented by the existing tmux/JB route items in the backlog and done history. I did not mark those items done because they are still open or operator-verify work.
 
 No source files changed and no tests were run. This response is only to cross the binary-owned write boundary for the free-text queue prompt so it stops being re-served by the Codex Stop hook.
-<!-- agent:boundary:fe496493 -->
+<!-- agent:boundary:b76cb2d0 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority -->
-- ~~[#f693] [#q9w3] [#fpyh] [#818s] [#pcwcrt]~~
-- Whe I delete queue items and type into the queue, I see the full set of CRDT sync issues. I deleted queue items but they reappeared. I tried deleting an item again and the queue downward duplicated corrupting the document. As I was typing in this prompt, 1 character was deleted twie...actually 3 times. See the missing characters in this prompt. JB `Run Agent Doc` error `resync: purged stash window @3 (all panes idle)
-  [sync] recovered live pane %3 for session b26b9957 via path provenance pid=154324 instance=8da2c700-adb5-4b70-9050-f743f5bc4197
-  can't find pane: %4
-  resync: failed to kill stash pane %4: tmux kill-pane failed for %4
-  [route] target tmux session: 0
-  Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %3 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Implement {feature}"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782582746430-direct_pane_protected_prompt_input-codex-_3-209a769b2c10.txt
-`
-- [#syncbarrier] [#qheadstrikeauto] [#actorprune] [#suprestassoc]
-- [#2y8j] [#cdtcutover] [#qeditdup] [#crdtauth6] [#nsfz] [#kj5flive]
-- I deleted items from the queue but they reappeared
-- When auto-adding queue items, verify that the item is not already in the queue. Do not add duplicates.
-- JB `Run Agent Doc` flooded the prompt with duplicate `agent-doc .../agent-doc-bugs2.md` dispatch prompts. Please fix the root cause.
-- ~~do [#f693]~~
-- ~~do [#fpyh]~~
-- ~~do [#818s]~~
-- ~~do [#actorprune]~~
-- do [#suprestassoc]
-- do [#cdtcutover]
-- do [#qeditdup]
-- do [#crdtauth6]
-- do [#nsfz]
-- do [#kj5flive]
-- ~~do [#provauth3b]~~
-- do [#closeoutstall]
-- do [#60ev]
-- do [#tmuxsynccrash]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

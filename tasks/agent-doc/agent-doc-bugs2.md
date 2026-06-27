@@ -98,7 +98,7 @@ Current source-of-truth docs/code contracts:
 Historical archived occurrence clusters in `tasks/agent-doc-bugs2.done.md` are: initial Compact Exchange repro/isolation (`#jbccache`, `#jbccfix`, `#jbccreg`, `#jbccdocs`); cancel-branch implementation and proof trail (`#jbccc1`/`#jbccc3`/`#jbccc4`/`#jbccc5`, `#jbcclivecancelresid`, `#0ep7`); late-accept duplicate replay (`#jbccacceptdup`, `#wkbs`); response-outside-exchange corruption (`#jb-cache-cancel-response-outside-exchange`); syntax/highlighting loss after disk load (`#7qfw`, `#jb-file-cache-conflict-syntax-loss`); degraded IPC avoiding raw disk writes (`#ipc-degraded-prefers-file-ipc`); reconnect stale-buffer recovery (`#yzer`, `#1jec`); remaining-trigger instrumentation (`#advr19`); and realtime cutover work removing the post-commit reconcile path that used to feed these dialogs (`#pcwcrt`).
 
 No source files changed for this queue item. Verification was `agent_doc_read` for queue/backlog/review plus a targeted `rg` scan over `tasks/agent-doc/agent-doc-bugs2.md`, `tasks/agent-doc-bugs2.done.md`, `src/agent-doc/runbooks`, `src/agent-doc/specs`, and mirrored skill runbooks.
-<!-- agent:boundary:e521e21f -->
+<!-- agent:boundary:bfda46ce -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -129,7 +129,7 @@ Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/
 ```
 ---
 - ~~:pushpin: do [#qeditdup] [#qftloss#qftloss]~~
-- :pushpin: JB `File Cache Conflict` occurrences
+- ~~:pushpin: JB `File Cache Conflict` occurrences~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: do [#60ev]
 - :pushpin: do [#syncbarrier]
 - :pushpin: do [#qheadstrikeauto]

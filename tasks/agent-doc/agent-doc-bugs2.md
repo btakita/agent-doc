@@ -61,7 +61,27 @@ I treated `[#qftloss#qftloss]` as the legacy `#qftloss` class, whose current act
 For `#qftlossproof`, the prompt text was preserved in the live-buffer sidecar and current disk state, so I did not find a free-text loss in this cycle. I am leaving `#qftlossproof` open because I did not find the full durable `qdurcrash`/replay proof needed to close that replacement item end-to-end.
 
 No source files changed and no tests were needed. `gh run list --workflow CI --limit 1` returned GitHub 404 for `btakita/agent-loop`, so I could not inspect the latest CI run.
-<!-- agent:boundary:e8934402 -->
+
+### Re: #qeditdupguard - gpt-5
+
+Implemented `#qeditdupguard` in `src/agent-doc` and pushed commit `201270a4` (`fix: prevent struck queue head resurrection`) to `origin/main`.
+
+What changed:
+- `agent-doc-orchestration/src/queue.rs`: queue convergence now treats a struck snapshot/current representative for the same queue-head identity as authoritative over a stale live re-emit, so the unstruck copy is dropped or re-struck instead of resurrected.
+- `agent-doc-orchestration/src/preflight/maintenance.rs`: added a maintenance regression for the `#qeditdup` / `#qftloss#qftloss` shape where a struck snapshot line reappears live during the preflight/writeback window.
+
+Verification:
+- `cargo test -p agent-doc-orchestration stale_live_reemit` passed.
+- `cargo test -p agent-doc-orchestration queue::tests::converge` passed.
+- `cargo test -p agent-doc-orchestration run_queue_maintenance_restrikes_snapshot_struck_live_reemit` passed.
+- Clean committed worktree `make check` passed: clippy, 5,480 nextest tests, doctests, medium simulation, and Lean build.
+- Clean committed worktree `make install-full` passed and installed `agent-doc`/`libagent_doc`.
+- `git push origin main` passed.
+- Latest GitHub Actions CI run for `201270a4` is `28301694825`; repeated public Actions checks through 2026-06-27 17:20 America/New_York still showed `Status In progress`. `gh` cannot currently poll authenticated logs because its stored token is invalid and the unauthenticated API hit rate/permission limits.
+- I also tried local clean `make tmux-ci`; it failed because the live test saw this active Codex pane `%0` as `alive-busy` and refused to clear it, so that local live sweep is not a clean signal in this interactive tmux session.
+
+Confidence: high for the requested queue resurrection regression; remote CI conclusion was still pending when this closeout was written.
+<!-- agent:boundary:220fc9ba -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -116,6 +136,7 @@ Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/
 - :pushpin: do [#provauth3bimpl]
 - :pushpin: do [#supstaledetectverify]
 - :pushpin: do [#suptmuxstaleverify]
+- ~~do [#qeditdupguard]~~
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -142,7 +163,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#qeditdupguard] #agent-doc-bug live #qeditdup verification failed on 2026-06-27: a queue row that HEAD had struck (`do [#qeditdup] [#qftloss#qftloss]`) was resurrected unstruck in the live buffer/current working tree during the interrupted preflight/writeback window. Evidence: live-buffer `.agent-doc/live-buffer/f6d9af4a09fc7ed8.jetbrains-52613-d265e059-af8c-421f-a813-9de0ac53521c`; ops.log cycle `cycle-1782592777227` with `ipc_proof_insufficient`, `live_prompt_drift_after_preflight`, `preflight_blocked_uncommitted_closeout_drift`, and `editor_op_recorded`; `git diff -- tasks/agent-doc/agent-doc-bugs2.md` showed the struck `#qeditdup` row restored unstruck. Implement the deeper editor-edit-during-cycle guard in the consolidated queue race plan and add regression coverage. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#tmuxsynccrashlog] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md
 - [ ] [#qftlossproof] Replacement for #qftloss: free-text prompt preservation live proof. After the operator types an unsaved queue/free-text prompt during concurrent finalize, inspect .agent-doc/live-buffer journal evidence plus ops.log qdurcrash/live-buffer replay markers; close only if the prompt survives end-to-end, otherwise file a focused loss bug with artifact paths. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#midturnrecycleproof] Replacement for #midturn-recycle-resume: Phase A recycle interlock live proof. Drive a recycle in the preflight->finalize window, inspect ops.log cycle-open recycle-defer/commit markers and editor writeback proof; close only if no live_prompt_drift_after_preflight appears, otherwise file a regression. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md

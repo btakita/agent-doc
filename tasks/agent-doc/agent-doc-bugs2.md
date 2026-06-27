@@ -124,7 +124,13 @@ No source files changed, and no tests were run. Preflight still surfaced semanti
 I reopened the closeout because the prior finalize committed my response but left the live queue activation edits as working-tree drift. This pass preserves and commits those edits: `queue: start`, queue marker `go`, `#closeoutstall` as the in-progress head, and the duplicated `do #60ev` / `do #tmuxsynccrash` rows exactly as present.
 
 No repo implementation or tests ran in this repair pass. The next drainable head remains `#closeoutstall`; it is intentionally still open, not done or gated.
-<!-- agent:boundary:9b02c773 -->
+
+### Re: restored queued ids — gpt-5
+
+I restored the queue rows that session-check warned were dropped: `do #closeoutstall`, `do #60ev`, and `do #tmuxsynccrash`, using `agent-doc queue sync`. The backlog items remain open.
+
+The document frontmatter is still `queue: stop`, so these rows are inactive queue residue rather than executable drain work in this repair cycle. No repo implementation ran, no source files changed, and no tests were run.
+<!-- agent:boundary:312eef9d -->
 <!-- /agent:exchange -->
 ## Queue
 

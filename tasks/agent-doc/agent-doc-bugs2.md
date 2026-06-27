@@ -39,7 +39,7 @@ done
 Compacted content:
 - Archived 34 response topic(s): do #provauth1 #provauth2 #provauth3; drain #actorprune; drain #qheadstrikeauto; 31 more
 - Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac...
-<!-- agent:boundary:492c86ab -->
+<!-- agent:boundary:67fff5d7 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -71,7 +71,7 @@ Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/
 ---
 - ~~:pushpin: fix `• The finalize call rejected the sibling list because this binary requires one message per sibling path. I’m retrying with paired sibling messages; no file write happened on the rejected call.`~~
 - ~~:pushpin: monsterrodholders.md issue `• The failed agent-doc write inserted only a few summary bullets instead of a clean Re: #osm-tile-key-provision section. I’m going to fix the task doc with a narrow patch: remove my partial bullets from the compacted summary and add a proper exchange entry before the boundary. `~~
-- :pushpin: do [#qeditdup] [#qftloss#qftloss]
+- ~~:pushpin: do [#qeditdup] [#qftloss#qftloss]~~
 - :pushpin: JB `File Cache Conflict` occurences
 - :pushpin: do [#60ev]
 - :pushpin: do [#syncbarrier]

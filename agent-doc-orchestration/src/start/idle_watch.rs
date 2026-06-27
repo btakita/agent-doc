@@ -2977,6 +2977,7 @@ mod tests {
         // inputs recycle — the deferred recycle fires at the true quiescent boundary.
         crate::cycle_state::mark_committed(&file, "committed", Some("# plan\n"), Some("# plan\n"))
             .unwrap();
+        wait_for_test_ipc_handlers_to_drain();
         let cycle_open_after_commit = crate::cycle_state::load(&file)
             .ok()
             .flatten()
@@ -3001,6 +3002,15 @@ mod tests {
             SupervisorRecycleAction::RecycleImmediate,
             "once the cycle commits and IPC drains, the deferred recycle fires"
         );
+    }
+
+    fn wait_for_test_ipc_handlers_to_drain() {
+        for _ in 0..50 {
+            if crate::ipc_socket::inflight_connection_handlers() == 0 {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
     }
 
     #[test]

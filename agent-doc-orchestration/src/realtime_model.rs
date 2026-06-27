@@ -838,6 +838,9 @@ mod tests {
             len: body.len(),
             hash: crate::debounce::content_hash(body),
             timestamp_ms: generation,
+            edit_epoch: 0,
+            last_synced_epoch: 0,
+            state_vector_b64: None,
             editor_id: None,
             content: content.map(|c| c.to_string()),
         }

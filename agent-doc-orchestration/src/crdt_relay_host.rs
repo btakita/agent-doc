@@ -61,6 +61,8 @@ use crate::crdt_relay::{PendingReplicaUpdate, RelayHub, ReplicaDeliverySnapshot}
 /// their own ids via [`crate::crdt_relay::mint_client_id`] and can never collide
 /// with this reserved id (`RelayHub::register` rejects it).
 const CANONICAL_CLIENT_ID: u64 = 1;
+const EDITOR_SYNC_SETTLE_MS: u64 = 75;
+const EDITOR_SYNC_TIMEOUT_MS: u64 = 150;
 
 /// Process-global per-document relay-hub registry, keyed by document hash.
 ///
@@ -412,6 +414,7 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
         // unchanged.
         return true;
     }
+    settle_or_flush_editor_sync_barrier(file, "commit_barrier");
     // `#staleinmem` — out-of-band baseline reconcile, BEFORE flushing live editors
     // into the canonical for the commit cut. If the document was corrected out of
     // band on disk since this hub's last commit (a `git checkout HEAD` /
@@ -579,6 +582,7 @@ pub fn reconcile_disk_projection_for_file(file: &Path, projection: &[u8]) -> Res
         // baseline-wins load path in snapshot.rs already handles stale disk.
         return Ok(None);
     }
+    settle_or_flush_editor_sync_barrier(file, "disk_projection_reconcile");
     let changed =
         with_hub_seeded_from_file(file, |hub| hub.reconcile_disk_projection(projection))??;
     crate::ops_log::log_op(
@@ -590,6 +594,96 @@ pub fn reconcile_disk_projection_for_file(file: &Path, projection: &[u8]) -> Res
         ),
     );
     Ok(Some(changed))
+}
+
+fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) {
+    let file_str = file.display().to_string();
+    let outcome = crate::debounce::await_editor_sync_barrier(
+        &file_str,
+        EDITOR_SYNC_SETTLE_MS,
+        EDITOR_SYNC_TIMEOUT_MS,
+    );
+    let in_flight = outcome
+        .statuses
+        .iter()
+        .filter(|status| status.in_flight)
+        .count();
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "editor_sync_barrier file={} reason={} outcome={:?} statuses={} in_flight={} typing_recent={}",
+            file.display(),
+            reason,
+            outcome.kind,
+            outcome.statuses.len(),
+            in_flight,
+            outcome.typing_recent
+        ),
+    );
+    if outcome.kind != crate::debounce::EditorSyncBarrierKind::TimedOut {
+        return;
+    }
+
+    let canonical = match file.canonicalize() {
+        Ok(path) => path,
+        Err(e) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "editor_sync_barrier_flush_skipped file={} reason={} cause=canonicalize_error error={}",
+                    file.display(),
+                    reason,
+                    e
+                ),
+            );
+            return;
+        }
+    };
+    let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
+    if !crate::ipc_socket::is_listener_active(&project_root) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "editor_sync_barrier_flush_skipped file={} reason={} cause=no_ipc_listener",
+                file.display(),
+                reason
+            ),
+        );
+        return;
+    }
+
+    let patch_id = uuid::Uuid::new_v4().to_string();
+    let path_str = canonical.to_string_lossy().to_string();
+    match crate::ipc_socket::send_save_document(&project_root, &path_str, &patch_id) {
+        Ok(true) => crate::ops_log::log_op(
+            file,
+            &format!(
+                "editor_sync_barrier_flush_requested file={} reason={} patch_id={}",
+                file.display(),
+                reason,
+                patch_id
+            ),
+        ),
+        Ok(false) => crate::ops_log::log_op(
+            file,
+            &format!(
+                "editor_sync_barrier_flush_not_acked file={} reason={} patch_id={}",
+                file.display(),
+                reason,
+                patch_id
+            ),
+        ),
+        Err(e) => crate::ops_log::log_op(
+            file,
+            &format!(
+                "editor_sync_barrier_flush_error file={} reason={} patch_id={} error={}",
+                file.display(),
+                reason,
+                patch_id,
+                e
+            ),
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -648,6 +742,28 @@ mod tests {
         assert!(
             !registry.contains_key(&hash),
             "the Detached path must not allocate a relay hub"
+        );
+    }
+
+    #[test]
+    fn editor_attached_commit_barrier_defers_in_flight_editor_epoch() {
+        let (_dir, doc) = temp_doc("epoch-defers.md");
+        let file_str = doc.display().to_string();
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        crate::debounce::document_changed_with_content_for_editor(
+            &file_str,
+            &format!("{disk}\nunsaved editor text"),
+            Some("jetbrains:epoch-defers"),
+        );
+
+        let start = std::time::Instant::now();
+        assert!(commit_barrier_for_file_with_authority(
+            &doc,
+            CrdtAuthority::MultiReplica
+        ));
+        assert!(
+            start.elapsed() >= std::time::Duration::from_millis(100),
+            "multi-replica commit barrier must defer briefly for an in-flight editor epoch"
         );
     }
 

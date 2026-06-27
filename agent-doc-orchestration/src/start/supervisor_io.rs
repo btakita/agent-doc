@@ -78,6 +78,16 @@ pub(crate) fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcRes
                 .actor_runtime
                 .as_ref()
                 .map(|runtime| runtime.generation);
+            let editor_sync = shared.actor_runtime.as_ref().map(|runtime| {
+                let file = runtime.file.display().to_string();
+                let statuses = crate::debounce::editor_sync_statuses(&file);
+                let in_flight = statuses.iter().any(|status| status.in_flight);
+                serde_json::json!({
+                    "file": file,
+                    "in_flight": in_flight,
+                    "statuses": statuses,
+                })
+            });
             IpcResponse::ok(serde_json::json!({
                 "running": shared.running.load(Ordering::Relaxed),
                 "state": state.as_str(),
@@ -85,6 +95,7 @@ pub(crate) fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcRes
                 "actor_session_id": actor_session_id,
                 "actor_pane_id": actor_pane_id,
                 "actor_generation": actor_generation,
+                "editor_sync": editor_sync,
                 "restart_count": shared.restart_count.load(Ordering::Relaxed),
                 "cwd_source": shared.cwd_source,
                 "supervisor_pid": shared.supervisor_pid,
@@ -934,6 +945,42 @@ mod tests {
             b"agent-doc tasks/software/tsift.md\r"
         );
     }
+
+    #[test]
+    fn handle_ipc_state_includes_editor_sync_for_actor_file() {
+        let (_dir, doc) = crdt_temp_doc("state-editor-sync.md");
+        let project_root = doc.parent().unwrap().to_path_buf();
+        let file_str = doc.display().to_string();
+        crate::debounce::document_changed_with_content_for_editor(
+            &file_str,
+            "disk plus unsaved editor text",
+            Some("jetbrains:state"),
+        );
+        let runtime = SessionActorRuntime {
+            project_root,
+            file: doc.clone(),
+            session_id: "state-session".to_string(),
+            pane_id: "%1".to_string(),
+            generation: 7,
+        };
+        let shared = Arc::new(SupervisorShared::with_actor_runtime(
+            "test",
+            "state-instance".to_string(),
+            "claude",
+            Some(runtime),
+            Some(crate::session_actor::ActorState::Ready),
+            None,
+        ));
+
+        let response = handle_ipc(IpcMethod::State, &shared);
+        assert!(response.ok, "{response:?}");
+        let data = response.data.expect("state data");
+        let sync = data.get("editor_sync").expect("editor_sync field");
+        assert_eq!(sync["file"], file_str);
+        assert_eq!(sync["statuses"][0]["edit_epoch"], 1);
+        assert_eq!(sync["statuses"][0]["in_flight"], true);
+    }
+
     #[test]
     fn handle_ipc_inject_allows_pending_capability_proof() {
         // `#capproofbg`: a *pending* managed-capability proof no longer blocks

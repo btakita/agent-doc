@@ -1994,6 +1994,23 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
     // error or absent ack means we cannot trust disk == buffer, so fall through.
     let patch_id = uuid::Uuid::new_v4().to_string();
     let path_str = canonical.to_string_lossy().to_string();
+    let barrier = crate::debounce::await_editor_sync_barrier(&path_str, 75, 150);
+    let in_flight = barrier
+        .statuses
+        .iter()
+        .filter(|status| status.in_flight)
+        .count();
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "editor_sync_barrier file={} barrier=ipc_truncation_recover outcome={:?} statuses={} in_flight={} typing_recent={}",
+            file.display(),
+            barrier.kind,
+            barrier.statuses.len(),
+            in_flight,
+            barrier.typing_recent
+        ),
+    );
     match crate::ipc_socket::send_save_document(&project_root, &path_str, &patch_id) {
         Ok(true) => {}
         Ok(false) | Err(_) => return Ok(false),

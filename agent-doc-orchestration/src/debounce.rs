@@ -230,10 +230,57 @@ pub struct LiveBufferSnapshot {
     pub len: usize,
     pub hash: String,
     pub timestamp_ms: u128,
+    /// Monotonic per-editor edit epoch, bumped on each durable live-buffer report.
+    #[serde(default)]
+    pub edit_epoch: u64,
+    /// Last epoch known to be synced to disk by the reporting editor. Older
+    /// sidecars default to zero and are treated conservatively unless disk
+    /// content proves the current epoch is already flushed.
+    #[serde(default)]
+    pub last_synced_epoch: u64,
+    /// Optional base64-encoded yrs state vector for callers that have an attached
+    /// editor replica. The epoch barrier can operate without it, but carrying it
+    /// through the sidecar gives binary-side probes a state-vector exchange
+    /// surface instead of requiring text comparison.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_vector_b64: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub editor_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+}
+
+/// Cross-process editor sync status derived from durable live-buffer sidecars.
+///
+/// `effective_last_synced_epoch` is promoted to `edit_epoch` when disk content
+/// proves the current editor buffer is already flushed, even if the sidecar came
+/// from an older plugin that did not explicitly stamp `last_synced_epoch`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EditorSyncStatus {
+    pub editor_id: Option<String>,
+    pub edit_epoch: u64,
+    pub last_synced_epoch: u64,
+    pub effective_last_synced_epoch: u64,
+    pub in_flight: bool,
+    pub disk_matches: bool,
+    pub timestamp_ms: u128,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_vector_b64: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EditorSyncBarrierKind {
+    NoEditor,
+    Ready,
+    TimedOut,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EditorSyncBarrierOutcome {
+    pub kind: EditorSyncBarrierKind,
+    pub statuses: Vec<EditorSyncStatus>,
+    pub typing_recent: bool,
 }
 
 /// Write-provenance record for agent-doc's own most-recent disk write to a
@@ -417,6 +464,18 @@ fn write_live_buffer_snapshot(
     editor_id: Option<&str>,
 ) -> std::io::Result<()> {
     let live_path = live_buffer_snapshot_path_for_editor(file, editor_id);
+    let previous = read_live_buffer_snapshot(file, &live_path);
+    let edit_epoch = previous
+        .as_ref()
+        .map(|snapshot| snapshot.edit_epoch)
+        .unwrap_or(0)
+        .saturating_add(1);
+    let last_synced_epoch = previous
+        .as_ref()
+        .map(|snapshot| snapshot.last_synced_epoch)
+        .unwrap_or(0)
+        .min(edit_epoch);
+    let state_vector_b64 = previous.and_then(|snapshot| snapshot.state_vector_b64);
     if let Some(parent) = live_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -428,6 +487,9 @@ fn write_live_buffer_snapshot(
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis(),
+        edit_epoch,
+        last_synced_epoch,
+        state_vector_b64,
         editor_id: editor_id
             .map(str::trim)
             .filter(|id| !id.is_empty())
@@ -477,6 +539,93 @@ fn read_live_buffer_snapshot(file: &str, path: &std::path::Path) -> Option<LiveB
     let content = std::fs::read_to_string(path).ok()?;
     let snapshot: LiveBufferSnapshot = serde_json::from_str(&content).ok()?;
     (snapshot.path == file).then_some(snapshot)
+}
+
+/// Return the per-editor sync status for every live-buffer sidecar of `file`.
+///
+/// The poll is state-vector/epoch based when the editor reports those fields and
+/// uses disk len/hash only to prove the current epoch has already been flushed.
+/// It never compares full text.
+pub fn editor_sync_statuses(file: &str) -> Vec<EditorSyncStatus> {
+    let disk = std::fs::read_to_string(file).ok();
+    let disk_len = disk.as_ref().map(|content| content.len());
+    let disk_hash = disk.as_ref().map(|content| content_hash(content));
+    live_buffer_snapshots(file)
+        .into_iter()
+        .map(|snapshot| {
+            let disk_matches = match (disk_len, disk_hash.as_ref()) {
+                (Some(len), Some(hash)) => {
+                    snapshot.len == len && snapshot.hash.eq_ignore_ascii_case(hash)
+                }
+                _ => false,
+            };
+            let effective_last_synced_epoch = if disk_matches {
+                snapshot.edit_epoch
+            } else {
+                snapshot.last_synced_epoch
+            };
+            let in_flight = snapshot.edit_epoch > effective_last_synced_epoch;
+            EditorSyncStatus {
+                editor_id: snapshot.editor_id,
+                edit_epoch: snapshot.edit_epoch,
+                last_synced_epoch: snapshot.last_synced_epoch,
+                effective_last_synced_epoch,
+                in_flight,
+                disk_matches,
+                timestamp_ms: snapshot.timestamp_ms,
+                state_vector_b64: snapshot.state_vector_b64,
+            }
+        })
+        .collect()
+}
+
+pub fn editor_sync_in_flight(file: &str) -> bool {
+    editor_sync_statuses(file)
+        .iter()
+        .any(|status| status.in_flight)
+}
+
+/// Wait briefly for the editor epoch/typing sidecars to settle.
+///
+/// This is a bounded barrier, not a lock: timeout returns `TimedOut` so callers
+/// can fail open to the editor buffer (for example by requesting a save) instead
+/// of discarding a live edit or blocking indefinitely.
+pub fn await_editor_sync_barrier(
+    file: &str,
+    settle_ms: u64,
+    timeout_ms: u64,
+) -> EditorSyncBarrierOutcome {
+    let start = Instant::now();
+    let timeout = std::time::Duration::from_millis(timeout_ms);
+    let poll_interval = std::time::Duration::from_millis(10);
+
+    loop {
+        let statuses = editor_sync_statuses(file);
+        let typing_recent = settle_ms > 0 && is_typing_via_file(file, settle_ms);
+        let in_flight = typing_recent || statuses.iter().any(|status| status.in_flight);
+        if statuses.is_empty() && !typing_recent {
+            return EditorSyncBarrierOutcome {
+                kind: EditorSyncBarrierKind::NoEditor,
+                statuses,
+                typing_recent,
+            };
+        }
+        if !in_flight {
+            return EditorSyncBarrierOutcome {
+                kind: EditorSyncBarrierKind::Ready,
+                statuses,
+                typing_recent,
+            };
+        }
+        if start.elapsed() >= timeout {
+            return EditorSyncBarrierOutcome {
+                kind: EditorSyncBarrierKind::TimedOut,
+                statuses,
+                typing_recent,
+            };
+        }
+        std::thread::sleep(poll_interval);
+    }
 }
 
 /// Clear the durable live-buffer sidecar for a document.
@@ -1056,6 +1205,67 @@ mod tests {
         assert_eq!(snapshot.hash, content_hash(visible));
         assert!(live_buffer_diverges_from_content(&doc_str, "disk").is_some());
         assert!(live_buffer_diverges_from_content(&doc_str, visible).is_none());
+    }
+
+    #[test]
+    fn live_buffer_epoch_reports_in_flight_until_disk_matches_editor_buffer() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("epoch-barrier.md");
+        std::fs::write(&doc, "disk").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        document_changed_with_content_for_editor(&doc_str, "disk", Some("jetbrains:test"));
+        let first = live_buffer_snapshot(&doc_str).expect("first snapshot");
+        assert_eq!(first.edit_epoch, 1);
+
+        let ready = editor_sync_statuses(&doc_str);
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].edit_epoch, 1);
+        assert_eq!(ready[0].effective_last_synced_epoch, 1);
+        assert!(ready[0].disk_matches);
+        assert!(!ready[0].in_flight);
+
+        let unsaved = "disk plus unsaved editor text";
+        document_changed_with_content_for_editor(&doc_str, unsaved, Some("jetbrains:test"));
+        let second = live_buffer_snapshot(&doc_str).expect("second snapshot");
+        assert_eq!(second.edit_epoch, 2);
+
+        let blocked = editor_sync_statuses(&doc_str);
+        assert_eq!(blocked.len(), 1);
+        assert_eq!(blocked[0].edit_epoch, 2);
+        assert_eq!(blocked[0].effective_last_synced_epoch, 0);
+        assert!(!blocked[0].disk_matches);
+        assert!(blocked[0].in_flight);
+
+        std::fs::write(&doc, unsaved).unwrap();
+        let flushed = editor_sync_statuses(&doc_str);
+        assert_eq!(flushed[0].effective_last_synced_epoch, 2);
+        assert!(flushed[0].disk_matches);
+        assert!(!flushed[0].in_flight);
+    }
+
+    #[test]
+    fn editor_sync_barrier_times_out_until_editor_buffer_is_flushed() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("barrier-timeout.md");
+        std::fs::write(&doc, "saved").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+        let unsaved = "saved plus unsaved editor text";
+
+        document_changed_with_content_for_editor(&doc_str, unsaved, Some("vscode:test"));
+
+        let start = Instant::now();
+        let timed_out = await_editor_sync_barrier(&doc_str, 0, 30);
+        assert_eq!(timed_out.kind, EditorSyncBarrierKind::TimedOut);
+        assert!(start.elapsed().as_millis() >= 30);
+        assert!(timed_out.statuses.iter().any(|status| status.in_flight));
+
+        std::fs::write(&doc, unsaved).unwrap();
+        let ready = await_editor_sync_barrier(&doc_str, 0, 100);
+        assert_eq!(ready.kind, EditorSyncBarrierKind::Ready);
+        assert!(ready.statuses.iter().all(|status| !status.in_flight));
     }
 
     /// Editor-close lifecycle: `clear_live_buffer` removes the sidecar so the

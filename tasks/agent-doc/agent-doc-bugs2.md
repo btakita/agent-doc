@@ -414,7 +414,24 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/
 This is the same protected-composer guard as the current-document refusal: the route correctly refused to inject `agent-doc ...monsterrodholders.md` into pane `%1` because that pane already had a drafted Codex prompt, `› Summarize recent commits`. The next operator action for that pane is to submit or clear that draft, then rerun JB `Run Agent Doc` for `src/boost-client/tasks/monsterrodholders.md`.
 
 I did not normalize the queue by hand, mark backlog IDs done, or run implementation work in this cycle. No source files changed and no tests were run. Preflight did warn that the installed `agent-doc` binary/cdylib may be stale relative to local source edits; I left that as a warning because this cycle was only answering the protected-draft queue prompt.
-<!-- agent:boundary:97c1167a -->
+
+
+### Re: monsterrodholders.md partial patchback note — gpt-5
+
+> **Queue prompt:**
+> :pushpin: monsterrodholders.md issue
+> ```text
+> • The failed agent-doc write inserted only a few summary bullets instead of a clean Re: #osm-tile-key-provision
+>   section. I’m going to fix the task doc with a narrow patch: remove my partial bullets from the compacted summary and
+>   add a proper exchange entry before the boundary.
+> ```
+
+I treated this as copied status text from the `monsterrodholders.md` session, not a fresh implementation directive for this document. The active plan for `agent-doc-bugs2.md` emitted no repo actions beyond finalizing this response, so I did not patch `src/boost-client/tasks/monsterrodholders.md` from here.
+
+If that task document still contains the partial `#osm-tile-key-provision` patchback, it should be repaired through its own `agent-doc src/boost-client/tasks/monsterrodholders.md` cycle so the response and commit boundary belong to the document that owns the exchange.
+
+No source files changed and no tests were run. I left the stale-install warning and unrelated semantic-completion candidates untouched.
+<!-- agent:boundary:99e56925 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -422,13 +439,13 @@ I did not normalize the queue by hand, mark backlog IDs done, or run implementat
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~`/clear` was autonomously added...blocking JB `Run Agent Doc`. As I was typing in this item, 2 duplicates of the next queue item were added before this item. And a stale copy of this prompt was duplicated above this item...and the last 3 characters I typed were deleted in this prompt. CRDT issues...~~
 - ~~~~Duplicate text document corruption occurred while I was typing into te queue.~~ — auto-struck: answered this cycle (#ftstrike)~~
----
-🚧 :pushpin: JB `Run Agent Doc` on monsterrodholders.md
+~~~done
+:pushpin: JB `Run Agent Doc` on monsterrodholders.md
 ```text
 [route] target tmux session: 0
 Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %1 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Summarize recent commits"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782586439553-direct_pane_protected_prompt_input-codex-_1-a0c7b4c8e461.txt
 ```
----
+~~~
 ~~~done
 :pushpin: JB `Run Agent Doc`
 ```
@@ -437,14 +454,14 @@ Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/
 ```
 ~~~
 ---
-:pushpin: monsterrodholders.md issue
+🚧 :pushpin: monsterrodholders.md issue
 ```
 • The failed agent-doc write inserted only a few summary bullets instead of a clean Re: #osm-tile-key-provision
   section. I’m going to fix the task doc with a narrow patch: remove my partial bullets from the compacted summary and
   add a proper exchange entry before the boundary.
 ```
 ---
-- :pushpin: fix `• The finalize call rejected the sibling list because this binary requires one message per sibling path. I’m retrying with paired sibling messages; no file write happened on the rejected call.`
+- ~~:pushpin: fix `• The finalize call rejected the sibling list because this binary requires one message per sibling path. I’m retrying with paired sibling messages; no file write happened on the rejected call.`~~
 - :pushpin: monsterrodholders.md issue `• The failed agent-doc write inserted only a few summary bullets instead of a clean Re: #osm-tile-key-provision section. I’m going to fix the task doc with a narrow patch: remove my partial bullets from the compacted summary and add a proper exchange entry before the boundary. `
 - :pushpin: do [#qeditdup] [#qftloss#qftloss]
 - :pushpin: JB `File Cache Conflict` occurences

@@ -151,7 +151,7 @@ This was completed and pushed last cycle — striking the head so the queue stop
 - Committed + pushed: `lazily-hub/lazily-py` `ed786cc` (`docs: refresh README …`).
 
 Nothing else changed this cycle. Queue stays operator-paused on the `release + publish` heads — not looping.
-<!-- agent:boundary:c6132ca9 -->
+<!-- agent:boundary:53c08bb1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -161,6 +161,8 @@ Nothing else changed this cycle. Queue stays operator-paused on the `release + p
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - 🚧 Update lazily-py README with the latest docs using the latest changes using lazily-spec + the lazily family.
+- Update lazily-zig README with the latest docs using the latest changes using lazily-spec + the lazily family.
+- Update lazily-js README with the latest docs using the latest changes using lazily-spec + the lazily family.
 <!-- /agent:queue -->
 
 ## Backlog

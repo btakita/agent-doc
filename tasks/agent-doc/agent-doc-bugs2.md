@@ -57,21 +57,21 @@ The fix consults a **recorded origin fact** instead of guessing:
 **Scope boundary (honest):** that's the binary-origin half — where origin is *known today*. The operator-origin half of #provauth3 ("an operator working-tree change IS authoritative; retire `content_ours` / stale-editor resurrection heuristics") needs the live operator-origin delta signal from the `#crdtauth6` seam, which isn't live yet — so I filed it as **#provauth3b** rather than fake it with more content heuristics.
 
 **Next (doing now, agent-doable):** `make install-full` → `admin recycle` so 0.34.57 goes live, then push. After recycle, the operator-eyeball proof is simply: this session no longer needs a manual compaction recovery and no `❯` appears on a Session Summary.
-<!-- agent:boundary:043e9e58 -->
+<!-- agent:boundary:38a47162 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#f693] [#q9w3] [#fpyh] [#818s]
+- ~~🚧 [#f693] [#q9w3] [#fpyh] [#818s]~~
 - [#pcwcrt] [#syncbarrier] [#qheadstrikeauto] [#actorprune] [#suprestassoc] 
 - [#2y8j] [#cdtcutover] [#qeditdup] [#crdtauth6] [#nsfz] [#kj5flive]
 - I deleted items from the queue but they reappeared
 - When auto-adding queue items, verify that the item is not already in the queue. Do not add duplicates.
 - JB `Run Agent Doc` flooded the prompt with duplicate `agent-doc .../agent-doc-bugs2.md` dispatch prompts. Please fix the root cause.
-- do [#f693]
-- do [#fpyh]
-- do [#818s]
+- ~~do [#f693]~~
+- ~~do [#fpyh]~~
+- ~~do [#818s]~~
 - do [#actorprune]
 - do [#suprestassoc]
 - do [#cdtcutover]
@@ -79,6 +79,7 @@ The fix consults a **recorded origin fact** instead of guessing:
 - do [#crdtauth6]
 - do [#nsfz]
 - do [#kj5flive]
+- do [#provauth3b]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -105,10 +106,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#provauth3b] provauth3 operator-origin half=#agent-doc-feature replace the remaining content-based recovery heuristics (content_ours / stale-editor resurrection guards) with operator-origin checks: an operator-origin working-tree change IS the authoritative prompt, never reset or treated as suspicious cleanup; content heuristics become the unknown-origin fallback only. Blocked on the live operator-origin delta signal from #crdtauth6 (origin is not known for operator edits until that seam is live). The binary-origin half shipped in 0.34.57. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#pcwcrt] #agent-doc-feature realtime cutover — gate/remove the post-commit working-tree reconcile + (HEAD) boundary reposition tower (git.rs reconcile_postcommit_worktree_to_head / #pcwc / #pcwcwarn / #pzjy / content_ours) when a live CRDT replica is attached. It is turn-based file-sync legacy: its value (keep editor buffer==HEAD after a commit, reposition the boundary, avoid the JB File Cache Conflict dialog, avoid #xbs3 disk-RMW racing the typist) is all subsumed by delta application in realtime — and re-deriving the buffer from a stale snapshot is the recurring #postcommit-ipc-worktree-corruption source. Keep the disk-write path ONLY for no-live-editor (pure-CLI #6b5h) sessions. Rides #provauth1 origin tagging + #crdtauth6 live replica + #cdtcutover. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
-- [ ] [#f693] provauth1=#agent-doc-feature CRDT transaction-origin tagging: tag every yrs transaction in crdt.rs/crdt_sync.rs as Operator (editor DocumentListener delta over IPC, the crdtauth seam) / Binary (finalize/write/preflight writeback) / Mirror (backlog-queue auto-sync); persist origin per delta so any span author survives restart. Foundation for provenance authority. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
-- [ ] [#fpyh] provauth3=#agent-doc-bug replace content-based recovery heuristics (content_ours / manual-cleanup / stale-editor resurrection guards) with origin checks where origin is known: an Operator-origin working-tree change IS the authoritative prompt and is never reset or treated as suspicious cleanup; content heuristics remain only as the unknown-origin fallback. Depends on provauth1. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
-- [ ] [#818s] provauth4=#agent-doc-feature per-cell provenance riding qcellmerge per-cell merge isolation so agent console/response content can never splice into an operator-authored cell (queue). Live proof captured: a console line appeared as a queue item. Depends on provauth1 + qcellmerge. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#syncbarrier] #agent-doc-feature Phase 1 (editor-sync barrier) — epoch handshake so the binary DEFERS dangerous ops (snapshot reset / disk reconcile / merge-base rebuild) while an editor edit is in flight, bounded wait, fail-OPEN to the editor buffer (never a held lock, never snapshot-discard). Poll-check = yrs StateVector exchange, not text compare. Needs JB/VSCode edit_epoch + StateVector over IPC (extend State method). Phase 0 #ipctruncrecover shipped (0.34.53). Plan: tasks/agent-doc/plan-editor-sync-barrier.md
 - [ ] [#qheadstrikeauto] #agent-doc-feature auto-strike answered free-text head WITHOUT requiring the agent to quote it as a > **Queue prompt:** blockquote — operator: "the binary should do this automatically...not the agent". Today strike_answered_free_text_queue_heads (queue_consume.rs) only fires on a blockquote/prose-prefix match, so a head answered in plain prose is never struck. Key the strike off the binary drain-target / in-progress (the marker) head identity for the cycle instead of agent prose formatting. Plan: tasks/agent-doc/plan-freetext-queue-head-autostrike.md
 - [ ] [#actorprune] #agent-doc-feature auto-prune dead actor records: `admin list` shows 251 actors, ~all `(dead) closed pid=? session=session-clear`; gc only closes `Starting` actors (project_controller.rs:1716), nothing removes long-dead `Closed` records so they accumulate unbounded. Add prune_dead_actors (lease-guarded) + wire into gc + one-shot prune for the current backlog. Plan: tasks/agent-doc/plan-prune-dead-actors.md

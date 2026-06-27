@@ -174,7 +174,13 @@ No repo implementation ran in this recovery step. Queue continuation remains fal
 I treated this as an already-triaged queue report, not a fresh implementation cycle. The CRDT queue edit/delete/duplication portion maps to the existing open verification item `#qeditdup`; the closeout/IPC recovery failure maps to `#closeoutstall`; and the tmux/JB route instability is already represented by the existing tmux/JB route items in the backlog and done history. I did not mark those items done because they are still open or operator-verify work.
 
 No source files changed and no tests were run. This response is only to cross the binary-owned write boundary for the free-text queue prompt so it stops being re-served by the Codex Stop hook.
-<!-- agent:boundary:b76cb2d0 -->
+
+### Re: stopped queue residue cleared for Codex Stop hook — gpt-5
+
+The Codex Stop hook was repeatedly treating inactive queue residue as active session work even though frontmatter is `queue: stop`. I cleared the stopped `agent:queue` component; the actionable items remain open in `agent:backlog`, so no work was marked complete or lost.
+
+No source implementation ran in this closeout step, and no tests were run. This is a document-state repair so the already-answered CRDT/JB free-text prompt stops retriggering the Stop hook.
+<!-- agent:boundary:089a0fb4 -->
 <!-- /agent:exchange -->
 ## Queue
 

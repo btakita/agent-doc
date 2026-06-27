@@ -130,7 +130,13 @@ No repo implementation or tests ran in this repair pass. The next drainable head
 I restored the queue rows that session-check warned were dropped: `do #closeoutstall`, `do #60ev`, and `do #tmuxsynccrash`, using `agent-doc queue sync`. The backlog items remain open.
 
 The document frontmatter is still `queue: stop`, so these rows are inactive queue residue rather than executable drain work in this repair cycle. No repo implementation ran, no source files changed, and no tests were run.
-<!-- agent:boundary:312eef9d -->
+
+### Re: closeout repair for IPC drift and stopped queue — gpt-5
+
+I reopened this Codex invocation as a closeout repair. Preflight repaired a stale `preflight_started` cycle, then found uncommitted document drift that needed the binary-owned write path: the auto-appended IPC proof diagnostic plus the preserved queue free-text row containing the JB `Run Agent Doc` route refusal log.
+
+I did not start repo implementation or mark any backlog item done in this cycle. The document frontmatter is still `queue: stop`, so the queue rows are inactive residue rather than executable drain work. No source files changed and no tests were run.
+<!-- agent:boundary:09816613 -->
 <!-- /agent:exchange -->
 ## Queue
 

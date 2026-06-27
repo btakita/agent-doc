@@ -274,7 +274,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=50bef7ea-1a4b-4b40-a47e-b91bd58c2140 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=47298 candidate_hash=4f1039f6755ef915da209acbe4b18b8a97485b1b512740e44c3cec58e54f4321 content_ours_len=44833 content_ours_hash=64a74721a3afa16f02cac35ddccb6a9c6beeaa36e0b6ac694a10f90678c7ae7e doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782586762423
 ```
-<!-- agent:boundary:09b9ad8b -->
+<!-- agent:boundary:bb1aa147 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -282,14 +282,14 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~[#closeoutstall]~~
 - 🚧 [#closeoutstall]: I readded this but you deleted it.
-- do [#qeditdup] [#qftloss#qftloss]
 ---
-JB `Run Agent Doc` on monsterrodholders.md
+:round_pushpin: JB `Run Agent Doc` on monsterrodholders.md
 ```text
 [route] target tmux session: 0
 Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %1 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Summarize recent commits"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782586439553-direct_pane_protected_prompt_input-codex-_1-a0c7b4c8e461.txt
 ```
 ---
+- do [#qeditdup] [#qftloss#qftloss]
 - JB `File Cache Conflict` occurences
 - do [#60ev]
 - do [#tmuxsynccrash]

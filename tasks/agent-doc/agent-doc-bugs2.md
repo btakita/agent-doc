@@ -221,7 +221,20 @@ This queue head matches the completed `#ipcproofnostall` entry in `tasks/agent-d
 
 I did not change source files or rerun tests in this cycle because this is an already-resolved duplicate queue head. I am consuming the free-text queue prompt and leaving the open implementation backlog items untouched.
 
-<!-- agent:boundary:b9e9e5b4 -->
+### Re: queue normalization correction — gpt-5
+
+> **Queue prompt:** Fix. Your attempt to normalize the queue reverted some of my chages...including i
+> ```
+> • The explicit consume fails the same way, which means the queue body is malformed for the queue parser: the pasted
+>   route log and --- separators are inside agent:queue but not as list items. I’m checking the component patch command so
+>   I can normalize the queue into parseable list entries while preserving the route-log information.
+> ```
+
+You were right: my first queue patch used an unquoted heredoc, so shell backtick substitution ran inside the queued route-log text. That polluted the queue and could overwrite or distort operator edits. I corrected the queue body with a quoted heredoc, preserved the `JB Run Agent Doc` route-refusal prompt as a fenced multiline queue prompt, and kept the existing id-backed backlog queue rows behind it.
+
+I did not change source files or run tests in this correction cycle. This was a session-document repair for my queue write mistake; the durable fix item for closeout/editor convergence remains open as `#closeoutstall`.
+
+<!-- agent:boundary:6defd6c7 -->
 <!-- /agent:exchange -->
 ## Queue
 

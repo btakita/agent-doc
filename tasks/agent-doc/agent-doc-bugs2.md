@@ -277,6 +277,13 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/
 
 ### Re: #closeoutstall + #tmuxsynccrash — gpt-5
 
+> **Queue prompt:**
+>
+> [#closeoutstall]: I readded this but you deleted it.
+>
+> do [#tmuxsynccrash]
+
+
 I recovered the crashed work and did not drop the re-added `#closeoutstall` item again. `#closeoutstall` is now implemented and marked done: the write path records a typed `editor_convergence_required` blocked-closeout state when a proven live editor cannot ACK the response, and `session-check` reports one canonical retry/force-disk diagnostic instead of leaving a direct Codex turn stalled with the response only in `.agent-doc/patches`.
 
 I also fixed the tmux crash root cause in `#tmuxsynccrash`: `repair_layout` now treats an existing `agent-doc` target with zero stash windows as converged for the destructive rescue phase, so manual/JB sync no longer forces a stash window into a clean one-window layout and then ping-pongs through `move-window` / `swap-window` / `join-pane` / `resize-window` churn. The existing passive supersede rerun and destructive repair throttle remain in place. Installed dogfood binary: `agent-doc 0.34.62`, with two controllers marked for idle-boundary recycle.
@@ -284,14 +291,23 @@ I also fixed the tmux crash root cause in `#tmuxsynccrash`: `repair_layout` now 
 Commits: `src/agent-doc` `c83edc1c` and superproject pointer `31b1f4526`. Verification: focused Rust tests for the blocked closeout, no-ACK write path, tmux rescue predicate, and live zero-stash tmux no-op; `make check` green with 5,473 tests; `make tmux-ci` green; `agent-doc --version` reports `0.34.62`. Latest GitHub CI is red on prior upstream `7b2e54c7`; log download is blocked by GitHub permissions, but the local `make check` failure class was fixed and rerun green here.
 
 `#tmuxsynccrash` is code-complete and installed; I am gating it only for the remaining operator live proof: run JB `Sync Tmux Layout` repeatedly with the repro layout and confirm the tmux server pid stays stable.
-<!-- agent:boundary:50b362f1 -->
+
+### Re: #closeoutstall + #tmuxsynccrash — gpt-5
+
+I recovered the crashed work and did not drop the re-added `#closeoutstall` item again. `#closeoutstall` is now implemented and marked done: the write path records a typed `editor_convergence_required` blocked-closeout state when a proven live editor cannot ACK the response, and `session-check` reports one canonical retry/force-disk diagnostic instead of leaving a direct Codex turn stalled with the response only in `.agent-doc/patches`.
+
+I also fixed the tmux crash root cause in `#tmuxsynccrash`: `repair_layout` now treats an existing `agent-doc` target with zero stash windows as converged for the destructive rescue phase, so manual/JB sync no longer forces a stash window into a clean one-window layout and then ping-pongs through `move-window` / `swap-window` / `join-pane` / `resize-window` churn. The existing passive supersede rerun and destructive repair throttle remain in place. Installed dogfood binary: `agent-doc 0.34.62`, with two controllers marked for idle-boundary recycle.
+
+Commits: `src/agent-doc` `c83edc1c` and superproject pointer `31b1f4526`. Verification: focused Rust tests for the blocked closeout, no-ACK write path, tmux rescue predicate, and live zero-stash tmux no-op; `make check` green with 5,473 tests; `make tmux-ci` green; `agent-doc --version` reports `0.34.62`. Latest GitHub CI is red on prior upstream `7b2e54c7`; log download is blocked by GitHub permissions, but the local `make check` failure class was fixed and rerun green here.
+
+`#tmuxsynccrash` is code-complete and installed; I am gating it only for the remaining operator live proof: run JB `Sync Tmux Layout` repeatedly with the repro layout and confirm the tmux server pid stays stable.
+<!-- agent:boundary:7980d6b0 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~[#closeoutstall]~~
-- 🚧 [#closeoutstall]: I readded this but you deleted it.
+- `/clear` was autonomously added...blocking JB `Run Agent Doc`. As I was typing in this item, 2 duplicates of the next queue item were added before this item. And a stale copy of this prompt was duplicated above this item...and the last 3 characters I typed were deleted in this prompt. CRDT issues...
 ---
 :round_pushpin: JB `Run Agent Doc` on monsterrodholders.md
 ```text
@@ -299,10 +315,16 @@ Commits: `src/agent-doc` `c83edc1c` and superproject pointer `31b1f4526`. Verifi
 Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %1 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Summarize recent commits"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782586439553-direct_pane_protected_prompt_input-codex-_1-a0c7b4c8e461.txt
 ```
 ---
+monsterrodholders.md issue
+```
+• The failed agent-doc write inserted only a few summary bullets instead of a clean Re: #osm-tile-key-provision
+  section. I’m going to fix the task doc with a narrow patch: remove my partial bullets from the compacted summary and
+  add a proper exchange entry before the boundary.
+```
+---
 - do [#qeditdup] [#qftloss#qftloss]
 - JB `File Cache Conflict` occurences
 - do [#60ev]
-- do [#tmuxsynccrash]
 - do [#syncbarrier]
 - do [#qheadstrikeauto]
 - do [#suprestassoc]

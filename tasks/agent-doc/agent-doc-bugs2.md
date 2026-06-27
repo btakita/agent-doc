@@ -234,7 +234,22 @@ You were right: my first queue patch used an unquoted heredoc, so shell backtick
 
 I did not change source files or run tests in this correction cycle. This was a session-document repair for my queue write mistake; the durable fix item for closeout/editor convergence remains open as `#closeoutstall`.
 
-<!-- agent:boundary:6defd6c7 -->
+### Re: reverted queue item and CRDT character loss — gpt-5
+
+> **Queue prompt:** Your attempt to normalize the queue reverted some of my chages...including entirely this item...and CRDT deleted a character...from `changes` to `chages`.
+> ```
+> • The explicit consume fails the same way, which means the queue body is malformed for the queue parser: the pasted
+>   route log and --- separators are inside agent:queue but not as list items. I’m checking the component patch command so
+>   I can normalize the queue into parseable list entries while preserving the route-log information.
+> ```
+
+Acknowledged. I caused the queue-body overwrite risk with the manual component replacement, and the live document then showed the exact failure mode you are tracking: a whole queue item was lost/reintroduced out of order and a typed character was dropped (`changes` -> `chages`). I am not applying another broad queue rewrite.
+
+I’m leaving the evidence in this session and mapping it to the existing open queue-edit/loss work rather than filing a duplicate: `#qeditdup` covers queue item duplication/resurrection during active turns, and `#qftloss` covers free-text prompt loss from live-buffer/CRDT convergence. Those should stay open until the live editor proof shows this class no longer reproduces.
+
+No source files changed in this correction cycle, and I did not run tests. The immediate fix here is to preserve the corrected queue prompt and stop using manual queue replacement as a recovery shortcut.
+
+<!-- agent:boundary:12c31b26 -->
 <!-- /agent:exchange -->
 ## Queue
 

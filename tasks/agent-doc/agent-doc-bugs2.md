@@ -321,14 +321,24 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=6e5216b3-3483-4a87-9338-31f1704dacc6 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=49876 candidate_hash=0e717403c4b0ec0b856101ab2a698dfed92231184cade4b128ca0b466e477e7e content_ours_len=66132 content_ours_hash=fd882ac79f90d72686c7d61b15a1fe450c437b320a198a320ca1341c24644aea doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782589089995
 ```
-<!-- agent:boundary:d872f63e -->
+
+### Re: queue CRDT corruption report — gpt-5
+
+> **Queue prompt:** `/clear` was autonomously added...blocking JB `Run Agent Doc`. As I was typing in this item, 2 duplicates of the next queue item were added before this item. And a stale copy of this prompt was duplicated above this item...and the last 3 characters I typed were deleted in this prompt. CRDT issues...
+
+> **Queue prompt:** Duplicate text document corruption occurred while I was typing into te queue.
+
+I treated both queue prompts as live evidence for the existing queue-edit corruption work, not as new duplicate backlog items. The duplicated/resurrected queue rows and autonomous `/clear` behavior map to `#qeditdup`; the lost typed characters and duplicated free text map to the replacement backlog proof item `#qftlossproof` for the existing `#qftloss` class.
+
+No source files changed and no tests ran in this cycle. The review cleanup from the prior closeout remains in place: `agent:review` is empty, and the proof/log follow-ups are ordinary backlog items now.
+<!-- agent:boundary:d3f74194 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 🚧 `/clear` was autonomously added...blocking JB `Run Agent Doc`. As I was typing in this item, 2 duplicates of the next queue item were added before this item. And a stale copy of this prompt was duplicated above this item...and the last 3 characters I typed were deleted in this prompt. CRDT issues...
-- Duplicate text document corruption occurred while I was typing into te queue.
+- ~~`/clear` was autonomously added...blocking JB `Run Agent Doc`. As I was typing in this item, 2 duplicates of the next queue item were added before this item. And a stale copy of this prompt was duplicated above this item...and the last 3 characters I typed were deleted in this prompt. CRDT issues...~~
+- ~~Duplicate text document corruption occurred while I was typing into te queue.~~ — auto-struck: answered this cycle (#ftstrike)
 - [#tmuxsynccrashlog]
 - [#qftlossproof]
 - [#midturnrecycleproof]
@@ -341,6 +351,14 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/
 ```text
 [route] target tmux session: 0
 Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md into pane %1 for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Summarize recent commits"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/logs/route-submit/1782586439553-direct_pane_protected_prompt_input-codex-_1-a0c7b4c8e461.txt
+```
+---
+---
+:round_pushpin: monsterrodholders.md issue
+```
+• The failed agent-doc write inserted only a few summary bullets instead of a clean Re: #osm-tile-key-provision
+  section. I’m going to fix the task doc with a narrow patch: remove my partial bullets from the compacted summary and
+  add a proper exchange entry before the boundary.
 ```
 ---
 - fix `• The finalize call rejected the sibling list because this binary requires one message per sibling path. I’m retrying with paired sibling messages; no file write happened on the rejected call.`
@@ -356,25 +374,7 @@ Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/
 - :pushpin: do [#crdtauth6]
 - :pushpin: do [#nsfz]
 - :pushpin: do [#kj5flive]
----
-monsterrodholders.md issue
-```
-• The failed agent-doc write inserted only a few summary bullets instead of a clean Re: #osm-tile-key-provision
-  section. I’m going to fix the task doc with a narrow patch: remove my partial bullets from the compacted summary and
-  add a proper exchange entry before the boundary.
-```
----
-- do [#qeditdup] [#qftloss#qftloss]
 - JB `File Cache Conflict` occurences
-- do [#60ev]
-- do [#syncbarrier]
-- do [#qheadstrikeauto]
-- do [#suprestassoc]
-- do [#2y8j]
-- do [#cdtcutover]
-- do [#crdtauth6]
-- do [#nsfz]
-- do [#kj5flive]
 - do [#tmuxsynccrashlog]
 - do [#qftlossproof]
 - do [#midturnrecycleproof]

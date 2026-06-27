@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.63
+
+- **Agent-doc skill installs now ship an OKF concept bundle for durable dynamic-context vocabulary.** The shared `SKILL.md` router points concept/vocabulary lookups at `okf/index.md`, while branch procedures remain in runbooks and current-state packs remain in `preflight`/`plan`/`tsift` output. `agent-doc skill install` now reconciles bundled OKF Markdown files beside each managed harness surface (`.claude/skills/agent-doc/okf`, `.codex/okf`, `.opencode/skills/agent-doc/okf`, plus Cursor/Generic paths), reaping stale managed Markdown while preserving local non-Markdown artifacts. README, SPEC, and dev instructions now treat bundled OKF resources as part of the instruction-surface contract. Coverage: installer unit tests for OKF paths/reaping/all-env installs plus the CLI skill-install integration test proving the OKF index is installed.
+
 ## 0.34.62
 
 - **`#closeoutstall` — proven live-editor no-ACK closeouts now have a typed blocked state instead of an ambiguous direct-Codex stall.** When the write path has live editor evidence but cannot prove editor convergence (`no_listener`, `no_ack_content`, `ack_mismatch`, `no_ack`, or `send_failed`), it now records `blocked_closeout.kind=editor_convergence_required` on the open cycle with the source, reason, optional patch id, `retry_without_disk_write`, and a copyable recovery command. `session-check` reports that canonical operator-gated diagnostic before falling through to generic repair/commit-boundary recovery, and committed cycles clear the blocked state. This preserves the safety invariant — no automatic disk write behind a proven live editor — while making the stalled response actionable. Coverage: focused `session-check` regression plus the existing editorless-socket no-ACK write-path test.

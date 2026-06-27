@@ -3325,6 +3325,18 @@ fn test_skill_md_contains_required_steps() {
             .exists(),
         "skill install should write the planning-dispatch runbook"
     );
+    assert!(
+        tmp.path()
+            .join(".claude/skills/agent-doc/okf/index.md")
+            .exists(),
+        "skill install should write the OKF concept index"
+    );
+    let okf_index =
+        std::fs::read_to_string(tmp.path().join(".claude/skills/agent-doc/okf/index.md")).unwrap();
+    assert!(
+        okf_index.contains("Session Cycle"),
+        "installed OKF index should include session-cycle navigation"
+    );
     let pending_ops = std::fs::read_to_string(
         tmp.path()
             .join(".claude/skills/agent-doc/runbooks/pending-ops.md"),

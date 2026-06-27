@@ -221,6 +221,20 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
     ),
 ];
 
+/// Bundled OKF concept files installed alongside the skill.
+const BUNDLED_OKF: &[(&str, &str)] = &[
+    ("index.md", include_str!("../okf/index.md")),
+    ("session-cycle.md", include_str!("../okf/session-cycle.md")),
+    (
+        "instruction-surface.md",
+        include_str!("../okf/instruction-surface.md"),
+    ),
+    (
+        "dynamic-context.md",
+        include_str!("../okf/dynamic-context.md"),
+    ),
+];
+
 /// Current binary version (from Cargo.toml).
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const CODEX_USER_PROMPT_COMMAND: &str = "agent-doc hook codex-user-prompt-submit";
@@ -605,6 +619,85 @@ fn install_runbooks_for(env: agent_kit::detect::Environment, root: Option<&Path>
 fn install_runbooks_all(root: Option<&Path>) -> Result<()> {
     for (env, _) in agent_kit::detect::Environment::all_skill_rel_paths("agent-doc") {
         install_runbooks_for(env, root)?;
+    }
+    Ok(())
+}
+
+/// Install bundled OKF concept files alongside the skill for the detected environment.
+fn install_okf(root: Option<&Path>) -> Result<()> {
+    let env = detect_install_env();
+    install_okf_for(env, root)
+}
+
+/// Resolve the OKF directory for a specific environment.
+fn okf_rel_path(env: &agent_kit::detect::Environment) -> std::path::PathBuf {
+    use agent_kit::detect::Environment;
+    match env {
+        Environment::ClaudeCode => std::path::PathBuf::from(".claude/skills/agent-doc/okf"),
+        Environment::OpenCode => std::path::PathBuf::from(".opencode/skills/agent-doc/okf"),
+        Environment::Codex => std::path::PathBuf::from(".codex/okf"),
+        Environment::Cursor => std::path::PathBuf::from(".cursor/rules/okf"),
+        Environment::Generic => std::path::PathBuf::from("okf"),
+    }
+}
+
+/// Install bundled OKF files for a specific environment.
+///
+/// The installer reconciles only Markdown files in the managed OKF directory.
+/// Non-Markdown files are left alone for local notes or tool artifacts.
+fn install_okf_for(env: agent_kit::detect::Environment, root: Option<&Path>) -> Result<()> {
+    let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
+    let base = resolved.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let okf_dir = base.join(okf_rel_path(&env));
+    std::fs::create_dir_all(&okf_dir)?;
+
+    let canonical_names: std::collections::HashSet<&str> =
+        BUNDLED_OKF.iter().map(|(name, _)| *name).collect();
+
+    for (name, content) in BUNDLED_OKF {
+        let path = okf_dir.join(name);
+        let needs_write = !path.exists()
+            || std::fs::read_to_string(&path)
+                .map(|existing| existing != *content)
+                .unwrap_or(true);
+        if needs_write {
+            std::fs::write(&path, content)?;
+        }
+    }
+
+    let entries = std::fs::read_dir(&okf_dir)
+        .with_context(|| format!("read OKF dir {}", okf_dir.display()))?;
+    for entry in entries {
+        let entry =
+            entry.with_context(|| format!("read OKF dir entry under {}", okf_dir.display()))?;
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("inspect OKF entry {}", entry.path().display()))?;
+        if !file_type.is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("md") {
+            continue;
+        }
+        let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if canonical_names.contains(file_name) {
+            continue;
+        }
+        std::fs::remove_file(&path)
+            .with_context(|| format!("reap stale OKF {}", path.display()))?;
+        eprintln!("[{}] reaped stale OKF → {}", env, path.display());
+    }
+
+    Ok(())
+}
+
+/// Install bundled OKF files for all environments.
+fn install_okf_all(root: Option<&Path>) -> Result<()> {
+    for (env, _) in agent_kit::detect::Environment::all_skill_rel_paths("agent-doc") {
+        install_okf_for(env, root)?;
     }
     Ok(())
 }
@@ -999,6 +1092,7 @@ pub fn install_at(root: Option<&Path>) -> Result<()> {
     let env = agent_kit::detect::Environment::detect();
     config().install(resolved.as_deref())?;
     install_runbooks(resolved.as_deref())?;
+    install_okf(resolved.as_deref())?;
     install_env_artifacts(env, resolved.as_deref())?;
     sync_managed_root_agents(resolved.as_deref())
 }
@@ -1023,6 +1117,7 @@ pub fn install_and_check_updated() -> Result<bool> {
 
     cfg.install(resolved.as_deref())?;
     install_runbooks(resolved.as_deref())?;
+    install_okf(resolved.as_deref())?;
     install_env_artifacts(detect_install_env(), resolved.as_deref())?;
     sync_managed_root_agents(resolved.as_deref())?;
     Ok(!was_current)
@@ -1033,6 +1128,7 @@ pub fn install_for(env: agent_kit::detect::Environment) -> Result<()> {
     let resolved = resolve_root();
     config_for_env(env).install_for(env, resolved.as_deref())?;
     install_runbooks_for(env, resolved.as_deref())?;
+    install_okf_for(env, resolved.as_deref())?;
     install_env_artifacts(env, resolved.as_deref())?;
     sync_managed_root_agents(resolved.as_deref())
 }
@@ -1044,6 +1140,7 @@ pub fn install_all() -> Result<()> {
         config_for_env(env).install_for(env, resolved.as_deref())?;
     }
     install_runbooks_all(resolved.as_deref())?;
+    install_okf_all(resolved.as_deref())?;
     install_env_artifacts_all(resolved.as_deref())?;
     sync_managed_root_agents(resolved.as_deref())
 }
@@ -1447,6 +1544,41 @@ mod tests {
             );
             assert!(runbooks_dir.join("commit.md").exists());
         }
+    }
+
+    #[test]
+    fn install_okf_creates_concepts_for_each_harness() {
+        let dir = tempfile::tempdir().unwrap();
+        for (env, rel) in [
+            (Environment::ClaudeCode, ".claude/skills/agent-doc/okf"),
+            (Environment::Codex, ".codex/okf"),
+            (Environment::OpenCode, ".opencode/skills/agent-doc/okf"),
+        ] {
+            super::install_okf_for(env, Some(dir.path())).unwrap();
+
+            let index = dir.path().join(rel).join("index.md");
+            assert!(index.exists(), "missing OKF index at {}", index.display());
+            let content = std::fs::read_to_string(&index).unwrap();
+            assert!(content.contains("Agent Doc OKF Index"));
+            assert!(content.contains("session-cycle.md"));
+        }
+    }
+
+    #[test]
+    fn install_okf_reaps_stale_markdown_but_keeps_local_artifacts() {
+        let dir = tempfile::tempdir().unwrap();
+        let okf_dir = dir.path().join(".claude/skills/agent-doc/okf");
+        std::fs::create_dir_all(&okf_dir).unwrap();
+        let stale = okf_dir.join("legacy-concept.md");
+        std::fs::write(&stale, "---\ntype: concept\n---\n# Legacy\n").unwrap();
+        let kept = okf_dir.join("notes.txt");
+        std::fs::write(&kept, "local note\n").unwrap();
+
+        super::install_okf_for(Environment::ClaudeCode, Some(dir.path())).unwrap();
+
+        assert!(!stale.exists(), "stale OKF markdown should be reaped");
+        assert!(kept.exists(), "non-md OKF artifacts should be preserved");
+        assert!(okf_dir.join("instruction-surface.md").exists());
     }
 
     #[test]
@@ -1898,6 +2030,26 @@ mod tests {
     }
 
     #[test]
+    fn install_okf_all_creates_for_each_env() {
+        let dir = tempfile::tempdir().unwrap();
+
+        super::install_okf_all(Some(dir.path())).unwrap();
+
+        assert!(
+            dir.path()
+                .join(".claude/skills/agent-doc/okf/index.md")
+                .exists()
+        );
+        assert!(dir.path().join(".codex/okf/index.md").exists());
+        assert!(
+            dir.path()
+                .join(".opencode/skills/agent-doc/okf/index.md")
+                .exists()
+        );
+        assert!(dir.path().join(".cursor/rules/okf/index.md").exists());
+    }
+
+    #[test]
     fn bundled_skill_contains_harness_preamble() {
         assert!(SKILL_TEMPLATE.contains("Harness Compatibility"));
         assert!(SKILL_TEMPLATE.contains("harness-invocation.md"));
@@ -1905,6 +2057,7 @@ mod tests {
         assert!(SKILL_TEMPLATE.contains("runbooks/command-synonyms.md"));
         assert!(SKILL_TEMPLATE.contains("runbooks/compound-task-steering.md"));
         assert!(SKILL_TEMPLATE.contains("runbooks/planning-dispatch.md"));
+        assert!(SKILL_TEMPLATE.contains("okf/index.md"));
     }
 
     #[test]
@@ -2166,6 +2319,33 @@ mod tests {
         assert!(
             SKILL_TEMPLATE.contains("dynamic-context.md"),
             "SKILL.md should list dynamic-context in the runbook catalog"
+        );
+    }
+
+    #[test]
+    fn bundled_okf_includes_agent_doc_concepts() {
+        assert!(
+            BUNDLED_OKF.iter().any(|(name, _)| *name == "index.md"),
+            "index.md should be in BUNDLED_OKF"
+        );
+        assert!(
+            BUNDLED_OKF
+                .iter()
+                .any(|(name, _)| *name == "session-cycle.md"),
+            "session-cycle.md should be in BUNDLED_OKF"
+        );
+        assert!(
+            BUNDLED_OKF
+                .iter()
+                .any(|(name, _)| *name == "instruction-surface.md"),
+            "instruction-surface.md should be in BUNDLED_OKF"
+        );
+        assert!(
+            BUNDLED_OKF
+                .iter()
+                .any(|(name, content)| *name == "dynamic-context.md"
+                    && content.contains("Dynamic Context")),
+            "dynamic-context.md should be in BUNDLED_OKF"
         );
     }
 

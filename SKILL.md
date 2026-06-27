@@ -2,7 +2,7 @@
 description: "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>. Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.34.25"
+agent-doc-version: "0.34.63"
 ---
 
 # agent-doc
@@ -15,7 +15,7 @@ This shared hot path serves Claude Code, Codex, OpenCode, Cursor, and direct har
 
 ## Dynamic Context Map
 
-Use this SKILL.md as the hot-path router. Load linked files only when their branch is active: invocation and harness drift → [runbooks/harness-invocation.md](runbooks/harness-invocation.md); preflight planning → [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md); response and pending updates → [runbooks/respond.md](runbooks/respond.md) plus [runbooks/pending-ops.md](runbooks/pending-ops.md); persistence and manual repair → [runbooks/persist-closeout.md](runbooks/persist-closeout.md) plus [runbooks/commit.md](runbooks/commit.md); context-authoring policy → [runbooks/dynamic-context.md](runbooks/dynamic-context.md). Do not copy runbook detail back into this file unless it is required every cycle.
+Use this SKILL.md as the hot-path router. Load linked files only when their branch is active: invocation and harness drift → [runbooks/harness-invocation.md](runbooks/harness-invocation.md); preflight planning → [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md); response and pending updates → [runbooks/respond.md](runbooks/respond.md) plus [runbooks/pending-ops.md](runbooks/pending-ops.md); persistence and manual repair → [runbooks/persist-closeout.md](runbooks/persist-closeout.md) plus [runbooks/commit.md](runbooks/commit.md); context-authoring policy → [runbooks/dynamic-context.md](runbooks/dynamic-context.md); durable concept definitions and vocabulary → [okf/index.md](okf/index.md). Do not copy runbook or OKF detail back into this file unless it is required every cycle.
 
 ## Invocation
 

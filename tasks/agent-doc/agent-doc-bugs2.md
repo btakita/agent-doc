@@ -212,7 +212,7 @@ Verification passed:
 - focused realtime/lifecycle spec tests
 - `make check` in `src/agent-doc` (5511 nextest tests passed, 242 skipped, doctests passed, medium sim corpus passed, Lean build passed)
 - latest GitHub Actions `CI` run on `main` is green.
-<!-- agent:boundary:4085e6ee -->
+<!-- agent:boundary:de7bc772 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -221,7 +221,7 @@ Verification passed:
 - ~~:pushpin: do [#syncbarrier]~~
 - ~~:pushpin: do [#qheadstrikeauto]~~
 - ~~:pushpin: do [#suprestassoc]~~
-- 🚧 :pushpin: do [#2y8j]
+- :pushpin: do [#2y8j]
 - :pushpin: do [#cdtcutover]
 - :pushpin: do [#crdtauth6]
 - :pushpin: do [#nsfz]
@@ -241,7 +241,6 @@ Verification passed:
 - :pushpin: do [#supstaledetectverify]
 - :pushpin: do [#suptmuxstaleverify]
 - :pushpin: do [#60ev]
-- do [#suprestassoc-live]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

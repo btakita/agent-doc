@@ -211,7 +211,21 @@ Verification passed:
 - focused realtime/lifecycle spec tests
 - `make check` in `src/agent-doc` (5511 nextest tests passed, 242 skipped, doctests passed, medium sim corpus passed, Lean build passed)
 - latest GitHub Actions `CI` run on `main` is green.
-<!-- agent:boundary:12007ce2 -->
+
+### Re: Completion audit for operator-visible realtime authority — gpt-5
+
+I audited the current state against the original goal instead of treating the prior patch as automatically complete.
+
+Current evidence is good for the implementation/spec boundary: `specs/14-realtime-workflow.md` is the canonical realtime authority spec, `specs/15-turn-lifecycle.md` separates turn closeout/commit ownership, `SPEC.md` links both, and the queue/backlog wording does not contradict the invariant that operator-visible text is already authoritative. The remaining duplicate queue rows are queue hygiene, not an authority-rule contradiction.
+
+I added one more focused regression for the concrete symptom shape: a partial raw word typed into `agent:exchange` after preflight now has a pinned test, `live_prompt_drift_auto_recovery_preserves_partial_exchange_word`, proving recovery appends the missing response without resetting the exchange to the pre-typing snapshot. While rerunning the suite, I also fixed a test isolation bug where IPC snapshot tests could read ambient live stale-supervisor state from this workspace and incorrectly refuse clean `content_ours` adoption for temp docs; explicit forced-stale tests still cover that behavior.
+
+Updated commits: agent-doc submodule `e3f52cda`, root pointer `760a08f7b`.
+
+Verification: `cargo fmt --check`, `git diff --check`, focused realtime/turn lifecycle tests, the new partial-word test, IPC snapshot tests, full `make check` with 5516 nextest tests passed, doctests passed, medium sim passed, Lean passed, and latest GitHub Actions CI is green.
+
+I am not marking the overarching goal complete yet because a real editor-attached live typing proof in `agent-doc-bugs2.md` is still external evidence I did not observe in this turn. The automated harness now covers the exact post-preflight partial-word merge shape, and the live document/session is ready for that operator/plugin proof.
+<!-- agent:boundary:9e708a77 -->
 <!-- /agent:exchange -->
 ## Queue
 

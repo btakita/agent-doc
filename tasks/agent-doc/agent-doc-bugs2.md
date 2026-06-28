@@ -161,7 +161,7 @@ Verification:
 - `gh run list --workflow CI --limit 1` reports latest CI run `28306093045` completed successfully.
 
 No code files changed in this cycle; this was verification and backlog closeout for a stale implementation head.
-<!-- agent:boundary:e99ecbc7 -->
+<!-- agent:boundary:5fde3f4b -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -169,7 +169,7 @@ No code files changed in this cycle; this was verification and backlog closeout 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: do [#syncbarrier]~~
 - ~~:pushpin: do [#qheadstrikeauto]~~
-- :pushpin: do [#suprestassoc]
+- 🚧 :pushpin: do [#suprestassoc]
 - :pushpin: do [#2y8j]
 - :pushpin: do [#cdtcutover]
 - :pushpin: do [#crdtauth6]
@@ -223,7 +223,7 @@ What are #next-steps to fix bugs?
 - [ ] [#provauth3bimpl] Replacement for #provauth3b: operator-origin authority cutover. Once #crdtauth6 supplies live origin deltas, replace remaining content_ours/stale-editor resurrection heuristics with origin checks and add logs/tests proving operator-origin working-tree edits are never reset. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#supstaledetectverify] Replacement for #supstaledetect: stale-install warning merge/install verification. Merge the source-mtime warning fix, install/recycle, then verify logs show a fresh build no longer warns while a genuinely stale binary still emits stale_install evidence.
 - [ ] [#suptmuxstaleverify] Replacement for #suptmuxstale: stale-supervisor pane indicator install/log proof. Merge/install the pane-title marker change, recycle, then verify .agent-doc/supervisor-stale plus pane title/turn_status logs show STALE SUPERVISOR only when the supervisor binary is actually stale.
-- [ ] [#suprestassoc] #agent-doc-bug restart-supervisor re-associates the wrong doc: restarting the equityfundingsource.md supervisor re-bound EFS to the agent-doc-bugs2.md claude session. Actor re-register/lease-replace likely keys on pane/session not (document_id,generation) across the shared project controller. Needs live repro; fix = scope re-association to the restarted doc only + regression. Plan: tasks/agent-doc/plan-restart-supervisor-doc-reassociation.md
+- [ ] 🚧 [#suprestassoc] #agent-doc-bug restart-supervisor re-associates the wrong doc: restarting the equityfundingsource.md supervisor re-bound EFS to the agent-doc-bugs2.md claude session. Actor re-register/lease-replace likely keys on pane/session not (document_id,generation) across the shared project controller. Needs live repro; fix = scope re-association to the restarted doc only + regression. Plan: tasks/agent-doc/plan-restart-supervisor-doc-reassociation.md
 - [ ] [#60ev] plan-dynamic-context-injection-ledger.md
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md

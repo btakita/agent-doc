@@ -103,14 +103,29 @@ Execution evidence retained from the completed #syncbarrier closeout:
 - `gh run list --workflow CI --limit 1` reported latest CI run `28302427088` completed successfully.
 - `make install` installed `agent-doc 0.34.63` and marked two controllers for recycle.
 - `src/agent-doc` commit `fa98a2ed` contains the implementation.
-<!-- agent:boundary:665f64bd -->
+
+### Re: editor connection proof for queue consume closeout - gpt-5
+
+Fixed the root cause. The editor was open, but the editor apply paths could ACK patch content without first publishing the `.agent-doc/plugin-owner/...` live-owner proof that Rust uses to classify an attached editor endpoint. That made closeout report `editor_endpoint=absent` even though the UI was open.
+
+Red/green evidence:
+- JetBrains socket path: targeted test failed before the fix, then passed after `ownsDocument(patch.file)` became required before queue/apply/ACK.
+- VS Code patch path: targeted test failed before the fix, then passed after native `pluginOwnerTryAcquire`/`pluginOwnerRelease` wrappers and acquire-before-ACK behavior were added.
+- Full checks passed: JetBrains `./gradlew test buildPlugin`, VS Code `npm test`, and Rust `make check`.
+
+Installed:
+- Rust `agent-doc`/`libagent_doc.so` via `make install`.
+- JetBrains plugin `0.2.196` into `~/.local/share/JetBrains/IntelliJIdea2026.1`; restart IntelliJ to load the newly installed plugin.
+
+I also committed and pushed the dirty nested repos requested by the latest prompt, and kept the registered `src/agent-doc-*-wt` checkout directories out of the root commit as worktrees rather than embedded repos.
+<!-- agent:boundary:97a24d53 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~🚧 :pushpin: do [#syncbarrier]~~
-- :pushpin: do [#qheadstrikeauto]
+- ~~:pushpin: do [#syncbarrier]~~
+- 🚧 :pushpin: do [#qheadstrikeauto]
 - :pushpin: do [#suprestassoc]
 - :pushpin: do [#2y8j]
 - :pushpin: do [#cdtcutover]

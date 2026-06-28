@@ -821,6 +821,15 @@ fn realtime_workflow_spec_pins_lazily_backed_authority() {
         "realtime workflow spec must require frontend capability proof before trusting editor mutation delivery"
     );
     assert!(
+        realtime.contains("## Editor Frontend Hot Path")
+            && realtime.contains("The editor text-change callback is a capture boundary, not a convergence worker")
+            && realtime.contains("must not perform full-buffer reads")
+            && realtime.contains("CRDT merge, code-point offset conversion, socket I/O, native sidecar writes, patch application, or document saves")
+            && realtime.contains("queued onto cancellable background work")
+            && realtime.contains("disposed when the document closes or the plugin unloads"),
+        "realtime workflow spec must keep editor UI/extension-host text-change callbacks fast"
+    );
+    assert!(
         spec.contains("realtime state machine") && spec.contains("lazily-rs-backed state"),
         "top-level spec must surface the lazily-backed realtime authority invariant"
     );

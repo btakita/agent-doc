@@ -50,6 +50,20 @@ both when possible, or fail closed before applying any agent delta.
 ACK-content proves what an editor observed after a patch. It does not prove that
 older snapshot text should overwrite newer operator text.
 
+## Editor Frontend Hot Path
+
+The editor text-change callback is a capture boundary, not a convergence worker. JetBrains `DocumentListener` callbacks, VS Code
+`onDidChangeTextDocument` callbacks, and equivalent future editor hooks must
+capture only the small event fields needed to identify the document, mark the
+document dirty/typing-active, and enqueue later work. They must not perform full-buffer reads, CRDT merge, code-point offset conversion, socket I/O, native sidecar writes, patch application, or document saves on the editor UI thread or extension-host text-change callback.
+
+Any work that can scale with document size, block on native code, block on IPC,
+or mutate the document must be queued onto cancellable background work. That
+background work must re-check the latest operator-visible source before
+ACKing, applying, or broadcasting a change, and must be disposed when the document closes or the plugin unloads. A queued editor task is therefore never
+authority by itself; if it runs after newer operator input, it must rebase
+against that input or fail closed.
+
 ## Realtime Queue + Exchange Rules
 
 The `agent:queue` and `agent:exchange` components are realtime document state,

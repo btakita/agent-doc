@@ -240,7 +240,22 @@ A clean split would be:
 - `agent-doc-turn`: admitted-turn lifecycle and commit decisions.
 
 So I agree with adding `agent-doc-document`, with one constraint: it should own document semantics, not runtime authority. The realtime loop may hold a `DocumentProjectionState` from `agent-doc-document`, but the ordering, source arbitration, and apply/verify lifecycle should stay in `agent-doc-realtime`. That prevents `agent-doc-document` from becoming another place where turn-based or snapshot-based authority can accidentally leak back into the hot path.
-<!-- agent:boundary:858f5e35 -->
+
+### Re: Should agent-doc-merge stay distinct from agent-doc-document? — gpt-5
+
+`agent-doc-merge` should remain distinct from `agent-doc-document`.
+
+The clean dependency direction is:
+
+- `agent-doc-document`: owns the document model: parsing, component spans, parse diagnostics, normalized document operations, projections, validation, and deterministic single-document transforms.
+- `agent-doc-merge`: owns concurrent edit resolution: operator/agent merge policy, CRDT-style operation merge, conflict classification, preservation proofs, and invariants such as “operator-visible text is never discarded.” It depends on `agent-doc-document`, not the other way around.
+
+I would allow `agent-doc-document` to expose low-level helpers such as “apply this normalized edit,” “replace this component,” “validate this projection,” or “compute component spans.” But once the logic compares two or more document versions/events and decides whose concurrent intent survives, that belongs in `agent-doc-merge`.
+
+The reason to keep them separate is practical, not aesthetic: editor plugins, parse diagnostics, and read-only tooling should be able to use `agent-doc-document` without pulling in CRDT/merge policy. Realtime and turn lifecycle code should call `agent-doc-merge` explicitly when they need conflict resolution. That makes it much harder for snapshot/turn authority to leak back into the document model under the name of “normalization.”
+
+So my answer is: keep `agent-doc-merge` as a separate crate, built on `agent-doc-document`. If early extraction overhead is annoying, start as distinct modules with the same dependency rule, then split the crate once the API stabilizes.
+<!-- agent:boundary:8ee769cb -->
 <!-- /agent:exchange -->
 ## Queue
 

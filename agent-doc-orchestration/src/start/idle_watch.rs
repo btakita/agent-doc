@@ -3111,6 +3111,12 @@ mod tests {
         let relative_doc = doc.strip_prefix(&cwd).unwrap();
 
         crate::debounce::document_changed(doc.to_string_lossy().as_ref());
+        for _ in 0..50 {
+            if super::editor_typing_active_for_idle_queue(relative_doc) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
 
         assert!(
             super::editor_typing_active_for_idle_queue(relative_doc),

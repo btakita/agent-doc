@@ -1906,6 +1906,8 @@ class PatchWatcher implements vscode.Disposable {
     private ownedDocs = new Set<string>();
     /** Coalesced full-buffer live reports; never run from onDidChangeTextDocument. */
     private liveBufferReportTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    /** Native typing markers are queued off the text-change listener path. */
+    private nativeChangeTimers = new Map<string, ReturnType<typeof setTimeout>>();
     /** Native editor-op writes are queued off the text-change listener path. */
     private pendingEditorOpReports: PendingEditorOpReport[] = [];
     private editorOpReportTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1982,7 +1984,7 @@ class PatchWatcher implements vscode.Disposable {
                 const eventProjectRoot = this.patchesDir
                     ? path.dirname(path.dirname(this.patchesDir))
                     : undefined;
-                native.documentChanged(fsPath, eventProjectRoot);
+                this.scheduleNativeDocumentChanged(fsPath, eventProjectRoot);
                 this.scheduleLiveBufferReport(e.document, eventProjectRoot);
                 const changes: ReplicaTextChange[] = e.contentChanges.map((change) => ({
                     rangeOffset: change.rangeOffset,
@@ -2514,6 +2516,15 @@ class PatchWatcher implements vscode.Disposable {
             });
     }
 
+    private scheduleNativeDocumentChanged(fsPath: string, projectRoot: string | undefined): void {
+        if (this.nativeChangeTimers.has(fsPath)) return;
+        const timer = setTimeout(() => {
+            this.nativeChangeTimers.delete(fsPath);
+            native.documentChanged(fsPath, projectRoot);
+        }, 0);
+        this.nativeChangeTimers.set(fsPath, timer);
+    }
+
     private scheduleLiveBufferReport(document: vscode.TextDocument, projectRoot: string | undefined): void {
         const fsPath = document.uri.fsPath;
         const previous = this.liveBufferReportTimers.get(fsPath);
@@ -2561,6 +2572,9 @@ class PatchWatcher implements vscode.Disposable {
         const timer = this.liveBufferReportTimers.get(filePath);
         if (timer) clearTimeout(timer);
         this.liveBufferReportTimers.delete(filePath);
+        const nativeTimer = this.nativeChangeTimers.get(filePath);
+        if (nativeTimer) clearTimeout(nativeTimer);
+        this.nativeChangeTimers.delete(filePath);
         this.pendingEditorOpReports = this.pendingEditorOpReports.filter((report) => report.fsPath !== filePath);
         clearEditorOpShadow(filePath);
         void this.crdtReplicas?.handleDocumentClosed(filePath);

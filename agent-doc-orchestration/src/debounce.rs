@@ -5,9 +5,10 @@
 //!   Neovim, Zed) so they share identical timing logic via the agent-doc FFI layer.
 //! - In-process state: a `Mutex<HashMap<PathBuf, Instant>>` (`LAST_CHANGE`) records the last
 //!   edit timestamp per file path.
-//! - Cross-process state: each `document_changed` call also writes a millisecond Unix timestamp
-//!   to `.agent-doc/typing/<hash>` so CLI invocations running in a separate process can detect
-//!   active typing. Editor plugins may additionally record the visible buffer digest in
+//! - Cross-process state: each `document_changed` call queues a best-effort millisecond Unix
+//!   timestamp write to `.agent-doc/typing/<hash>` so CLI invocations running in a separate
+//!   process can detect active typing without making editor change listeners wait on disk.
+//!   Editor plugins may additionally record the visible buffer digest in
 //!   `.agent-doc/live-buffer/<hash>` so CLI direct-disk writes can detect idle-but-unsaved
 //!   editor drift before mutating the file on disk. The hash is derived from the file path string
 //!   via `DefaultHasher`.
@@ -29,8 +30,8 @@
 //! - `await_idle` polls every 100 ms and returns `false` if `timeout_ms` expires before idle.
 //!
 //! ## Agentic Contracts
-//! - `document_changed(file: &str)` — records now as last-change time; writes typing indicator
-//!   file (best-effort); never panics.
+//! - `document_changed(file: &str)` — records now as last-change time; queues a typing indicator
+//!   file write (best-effort); never panics.
 //! - `document_changed_with_digest(file, len, hash)` — records typing plus the latest
 //!   editor-visible buffer digest without passing full document content through FFI.
 //! - `live_buffer_diverges_from_content(file, content)` — returns the latest editor-visible
@@ -66,12 +67,14 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock, mpsc};
 use std::time::Instant;
 
 static LAST_CHANGE: Mutex<Option<HashMap<PathBuf, Instant>>> = Mutex::new(None);
 
 static EDITOR_BUFFER_STATES: Mutex<Option<HashMap<PathBuf, EditorBufferState>>> = Mutex::new(None);
+
+static TYPING_INDICATOR_TX: OnceLock<mpsc::Sender<String>> = OnceLock::new();
 
 fn with_state<R>(f: impl FnOnce(&mut HashMap<PathBuf, Instant>) -> R) -> R {
     let mut guard = LAST_CHANGE.lock().unwrap();
@@ -82,19 +85,13 @@ fn with_state<R>(f: impl FnOnce(&mut HashMap<PathBuf, Instant>) -> R) -> R {
 /// Record a document change event for the given file.
 ///
 /// Called by editor plugins on every document modification.
-/// Also writes a typing indicator file for cross-process visibility.
+/// Also queues a typing indicator file write for cross-process visibility.
 pub fn document_changed(file: &str) {
     let path = PathBuf::from(file);
     with_state(|map| {
         map.insert(path.clone(), Instant::now());
     });
-    // Write cross-process typing indicator (best-effort, never block)
-    if let Err(e) = write_typing_indicator(file) {
-        eprintln!(
-            "[debounce] typing indicator write failed for {:?}: {}",
-            file, e
-        );
-    }
+    queue_typing_indicator_write(file);
 }
 
 /// Record a document change and the editor-visible buffer digest.
@@ -405,6 +402,51 @@ fn write_typing_indicator(file: &str) -> std::io::Result<()> {
         .unwrap_or_default()
         .as_millis();
     std::fs::write(&typing_path, now.to_string())
+}
+
+fn queue_typing_indicator_write(file: &str) {
+    if let Err(e) = typing_indicator_sender().send(file.to_string()) {
+        eprintln!(
+            "[debounce] typing indicator enqueue failed for {:?}: {}",
+            file, e
+        );
+    }
+}
+
+fn typing_indicator_sender() -> &'static mpsc::Sender<String> {
+    TYPING_INDICATOR_TX.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<String>();
+        if let Err(e) = std::thread::Builder::new()
+            .name("agent-doc-typing-indicator".to_string())
+            .spawn(move || typing_indicator_worker(rx))
+        {
+            eprintln!("[debounce] typing indicator worker spawn failed: {e}");
+        }
+        tx
+    })
+}
+
+fn typing_indicator_worker(rx: mpsc::Receiver<String>) {
+    loop {
+        let first = match rx.recv() {
+            Ok(file) => file,
+            Err(_) => return,
+        };
+        let mut pending = HashMap::new();
+        pending.insert(first, ());
+        while let Ok(file) = rx.try_recv() {
+            pending.insert(file, ());
+        }
+
+        for file in pending.into_keys() {
+            if let Err(e) = write_typing_indicator(&file) {
+                eprintln!(
+                    "[debounce] typing indicator write failed for {:?}: {}",
+                    file, e
+                );
+            }
+        }
+    }
 }
 
 /// Record the latest editor-visible buffer digest (len/hash only) for the given
@@ -1138,6 +1180,16 @@ fn status_file_path(file: &str) -> PathBuf {
 mod tests {
     use super::*;
 
+    fn wait_for_typing_indicator(file: &str, debounce_ms: u64) {
+        for _ in 0..50 {
+            if is_typing_via_file(file, debounce_ms) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("typing indicator was not written for {file}");
+    }
+
     #[test]
     fn idle_when_no_changes() {
         assert!(is_idle("/tmp/test-no-changes.md", 1500));
@@ -1184,7 +1236,7 @@ mod tests {
         document_changed(&doc_str);
 
         // Should detect typing within 2000ms window
-        assert!(is_typing_via_file(&doc_str, 2000));
+        wait_for_typing_indicator(&doc_str, 2000);
     }
 
     #[test]
@@ -1546,6 +1598,7 @@ mod tests {
         let doc_str = doc.to_string_lossy().to_string();
 
         document_changed(&doc_str);
+        wait_for_typing_indicator(&doc_str, 2000);
         std::thread::sleep(std::time::Duration::from_millis(50));
 
         // With a 10ms debounce, 50ms ago should NOT be typing
@@ -1642,9 +1695,11 @@ mod tests {
 
         document_changed(&doc1_str);
         let path1 = typing_indicator_path(&doc1_str);
+        wait_for_typing_indicator(&doc1_str, 2000);
 
         document_changed(&doc2_str);
         let path2 = typing_indicator_path(&doc2_str);
+        wait_for_typing_indicator(&doc2_str, 2000);
 
         // If hashes collide, paths are identical
         // This is a low-probability event but should be documented
@@ -1734,12 +1789,14 @@ mod tests {
         let doc_str = doc.to_string_lossy().to_string();
 
         document_changed(&doc_str);
+        wait_for_typing_indicator(&doc_str, 2000);
 
         // is_typing_via_file accepts debounce_ms as parameter — good
         assert!(is_typing_via_file(&doc_str, 2000));
         assert!(is_typing_via_file(&doc_str, 100));
 
         // await_idle_via_file also accepts debounce_ms — configurable
+        write_typing_indicator(&doc_str).unwrap();
         let start = Instant::now();
         let result = await_idle_via_file(&doc_str, 10, 1000);
         let elapsed = start.elapsed();
@@ -1762,6 +1819,8 @@ mod tests {
         let doc_str = doc.to_string_lossy().to_string();
 
         document_changed(&doc_str);
+        wait_for_typing_indicator(&doc_str, 2000);
+        write_typing_indicator(&doc_str).unwrap();
 
         let start = Instant::now();
         // With 100ms debounce, poll should check ~every 100ms
@@ -1792,6 +1851,7 @@ mod tests {
         let doc_str = doc.to_string_lossy().to_string();
 
         document_changed(&doc_str);
+        wait_for_typing_indicator(&doc_str, 2000);
 
         // Should find .agent-doc/ at project root, not fall back to wrong path
         assert!(is_typing_via_file(&doc_str, 2000));
@@ -1810,6 +1870,7 @@ mod tests {
         let doc_str = doc.to_string_lossy().to_string();
 
         document_changed(&doc_str);
+        wait_for_typing_indicator(&doc_str, 2000);
 
         assert!(is_typing_via_file(&doc_str, 2000));
     }

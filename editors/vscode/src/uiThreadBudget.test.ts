@@ -12,12 +12,14 @@ describe('editor UI thread budget', () => {
         assert.ok(end > start, 'typing listener should precede watcher startup log');
         const listener = source.slice(start, end);
 
-        assert.ok(listener.includes('native.documentChanged(fsPath, eventProjectRoot);'));
+        assert.ok(listener.includes('this.scheduleNativeDocumentChanged(fsPath, eventProjectRoot);'));
         assert.ok(listener.includes('this.scheduleLiveBufferReport(e.document, eventProjectRoot);'));
         assert.ok(listener.includes('handleLocalChangeDelta(fsPath, changes)'));
         assert.ok(listener.includes('this.scheduleEditorOpReport(fsPath, e.contentChanges, eventProjectRoot);'));
         assert.strictEqual(listener.includes('e.document.getText()'), false);
+        assert.strictEqual(listener.includes('native.documentChanged('), false);
         assert.strictEqual(listener.includes('documentChangedDigestContent'), false);
+        assert.strictEqual(listener.includes('native.recordEditorOp('), false);
         assert.strictEqual(listener.includes('reportEditorChange('), false);
     });
 

@@ -5044,6 +5044,12 @@ mod tests {
 
         let doc_str = doc.to_string_lossy().to_string();
         crate::debounce::document_changed(&doc_str);
+        for _ in 0..50 {
+            if crate::debounce::is_typing_via_file(&doc_str, 60_000) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
 
         let err = guard_visible_write_idle_with_budget(&doc, "test_visible_write", 60_000, 0)
             .unwrap_err();

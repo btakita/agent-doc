@@ -415,6 +415,27 @@ One.
     }
 
     @Test
+    fun `minimal document edit only reports success after target text is present`() {
+        val patchWatcherPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+        ).first { Files.exists(it) }
+        val patchWatcher = Files.readString(patchWatcherPath)
+        val helperStart = patchWatcher.indexOf("internal fun applyMinimalDocumentEditUtil(")
+        val helperEnd = patchWatcher.indexOf("/**", helperStart)
+        val helper = patchWatcher.substring(helperStart, helperEnd)
+
+        val replaceIdx = helper.indexOf("document.replaceString(edit.start, edit.end, edit.replacement)")
+        val postApplyProofIdx = helper.indexOf("return document.text == after")
+
+        assertTrue(replaceIdx >= 0)
+        assertTrue(
+            "minimal edit helper must verify the post-apply buffer before ACKing",
+            postApplyProofIdx > replaceIdx,
+        )
+    }
+
+    @Test
     fun `cold opened markdown files refresh visual highlighters`() {
         val visualHighlighterPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/VisualHighlighterManager.kt"),

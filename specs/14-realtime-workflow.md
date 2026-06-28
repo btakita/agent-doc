@@ -313,7 +313,7 @@ Realtime transitions are continuous and must work regardless of agent state:
 | Merge conflicts | `AgentDeltaReady` plus latest realtime source | `ConflictBlocked` | Typed conflict describing the same-node or ambiguous placement failure. |
 | Editor/CRDT delivery starts | `MergePlanned` with editor owner | `ApplyInFlight` | Patch plan targets the current editor-visible baseline or node proof. For CRDT remote text delivery, the handoff carries the expected editor text observed before convergence. |
 | Disk delivery starts | `MergePlanned` with no editor owner | `ApplyInFlight` | Current file still matches the merge input, or the merge is recomputed first. |
-| Delivery ACK/content verifies | `ApplyInFlight` | `AppliedVerified` | Owner-visible text contains the agent delta and every observed operator edit. |
+| Delivery ACK/content verifies | `ApplyInFlight` | `AppliedVerified` | Post-apply owner-visible text equals the intended target and contains the agent delta plus every observed operator edit. Editor API success alone is not proof. |
 | Delivery fails, ACK mismatches, expected editor text mismatches, or a newer operator edit appears | `ApplyInFlight` | `EditorDirty`, `DiskAuthoritative`, or `ConflictBlocked` | The stale plan is discarded; the next attempt must re-read source-of-truth and merge again. |
 | Realtime handoff completes | `AppliedVerified` | `EditorQuiescent` or `DiskAuthoritative` | Realtime publishes the verified apply proof and latest source-of-truth text without committing. |
 
@@ -485,8 +485,9 @@ Every document mutation that can affect a session document follows this order:
    disk-authoritative recovery. CRDT remote delivery must compare the live
    editor text with the expected editor text captured before convergence; if the
    editor text advanced, the delivery is stale and must not ACK or mutate.
-8. Verify the post-apply source-of-truth document contains the agent response
-   and still contains every operator-authored line observed before the apply.
+8. Verify the post-apply source-of-truth document equals the intended target,
+   contains the agent response, and still contains every operator-authored line
+   observed before the apply. Editor API success alone is not proof.
 9. Return the verified apply proof and latest source-of-truth text to the
    document turn lifecycle. Do not commit from merge or realtime code.
 

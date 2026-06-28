@@ -198,6 +198,22 @@ describe('patchGuard', () => {
         assert.strictEqual(source.includes('document.lineCount'), false);
     });
 
+    it('ACKs visible editor edits only after the post-apply buffer matches the target', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        const applyStart = source.indexOf('private async applyMinimalTextEdit(');
+        const applyEnd = source.indexOf('private async applyCrdtReplicaText(', applyStart);
+        const body = source.slice(applyStart, applyEnd);
+
+        const applyEditIdx = body.indexOf('const applied = await vscode.workspace.applyEdit(edit);');
+        const postApplyProofIdx = body.indexOf('return applied && document.getText() === targetContent;');
+
+        assert.ok(applyEditIdx >= 0, 'minimal edit helper must observe WorkspaceEdit result');
+        assert.ok(
+            postApplyProofIdx > applyEditIdx,
+            'minimal edit helper must verify the post-apply buffer before ACKing',
+        );
+    });
+
     it('keeps cycle 1779845677327 full-content fixture off visible write paths', () => {
         const cycleFixture = {
             file: '/repo/tasks/agent-doc/agent-doc-bugs2.md',

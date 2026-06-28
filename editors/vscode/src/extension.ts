@@ -2485,7 +2485,8 @@ class PatchWatcher implements vscode.Disposable {
         );
         const edit = new vscode.WorkspaceEdit();
         edit.replace(document.uri, range, replacement.text);
-        return vscode.workspace.applyEdit(edit);
+        const applied = await vscode.workspace.applyEdit(edit);
+        return applied && document.getText() === targetContent;
     }
 
     private async applyCrdtReplicaText(filePath: string, targetContent: string, expectedContent: string): Promise<boolean> {

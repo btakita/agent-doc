@@ -2147,7 +2147,7 @@ internal fun applyMinimalDocumentEditUtil(
 ): Boolean {
     val edit = minimalDocumentEditUtil(before, after) ?: return false
     document.replaceString(edit.start, edit.end, edit.replacement)
-    return true
+    return document.text == after
 }
 
 /**

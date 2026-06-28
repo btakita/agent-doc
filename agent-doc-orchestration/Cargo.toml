@@ -17,8 +17,15 @@ test-support = []
 
 [dependencies]
 agent-doc-core = { path = "../agent-doc-core", version = "0.34.65" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.34.65" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.65" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.65" }
+agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.34.65" }
+agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.65" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.65" }
+agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.34.65" }
+agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.34.65" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.65" }
 lazily = "0.13.1"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }

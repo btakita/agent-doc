@@ -277,66 +277,107 @@ struct WriteArgs {
     /// Write origin identifier for tracing (e.g., "skill", "watch", "stream")
     #[arg(long)]
     origin: Option<String>,
-    /// Add a new pending item at the beginning of the list (repeatable).
+    /// Add a new backlog item at the beginning of the list (repeatable).
     /// Multiple flags in one invocation land in flag order, top-down: the first
-    /// `--pending-add` is topmost (what you read is what you get). For a specific
-    /// interleave with existing items, use `--pending-add-after`/`--pending-add-before`.
+    /// `--backlog-add` is topmost (what you read is what you get). For a specific
+    /// interleave with existing items, use `--backlog-add-after`/`--backlog-add-before`.
     /// Prefix with canonical `id=<custom> ` to preserve a custom id instead of generating one.
     /// Leading `[#custom] ` is also accepted as compatibility input.
-    #[arg(long = "pending-add")]
+    #[arg(long = "backlog-add", alias = "pending-add")]
     pending_add: Vec<String>,
-    /// Add a new pending item to another document's backlog (repeatable pairs: FILE TEXT).
+    /// Add a new backlog item to another document's backlog (repeatable pairs: FILE TEXT).
     /// Prefix TEXT with canonical `id=<custom> ` to preserve a custom id.
-    #[arg(long = "pending-add-to", num_args = 2, value_names = ["FILE", "TEXT"])]
+    #[arg(
+        long = "backlog-add-to",
+        alias = "pending-add-to",
+        num_args = 2,
+        value_names = ["FILE", "TEXT"]
+    )]
     pending_add_to: Vec<String>,
-    /// Add a new gated pending item at the beginning of the list (repeatable).
-    /// Like `--pending-add`, multiple flags land in flag order, top-down (first flag topmost).
+    /// Add a new gated backlog item at the beginning of the list (repeatable).
+    /// Like `--backlog-add`, multiple flags land in flag order, top-down (first flag topmost).
     /// Prefix with canonical `id=<custom> ` to preserve a custom id instead of generating one.
     /// Leading `[#custom] ` is also accepted as compatibility input.
-    #[arg(long = "pending-add-gated")]
+    #[arg(long = "backlog-add-gated", alias = "pending-add-gated")]
     pending_add_gated: Vec<String>,
-    /// Add a new pending item immediately AFTER an existing item (repeatable pairs: ID TEXT).
-    /// Chains build a deterministic order: `--pending-add-after A "B" --pending-add-after B "C"` → A→B→C.
-    #[arg(long = "pending-add-after", num_args = 2, value_names = ["ID", "TEXT"])]
+    /// Add a new backlog item immediately AFTER an existing item (repeatable pairs: ID TEXT).
+    /// Chains build a deterministic order: `--backlog-add-after A "B" --backlog-add-after B "C"` -> A->B->C.
+    #[arg(
+        long = "backlog-add-after",
+        alias = "pending-add-after",
+        num_args = 2,
+        value_names = ["ID", "TEXT"]
+    )]
     pending_add_after: Vec<String>,
-    /// Add a new pending item immediately BEFORE an existing item (repeatable pairs: ID TEXT).
-    #[arg(long = "pending-add-before", num_args = 2, value_names = ["ID", "TEXT"])]
+    /// Add a new backlog item immediately BEFORE an existing item (repeatable pairs: ID TEXT).
+    #[arg(
+        long = "backlog-add-before",
+        alias = "pending-add-before",
+        num_args = 2,
+        value_names = ["ID", "TEXT"]
+    )]
     pending_add_before: Vec<String>,
-    /// Add a new pending item at the END of the active list (repeatable). Alias `--pending-append`.
-    #[arg(long = "pending-add-back", alias = "pending-append")]
+    /// Add a new backlog item at the END of the active list (repeatable). Alias `--backlog-append`.
+    #[arg(
+        long = "backlog-add-back",
+        alias = "pending-add-back",
+        alias = "backlog-append",
+        alias = "pending-append"
+    )]
     pending_add_back: Vec<String>,
+    /// Add a new icebox item at the beginning of the list (repeatable).
+    #[arg(long = "icebox-add")]
+    icebox_add: Vec<String>,
+    /// Add a new icebox item immediately AFTER an existing item (repeatable pairs: ID TEXT).
+    #[arg(long = "icebox-add-after", num_args = 2, value_names = ["ID", "TEXT"])]
+    icebox_add_after: Vec<String>,
+    /// Add a new icebox item immediately BEFORE an existing item (repeatable pairs: ID TEXT).
+    #[arg(long = "icebox-add-before", num_args = 2, value_names = ["ID", "TEXT"])]
+    icebox_add_before: Vec<String>,
+    /// Add a new icebox item at the END of the list (repeatable). Alias `--icebox-append`.
+    #[arg(long = "icebox-add-back", alias = "icebox-append")]
+    icebox_add_back: Vec<String>,
+    /// Edit an icebox item: `id=new text` (repeatable).
+    #[arg(long = "icebox-edit")]
+    icebox_edit: Vec<String>,
+    /// Clear all icebox items.
+    #[arg(long = "icebox-clear")]
+    icebox_clear: bool,
+    /// Reorder icebox items by comma-separated hash ids.
+    #[arg(long = "icebox-reorder")]
+    icebox_reorder: Option<String>,
     /// Mark a backlog or icebox item `[x]` by hash id (repeatable).
     /// `--pending-done` and `--backlog-done` are deprecated aliases.
     #[arg(long = "done", alias = "pending-done", alias = "backlog-done")]
     pending_done: Vec<String>,
-    /// Edit a pending item: `id=new text` (repeatable).
-    #[arg(long = "pending-edit")]
+    /// Edit a backlog item: `id=new text` (repeatable).
+    #[arg(long = "backlog-edit", alias = "pending-edit")]
     pending_edit: Vec<String>,
-    /// Clear all pending items.
-    #[arg(long = "pending-clear")]
+    /// Clear all backlog items.
+    #[arg(long = "backlog-clear", alias = "pending-clear")]
     pending_clear: bool,
-    /// Reorder pending items by comma-separated hash ids.
-    #[arg(long = "pending-reorder")]
+    /// Reorder backlog items by comma-separated hash ids.
+    #[arg(long = "backlog-reorder", alias = "pending-reorder")]
     pending_reorder: Option<String>,
-    /// Transition a pending item to `[/]` (gated) by hash id (repeatable).
+    /// Transition a backlog item to `[/]` (gated) by hash id (repeatable).
     /// Idempotent on already-gated items; errors on `[x]` items.
-    #[arg(long = "pending-gate")]
+    #[arg(long = "backlog-gate", alias = "pending-gate")]
     pending_gate: Vec<String>,
-    /// Transition a pending item from `[/]` back to `[ ]` by hash id (repeatable).
+    /// Transition a backlog item from `[/]` back to `[ ]` by hash id (repeatable).
     /// Errors on `[ ]` or `[x]` items — the source must be gated.
-    #[arg(long = "pending-ungate")]
+    #[arg(long = "backlog-ungate", alias = "pending-ungate")]
     pending_ungate: Vec<String>,
     /// Resolve all items matching a typed gate (e.g., [/release] → [x]).
-    #[arg(long = "pending-resolve-gate")]
+    #[arg(long = "backlog-resolve-gate", alias = "pending-resolve-gate")]
     pending_resolve_gate: Vec<String>,
     /// Set a typed gate on a gated item: `id=gate_type` (e.g., `gqep=release`).
-    #[arg(long = "pending-set-gate-type")]
+    #[arg(long = "backlog-set-gate-type", alias = "pending-set-gate-type")]
     pending_set_gate_type: Vec<String>,
     /// Set a typed proof/disproof verify predicate on a gated item so the gate
     /// auto-resolves from ops.log markers (`#optverify`):
     /// `id=verify=ops_log:<marker>;disproof=ops_log:<text>` (repeatable).
     /// The gate-set timestamp is stamped automatically.
-    #[arg(long = "pending-set-verify")]
+    #[arg(long = "backlog-set-verify", alias = "pending-set-verify")]
     pending_set_verify: Vec<String>,
     /// Add a new gated item directly to the review list (repeatable).
     #[arg(long = "review-add")]
@@ -360,9 +401,9 @@ struct WriteArgs {
         hide = true
     )]
     allow_replace_pending: bool,
-    /// Only mutate pending component — skip stdin reading and exchange synthesis.
-    /// Requires at least one --pending-* flag; incompatible with --template/--stream/--ipc.
-    #[arg(long = "pending-only")]
+    /// Only mutate tracked-work components — skip stdin reading and exchange synthesis.
+    /// Requires at least one backlog/icebox/review mutation flag; incompatible with --template/--stream/--ipc.
+    #[arg(long = "backlog-only", alias = "pending-only")]
     pending_only: bool,
     /// Replace the status component content (repeatable for multi-line).
     #[arg(long = "status")]
@@ -1270,7 +1311,7 @@ enum Commands {
     Notify {
         /// Path to the document
         file: PathBuf,
-        /// Notification message (optional when --pending-add is used)
+        /// Notification message (optional when --backlog-add is used)
         message: Option<String>,
         /// Source document or session
         #[arg(long)]
@@ -1281,14 +1322,14 @@ enum Commands {
         /// Skip git commit after notification
         #[arg(long)]
         no_commit: bool,
-        /// Add a pending item to the target document (repeatable). Auto-creates agent:backlog if absent.
-        #[arg(long = "pending-add")]
+        /// Add a backlog item to the target document (repeatable). Auto-creates agent:backlog if absent.
+        #[arg(long = "backlog-add", alias = "pending-add")]
         pending_add: Vec<String>,
-        /// Add a gated pending item (repeatable). Like --pending-add but assigns [/] instead of [ ].
-        #[arg(long = "pending-add-gated")]
+        /// Add a gated backlog item (repeatable). Like --backlog-add but assigns [/] instead of [ ].
+        #[arg(long = "backlog-add-gated", alias = "pending-add-gated")]
         pending_add_gated: Vec<String>,
         /// Do not auto-create agent:backlog component if absent
-        #[arg(long = "no-create-pending")]
+        #[arg(long = "no-create-backlog", alias = "no-create-pending")]
         no_create_pending: bool,
     },
     /// Print the path to the shared library (libagent_doc.so/dylib/dll)
@@ -1353,6 +1394,16 @@ enum Commands {
     /// Manage the agent:backlog component (`pending` is a deprecated alias)
     #[command(name = "backlog", alias = "pending")]
     Backlog {
+        /// Path to the session document
+        file: PathBuf,
+        /// Bypass editor convergence for explicit recovery/headless writes.
+        #[arg(long)]
+        force_disk: bool,
+        #[command(subcommand)]
+        action: PendingAction,
+    },
+    /// Manage the agent:icebox component
+    Icebox {
         /// Path to the session document
         file: PathBuf,
         /// Bypass editor convergence for explicit recovery/headless writes.
@@ -1856,19 +1907,19 @@ enum HookAction {
 
 #[derive(Subcommand)]
 enum PendingAction {
-    /// Add an item to the pending component (front of list; assigns stable hash id + `[ ]`)
+    /// Add an item to the selected tracked-work component (front of list; assigns stable hash id + `[ ]`)
     Add {
-        /// The pending item description. Prefix with canonical `id=<custom> ` to preserve a custom id.
+        /// The item description. Prefix with canonical `id=<custom> ` to preserve a custom id.
         /// Leading `[#custom] ` is also accepted as compatibility input.
         item: String,
     },
-    /// Add a gated item to the pending component (front of list; assigns stable hash id + `[/]`)
+    /// Add a gated item to the selected tracked-work component (front of list; assigns stable hash id + `[/]`)
     AddGated {
-        /// The pending item description. Prefix with canonical `id=<custom> ` to preserve a custom id.
+        /// The item description. Prefix with canonical `id=<custom> ` to preserve a custom id.
         /// Leading `[#custom] ` is also accepted as compatibility input.
         item: String,
     },
-    /// Remove an item from the pending component
+    /// Remove an item from the selected tracked-work component
     Remove {
         /// Content to match
         target: String,
@@ -1894,14 +1945,14 @@ enum PendingAction {
         /// New item text
         text: String,
     },
-    /// Clear all pending items
+    /// Clear all items
     Clear,
     /// Reorder items by hash id (comma-separated)
     Reorder {
         /// Comma-separated list of hash ids
         ids: String,
     },
-    /// List current pending items
+    /// List current items
     List,
     /// Resolve all items matching a typed gate (e.g., [/release] → [x])
     ResolveGate {
@@ -1955,7 +2006,7 @@ enum QueueAction {
     /// free-text heads (the strike heuristic only consumes one head per
     /// finalize), to drain the answered stragglers instead of re-serving them.
     /// Scoped to free-text heads; id-backed heads must be reaped via `--done`
-    /// / `--pending-gate`, unless `--ack-id` is explicitly acknowledging a
+    /// / `--backlog-gate`, unless `--ack-id` is explicitly acknowledging a
     /// correction head while leaving its open backlog item in place.
     Consume {
         /// Path to the session document
@@ -2671,6 +2722,13 @@ fn main() -> anyhow::Result<()> {
                     pending_add_after: args.pending_add_after,
                     pending_add_before: args.pending_add_before,
                     pending_add_back: args.pending_add_back,
+                    icebox_add: args.icebox_add,
+                    icebox_add_after: args.icebox_add_after,
+                    icebox_add_before: args.icebox_add_before,
+                    icebox_add_back: args.icebox_add_back,
+                    icebox_edit: args.icebox_edit,
+                    icebox_clear: args.icebox_clear,
+                    icebox_reorder: args.icebox_reorder,
                     pending_done: args.pending_done,
                     pending_edit: args.pending_edit,
                     pending_clear: args.pending_clear,
@@ -2722,6 +2780,13 @@ fn main() -> anyhow::Result<()> {
                     pending_add_after: args.pending_add_after,
                     pending_add_before: args.pending_add_before,
                     pending_add_back: args.pending_add_back,
+                    icebox_add: args.icebox_add,
+                    icebox_add_after: args.icebox_add_after,
+                    icebox_add_before: args.icebox_add_before,
+                    icebox_add_back: args.icebox_add_back,
+                    icebox_edit: args.icebox_edit,
+                    icebox_clear: args.icebox_clear,
+                    icebox_reorder: args.icebox_reorder,
                     pending_done: args.pending_done,
                     pending_edit: args.pending_edit,
                     pending_clear: args.pending_clear,
@@ -3693,6 +3758,69 @@ fn main() -> anyhow::Result<()> {
                     }
                     PendingAction::SetVerify { id, spec } => {
                         agent_doc_orchestration::pending_cmd::set_gate_verify(&file, &id, &spec)
+                    }
+                }
+            })
+        }
+        Commands::Icebox {
+            file,
+            force_disk,
+            action,
+        } => {
+            agent_doc_orchestration::pending_cmd::with_force_disk_pending_writes(force_disk, || {
+                match action {
+                    PendingAction::Add { item } => {
+                        agent_doc_orchestration::pending_cmd::icebox_add(&file, &item)
+                    }
+                    PendingAction::AddGated { item: _ } => {
+                        anyhow::bail!(
+                            "agent-doc icebox add-gated is not supported; use `agent-doc review add` for gated review work"
+                        )
+                    }
+                    PendingAction::Remove { target, contains } => {
+                        agent_doc_orchestration::pending_cmd::icebox_remove(
+                            &file, &target, contains,
+                        )
+                    }
+                    PendingAction::Prune => {
+                        agent_doc_orchestration::pending_cmd::icebox_reap(&file)
+                    }
+                    PendingAction::Reap => agent_doc_orchestration::pending_cmd::icebox_reap(&file),
+                    PendingAction::Backfill => {
+                        agent_doc_orchestration::pending_cmd::icebox_backfill(&file)
+                    }
+                    PendingAction::Done { id } => {
+                        agent_doc_orchestration::pending_cmd::done(&file, &id)
+                    }
+                    PendingAction::Edit { id, text } => {
+                        agent_doc_orchestration::pending_cmd::icebox_edit(&file, &id, &text)
+                    }
+                    PendingAction::Clear => {
+                        agent_doc_orchestration::pending_cmd::icebox_clear(&file)
+                    }
+                    PendingAction::Reorder { ids } => {
+                        let ids: Vec<String> = ids
+                            .split(',')
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        agent_doc_orchestration::pending_cmd::icebox_reorder(&file, &ids)
+                    }
+                    PendingAction::List => agent_doc_orchestration::pending_cmd::icebox_list(&file),
+                    PendingAction::ResolveGate { gate_type } => {
+                        anyhow::bail!(
+                            "agent-doc icebox resolve-gate is not supported for parked work (requested gate type `{gate_type}`)"
+                        )
+                    }
+                    PendingAction::SetGateType { id, gate_type } => {
+                        anyhow::bail!(
+                            "agent-doc icebox set-gate-type is not supported for parked work (requested #{id} -> {gate_type})"
+                        )
+                    }
+                    PendingAction::SetVerify { id, spec: _ } => {
+                        anyhow::bail!(
+                            "agent-doc icebox set-verify is not supported for parked work (requested #{id})"
+                        )
                     }
                 }
             })

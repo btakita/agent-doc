@@ -29,6 +29,15 @@
 //! re-exporting these modules via `pub use` shims. Core-backed lib modules
 //! (`component`/`crdt`/`frontmatter`/`project_config`/`template`) are mirrored
 //! here as shims so moved bodies need no `crate::` rewriting.
+//!
+//! The next boundary is to retire this crate as an authority holder. Pure
+//! document projection lives in `agent-doc-document`, turn lifecycle state in
+//! `agent-doc-turn`, shared turn-executor vocabulary in
+//! `agent-doc-turn-executor`, shared tmux facts/effects in the
+//! `agent-doc-tmux` crate family, and tmux-to-turn readiness in
+//! `agent-doc-turn-executor-tmux`. This crate remains a transitional adapter
+//! for harness, git, editor, and remaining command ports while those ports are
+//! split into narrower crates.
 
 // Core-backed shims (mirror the main-crate shims).
 pub mod component;
@@ -36,6 +45,14 @@ pub mod crdt;
 pub mod frontmatter;
 pub mod project_config;
 pub mod template;
+
+pub use agent_doc_document as document;
+pub use agent_doc_tmux as tmux;
+pub use agent_doc_tmux_commands as tmux_commands;
+pub use agent_doc_tmux_io as tmux_io;
+pub use agent_doc_turn as turn;
+pub use agent_doc_turn_executor as turn_executor;
+pub use agent_doc_turn_executor_tmux as turn_executor_tmux;
 
 // Foundation utilities (increments 1–5).
 pub mod config;

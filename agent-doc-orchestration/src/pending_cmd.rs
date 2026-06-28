@@ -1,6 +1,6 @@
 //! # Module: pending_cmd
 //!
-//! CLI subcommands for managing the `agent:backlog` component.
+//! CLI subcommands for managing tracked work components.
 //!
 //! - `agent-doc backlog <FILE> add <item>` — add a backlog item at the beginning
 //!   (supports canonical `id=<custom> ` syntax and compatibility `[#custom] ` input
@@ -8,6 +8,8 @@
 //! - `agent-doc backlog <FILE> remove <target>` — remove by content match
 //! - `agent-doc backlog <FILE> prune` — remove completed items
 //! - `agent-doc backlog <FILE> list` — print backlog items
+//! - `agent-doc icebox <FILE> ...` uses the same granular tracked-work
+//!   operations against the `agent:icebox` component.
 
 use anyhow::{Context, Result};
 use std::cell::Cell;
@@ -15,7 +17,9 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::component;
-use crate::component::{is_backlog_component, is_review_component, is_tracked_work_component};
+use crate::component::{
+    is_backlog_component, is_icebox_component, is_review_component, is_tracked_work_component,
+};
 use crate::pending;
 use crate::snapshot;
 
@@ -89,14 +93,43 @@ fn line_is_legacy_done_item(line: &str) -> bool {
         || after_marker.starts_with("[done]")
 }
 
-fn find_pending_component(file: &Path) -> Result<(String, component::Component)> {
+#[derive(Clone, Copy)]
+enum TrackedList {
+    Backlog,
+    Icebox,
+}
+
+impl TrackedList {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Backlog => "backlog",
+            Self::Icebox => "icebox",
+        }
+    }
+
+    fn matches(self, name: &str) -> bool {
+        match self {
+            Self::Backlog => is_backlog_component(name),
+            Self::Icebox => is_icebox_component(name),
+        }
+    }
+}
+
+fn find_tracked_list_component(
+    file: &Path,
+    list: TrackedList,
+) -> Result<(String, component::Component)> {
     let content = std::fs::read_to_string(file).context("failed to read document")?;
     let components = component::parse(&content).context("failed to parse components")?;
     let comp = components
         .into_iter()
-        .find(|c| is_backlog_component(&c.name))
-        .context("document has no backlog/pending component")?;
+        .find(|c| list.matches(&c.name))
+        .with_context(|| format!("document has no {} component", list.label()))?;
     Ok((content, comp))
+}
+
+fn find_pending_component(file: &Path) -> Result<(String, component::Component)> {
+    find_tracked_list_component(file, TrackedList::Backlog)
 }
 
 fn find_review_component_in_content(content: &str) -> Result<Option<component::Component>> {
@@ -218,6 +251,13 @@ fn canonicalize_component_content(file: &Path, content: &str) -> String {
     canonical
 }
 
+fn canonicalize_tracked_list_content(file: &Path, list: TrackedList, content: &str) -> String {
+    match list {
+        TrackedList::Backlog => canonicalize_component_content(file, content),
+        TrackedList::Icebox => canonicalize_component_content(file, content),
+    }
+}
+
 fn log_symptom_dedupe(file: &Path, surface: &str, id: &str, key: &pending::SymptomDedupeKey) {
     crate::ops_log::log_op(
         file,
@@ -271,18 +311,27 @@ pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     Ok(())
 }
 
+pub fn icebox_add(file: &Path, item: &str) -> Result<()> {
+    add_many_to_list(file, &[item.to_string()], false, TrackedList::Icebox).map(|_| ())
+}
+
 /// Add multiple new items while preserving the caller's flag order, top-down, at
 /// the beginning of the pending list: the first item lands topmost ("what you
 /// read is what you get"). Each individual add prepends to the front, so to keep
 /// flag order top-down we apply the batch in reverse (`#pendaddorder`); the last
 /// item is prepended first and the first item is prepended last, ending up on top.
-pub fn add_many(file: &Path, items: &[String], gated: bool) -> Result<Vec<String>> {
+fn add_many_to_list(
+    file: &Path,
+    items: &[String],
+    gated: bool,
+    list: TrackedList,
+) -> Result<Vec<String>> {
     let mut ids = Vec::with_capacity(items.len());
     // Iterate in reverse so that prepend-each-to-front yields the caller's flag
     // order top-down (first flag topmost). Do NOT change to forward iteration —
     // that reverses N-flag `--pending-add` batches (`#pendaddorder`).
     for item in items.iter().rev() {
-        let (full_content, comp) = find_pending_component(file)?;
+        let (full_content, comp) = find_tracked_list_component(file, list)?;
         reject_colliding_explicit_id(&full_content, item)?;
         let existing = &full_content[comp.open_end..comp.close_start];
         let doc_id = doc_id_for(file);
@@ -293,18 +342,31 @@ pub fn add_many(file: &Path, items: &[String], gated: bool) -> Result<Vec<String
         if outcome.inserted {
             ids.push(outcome.id.clone());
         } else if let Some(key) = outcome.deduped_key.as_ref() {
-            log_symptom_dedupe(file, "backlog", &outcome.id, key);
+            log_symptom_dedupe(file, list.label(), &outcome.id, key);
         }
     }
     ids.reverse();
     Ok(ids)
 }
 
+pub fn add_many(file: &Path, items: &[String], gated: bool) -> Result<Vec<String>> {
+    add_many_to_list(file, items, gated, TrackedList::Backlog)
+}
+
+pub fn icebox_add_many(file: &Path, items: &[String]) -> Result<Vec<String>> {
+    add_many_to_list(file, items, false, TrackedList::Icebox)
+}
+
 /// `#ah0s`: insert a new item at an explicit position relative to the active
 /// list (after/before an anchor id, or at the tail), instead of the front
 /// default. Returns the assigned id.
-fn add_at(file: &Path, item: &str, position: pending::AddPosition<'_>) -> Result<String> {
-    let (full_content, comp) = find_pending_component(file)?;
+fn add_at_to_list(
+    file: &Path,
+    item: &str,
+    position: pending::AddPosition<'_>,
+    list: TrackedList,
+) -> Result<String> {
+    let (full_content, comp) = find_tracked_list_component(file, list)?;
     reject_colliding_explicit_id(&full_content, item)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
@@ -313,9 +375,13 @@ fn add_at(file: &Path, item: &str, position: pending::AddPosition<'_>) -> Result
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     if let Some(key) = outcome.deduped_key.as_ref() {
-        log_symptom_dedupe(file, "backlog", &outcome.id, key);
+        log_symptom_dedupe(file, list.label(), &outcome.id, key);
     }
     Ok(outcome.id)
+}
+
+fn add_at(file: &Path, item: &str, position: pending::AddPosition<'_>) -> Result<String> {
+    add_at_to_list(file, item, position, TrackedList::Backlog)
 }
 
 /// `#ah0s`: `--pending-add-after <id> "<text>"`. Repeatable; chaining
@@ -332,6 +398,28 @@ pub fn add_before(file: &Path, anchor_id: &str, item: &str) -> Result<String> {
 /// `#ah0s`: `--pending-add-back "<text>"` (alias `--pending-append`) — tail insert.
 pub fn add_back(file: &Path, item: &str) -> Result<String> {
     add_at(file, item, pending::AddPosition::Last)
+}
+
+pub fn icebox_add_after(file: &Path, anchor_id: &str, item: &str) -> Result<String> {
+    add_at_to_list(
+        file,
+        item,
+        pending::AddPosition::After(anchor_id),
+        TrackedList::Icebox,
+    )
+}
+
+pub fn icebox_add_before(file: &Path, anchor_id: &str, item: &str) -> Result<String> {
+    add_at_to_list(
+        file,
+        item,
+        pending::AddPosition::Before(anchor_id),
+        TrackedList::Icebox,
+    )
+}
+
+pub fn icebox_add_back(file: &Path, item: &str) -> Result<String> {
+    add_at_to_list(file, item, pending::AddPosition::Last, TrackedList::Icebox)
 }
 
 /// Summary of an `agent-doc review ungate-tasks` run.
@@ -528,18 +616,27 @@ pub fn add_ungate_tasks_for_review(file: &Path) -> Result<UngateTasksReport> {
 }
 
 /// Run lazy backfill over the pending component and write if changed.
-pub fn backfill(file: &Path) -> Result<()> {
-    let (full_content, comp) = find_pending_component(file)?;
+fn backfill_list(file: &Path, list: TrackedList) -> Result<()> {
+    let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
     let (new_content, changed) = pending::backfill(existing, &doc_id, &HashSet::new());
     if !changed {
-        eprintln!("[pending] already canonical — no changes");
+        eprintln!("[{}] already canonical — no changes", list.label());
         return Ok(());
     }
     let new_doc = comp.replace_content(&full_content, &new_content);
     persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
+}
+
+/// Run lazy backfill over the backlog component and write if changed.
+pub fn backfill(file: &Path) -> Result<()> {
+    backfill_list(file, TrackedList::Backlog)
+}
+
+pub fn icebox_backfill(file: &Path) -> Result<()> {
+    backfill_list(file, TrackedList::Icebox)
 }
 
 /// Mark an item `[x]` by id.
@@ -775,19 +872,27 @@ fn gate_in_place(file: &Path, id: &str) -> Result<()> {
 }
 
 /// Edit an item's text, preserving its hash id.
-pub fn edit(file: &Path, id: &str, text: &str) -> Result<()> {
-    let (full_content, comp) = find_pending_component(file)?;
+fn edit_list(file: &Path, list: TrackedList, id: &str, text: &str) -> Result<()> {
+    let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = pending::op_edit(existing, id, text)?;
-    let canonical = canonicalize_component_content(file, &new_content);
+    let canonical = canonicalize_tracked_list_content(file, list, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
 }
 
-/// Clear all items from the pending component.
-pub fn clear(file: &Path) -> Result<()> {
-    let (full_content, comp) = find_pending_component(file)?;
+/// Edit a backlog item's text, preserving its hash id.
+pub fn edit(file: &Path, id: &str, text: &str) -> Result<()> {
+    edit_list(file, TrackedList::Backlog, id, text)
+}
+
+pub fn icebox_edit(file: &Path, id: &str, text: &str) -> Result<()> {
+    edit_list(file, TrackedList::Icebox, id, text)
+}
+
+fn clear_list(file: &Path, list: TrackedList) -> Result<()> {
+    let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = pending::op_clear(existing)?;
     let new_doc = comp.replace_content(&full_content, &new_content);
@@ -795,20 +900,36 @@ pub fn clear(file: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Reorder items by id (comma-separated). Missing ids keep their relative order.
-pub fn reorder(file: &Path, ids: &[String]) -> Result<()> {
-    let (full_content, comp) = find_pending_component(file)?;
+/// Clear all items from the backlog component.
+pub fn clear(file: &Path) -> Result<()> {
+    clear_list(file, TrackedList::Backlog)
+}
+
+pub fn icebox_clear(file: &Path) -> Result<()> {
+    clear_list(file, TrackedList::Icebox)
+}
+
+fn reorder_list(file: &Path, list: TrackedList, ids: &[String]) -> Result<()> {
+    let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = pending::op_reorder(existing, ids)?;
-    let canonical = canonicalize_component_content(file, &new_content);
+    let canonical = canonicalize_tracked_list_content(file, list, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
 }
 
-/// Reap `[x]` items and print removed ids.
-pub fn reap(file: &Path) -> Result<()> {
-    let (full_content, comp) = find_pending_component(file)?;
+/// Reorder backlog items by id (comma-separated). Missing ids keep their relative order.
+pub fn reorder(file: &Path, ids: &[String]) -> Result<()> {
+    reorder_list(file, TrackedList::Backlog, ids)
+}
+
+pub fn icebox_reorder(file: &Path, ids: &[String]) -> Result<()> {
+    reorder_list(file, TrackedList::Icebox, ids)
+}
+
+fn reap_list(file: &Path, list: TrackedList) -> Result<()> {
+    let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
     let (canonical_content, changed) = pending::backfill(existing, &doc_id, &HashSet::new());
@@ -820,10 +941,10 @@ pub fn reap(file: &Path) -> Result<()> {
         new_content
     };
     if !changed && removed.is_empty() {
-        eprintln!("[pending] no [x] items to reap");
+        eprintln!("[{}] no [x] items to reap", list.label());
         return Ok(());
     }
-    let canonical = canonicalize_component_content(file, &final_content);
+    let canonical = canonicalize_tracked_list_content(file, list, &final_content);
     let mut new_doc = comp.replace_content(&full_content, &canonical);
     if !removed_items.is_empty() {
         let archived = crate::preflight::archive_pending_done(file, &new_doc, &removed_items)
@@ -831,28 +952,42 @@ pub fn reap(file: &Path) -> Result<()> {
             .context("failed to archive reaped item(s) to agent:done")?;
         new_doc = archived;
     }
-    if let Some(reconciled) = crate::status_cmd::reconcile_top_backlog_status_content(&new_doc)? {
+    if matches!(list, TrackedList::Backlog)
+        && let Some(reconciled) = crate::status_cmd::reconcile_top_backlog_status_content(&new_doc)?
+    {
         new_doc = reconciled;
     }
     persist_pending_write(file, &full_content, &new_doc)?;
     if changed {
-        eprintln!("[pending] backfilled missing hash ids / checkboxes before reap");
+        eprintln!(
+            "[{}] backfilled missing hash ids / checkboxes before reap",
+            list.label()
+        );
     }
     if removed.is_empty() {
-        eprintln!("[pending] no [x] items to reap");
+        eprintln!("[{}] no [x] items to reap", list.label());
         return Ok(());
     }
     eprintln!(
-        "[pending] reaped {} item(s): {}",
+        "[{}] reaped {} item(s): {}",
+        list.label(),
         removed.len(),
         removed.join(", ")
     );
     Ok(())
 }
 
-/// Remove a pending item by content match.
-pub fn remove(file: &Path, target: &str, contains: bool) -> Result<()> {
-    let (full_content, comp) = find_pending_component(file)?;
+/// Reap `[x]` backlog items and print removed ids.
+pub fn reap(file: &Path) -> Result<()> {
+    reap_list(file, TrackedList::Backlog)
+}
+
+pub fn icebox_reap(file: &Path) -> Result<()> {
+    reap_list(file, TrackedList::Icebox)
+}
+
+fn remove_from_list(file: &Path, list: TrackedList, target: &str, contains: bool) -> Result<()> {
+    let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let lines: Vec<&str> = existing.lines().collect();
     let new_lines: Vec<String> = if contains {
@@ -873,13 +1008,22 @@ pub fn remove(file: &Path, target: &str, contains: bool) -> Result<()> {
     };
 
     if new_lines.len() == lines.len() {
-        eprintln!("[pending] no matching item found");
+        eprintln!("[{}] no matching item found", list.label());
     }
 
     let new_content = new_lines.join("\n");
     let new_doc = comp.replace_content(&full_content, &new_content);
     persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
+}
+
+/// Remove a backlog item by content match.
+pub fn remove(file: &Path, target: &str, contains: bool) -> Result<()> {
+    remove_from_list(file, TrackedList::Backlog, target, contains)
+}
+
+pub fn icebox_remove(file: &Path, target: &str, contains: bool) -> Result<()> {
+    remove_from_list(file, TrackedList::Icebox, target, contains)
 }
 
 /// Remove completed items (lines with [x], [done], or starting with ✅).
@@ -1032,13 +1176,12 @@ pub fn resolve_gate_scan(gate_type: &str, scope: &Path) -> Result<usize> {
     Ok(total)
 }
 
-/// List current pending items.
-pub fn list(file: &Path) -> Result<()> {
-    let (full_content, comp) = find_pending_component(file)?;
+fn list_items(file: &Path, list: TrackedList) -> Result<()> {
+    let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
 
     if existing.trim().is_empty() {
-        println!("(no pending items)");
+        println!("(no {} items)", list.label());
         return Ok(());
     }
 
@@ -1049,6 +1192,15 @@ pub fn list(file: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// List current backlog items.
+pub fn list(file: &Path) -> Result<()> {
+    list_items(file, TrackedList::Backlog)
+}
+
+pub fn icebox_list(file: &Path) -> Result<()> {
+    list_items(file, TrackedList::Icebox)
 }
 
 #[cfg(test)]

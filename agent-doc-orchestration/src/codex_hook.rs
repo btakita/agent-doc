@@ -1862,16 +1862,6 @@ Done.\n\
         doc
     }
 
-    fn write_nested_doc(dir: &tempfile::TempDir) -> PathBuf {
-        let nested = dir.path().join("nested");
-        fs::create_dir_all(nested.join(".agent-doc")).unwrap();
-        let doc = nested.join("task.md");
-        let content = "---\nsession: sid\n---\n\n## User\n\nHello\n";
-        fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
-        doc
-    }
-
     fn write_nested_template_doc(dir: &tempfile::TempDir) -> PathBuf {
         let nested = dir.path().join("nested");
         fs::create_dir_all(nested.join(".agent-doc")).unwrap();

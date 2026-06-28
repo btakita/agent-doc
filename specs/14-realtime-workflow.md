@@ -73,6 +73,17 @@ it is not operator intent, not queue identity, and not an independent scheduling
 input. Realtime must update the document so every actively running HEAD carries
 the `🚧` marker, and no inactive/drained head carries it. Cosmetic markers such
 as `🚧`, `:pushpin:`, and `:round_pushpin:` do not change selected head identity.
+If the operator moves `🚧` in the current realtime source epoch, realtime treats
+that as a retarget request, validates it through the same auto-DAG dependency
+projection, and projects `🚧` onto the selected head plus required prerequisites.
+Stale markers left from an older projection are not retarget intent unless the
+current diff/source epoch shows the marker move.
+
+The pure queue marker and active-head projection rules live in
+`agent-doc-document`. Realtime scheduling consumes those pure functions; turn
+lifecycle code consumes the selected-head projection. `agent-doc-orchestration`
+may temporarily adapt existing parser and IO surfaces, but it must not be the
+long-term owner of `🚧` semantics.
 
 | Operator edit | Realtime queue effect | Current turn effect |
 |---|---|---|
@@ -114,6 +125,51 @@ This rule separates queue-state convergence from turn lifecycle. Realtime may
 apply and verify queue projection updates, but it must not commit them. The
 turn lifecycle decides whether the verified state is committed; see
 [Turn Lifecycle Authority](15-turn-lifecycle.md).
+
+## Element Models
+
+The realtime document model is composed from per-element realtime models. Each
+supported `agent:*` element gets a small pure crate under the
+`agent-doc-element-*` family:
+
+| Element crate | Element | Local realtime model | Composition role |
+|---|---|---|---|
+| `agent-doc-element-exchange` | `agent:exchange` | prompt/response exchange state | local shared surface |
+| `agent-doc-element-boundary` | `agent:boundary:*` | inline response boundary marker | projection consumed by exchange/turn closeout |
+| `agent-doc-element-queue` | `agent:queue` | active heads, pins, priorities, auto-DAG ordering, `🚧` projection | consumer/projection of runnable work |
+| `agent-doc-element-backlog` | `agent:backlog` (`agent:pending` alias) | tracked runnable work items | producer for queue projection |
+| `agent-doc-element-review` | `agent:review` | tracked gated work items | local gate state |
+| `agent-doc-element-icebox` | `agent:icebox` | tracked parked work items | local parked state, not queue producer |
+| `agent-doc-element-done` | `agent:done` | completed-work archive state | archive target |
+| `agent-doc-element-status` | `agent:status` | status projection | observer/projection |
+| `agent-doc-element-signals` | `agent:signals` | signal definitions and readings | observer across document/runtime models |
+| `agent-doc-element-unknown` | unregistered `agent:*` components | generic operator-authoritative component text | local safe fallback |
+
+The base `agent-doc-element` crate defines descriptor vocabulary: marker
+names, aliases, source, local realtime model, composition role, write policy,
+and authority. `agent-doc-element-registry` composes the built-in
+descriptors. These crates are pure: they must not read/write files, open IPC,
+run tmux, mutate snapshots, dispatch agents, or commit.
+
+`agent-doc-document` composes element models and owns cross-element invariants:
+backlog-to-queue sync, active-head projection, auto-DAG recomputation,
+tracked-work archive routing, and signal observations that depend on queue or
+turn state. Element crates own local rules only. For example, backlog and
+icebox can share a tracked-item model, but only backlog is a runnable work
+producer; icebox is parked and must not mirror into `agent:queue`.
+
+`agent-doc-element-unknown` is not a reserved `agent:unknown` document marker.
+It is an internal fallback classification for an `agent:*` component whose name
+is not known to built-in code or registered plugins. The fallback is
+operator-authoritative and merge-only: realtime may preserve and carry the
+content, but it must not perform semantic mutations against it.
+
+Plugin-defined custom elements should register additional element descriptors
+against the same vocabulary. Plugin loading, version checks, permissions, and
+any effectful plugin execution are scheduled for a later runtime/plugin crate.
+A plugin element still has to declare its authority and write policy up front.
+Until that descriptor is registered, the unknown fallback preserves
+operator-visible text.
 
 ## Disk Visibility And Durability
 
@@ -430,6 +486,21 @@ leave a verified realtime merge uncommitted, such as a compact preview, a retry
 handoff, or an operator-selected no-commit flow. Saving backup/audit state can
 be part of lifecycle closeout, but backup writes are not realtime authority.
 
+## Document Projection Crate Boundary
+
+`agent-doc-document` owns pure document projections that can be computed from
+document text and typed facts without disk, git, editors, tmux, clocks, or turn
+state. Current responsibilities include:
+
+- queue in-progress marker identity and projection;
+- active HEAD projection from queue rows, marker-retarget requests, and
+  auto-DAG prerequisite expansion;
+- future pure parse/document views used by realtime diagnostics.
+
+`agent-doc-document` does not commit, dispatch turns, run repair, call tmux,
+or decide lifecycle closeout. It returns document-state facts for
+`agent-doc-realtime` and `agent-doc-turn` to consume.
+
 ## Merge Crate Boundary
 
 The pure boundary is the `agent-doc-merge` crate. It owns document merge,
@@ -481,8 +552,18 @@ but the hot path reads the lazily-backed projection when deciding:
 
 Cycle state remains separate. It may request work or retain a captured response,
 but it must not carry realtime document authority. Any future
-`agent-doc-realtime` crate should therefore depend on `agent-doc-merge` for pure
-merge semantics and on lazily-rs for its state machine/projection substrate.
+`agent-doc-realtime` crate should therefore depend on `agent-doc-document` for
+pure document projections, `agent-doc-merge` for pure merge semantics,
+`agent-doc-turn-executor`/executor-specific model crates for dispatch-readiness
+facts, `agent-doc-tmux` for shared tmux observations where tmux is the active
+executor family, `agent-doc-supervisor` for supervisor realtime observations and
+pure lifecycle decisions, and lazily-rs for its state machine/projection
+substrate.
+Tmux command construction and subprocess effects remain outside the realtime
+authority core in `agent-doc-tmux-commands` and `agent-doc-tmux-io`.
+Supervisor spawn/kill/reexec/socket effects belong in
+`agent-doc-supervisor-process`, while durable project control-plane RPC/CAS
+belongs in `agent-doc-controller`.
 
 ## Forbidden Shapes
 

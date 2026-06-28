@@ -1783,7 +1783,7 @@ pub fn stash_ttl_prune_targets(candidates: &[StashTtlCandidate], ttl_secs: u64) 
 #[cfg(test)]
 mod th {
     use super::*;
-    use sessions::{IsolatedTmux, SessionEntry, SessionRegistry};
+    use sessions::{IsolatedTmux, SessionEntry};
     pub(crate) static TMUX_START_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
     pub(crate) struct ScopedCurrentDir {
         prev_cwd: std::path::PathBuf,
@@ -2083,8 +2083,7 @@ mod th {
 }
 #[cfg(test)]
 pub(crate) use th::{
-    ScopedCurrentDir, TMUX_START_MUTEX, drive_pane_to_retained_dead, launch_mock_agent_doc,
-    mock_agent_prompt_visible, send_keys_with_retry, test_cwd, test_entry, tmux_start_lock,
+    ScopedCurrentDir, drive_pane_to_retained_dead, launch_mock_agent_doc, test_cwd, test_entry,
     wait_for_pane_contains, wait_for_pane_current_command, wait_for_pane_dead,
     wait_for_pane_in_stash_window, wait_for_pane_removed, wait_for_process_pid, wait_for_shell,
     wait_for_window_relation, write_mock_agent_doc,

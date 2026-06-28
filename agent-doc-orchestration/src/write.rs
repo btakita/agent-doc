@@ -260,6 +260,19 @@ pub struct CommandOptions {
     pub pending_add_before: Vec<String>,
     /// `#ah0s`: tail-insert items (`--pending-add-back` / `--pending-append`).
     pub pending_add_back: Vec<String>,
+    pub icebox_add: Vec<String>,
+    /// Repeated `<id> <text>` pairs — insert after the anchor id in `agent:icebox`.
+    pub icebox_add_after: Vec<String>,
+    /// Repeated `<id> <text>` pairs — insert before the anchor id in `agent:icebox`.
+    pub icebox_add_before: Vec<String>,
+    /// Tail-insert items into `agent:icebox`.
+    pub icebox_add_back: Vec<String>,
+    /// Edit an icebox item: `id=new text` (repeatable).
+    pub icebox_edit: Vec<String>,
+    /// Clear all icebox items.
+    pub icebox_clear: bool,
+    /// Reorder icebox items by comma-separated hash ids.
+    pub icebox_reorder: Option<String>,
     pub pending_done: Vec<String>,
     pub pending_edit: Vec<String>,
     pub pending_clear: bool,
@@ -1168,36 +1181,58 @@ fn build_rerun_command_base(options: &CommandOptions, commit_mode: CommitMode) -
         args.push(origin.clone());
     }
     for value in &options.pending_add {
-        args.push("--pending-add".to_string());
+        args.push("--backlog-add".to_string());
         args.push(value.clone());
     }
     for pair in options.pending_add_to.chunks(2) {
         if let [target, value] = pair {
-            args.push("--pending-add-to".to_string());
+            args.push("--backlog-add-to".to_string());
             args.push(target.clone());
             args.push(value.clone());
         }
     }
     for value in &options.pending_add_gated {
-        args.push("--pending-add-gated".to_string());
+        args.push("--backlog-add-gated".to_string());
         args.push(value.clone());
     }
     for pair in options.pending_add_after.chunks(2) {
         if let [anchor, value] = pair {
-            args.push("--pending-add-after".to_string());
+            args.push("--backlog-add-after".to_string());
             args.push(anchor.clone());
             args.push(value.clone());
         }
     }
     for pair in options.pending_add_before.chunks(2) {
         if let [anchor, value] = pair {
-            args.push("--pending-add-before".to_string());
+            args.push("--backlog-add-before".to_string());
             args.push(anchor.clone());
             args.push(value.clone());
         }
     }
     for value in &options.pending_add_back {
-        args.push("--pending-add-back".to_string());
+        args.push("--backlog-add-back".to_string());
+        args.push(value.clone());
+    }
+    for value in &options.icebox_add {
+        args.push("--icebox-add".to_string());
+        args.push(value.clone());
+    }
+    for pair in options.icebox_add_after.chunks(2) {
+        if let [anchor, value] = pair {
+            args.push("--icebox-add-after".to_string());
+            args.push(anchor.clone());
+            args.push(value.clone());
+        }
+    }
+    for pair in options.icebox_add_before.chunks(2) {
+        if let [anchor, value] = pair {
+            args.push("--icebox-add-before".to_string());
+            args.push(anchor.clone());
+            args.push(value.clone());
+        }
+    }
+    for value in &options.icebox_add_back {
+        args.push("--icebox-add-back".to_string());
         args.push(value.clone());
     }
     for value in &options.pending_done {
@@ -1205,34 +1240,34 @@ fn build_rerun_command_base(options: &CommandOptions, commit_mode: CommitMode) -
         args.push(value.clone());
     }
     for value in &options.pending_edit {
-        args.push("--pending-edit".to_string());
+        args.push("--backlog-edit".to_string());
         args.push(value.clone());
     }
     if options.pending_clear {
-        args.push("--pending-clear".to_string());
+        args.push("--backlog-clear".to_string());
     }
     if let Some(value) = &options.pending_reorder {
-        args.push("--pending-reorder".to_string());
+        args.push("--backlog-reorder".to_string());
         args.push(value.clone());
     }
     for value in &options.pending_gate {
-        args.push("--pending-gate".to_string());
+        args.push("--backlog-gate".to_string());
         args.push(value.clone());
     }
     for value in &options.pending_ungate {
-        args.push("--pending-ungate".to_string());
+        args.push("--backlog-ungate".to_string());
         args.push(value.clone());
     }
     for value in &options.pending_resolve_gate {
-        args.push("--pending-resolve-gate".to_string());
+        args.push("--backlog-resolve-gate".to_string());
         args.push(value.clone());
     }
     for value in &options.pending_set_gate_type {
-        args.push("--pending-set-gate-type".to_string());
+        args.push("--backlog-set-gate-type".to_string());
         args.push(value.clone());
     }
     for value in &options.pending_set_verify {
-        args.push("--pending-set-verify".to_string());
+        args.push("--backlog-set-verify".to_string());
         args.push(value.clone());
     }
     for value in &options.review_add {
@@ -1247,7 +1282,7 @@ fn build_rerun_command_base(options: &CommandOptions, commit_mode: CommitMode) -
         args.push("--allow-replace-pending".to_string());
     }
     if options.pending_only {
-        args.push("--pending-only".to_string());
+        args.push("--backlog-only".to_string());
     }
     if let Some(status) = &options.status {
         args.push("--status".to_string());
@@ -1459,7 +1494,7 @@ fn guard_no_explicit_baseline_replay_after_committed_cycle(
 
 fn grouped_pending_add_to(raw: &[String]) -> Result<Vec<(PathBuf, Vec<String>)>> {
     if !raw.len().is_multiple_of(2) {
-        anyhow::bail!("--pending-add-to expects repeated FILE TEXT pairs");
+        anyhow::bail!("--backlog-add-to expects repeated FILE TEXT pairs");
     }
 
     let mut grouped: Vec<(PathBuf, Vec<String>)> = Vec::new();
@@ -1478,19 +1513,19 @@ fn grouped_pending_add_to(raw: &[String]) -> Result<Vec<(PathBuf, Vec<String>)>>
 fn ensure_pending_add_target(target: &Path) -> Result<()> {
     if !target.exists() {
         anyhow::bail!(
-            "--pending-add-to target file not found: {}",
+            "--backlog-add-to target file not found (also --pending-add-to target file not found): {}",
             target.display()
         );
     }
     let content = std::fs::read_to_string(target).with_context(|| {
         format!(
-            "failed to read --pending-add-to target {}",
+            "failed to read --backlog-add-to target {}",
             target.display()
         )
     })?;
     let components = crate::component::parse(&content).with_context(|| {
         format!(
-            "failed to parse --pending-add-to target {}",
+            "failed to parse --backlog-add-to target {}",
             target.display()
         )
     })?;
@@ -1499,7 +1534,7 @@ fn ensure_pending_add_target(target: &Path) -> Result<()> {
         .any(|component| crate::component::is_backlog_component(&component.name))
     {
         anyhow::bail!(
-            "--pending-add-to target {} has no agent:backlog/agent:pending component",
+            "--backlog-add-to target {} has no agent:backlog/agent:pending component",
             target.display()
         );
     }
@@ -1585,7 +1620,7 @@ fn enforce_review_done_guard(file: &Path, id: &str) -> Result<()> {
 
     let normalized = crate::pending::normalize_pending_id(id);
     let message = format!(
-        "review_done_guard: --done #{} resolved from agent:{} instead of agent:review; run --pending-gate {} first or set review_done_guard = \"off\"",
+        "review_done_guard: --done #{} resolved from agent:{} instead of agent:review; run --backlog-gate {} first or set review_done_guard = \"off\"",
         normalized, component_name, normalized
     );
     match mode {
@@ -1737,6 +1772,13 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         || !options.pending_add_after.is_empty()
         || !options.pending_add_before.is_empty()
         || !options.pending_add_back.is_empty()
+        || !options.icebox_add.is_empty()
+        || !options.icebox_add_after.is_empty()
+        || !options.icebox_add_before.is_empty()
+        || !options.icebox_add_back.is_empty()
+        || !options.icebox_edit.is_empty()
+        || options.icebox_clear
+        || options.icebox_reorder.is_some()
         || !options.pending_done.is_empty()
         || !options.pending_edit.is_empty()
         || options.pending_clear
@@ -1752,16 +1794,16 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         || !options.review_resolve.is_empty();
 
     if options.pending_only && !has_pending_ops {
-        anyhow::bail!("--pending-only requires at least one --pending-* flag");
+        anyhow::bail!("--backlog-only requires at least one backlog/icebox/review mutation flag");
     }
     if options.pending_only && (options.is_template || options.is_stream || options.is_ipc) {
-        anyhow::bail!("--pending-only cannot be combined with --template, --stream, or --ipc");
+        anyhow::bail!("--backlog-only cannot be combined with --template, --stream, or --ipc");
     }
     if options.pending_only && commit_mode == CommitMode::Required {
-        anyhow::bail!("finalize does not support --pending-only");
+        anyhow::bail!("finalize does not support --backlog-only");
     }
     if !options.pending_add_to.len().is_multiple_of(2) {
-        anyhow::bail!("--pending-add-to expects repeated FILE TEXT pairs");
+        anyhow::bail!("--backlog-add-to expects repeated FILE TEXT pairs");
     }
     if options.commit_sibling.len() != options.commit_sibling_message.len() {
         anyhow::bail!(
@@ -1805,6 +1847,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             if options.pending_clear {
                 crate::pending_cmd::clear(file)?;
             }
+            if options.icebox_clear {
+                crate::pending_cmd::icebox_clear(file)?;
+            }
             // `#opsproof-samecycle-add`: track ids added this cycle so post-commit
             // ops-proof auto-completion never reaps a brand-new same-cycle add.
             let mut same_cycle_added_ids: Vec<String> =
@@ -1814,7 +1859,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 ensure_pending_add_target(target)?;
                 crate::pending_cmd::add_many(target, items, false).with_context(|| {
                     format!(
-                        "failed to apply --pending-add-to target {}",
+                        "failed to apply --backlog-add-to target {}",
                         target.display()
                     )
                 })?;
@@ -1828,23 +1873,51 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             // the front-insert default so anchor ids added this same cycle resolve.
             for pair in options.pending_add_after.chunks(2) {
                 if let [anchor, text] = pair {
-                    crate::pending_cmd::add_after(file, anchor, text)
-                        .with_context(|| format!("failed to apply --pending-add-after {anchor}"))?;
+                    let id = crate::pending_cmd::add_after(file, anchor, text)
+                        .with_context(|| format!("failed to apply --backlog-add-after {anchor}"))?;
+                    same_cycle_added_ids.push(id);
                 } else {
-                    anyhow::bail!("--pending-add-after expects repeated ID TEXT pairs");
+                    anyhow::bail!("--backlog-add-after expects repeated ID TEXT pairs");
                 }
             }
             for pair in options.pending_add_before.chunks(2) {
                 if let [anchor, text] = pair {
-                    crate::pending_cmd::add_before(file, anchor, text).with_context(|| {
-                        format!("failed to apply --pending-add-before {anchor}")
-                    })?;
+                    let id =
+                        crate::pending_cmd::add_before(file, anchor, text).with_context(|| {
+                            format!("failed to apply --backlog-add-before {anchor}")
+                        })?;
+                    same_cycle_added_ids.push(id);
                 } else {
-                    anyhow::bail!("--pending-add-before expects repeated ID TEXT pairs");
+                    anyhow::bail!("--backlog-add-before expects repeated ID TEXT pairs");
                 }
             }
             for text in &options.pending_add_back {
-                crate::pending_cmd::add_back(file, text)?;
+                same_cycle_added_ids.push(crate::pending_cmd::add_back(file, text)?);
+            }
+            same_cycle_added_ids.extend(crate::pending_cmd::icebox_add_many(
+                file,
+                &options.icebox_add,
+            )?);
+            for pair in options.icebox_add_after.chunks(2) {
+                if let [anchor, text] = pair {
+                    let id = crate::pending_cmd::icebox_add_after(file, anchor, text)
+                        .with_context(|| format!("failed to apply --icebox-add-after {anchor}"))?;
+                    same_cycle_added_ids.push(id);
+                } else {
+                    anyhow::bail!("--icebox-add-after expects repeated ID TEXT pairs");
+                }
+            }
+            for pair in options.icebox_add_before.chunks(2) {
+                if let [anchor, text] = pair {
+                    let id = crate::pending_cmd::icebox_add_before(file, anchor, text)
+                        .with_context(|| format!("failed to apply --icebox-add-before {anchor}"))?;
+                    same_cycle_added_ids.push(id);
+                } else {
+                    anyhow::bail!("--icebox-add-before expects repeated ID TEXT pairs");
+                }
+            }
+            for text in &options.icebox_add_back {
+                same_cycle_added_ids.push(crate::pending_cmd::icebox_add_back(file, text)?);
             }
             if !options.pending_add.is_empty()
                 || !options.pending_add_to.is_empty()
@@ -1852,6 +1925,10 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 || !options.pending_add_after.is_empty()
                 || !options.pending_add_before.is_empty()
                 || !options.pending_add_back.is_empty()
+                || !options.icebox_add.is_empty()
+                || !options.icebox_add_after.is_empty()
+                || !options.icebox_add_before.is_empty()
+                || !options.icebox_add_back.is_empty()
             {
                 crate::cycle_state::mark_pending_mutations(file)?;
                 crate::cycle_state::mark_pending_added(file)?;
@@ -1862,8 +1939,14 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             for pair in &options.pending_edit {
                 let (id, text) = pair
                     .split_once('=')
-                    .with_context(|| format!("--pending-edit expects 'id=text', got: {}", pair))?;
+                    .with_context(|| format!("--backlog-edit expects 'id=text', got: {}", pair))?;
                 crate::pending_cmd::edit(file, id, text)?;
+            }
+            for pair in &options.icebox_edit {
+                let (id, text) = pair
+                    .split_once('=')
+                    .with_context(|| format!("--icebox-edit expects 'id=text', got: {}", pair))?;
+                crate::pending_cmd::icebox_edit(file, id, text)?;
             }
             for id in &options.pending_gate {
                 crate::pending_cmd::gate(file, id)?;
@@ -1873,14 +1956,14 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             }
             for pair in &options.pending_set_gate_type {
                 let (id, gt) = pair.split_once('=').with_context(|| {
-                    format!("--pending-set-gate-type expects 'id=type', got: {}", pair)
+                    format!("--backlog-set-gate-type expects 'id=type', got: {}", pair)
                 })?;
                 crate::pending_cmd::set_gate_type(file, id, gt)?;
             }
             for pair in &options.pending_set_verify {
                 let (id, spec) = pair.split_once('=').with_context(|| {
                     format!(
-                        "--pending-set-verify expects 'id=<verify/disproof predicate spec>', got: {}",
+                        "--backlog-set-verify expects 'id=<verify/disproof predicate spec>', got: {}",
                         pair
                     )
                 })?;
@@ -1931,6 +2014,14 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                     .collect();
                 crate::pending_cmd::reorder(file, &ids)?;
             }
+            if let Some(ref order) = options.icebox_reorder {
+                let ids: Vec<String> = order
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                crate::pending_cmd::icebox_reorder(file, &ids)?;
+            }
             if !pending_kept_open_ids.is_empty() {
                 crate::cycle_state::record_pending_kept_open_ids(file, &pending_kept_open_ids)?;
             }
@@ -1956,6 +2047,13 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         has_pending_add: !options.pending_add.is_empty()
             || !options.pending_add_to.is_empty()
             || !options.pending_add_gated.is_empty()
+            || !options.pending_add_after.is_empty()
+            || !options.pending_add_before.is_empty()
+            || !options.pending_add_back.is_empty()
+            || !options.icebox_add.is_empty()
+            || !options.icebox_add_after.is_empty()
+            || !options.icebox_add_before.is_empty()
+            || !options.icebox_add_back.is_empty()
             || !options.review_add.is_empty(),
         has_pending_done: !options.pending_done.is_empty(),
         has_pending_mutation: has_pending_ops,
@@ -5188,6 +5286,50 @@ mod tests {
             "force-disk maintenance should leave an attributable transport log:\n{log}"
         );
     }
+
+    #[test]
+    fn closeout_pending_maintenance_skips_status_only_housekeeping_with_active_listener() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let source = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Ready. Top backlog item: #old.\n",
+            "<!-- /agent:status -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#new] Keep me\n",
+            "<!-- /agent:backlog -->\n",
+        )
+        .to_string();
+        fs::write(&doc, &source).unwrap();
+        snapshot::save(&doc, &source).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&source), Some(&source)).unwrap();
+        crate::capture::capture_response(&doc, "Done.").unwrap();
+
+        let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
+        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        crate::plugin_owner::write_plugin_owner_lease_for_test(
+            doc.to_str().unwrap(),
+            std::process::id(),
+        );
+
+        run_closeout_pending_maintenance(&doc, CommitMode::Required, false)
+            .expect("status-only housekeeping should not block response closeout");
+
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            source,
+            "closeout skip must leave visible operator-owned document text untouched"
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("closeout_pending_maintenance_skipped")
+                && log.contains("basis=no_tracked_work_closeout"),
+            "skip should leave an attributable ops-log entry:\n{log}"
+        );
+    }
+
     #[test]
     fn visible_write_guard_blocks_when_current_changed_after_merge() {
         let dir = TempDir::new().unwrap();
@@ -6341,6 +6483,110 @@ scratch
             fs::read_to_string(&doc).unwrap(),
             ack_content,
             "visible live prompt should remain in the working tree for the next cycle"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            !log.contains("snapshot_saved_file_ipc"),
+            "unsafe snapshot adoption must not be saved after an unmaterialized response:\n{log}"
+        );
+    }
+
+    #[test]
+    fn file_ipc_ack_content_partial_exchange_word_requires_visible_repair() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let before = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "operator-partial-wo\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_ours = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let ack_content = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "operator-partial-wo\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, before).unwrap();
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let watcher_dir = patches_dir.clone();
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let doc_for_watcher = doc.clone();
+        let ack_for_watcher = ack_content.to_string();
+        let watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
+                    continue;
+                };
+                if let Some(Ok(entry)) = entries.next() {
+                    if let Ok(text) = fs::read_to_string(entry.path())
+                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                        && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                    {
+                        let _ = fs::write(&doc_for_watcher, &ack_for_watcher);
+                        let _ = fs::write(ack_dir.join(format!("{pid}.md")), &ack_for_watcher);
+                    }
+                    let _ = fs::remove_file(entry.path());
+                    return;
+                }
+            }
+        });
+
+        let patch = crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: Please reply — gpt-5\n\nAnswered.",
+        );
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(baseline),
+            Some(content_ours),
+            None,
+            Some("patch-partial-exchange-word"),
+        );
+        watcher.join().unwrap();
+
+        let result = result.unwrap();
+        assert!(
+            !result.success,
+            "partial operator text without response materialization must not close out successfully"
+        );
+        assert_ne!(
+            snapshot::load(&doc).unwrap().as_deref(),
+            Some(content_ours),
+            "snapshot must not silently advance to content_ours when the visible editor/worktree still holds a partial operator word"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            ack_content,
+            "visible partial operator word should remain in the working tree for the next cycle"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(

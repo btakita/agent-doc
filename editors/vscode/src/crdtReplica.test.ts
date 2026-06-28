@@ -52,12 +52,14 @@ class FakeTransport implements ReplicaTransport {
     pending: ReplicaRemoteUpdate[] = [];
     acked: Array<{ patchId: string; generation: number }> = [];
     deregistered: string[] = [];
+    broadcastGate: Promise<void> | undefined;
 
     async register(): Promise<{ clientId: number; bootstrap?: Uint8Array | null }> {
         return { clientId: 42, bootstrap: Buffer.from([9]) };
     }
 
     async broadcastUpdate(filePath: string, identity: string, update: Uint8Array): Promise<void> {
+        if (this.broadcastGate) await this.broadcastGate;
         this.broadcasts.push({ filePath, identity, update: Buffer.from(update) });
     }
 
@@ -255,6 +257,51 @@ describe('crdt replica manager', () => {
         await manager.pollRemoteUpdates();
 
         assert.deepStrictEqual(transport.acked, []);
+    });
+
+    it('defers remote apply while a local delta is still forwarding', async () => {
+        const node = new FakeNode();
+        const transport = new FakeTransport();
+        const filePath = '/work/plan.md';
+        const applied: string[] = [];
+        let releaseBroadcast!: () => void;
+        transport.broadcastGate = new Promise<void>((resolve) => {
+            releaseBroadcast = resolve;
+        });
+        transport.pending = [{
+            patchId: 'crdt:1:42:7',
+            origin: 1,
+            target: 42,
+            generation: 7,
+            update: Buffer.from([7]),
+        }];
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => node,
+            listDocuments: () => [],
+            applyText: async (_file, text) => {
+                applied.push(text);
+                return true;
+            },
+        });
+
+        assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
+        const localForward = manager.handleLocalChangeDelta(filePath, [
+            { rangeOffset: 4, rangeLength: 0, text: ' typed' },
+        ]);
+
+        await manager.pollRemoteUpdates();
+        assert.deepStrictEqual(applied, []);
+        assert.deepStrictEqual(transport.acked, []);
+
+        releaseBroadcast();
+        await localForward;
+        await manager.pollRemoteUpdates();
+
+        assert.deepStrictEqual(applied, ['remote text']);
+        assert.deepStrictEqual(transport.acked, [{ patchId: 'crdt:1:42:7', generation: 7 }]);
     });
 });
 

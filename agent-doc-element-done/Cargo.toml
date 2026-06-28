@@ -1,0 +1,13 @@
+[package]
+name = "agent-doc-element-done"
+version = "0.34.65"
+edition = "2024"
+description = "Done/archive element descriptor for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_element_done"
+
+[dependencies]
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.65" }

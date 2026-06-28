@@ -2409,8 +2409,8 @@ mod tests {
     }
 
     #[test]
-    fn bundled_skill_contains_pending_capture_rules() {
-        assert!(SKILL_TEMPLATE.contains("Pending capture rule"));
+    fn bundled_skill_contains_backlog_capture_rules() {
+        assert!(SKILL_TEMPLATE.contains("Backlog capture rule"));
         assert!(SKILL_TEMPLATE.contains("[recommended]"));
         assert!(SKILL_TEMPLATE.contains("beginning of `agent:backlog`"));
         assert!(SKILL_TEMPLATE.contains("adjacent to its predecessor"));
@@ -2889,16 +2889,16 @@ mod tests {
     }
 
     #[test]
-    fn pending_ops_runbook_content_contains_pending_capture_rules() {
+    fn pending_ops_runbook_content_contains_backlog_capture_rules() {
         let (_, content) = BUNDLED_RUNBOOKS
             .iter()
             .find(|(name, _)| *name == "pending-ops.md")
             .expect("pending-ops.md not found");
-        assert!(content.contains("beginning of the list"));
+        assert!(content.contains("beginning of the backlog"));
         assert!(content.contains("[recommended]"));
         assert!(content.contains("preserve the order you presented them in"));
         assert!(content.contains("follow-on step from an ordered batch"));
-        assert!(content.contains("--pending-reorder gkke,9pw9,step3"));
+        assert!(content.contains("--backlog-reorder gkke,9pw9,step3"));
         assert!(content.contains("Existing `do #id` work that completed this cycle"));
         assert!(content.contains("--done <id>"));
     }

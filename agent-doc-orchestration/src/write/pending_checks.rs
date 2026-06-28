@@ -875,11 +875,49 @@ pub(crate) fn run_closeout_pending_maintenance(
     if commit_mode != CommitMode::Required {
         return Ok(());
     }
+    if !closeout_pending_maintenance_required(file)? {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "closeout_pending_maintenance_skipped file={} basis=no_tracked_work_closeout",
+                file.display()
+            ),
+        );
+        return Ok(());
+    }
     if force_disk {
         crate::preflight::run_pending_maintenance_force_disk(file).map(|_| ())
     } else {
         crate::preflight::run_pending_maintenance(file).map(|_| ())
     }
+}
+
+fn closeout_pending_maintenance_required(file: &Path) -> Result<bool> {
+    if let Some(state) = crate::cycle_state::load(file)?
+        && (state.had_pending_mutations
+            || state.pending_added_this_cycle
+            || !state.pending_done_ids.is_empty()
+            || !state.reaped_pending_ids.is_empty()
+            || !state.pending_gated_ids.is_empty()
+            || !state.pending_added_ids.is_empty())
+    {
+        return Ok(true);
+    }
+
+    let Ok(content) = std::fs::read_to_string(file) else {
+        return Ok(false);
+    };
+    let Ok(components) = crate::component::parse(&content) else {
+        return Ok(false);
+    };
+
+    Ok(components
+        .iter()
+        .filter(|component| crate::component::is_tracked_work_component(&component.name))
+        .any(|component| {
+            let (_, items, _) = crate::pending::parse_items(component.content(&content));
+            items.iter().any(|item| item.is_done())
+        }))
 }
 
 #[cfg(test)]

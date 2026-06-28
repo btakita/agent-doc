@@ -333,6 +333,7 @@ export class CrdtReplicaManager {
     private readonly forwarders = new Map<string, CrdtReplicaForwarder>();
     private readonly attaching = new Map<string, Promise<CrdtReplicaForwarder | null>>();
     private readonly applyingRemote = new Set<string>();
+    private readonly pendingLocalEdits = new Map<string, number>();
     private pollTimer: ReturnType<typeof setInterval> | undefined;
 
     constructor(private readonly options: CrdtReplicaManagerOptions) {
@@ -402,8 +403,13 @@ export class CrdtReplicaManager {
             change.rangeOffset,
             change.rangeLength,
         );
-        const forwarder = await this.forwarderFor(filePath);
-        await forwarder?.forwardLocalDelta(offset, deleteLen, change.text);
+        this.markLocalPending(filePath);
+        try {
+            const forwarder = await this.forwarderFor(filePath);
+            await forwarder?.forwardLocalDelta(offset, deleteLen, change.text);
+        } finally {
+            this.clearLocalPending(filePath);
+        }
     }
 
     async handleLocalChangeDelta(
@@ -428,20 +434,29 @@ export class CrdtReplicaManager {
             change.rangeOffset,
             change.rangeLength,
         );
-        const forwarder = await this.forwarderFor(filePath);
-        await forwarder?.forwardLocalDelta(offset, deleteLen, change.text);
+        this.markLocalPending(filePath);
+        try {
+            const forwarder = await this.forwarderFor(filePath);
+            await forwarder?.forwardLocalDelta(offset, deleteLen, change.text);
+        } finally {
+            this.clearLocalPending(filePath);
+        }
     }
 
     async pollRemoteUpdates(): Promise<void> {
         for (const [filePath, forwarder] of Array.from(this.forwarders.entries())) {
+            if (this.hasPendingLocal(filePath)) continue;
             const updates = await forwarder.pullRemoteUpdates();
+            if (this.hasPendingLocal(filePath)) continue;
             for (const update of updates) {
+                if (this.hasPendingLocal(filePath)) break;
                 if (!shouldApplyRemoteUpdate(update, forwarder.currentClientId)) {
                     await forwarder.ackRemoteUpdate(update);
                     continue;
                 }
                 const converged = forwarder.applyRemoteUpdate(update.update);
                 if (converged == null) continue;
+                if (this.hasPendingLocal(filePath)) continue;
                 this.applyingRemote.add(filePath);
                 try {
                     const applied = await this.options.applyText(filePath, converged);
@@ -483,5 +498,22 @@ export class CrdtReplicaManager {
         })();
         this.attaching.set(filePath, attach);
         return attach;
+    }
+
+    private markLocalPending(filePath: string): void {
+        this.pendingLocalEdits.set(filePath, (this.pendingLocalEdits.get(filePath) ?? 0) + 1);
+    }
+
+    private clearLocalPending(filePath: string): void {
+        const count = this.pendingLocalEdits.get(filePath) ?? 0;
+        if (count <= 1) {
+            this.pendingLocalEdits.delete(filePath);
+        } else {
+            this.pendingLocalEdits.set(filePath, count - 1);
+        }
+    }
+
+    private hasPendingLocal(filePath: string): boolean {
+        return (this.pendingLocalEdits.get(filePath) ?? 0) > 0;
     }
 }

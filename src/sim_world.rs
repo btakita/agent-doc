@@ -238,12 +238,6 @@ enum SimCommand {
     /// `execve` cannot sever the in-flight finalize IPC listener mid-cycle and drive
     /// the next finalize into `live_prompt_drift_after_preflight`.
     SetAgentDocCycleOpen(bool),
-    /// `#midturn-recycle-resume` Phase B: the harness child dies across the recycle
-    /// window (it crashed/was killed, or an escalation forced the recycle over a
-    /// wedged never-closing cycle). The next recycle-boot reading the still-open
-    /// `#durablerecycle` checkpoint must re-dispatch the interrupted turn (keyed off
-    /// the checkpoint) instead of adopting a dead surviving child.
-    MarkHarnessChildDiedAcrossRecycle,
     /// `#midturn-recycle-resume` Phase B: model a fresh supervisor BOOT from an
     /// `execve` recycle. Drives the pure `boot_resume_action` over the modeled
     /// open-cycle / child-survived / consumed state and applies the outcome —
@@ -331,20 +325,6 @@ enum SimCommand {
     /// targeted tests, not the random generator, so the seed corpus traces are
     /// unchanged.
     AbandonSupervisorToDeadSocket,
-    /// `#supdead-coldstart-fallback`: run the production
-    /// `decide_dead_supervisor_recovery` decision against the modeled dead socket
-    /// and apply its outcome — ColdStart reaps the stale socket + cold-starts a
-    /// fresh supervisor through the route path; Guidance refuses an unsafe
-    /// cold-start and leaves the supervisor `Dead` with an actionable message (no
-    /// raw ECONNREFUSED). Driven only by targeted tests, not the random generator.
-    RecoverDeadSupervisor {
-        /// The recovery caller is the dead supervisor's own pane/ancestor — an
-        /// in-process cold-start would be unsafe (self-targeting).
-        caller_is_own_ancestor: bool,
-        /// A cold-start can resolve a tmux target session from this context (the
-        /// caller is inside tmux or a project tmux session is configured).
-        can_resolve_tmux_target: bool,
-    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3346,7 +3326,7 @@ fn recycle_boot_with_surviving_child_adopts_without_redispatch() {
     world.apply(SimCommand::BindRouteOwner).unwrap();
     world.apply(SimCommand::SupervisorReady).unwrap();
 
-    // Cycle open, child survived (the default — no MarkHarnessChildDiedAcrossRecycle).
+    // Cycle open, child survived by default.
     world.apply(SimCommand::SetAgentDocCycleOpen(true)).unwrap();
     world.apply(SimCommand::SupervisorRecycleBoot).unwrap();
 

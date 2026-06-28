@@ -429,7 +429,7 @@ This keeps the existing `.agent-doc/logs/<session>.log` contract intact for any 
 ### Idle-queue watch (`#jb-run-agent-doc-busy-queue-dispatch-deadlock`)
 
 When a busy-pane `Run Agent Doc` route cannot inject into an active turn, it
-inserts the prompt **ahead of pending active-loop items** in plain `agent:queue` (a
+inserts the prompt **ahead of queued active-loop items** in plain `agent:queue` (a
 manual operator dispatch preempts the loop rather than landing at the tail —
 `#jb-run-preempt-autoloop-priority`; the priority insert lands after any leading
 queue directive such as a preset/start fence and never supersedes a lone active

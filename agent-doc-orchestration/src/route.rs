@@ -4605,10 +4605,6 @@ mod startup;
 pub use startup::*;
 
 #[cfg(test)]
-use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
-#[cfg(test)]
-use crate::supervisor::ipc::{IpcResponse, SupervisorIpc};
-#[cfg(test)]
 pub(crate) static TMUX_START_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 // Serialize mock agent launches without contending with tests that already
 // hold TMUX_START_MUTEX for broader prompt-readiness coverage.

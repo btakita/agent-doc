@@ -5525,7 +5525,7 @@ mod tests {
         );
 
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(ops_log.contains("orphaned_preparing_controller_reaped pid="));
+        assert!(ops_log.contains(&format!("orphaned_preparing_controller_reaped pid={pid}")));
     }
     #[test]
     fn qflood_coalesces_only_auto_in_flight_redispatch() {

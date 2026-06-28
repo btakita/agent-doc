@@ -1,0 +1,14 @@
+[package]
+name = "agent-doc-tmux"
+version = "0.34.65"
+edition = "2024"
+description = "Pure tmux realtime model state for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_tmux"
+
+[dependencies]
+lazily = "0.13.1"
+serde = { version = "1", features = ["derive"] }

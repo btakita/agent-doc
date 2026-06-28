@@ -1,0 +1,15 @@
+[package]
+name = "agent-doc-document"
+version = "0.34.65"
+edition = "2024"
+description = "Pure document projection rules for agent-doc realtime state"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_document"
+
+[dependencies]
+agent-doc-core = { path = "../agent-doc-core", version = "0.34.65" }
+agent-doc-element-registry = { path = "../agent-doc-element-registry", version = "0.34.65" }
+serde = { version = "1", features = ["derive"] }

@@ -7,18 +7,21 @@
 //!   exchange component content.
 //! - After appending, writes the document atomically, updates the snapshot, and
 //!   optionally commits.
-//! - `--pending-add` / `--pending-add-gated` adds items to the document's `agent:pending`
-//!   component. Auto-creates the component if absent (after exchange close tag).
-//!   `--no-create-pending` opts out of auto-creation.
-//! - When only pending ops are requested (no message), the exchange blockquote is skipped
-//!   (pending-only mode).
-//! - Pending errors become no-ops when `--no-create-pending` is set and the component is absent.
+//! - `--backlog-add` / `--backlog-add-gated` adds items to the document's
+//!   `agent:backlog` component. Auto-creates the component if absent (after
+//!   exchange close tag). Legacy aliases: `--pending-add` /
+//!   `--pending-add-gated`.
+//! - `--no-create-backlog` opts out of auto-creation.
+//! - When only backlog ops are requested (no message), the exchange blockquote
+//!   is skipped (backlog-only mode).
+//! - Backlog errors become no-ops when `--no-create-backlog` is set and the
+//!   component is absent.
 //!
 //! ## Agentic Contracts
 //! - `run(file, message, source, affects, commit, pending_add, pending_add_gated, no_create)`
 //!   — returns `Err` if the file is missing, message is required but absent, or the exchange
 //!   component is not found (when a message is provided).
-//! - Pending-only mode (no message + pending items): skips exchange, updates snapshot, commits.
+//! - Backlog-only mode (no message + backlog items): skips exchange, updates snapshot, commits.
 //! - Snapshot is always updated after a successful write.
 //! - When `commit` is true, calls `git::commit` after writing.
 //!
@@ -30,14 +33,14 @@
 //! - notify_without_affects: no affects → no `Re-evaluate:` line
 //! - notify_before_boundary: boundary marker present → notification inserted before it
 //! - multiline_message: message with newlines → each line prefixed with `> `
-//! - pending_add_auto_creates_component: no pending component → auto-created, item added
-//! - pending_add_to_existing_component: existing pending component → item added at the beginning
-//! - pending_add_gated_creates_gated_item: `--pending-add-gated` → item with `[/]` state
-//! - no_create_pending_skips_when_absent: `--no-create-pending` + absent → no-op
-//! - pending_add_with_message_writes_both: pending + message → both written
-//! - pending_only_updates_snapshot: pending-only → snapshot updated
+//! - backlog_add_auto_creates_component: no backlog component → auto-created, item added
+//! - backlog_add_to_existing_component: existing backlog component → item added at the beginning
+//! - backlog_add_gated_creates_gated_item: `--backlog-add-gated` → item with `[/]` state
+//! - no_create_backlog_skips_when_absent: `--no-create-backlog` + absent → no-op
+//! - backlog_add_with_message_writes_both: backlog + message → both written
+//! - backlog_only_updates_snapshot: backlog-only → snapshot updated
 //! - auto_create_inserts_after_exchange: component placed after exchange close tag
-//! - message_required_without_pending: no message, no pending → `Err`
+//! - message_required_without_backlog: no message, no backlog → `Err`
 
 use anyhow::{Context, Result, bail};
 use std::path::Path;
@@ -87,7 +90,7 @@ fn format_notification(message: &str, source: Option<&str>, affects: Option<&str
     lines.join("\n")
 }
 
-/// Ensure the document has an `agent:pending` component; create one if absent.
+/// Ensure the document has an `agent:backlog` component; create one if absent.
 /// Returns `Ok(true)` if a component was created, `Ok(false)` if it already existed.
 /// Under `no_create`, returns `Err` if absent.
 fn ensure_pending_component(file: &Path, no_create: bool) -> Result<bool> {
@@ -101,7 +104,7 @@ fn ensure_pending_component(file: &Path, no_create: bool) -> Result<bool> {
     }
 
     if no_create {
-        bail!("document has no pending component and --no-create-pending was set");
+        bail!("document has no backlog component and --no-create-backlog was set");
     }
 
     // Insert before ## Assistant / ## Pending / end-of-file, whichever comes first.
@@ -116,13 +119,13 @@ fn ensure_pending_component(file: &Path, no_create: bool) -> Result<bool> {
 
     std::fs::write(file, &new_doc)?;
     eprintln!(
-        "[notify] auto-created agent:pending component in {}",
+        "[notify] auto-created agent:backlog component in {}",
         file.display()
     );
     Ok(true)
 }
 
-/// Find the best position to insert a pending component.
+/// Find the best position to insert a backlog component.
 fn find_pending_insert_position(doc: &str, components: &[component::Component]) -> usize {
     // After the exchange close tag if one exists
     if let Some(exchange) = components.iter().find(|c| c.name == "exchange") {
@@ -133,8 +136,8 @@ fn find_pending_insert_position(doc: &str, components: &[component::Component]) 
 }
 
 /// Append a notification to a document's exchange component, update the snapshot,
-/// and optionally commit. When `pending_add` items are present, adds them to the
-/// pending component (auto-creating it if needed) and skips the exchange blockquote.
+/// and optionally commit. When backlog items are present, adds them to the
+/// backlog component (auto-creating it if needed) and skips the exchange blockquote.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     file: &Path,
@@ -154,15 +157,15 @@ pub fn run(
     let has_pending_ops = !pending_add.is_empty() || !pending_add_gated.is_empty();
     let pending_only = has_pending_ops && message.is_none();
 
-    // --- Pending operations ---
+    // --- Backlog operations ---
     if has_pending_ops {
-        // Ensure pending component exists (auto-create unless opted out)
+        // Ensure backlog component exists (auto-create unless opted out)
         match ensure_pending_component(file, no_create_pending) {
             Ok(_) => {}
             Err(e) => {
                 // Under auto-create mode, errors become no-ops
                 if no_create_pending {
-                    eprintln!("[notify] skipping pending ops: {}", e);
+                    eprintln!("[notify] skipping backlog ops: {}", e);
                     if pending_only {
                         return Ok(());
                     }
@@ -172,23 +175,23 @@ pub fn run(
             }
         }
 
-        // Add pending items
+        // Add backlog items
         let doc_id = pending_cmd::doc_id_for(file);
         for item in pending_add.iter().rev() {
             match add_pending_item(file, item, &doc_id, false) {
-                Ok(id) => eprintln!("[notify] added pending item #{}", id),
-                Err(e) => eprintln!("[notify] pending-add no-op: {}", e),
+                Ok(id) => eprintln!("[notify] added backlog item #{}", id),
+                Err(e) => eprintln!("[notify] backlog-add no-op: {}", e),
             }
         }
         for item in pending_add_gated.iter().rev() {
             match add_pending_item(file, item, &doc_id, true) {
-                Ok(id) => eprintln!("[notify] added gated pending item #{}", id),
-                Err(e) => eprintln!("[notify] pending-add-gated no-op: {}", e),
+                Ok(id) => eprintln!("[notify] added gated backlog item #{}", id),
+                Err(e) => eprintln!("[notify] backlog-add-gated no-op: {}", e),
             }
         }
     }
 
-    // --- Exchange notification (skip in pending-only mode) ---
+    // --- Exchange notification (skip in backlog-only mode) ---
     if pending_only {
         // Still update snapshot and commit
         let doc = std::fs::read_to_string(file)
@@ -202,7 +205,7 @@ pub fn run(
     }
 
     let message = message
-        .ok_or_else(|| anyhow::anyhow!("message is required when --pending-add is not used"))?;
+        .ok_or_else(|| anyhow::anyhow!("message is required when --backlog-add is not used"))?;
 
     let doc = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
@@ -272,7 +275,7 @@ pub fn run(
     Ok(())
 }
 
-/// Add a single pending item to a document's pending component.
+/// Add a single backlog item to a document's backlog component.
 /// Returns the assigned hash ID on success.
 fn add_pending_item(file: &Path, item: &str, doc_id: &str, gated: bool) -> Result<String> {
     let content = std::fs::read_to_string(file).context("failed to read document")?;
@@ -551,7 +554,7 @@ mod tests {
         assert!(result.contains("implement feature X"));
         assert!(result.contains("[ ]"));
         assert!(result.contains("[#"));
-        // Pending-only: no exchange blockquote
+        // Backlog-only: no exchange blockquote
         assert!(!result.contains("> **[NOTIFY"));
     }
 
@@ -650,11 +653,11 @@ mod tests {
         );
 
         let items = vec!["ignored item".to_string()];
-        // With --no-create-pending and pending-only, should return Ok (no-op)
+        // With --no-create-backlog and backlog-only, should return Ok (no-op)
         run(&doc, None, None, None, false, &items, &[], true).unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
-        // Nothing changed — no pending component created, no blockquote
+        // Nothing changed — no backlog component created, no blockquote
         assert!(!result.contains("agent:pending"));
         assert!(!result.contains("ignored item"));
     }
@@ -668,7 +671,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\nContent\n<!-- /agent:exchange -->\n",
         );
 
-        let items = vec!["new pending item".to_string()];
+        let items = vec!["new backlog item".to_string()];
         run(
             &doc,
             Some("Notification msg"),
@@ -682,8 +685,8 @@ mod tests {
         .unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
-        // Both pending item and exchange blockquote should be present
-        assert!(result.contains("new pending item"));
+        // Both backlog item and exchange blockquote should be present
+        assert!(result.contains("new backlog item"));
         assert!(result.contains("> **[NOTIFY]**"));
         assert!(result.contains("> Notification msg"));
     }

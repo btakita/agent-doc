@@ -496,9 +496,6 @@ impl SimWorld {
                     self.recycle_clear.cycle_open_defer_streak = 0;
                 }
             }
-            SimCommand::MarkHarnessChildDiedAcrossRecycle => {
-                self.recycle_clear.recycle_child_died = true;
-            }
             SimCommand::SupervisorRecycleBoot => {
                 self.supervisor_recycle_boot();
             }
@@ -557,12 +554,6 @@ impl SimWorld {
             }
             SimCommand::AbandonSupervisorToDeadSocket => {
                 self.abandon_supervisor_to_dead_socket();
-            }
-            SimCommand::RecoverDeadSupervisor {
-                caller_is_own_ancestor,
-                can_resolve_tmux_target,
-            } => {
-                self.recover_dead_supervisor(caller_is_own_ancestor, can_resolve_tmux_target);
             }
         }
         Ok(())

@@ -24,7 +24,7 @@ Rationale: each layer is independently testable against a fake-claude shell scri
 Apply to every submodule PR in this track:
 
 - **Module doc comment pins invariants.** The first thing in `supervisor/<mod>.rs` is a `//!` block listing the non-obvious constraints. Future refactors read this before touching the file.
-- **Fake-claude tests only.** Integration tests spawn a shell script inside a `TempDir`, never real `claude`. Real-claude smoke testing is deferred to the `#f7d5` pending item.
+- **Fake-claude tests only.** Integration tests spawn a shell script inside a `TempDir`, never real `claude`. Real-claude smoke testing is deferred to the `#f7d5` backlog item.
 - **`#![allow(dead_code)]` gate.** `supervisor/mod.rs` carries a module-level `#![allow(dead_code)]` until the `start.rs` wire-up PR removes it. Each intermediate PR must compile clean with the gate ON.
 - **Never swallow errors.** Per `src/agent-doc/CLAUDE.md` — any fallible op logs to stderr at minimum. No `let _ =`.
 - **No new async runtime.** Std threads + blocking I/O, same pattern as `ipc_socket.rs`.

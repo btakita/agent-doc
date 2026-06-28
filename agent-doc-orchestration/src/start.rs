@@ -2755,11 +2755,7 @@ mod th {
     use super::*;
     use crate::config::Config;
     use crate::frontmatter::Frontmatter;
-    use crate::hooks::fire_doc_hooks;
-    use crate::project_config;
     use crate::sessions::IsolatedTmux;
-    use std::collections::HashMap;
-    use tempfile::TempDir;
     pub(crate) struct ScopedCurrentDir {
         prev_cwd: std::path::PathBuf,
         _env_guard: crate::test_support::ProcessGlobalLockGuard,

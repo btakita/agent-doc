@@ -357,11 +357,18 @@ pub struct PreflightOutput {
     /// Order is preserved from the document for sequential evaluation.
     #[serde(default, skip_serializing_if = "indexmap::IndexMap::is_empty")]
     pub env: indexmap::IndexMap<String, Option<String>>,
-    /// True when the pending component's id order changed between snapshot and current.
-    /// When set, the skill MUST NOT reorder pending this cycle — user intent wins.
+    /// True when the backlog component's id order changed between snapshot and current.
+    /// When set, the skill MUST NOT reorder backlog this cycle; user intent wins.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub backlog_reordered: bool,
+    /// Legacy alias for `backlog_reordered`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pending_reordered: bool,
-    /// Count of pending items currently in `[/]` gated state.
+    /// Count of backlog items currently in `[/]` gated state.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub backlog_gated_count: usize,
+    /// Legacy alias for `backlog_gated_count`.
+    ///
     /// Surfaced so the skill can highlight blocked items in its response and
     /// decide whether to address gated work this cycle. Zero is omitted from
     /// JSON to keep the common case quiet.
@@ -415,9 +422,15 @@ pub struct PreflightOutput {
     pub agent_model: Option<String>,
     /// Ordered prompt texts from the `agent:queue` component.
     /// Non-empty only when the queue is active and contains prompts.
-    /// The first entry is the effective user prompt for this cycle.
+    /// Legacy consumers treated the first entry as the effective user prompt for
+    /// this cycle; schedulers should prefer `selected_queue_prompts`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queue_prompts: Vec<String>,
+    /// Realtime-selected active queue prompts for this cycle. This is normally
+    /// the first in-session drainable head, or an operator-retargeted `🚧` head
+    /// plus any auto-DAG prerequisites that must run before it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selected_queue_prompts: Vec<String>,
     /// Whether the queue is currently active (consuming prompts).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_active: Option<bool>,
@@ -2821,15 +2834,8 @@ fn render_done_archive_entry(today: &str, item: &crate::pending::PendingItem) ->
 
 fn claims_log_path(file: &Path) -> Option<std::path::PathBuf> {
     // Canonicalize to find project root reliably.
-    let canonical = match file.canonicalize() {
-        Ok(path) => path,
-        Err(_) => return None,
-    };
-
-    let root = match snapshot::find_project_root(&canonical) {
-        Some(root) => root,
-        None => return None,
-    };
+    let canonical = file.canonicalize().ok()?;
+    let root = snapshot::find_project_root(&canonical)?;
 
     Some(root.join(".agent-doc/claims.log"))
 }

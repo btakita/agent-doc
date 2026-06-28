@@ -1366,9 +1366,17 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     {
         // Boundary reposition happens pre-commit now (see above) so the
         // new boundary id lands in the same commit as the response.
-        // IPC reposition signal is still sent here so the plugin's
-        // Document buffer picks up the new boundary without a disk reload.
-        crate::write::try_ipc_reposition_boundary(file);
+        // The post-commit IPC reposition signal is intentionally skipped when
+        // this commit changed non-exchange surfaces. A reposition-only editor
+        // save can otherwise flush a stale live buffer and drop freshly
+        // committed queue/backlog/icebox state.
+        if should_send_post_commit_ipc_reposition(file) {
+            crate::write::try_ipc_reposition_boundary(file);
+        } else {
+            eprintln!(
+                "[commit] skipping IPC boundary reposition: commit changed non-exchange tracked surfaces"
+            );
+        }
 
         // Signal plugin to refresh VCS state so the gutter reflects the commit.
         // Without this, the IDE shows the entire response as uncommitted until
@@ -2775,7 +2783,7 @@ pub fn squash_session(file: &Path) -> Result<()> {
 
 /// Get the content of a file from the last agent-doc commit (or HEAD).
 /// Returns None if the file is not tracked or no commits exist.
-pub fn show_head(file: &Path) -> Result<Option<String>> {
+fn show_rev(file: &Path, rev: &str) -> Result<Option<String>> {
     let (super_root, resolved) = resolve_to_git_root(file)?;
     // Narrow to the submodule's own repo when the file lives inside a submodule.
     // `resolve_to_git_root` prefers the superproject, but `git show HEAD:<path>`
@@ -2796,7 +2804,7 @@ pub fn show_head(file: &Path) -> Result<Option<String>> {
 
     let output = Command::new("git")
         .current_dir(&git_root)
-        .args(["show", &format!("HEAD:{}", rel_path.to_string_lossy())])
+        .args(["show", &format!("{rev}:{}", rel_path.to_string_lossy())])
         .output()?;
 
     if !output.status.success() {
@@ -2805,6 +2813,41 @@ pub fn show_head(file: &Path) -> Result<Option<String>> {
     }
 
     Ok(Some(String::from_utf8_lossy(&output.stdout).to_string()))
+}
+
+pub fn show_head(file: &Path) -> Result<Option<String>> {
+    show_rev(file, "HEAD")
+}
+
+fn redact_exchange_component_content(doc: &str) -> Option<String> {
+    let components = crate::component::parse(doc).ok()?;
+    let mut redacted = doc.to_string();
+    for component in components.iter().rev() {
+        if component.name == "exchange" {
+            redacted = component.replace_content(&redacted, "");
+        }
+    }
+    Some(redacted)
+}
+
+fn post_commit_ipc_reposition_only_exchange_safe(parent_doc: &str, head_doc: &str) -> bool {
+    let Some(parent_redacted) = redact_exchange_component_content(parent_doc) else {
+        return false;
+    };
+    let Some(head_redacted) = redact_exchange_component_content(head_doc) else {
+        return false;
+    };
+    parent_redacted == head_redacted
+}
+
+fn should_send_post_commit_ipc_reposition(file: &Path) -> bool {
+    let Ok(Some(parent_doc)) = show_rev(file, "HEAD^") else {
+        return false;
+    };
+    let Ok(Some(head_doc)) = show_rev(file, "HEAD") else {
+        return false;
+    };
+    post_commit_ipc_reposition_only_exchange_safe(&parent_doc, &head_doc)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3214,11 +3257,6 @@ mod th {
     pub(crate) fn start_fake_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
         start_fake_listener_with_ack_status(project_root, None)
     }
-    pub(crate) fn start_fake_listener_error_ack(
-        project_root: &Path,
-    ) -> std::thread::JoinHandle<()> {
-        start_fake_listener_with_ack_status(project_root, Some("error"))
-    }
     pub(crate) fn wait_for_listener(project_root: &Path) {
         for _ in 0..100 {
             if crate::ipc_socket::is_listener_active(project_root) {
@@ -3237,13 +3275,86 @@ mod th {
 #[cfg(test)]
 pub(crate) use th::{
     add_submodule, commit_file, drift_gate_doc, drift_gate_scope, init_repo, start_fake_listener,
-    start_fake_listener_error_ack, wait_for_listener,
+    wait_for_listener,
 };
 
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
     use super::*;
+
+    #[test]
+    fn post_commit_ipc_reposition_safe_when_only_exchange_changes() {
+        let before = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: previous\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#head]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#head] current work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let after = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: previous\n",
+            "Done.\n\n",
+            "### Re: latest\n",
+            "Also done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#head]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#head] current work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        assert!(post_commit_ipc_reposition_only_exchange_safe(before, after));
+    }
+
+    #[test]
+    fn post_commit_ipc_reposition_unsafe_when_queue_or_backlog_changes() {
+        let before = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: previous\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#head]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#head] current work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let after = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: previous\n",
+            "Done.\n\n",
+            "### Re: latest\n",
+            "Also done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#head]\n",
+            "- do [#agentsignals]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#head] current work\n",
+            "- [ ] [#agentsignals] add realtime signals\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        assert!(!post_commit_ipc_reposition_only_exchange_safe(
+            before, after
+        ));
+    }
+
     #[test]
     fn scoped_drift_gate_ignores_independent_sibling_queue_insert() {
         // The motivating bug: a queue item inserted *beside* the running one is

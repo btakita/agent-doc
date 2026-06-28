@@ -329,8 +329,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     } else {
         run_pending_maintenance(file)?
     };
-    let pending_reordered = pending_report.reordered;
-    let pending_gated_count = pending_report.pending_gated_count;
+    let backlog_reordered = pending_report.reordered;
+    let pending_reordered = backlog_reordered;
+    let backlog_gated_count = pending_report.pending_gated_count;
+    let pending_gated_count = backlog_gated_count;
 
     // `#optverify`: opportunistic gated-review auto-verification. Runs before the
     // step-2 commit so any opt-in `[/]→[x]` flip is staged atomically (the
@@ -731,7 +733,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     }
     if diff_result.is_some()
         && queue_state.queue_active == Some(true)
-        && let Some(selected_head) = queue_state.queue_prompts.first()
+        && let Some(selected_head) = queue_state
+            .selected_queue_prompts
+            .first()
+            .or_else(|| queue_state.queue_prompts.first())
         && queue_body_diff_is_non_selected_future_state(
             &diff_result_with_current.previous,
             &diff_result_with_current.current,
@@ -763,7 +768,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     if diff_result.is_none()
         && !queue_state.queue_paused
         && queue_state.queue_supervisor_drainable
-        && let Some(head_prompt) = queue_state.queue_prompts.first()
+        && let Some(head_prompt) = queue_state
+            .selected_queue_prompts
+            .first()
+            .or_else(|| queue_state.queue_prompts.first())
     {
         let slash_command = crate::queue_command::slash_command_text(head_prompt);
         let prompt_source = slash_command.as_deref().unwrap_or(head_prompt);
@@ -1456,13 +1464,16 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         pending_callbacks,
         owned_pane_self_invocation,
         env: frontmatter_env,
+        backlog_reordered,
         pending_reordered,
+        backlog_gated_count,
         pending_gated_count,
         review_count: pending_report.review_count,
         review_gated_count: pending_report.review_gated_count,
         gate_verify: gate_verify_results,
         agent_model,
         queue_prompts: queue_state.queue_prompts,
+        selected_queue_prompts: queue_state.selected_queue_prompts,
         queue_active: queue_state.queue_active,
         queue_deferred: queue_state.queue_deferred,
         queue_start_at: queue_state.queue_start_at,

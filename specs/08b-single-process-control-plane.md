@@ -76,7 +76,7 @@ authorities once the controller record exists.
   registry entry from the actor row, and removes stale same-pane legacy entries
   that conflict with a live controller actor.
 - Session actor closeout persists the selected queue head, response/cycle
-terminal state, and tracked pending mutations as one controller transaction
+terminal state, and tracked-work mutations as one controller transaction
 after strict closeout checks pass. Failed closeout must leave those controller
 rows unadvanced.
 - Cycle-state authority is split into an accepted transition and a durable
@@ -464,7 +464,7 @@ the dispatch actor, store actor, per-document session actors, supervisor
 adapters, and projection workers. Store role snapshots include per-category
 SQLite counts for actor documents, lifecycle transitions, supervisor leases,
 dispatch receipts, queue heads, queue controls, queue backpressure, document
-cycles, pending mutations, projection diagnostics, admin operations,
+cycles, tracked-work mutations, projection diagnostics, admin operations,
 crash-recovery markers, and layout state.
 `agent-doc controller status` and `agent-doc admin inspect --json` must also
 include a `freshness` object that compares running controller/supervisor binary

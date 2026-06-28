@@ -4,11 +4,17 @@ phase: pending-implementation
 owner: btakita
 ---
 
-# Pending System — Stable IDs, Checkboxes, Gated Lifecycle, Granular Ops
+# Backlog System — Stable IDs, Checkboxes, Gated Lifecycle, Granular Ops
 
 ## Status
 
-**Approved, pending implementation.** Design agreed in `tasks/agent-doc/agent-doc-bugs.md` exchange. No code yet.
+**Approved.** Design agreed in `tasks/agent-doc/agent-doc-bugs.md` exchange.
+
+Terminology rule: `backlog` is the canonical user-facing name. `pending` remains
+only as a legacy component/CLI/module compatibility term. New generated
+commands, closeout hints, specs, and runbooks should say `--backlog-*` and
+`agent:backlog`; existing `--pending-*` spellings continue as aliases until a
+separate compatibility-removal release.
 
 ## Problem
 
@@ -33,15 +39,17 @@ Every bullet in `agent:backlog` carries a 4-char base32 hash as a visible prefix
 - [ ] [#b1c4] fix boundary repositioning off-by-one
 ```
 
-- Generated on first insert (via `--pending-add`) unless the caller explicitly
+- Generated on first insert (via `--backlog-add`, legacy `--pending-add`)
+  unless the caller explicitly
   provides a custom id with canonical `id=<custom> ` syntax; leading
   `[#custom] ` is accepted as compatibility input and normalized to the same
   custom id. Custom ids are non-empty ASCII alphanumeric strings with optional
   hyphens. Lazy backfill still generates IDs.
 - **Mutation-time collision rejection (`#preset-item-id-collision-enforce`):** an
-  **explicit** custom id (`id=<id>` / `[#id]`) passed to `--pending-add` /
-  `--pending-add-after` / `--pending-add-before` / `--pending-add-back` /
-  `--pending-add-to` fails closed when it collides with a frontmatter
+  **explicit** custom id (`id=<id>` / `[#id]`) passed to `--backlog-add` /
+  `--backlog-add-after` / `--backlog-add-before` / `--backlog-add-back` /
+  `--backlog-add-to` (or legacy `--pending-*` aliases) fails closed when it
+  collides with a frontmatter
   `prompt_presets` key or an existing active `agent:backlog` / `agent:review` /
   `agent:icebox` item id, so a new ambiguous `#id` is never written. Auto-id adds
   (no explicit prefix) are never blocked. Dispatch-time enforcement on a
@@ -66,12 +74,12 @@ Every bullet carries a GFM-style checkbox that encodes a three-state lifecycle:
 **Lifecycle diagram:**
 
 ```
-┌─────┐   --pending-gate     ┌─────┐   --done     ┌─────┐
+┌─────┐   --backlog-gate     ┌─────┐   --done     ┌─────┐
 │ [ ] │ ───────────────────► │ [/] │ ───────────────────► │ [x] │ ──► (reaped)
 │backlog                     │review                     │ done│
 └─────┘                      └─────┘                      └─────┘
    ▲                            │
-   │     --pending-ungate       │
+   │     --backlog-ungate       │
    └────────────────────────────┘
 
 Direct path (no gating needed):
@@ -93,7 +101,7 @@ items inside `agent:backlog`; preflight reports `legacy_gated_in_backlog` and
 
 **Why three states instead of a prose suffix:**
 
-- **Machine-readable.** Preflight emits `pending_gated_count`, `review_count`, and `review_gated_count`; release workflow can query gated items programmatically.
+- **Machine-readable.** Preflight emits `backlog_gated_count` (plus legacy `pending_gated_count`), `review_count`, and `review_gated_count`; release workflow can query gated items programmatically.
 - **Prevents accidental reap.** A `[/]` item is explicitly not reapable — releasing v0.32.5 cannot prematurely erase `#a002` just because its prose said "landed."
 - **Matches observed reality.** `code-landed ≠ done` is how the agent-doc project is actually run. Encoding it in the data model stops every response cycle from re-explaining "why isn't this checked."
 
@@ -155,7 +163,7 @@ On every preflight run:
      session document or its explicit external done archive instead of
      disappearing from live tracked work without a local record.
    - Persistence invariant: the reap must land in both the working tree document and the snapshot that the commit boundary stages. If preflight cannot persist that synchronized reap safely, it must fail closed instead of continuing with completed tracked-work items still present in backlog, review, or icebox.
-   - Snapshot-sync invariant (`#pending-gate-snapshot-desync`): closeout pending maintenance must re-sync the snapshot's tracked-work surfaces to the working-tree document whenever they diverge — even when maintenance itself performed no reap or backfill. The write phase persists `--pending-gate` / `--pending-edit` / `--review-add` mutations to the document but saves the `content_ours` snapshot (baseline + response) *before* those mutations, so without the re-sync the snapshot lags, the commit stages `snapshot == HEAD`, and the mutation is stranded as uncommitted post-commit drift (`--done` avoided this only because reap already triggered a snapshot rewrite). Reorder detection still compares the file against the **cycle-start** snapshot, not the re-synced one, so a same-cycle reorder is not masked.
+   - Snapshot-sync invariant (`#pending-gate-snapshot-desync`): closeout tracked-work maintenance must re-sync the snapshot's tracked-work surfaces to the working-tree document whenever they diverge — even when maintenance itself performed no reap or backfill. The write phase persists `--backlog-gate` / `--backlog-edit` / `--review-add` mutations to the document but saves the `content_ours` snapshot (baseline + response) *before* those mutations, so without the re-sync the snapshot lags, the commit stages `snapshot == HEAD`, and the mutation is stranded as uncommitted post-commit drift (`--done` avoided this only because reap already triggered a snapshot rewrite). Reorder detection still compares the file against the **cycle-start** snapshot, not the re-synced one, so a same-cycle reorder is not masked.
 - The standalone `agent-doc backlog <file> reap` command follows the same
   visibility rule for direct maintenance: it removes completed items from live
   tracked work, creates `agent:done` when needed, and appends each removed item
@@ -173,7 +181,7 @@ On every preflight run:
 moves already-explicit `[/]` items from `agent:backlog` into `agent:review` and
 inserts the review block when missing. It does not auto-classify prose such as
 "landed", "shipped", or "awaiting release"; those remain `[ ]` until touched
-manually via `--pending-gate`.
+manually via `--backlog-gate` (legacy `--pending-gate`).
 
 A doc that never gets opened again never migrates — fine, because IDs only matter when the skill/runbook is actively managing the list.
 
@@ -181,31 +189,41 @@ A doc that never gets opened again never migrates — fine, because IDs only mat
 
 ### 4. Granular write-command surface
 
-The skill/runbook **never** writes a `replace:pending` (or the deprecated `patch:pending`) block. Full-replace is forbidden. All mutations go through explicit flags on `agent-doc write`:
+The skill/runbook **never** writes a full `replace:backlog`, `replace:icebox`,
+`replace:pending`, or deprecated `patch:pending` block. Full-replace is
+forbidden for tracked-work lists. All mutations go through explicit flags on
+`agent-doc write` / `agent-doc finalize`:
 
-| Flag | Behavior |
-|------|----------|
-| `--pending-add "text"` | Add new item at the beginning of the list. Binary assigns hash and `[ ]` unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is accepted as compatibility input. When repeated in one command, all added items are inserted as one ordered batch: the first flag appears above the second, and the full batch appears above existing backlog items. |
-| `--pending-add-to <file> "text"` | Add a new `[ ]` item to another document's backlog. The target file must exist and contain an `agent:backlog` / legacy `agent:pending` component; missing targets fail closed instead of falling back to the current document. Repeated pairs are grouped per target and preserve caller order at the top of each target backlog. |
-| `--pending-add-after <id> "text"` | `#ah0s`: insert a new `[ ]` item immediately **after** an existing item, by id. Repeatable `ID TEXT` pairs; chaining `--pending-add-after A "B" --pending-add-after B "C"` builds A→B→C deterministically (no follow-up `--pending-reorder`). Errors if the anchor id is absent. Applied after the front-insert default so an anchor added earlier in the same cycle resolves. |
-| `--pending-add-before <id> "text"` | `#ah0s`: symmetric counterpart — insert immediately **before** the anchor item. |
-| `--pending-add-back "text"` (alias `--pending-append`) | `#ah0s`: insert at the **end** of the active list (before any trailing text), for low-priority captures that should not jump the head. Repeatable. |
+| Flag | Legacy alias | Behavior |
+|------|--------------|----------|
+| `--backlog-add "text"` | `--pending-add` | Add new item at the beginning of the backlog. Binary assigns hash and `[ ]` unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is accepted as compatibility input. When repeated in one command, all added items are inserted as one ordered batch: the first flag appears above the second, and the full batch appears above existing backlog items. |
+| `--backlog-add-to <file> "text"` | `--pending-add-to` | Add a new `[ ]` item to another document's backlog. The target file must exist and contain an `agent:backlog` / legacy `agent:pending` component; missing targets fail closed instead of falling back to the current document. Repeated pairs are grouped per target and preserve caller order at the top of each target backlog. |
+| `--backlog-add-after <id> "text"` | `--pending-add-after` | `#ah0s`: insert a new `[ ]` item immediately **after** an existing backlog item, by id. Repeatable `ID TEXT` pairs; chaining `--backlog-add-after A "B" --backlog-add-after B "C"` builds A->B->C deterministically (no follow-up `--backlog-reorder`). Errors if the anchor id is absent. Applied after the front-insert default so an anchor added earlier in the same cycle resolves. |
+| `--backlog-add-before <id> "text"` | `--pending-add-before` | `#ah0s`: symmetric counterpart — insert immediately **before** the anchor item. |
+| `--backlog-add-back "text"` | `--pending-add-back`, `--backlog-append`, `--pending-append` | `#ah0s`: insert at the **end** of the backlog list (before any trailing text), for low-priority captures that should not jump the head. Repeatable. |
+| `--icebox-add "text"` | none | Add a parked tracked-work item at the beginning of `agent:icebox` using the same id, checkbox, collision, and writeback rules as backlog adds. Icebox adds do not mirror into `agent:queue`. |
+| `--icebox-add-after <id> "text"` | none | Insert a parked item immediately after an existing icebox item. |
+| `--icebox-add-before <id> "text"` | none | Insert a parked item immediately before an existing icebox item. |
+| `--icebox-add-back "text"` | `--icebox-append` | Insert a parked item at the end of `agent:icebox`. |
+| `--icebox-edit "id=new text"` | none | Rewrite parked item text, **preserve hash and state**. Multiline edits replace the item's entire continuation block; lines after the first must be indented continuation content, not new flush-left parent items. The `agent-doc icebox <file> edit <id> <text>` subcommand is the equivalent CLI form. |
+| `--icebox-clear` | none | Remove all icebox items. |
+| `--icebox-reorder <id1,id2,...>` | none | Reorder parked icebox items by ID. Missing IDs keep their relative order after the listed prefix. |
 
-The backlog is a **priority-ordered pool with id-based consumption** (`--done` / `--pending-gate` reference `#id`, never position) — not a stack or queue (FIFO execution discipline lives in `agent:queue`). So `--pending-add` stays the cheap front-insert default for single captures, and the explicit-position flags above make ordered insertion unambiguous when position matters, instead of relying on argv direction.
-| `--done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending`, `agent:review`, or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle, while preflight / repair also clean up stale completed items. Valid from any state (`[ ]` or `[/]`). If the id is already present in canonical `agent:done` or the current cycle's resolved-id ledger, treat it as an idempotent resolution warning rather than a fatal missing-id error. |
-| `--pending-gate <id>` | Move a backlog item to `agent:review` as `[/]` — code-complete, awaiting review/gate. Valid from `[ ]`. No-op if already in `agent:review`. Error if source is `[x]`. |
-| `--pending-ungate <id>` | Move an `agent:review` item back to backlog as `[ ]` — review failed, back to active. Legacy gated backlog items still ungate in place until migrated. Error if source is `[ ]` or `[x]`. |
-| `--pending-edit <id> "new text"` | Rewrite text, **preserve hash and state**. Multiline edits replace the item's entire continuation block; lines after the first must be indented continuation content, not new flush-left parent items. |
-| `--pending-clear` | Remove all items. |
-| `--pending-reorder <id1,id2,...>` | Reorder items by ID. Missing IDs keep their relative order after the listed prefix. |
-| `--review-add "text"` | Add a new `[/]` item directly to `agent:review`. Rare; normal code-complete flow should use `--pending-gate`. |
-| `--review-edit <id> "new text"` | Rewrite text in `agent:review`, preserving hash and state. |
-| `--review-resolve <id>` | Resolve an `agent:review` item: remove it and archive to `agent:done`. The completion path for finished gated work. Errors if no review component or no matching id. |
-| `--review-remove <id>` | Delete an `agent:review` item by id, removing **every** entry sharing the id. For stale/duplicate review entries (e.g. the identical `[/]` pair an interleaved finalize leaves behind, flagged `preset_item_id_collision`) that cannot be deduped via an ambiguous edit-by-id. Errors if no review component or no matching id. |
+The backlog is a **priority-ordered pool with id-based consumption** (`--done` / `--backlog-gate` reference `#id`, never position) — not a stack or queue (FIFO execution discipline lives in `agent:queue`). So `--backlog-add` stays the cheap front-insert default for single captures, and the explicit-position flags above make ordered insertion unambiguous when position matters, instead of relying on argv direction.
+| `--done <id>` | `--pending-done`, `--backlog-done` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending`, `agent:review`, or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle, while preflight / repair also clean up stale completed items. Valid from any state (`[ ]` or `[/]`). If the id is already present in canonical `agent:done` or the current cycle's resolved-id ledger, treat it as an idempotent resolution warning rather than a fatal missing-id error. |
+| `--backlog-gate <id>` | `--pending-gate` | Move a backlog item to `agent:review` as `[/]` — code-complete, awaiting review/gate. Valid from `[ ]`. No-op if already in `agent:review`. Error if source is `[x]`. |
+| `--backlog-ungate <id>` | `--pending-ungate` | Move an `agent:review` item back to backlog as `[ ]` — review failed, back to active. Legacy gated backlog items still ungate in place until migrated. Error if source is `[ ]` or `[x]`. |
+| `--backlog-edit <id> "new text"` | `--pending-edit` | Rewrite text, **preserve hash and state**. Multiline edits replace the item's entire continuation block; lines after the first must be indented continuation content, not new flush-left parent items. |
+| `--backlog-clear` | `--pending-clear` | Remove all backlog items. |
+| `--backlog-reorder <id1,id2,...>` | `--pending-reorder` | Reorder backlog items by ID. Missing IDs keep their relative order after the listed prefix. |
+| `--review-add "text"` | none | Add a new `[/]` item directly to `agent:review`. Rare; normal code-complete flow should use `--backlog-gate`. |
+| `--review-edit <id> "new text"` | none | Rewrite text in `agent:review`, preserving hash and state. |
+| `--review-resolve <id>` | none | Resolve an `agent:review` item: remove it and archive to `agent:done`. The completion path for finished gated work. Errors if no review component or no matching id. |
+| `--review-remove <id>` | none | Delete an `agent:review` item by id, removing **every** entry sharing the id. For stale/duplicate review entries (e.g. the identical `[/]` pair an interleaved finalize leaves behind, flagged `preset_item_id_collision`) that cannot be deduped via an ambiguous edit-by-id. Errors if no review component or no matching id. |
 
 Closeout pending-maintenance (commit-required `finalize` / `write --commit`) also auto-dedupes **identical** same-id review entries (same id, state, gate type, text, continuation) to a single representative; distinct items sharing an id are left intact so the `preset_item_id_collision` ambiguity warning still surfaces.
 
-For every id-based pending flag except `--pending-add`, the binary normalizes
+For every id-based backlog flag except `--backlog-add`, the binary normalizes
 the id by trimming whitespace, stripping one optional leading `#`, and
 lowercasing before lookup. `--done 4qja` and `--done #4QJA`
 must therefore resolve the same tracked item.
@@ -216,11 +234,11 @@ must therefore resolve the same tracked item.
 projects. Default `off` keeps direct backlog-to-done closeouts valid. `warn`
 prints a warning when `--done <id>` resolves an item outside `agent:review`;
 `strict` (alias `error`) fails that mutation until the same cycle first runs
-`--pending-gate <id>`.
+`--backlog-gate <id>` (legacy alias: `--pending-gate <id>`).
 
-**Plan-backed item rule:** when a pending bullet depends on a dedicated plan
-document, the operator must create that plan file before adding the pending
-item, and the pending text must include the concrete plan-file path. The
+**Plan-backed item rule:** when a backlog bullet depends on a dedicated plan
+document, the operator must create that plan file before adding the backlog
+item, and the backlog text must include the concrete plan-file path. The
 backlog entry is the durable pointer; it should not require later archaeology to
 discover which `plan-*.md` file was intended.
 
@@ -236,30 +254,32 @@ the resolved `explicit_backlog_targets` paths for operator verification.
 
 **Declaration-chain order:** when multiple prompt-bearing changes in one cycle
 each invoke `#agent-doc-bug`, `agent-doc plan` treats them as one ordered batch.
-The `pending_mutations` entries and repeated `--pending-add-to` placeholders
+The `pending_mutations` entries and repeated `--backlog-add-to` placeholders
 must follow declaration order so the first declared bug remains above later
-bugs after insertion. If an agent intentionally changes priority, the closeout
+bugs after insertion. The internal field name remains `pending_mutations` for
+compatibility; generated command placeholders are canonical `--backlog-add-to`.
+If an agent intentionally changes priority, the closeout
 must say so explicitly instead of relying on reversed insertion side effects.
 
 **State transition matrix:**
 
-| From \ Op | `--done` | `--pending-gate` | `--pending-ungate` |
+| From \ Op | `--done` | `--backlog-gate` | `--backlog-ungate` |
 |-----------|------------------|------------------|--------------------|
 | `[ ]` Open  | → `[x]` Done     | → `[/]` Gated    | error              |
 | `[/]` Gated | → `[x]` Done     | no-op (log)      | → `[ ]` Open       |
 | `[x]` Done  | no-op (log)      | error            | error              |
 
-**Explicitly rejected:** `--pending-replace`. Every transformation it could express is a sequence of `add` / `done` / `edit` / `reorder`, and the sequence preserves IDs where replace would churn them. Adding it would re-enable the full-replace pattern this spec is trying to eliminate.
+**Explicitly rejected:** `--backlog-replace` / `--pending-replace`. Every transformation it could express is a sequence of `add` / `done` / `edit` / `reorder`, and the sequence preserves IDs where replace would churn them. Adding it would re-enable the full-replace pattern this spec is trying to eliminate.
 
 ### 5. Reorder detection in preflight
 
 Preflight becomes reorder-aware:
 
-1. Extract ordered `[#id]` list from snapshot's pending component.
+1. Extract ordered `[#id]` list from the snapshot's backlog component.
 2. Extract same from current document.
-3. If ID set unchanged but order differs → **user reordered**. Preflight rewrites the snapshot to match, commits, and emits `pending_reordered: true` in the JSON output.
+3. If ID set unchanged but order differs → **user reordered**. Preflight rewrites the snapshot to match, commits, and emits `backlog_reordered: true` plus the legacy `pending_reordered: true` in the JSON output.
 4. If the ID set also changed → apply adds/removes (lazy backfill + `[x]` reap) first, then compare remaining IDs' order.
-5. When `pending_reordered: true`, the skill MUST NOT reorder the component in the current cycle — user intent wins for at least one cycle.
+5. When `backlog_reordered: true`, the skill MUST NOT reorder the component in the current cycle — user intent wins for at least one cycle.
 
 ### 6. Enforcement
 
@@ -268,20 +288,20 @@ Invert the current rule:
 - **Before:** missing `patch:pending` → error.
 - **After:** presence of `replace:pending` (or the deprecated `patch:pending`) in the outgoing write payload → error.
 
-`agent-doc write` validates this at parse time. The only way to mutate pending is via the granular flags.
+`agent-doc write` validates this at parse time. The only way to mutate backlog is via the granular flags.
 
 **#25ag rename (v0.32.4):** The block syntax was renamed from `patch:pending` to `replace:pending`. The `replace:` prefix signals full-replacement semantics explicitly and is the canonical form. Dual-accept is in effect for one release: `patch:pending`, `--allow-patch-pending`, and `AGENT_DOC_ALLOW_PATCH_PENDING=1` still work but emit a deprecation warning on stderr. Canonical names: `replace:pending` + `--allow-replace-pending` + `AGENT_DOC_ALLOW_REPLACE_PENDING=1`. Next release removes the deprecated names.
 
-**Thread-safety fix (#envvar1):** The CLI dispatcher no longer uses `unsafe { env::set_var() }` to propagate `--allow-replace-pending` and `--pending-add` state to downstream write functions. A `WriteFlags` struct is threaded explicitly through the call chain. Env var reads are retained as a backwards-compat fallback for external scripts that set them before invoking `agent-doc write`.
+**Thread-safety fix (#envvar1):** The CLI dispatcher no longer uses `unsafe { env::set_var() }` to propagate `--allow-replace-pending` and backlog-add state to downstream write functions. A `WriteFlags` struct is threaded explicitly through the call chain. Env var reads are retained as a backwards-compat fallback for external scripts that set them before invoking `agent-doc write`.
 
-**Component attribute deprecation (v0.33.15):** The `patch=replace` (and legacy `mode=replace`) attribute on `<!-- agent:backlog -->` / `<!-- agent:pending -->` opening tags is deprecated. The backlog component defaults to `replace` mode via the built-in default in `template::default_mode()`, and the binary owns all backlog mutations through `--pending-*` flags — making the inline attribute redundant. Existing documents are normalized automatically: the write path strips `patch=` and `mode=` from backlog component tags and emits a deprecation warning. New scaffolds omit the attribute.
+**Component attribute deprecation (v0.33.15):** The `patch=replace` (and legacy `mode=replace`) attribute on `<!-- agent:backlog -->` / `<!-- agent:pending -->` opening tags is deprecated. The backlog component defaults to `replace` mode via the built-in default in `template::default_mode()`, and the binary owns all backlog mutations through `--backlog-*` flags (legacy `--pending-*` aliases) — making the inline attribute redundant. Existing documents are normalized automatically: the write path strips `patch=` and `mode=` from backlog component tags and emits a deprecation warning. New scaffolds omit the attribute.
 
 ## Schema — fully-migrated example
 
 ```markdown
 <!-- agent:backlog -->
 ### Active
-- [ ] [#a3f2] implement --pending-reorder
+- [ ] [#a3f2] implement --backlog-reorder
 - [ ] [#b1c4] rewrite runbook to forbid replace:pending
 
 ### Gated
@@ -295,13 +315,13 @@ Invert the current rule:
 
 After next preflight: `#c9e0` is reaped, `- [x]` line is removed, commit rolls forward. `#eg0w` and `#a002` remain untouched — they stay `[/]` until an operator explicitly promotes them to `[x]`.
 
-**Header preservation:** `agent:backlog` and `agent:icebox` may contain ordinary markdown headings or blank lines between item groups for organization. Granular pending mutations (`add`, `done`, `edit`, `clear`, `reorder`, `gate`, `ungate`, reap/backfill) must preserve those non-item lines in place. Reordering operates on the item slots only; it does not delete or auto-synthesize headings.
+**Header preservation:** `agent:backlog` and `agent:icebox` may contain ordinary markdown headings or blank lines between item groups for organization. Granular tracked-work mutations (`add`, `done`, `edit`, `clear`, `reorder`, `gate`, `ungate`, reap/backfill) must preserve those non-item lines in place. Reordering operates on the item slots only; it does not delete or auto-synthesize headings.
 
 **Ordered parent-item support:** A backlog or icebox may use flush-left ordered parent entries (`1. ...`, `2. ...`) instead of unordered `- ...` bullets. When any tracked parent entry in a component uses ordered style, the binary canonicalizes all tracked parent entries in that component as a single sequential ordered list in current item order. Adds, reorders, done/reap transitions, and selective transfers therefore renumber tracked parents instead of preserving stale ordinals.
 
 **Priority ordering (`#backlog-priority-attribute`):** A backlog or icebox marker may carry a bare `priority` attribute (`<!-- agent:backlog priority -->`). When present, `run_pending_maintenance` stable-sorts that component's tracked items each cycle by their per-item `priority=<1..9>` token (`1` = highest, sorts first; `9` = lowest numbered). An item with no valid `priority=` token ranks below every numbered item and keeps its authored relative order under the stable sort. The token may appear anywhere in the item text (e.g. `- [ ] [#id] priority=2 do the thing`). The sort preserves non-item segments (headings, blank lines) at their positions and is idempotent. Paired with the backlog→queue sync `queue` attribute (see `specs/07-orchestration-commands.md`), a `priority`-sorted backlog yields a prioritized `agent:queue`; if the queue-tagged backlog source also carries `priority`, preflight immediately applies the queue priority/auto-DAG recompute to synced prompts and annotates automatically promoted prompts with `:round_pushpin:`. `agent:icebox priority` still sorts parked work, but `agent:icebox queue` does not auto-populate the active queue. A `priority` attribute on the `agent:queue` marker additionally stable-sorts the queue's `do [#id]` prompts by their source item's priority (covering append-built or manually edited queues). Pure logic: `pending::sort_by_priority` / `pending::item_priority_rank` and `queue::sort_prompts_by_priority`.
 
-**Same-cycle pending-add queue sync (`#pendingaddqueuesync`):** `--pending-add*` mutations are applied during finalize/write, after preflight's ordinary backlog→queue sync has already run. In an active go/start queue whose `agent:backlog` carries a recognized `queue` attribute, closeout appends ids recorded in `cycle_state.pending_added_ids` into `agent:queue` after current-head consumption and before commit. This append-only closeout path preserves the existing runnable queue order, skips done/already-queued/operator-verify ids, updates the snapshot queue region, and does not run for plain persisted-active queues without go/start so the `#backlog-queue-sync-pending-add-amplification` guard remains intact.
+**Same-cycle backlog-add queue sync (`#pendingaddqueuesync`):** `--backlog-add*` mutations (legacy `--pending-add*` aliases) are applied during finalize/write, after preflight's ordinary backlog→queue sync has already run. In an active go/start queue whose `agent:backlog` carries a recognized `queue` attribute, closeout appends ids recorded in `cycle_state.pending_added_ids` into `agent:queue` after current-head consumption and before commit. This append-only closeout path preserves the existing runnable queue order, skips done/already-queued/operator-verify ids, updates the snapshot queue region, and does not run for plain persisted-active queues without go/start so the `#backlog-queue-sync-pending-add-amplification` guard remains intact.
 
 **Manual priority pin (`#queue-manual-priority-override`):** Any queue item may be prefixed with a pin marker (`- __prioritized__ do [#id]` or `- __prioritized__ <free text>`). Under a `priority`-attributed `agent:queue`, `queue::sort_prompts_by_priority` treats an **operator** pin as **position-locked** (`#queue-operator-pin-position-lock`): the `priority` attribute never moves an operator-pinned prompt — it stays at the exact slot where the operator placed it, and the unpinned / agent-pinned prompts reorder *around* it (filling only the slots not held by an operator pin). This is the operator's stated requirement: "if I add an item to a certain position with a `:pushpin:`, it remains there." A pin is sticky — it persists across the per-turn recompute because it lives in the document text — and is released simply by deleting the marker, after which the item rejoins the rank-ordered remainder. If an operator manually moves an existing live prompt to a new position in a priority queue, preflight treats that movement as an authored priority override and annotates the moved prompt with the canonical operator pin `:pushpin:` before the priority/auto-DAG recompute (`queue::annotate_operator_priority_reorders`), locking it at that new position. The `sort_prompts_by_dag` path — active only when `after=#id` edges exist — applies the same position-lock (`#queue-operator-pin-position-lock-dag`): operator pins keep their document slots while the movable (agent-pin/unpinned) prompts reorder around them to satisfy the edges, and the blocker-outranks-pin exception still holds (if anchoring would violate a dependency, the dependency wins and the plain dependency topo is used).
 
@@ -323,14 +343,14 @@ Indented child task lines are canonicalized when they look like list items: the 
 ## Implementation plan
 
 1. **Rust — commands** (`src/write.rs`, `src/pending.rs`):
-   - `--pending-add <text>` (supports canonical `id=<custom> ` syntax and compatibility `[#custom] ` input)
-   - `--pending-add-to <file> <text>` for explicit cross-document backlog targets
+   - `--backlog-add <text>` (supports canonical `id=<custom> ` syntax and compatibility `[#custom] ` input)
+   - `--backlog-add-to <file> <text>` for explicit cross-document backlog targets
    - `--done <id>`
-   - `--pending-gate <id>` (new — Gated lifecycle)
-   - `--pending-ungate <id>` (new — Gated lifecycle)
-   - `--pending-edit <id> <text>`
-   - `--pending-clear`
-   - `--pending-reorder <ids>`
+   - `--backlog-gate <id>` (Gated lifecycle; legacy `--pending-gate`)
+   - `--backlog-ungate <id>` (Gated lifecycle; legacy `--pending-ungate`)
+   - `--backlog-edit <id> <text>`
+   - `--backlog-clear`
+   - `--backlog-reorder <ids>`
    - `PendingState` enum: `Open | Gated | Done`. Parser accepts `[ ] | [/] | [x]`; renderer emits the reverse.
    - Hash generation helper in `src/pending.rs`.
    - State transition validation (see matrix above) enforced at the `pending_cmd` layer.
@@ -340,15 +360,15 @@ Indented child task lines are canonicalized when they look like list items: the 
    - Lazy backfill: assign missing hash IDs.
    - Lazy backfill: insert missing `[ ]` checkboxes (never `[/]` — gated state is always explicit).
    - Reap: remove `- [x]` lines only. `[/]` is skipped unconditionally.
-   - Reorder detect: diff ID order, emit `pending_reordered` flag in JSON.
-   - Emit `pending_gated_count` alongside existing counts in preflight JSON.
+   - Reorder detect: diff ID order, emit `backlog_reordered` flag in JSON plus the legacy `pending_reordered` alias.
+   - Emit `backlog_gated_count` alongside existing counts in preflight JSON plus the legacy `pending_gated_count` alias.
 
 3. **Skill — runbook** (`.claude/skills/agent-doc/SKILL.md` §1b):
-   - Document `--pending-gate` / `--pending-ungate` alongside existing granular flags.
-   - Guidance: when agent lands code that cannot ship immediately (awaiting release, telemetry, field validation), call `--pending-gate <id>` instead of leaving `[ ]` with prose "awaiting X".
-   - Respect `pending_reordered: true` — do not reorder this cycle.
+   - Document `--backlog-gate` / `--backlog-ungate` alongside existing granular flags.
+   - Guidance: when agent lands code that cannot ship immediately (awaiting release, telemetry, field validation), call `--backlog-gate <id>` instead of leaving `[ ]` with prose "awaiting X".
+   - Respect `backlog_reordered: true` — do not reorder this cycle.
    - For plan-backed work, create the plan file first and include its path in
-     the pending item text in the same cycle.
+     the backlog item text in the same cycle.
 
 4. **Release discipline:**
    - `Gated` lifecycle ships in its own release (**v0.32.6**), NOT bundled with the `#eg0w` CommitLock release (v0.32.5). Reason: the CommitLock fix gets clean field validation first; mixing gated-state into the same release confuses the field-test signal.

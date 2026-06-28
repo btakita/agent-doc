@@ -689,27 +689,11 @@ pub fn sync_backlog_into_queue(
 /// Strong emphasis / pushpin == operator; italic emphasis / round-pushpin ==
 /// agent. Both asterisk and underscore spellings are accepted (markdown treats
 /// them identically), so toggling spelling never changes the tier.
-pub const PRIORITIZED_MARKERS: [&str; 7] = [
-    "**prioritized**",
-    "__prioritized__",
-    "**pin**",
-    "__pin__",
-    ":pushpin:",
-    ":pin:",
-    "📌",
-];
-pub const AGENT_PRIORITIZED_MARKERS: [&str; 6] = [
-    "*prioritized*",
-    "_prioritized_",
-    "*pin*",
-    "_pin_",
-    ":round_pushpin:",
-    "📍",
-];
-/// Canonical single-spelling constants (emoji-shortcode form).
-pub const PRIORITIZED_MARKER: &str = ":pushpin:";
-pub const AGENT_PRIORITIZED_MARKER: &str = ":round_pushpin:";
-pub const IN_PROGRESS_MARKER: &str = "🚧";
+pub use agent_doc_document::queue_projection::{
+    AGENT_PRIORITIZED_MARKER, AGENT_PRIORITIZED_MARKERS, IN_PROGRESS_MARKER, PRIORITIZED_MARKER,
+    PRIORITIZED_MARKERS, apply_in_progress_marker, has_in_progress_marker,
+    strip_in_progress_marker, strip_in_progress_marker_for_display, strip_priority_markers,
+};
 
 /// True when `text` carries an **operator** (strong-emphasis) pin marker at its
 /// head (after optional leading whitespace), in either spelling.
@@ -730,74 +714,42 @@ pub fn is_agent_prioritized(text: &str) -> bool {
     !is_prioritized(text) && AGENT_PRIORITIZED_MARKERS.iter().any(|m| t.starts_with(m))
 }
 
-/// Strip the leading in-progress marker plus surrounding whitespace from a
-/// prompt's text.
-pub fn strip_in_progress_marker(text: &str) -> String {
-    let mut t = text.trim();
-    while let Some(rest) = t.trim_start().strip_prefix(IN_PROGRESS_MARKER) {
-        t = rest.trim_start();
-    }
-    t.trim().to_string()
-}
-
-/// Prefix the visible in-progress marker idempotently.
-pub fn apply_in_progress_marker(text: &str) -> String {
-    format!("{IN_PROGRESS_MARKER} {}", strip_in_progress_marker(text))
-}
-
-fn strip_in_progress_marker_for_display(text: &str) -> Option<String> {
-    let trimmed_start = text.trim_start();
-    let leading_len = text.len() - trimmed_start.len();
-    let leading = &text[..leading_len];
-    let mut rest = trimmed_start;
-    let mut removed = false;
-    while let Some(after_marker) = rest.strip_prefix(IN_PROGRESS_MARKER) {
-        removed = true;
-        rest = after_marker.trim_start();
-    }
-    removed.then(|| format!("{leading}{rest}"))
-}
-
-/// Strip leading operator/agent pin markers (any spelling), the in-progress
-/// marker, plus surrounding whitespace from a prompt's text, returning the
-/// cosmetic-marker-independent content.
-///
-/// Used to compare two queue prompts for **identity** without being fooled by a
-/// `:pushpin:` / `:round_pushpin:` annotation present on one side only
-/// (`#queue-consume-pushpin-normalization`): the snapshot can hold the unpinned
-/// spelling of a head while the live document holds the pinned spelling of the
-/// same logical item. The pin is cosmetic priority metadata, not item identity,
-/// so a head-equality check must normalize it away or it errors out the cycle
-/// (`queue consume: snapshot head prompts ... do not match document head prompts`).
-/// Repeated leading markers are stripped so a doubly-annotated head still
-/// normalizes to its bare content. The `🚧` marker is also cosmetic: it indicates
-/// the current in-progress head and must not change queue identity.
-pub fn strip_priority_markers(text: &str) -> String {
-    let mut t = text.trim();
-    loop {
-        let trimmed = t.trim_start();
-        let stripped = trimmed.strip_prefix(IN_PROGRESS_MARKER).or_else(|| {
-            PRIORITIZED_MARKERS
-                .iter()
-                .chain(AGENT_PRIORITIZED_MARKERS.iter())
-                .find_map(|m| trimmed.strip_prefix(m))
-        });
-        match stripped {
-            Some(rest) => t = rest.trim_start(),
-            None => break,
-        }
-    }
-    t.trim().to_string()
-}
-
 /// Clear all queue in-progress markers, then mark the first live prompt when
 /// requested. Returns `None` when the rendered queue would be unchanged.
 pub fn set_first_prompt_in_progress(
     entries: &[QueueEntry],
     mark_first_prompt: bool,
 ) -> Option<Vec<QueueEntry>> {
+    let target_texts = if mark_first_prompt {
+        prompts(entries)
+            .first()
+            .map(|prompt| vec![strip_in_progress_marker(&prompt.text)])
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    set_prompts_in_progress(entries, &target_texts)
+}
+
+/// Clear all queue in-progress markers, then mark the requested live prompt(s).
+///
+/// The visible `🚧` marker is a realtime projection of the active head set, not
+/// prompt identity. The target list is a multiset: duplicate target texts mark
+/// the same number of matching prompts, which leaves room for concurrent active
+/// heads while avoiding accidental duplicate marking from repeated queue rows.
+pub fn set_prompts_in_progress(
+    entries: &[QueueEntry],
+    target_texts: &[String],
+) -> Option<Vec<QueueEntry>> {
+    let mut target_counts = std::collections::BTreeMap::<String, usize>::new();
+    for text in target_texts {
+        let key = strip_priority_markers(text);
+        if key.is_empty() {
+            continue;
+        }
+        *target_counts.entry(key).or_default() += 1;
+    }
     let mut changed = false;
-    let mut marked = false;
     let out = entries
         .iter()
         .map(|entry| match entry {
@@ -807,7 +759,11 @@ pub fn set_first_prompt_in_progress(
                     next.text = stripped;
                     changed = true;
                 }
-                if mark_first_prompt && !marked {
+                let key = strip_priority_markers(&next.text);
+                if let Some(remaining) = target_counts.get_mut(&key)
+                    && *remaining > 0
+                {
+                    *remaining -= 1;
                     if !crate::queue_command::is_slash_command(&next.text) {
                         let marked_text = apply_in_progress_marker(&next.text);
                         if marked_text != next.text {
@@ -815,7 +771,6 @@ pub fn set_first_prompt_in_progress(
                             changed = true;
                         }
                     }
-                    marked = true;
                 }
                 QueueEntry::Prompt(next)
             }
@@ -2552,6 +2507,31 @@ mod tests {
         let entries = parse("- 🚧 /clear\n- do [#new]\n").unwrap();
         let marked = set_first_prompt_in_progress(&entries, true).unwrap();
         assert_eq!(render(&marked), "/clear\n- do [#new]\n");
+    }
+
+    #[test]
+    fn set_prompts_in_progress_projects_multiple_active_heads() {
+        let entries = parse("- 🚧 do [#old]\n- do [#alpha]\n- do [#beta]\n").unwrap();
+        let targets = vec!["do [#alpha]".to_string(), "do [#beta]".to_string()];
+        let marked = set_prompts_in_progress(&entries, &targets).unwrap();
+
+        assert_eq!(
+            render(&marked),
+            "- do [#old]\n- 🚧 do [#alpha]\n- 🚧 do [#beta]\n"
+        );
+    }
+
+    #[test]
+    fn in_progress_marker_detection_allows_priority_prefix() {
+        assert!(has_in_progress_marker(":round_pushpin: 🚧 do [#alpha]"));
+        assert_eq!(
+            strip_in_progress_marker(":round_pushpin: 🚧 do [#alpha]"),
+            ":round_pushpin: do [#alpha]"
+        );
+
+        let entries = parse("- :round_pushpin: 🚧 do [#alpha]\n").unwrap();
+        let marked = set_prompts_in_progress(&entries, &[]).unwrap();
+        assert_eq!(render(&marked), "- :round_pushpin: do [#alpha]\n");
     }
 
     #[test]

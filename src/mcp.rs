@@ -174,20 +174,47 @@ fn finalize_input_schema() -> Value {
     properties.insert(
         "pending_add".to_string(),
         string_array_property(Some(
-            "Optional backlog items to add, equivalent to repeated --pending-add.",
+            "Legacy name for backlog_add. Optional backlog items to add.",
+        )),
+    );
+    properties.insert(
+        "backlog_add".to_string(),
+        string_array_property(Some(
+            "Optional backlog items to add, equivalent to repeated --backlog-add.",
         )),
     );
     properties.insert(
         "pending_add_back".to_string(),
         string_array_property(Some(
-            "Optional backlog items to append, equivalent to repeated --pending-add-back.",
+            "Legacy name for backlog_add_back. Optional backlog items to append.",
+        )),
+    );
+    properties.insert(
+        "backlog_add_back".to_string(),
+        string_array_property(Some(
+            "Optional backlog items to append, equivalent to repeated --backlog-add-back.",
         )),
     );
     for key in [
+        "backlog_add_to",
+        "backlog_add_gated",
+        "backlog_add_after",
+        "backlog_add_before",
         "pending_add_to",
         "pending_add_gated",
         "pending_add_after",
         "pending_add_before",
+        "icebox_add",
+        "icebox_add_after",
+        "icebox_add_before",
+        "icebox_add_back",
+        "icebox_edit",
+        "backlog_edit",
+        "backlog_gate",
+        "backlog_ungate",
+        "backlog_resolve_gate",
+        "backlog_set_gate_type",
+        "backlog_set_verify",
         "pending_edit",
         "pending_gate",
         "pending_ungate",
@@ -204,6 +231,10 @@ fn finalize_input_schema() -> Value {
         properties.insert(key.to_string(), string_array_property(None));
     }
     properties.insert("pending_clear".to_string(), bool_property(None));
+    properties.insert("backlog_clear".to_string(), bool_property(None));
+    properties.insert("icebox_clear".to_string(), bool_property(None));
+    properties.insert("backlog_reorder".to_string(), string_property(None));
+    properties.insert("icebox_reorder".to_string(), string_property(None));
     properties.insert("pending_reorder".to_string(), string_property(None));
     properties.insert("allow_replace_pending".to_string(), bool_property(None));
     properties.insert("force_disk".to_string(), bool_property(None));
@@ -453,6 +484,34 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
     let file = required_path_arg(args, "file")?;
     let response = required_string_arg(args, "response")?;
     let origin = optional_string_arg(args, "origin")?.unwrap_or_else(|| "mcp".to_string());
+    let mut pending_add = string_vec_arg(args, "backlog_add")?;
+    pending_add.extend(string_vec_arg(args, "pending_add")?);
+    let mut pending_add_to = string_vec_arg(args, "backlog_add_to")?;
+    pending_add_to.extend(string_vec_arg(args, "pending_add_to")?);
+    let mut pending_add_gated = string_vec_arg(args, "backlog_add_gated")?;
+    pending_add_gated.extend(string_vec_arg(args, "pending_add_gated")?);
+    let mut pending_add_after = string_vec_arg(args, "backlog_add_after")?;
+    pending_add_after.extend(string_vec_arg(args, "pending_add_after")?);
+    let mut pending_add_before = string_vec_arg(args, "backlog_add_before")?;
+    pending_add_before.extend(string_vec_arg(args, "pending_add_before")?);
+    let mut pending_add_back = string_vec_arg(args, "backlog_add_back")?;
+    pending_add_back.extend(string_vec_arg(args, "pending_add_back")?);
+    let mut pending_edit = string_vec_arg(args, "backlog_edit")?;
+    pending_edit.extend(string_vec_arg(args, "pending_edit")?);
+    let pending_clear =
+        bool_arg(args, "backlog_clear", false)? || bool_arg(args, "pending_clear", false)?;
+    let pending_reorder = optional_string_arg(args, "backlog_reorder")?
+        .or(optional_string_arg(args, "pending_reorder")?);
+    let mut pending_gate = string_vec_arg(args, "backlog_gate")?;
+    pending_gate.extend(string_vec_arg(args, "pending_gate")?);
+    let mut pending_ungate = string_vec_arg(args, "backlog_ungate")?;
+    pending_ungate.extend(string_vec_arg(args, "pending_ungate")?);
+    let mut pending_resolve_gate = string_vec_arg(args, "backlog_resolve_gate")?;
+    pending_resolve_gate.extend(string_vec_arg(args, "pending_resolve_gate")?);
+    let mut pending_set_gate_type = string_vec_arg(args, "backlog_set_gate_type")?;
+    pending_set_gate_type.extend(string_vec_arg(args, "pending_set_gate_type")?);
+    let mut pending_set_verify = string_vec_arg(args, "backlog_set_verify")?;
+    pending_set_verify.extend(string_vec_arg(args, "pending_set_verify")?);
     let options = agent_doc_orchestration::write::CommandOptions {
         file: file.clone(),
         baseline_file: optional_path_arg(args, "baseline_file")?,
@@ -461,21 +520,28 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
         is_ipc: bool_arg(args, "ipc", false)?,
         force_disk: bool_arg(args, "force_disk", false)?,
         origin: Some(origin),
-        pending_add: string_vec_arg(args, "pending_add")?,
-        pending_add_to: string_vec_arg(args, "pending_add_to")?,
-        pending_add_gated: string_vec_arg(args, "pending_add_gated")?,
-        pending_add_after: string_vec_arg(args, "pending_add_after")?,
-        pending_add_before: string_vec_arg(args, "pending_add_before")?,
-        pending_add_back: string_vec_arg(args, "pending_add_back")?,
+        pending_add,
+        pending_add_to,
+        pending_add_gated,
+        pending_add_after,
+        pending_add_before,
+        pending_add_back,
+        icebox_add: string_vec_arg(args, "icebox_add")?,
+        icebox_add_after: string_vec_arg(args, "icebox_add_after")?,
+        icebox_add_before: string_vec_arg(args, "icebox_add_before")?,
+        icebox_add_back: string_vec_arg(args, "icebox_add_back")?,
+        icebox_edit: string_vec_arg(args, "icebox_edit")?,
+        icebox_clear: bool_arg(args, "icebox_clear", false)?,
+        icebox_reorder: optional_string_arg(args, "icebox_reorder")?,
         pending_done: string_vec_arg(args, "done")?,
-        pending_edit: string_vec_arg(args, "pending_edit")?,
-        pending_clear: bool_arg(args, "pending_clear", false)?,
-        pending_reorder: optional_string_arg(args, "pending_reorder")?,
-        pending_gate: string_vec_arg(args, "pending_gate")?,
-        pending_ungate: string_vec_arg(args, "pending_ungate")?,
-        pending_resolve_gate: string_vec_arg(args, "pending_resolve_gate")?,
-        pending_set_gate_type: string_vec_arg(args, "pending_set_gate_type")?,
-        pending_set_verify: string_vec_arg(args, "pending_set_verify")?,
+        pending_edit,
+        pending_clear,
+        pending_reorder,
+        pending_gate,
+        pending_ungate,
+        pending_resolve_gate,
+        pending_set_gate_type,
+        pending_set_verify,
         review_add: string_vec_arg(args, "review_add")?,
         review_edit: string_vec_arg(args, "review_edit")?,
         review_remove: string_vec_arg(args, "review_remove")?,
@@ -697,12 +763,33 @@ mod tests {
         for key in [
             "baseline_file",
             "done",
+            "backlog_add",
+            "backlog_add_to",
+            "backlog_add_gated",
+            "backlog_add_after",
+            "backlog_add_before",
+            "backlog_add_back",
             "pending_add",
             "pending_add_to",
             "pending_add_gated",
             "pending_add_after",
             "pending_add_before",
             "pending_add_back",
+            "icebox_add",
+            "icebox_add_after",
+            "icebox_add_before",
+            "icebox_add_back",
+            "icebox_edit",
+            "icebox_clear",
+            "icebox_reorder",
+            "backlog_edit",
+            "backlog_clear",
+            "backlog_reorder",
+            "backlog_gate",
+            "backlog_ungate",
+            "backlog_resolve_gate",
+            "backlog_set_gate_type",
+            "backlog_set_verify",
             "pending_edit",
             "pending_clear",
             "pending_reorder",

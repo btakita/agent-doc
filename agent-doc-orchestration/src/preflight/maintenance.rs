@@ -1004,6 +1004,7 @@ pub(crate) fn enforce_no_dropped_backlog(file: &Path, rc: &crate::graph::RunCont
 #[derive(Debug, Default)]
 pub(crate) struct QueueState {
     pub(crate) queue_prompts: Vec<String>,
+    pub(crate) selected_queue_prompts: Vec<String>,
     pub(crate) queue_active: Option<bool>,
     pub(crate) queue_deferred: bool,
     pub(crate) queue_start_at: Option<String>,
@@ -1178,6 +1179,65 @@ pub(crate) fn collect_after_deps(
     deps
 }
 
+fn queue_prompt_projection_rows(
+    content: &str,
+    entries: &[crate::queue::QueueEntry],
+) -> Vec<agent_doc_document::queue_projection::QueuePromptRow> {
+    let deferred_ids = crate::queue_continuation::deferred_backlog_ids(content);
+    let preset_supplies_directive = crate::component::parse(content)
+        .ok()
+        .and_then(|components| {
+            components
+                .iter()
+                .find(|component| component.name == "queue")
+                .map(|component| component.attrs.contains_key("preset"))
+        })
+        .unwrap_or(false);
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            crate::queue::QueueEntry::Prompt(prompt) => {
+                let text = crate::queue::strip_in_progress_marker(&prompt.text);
+                let id = queue_prompt_done_id(&text);
+                let projectable_default =
+                    !crate::queue_continuation::is_noise_queue_head(
+                        &text,
+                        preset_supplies_directive,
+                    ) && !id.as_ref().is_some_and(|id| deferred_ids.contains(id));
+                Some(agent_doc_document::queue_projection::QueuePromptRow::new(
+                    prompt.text.clone(),
+                    id,
+                    projectable_default,
+                ))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn active_queue_prompt_projection(
+    content: &str,
+    entries: &[crate::queue::QueueEntry],
+    deps: &std::collections::HashMap<String, Vec<String>>,
+    honor_in_progress_markers: bool,
+) -> agent_doc_document::queue_projection::ActiveQueuePromptProjection {
+    let rows = queue_prompt_projection_rows(content, entries);
+    agent_doc_document::queue_projection::project_active_queue_prompts(
+        &rows,
+        deps,
+        honor_in_progress_markers,
+    )
+}
+
+fn in_progress_marker_retarget_requested(
+    diff: Option<&str>,
+    content: &str,
+    entries: &[crate::queue::QueueEntry],
+) -> bool {
+    let rows = queue_prompt_projection_rows(content, entries);
+    agent_doc_document::queue_projection::in_progress_marker_retarget_requested(diff, &rows)
+}
+
 /// Why a backlog id was skipped from the auto-drain queue (`#goqueuestall`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UndrainableSkip {
@@ -1267,7 +1327,11 @@ pub(crate) fn dedup_queue_nodes_by_key(content: &str) -> Result<Option<(String, 
 
 fn selected_queue_head_node_key(content: &str, head_text: &str) -> Option<String> {
     if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
-        && let Some(node) = nodes.into_iter().find(|node| !node.item.struck)
+        && let Some(node) = nodes.into_iter().find(|node| {
+            !node.item.struck
+                && crate::queue::strip_priority_markers(node.item.text.trim())
+                    == crate::queue::strip_priority_markers(head_text)
+        })
     {
         return Some(node.node_key);
     }
@@ -1683,6 +1747,7 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
     if activation.active && crate::queue::has_stop_fence_at_head(&activation.entries_after) {
         return Ok(QueueState {
             queue_prompts: vec![],
+            selected_queue_prompts: vec![],
             queue_active: Some(false),
             queue_deferred: false,
             queue_start_at: None,
@@ -1703,6 +1768,7 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
     {
         return Ok(QueueState {
             queue_prompts: vec![],
+            selected_queue_prompts: vec![],
             queue_active: None,
             queue_deferred: true,
             queue_start_at: Some(start_at.to_string()),
@@ -1745,9 +1811,25 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
     let queue_supervisor_drainable = activation.active
         && crate::queue_continuation::live_drainable_continuation_head(file, &drainability_content)
             .is_some();
+    let selected_queue_prompts = if activation.active {
+        active_queue_prompt_projection(
+            &drainability_content,
+            &activation.entries_after,
+            &collect_after_deps(&components, &content),
+            in_progress_marker_retarget_requested(
+                diff,
+                &drainability_content,
+                &activation.entries_after,
+            ),
+        )
+        .prompts
+    } else {
+        Vec::new()
+    };
 
     Ok(QueueState {
         queue_prompts,
+        selected_queue_prompts,
         queue_active: if activation.active {
             Some(true)
         } else if activation.deferred {
@@ -2765,6 +2847,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             }
             return Ok(QueueState {
                 queue_prompts: vec![],
+                selected_queue_prompts: vec![],
                 queue_active: Some(false),
                 queue_deferred: false,
                 queue_start_at: None,
@@ -2791,6 +2874,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             }
             return Ok(QueueState {
                 queue_prompts: vec![],
+                selected_queue_prompts: vec![],
                 queue_active: None,
                 queue_deferred: true,
                 queue_start_at: Some(dt.to_string()),
@@ -2932,6 +3016,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     }
                     return Ok(QueueState {
                         queue_prompts: vec![],
+                        selected_queue_prompts: vec![],
                         queue_active: Some(false),
                         queue_deferred: false,
                         queue_start_at: None,
@@ -3038,15 +3123,50 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     }
 
     let mut in_progress_markers_changed = false;
-    let mut current_head_ids = std::collections::HashSet::new();
-    if activation.active
-        && let Some(head) = crate::queue::prompts(&activation.entries_after).first()
-        && let Some(id) = queue_prompt_done_id(&head.text)
-    {
-        current_head_ids.insert(id);
+    let active_queue_projection = if activation.active {
+        let current_components = crate::component::parse(&current_content)?;
+        active_queue_prompt_projection(
+            &current_content,
+            &activation.entries_after,
+            &collect_after_deps(&current_components, &current_content),
+            in_progress_marker_retarget_requested(
+                diff,
+                &current_content,
+                &activation.entries_after,
+            ),
+        )
+    } else {
+        agent_doc_document::queue_projection::ActiveQueuePromptProjection::default()
+    };
+    if active_queue_projection.retargeted {
+        eprintln!(
+            "[preflight] queue: honored operator in-progress marker retarget to {} active head(s)",
+            active_queue_projection.prompts.len()
+        );
     }
+    if !active_queue_projection.missing_dependency_ids.is_empty() {
+        queue_warnings.push(PreflightWarning {
+            code: "queue_retarget_missing_prerequisite".to_string(),
+            message: format!(
+                "operator-selected queue head has prerequisite id(s) not present as live queue prompts: {}",
+                active_queue_projection
+                    .missing_dependency_ids
+                    .iter()
+                    .map(|id| format!("#{id}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            document_agent: None,
+            active_harness: None,
+        });
+    }
+    let active_queue_prompt_texts = active_queue_projection.prompts;
+    let current_head_ids = active_queue_prompt_texts
+        .iter()
+        .filter_map(|text| queue_prompt_done_id(text))
+        .collect::<std::collections::HashSet<_>>();
     if let Some(marked_entries) =
-        crate::queue::set_first_prompt_in_progress(&activation.entries_after, activation.active)
+        crate::queue::set_prompts_in_progress(&activation.entries_after, &active_queue_prompt_texts)
     {
         let new_body = crate::queue::render(&marked_entries);
         current_content = {
@@ -3242,16 +3362,10 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         &activation.entries_after,
         activation.active,
     )?;
-    if activation.active
-        && let Some(head) = crate::queue::prompts(&activation.entries_after).first()
-    {
-        let head_text = crate::queue::strip_in_progress_marker(&head.text);
-        record_selected_queue_head_state(
-            file,
-            &current_content,
-            &head_text,
-            queue_supervisor_drainable,
-        )?;
+    if activation.active && !active_queue_prompt_texts.is_empty() {
+        for head_text in &active_queue_prompt_texts {
+            record_selected_queue_head_state(file, &current_content, head_text, true)?;
+        }
     } else if activation.deferred
         && let Some(head) = crate::queue::first_prompt(&activation.entries_after)
     {
@@ -3266,6 +3380,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
 
     Ok(QueueState {
         queue_prompts,
+        selected_queue_prompts: active_queue_prompt_texts,
         queue_active: if activation.active {
             Some(true)
         } else if activation.deferred {
@@ -5169,6 +5284,152 @@ mod tests {
         );
         assert_eq!(projection.queue.worklist[1].text, "do [#beta]");
         assert!(projection.queue.worklist_queue_hash.is_some());
+    }
+
+    #[test]
+    fn run_queue_maintenance_marks_first_in_session_drainable_head_in_progress() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#verify]\n",
+            "- do [#focused]\n",
+            "- do [#ready]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#verify] [operator-verify] needs a human\n",
+            "- [ ] [#focused] [focused-cycle] needs a clean turn\n",
+            "- [ ] [#ready] active work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(state.queue_active, Some(true));
+        assert_eq!(state.queue_drainable_head_count, 1);
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("- do [#verify]\n- do [#focused]\n- 🚧 do [#ready]"),
+            "in-progress marker must project the first in-session drainable head:\n{updated}"
+        );
+        assert!(updated.contains("- [ ] [#verify] [operator-verify] needs a human"));
+        assert!(updated.contains("- [ ] [#focused] [focused-cycle] needs a clean turn"));
+        assert!(updated.contains("- [ ] 🚧 [#ready] active work"));
+
+        let ready_node_key = agent_doc_markdown_ast::mutations::item_nodes(&updated, "queue")
+            .unwrap()
+            .into_iter()
+            .find(|node| node.item.text.contains("#ready"))
+            .expect("ready queue head should have a node key")
+            .node_key;
+        let document_hash = crate::pending_cmd::doc_id_for(&doc);
+        let ledger = crate::project_controller::load_state_event_ledger(dir.path()).unwrap();
+        let projection = ledger
+            .project_document(&document_hash)
+            .expect("selected queue state should project for document");
+        assert_eq!(
+            projection.queue.active_head.as_deref(),
+            Some(ready_node_key.as_str())
+        );
+        let head = projection
+            .queue
+            .heads
+            .get(&ready_node_key)
+            .expect("ready queue head should be present in projection");
+        assert_eq!(head.backlog_id.as_deref(), Some("ready"));
+        assert_eq!(head.prompt_text.as_deref(), Some("do [#ready]"));
+        assert!(head.drainable);
+    }
+
+    #[test]
+    fn run_queue_maintenance_honors_marker_retarget_with_auto_dag_prerequisites() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:queue priority -->\n",
+            "- do [#ops]\n",
+            "- 🚧 do [#ship]\n",
+            "- do [#setup]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority -->\n",
+            "- [ ] [#ops] priority=9 independent work\n",
+            "- [ ] [#ship] priority=2 after=#setup selected dependent work\n",
+            "- [ ] [#setup] priority=1 prerequisite work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let snapshot_content = content.replace(
+            "- do [#ops]\n- 🚧 do [#ship]",
+            "- 🚧 do [#ops]\n- do [#ship]",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, &snapshot_content).unwrap();
+
+        let diff = concat!(
+            "@@ queue @@\n",
+            "-- 🚧 do [#ops]\n",
+            "+- do [#ops]\n",
+            "-- do [#ship]\n",
+            "+- 🚧 do [#ship]\n",
+        );
+        let state = run_queue_maintenance(&doc, Some(diff)).unwrap();
+
+        assert_eq!(state.queue_active, Some(true));
+        assert_eq!(
+            state.selected_queue_prompts,
+            vec![
+                ":round_pushpin: do [#setup]".to_string(),
+                "do [#ship]".to_string()
+            ]
+        );
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("- 🚧 :round_pushpin: do [#setup]\n- 🚧 do [#ship]\n- do [#ops]"),
+            "operator retarget must project the selected head and its auto-DAG prerequisite as active:\n{updated}"
+        );
+        assert!(updated.contains("- [ ] 🚧 [#setup] priority=1 prerequisite work"));
+        assert!(
+            updated.contains("- [ ] 🚧 [#ship] priority=2 after=#setup selected dependent work")
+        );
+        assert!(updated.contains("- [ ] [#ops] priority=9 independent work"));
+
+        let node_keys = agent_doc_markdown_ast::mutations::item_nodes(&updated, "queue").unwrap();
+        let setup_node_key = node_keys
+            .iter()
+            .find(|node| node.item.text.contains("#setup"))
+            .expect("setup queue head should have a node key")
+            .node_key
+            .clone();
+        let ship_node_key = node_keys
+            .iter()
+            .find(|node| node.item.text.contains("#ship"))
+            .expect("ship queue head should have a node key")
+            .node_key
+            .clone();
+        let document_hash = crate::pending_cmd::doc_id_for(&doc);
+        let ledger = crate::project_controller::load_state_event_ledger(dir.path()).unwrap();
+        let projection = ledger
+            .project_document(&document_hash)
+            .expect("selected queue state should project for document");
+        assert!(projection.queue.active_heads.contains(&setup_node_key));
+        assert!(projection.queue.active_heads.contains(&ship_node_key));
+        assert_eq!(
+            projection.queue.active_head.as_deref(),
+            Some(ship_node_key.as_str())
+        );
     }
 
     #[test]

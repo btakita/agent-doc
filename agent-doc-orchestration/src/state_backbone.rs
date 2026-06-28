@@ -949,6 +949,8 @@ pub struct FileWatchChangeProjection {
 pub struct QueueProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_head: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub active_heads: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub heads: BTreeMap<String, QueueHeadProjection>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
@@ -979,6 +981,7 @@ impl QueueProjection {
         head.defer_reason = None;
         if head.transition(QueueHeadEvent::Selected) {
             self.active_head = Some(node_key.to_string());
+            self.active_heads.insert(node_key.to_string());
         }
     }
 
@@ -993,6 +996,7 @@ impl QueueProjection {
         if self.active_head.as_deref() == Some(node_key) {
             self.active_head = None;
         }
+        self.active_heads.remove(node_key);
     }
 
     fn apply_completed(&mut self, node_key: &str, backlog_id: Option<&str>) {
@@ -1006,6 +1010,7 @@ impl QueueProjection {
         if self.active_head.as_deref() == Some(node_key) {
             self.active_head = None;
         }
+        self.active_heads.remove(node_key);
     }
 
     fn apply_worklist(&mut self, queue_hash: &str, entries: &[QueueWorklistEntry], active: bool) {

@@ -1,8 +1,9 @@
 //! Integration tests for the pending system (stable hash ids + granular ops).
 //!
 //! Covers:
-//! - `agent-doc pending <file> add/backfill/done/edit/reorder/clear/reap`
-//! - `agent-doc write --pending-add/--done/...`
+//! - `agent-doc backlog <file> add/backfill/done/edit/reorder/clear/reap`
+//! - `agent-doc icebox <file> add/backfill/done/edit/reorder/clear/reap`
+//! - `agent-doc write --backlog-add/--icebox-edit/--done/...`
 //! - `replace:pending` block rejection (and `--allow-replace-pending` escape hatch)
 //! - `patch:pending` dual-accept with deprecation warning (#25ag migration)
 
@@ -24,6 +25,18 @@ fn setup_doc(body: &str) -> (TempDir, PathBuf) {
     let content = format!(
         "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n{}\n<!-- /agent:pending -->\n",
         body
+    );
+    fs::write(&doc, content).unwrap();
+    (tmp, doc)
+}
+
+fn setup_doc_with_icebox(backlog: &str, icebox: &str) -> (TempDir, PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = format!(
+        "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n{}\n<!-- /agent:backlog -->\n\n<!-- agent:icebox -->\n{}\n<!-- /agent:icebox -->\n",
+        backlog, icebox
     );
     fs::write(&doc, content).unwrap();
     (tmp, doc)
@@ -401,6 +414,143 @@ fn write_pending_add_after_and_back_position_items_explicitly() {
     assert!(
         lines.last().unwrap().contains("appended at tail"),
         "back insert must land at the tail: {body}"
+    );
+}
+
+#[test]
+fn write_icebox_edit_preserves_hash_and_backlog_untouched() {
+    let (_tmp, doc) = setup_doc_with_icebox(
+        "- [ ] [#back1] active backlog task\n",
+        "- [ ] [#park1] parked task\n",
+    );
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--icebox-edit",
+            "park1=renamed parked task",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        component_body(&content, "backlog").contains("[#back1] active backlog task"),
+        "{content}"
+    );
+    let icebox = component_body(&content, "icebox");
+    assert!(
+        icebox.contains("- [ ] [#park1] renamed parked task"),
+        "{icebox}"
+    );
+    assert!(!icebox.contains("parked task\n"), "{icebox}");
+}
+
+#[test]
+fn write_icebox_reorder_and_clear_target_icebox_only() {
+    let (_tmp, doc) = setup_doc_with_icebox(
+        "- [ ] [#back1] active backlog task\n",
+        "- [ ] [#park1] parked one\n- [ ] [#park2] parked two\n",
+    );
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--icebox-reorder",
+            "park2,park1",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    let icebox = component_body(&content, "icebox");
+    assert!(
+        icebox.find("[#park2]").unwrap() < icebox.find("[#park1]").unwrap(),
+        "{icebox}"
+    );
+    assert!(
+        component_body(&content, "backlog").contains("[#back1] active backlog task"),
+        "{content}"
+    );
+
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--icebox-clear",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nsecond response\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    assert_eq!(component_body(&content, "icebox"), "");
+    assert!(
+        component_body(&content, "backlog").contains("[#back1] active backlog task"),
+        "{content}"
+    );
+}
+
+#[test]
+fn icebox_subcommand_backfill_edit_reorder_reap_targets_icebox() {
+    let (_tmp, doc) = setup_doc_with_icebox(
+        "- [ ] [#back1] active backlog task\n",
+        "- parked legacy\n- [x] [#done1] completed parked task\n",
+    );
+    agent_doc()
+        .args(["icebox", doc.to_str().unwrap(), "--force-disk", "backfill"])
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    let generated_id = component_body(&content, "icebox")
+        .lines()
+        .find_map(|line| {
+            line.split("[#")
+                .nth(1)
+                .and_then(|rest| rest.split(']').next())
+        })
+        .expect("backfill should assign an id")
+        .to_string();
+
+    agent_doc()
+        .args([
+            "icebox",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "edit",
+            &generated_id,
+            "renamed legacy parked task",
+        ])
+        .assert()
+        .success();
+    agent_doc()
+        .args([
+            "icebox",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "reorder",
+            &format!("done1,{generated_id}"),
+        ])
+        .assert()
+        .success();
+    agent_doc()
+        .args(["icebox", doc.to_str().unwrap(), "--force-disk", "reap"])
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        component_body(&content, "backlog").contains("[#back1] active backlog task"),
+        "{content}"
+    );
+    let icebox = component_body(&content, "icebox");
+    assert!(icebox.contains("renamed legacy parked task"), "{icebox}");
+    assert!(!icebox.contains("[#done1]"), "{icebox}");
+    assert!(
+        component_body(&content, "done").contains("[#done1] completed parked task"),
+        "{content}"
     );
 }
 
@@ -1127,6 +1277,12 @@ fn preflight_emits_pending_reordered_flag() {
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("preflight output should be JSON");
     assert_eq!(
+        parsed.get("backlog_reordered").and_then(|v| v.as_bool()),
+        Some(true),
+        "expected backlog_reordered: true, full output: {}",
+        stdout
+    );
+    assert_eq!(
         parsed.get("pending_reordered").and_then(|v| v.as_bool()),
         Some(true),
         "expected pending_reordered: true, full output: {}",
@@ -1149,6 +1305,12 @@ fn preflight_emits_pending_gated_count() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("preflight output should be JSON");
+    assert_eq!(
+        parsed.get("backlog_gated_count").and_then(|v| v.as_u64()),
+        Some(2),
+        "expected backlog_gated_count: 2, full output: {}",
+        stdout
+    );
     assert_eq!(
         parsed.get("pending_gated_count").and_then(|v| v.as_u64()),
         Some(2),
@@ -1216,6 +1378,11 @@ fn preflight_omits_pending_gated_count_when_zero() {
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("preflight output should be JSON");
     // Zero is omitted via skip_serializing_if — field should be absent entirely.
+    assert!(
+        parsed.get("backlog_gated_count").is_none(),
+        "expected backlog_gated_count to be omitted at zero, got: {}",
+        stdout
+    );
     assert!(
         parsed.get("pending_gated_count").is_none(),
         "expected pending_gated_count to be omitted at zero, got: {}",

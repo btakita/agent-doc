@@ -1,0 +1,13 @@
+[package]
+name = "agent-doc-element-icebox"
+version = "0.34.65"
+edition = "2024"
+description = "Icebox element descriptor for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_element_icebox"
+
+[dependencies]
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.65" }

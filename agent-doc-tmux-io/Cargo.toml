@@ -1,0 +1,13 @@
+[package]
+name = "agent-doc-tmux-io"
+version = "0.34.65"
+edition = "2024"
+description = "Effectful tmux command execution adapter for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_tmux_io"
+
+[dependencies]
+agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.65" }

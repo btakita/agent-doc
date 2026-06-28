@@ -9,6 +9,7 @@ planning, realtime parse-state projection, and post-apply visible-state
 verification. The turn lifecycle owns admission, preflight, agent dispatch,
 response capture, pending-operation
 decisions, selected write policy, backup/audit updates, and commits.
+The Rust pure lifecycle state machine lives in `agent-doc-turn`.
 
 Hard invariants:
 
@@ -16,6 +17,8 @@ Hard invariants:
 - agent-doc-merge does not commit;
 - `agent-doc-realtime` does not commit;
 - realtime handoff proof is an input to turn closeout, not a commit by itself;
+- turn-executor readiness gates dispatch, but executors do not own document
+  merge, queue projection, or commits;
 - preflight consumes the realtime parse projection; `ParseBlocked` moves the
   turn to `InterruptedBlocked` instead of running surprise repair;
 - commit is optional when the selected turn policy is no-commit;
@@ -41,7 +44,7 @@ replace realtime source authority.
 | `ResponseCaptured` | lifecycle | Final assistant response is durably captured for replay. | Build the lifecycle-owned operation set and request realtime apply/verification. |
 | `RealtimeApplyPending` | realtime+lifecycle | The lifecycle has a bounded operation set and is waiting for realtime merge/apply/verify. | Realtime returns a verified handoff proof, a typed conflict, or an unproven delivery result. |
 | `RealtimeApplyVerified` | lifecycle | The latest source-of-truth text contains the agent-owned delta and preserved operator edits. | Apply the selected closeout policy: commit, no-commit, retry, or fail closed. |
-| `CommitPending` | lifecycle | Backup/audit state, index staging, pending mutations, and git commit are in progress. | Commit succeeds, no-op commit is proven, or a recoverable/blocked closeout is recorded. |
+| `CommitPending` | lifecycle | Backup/audit state, index staging, tracked-work mutations, and git commit are in progress. | Commit succeeds, no-op commit is proven, or a recoverable/blocked closeout is recorded. |
 | `Committed` | lifecycle | Closeout crossed the selected commit boundary and terminal state is recorded. | Later prompts start a new turn; duplicate terminal bookkeeping is ignored. |
 | `NoCommitComplete` | lifecycle | The selected policy intentionally leaves the verified document uncommitted. | Later prompt/commit policy starts a new turn or commits through an explicit lifecycle command. |
 | `InterruptedBlocked` | lifecycle | Closeout cannot prove safe progress, often because editor convergence, response capture, or commit proof is missing. | Retry from durable lifecycle state, recover through operator-selected policy, or abandon when no response was captured. |
@@ -116,7 +119,7 @@ flowchart LR
 | Backend dispatch accepted after parse gate | `PreflightOpened` | `PromptDispatched` | Realtime parse state is `ParseValid`, or `ParseRecoverable` with diagnostics that do not affect the targeted operation; the harness reports the prompt was accepted or the owned pane entered turn-active state. |
 | Backend starts/continues output | `PromptDispatched` | `AgentRunning` | Harness turn-active evidence or streamed output belongs to this cycle. |
 | Final response captured | `AgentRunning` | `ResponseCaptured` | Durable capture file stores response body, response hash, cycle id, and baseline facts. |
-| Operation set built | `ResponseCaptured` | `RealtimeApplyPending` | Response placement, pending mutations, queue consumption, compact exchange, and done/review changes are bounded to lifecycle-owned intent. |
+| Operation set built | `ResponseCaptured` | `RealtimeApplyPending` | Response placement, tracked-work mutations, queue consumption, compact exchange, and done/review changes are bounded to lifecycle-owned intent. |
 | Realtime apply verified | `RealtimeApplyPending` | `RealtimeApplyVerified` | Realtime state machine returns latest source-of-truth text plus proof that operator-visible edits and agent-owned deltas are present. |
 | Realtime conflict or unproven delivery | `RealtimeApplyPending` | `InterruptedBlocked` | Typed reason records conflict, stale ACK, missing editor convergence, send failure, or source mismatch. |
 | Commit policy selected | `RealtimeApplyVerified` | `CommitPending` | The turn policy requires a commit and the latest verified source text is still current. |
@@ -156,6 +159,77 @@ Only `verified` may move the turn to `RealtimeApplyVerified`. Even then, the
 lifecycle still chooses commit/no-commit/retry policy. A verified realtime merge
 is sufficient to update backup/audit state only when the lifecycle state says
 that backup update is part of the selected closeout action.
+
+## Turn Executor Boundary
+
+A turn executor is where the agent turn runs and is observed. Tmux is the first
+executor implementation, but future non-tmux terminals and agent APIs should
+fit the same boundary.
+
+The shared pure executor vocabulary lives in `agent-doc-turn-executor`. Shared
+tmux observations and realtime tmux model facts live in `agent-doc-tmux`
+because other parts of the stack may observe or act on tmux without owning turn
+execution. Tmux command argv builders and parsers live in
+`agent-doc-tmux-commands`; subprocess execution lives in `agent-doc-tmux-io`.
+
+Executor-specific adapters live in sibling crates such as
+`agent-doc-turn-executor-tmux`. That crate consumes `agent-doc-tmux` facts and
+maps them into turn-executor readiness, output watermark, missing/exited
+executor, stale/crashed supervisor, and requested scheduling action. It does
+not execute commands.
+
+Executor IO belongs in adapter code. Today much of it is still transitional
+`agent-doc-orchestration` code, but new tmux effects should move toward
+`agent-doc-tmux-io`, using pure command descriptions from
+`agent-doc-tmux-commands`, then emit typed observations into `agent-doc-tmux`
+and `agent-doc-turn-executor-tmux`. Those IO crates must not own queue
+projection, document merge, lifecycle commits, or realtime source authority.
+
+The session document is not a turn executor. It is the realtime document
+subject/source/sink governed by
+[Real-Time Workflow Authority](14-realtime-workflow.md). If future code needs a
+"write target" concept, it should be named separately from turn executor.
+
+## Supervisor And Controller Boundary
+
+The project controller is the control plane process and durable CAS/RPC owner
+for a project. Use `controller` in crate names, not `pcp`. The controller is
+not the supervisor state machine itself; it persists and applies supervisor
+decisions.
+
+Recommended crate names:
+
+- `agent-doc-supervisor`: pure supervisor domain model and realtime state
+  machine. It owns states and facts such as `Starting`, `Ready`, `Busy`,
+  `Dead`, `Closed`, generation, heartbeat freshness, pane/socket liveness
+  observations, recycle/defer decisions, stale actor close decisions, and dead
+  supervisor recovery decisions. It does not spawn, kill, unlink sockets, run
+  tmux commands, write git commits, or mutate the session document.
+- `agent-doc-supervisor-process`: effectful supervisor process/socket/tmux
+  operations. It owns spawn, kill, reexec, cold-start, stale-socket unlink, and
+  supervisor process reaping. It emits typed observations/results back into
+  `agent-doc-supervisor`.
+- `agent-doc-controller`: project controller RPC, admission, durable CAS store,
+  and application of supervisor/turn decisions. It may store a controller-local
+  representation of supervisor state, but that representation is not a separate
+  policy source.
+- `agent-doc-controller-supervisor`: optional adapter/schema module or crate if
+  the controller's persisted supervisor record needs to be isolated. It should
+  translate between controller storage and `agent-doc-supervisor` facts, not own
+  supervisor policy.
+
+Reaping names must distinguish what is being reaped:
+
+- stale supervisor actor/projection close decisions are supervisor-domain
+  decisions applied through the controller;
+- supervisor process and stale-socket reaping are supervisor-process effects;
+- stale project-controller process reaping belongs to `agent-doc-controller`,
+  not `agent-doc-supervisor`;
+- editor/plugin sidecar reaping belongs to editor/plugin IO boundaries.
+
+This separation keeps supervisor realtime state available to editor, tmux,
+diagnostic, and turn-executor code without making those consumers depend on the
+controller's durable store or process-kill effects.
 
 ## Queue Admission
 

@@ -1086,7 +1086,9 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // response, falling through to the safe bail instead of auto-committing a
         // response-less document.
         ("agent-doc-orchestration/src/preflight.rs", "reason=") => 3,
-        ("agent-doc-orchestration/src/preflight/run.rs", "reason=") => 1,
+        // 1 -> 0: queue selected-head handling moved to typed queue projection
+        // fields, retiring the last ad hoc `reason=` token from preflight/run.
+        ("agent-doc-orchestration/src/preflight/run.rs", "reason=") => 0,
         // 1 -> 2 (`reason=clean_session|operator_verify`): the go-mode
         // backlog→queue sync skips agent-undrainable heads and logs
         // `go_queue_skip_undrainable id=#<id> reason=<reason> session=<...>`
@@ -1355,7 +1357,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // guard inside `atomic_write_if_current_pub`. Fewer hot-path guard
         // tokens, not more — the guard boundary is centralized, not added.
         // +1 (#ipcproofcloseout): `run_command` now invokes the existing stale
-        // snapshot reset-drift guard before granular pending/review/status
+        // snapshot reset-drift guard before granular backlog/review/status
         // mutations, so a failed finalize cannot alter backlog state without the
         // exchange response. Reuses the existing reset-drift boundary.
         // +1 (#missing-head-response-recovery): strict empty-response closeout
@@ -3292,6 +3294,29 @@ fn test_cli_init_file_lazy_project_init() {
 
 // ── skill tests ───────────────────────────────────────────────────────────────
 
+fn assert_operator_authority_instructions(content: &str, surface: &str) {
+    assert!(
+        content.contains("Preserve user edits; let `agent-doc write --stream` merge"),
+        "{surface} should tell agents to preserve user edits through the merge path"
+    );
+    assert!(
+        content.contains("Operator-visible document text is authoritative"),
+        "{surface} should state the operator-visible document is authoritative"
+    );
+    assert!(
+        content.contains("never recover, patch, or hook-closeout by replacing it with `content_ours`, a snapshot, or ACK-content"),
+        "{surface} should forbid content_ours/snapshot/ACK-content replacement that drops operator text"
+    );
+    assert!(
+        content.contains("Snapshots are backup/audit state, not hot-path authority"),
+        "{surface} should keep snapshots out of hot-path document authority"
+    );
+    assert!(
+        content.contains("fail closed or retry through the editor instead"),
+        "{surface} should require fail-closed/editor retry instead of dropping operator text"
+    );
+}
+
 #[test]
 fn test_cli_skill_install_help() {
     let mut cmd = agent_doc_cmd();
@@ -3402,6 +3427,7 @@ fn test_skill_md_contains_required_steps() {
 
     let skill_path = tmp.path().join(".claude/skills/agent-doc/SKILL.md");
     let content = std::fs::read_to_string(&skill_path).unwrap();
+    assert_operator_authority_instructions(&content, "Claude SKILL.md");
 
     let required_steps = ["### 0.", "### 1.", "### 2."];
     for step in &required_steps {
@@ -3478,11 +3504,11 @@ fn test_skill_md_contains_required_steps() {
     );
     assert!(
         content.contains("create the plan file first"),
-        "SKILL.md should require creating plan files before adding plan-backed pending items"
+        "SKILL.md should require creating plan files before adding plan-backed backlog items"
     );
     assert!(
         content.contains("include that exact plan file path"),
-        "SKILL.md should require plan-backed pending items to include the plan path"
+        "SKILL.md should require plan-backed backlog items to include the plan path"
     );
     assert!(
         tmp.path()
@@ -3515,7 +3541,7 @@ fn test_skill_md_contains_required_steps() {
     .unwrap();
     assert!(
         pending_ops.contains("plan-spec2-rollout.md"),
-        "installed pending-ops runbook should document plan-backed pending items"
+        "installed pending-ops runbook should document plan-backed backlog items"
     );
 }
 
@@ -3543,6 +3569,7 @@ fn test_codex_skill_install_writes_hook_artifacts() {
     );
 
     let skill = std::fs::read_to_string(&skill_path).unwrap();
+    assert_operator_authority_instructions(&skill, "Codex SKILL.md");
     assert!(skill.contains("Interactive markdown session for Codex"));
     assert!(skill.contains("agent-doc skill install --harness codex --reload restart"));
 
@@ -3600,6 +3627,25 @@ fn test_codex_skill_install_writes_hook_artifacts() {
             std::fs::canonicalize(tmp.path()).unwrap().to_str().unwrap()
         ]
     );
+}
+
+#[test]
+fn test_opencode_skill_install_preserves_operator_authority_instructions() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.env("OPENCODE", "1");
+    cmd.env_remove("CLAUDE_CODE");
+    cmd.env_remove("CLAUDE_CODE_ENTRYPOINT");
+    cmd.env_remove("CODEX_CLI");
+    cmd.args(["skill", "install"]);
+    cmd.assert().success();
+
+    let skill_path = tmp.path().join(".opencode/skills/agent-doc/SKILL.md");
+    let content = std::fs::read_to_string(&skill_path).unwrap();
+    assert_operator_authority_instructions(&content, "OpenCode SKILL.md");
+    assert!(content.contains("Interactive markdown session for OpenCode"));
+    assert!(content.contains("agent-doc skill install --harness opencode"));
 }
 
 #[test]

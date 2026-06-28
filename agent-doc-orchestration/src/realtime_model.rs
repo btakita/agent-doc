@@ -842,6 +842,9 @@ mod tests {
             last_synced_epoch: 0,
             state_vector_b64: None,
             editor_id: None,
+            editor_kind: None,
+            editor_version: None,
+            capabilities: Vec::new(),
             content: content.map(|c| c.to_string()),
         }
     }

@@ -239,6 +239,8 @@ describe('patchGuard', () => {
         assert.ok(source.includes('patch.origin_editor_id === EDITOR_ID'));
         assert.ok(source.includes('native.documentClosedForEditor(document.uri.fsPath'));
         assert.ok(nativeSource.includes('agent_doc_document_changed_digest_content_for_editor'));
+        assert.ok(nativeSource.includes('agent_doc_document_changed_digest_content_for_editor_v2'));
+        assert.ok(nativeSource.includes('operator_text_authority_v1'));
         assert.ok(nativeSource.includes('agent_doc_document_closed_for_editor'));
     });
 });

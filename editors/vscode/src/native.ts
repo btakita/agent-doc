@@ -118,6 +118,7 @@ function resetBindings(): void {
     _is_tracked = null;
     _document_changed_digest_for_editor = null;
     _document_changed_digest_content_for_editor = null;
+    _document_changed_digest_content_for_editor_v2 = null;
     _document_closed_for_editor = null;
     _plugin_owner_try_acquire = null;
     _plugin_owner_release = null;
@@ -139,6 +140,9 @@ function resetBindings(): void {
 }
 
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
+const EDITOR_PLUGIN_KIND = 'vscode';
+const EDITOR_PLUGIN_VERSION = '0.2.34';
+const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 
 function findLibrary(projectRoot?: string): string | null {
     // 1. Explicit env var
@@ -238,6 +242,7 @@ let _document_changed_digest: any = null;
 let _document_changed_digest_content: any = null;
 let _document_changed_digest_for_editor: any = null;
 let _document_changed_digest_content_for_editor: any = null;
+let _document_changed_digest_content_for_editor_v2: any = null;
 let _document_closed_for_editor: any = null;
 let _plugin_owner_try_acquire: any = null;
 let _plugin_owner_release: any = null;
@@ -358,6 +363,16 @@ function bindFunctions(): void {
         _document_changed_digest_for_editor = null;
         _document_changed_digest_content_for_editor = null;
         _document_closed_for_editor = null;
+    }
+    try {
+        _document_changed_digest_content_for_editor_v2 = lib.func(
+            'agent_doc_document_changed_digest_content_for_editor_v2',
+            'void',
+            ['str', 'str', 'str', 'str', 'str', 'str'],
+        );
+    } catch (e: any) {
+        console.log(`[agent-doc/native] live-buffer capability ABI unavailable: ${e.message}`);
+        _document_changed_digest_content_for_editor_v2 = null;
     }
     try {
         _plugin_owner_try_acquire = lib.func(
@@ -1451,7 +1466,16 @@ export function documentChangedDigestContent(
 ): void {
     if (!ensureLoaded(projectRoot)) return;
     bindFunctions();
-    if (editorId && _document_changed_digest_content_for_editor) {
+    if (editorId && _document_changed_digest_content_for_editor_v2) {
+        _document_changed_digest_content_for_editor_v2(
+            filePath,
+            content,
+            editorId,
+            EDITOR_PLUGIN_KIND,
+            EDITOR_PLUGIN_VERSION,
+            OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+        );
+    } else if (editorId && _document_changed_digest_content_for_editor) {
         _document_changed_digest_content_for_editor(filePath, content, editorId);
     } else {
         _document_changed_digest_content(filePath, content);

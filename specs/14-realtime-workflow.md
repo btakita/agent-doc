@@ -212,6 +212,19 @@ realtime authority rules.
 | `AppliedVerified` | Post-apply source-of-truth | The owner-visible document contains the agent operation and preserves observed operator text. | Save backup state and commit. |
 | `ConflictBlocked` | Current source-of-truth | Merge or delivery could not prove preservation of operator text. | Leave the document untouched and report/retry later. |
 
+Editor-sidecars that prove a live editor buffer must also carry a stable
+frontend capability proof before the controller treats that editor as safe for
+operator-preserving mutation. The canonical capability for this invariant is
+`operator_text_authority_v1`: the editor reports full visible buffer content,
+per-editor identity, and enough local operation/epoch evidence for the harness
+to avoid discarding operator text. A diverged live-buffer sidecar from an older
+or capability-unknown frontend is still authoritative operator input, but it is
+not safe delivery proof. The controller must enter `ConflictBlocked` (or an
+equivalent fail-closed closeout) before sending a patch that could overwrite
+that buffer. Reloading/updating the editor frontend can replace the sidecar with
+a capability-bearing report; direct disk overwrite remains an explicit
+operator escape hatch only.
+
 Snapshots never create a realtime state. A snapshot can contribute a candidate
 delta to `AgentDeltaReady`; it cannot move a document to `MergePlanned`,
 `ApplyInFlight`, or `AppliedVerified` by itself.

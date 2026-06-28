@@ -21,8 +21,10 @@ import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.openapi.vfs.VirtualFileEvent
-import com.intellij.openapi.vfs.VirtualFileListener
+import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.openapi.vfs.newvfs.BulkFileListener
+import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent
+import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import com.intellij.psi.PsiManager
 import com.intellij.util.Alarm
 import java.awt.Color
@@ -55,14 +57,18 @@ class VisualHighlighterManager private constructor(private val project: Project)
                 }
             },
         )
-        com.intellij.openapi.vfs.VirtualFileManager.getInstance().addVirtualFileListener(
-            object : VirtualFileListener {
-                override fun contentsChanged(event: VirtualFileEvent) {
-                    if (!event.file.name.endsWith(".md")) return
-                    reparseAndRefresh(event.file)
+        project.messageBus.connect(this).subscribe(
+            VirtualFileManager.VFS_CHANGES,
+            object : BulkFileListener {
+                override fun after(events: List<VFileEvent>) {
+                    for (event in events) {
+                        if (event !is VFileContentChangeEvent) continue
+                        val file = event.file
+                        if (!file.name.endsWith(".md")) continue
+                        reparseAndRefresh(file)
+                    }
                 }
             },
-            this,
         )
         refreshAll()
     }

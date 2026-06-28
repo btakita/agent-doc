@@ -7,7 +7,6 @@ import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
-import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vcs.changes.VcsDirtyScopeManager
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -154,7 +153,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         state.watchThread = Thread({
             try {
-                watchLoop(state, patchesDir.toPath())
+                watchLoop(patchesDir.toPath())
             } catch (_: InterruptedException) {
                 // Normal shutdown
             } catch (e: Exception) {
@@ -341,7 +340,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         }
     }
 
-    private fun watchLoop(state: RootState, dir: Path) {
+    private fun watchLoop(dir: Path) {
         val watchService: WatchService = FileSystems.getDefault().newWatchService()
         dir.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY)
 
@@ -1102,15 +1101,6 @@ class PatchWatcher(private val project: Project) : Disposable {
             refreshVisualHighlightersAfterFileCacheConflict(targetFile, "resolved")
         }
 
-        // Capture caret offset before write action (for cursor-aware append ordering)
-        val caretOffset: Int? = try {
-            val editors = FileEditorManager.getInstance(project).getAllEditors(targetFile)
-            val textEditor = editors.firstOrNull { it is TextEditor } as? TextEditor
-            textEditor?.editor?.caretModel?.offset
-        } catch (_: Exception) {
-            null
-        }
-
         // Compute the patched result OUTSIDE the write action to avoid
         // blocking the EDT for no-op patches. Only acquire the write lock
         // if the content actually changed.
@@ -1180,14 +1170,14 @@ class PatchWatcher(private val project: Project) : Disposable {
             } else {
                 p.boundaryId
             }
-            result = applyComponentPatchNative(result, p.component, p.content, caretOffset, effectiveBoundaryId, p.op)
+            result = applyComponentPatchNative(result, p.component, p.content, effectiveBoundaryId, p.op)
         }
 
         // Apply unmatched content to exchange or output component
         if (patch.unmatched.isNotBlank()) {
-            val exchangeResult = applyComponentPatchNative(result, "exchange", patch.unmatched, caretOffset)
+            val exchangeResult = applyComponentPatchNative(result, "exchange", patch.unmatched)
             result = if (exchangeResult != result) exchangeResult
-                else applyComponentPatchNative(result, "output", patch.unmatched, caretOffset)
+                else applyComponentPatchNative(result, "output", patch.unmatched)
         }
 
         // Reposition boundary to end of exchange if requested
@@ -1488,7 +1478,7 @@ class PatchWatcher(private val project: Project) : Disposable {
      * The native library handles code block detection, attribute parsing,
      * and mode resolution identically to the CLI — eliminating duplicated logic.
      */
-    private fun applyComponentPatchNative(doc: String, component: String, content: String, caretOffset: Int? = null, boundaryId: String? = null, modeOverride: String? = null): String {
+    private fun applyComponentPatchNative(doc: String, component: String, content: String, boundaryId: String? = null, modeOverride: String? = null): String {
         val mode = componentPatchModeOverrideUtil(modeOverride) ?: extractComponentMode(doc, component)
         if (mode == "append" && appendPatchAlreadyPresentUtil(doc, component, content)) {
             LOG.info("Patch dedup: append content already present in $component")

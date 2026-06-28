@@ -212,6 +212,7 @@ const TYPING_DIR: &str = ".agent-doc/typing";
 /// Directory for latest editor-visible buffer digests, relative to project root.
 const LIVE_BUFFER_DIR: &str = ".agent-doc/live-buffer";
 const WRITE_PROVENANCE_DIR: &str = ".agent-doc/write-provenance";
+pub const OPERATOR_TEXT_AUTHORITY_CAPABILITY: &str = "operator_text_authority_v1";
 
 /// Latest editor-visible buffer digest for a document.
 ///
@@ -244,7 +245,28 @@ pub struct LiveBufferSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub editor_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+}
+
+impl LiveBufferSnapshot {
+    pub fn has_capability(&self, capability: &str) -> bool {
+        self.capabilities
+            .iter()
+            .any(|candidate| candidate == capability)
+    }
+}
+
+struct LiveBufferSnapshotMetadata<'a> {
+    editor_id: Option<&'a str>,
+    editor_kind: Option<&'a str>,
+    editor_version: Option<&'a str>,
+    capabilities: &'a [&'a str],
 }
 
 /// Cross-process editor sync status derived from durable live-buffer sidecars.
@@ -466,12 +488,17 @@ pub fn record_live_buffer_digest_for_editor(
     content_hash: &str,
     editor_id: Option<&str>,
 ) -> std::io::Result<()> {
-    write_live_buffer_snapshot(
+    write_live_buffer_snapshot_with_metadata(
         file,
         content_len,
         content_hash.to_ascii_lowercase(),
         None,
-        editor_id,
+        LiveBufferSnapshotMetadata {
+            editor_id,
+            editor_kind: None,
+            editor_version: None,
+            capabilities: &[],
+        },
     )
 }
 
@@ -489,23 +516,50 @@ pub fn record_live_buffer_digest_content_for_editor(
     content: &str,
     editor_id: Option<&str>,
 ) -> std::io::Result<()> {
-    write_live_buffer_snapshot(
+    write_live_buffer_snapshot_with_metadata(
         file,
         content.len(),
         content_hash(content),
         Some(content.to_string()),
-        editor_id,
+        LiveBufferSnapshotMetadata {
+            editor_id,
+            editor_kind: None,
+            editor_version: None,
+            capabilities: &[],
+        },
     )
 }
 
-fn write_live_buffer_snapshot(
+pub fn record_live_buffer_digest_content_for_editor_with_capabilities(
+    file: &str,
+    content: &str,
+    editor_id: &str,
+    editor_kind: &str,
+    editor_version: &str,
+    capabilities: &[&str],
+) -> std::io::Result<()> {
+    write_live_buffer_snapshot_with_metadata(
+        file,
+        content.len(),
+        content_hash(content),
+        Some(content.to_string()),
+        LiveBufferSnapshotMetadata {
+            editor_id: Some(editor_id),
+            editor_kind: Some(editor_kind),
+            editor_version: Some(editor_version),
+            capabilities,
+        },
+    )
+}
+
+fn write_live_buffer_snapshot_with_metadata(
     file: &str,
     content_len: usize,
     hash: String,
     content: Option<String>,
-    editor_id: Option<&str>,
+    metadata: LiveBufferSnapshotMetadata<'_>,
 ) -> std::io::Result<()> {
-    let live_path = live_buffer_snapshot_path_for_editor(file, editor_id);
+    let live_path = live_buffer_snapshot_path_for_editor(file, metadata.editor_id);
     let previous = read_live_buffer_snapshot(file, &live_path);
     let edit_epoch = previous
         .as_ref()
@@ -517,7 +571,9 @@ fn write_live_buffer_snapshot(
         .map(|snapshot| snapshot.last_synced_epoch)
         .unwrap_or(0)
         .min(edit_epoch);
-    let state_vector_b64 = previous.and_then(|snapshot| snapshot.state_vector_b64);
+    let state_vector_b64 = previous
+        .as_ref()
+        .and_then(|snapshot| snapshot.state_vector_b64.clone());
     if let Some(parent) = live_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -532,10 +588,28 @@ fn write_live_buffer_snapshot(
         edit_epoch,
         last_synced_epoch,
         state_vector_b64,
-        editor_id: editor_id
+        editor_id: metadata
+            .editor_id
             .map(str::trim)
             .filter(|id| !id.is_empty())
             .map(ToString::to_string),
+        editor_kind: metadata
+            .editor_kind
+            .map(str::trim)
+            .filter(|kind| !kind.is_empty())
+            .map(ToString::to_string),
+        editor_version: metadata
+            .editor_version
+            .map(str::trim)
+            .filter(|version| !version.is_empty())
+            .map(ToString::to_string),
+        capabilities: metadata
+            .capabilities
+            .iter()
+            .map(|capability| capability.trim())
+            .filter(|capability| !capability.is_empty())
+            .map(ToString::to_string)
+            .collect(),
         content,
     };
     let encoded = serde_json::to_string(&snapshot)?;
@@ -803,6 +877,14 @@ pub fn live_buffer_diverges_from_content(file: &str, content: &str) -> Option<Li
         .into_iter()
         .filter(|snapshot| live_buffer_snapshot_diverges_from_content(file, snapshot, content))
         .max_by_key(|snapshot| snapshot.timestamp_ms)
+}
+
+pub fn live_buffer_divergence_missing_operator_text_authority(
+    file: &str,
+    content: &str,
+) -> Option<LiveBufferSnapshot> {
+    live_buffer_diverges_from_content(file, content)
+        .filter(|snapshot| !snapshot.has_capability(OPERATOR_TEXT_AUTHORITY_CAPABILITY))
 }
 
 fn live_buffer_snapshot_diverges_from_content(
@@ -1540,6 +1622,89 @@ mod tests {
         assert_eq!(snap.content.as_deref(), Some("hello"));
         assert_eq!(snap.len, 5);
         assert_eq!(snap.hash, content_hash("hello"));
+    }
+
+    #[test]
+    fn live_buffer_capability_metadata_roundtrips_and_legacy_report_clears_authority() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("cap-roundtrip.md");
+        std::fs::write(&doc, "hello").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            "hello",
+            "jetbrains-7-test",
+            "jetbrains",
+            "0.2.197",
+            &[OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+        let snap = live_buffer_snapshot(&doc_str).expect("snapshot recorded");
+        assert_eq!(snap.editor_id.as_deref(), Some("jetbrains-7-test"));
+        assert_eq!(snap.editor_kind.as_deref(), Some("jetbrains"));
+        assert_eq!(snap.editor_version.as_deref(), Some("0.2.197"));
+        assert!(snap.has_capability(OPERATOR_TEXT_AUTHORITY_CAPABILITY));
+
+        record_live_buffer_digest_content_for_editor(
+            &doc_str,
+            "hello again",
+            Some("jetbrains-7-test"),
+        )
+        .unwrap();
+        let snap = live_buffer_snapshot(&doc_str).expect("snapshot recorded");
+        assert_eq!(snap.editor_kind, None);
+        assert_eq!(snap.editor_version, None);
+        assert!(
+            !snap.has_capability(OPERATOR_TEXT_AUTHORITY_CAPABILITY),
+            "a capability-less legacy report must not inherit stale authority proof"
+        );
+    }
+
+    #[test]
+    fn diverged_live_buffer_without_operator_authority_capability_is_detected() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("cap-missing.md");
+        std::fs::write(&doc, "saved").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        record_live_buffer_digest_content_for_editor(
+            &doc_str,
+            "saved plus operator text",
+            Some("jetbrains-old"),
+        )
+        .unwrap();
+
+        let snap = live_buffer_divergence_missing_operator_text_authority(&doc_str, "saved")
+            .expect("old sidecar diverges without authority capability");
+        assert_eq!(snap.editor_id.as_deref(), Some("jetbrains-old"));
+        assert!(!snap.has_capability(OPERATOR_TEXT_AUTHORITY_CAPABILITY));
+    }
+
+    #[test]
+    fn diverged_live_buffer_with_operator_authority_capability_is_not_missing_authority() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("cap-present.md");
+        std::fs::write(&doc, "saved").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            "saved plus operator text",
+            "jetbrains-new",
+            "jetbrains",
+            "0.2.197",
+            &[OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+
+        assert!(
+            live_buffer_divergence_missing_operator_text_authority(&doc_str, "saved").is_none(),
+            "capable sidecar may be merged through the realtime operator-authoritative path"
+        );
     }
 
     /// #pcp6: when the editor reports its full buffer content and it exactly

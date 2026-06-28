@@ -27,6 +27,11 @@ internal data class PreparedEditorOp(
     val deleteBytes: Long,
 )
 
+private const val OPERATOR_TEXT_AUTHORITY_CAPABILITY = "operator_text_authority_v1"
+
+private fun pluginVersion(): String =
+    TypingTracker::class.java.`package`?.implementationVersion ?: "unknown"
+
 internal fun prepareEditorOpReports(
     finalText: String,
     ops: List<PendingEditorOp>,
@@ -168,15 +173,18 @@ object TypingTracker : DocumentListener {
                 val text = com.intellij.openapi.application.ApplicationManager.getApplication()
                     .runReadAction<String> { document.text }
                 try {
-                    lib.agent_doc_document_changed_digest_content_for_editor(
+                    lib.agent_doc_document_changed_digest_content_for_editor_v2(
                         filePath,
                         text,
                         EditorIdentity.id,
+                        "jetbrains",
+                        pluginVersion(),
+                        OPERATOR_TEXT_AUTHORITY_CAPABILITY,
                     )
                 } catch (_: UnsatisfiedLinkError) {
-                    lib.agent_doc_document_changed_digest_content(filePath, text)
+                    reportLiveBufferContentV1(lib, filePath, text)
                 } catch (_: NoSuchMethodError) {
-                    lib.agent_doc_document_changed_digest_content(filePath, text)
+                    reportLiveBufferContentV1(lib, filePath, text)
                 }
                 LOG.debug("[native] document_changed content reported: $filePath")
                 val opReports = prepareEditorOpReports(text, drainPendingEditorOps(filePath))
@@ -194,6 +202,20 @@ object TypingTracker : DocumentListener {
             }
         }, CONTENT_REPORT_DELAY_MS, TimeUnit.MILLISECONDS)
         pendingContentReports[filePath] = task
+    }
+
+    private fun reportLiveBufferContentV1(lib: AgentDocLib, filePath: String, text: String) {
+        try {
+            lib.agent_doc_document_changed_digest_content_for_editor(
+                filePath,
+                text,
+                EditorIdentity.id,
+            )
+        } catch (_: UnsatisfiedLinkError) {
+            lib.agent_doc_document_changed_digest_content(filePath, text)
+        } catch (_: NoSuchMethodError) {
+            lib.agent_doc_document_changed_digest_content(filePath, text)
+        }
     }
 
     /**

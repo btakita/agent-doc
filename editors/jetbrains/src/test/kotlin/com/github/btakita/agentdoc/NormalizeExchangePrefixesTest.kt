@@ -257,7 +257,7 @@ One.
         val source = Files.readString(sourcePath)
 
         assertTrue(source.contains("componentPatchModeOverrideUtil(modeOverride) ?: extractComponentMode(doc, component)"))
-        assertTrue(source.contains("applyComponentPatchNative(result, p.component, p.content, caretOffset, effectiveBoundaryId, p.op)"))
+        assertTrue(source.contains("applyComponentPatchNative(result, p.component, p.content, effectiveBoundaryId, p.op)"))
         assertTrue(source.contains("VFS whole-buffer patch apply is disabled"))
     }
 

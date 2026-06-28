@@ -810,6 +810,12 @@ fn realtime_workflow_spec_pins_lazily_backed_authority() {
         "realtime workflow spec must forbid turn-local realtime authority"
     );
     assert!(
+        realtime.contains("operator_text_authority_v1")
+            && realtime.contains("capability-unknown frontend")
+            && realtime.contains("not safe delivery proof"),
+        "realtime workflow spec must require frontend capability proof before trusting editor mutation delivery"
+    );
+    assert!(
         spec.contains("realtime state machine") && spec.contains("lazily-rs-backed state"),
         "top-level spec must surface the lazily-backed realtime authority invariant"
     );
@@ -1519,7 +1525,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // reason flows through the helper's existing `reason={reason}` token. Net -1:
         // a CLI-only/no-editor session now disk-falls-back on ack_mismatch instead of
         // hard-refusing (the #6b5h wedge). Audited — no new flow boundary.
-        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 20,
+        // 20 -> 23 (#operator-text-authority): a diverged live-buffer sidecar from
+        // a capability-unknown editor now fails closed before IPC send with
+        // `reason=editor_capability_missing`; the other two new occurrences are
+        // regression assertions proving the guard fired and a capable sidecar did
+        // not. Routed through the existing converge fail-closed boundary.
+        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 23,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

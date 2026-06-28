@@ -1534,6 +1534,29 @@ pub fn try_editor_converge(
         );
         return Ok(true);
     }
+    if let Some(snapshot) = crate::debounce::live_buffer_divergence_missing_operator_text_authority(
+        &canonical_file.to_string_lossy(),
+        current_content,
+    ) {
+        let editor_id = snapshot.editor_id.as_deref().unwrap_or("unknown");
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "{source}_writeback file={} transport=blocked reason=editor_capability_missing capability={} editor_id={} live_len={} live_hash={} action=editor_reload_required",
+                file.display(),
+                crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+                editor_id,
+                snapshot.len,
+                snapshot.hash
+            ),
+        );
+        anyhow::bail!(
+            "{source}: refused editor convergence for {} because live editor buffer {} lacks required capability {}",
+            file.display(),
+            editor_id,
+            crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY
+        );
+    }
     match ipc_direct_disk_degraded(&project_root, file) {
         Ok(true) => {
             log_ipc_dewedge_prefer_file_ipc(file, source);
@@ -2933,6 +2956,84 @@ mod core_tests {
             "no-listener queue consume must not record disk fallback:\n{log}"
         );
     }
+
+    #[test]
+    fn converge_document_or_disk_blocks_diverged_under_capable_live_buffer_before_ipc() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = crate::test_support::queue_consume_convergence_source();
+        let target = crate::test_support::queue_consume_convergence_target();
+        fs::write(&doc, &source).unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+        crate::debounce::record_live_buffer_digest_content_for_editor(
+            &doc_str,
+            &format!("{source}\noperator typed text\n"),
+            Some("jetbrains-old"),
+        )
+        .unwrap();
+
+        let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("operator_text_authority_v1"),
+            "under-capable editor sidecar must block with the missing capability: {err}"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            source,
+            "under-capable editor sidecar must not let the converger mutate disk"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("reason=editor_capability_missing")
+                && log.contains("capability=operator_text_authority_v1")
+                && log.contains("editor_id=jetbrains-old")
+                && !log.contains("queue_consume_editor_convergence_attempt"),
+            "capability guard must fire before IPC attempt:\n{log}"
+        );
+    }
+
+    #[test]
+    fn converge_document_or_disk_does_not_capability_block_capable_live_buffer() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = crate::test_support::queue_consume_convergence_source();
+        let target = crate::test_support::queue_consume_convergence_target();
+        fs::write(&doc, &source).unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+        crate::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            &format!("{source}\noperator typed text\n"),
+            "jetbrains-new",
+            "jetbrains",
+            "0.2.197",
+            &[crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+
+        let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("no_listener"),
+            "capable sidecar should continue into the existing listener/no-listener guard: {err}"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            !log.contains("reason=editor_capability_missing"),
+            "capable sidecar must not trip the capability guard:\n{log}"
+        );
+    }
+
     #[test]
     fn converge_document_or_disk_route_source_blocks_without_listener() {
         // `#fccroute`: the three route/dispatch session-document write sites

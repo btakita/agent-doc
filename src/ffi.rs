@@ -419,6 +419,86 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor(
     }
 }
 
+/// Record a document change plus full visible buffer content for one editor
+/// instance, including frontend metadata/capabilities.
+///
+/// `capabilities_csv` is a comma-separated list of stable capability tokens.
+/// Unknown/empty tokens are ignored. Old plugins use
+/// [`agent_doc_document_changed_digest_content_for_editor`] and therefore record
+/// no capability proof.
+///
+/// # Safety
+///
+/// `file_path`, `content`, `editor_id`, `editor_kind`, `editor_version`, and
+/// `capabilities_csv` must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v2(
+    file_path: *const c_char,
+    content: *const c_char,
+    editor_id: *const c_char,
+    editor_kind: *const c_char,
+    editor_version: *const c_char,
+    capabilities_csv: *const c_char,
+) {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(path) => path,
+        Err(_) => return,
+    };
+    let text = match unsafe { CStr::from_ptr(content) }.to_str() {
+        Ok(text) => text,
+        Err(_) => return,
+    };
+    let editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
+        Ok(editor) => editor,
+        Err(_) => return,
+    };
+    let kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
+        Ok(kind) => kind,
+        Err(_) => return,
+    };
+    let version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
+        Ok(version) => version,
+        Err(_) => return,
+    };
+    let capabilities_raw = match unsafe { CStr::from_ptr(capabilities_csv) }.to_str() {
+        Ok(capabilities) => capabilities,
+        Err(_) => return,
+    };
+    let capabilities: Vec<&str> = capabilities_raw
+        .split(',')
+        .map(str::trim)
+        .filter(|capability| !capability.is_empty())
+        .collect();
+    agent_doc_orchestration::debounce::document_changed(path);
+    if let Err(err) =
+        agent_doc_orchestration::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            path,
+            text,
+            editor,
+            kind,
+            version,
+            &capabilities,
+        )
+    {
+        eprintln!("[ffi] live-buffer v2 write failed for {path}: {err}");
+    }
+    match agent_doc_orchestration::realtime_model::broadcast_editor_change(
+        Path::new(path),
+        editor,
+        text,
+    ) {
+        Ok(deliveries) if !deliveries.is_empty() => {
+            eprintln!(
+                "[ffi] realtime broadcast queued {} peer patch(es) for editor_id {}",
+                deliveries.len(),
+                editor
+            );
+        }
+        Ok(_) => {}
+        Err(err) => eprintln!("[ffi] realtime broadcast failed for {path}: {err}"),
+    }
+}
+
 /// Clear one editor instance's live-buffer sidecar when the editor closes the
 /// document.
 ///

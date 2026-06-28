@@ -1425,6 +1425,22 @@ mod tests {
         );
     }
 
+    fn assert_editor_capability_compact_refusal(err: &anyhow::Error, ops_log: &str) {
+        let err = err.to_string();
+        assert!(
+            err.contains("lacks required capability")
+                && err.contains(crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY),
+            "compact with an under-capable live editor buffer must fail closed: {err}"
+        );
+        assert!(
+            ops_log.contains("compact_writeback")
+                && ops_log.contains("transport=blocked")
+                && ops_log.contains("reason=editor_capability_missing")
+                && ops_log.contains(crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY),
+            "under-capable compact refusal should be logged:\n{ops_log}"
+        );
+    }
+
     #[test]
     fn non_exchange_list_item_counts_counts_backlog_and_review() {
         let counts = non_exchange_list_item_counts(COMPACTDROPITEM_DOC);
@@ -2102,7 +2118,7 @@ mod tests {
             "failed compact must not advance the snapshot"
         );
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert_no_listener_compact_refusal(&err, &ops_log);
+        assert_editor_capability_compact_refusal(&err, &ops_log);
     }
 
     #[test]
@@ -2156,7 +2172,7 @@ mod tests {
             "failed compact must not advance a stale snapshot"
         );
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert_no_listener_compact_refusal(&err, &ops_log);
+        assert_editor_capability_compact_refusal(&err, &ops_log);
     }
 
     #[test]

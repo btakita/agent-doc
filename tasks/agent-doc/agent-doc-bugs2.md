@@ -26,6 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -186,7 +187,11 @@ Verification:
 - GitHub Actions CI is green for `agent-doc` release commit `9aa073d2` and `lazily-rs` release commit `bf6a920`.
 
 Remaining operator-only proof is tracked as `#suprestassoc-live`: restart the EFS supervisor in a live editor/tmux setup and verify the projection stays associated with EFS, not this session.
-<!-- agent:boundary:00271b92 -->
+
+### Re: continue — gpt-5
+
+Continuing after the `#suprestassoc` closeout. That item is closed/released as `agent-doc 0.34.65`; the remaining live proof is tracked as `#suprestassoc-live`, so the queue should proceed to the next actionable head after this repair boundary.
+<!-- agent:boundary:d17a7759 -->
 <!-- /agent:exchange -->
 ## Queue
 

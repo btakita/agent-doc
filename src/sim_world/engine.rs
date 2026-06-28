@@ -1865,9 +1865,13 @@ impl SimWorld {
         self.snapshot = content_ours.to_string();
     }
 
-    pub(crate) fn apply_ack_sidecar_only_repair(&mut self, ack_content: &str) {
-        self.snapshot = ack_content.to_string();
-        self.coverage.ack_sidecar_only_repairs += 1;
+    pub(crate) fn handle_ack_sidecar_only_evidence(&mut self, ack_content: &str) {
+        if self.doc == ack_content {
+            self.snapshot = ack_content.to_string();
+            self.coverage.ack_sidecar_only_repairs += 1;
+        } else {
+            self.coverage.ack_sidecar_only_blocks += 1;
+        }
     }
 
     pub(crate) fn repair_visible_duplicate_response(&mut self) {

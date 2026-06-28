@@ -828,6 +828,7 @@ struct Coverage {
     live_prompt_forward_merges: usize,
     already_applied_response_recoveries: usize,
     ack_sidecar_only_repairs: usize,
+    ack_sidecar_only_blocks: usize,
     visible_duplicate_repairs: usize,
     post_commit_follow_up_handoffs: usize,
     starting_prompt_promotions: usize,
@@ -1107,6 +1108,7 @@ impl Coverage {
         self.editorless_disk_fallbacks += other.editorless_disk_fallbacks;
         self.already_applied_response_recoveries += other.already_applied_response_recoveries;
         self.ack_sidecar_only_repairs += other.ack_sidecar_only_repairs;
+        self.ack_sidecar_only_blocks += other.ack_sidecar_only_blocks;
         self.visible_duplicate_repairs += other.visible_duplicate_repairs;
         self.post_commit_follow_up_handoffs += other.post_commit_follow_up_handoffs;
         self.starting_prompt_promotions += other.starting_prompt_promotions;
@@ -5273,26 +5275,47 @@ fn sidecar_normalization_divergence_sim_uses_normalized_content_ours() {
 }
 
 #[test]
-fn ack_sidecar_only_repair_sim_uses_authoritative_sidecar_snapshot() {
+fn ack_sidecar_only_drift_sim_blocks_without_visible_proof() {
     let mut world = SimWorld::new(2_012);
     world.doc = template_doc(
         "❯ do #acksidecar. spec-test-build-install-commit-push\n<!-- agent:boundary:live -->\n",
     );
-    world.snapshot = template_doc("<!-- agent:boundary:base -->\n");
+    let original_snapshot = template_doc("<!-- agent:boundary:base -->\n");
+    world.snapshot = original_snapshot.clone();
     let ack_content = template_doc(
         "❯ do #acksidecar. spec-test-build-install-commit-push\n### Re: #acksidecar — gpt-5\n\nDone.\n<!-- agent:boundary:ack -->\n",
     );
 
-    world.apply_ack_sidecar_only_repair(&ack_content);
+    world.handle_ack_sidecar_only_evidence(&ack_content);
 
-    assert_eq!(world.coverage.ack_sidecar_only_repairs, 1);
+    assert_eq!(world.coverage.ack_sidecar_only_repairs, 0);
+    assert_eq!(world.coverage.ack_sidecar_only_blocks, 1);
     assert_eq!(
-        world.snapshot, ack_content,
-        "ack-content sidecar should be the committed snapshot proof even when the local visible file still lags"
+        world.snapshot, original_snapshot,
+        "sidecar-only ACK evidence must not become the committed snapshot when the visible file still lags"
     );
     assert!(
         !world.doc.contains("### Re: #acksidecar — gpt-5"),
         "the sim must keep the sidecar-only distinction from ordinary disk repair"
+    );
+}
+
+#[test]
+fn ack_sidecar_only_matching_visible_sim_can_refresh_snapshot() {
+    let mut world = SimWorld::new(2_014);
+    let ack_content = template_doc(
+        "❯ do #ackvisible. spec-test-build-install-commit-push\n### Re: #ackvisible — gpt-5\n\nDone.\n<!-- agent:boundary:ack -->\n",
+    );
+    world.doc = ack_content.clone();
+    world.snapshot = template_doc("<!-- agent:boundary:base -->\n");
+
+    world.handle_ack_sidecar_only_evidence(&ack_content);
+
+    assert_eq!(world.coverage.ack_sidecar_only_repairs, 1);
+    assert_eq!(world.coverage.ack_sidecar_only_blocks, 0);
+    assert_eq!(
+        world.snapshot, ack_content,
+        "ACK-content can refresh durable state only when it matches the operator-visible document"
     );
 }
 
@@ -5822,9 +5845,14 @@ fn closeout_recovery_transition_scenarios_cover_simworld_inputs() {
     let ack_content = template_doc(
         "❯ do #transitionack. spec-test-build-install-commit-push\n### Re: #transitionack — gpt-5\n\nDone.\n<!-- agent:boundary:ack -->\n",
     );
-    ack_world.apply_ack_sidecar_only_repair(&ack_content);
-    assert_eq!(ack_world.coverage.ack_sidecar_only_repairs, 1);
-    assert_eq!(ack_world.snapshot, ack_content);
+    ack_world.handle_ack_sidecar_only_evidence(&ack_content);
+    assert_eq!(ack_world.coverage.ack_sidecar_only_repairs, 0);
+    assert_eq!(ack_world.coverage.ack_sidecar_only_blocks, 1);
+    assert!(
+        !ack_world
+            .snapshot
+            .contains("### Re: #transitionack — gpt-5")
+    );
     assert_eq!(
         closeout_recovery_decision_from_state(
             file,

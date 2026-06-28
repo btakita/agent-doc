@@ -226,37 +226,6 @@ Verification: `cargo fmt --check`, `git diff --check`, focused realtime/turn lif
 
 I am not marking the overarching goal complete yet because a real editor-attached live typing proof in `agent-doc-bugs2.md` is still external evidence I did not observe in this turn. The automated harness now covers the exact post-preflight partial-word merge shape, and the live document/session is ready for that operator/plugin proof.
 
-### Re: Should we extract an agent-doc-turn crate? — gpt-5
-
-Yes, I think `agent-doc-turn` is a good extraction, but it should come after the `agent-doc-merge` and realtime boundaries are stabilized.
-
-The honest boundary is:
-
-- `agent-doc-merge`: pure merge/CRDT-ish document operations. It returns a merged document, typed conflicts/proofs, and verification facts. It never commits.
-- `agent-doc-realtime`: lazily-rs-backed realtime lifecycle: editor IPC, disk observation, out-of-band writes, parse state, epochs, apply/verify scheduling. It keeps working regardless of whether the agent is idle, in preflight, dispatching, or closing out.
-- `agent-doc-turn`: admitted-turn lifecycle: admit -> preflight -> dispatch -> response capture -> handoff to realtime merge/apply -> commit/no-commit/blocked. It owns the decision that a turn may commit, but should emit effects rather than directly owning git/socket/disk IO.
-- `agent-doc-orchestration`: CLI/harness adapters, git implementation, editor socket implementation, tmux/supervisor integration, and compatibility glue.
-
-So: yes to `agent-doc-turn`, but not as a place to put realtime authority. It should consume realtime handoff facts and merge results, then decide the turn lifecycle outcome. That keeps the invariant intact: realtime resolution is independent from turns, while commits remain part of the document turn lifecycle.
-
-I also added an active editor-IPC regression around the compact-exchange/partial-word failure mode: the test keeps an operator-typed partial word inside the exchange while adding the missing assistant response, verifies the editor IPC path is used, and verifies we do not silently fall back to disk. Full `make check` passed after this, and the latest CI run I checked was green.
-
-### Re: Should agent-doc-realtime split into editor and tmux crates? — gpt-5
-
-I would not decompose `agent-doc-realtime` into `agent-doc-editor` and `agent-doc-tmux` as two replacement peers. I would keep a small `agent-doc-realtime` core, then extract editor/tmux as adapter crates when the interfaces are stable.
-
-Suggested shape:
-
-- `agent-doc-realtime`: lazily-rs state machines for realtime document authority, epochs, parse projection, source arbitration, apply/verify scheduling, and handoff facts. This is the invariant-bearing core.
-- `agent-doc-editor`: editor/plugin IPC protocol, live-buffer sidecars, editor ownership proof, editor epoch sync, diagnostics publication, and patch ACK handling. It publishes `EditorEvent`/`EditorSnapshot`/`EditorAck` into realtime; it does not decide turn commits.
-- `agent-doc-tmux` or better `agent-doc-harness`: terminal/session/supervisor/tmux state observation. It publishes agent activity, pane/session liveness, interruption, and lifecycle signals. It should not be a document-authority source unless it is actually observing document text.
-- `agent-doc-turn`: admitted-turn lifecycle decisions and commit ownership, consuming realtime handoff facts.
-- `agent-doc-merge`: pure document merge functions.
-
-The naming caveat matters: `agent-doc-tmux` is accurate only if the boundary is truly tmux-specific. If the crate is meant to cover Codex/Claude/OpenCode harness state, supervisor status, pane lifecycle, and future non-tmux adapters, `agent-doc-harness` or `agent-doc-terminal` is probably a better name. I would reserve `agent-doc-tmux` for a narrow implementation adapter under that broader boundary.
-
-So my honest answer: yes, separate the loops, but do not split away the realtime core. Make `agent-doc-realtime` the source-agnostic state machine, `agent-doc-editor` the document-editor adapter, and a harness/tmux crate the runtime-state adapter. The invariant remains: only editor/disk document projections feed merge authority; tmux/harness state can affect scheduling and interruption, but must not overwrite operator-visible document text.
-
 ### Re: agent-doc-document for realtime state — gpt-5
 
 Yes, `agent-doc-document` is a strong crate boundary, but I would define it as the document model/projection crate rather than the realtime loop crate.
@@ -271,7 +240,7 @@ A clean split would be:
 - `agent-doc-turn`: admitted-turn lifecycle and commit decisions.
 
 So I agree with adding `agent-doc-document`, with one constraint: it should own document semantics, not runtime authority. The realtime loop may hold a `DocumentProjectionState` from `agent-doc-document`, but the ordering, source arbitration, and apply/verify lifecycle should stay in `agent-doc-realtime`. That prevents `agent-doc-document` from becoming another place where turn-based or snapshot-based authority can accidentally leak back into the hot path.
-<!-- agent:boundary:205d5029 -->
+<!-- agent:boundary:858f5e35 -->
 <!-- /agent:exchange -->
 ## Queue
 

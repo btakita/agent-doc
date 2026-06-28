@@ -375,6 +375,7 @@ fn tool_read(args: &Map<String, Value>) -> Result<Value> {
 }
 
 fn tool_admit(args: &Map<String, Value>) -> Result<Value> {
+    ensure_mcp_binary_fresh_for_mutation()?;
     let file = required_path_arg(args, "file")?;
     let admit = agent_doc_orchestration::admit::admit(&file)?;
     let structured = json!({
@@ -389,6 +390,7 @@ fn tool_admit(args: &Map<String, Value>) -> Result<Value> {
 }
 
 fn tool_preflight(args: &Map<String, Value>) -> Result<Value> {
+    ensure_mcp_binary_fresh_for_mutation()?;
     let file = required_path_arg(args, "file")?;
     let probe = bool_arg(args, "probe", false)?;
     let mut command =
@@ -481,6 +483,7 @@ fn tool_session_check(args: &Map<String, Value>) -> Result<Value> {
 }
 
 fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
+    ensure_mcp_binary_fresh_for_mutation()?;
     let file = required_path_arg(args, "file")?;
     let response = required_string_arg(args, "response")?;
     let origin = optional_string_arg(args, "origin")?.unwrap_or_else(|| "mcp".to_string());
@@ -579,6 +582,53 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
         serde_json::to_string_pretty(&structured)?,
         structured,
     ))
+}
+
+fn ensure_mcp_binary_fresh_for_mutation() -> Result<()> {
+    if mcp_binary_stale_for_test() {
+        bail!(stale_mcp_binary_message());
+    }
+
+    let exe = std::env::current_exe().context("failed to resolve running agent-doc MCP binary")?;
+    let launchable = std::fs::metadata(&exe)
+        .map(|metadata| metadata.is_file())
+        .unwrap_or(false);
+    if launchable {
+        return Ok(());
+    }
+
+    bail!(
+        "{} running_exe={}",
+        stale_mcp_binary_message(),
+        exe.display()
+    );
+}
+
+fn stale_mcp_binary_message() -> &'static str {
+    "stale agent-doc MCP server: the running MCP process maps an agent-doc binary \
+     that is no longer launchable, usually because `make install` or `cargo install` \
+     replaced it. Restart/recycle the MCP server, then retry the mutation; refusing \
+     to run stale admit/preflight/finalize logic against a live document."
+}
+
+#[cfg(test)]
+fn mcp_binary_stale_for_test() -> bool {
+    MCP_BINARY_STALE_FOR_TEST.with(|stale| stale.get())
+}
+
+#[cfg(not(test))]
+fn mcp_binary_stale_for_test() -> bool {
+    false
+}
+
+#[cfg(test)]
+thread_local! {
+    static MCP_BINARY_STALE_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+fn set_mcp_binary_stale_for_test(stale: bool) {
+    MCP_BINARY_STALE_FOR_TEST.with(|value| value.set(stale));
 }
 
 fn read_document(file: &Path, component: Option<&str>) -> Result<String> {
@@ -869,6 +919,44 @@ mod tests {
         assert_eq!(
             state.phase,
             agent_doc_orchestration::cycle_state::CyclePhase::PreflightStarted
+        );
+    }
+
+    #[test]
+    fn stale_mcp_binary_blocks_mutating_tools_before_cycle_start() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let file = root.join("session.md");
+        std::fs::write(
+            &file,
+            "---\nagent_doc_session: sid-1\n---\n\n# Session\n\n❯ Please inspect\n",
+        )
+        .unwrap();
+
+        set_mcp_binary_stale_for_test(true);
+        let response = response_for(json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "agent_doc_admit",
+                "arguments": { "file": file.display().to_string() }
+            }
+        }));
+        set_mcp_binary_stale_for_test(false);
+
+        assert_eq!(response["result"]["isError"], true);
+        let error = response["result"]["structuredContent"]["error"]
+            .as_str()
+            .unwrap();
+        assert!(error.contains("stale agent-doc MCP server"));
+        assert!(error.to_ascii_lowercase().contains("restart"));
+        assert!(
+            agent_doc_orchestration::cycle_state::load(&file)
+                .unwrap()
+                .is_none(),
+            "stale MCP mutation guard must fire before opening a response cycle"
         );
     }
 

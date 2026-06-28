@@ -26,6 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -325,7 +326,13 @@ Verification:
 - `make install`
 
 I added the `agent:signals` follow-up as `#agentsignals` at the back of the backlog. GitHub Actions status could not be checked because GitHub returned an API rate-limit error for `gh run list --workflow CI --limit 1`.
-<!-- agent:boundary:ec92014e -->
+
+### Re: restore #agentsignals and backlog naming - gpt-5
+
+Confirmed: the previous runtime committed the exchange sentence claiming #agentsignals was added, but the backlog did not contain the item. I fixed the tracked-work mutation path so tail/positioned backlog additions record same-cycle ids, and I restored #agentsignals through the fresh binary-owned backlog-add path.
+
+I also started the terminology migration: backlog is the canonical user-facing name, pending remains a legacy compatibility alias, and icebox now has granular add operations for parked work without mirroring into the runnable queue.
+<!-- agent:boundary:84d74bde -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -354,6 +361,7 @@ I added the `agent:signals` follow-up as `#agentsignals` at the back of the back
 - :pushpin: do [#supstaledetectverify]
 - :pushpin: do [#suptmuxstaleverify]
 - :pushpin: do [#60ev]
+- do [#agentsignals]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -394,6 +402,7 @@ What are #next-steps to fix bugs?
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
 - [ ] [#kj5flive] [operator-verify] #mergestatemachine3 live proof replacement for cleared review #kj5f: after the latest JB plugin update is installed, verify JB+VSCode attach/detach/ownership facts flow through the merge-ownership state machine via #lazilystatesync, then run live editor-attached/detached repros for File Cache Conflict and the #6b5h wedge with logs sufficient to prove/disprove the fix before filing follow-up bugs. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#suprestassoc-live] [operator-verify] Restart the `tasks/professional/equityfundingsource.md` supervisor in a live editor/tmux setup and verify the actor/admin projection keeps EFS bound to its own pane/session without re-associating to `tasks/agent-doc/agent-doc-bugs2.md`.
+- [ ] [#agentsignals] [future/separate] Add a realtime agent:signals element after core realtime convergence is stable. Start with deterministic built-in signals for tests, queue, supervisor, and ipc; design custom user-defined signals as plugin-backed tracked work with Rust as the first target and future multi-language support; use tasks/software/realtime-signals-patchboard.md as the GUI/semi-programmatic reference; keep MLP enhancement optional/experimental and not load-bearing for deterministic states.
 <!-- /agent:backlog -->
 
 ## Review

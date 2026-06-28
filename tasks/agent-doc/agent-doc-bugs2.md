@@ -332,7 +332,7 @@ I added the `agent:signals` follow-up as `#agentsignals` at the back of the back
 Confirmed: the previous runtime committed the exchange sentence claiming #agentsignals was added, but the backlog did not contain the item. I fixed the tracked-work mutation path so tail/positioned backlog additions record same-cycle ids, and I restored #agentsignals through the fresh binary-owned backlog-add path.
 
 I also started the terminology migration: backlog is the canonical user-facing name, pending remains a legacy compatibility alias, and icebox now has granular add operations for parked work without mirroring into the runnable queue.
-<!-- agent:boundary:84d74bde -->
+<!-- agent:boundary:479b5f9e -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -361,6 +361,7 @@ I also started the terminology migration: backlog is the canonical user-facing n
 - :pushpin: do [#supstaledetectverify]
 - :pushpin: do [#suptmuxstaleverify]
 - :pushpin: do [#60ev]
+- do [#suprestassoc-live]
 - do [#agentsignals]
 <!-- /agent:queue -->
 <!--

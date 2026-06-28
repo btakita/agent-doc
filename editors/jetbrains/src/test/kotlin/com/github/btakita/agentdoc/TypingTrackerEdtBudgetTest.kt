@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import java.nio.file.Files
 import java.nio.file.Paths
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -66,6 +67,27 @@ class TypingTrackerEdtBudgetTest {
         assertFalse(
             "coalescing must not overwrite the previous editor op with only the newest event",
             source.contains("scheduleFullContentReport(lib, filePath, event.document, op)"),
+        )
+    }
+
+    @Test
+    fun `coalesced editor op offsets use the per-op shadow not the final buffer`() {
+        val reports = prepareEditorOpReports(
+            finalText = "x",
+            ops = listOf(
+                PendingEditorOp(offset = 0, oldFragment = "", newFragment = "é", remoteCrdtApply = false),
+                PendingEditorOp(offset = 1, oldFragment = "", newFragment = "x", remoteCrdtApply = false),
+                PendingEditorOp(offset = 0, oldFragment = "é", newFragment = "", remoteCrdtApply = false),
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                PreparedEditorOp(opKind = "insert", byteOffset = 0L, insertText = "é", deleteBytes = 0L),
+                PreparedEditorOp(opKind = "insert", byteOffset = 2L, insertText = "x", deleteBytes = 0L),
+                PreparedEditorOp(opKind = "delete", byteOffset = 0L, insertText = null, deleteBytes = 2L),
+            ),
+            reports,
         )
     }
 

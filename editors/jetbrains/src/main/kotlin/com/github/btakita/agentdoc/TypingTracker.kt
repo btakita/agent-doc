@@ -13,6 +13,84 @@ object EditorIdentity {
     val id: String = "jetbrains-${ProcessHandle.current().pid()}-${UUID.randomUUID()}"
 }
 
+internal data class PendingEditorOp(
+    val offset: Int,
+    val oldFragment: String,
+    val newFragment: String,
+    val remoteCrdtApply: Boolean,
+)
+
+internal data class PreparedEditorOp(
+    val opKind: String,
+    val byteOffset: Long,
+    val insertText: String?,
+    val deleteBytes: Long,
+)
+
+internal fun prepareEditorOpReports(
+    finalText: String,
+    ops: List<PendingEditorOp>,
+): List<PreparedEditorOp> {
+    if (ops.isEmpty()) return emptyList()
+
+    var shadow = reverseApplyEditorOps(finalText, ops) ?: return emptyList()
+    val reports = mutableListOf<PreparedEditorOp>()
+    for (op in ops) {
+        val offset = op.offset
+        if (offset < 0 || offset > shadow.length) return emptyList()
+        val oldEnd = offset + op.oldFragment.length
+        if (oldEnd > shadow.length) return emptyList()
+        if (shadow.substring(offset, oldEnd) != op.oldFragment) return emptyList()
+
+        val byteOffset = shadow
+            .substring(0, offset)
+            .toByteArray(Charsets.UTF_8)
+            .size
+            .toLong()
+
+        if (!op.remoteCrdtApply) {
+            if (op.oldFragment.isNotEmpty()) {
+                reports.add(
+                    PreparedEditorOp(
+                        opKind = "delete",
+                        byteOffset = byteOffset,
+                        insertText = null,
+                        deleteBytes = op.oldFragment.toByteArray(Charsets.UTF_8).size.toLong(),
+                    )
+                )
+            }
+            if (op.newFragment.isNotEmpty()) {
+                reports.add(
+                    PreparedEditorOp(
+                        opKind = "insert",
+                        byteOffset = byteOffset,
+                        insertText = op.newFragment,
+                        deleteBytes = 0L,
+                    )
+                )
+            }
+        }
+
+        shadow = shadow.substring(0, offset) + op.newFragment + shadow.substring(oldEnd)
+    }
+
+    if (shadow != finalText) return emptyList()
+    return reports
+}
+
+private fun reverseApplyEditorOps(finalText: String, ops: List<PendingEditorOp>): String? {
+    var shadow = finalText
+    for (op in ops.asReversed()) {
+        val offset = op.offset
+        if (offset < 0 || offset > shadow.length) return null
+        val newEnd = offset + op.newFragment.length
+        if (newEnd > shadow.length) return null
+        if (shadow.substring(offset, newEnd) != op.newFragment) return null
+        shadow = shadow.substring(0, offset) + op.oldFragment + shadow.substring(newEnd)
+    }
+    return shadow
+}
+
 /**
  * Tracks document changes and provides debounce via the FFI shared library.
  *
@@ -32,13 +110,6 @@ object TypingTracker : DocumentListener {
     }
     private val pendingContentReports = ConcurrentHashMap<String, ScheduledFuture<*>>()
     private val pendingEditorOps = ConcurrentHashMap<String, MutableList<PendingEditorOp>>()
-
-    private data class PendingEditorOp(
-        val offset: Int,
-        val oldFragment: String,
-        val newFragment: String,
-        val remoteCrdtApply: Boolean,
-    )
 
     override fun documentChanged(event: DocumentEvent) {
         val vFile = FileDocumentManager.getInstance().getFile(event.document) ?: return
@@ -108,8 +179,9 @@ object TypingTracker : DocumentListener {
                     lib.agent_doc_document_changed_digest_content(filePath, text)
                 }
                 LOG.debug("[native] document_changed content reported: $filePath")
-                for (op in drainPendingEditorOps(filePath).filterNot { it.remoteCrdtApply }) {
-                    reportEditorOp(lib, filePath, text, op)
+                val opReports = prepareEditorOpReports(text, drainPendingEditorOps(filePath))
+                for (op in opReports) {
+                    reportEditorOp(lib, filePath, op)
                 }
             } catch (_: UnsatisfiedLinkError) {
                 // older cdylib without full-content sidecar support; skip
@@ -127,23 +199,14 @@ object TypingTracker : DocumentListener {
     /**
      * #qnodemerge4wire Phase 4: report a single editor change as byte-offset
      * [agent_doc_record_editor_op] op(s). IntelliJ `DocumentEvent` offsets/fragments
-     * are UTF-16; the FFI wants UTF-8 BYTE units, so we convert. The prefix
-     * `[0, offset)` is unchanged by the edit, so its UTF-8 byte length is the byte
-     * offset (computed from the post-change `newText`, whose prefix is identical).
-     * A replacement (old+new both non-empty) is reported as a delete of the old
-     * bytes then an insert of the new text at the same offset, matching
-     * `EditorOp`'s flat replay contract.
+     * are UTF-16; [prepareEditorOpReports] replays the coalesced burst against
+     * each op's pre-edit shadow so the FFI receives UTF-8 byte units.
      */
     private fun reportEditorOp(
         lib: AgentDocLib,
         filePath: String,
-        newText: String,
-        op: PendingEditorOp,
+        op: PreparedEditorOp,
     ) {
-        val oldFragment = op.oldFragment
-        val newFragment = op.newFragment
-        if (oldFragment.isEmpty() && newFragment.isEmpty()) return
-
         // Resolve the base hash captured ops must align to; skip (diff-guess
         // fallback) when unavailable.
         val baseHashPtr = lib.agent_doc_document_base_hash(filePath) ?: return
@@ -154,27 +217,14 @@ object TypingTracker : DocumentListener {
         }
         if (baseHash.isNullOrEmpty()) return
 
-        val utf16Offset = op.offset
-        val byteOffset = newText
-            .substring(0, minOf(utf16Offset, newText.length))
-            .toByteArray(Charsets.UTF_8)
-            .size
-            .toLong()
-
-        if (oldFragment.isNotEmpty()) {
-            val deleteBytes = oldFragment.toByteArray(Charsets.UTF_8).size.toLong()
-            lib.agent_doc_record_editor_op(filePath, baseHash, "delete", byteOffset, null, deleteBytes)
-        }
-        if (newFragment.isNotEmpty()) {
-            lib.agent_doc_record_editor_op(
-                filePath,
-                baseHash,
-                "insert",
-                byteOffset,
-                newFragment,
-                0L,
-            )
-        }
+        lib.agent_doc_record_editor_op(
+            filePath,
+            baseHash,
+            op.opKind,
+            op.byteOffset,
+            op.insertText,
+            op.deleteBytes,
+        )
     }
 
     /** Block until the document has been idle, or timeout. Returns true if idle. */

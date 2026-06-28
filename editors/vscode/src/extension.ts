@@ -1908,6 +1908,8 @@ class PatchWatcher implements vscode.Disposable {
     private liveBufferReportTimers = new Map<string, ReturnType<typeof setTimeout>>();
     /** Native typing markers are queued off the text-change listener path. */
     private nativeChangeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    /** CRDT local forwards are queued off the text-change listener path. */
+    private crdtLocalChangeTimers = new Map<string, Set<ReturnType<typeof setTimeout>>>();
     /** Native editor-op writes are queued off the text-change listener path. */
     private pendingEditorOpReports: PendingEditorOpReport[] = [];
     private editorOpReportTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1991,10 +1993,7 @@ class PatchWatcher implements vscode.Disposable {
                     rangeLength: change.rangeLength,
                     text: change.text,
                 }));
-                const crdtForward = this.crdtReplicas?.handleLocalChangeDelta(fsPath, changes);
-                crdtForward?.catch((err: any) => {
-                    this.outputChannel.appendLine(`crdt-replica: local change skipped for ${fsPath}: ${err?.message ?? err}`);
-                });
+                this.scheduleCrdtLocalChangeDelta(fsPath, changes);
                 // #qnodemerge4wire Phase 4: report the real editor op so a concurrent
                 // agent merge aligns to the user's actual edit boundaries.
                 if (!remoteCrdtApply) {
@@ -2153,6 +2152,24 @@ class PatchWatcher implements vscode.Disposable {
         } catch {
             // directory might not exist yet
         }
+    }
+
+    private scheduleCrdtLocalChangeDelta(fsPath: string, changes: readonly ReplicaTextChange[]): void {
+        const timer = setTimeout(() => {
+            const timers = this.crdtLocalChangeTimers.get(fsPath);
+            timers?.delete(timer);
+            if (timers?.size === 0) this.crdtLocalChangeTimers.delete(fsPath);
+            const crdtForward = this.crdtReplicas?.handleLocalChangeDelta(fsPath, changes);
+            crdtForward?.catch((err: any) => {
+                this.outputChannel.appendLine(`crdt-replica: local change skipped for ${fsPath}: ${err?.message ?? err}`);
+            });
+        }, 0);
+        let timers = this.crdtLocalChangeTimers.get(fsPath);
+        if (!timers) {
+            timers = new Set();
+            this.crdtLocalChangeTimers.set(fsPath, timers);
+        }
+        timers.add(timer);
     }
 
     private targetsThisEditor(patch: IpcPatch): boolean {
@@ -2584,6 +2601,11 @@ class PatchWatcher implements vscode.Disposable {
         const nativeTimer = this.nativeChangeTimers.get(filePath);
         if (nativeTimer) clearTimeout(nativeTimer);
         this.nativeChangeTimers.delete(filePath);
+        const crdtTimers = this.crdtLocalChangeTimers.get(filePath);
+        if (crdtTimers) {
+            for (const crdtTimer of crdtTimers) clearTimeout(crdtTimer);
+        }
+        this.crdtLocalChangeTimers.delete(filePath);
         this.pendingEditorOpReports = this.pendingEditorOpReports.filter((report) => report.fsPath !== filePath);
         clearEditorOpShadow(filePath);
         void this.crdtReplicas?.handleDocumentClosed(filePath);
@@ -2902,6 +2924,14 @@ class PatchWatcher implements vscode.Disposable {
             clearTimeout(timer);
         }
         this.liveBufferReportTimers.clear();
+        for (const timer of this.nativeChangeTimers.values()) {
+            clearTimeout(timer);
+        }
+        this.nativeChangeTimers.clear();
+        for (const timers of this.crdtLocalChangeTimers.values()) {
+            for (const timer of timers) clearTimeout(timer);
+        }
+        this.crdtLocalChangeTimers.clear();
         if (this.editorOpReportTimer) clearTimeout(this.editorOpReportTimer);
         this.editorOpReportTimer = undefined;
         this.pendingEditorOpReports = [];

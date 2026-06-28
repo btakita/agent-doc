@@ -65,23 +65,20 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val newFragment = event.newFragment.toString()
         val oldFragment = event.oldFragment.toString()
         if (newFragment.isEmpty() && oldFragment.isEmpty()) return
-        val beforeText = shadows[filePath] ?: run {
+        if (!shadows.containsKey(filePath)) {
             seedAndAttachFromDocument(filePath, event.document)
             return
         }
-        val nextText = applyEventToShadow(beforeText, event.offset, oldFragment, newFragment) ?: run {
-            shadows.remove(filePath)
-            seedAndAttachFromDocument(filePath, event.document)
-            return
-        }
-        shadows[filePath] = nextText
-        val offset = codePointOffset(beforeText, event.offset)
-        val deleteLen = oldFragment.codePointCount(0, oldFragment.length)
         markLocalPending(filePath)
         executor.execute {
             try {
-                val forwarder = forwarderFor(filePath, beforeText)
-                forwarder?.forwardLocalDelta(offset, deleteLen, newFragment)
+                forwardLocalDeltaFromShadow(
+                    filePath,
+                    event.document,
+                    event.offset,
+                    oldFragment,
+                    newFragment,
+                )
             } finally {
                 clearLocalPending(filePath)
             }
@@ -101,6 +98,29 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 clearLocalPending(filePath)
             }
         }
+    }
+
+    private fun forwardLocalDeltaFromShadow(
+        filePath: String,
+        document: Document,
+        eventOffset: Int,
+        oldFragment: String,
+        newFragment: String,
+    ) {
+        val beforeText = shadows[filePath] ?: run {
+            seedAndAttachFromDocument(filePath, document)
+            return
+        }
+        val nextText = applyEventToShadow(beforeText, eventOffset, oldFragment, newFragment) ?: run {
+            shadows.remove(filePath)
+            seedAndAttachFromDocument(filePath, document)
+            return
+        }
+        shadows[filePath] = nextText
+        val offset = codePointOffset(beforeText, eventOffset)
+        val deleteLen = oldFragment.codePointCount(0, oldFragment.length)
+        val forwarder = forwarderFor(filePath, beforeText)
+        forwarder?.forwardLocalDelta(offset, deleteLen, newFragment)
     }
 
     private fun pollRemoteUpdates() {

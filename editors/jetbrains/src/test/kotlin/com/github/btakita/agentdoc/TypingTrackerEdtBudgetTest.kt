@@ -107,8 +107,8 @@ class TypingTrackerEdtBudgetTest {
             .substringBefore("private fun seedAndAttachFromDocument")
 
         assertTrue(
-            "CRDT documentChanged should update an in-memory shadow from the DocumentEvent delta",
-            listenerBody.contains("applyEventToShadow(beforeText, event.offset, oldFragment, newFragment)"),
+            "CRDT documentChanged should enqueue local CRDT forwarding onto the replica worker",
+            listenerBody.contains("executor.execute"),
         )
         assertTrue(
             "CRDT documentChanged should defer full-buffer seeding to a background worker",
@@ -117,6 +117,18 @@ class TypingTrackerEdtBudgetTest {
         assertFalse(
             "CRDT documentChanged must not copy the full editor buffer on every keystroke",
             listenerBody.contains("event.document.text"),
+        )
+        assertFalse(
+            "CRDT documentChanged must not compute code-point offsets on the UI thread for large shadows",
+            listenerBody.contains("codePointOffset("),
+        )
+        assertFalse(
+            "CRDT documentChanged must not apply shadow deltas on the UI thread",
+            listenerBody.contains("applyEventToShadow("),
+        )
+        assertFalse(
+            "CRDT documentChanged must not call the replica/socket forwarder on the UI thread",
+            listenerBody.contains("forwardLocalDelta("),
         )
     }
 }

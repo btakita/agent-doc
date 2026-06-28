@@ -238,6 +238,12 @@ fn finalize_input_schema() -> Value {
     properties.insert("pending_reorder".to_string(), string_property(None));
     properties.insert("allow_replace_pending".to_string(), bool_property(None));
     properties.insert("force_disk".to_string(), bool_property(None));
+    properties.insert(
+        "force_disk_operator_override".to_string(),
+        string_property(Some(
+            "Required when force_disk=true. Summarize the operator's explicit decision to bypass live-editor convergence.",
+        )),
+    );
     properties.insert("origin".to_string(), string_property(None));
     properties.insert("status".to_string(), string_property(None));
 
@@ -515,13 +521,23 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
     pending_set_gate_type.extend(string_vec_arg(args, "pending_set_gate_type")?);
     let mut pending_set_verify = string_vec_arg(args, "backlog_set_verify")?;
     pending_set_verify.extend(string_vec_arg(args, "pending_set_verify")?);
+    let force_disk = bool_arg(args, "force_disk", false)?;
+    if force_disk {
+        let override_note =
+            optional_string_arg(args, "force_disk_operator_override")?.unwrap_or_default();
+        if override_note.trim().is_empty() {
+            bail!(
+                "force_disk_operator_override is required when force_disk=true; use force-disk only after the operator explicitly chose to bypass live-editor convergence"
+            );
+        }
+    }
     let options = agent_doc_orchestration::write::CommandOptions {
         file: file.clone(),
         baseline_file: optional_path_arg(args, "baseline_file")?,
         is_template: bool_arg(args, "template", false)?,
         is_stream: bool_arg(args, "stream", false)?,
         is_ipc: bool_arg(args, "ipc", false)?,
-        force_disk: bool_arg(args, "force_disk", false)?,
+        force_disk,
         origin: Some(origin),
         pending_add,
         pending_add_to,
@@ -854,9 +870,42 @@ mod tests {
             "review_resolve",
             "commit_sibling",
             "commit_sibling_message",
+            "force_disk_operator_override",
         ] {
             assert!(props.contains_key(key), "missing finalize schema key {key}");
         }
+        assert!(
+            props["force_disk_operator_override"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("operator's explicit decision"),
+            "force-disk override schema must describe the operator authority boundary"
+        );
+    }
+
+    #[test]
+    fn finalize_rejects_force_disk_without_operator_override() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let response = response_for(json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {
+                "name": "agent_doc_finalize",
+                "arguments": {
+                    "file": file.path(),
+                    "response": "<!-- patch:exchange -->\n### Re: blocked — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+                    "force_disk": true
+                }
+            }
+        }));
+        assert_eq!(response["result"]["isError"], true);
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("force_disk_operator_override")
+                && text.contains("operator explicitly chose"),
+            "MCP force-disk must require an explicit operator override note, got: {text}"
+        );
     }
 
     #[test]

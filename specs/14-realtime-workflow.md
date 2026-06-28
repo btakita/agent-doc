@@ -596,6 +596,10 @@ terminal runs all share the same boundary:
   write/commit path;
 - harnesses may insert a missing user prompt before a response exists, but they
   must not patch the assistant response directly into the document;
+- a stale MCP server or other long-lived tool host whose running binary,
+  executable path, generated instructions, or mutation contract is no longer
+  launchable/current must refuse mutating tools such as `agent_doc_admit`,
+  `agent_doc_preflight`, and `agent_doc_finalize` until restarted or recycled;
 - untrusted, stale, or missing delivery proof is a fail-closed result, not
   permission to write the session document directly.
 

@@ -829,6 +829,22 @@ fn realtime_workflow_spec_keeps_merge_and_commit_lifecycles_distinct() {
 }
 
 #[test]
+fn realtime_workflow_spec_pins_stale_tool_host_fail_closed() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let realtime = fs::read_to_string(root.join("specs/14-realtime-workflow.md")).unwrap();
+
+    assert!(
+        realtime.contains("stale MCP server")
+            && realtime.contains("long-lived tool host")
+            && realtime.contains("must refuse mutating tools")
+            && realtime.contains("agent_doc_admit")
+            && realtime.contains("agent_doc_preflight")
+            && realtime.contains("agent_doc_finalize"),
+        "realtime workflow spec must make stale MCP/tool-host mutation fail closed"
+    );
+}
+
+#[test]
 fn realtime_workflow_spec_models_parse_state_and_editor_feedback() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let realtime = fs::read_to_string(root.join("specs/14-realtime-workflow.md")).unwrap();

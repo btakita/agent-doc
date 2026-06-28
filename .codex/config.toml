@@ -1,0 +1,12 @@
+[features]
+hooks = true
+
+[mcp_servers.agent-doc]
+args = [
+    "mcp",
+    "serve",
+    "--project-root",
+    "/home/brian/work/btakita/agent-loop/src/agent-doc-qftbklgstrike-wt",
+]
+command = "agent-doc"
+default_tools_approval_mode = "approve"

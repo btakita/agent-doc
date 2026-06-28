@@ -32,6 +32,18 @@ free-text item is the blockquote-matched `#ftstrike`. `do [#id]` heads are
 different — they strike by id via `--done <id>` regardless of position and need no
 quote.
 
+**Already-complete or backlog-tracked free-text heads auto-strike (`#qftbklgstrike`).**
+Separately from the exchange-answer strike above, preflight queue maintenance
+auto-strikes a live free-text head when a deterministic scorer proves the work is
+already captured elsewhere — either it is already complete (a matching `agent:done`
+item) or a backlog item already addresses it (a matching active `agent:backlog`
+item) — even with no exchange answer for it. The head is struck in place and
+annotated `— auto-struck: completed by #<id>` or `— auto-struck: tracked by backlog
+#<id>`; it is never deleted. The match must clear a conservative threshold (a near
+restatement of the tracked item), so an unrelated operator prompt is never struck:
+you do not need to do anything to trigger or avoid this — a genuinely unanswered,
+unrelated head always survives. id-backed heads are unaffected (they strike by id).
+
 The `#ftstrike` pass is **conservative about in-flight edits (`#qstrikeexplain`)**: it
 strikes a free-text head only when that head was present in the stable pre-turn
 baseline (the preflight baseline). A head that first appeared in the live buffer

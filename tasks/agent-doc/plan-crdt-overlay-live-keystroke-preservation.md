@@ -96,3 +96,82 @@ Per operator directive (2026-06-26): production CRDT bugs observed during dogfoo
 logged in `tasks/agent-doc/agent-doc-bugs2.md` **the same turn** they're observed (with
 ops.log marker evidence + code location), then fixed in a focused cycle. This plan is the
 template for that flow.
+
+## Live recurrence on 0.34.52 — line-multiset check under-detects (2026-06-26)
+
+Operator report (agent-doc-bugs2.md queue head): "As I was typing in this prompt, a
+3-way merge occurred. I also have characters from a previous word I typed in deleted.
+Consistent CRDT issues." Confirms the residual is still live on the installed 0.34.52
+(supervisor:fresh — NOT a staleness artifact).
+
+**ops.log evidence** (`.agent-doc/logs/ops.log`, session `b26b9957`, during the typing
+burst):
+
+```
+20:38:17  crdt_merge_base_overlay_stale  overlay_len=96633 fallback_len=97059  → crdt_merge_base_overlay_rebuilt
+20:38:23  crdt_merge_base_overlay_stale  overlay_len=97059 fallback_len=98015  → crdt_merge_base_overlay_rebuilt
+20:39:41  crdt_merge_base_overlay_stale  overlay_len=98015 fallback_len=98020  → crdt_merge_base_overlay_rebuilt
+20:35:15  crdt_merge_base_overlay_stale  overlay_len=96633 fallback_len=96632  → crdt_merge_base_overlay_rebuilt
+```
+
+Every cycle in the burst took the `crdt_merge_base_overlay_rebuilt` (discard-to-baseline)
+path; `crdt_merge_base_overlay_ahead_preserved` **never** fired. The 20:35:15 line is the
+tell: the overlay (96633) is **larger** than the baseline (96632) — a genuine live-ahead
+edit — yet `overlay_carries_unbaselined_content` returned false and the live overlay was
+rebuilt (discarded) anyway.
+
+**Why the 0.34.50 partial fix misses it.** `overlay_carries_unbaselined_content`
+(`agent-doc-orchestration/src/snapshot.rs:1138`) only reports "ahead" when the overlay
+contains a **brand-new, non-empty, distinct line** absent from the baseline multiset. It
+cannot see (a) a **pure deletion** (overlay ⊆ baseline by lines — the documented residual),
+or (b) an **additive within-line edit whose changed line still collides with another
+identical baseline line** (e.g. the many duplicate `- :pushpin: do [#…]` / empty-bullet
+lines in this very queue) — the multiset still "contains" it, so +1 byte of live content is
+classed behind. Line-string equality cannot distinguish ahead from behind; this is exactly
+why the plan (above) specifies **causal state-vector dominance** as the correct test.
+
+**Fix to implement in the focused cycle (supersedes the line-multiset heuristic):**
+classify ahead/behind/divergent by **yrs state-vector dominance** between the overlay CRDT
+and the baseline-projected CRDT, not by markdown line strings:
+- overlay SV strictly dominates baseline SV → **ahead**, preserve the sidecar (covers pure
+  deletions and within-line edits the string check misses).
+- baseline SV strictly dominates overlay SV → **behind**, discard + `overlay_discarded_bytes`.
+- neither dominates → **concurrent-divergent**, preserve + 3-way CRDT merge.
+Keep the `#crdtedgetests` matrix; add a row for "additive edit on a line that duplicates an
+existing baseline line" and "pure single-line deletion racing finalize", both red against
+the current string check.
+
+
+## BLOCKER discovered 2026-06-26 (#crdtsvdom precondition) — SV dominance is NOT yet meaningful
+
+Investigated the CRDT API before implementing the state-vector-dominance fix above.
+**State-vector dominance as literally specified cannot work with the current
+`OverlayCrdtDoc` construction**, and shipping it as written would produce a *vacuous*
+comparison (every pair reads as "divergent"), which is worse than the line-string check.
+
+Findings (`agent-doc-markdown-ast/src/crdt.rs`, `agent-doc-core/src/crdt_sync.rs`):
+- `OverlayCrdtDoc::from_markdown` calls `Doc::new()` → a **random client id** per call.
+- The persisted overlay sidecar keeps its *own* original client id; a baseline doc built
+  fresh via `from_markdown(baseline)` gets a *different* random client id.
+- yrs state vectors are per-client causal clocks. Two docs with **disjoint client
+  namespaces share no causal history**, so neither SV dominates the other — the dominance
+  test is always "concurrent/divergent" regardless of actual content lineage. (Compare
+  `crdt_sync.rs::canonical_covers`, which only works because both replicas share lineage.)
+- The existing test `crdt_merge_base_state_rebuilds_stale_overlay_after_first_fallback`
+  (`snapshot.rs`) **deliberately discards** an overlay that is a strict subset of baseline
+  as "genuinely stale" — which is byte-identical in shape to a **live deletion**. A pure
+  content check (string OR vacuous-SV) cannot separate "operator deleted a line" from
+  "baseline advanced past an older overlay"; only real causal history can.
+
+**Therefore #crdtsvdom has a hard precondition (its own brick, do FIRST):** give the overlay
+and baseline a **comparable causal lineage** before any dominance test, e.g.:
+- seed `OverlayCrdtDoc` with **deterministic client ids** (`Doc::with_client_id`) per role
+  (overlay vs baseline), and/or persist the **cycle-start baseline CRDT state** alongside the
+  overlay so next cycle has a shared ancestor to diff against (apply overlay's `diff(baseline_sv)`
+  and test whether it is empty), and
+- expose `state_vector()` / `diff()` on `OverlayCrdtDoc` (the `doc` field is private today).
+
+Only after that lineage groundwork does the ahead/behind/divergent dominance test become
+correct. Until then the line-multiset heuristic stays (it is at least deterministic and
+conservative). The eliminative track (`#crdtauth5/6` live delta forwarding) naturally
+provides this shared lineage — so #crdtsvdom may fold into that work rather than standing alone.

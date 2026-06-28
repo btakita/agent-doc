@@ -28,8 +28,8 @@ The current failure mode is structural:
   `PatchWatcher.kt` uses full `document.setText(...)` plus `saveDocument(...)`
   in normal patch paths.
 - The VS Code extension already rejects `fullContent` IPC, but normal component,
-  reposition, and reconnect paths still use full-range
-  `WorkspaceEdit.replace(...)` and call `document.save()` after patch apply in
+  reposition, reconnect, and save-signal paths historically still carried
+  full-range `WorkspaceEdit.replace(...)` / save-style repair risks in
   `editors/vscode/src/extension.ts`.
 - Those combinations can invalidate or degrade editor undo history. The CRDT may
   supply the content, but unsafe editor/disk mutation is the undo breaker.
@@ -411,6 +411,30 @@ Verification:
 - No File Cache Conflict.
 - Undo in both editors remains local and predictable.
 
+Progress 2026-06-27:
+
+- Implemented per-editor CRDT replica registration, update fan-out, target-owned
+  pull delivery, and ACK tracking in the supervisor relay path
+  (`crdt_relay`, `crdt_relay_host`, `supervisor::ipc`, `start::supervisor_io`).
+- Required closeout now fails closed before commit when live MultiReplica
+  delivery is still unacknowledged; best-effort commit skips materialization
+  instead of committing ahead of convergence.
+- JetBrains now wires a production `DocumentListener`/poller through
+  `CrdtReplicaManager`, applies remote CRDT text via minimal editor edits, and
+  ACKs only after editor application succeeds.
+- VS Code now has native replica FFI bindings, a supervisor socket transport,
+  a CRDT replica manager, open/close wiring, local delta forwarding, remote
+  minimal edit application, and ACK-after-apply tests.
+- Automated evidence: VS Code `npm test`; JetBrains
+  `./gradlew test --tests com.github.btakita.agentdoc.CrdtReplicaForwarderTest`;
+  Rust `cargo test -p agent-doc-orchestration crdt_relay --lib`,
+  `cargo test -p agent-doc-orchestration crdtauth5 --lib`,
+  `cargo test -p agent-doc-orchestration complete_required_closeout_blocks_until_live_replica_delivery_is_acked --lib`,
+  and `cargo check -p agent-doc-orchestration`.
+- Remaining Phase 3 evidence is live editor verification: two-editor
+  JetBrains/VS Code convergence, no cache conflict, and undo/redo behavior under
+  real IDE edit stacks.
+
 ### Phase 4: realtime admit and transaction closeout
 
 Goal: remove turn-based preflight/finalize from the hot path.
@@ -423,6 +447,73 @@ Changes:
 - Persist response capture before processing.
 - Consume typed queue items transactionally.
 - Commit only after projection materialization is confirmed.
+
+Progress 2026-06-27:
+
+- Added `agent-doc admit <FILE>` as a lightweight admission command in the
+  orchestration crate. It reads the current realtime document projection, opens a
+  durable response-bound cycle checkpoint, emits JSON, and records
+  `realtime_admit ... source=admit action=accepted` in `ops.log`.
+- Routed direct `agent-doc run` cycle opening through the same admit helper, so
+  child-agent dispatch now enters the response cycle through the lightweight
+  realtime admission surface while leaving prompt construction and pre-commit
+  behavior unchanged.
+- The new admit path does not call the legacy preflight runner, so admission now
+  has a tested no-maintenance surface separate from repair, GC, layout repair,
+  queue maintenance, diff classification, claim checks, and pre-agent commit.
+- Exposed `agent_doc_admit` on the MCP server and switched configured Codex
+  queue-continuation instructions from `agent_doc_preflight` to
+  `agent_doc_admit` before `agent_doc_plan` / `agent_doc_read` and
+  `agent_doc_finalize`. The legacy MCP preflight tool remains available for
+  compatibility/reporting, but the live in-pane submission path now points at the
+  lightweight admission surface.
+- Queue head consumption now writes typed append-only proof-ledger records around
+  the mutation: a `QueueHead`/`Recorded` identity proof before any visible
+  document change, followed by a `QueueHead`/`Consumed` write-result proof after
+  the document and snapshot converge. The queue cleanup escape-hatch tests were
+  also moved to the cutover contract: they verify pure strike planning but fail
+  closed without editor convergence instead of writing directly on no-listener
+  paths.
+- Captured CRDT/template patchback recovery now replays through the normal
+  strict stream write path instead of the repair-only template writer, so a crash
+  after response capture reuses the same capture, materialization, snapshot, and
+  commit closeout path as `finalize`.
+- Resolved the Codex auto-queue no-listener closeout gap by carrying the
+  response-derived queue completion id into captured-response replay and folding
+  queue consumption into the stream writer's single materialized document +
+  snapshot pair. The path records the same before/after queue proof-ledger rows
+  but no longer performs a second visible queue-consume write after recovery.
+- Strict committed closeout now appends a typed `TerminalProof` /
+  `TerminalStateObserved` proof-ledger row after session-check and actor closeout
+  succeed. The record proves the cycle id, committed phase, capture metadata,
+  session-check success, actor-closeout persistence, and matching visible file /
+  snapshot / HEAD hashes. Detached closeout also uses the explicit force-disk
+  pending-maintenance path for terminal reap, while editor-attached closeout
+  remains on guarded editor convergence.
+- Crash-replay evidence now asserts the same terminal proof row for both
+  crash-after-apply (`write_applied` restart recovery) and crash-before-commit
+  (captured response replay on next preflight). Git-backed orphaned-response
+  repair replays through the normal write/commit closeout transaction; standalone
+  non-git repair fixtures keep legacy direct repair semantics.
+- Automated evidence: `cargo test -p agent-doc-orchestration admit --lib`,
+  `cargo test -p agent-doc-orchestration start_run_cycle_routes_through_realtime_admit --lib`,
+  `cargo test -p agent-doc-orchestration queue_consume --lib`,
+  `cargo test -p agent-doc mcp`,
+  `cargo test -p agent-doc-orchestration configured_mcp_tools --lib`,
+  `cargo test -p agent-doc-orchestration stop_marker_fallback_continuation_prefers_configured_mcp_tools --lib`,
+  `cargo test -p agent-doc-orchestration complete_required_closeout_reaps_lingering_completed_item --lib`,
+  `cargo test -p agent-doc-orchestration complete_required_closeout_blocks_until_live_replica_delivery_is_acked --lib`,
+  `cargo test -p agent-doc-orchestration force_disk_closeout_pending_maintenance_bypasses_active_listener --lib`,
+  `cargo test -p agent-doc-orchestration terminal_proof --lib`,
+  `cargo test -p agent-doc --test run_integration interrupted_run_leaves_write_applied_and_preflight_finishes_commit`,
+  `cargo test -p agent-doc --test test_cli mcp_finalize_close_after_capture_recovers_on_next_preflight_once`,
+  `cargo test -p agent-doc-orchestration preflight_recovers_response_captured_cycle_without_pending_file --lib`,
+  `cargo test -p agent-doc-orchestration preflight_auto_recovers_jb_cache_conflict_cancel_write_applied_with_snapshot_drift --lib`,
+  `cargo test -p agent-doc-orchestration recover_replays_capture_without_pending --lib`,
+  and `cargo check -p agent-doc`.
+- Phase 4 is complete for git-backed realtime admission, queue proof, crash
+  replay, and terminal closeout proof. Remaining live-editor validation stays
+  tracked by the Phase 3 and Phase 6 live verification gates.
 
 Verification:
 
@@ -447,6 +538,140 @@ Remove or permanently disable:
 - repair paths that mutate visible files while editors are open
 
 Keep compatibility shims only when they call the controller APIs internally.
+
+Progress 2026-06-27:
+
+- Disabled the convergence-gate timeout path that previously mapped an
+  unconverged editor boundary to a `ForceDiskFallback` decision and then
+  continued dispatching the next queue item.
+- The pure gate now returns `Blocked` at timeout; idle-watch records a
+  replayable `convergence_gate_blocked severity=error action=fail_closed`
+  artifact once for the boundary and continues deferring instead of dispatching
+  through the old escape hatch.
+- Disabled the synchronous editor-IPC wait/fallback branch in write convergence:
+  once a listener is active/connectable, missing ACK content, missing ACKs,
+  send failures, or untrusted ACK mismatches now log
+  `transport=blocked action=editor_convergence_required` and fail closed instead
+  of returning `Ok(false)` to a disk write, even when no plugin-owner lease is
+  present.
+- Updated the pure `decide_editorless_disk_fallback` model so a missing,
+  controller-hosted, or editor-backed socket with unproven delivery is
+  `FailClosed`; only explicit `--force-disk` may select the disk write branch.
+- Removed the no-listener headless disk fallback from write convergence. The
+  shared `try_editor_converge`, guarded wrapper, plain wrapper, template write,
+  apply-template repair, compact writeback, and status write paths now fail
+  closed with `transport=blocked reason=no_listener`; only explicit force-disk
+  paths remain as disk-write bypasses.
+- Removed VS Code extension autosaves from command paths. Session-control
+  commands no longer flush the editor buffer, and dispatch/mutation commands now
+  fail closed on a dirty document through `ensureDocumentCleanForCommand` instead
+  of calling `document.save()`.
+- Disabled VS Code full-range `WorkspaceEdit` replacements in the shared
+  minimal-edit helper. If the computed replacement would delete the entire
+  existing buffer from offset 0, the extension now logs
+  `full-document WorkspaceEdit replacement is disabled` and fails the patch
+  instead of applying a whole-document visible edit.
+- Disabled editor-open repair write paths in the editor plugins. VS Code prompt
+  polling now skips dirty tracked buffers instead of saving them, legacy
+  `save-document.signal` is consumed with `save_document IPC is disabled`, and
+  both VS Code and JetBrains reconnect `reread_disk` repair decisions log
+  `reread_disk repair is disabled` while keeping the visible buffer
+  editor-owned.
+- Disabled the JetBrains socket `save_document` repair message. The plugin now
+  logs `save_document IPC is disabled`, records the surface op as `disabled`, and
+  returns failure instead of calling `FileDocumentManager.saveDocument`.
+- Disabled the JetBrains closed-file VFS whole-buffer patch writer. The
+  no-document path now only reads disk to reject full-content IPC and ACK
+  already-present replay content; non-noop component patches fail closed with
+  `VFS whole-buffer patch apply is disabled` instead of calling
+  `VirtualFile.setBinaryContent`.
+- Disabled the watch-daemon direct legacy submit loop. File-watch events still
+  flow through the controller-owned `document_watcher` actor and persist
+  `FileWatchChangeObserved`, but `watch.rs` no longer calls
+  `run_with_context`/preflight after a filesystem event.
+- Sequential and DAG orchestration no longer require heavy preflight after
+  injecting each child prompt. The shared ordered-task step now calls the
+  lightweight `agent-doc admit` lifecycle hook and builds the child-agent prompt
+  from a synthetic injected-task diff, preserving imperative response-contract
+  enforcement for prompt presets and multiline tasks without running repair,
+  maintenance, broad diff reporting, or preflight JSON generation on every
+  child dispatch.
+- Parent batch-change closeout also uses lightweight admission and no longer
+  depends on a preflight baseline file before writing the stop message.
+- Queue consumption now mirrors its before/after proof-ledger checkpoints into
+  the typed state backbone: consumed heads append `QueueHeadSelected` before the
+  mutation and `QueueHeadCompleted` after document/snapshot convergence, and the
+  queue-consume regression test projects those events back into a completed
+  typed queue head.
+- Active queue maintenance now records the selected head in the typed state
+  backbone after queue normalization/in-progress marking settles. Repeated
+  preflights reuse the same selected-head event id as consumption's
+  before-mutation checkpoint, so the projection gains an idempotent typed
+  `active_head` before the prompt-diff synthesis path runs.
+- Queue head projections now carry optional selected-head prompt text. Queue
+  consumption records the next remaining head as selected after a non-draining
+  consume, and direct run continuation uses the typed prompt text when the
+  selected projection node still matches the current queue node key.
+- Queue maintenance now records typed deferred queue-head state for
+  stop-fence, time-gate, and mid-edit `item_modified` halts by pairing the
+  halted prompt text with `QueueHeadDeferred` reasons. Deferred projections are
+  non-drainable, clear `active_head`, and clear their stale defer reason when
+  the same node is selected again.
+- Direct run continuation now requires typed queue-head state for the current
+  queue node. The synthetic prompt-diff path and auto-continuation loop stop
+  with `unproven_typed_queue_state` when selected/deferred facts are missing or
+  stale instead of falling back to markdown prompt text, stop fences, time
+  gates, or snapshot head comparisons as authoritative guards.
+- Queue maintenance now records a typed `QueueWorklistProjected` event for the
+  active queue worklist after normalization and in-progress marking, including
+  the rendered queue hash and typed prompt/preset/dispatch entries. Batch
+  `orchestrate --from-queue` now resolves tasks from that projection and fails
+  closed when the typed worklist is missing, inactive, or stale relative to the
+  current rendered queue hash; markdown is used only as the activation/hash
+  guard, not as the task source.
+- Route queue activation/dispatch, route bug-report backlog filing, free-text
+  queue consume, template apply, repair replay, and auto-done pending mutations
+  now keep no-listener/no-proof writes strict by default and require explicit
+  force-disk plumbing for editorless CLI/test paths. The forced paths log
+  `reason=force_disk` while the default paths still fail closed on unproven
+  editor convergence.
+- Automated evidence: `cargo test -p agent-doc-orchestration convergence_gate
+  --lib`, `cargo test -p agent-doc-orchestration convergence_playback --lib`,
+  `cargo test -p agent-doc-orchestration editorless --lib`, `cargo test -p
+  agent-doc-orchestration without_listener --lib`, `cargo test -p
+  agent-doc-orchestration converge_document_or_disk --lib`, `cargo test -p
+  agent-doc-orchestration converge_or_disk_write --lib`, `cargo test -p
+  agent-doc-orchestration try_compact_editor_converge --lib`, `cargo test -p
+  agent-doc-orchestration without_ack_content --lib`, `cargo test -p
+  agent-doc-orchestration ack_mismatch --lib`, `cargo check -p
+  agent-doc-orchestration`, `cargo test -p agent-doc-orchestration
+  document_watcher --lib`, `cargo test -p agent-doc-orchestration watch --lib`,
+  VS Code `npm test` including the full-document `WorkspaceEdit`, no-save, and
+  reconnect-repair disabled guards, and JetBrains `./gradlew test --tests
+  com.github.btakita.agentdoc.NormalizeExchangePrefixesTest` including the VFS
+  source guard against `setBinaryContent` and reconnect repair writes,
+  `cargo test -p agent-doc-orchestration queue_consume --lib`,
+  `cargo test -p agent-doc-orchestration run_queue_maintenance --lib`,
+  `cargo test -p agent-doc-orchestration state_backbone --lib`,
+  `cargo test -p agent-doc-orchestration state_wire --lib`,
+  `cargo test -p agent-doc-orchestration active_queue_prompt_state_prefers_typed_selected_prompt_when_node_matches --lib`,
+  `cargo test -p agent-doc-orchestration active_queue_prompt_state --lib`,
+  `cargo test -p agent-doc-orchestration active_queue_prompt_diff --lib`,
+  `cargo test -p agent-doc-orchestration should_continue_auto_queue --lib`,
+  `cargo test -p agent-doc-orchestration run::tests --lib`,
+  `cargo test -p agent-doc resolve_task_batch`,
+  `cargo test -p agent-doc orchestrate::dag::tests`,
+  `cargo test -p agent-doc orchestrate::dispatch::tests`, and
+  `cargo check -p agent-doc`.
+- Additional automated evidence 2026-06-27: focused force-disk/strict-write
+  regressions passed for route activation/enqueue/bug-report, pending auto-done,
+  queue consume, repair replay, capture provenance, template apply, and FlowCore
+  hot-path guards; `cargo clippy -- -D warnings` passed; `make check` passed in
+  `src/agent-doc` with 5,461 tests passed, 241 skipped, doctests passing, the
+  ignored closeout simulation target passing, and Lean formal build success.
+- Remaining Phase 5 removal: live editor validation still needs to prove no
+  editor-visible `disk_fallback` or markdown-authoritative queue path remains in
+  normal use.
 
 ## Verification matrix
 

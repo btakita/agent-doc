@@ -17,11 +17,21 @@ Interactive document session — respond to user edits in a markdown document.
 
 Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 
+## Dynamic Context Router
+
+Keep this file as a router, not a duplicate manual. Each entry should point to
+the dynamic file that owns its details:
+
+- **Context strategy:** See [`runbooks/dynamic-context.md`](runbooks/dynamic-context.md) for the AGENTS/SKILL pattern, dynamic context service shape, and storage guidance.
+- **agent-doc workflow:** See [`.claude/skills/agent-doc/SKILL.md`](.claude/skills/agent-doc/SKILL.md); load its linked runbooks only when that workflow branch is active.
+- **Code navigation:** See [`runbooks/code-navigation.md`](runbooks/code-navigation.md); use `tsift` envelopes instead of copying search, diff, log, or transcript content into prompts.
+- **Task-specific procedures:** Use the referenced file under [`runbooks/`](runbooks/) rather than expanding procedures inline.
+
 **Full workflow:** See [`.claude/skills/agent-doc/SKILL.md`](.claude/skills/agent-doc/SKILL.md) for the complete agent-doc workflow (preflight, respond, persist, pending ops, auto-loop).
 
 **Code navigation:** See [`.claude/skills/tsift/SKILL.md`](.claude/skills/tsift/SKILL.md) and [`runbooks/code-navigation.md`](runbooks/code-navigation.md) for tsift AST-aware search, call graphs, and digest commands.
 
-**Runbooks:** [runbooks/](runbooks/) — harness-invocation, commit, planning-dispatch, pending-ops, model-tier-gate, compact-exchange, streaming-checkpoints, document-format, code-enforced-directives, architecture-first (agent-doc development/dogfooding only), and more.
+**Runbooks:** [runbooks/](runbooks/) — dynamic-context, harness-invocation, commit, planning-dispatch, pending-ops, model-tier-gate, compact-exchange, streaming-checkpoints, document-format, code-enforced-directives, architecture-first (agent-doc development/dogfooding only), and more.
 
 <!-- tsift:code-navigation v=0.1.73 -->
 ## Code Navigation

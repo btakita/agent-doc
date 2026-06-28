@@ -2,6 +2,8 @@
 agent_doc_session: 64316602-b77c-48ce-b990-92fc72425f26
 agent_doc_format: template
 agent_doc_write: crdt
+agent: claude
+claude_model: opus
 queue: stop
 ---
 

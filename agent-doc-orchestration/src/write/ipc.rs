@@ -247,6 +247,10 @@ pub(crate) fn is_socket_ack_timeout_error(err: &anyhow::Error) -> bool {
     err.to_string().contains("IPC ack timeout")
 }
 
+pub(crate) fn is_socket_status_error(err: &anyhow::Error) -> bool {
+    err.to_string().contains("IPC ack status error")
+}
+
 pub(crate) fn remove_ipc_dewedge_marker(
     project_root: &Path,
     file: &Path,
@@ -4879,6 +4883,22 @@ mod core_tests {
             "IPC ack status error: something else"
         )));
     }
+
+    #[test]
+    fn is_socket_status_error_matches_terminal_apply_rejection() {
+        assert!(is_socket_status_error(&anyhow::anyhow!(
+            "{}",
+            r#"IPC ack status error: {"type":"ack","status":"error"}"#
+        )));
+        assert!(!is_socket_status_error(&anyhow::anyhow!(
+            "IPC ack timeout (6s)"
+        )));
+        assert!(!is_socket_status_error(&anyhow::anyhow!(
+            "{}",
+            r#"IPC ack already_applied: {"type":"ack","status":"error","reason":"already_applied"}"#
+        )));
+    }
+
     #[test]
     fn degraded_latch_self_heals_when_listener_recovers() {
         // `#ipc-degrade-self-heal`: the degrade latch is a circuit breaker, not

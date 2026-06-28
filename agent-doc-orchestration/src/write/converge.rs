@@ -1722,6 +1722,24 @@ pub fn try_editor_converge(
                     err
                 ),
             );
+            // A terminal `status:error` means the socket listener received the
+            // patch but its socket-side apply path rejected it. That is still not
+            // permission to raw-write the file, but the plugin-owned file-IPC
+            // watcher may be able to apply the exact same patch and prove the
+            // resulting buffer through ack-content in this same cycle.
+            if is_socket_status_error(&err)
+                && try_editor_converge_file_ipc(
+                    file,
+                    &project_root,
+                    &payload,
+                    &patch_id,
+                    target,
+                    source,
+                    "socket_status_error",
+                )?
+            {
+                return Ok(true);
+            }
             // `#fcc0e`: feed the de-wedge circuit breaker — a socket ack timeout
             // here counts toward the latch so a repeatedly-wedged listener trips
             // degraded and subsequent converges skip the doomed socket up front.
@@ -2520,6 +2538,107 @@ mod core_tests {
             !log.contains("transport=disk_fallback"),
             "a converged queue consume must not also take the disk fallback:\n{log}"
         );
+    }
+
+    #[test]
+    fn queue_consume_socket_status_error_falls_back_to_proven_file_ipc() {
+        // A live editor socket can accept a patch, emit the early pending ack,
+        // then reject the terminal apply (`status:error`) because the editor is
+        // busy or the socket-side apply path lost its generation race. That must
+        // not authorize a raw disk write, but it should try the plugin-owned
+        // file-IPC queue in the same cycle and accept it only with ack-content.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = crate::test_support::queue_consume_convergence_source();
+        let target = crate::test_support::queue_consume_convergence_target();
+        fs::write(&doc, &source).unwrap();
+
+        let listener_root = dir.path().to_path_buf();
+        let _listener = std::thread::spawn(move || {
+            let _ = crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                let patch_id = v
+                    .get("patch_id")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("unknown");
+                Some(
+                    serde_json::json!({
+                        "type": "ack",
+                        "id": patch_id,
+                        "status": "error",
+                        "reason": "socket_apply_failed"
+                    })
+                    .to_string(),
+                )
+            });
+        });
+        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+
+        let watcher_dir = agent_doc_dir.join("patches");
+        let watcher_ack_dir = agent_doc_dir.join("ack-content");
+        let watcher_doc = doc.clone();
+        let watcher_target = target.clone();
+        let watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(entries) = fs::read_dir(&watcher_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.extension().is_some_and(|e| e == "json") {
+                        continue;
+                    }
+                    let payload_text = fs::read_to_string(&path).unwrap();
+                    let payload: serde_json::Value = serde_json::from_str(&payload_text).unwrap();
+                    let patch_id = payload
+                        .get("patch_id")
+                        .and_then(|value| value.as_str())
+                        .unwrap()
+                        .to_string();
+                    fs::write(&watcher_doc, &watcher_target).unwrap();
+                    fs::write(
+                        watcher_ack_dir.join(format!("{patch_id}.md")),
+                        &watcher_target,
+                    )
+                    .unwrap();
+                    fs::remove_file(path).unwrap();
+                    return true;
+                }
+            }
+            false
+        });
+
+        let converged = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap();
+        assert!(
+            converged,
+            "socket status:error should retry through proven file IPC before failing closed"
+        );
+        assert!(watcher.join().unwrap(), "file IPC watcher saw no patch");
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("queue_consume_writeback")
+                && log.contains("send_failed")
+                && log.contains("IPC ack status error"),
+            "socket status error should remain auditable:\n{log}"
+        );
+        assert!(
+            log.contains("queue_consume_file_ipc_convergence_attempt")
+                && log.contains("degraded_cause=socket_status_error")
+                && log.contains("transport=file_ipc"),
+            "socket status error should fall back to proven file IPC:\n{log}"
+        );
+        assert!(
+            !log.contains("transport=disk_fallback"),
+            "socket status-error fallback must not raw-write behind the plugin:\n{log}"
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), target);
     }
 
     #[test]

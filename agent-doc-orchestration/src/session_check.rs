@@ -120,7 +120,43 @@ fn latest_committed_head_response_missing_from_working(file: &Path) -> Result<Op
     if working_norm.lines().any(|line| line.trim() == heading) {
         return Ok(None);
     }
+    if operator_live_buffer_contains_heading(file, &heading) {
+        return Ok(None);
+    }
     Ok(Some(heading))
+}
+
+fn operator_live_buffer_contains_heading(file: &Path, heading: &str) -> bool {
+    let file_key = file.to_string_lossy();
+    let heading = heading.trim();
+    if heading.is_empty() {
+        return false;
+    }
+    for snapshot in crate::debounce::live_buffer_snapshots(&file_key) {
+        if !snapshot.has_capability(crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY) {
+            continue;
+        }
+        if !crate::debounce::live_buffer_snapshot_editor_is_live(&snapshot) {
+            continue;
+        }
+        let Some(content) = snapshot.content.as_deref() else {
+            continue;
+        };
+        let content_norm = crate::git::normalize_transient_agent_doc_markers(content);
+        if content_norm.lines().any(|line| line.trim() == heading) {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "session_check_committed_response_visible_in_live_buffer file={} heading={:?} editor_id={:?}",
+                    file.display(),
+                    heading,
+                    snapshot.editor_id
+                ),
+            );
+            return true;
+        }
+    }
+    false
 }
 
 /// Event name prefix emitted by `preflight::run` that indicates a cycle
@@ -1683,6 +1719,92 @@ mod tests {
                 panic!("expected Interrupted, got Ok: {msg}");
             }
         }
+    }
+
+    #[test]
+    fn session_check_accepts_latest_committed_response_visible_in_operator_live_buffer() {
+        // When an attached editor is authoritative, the operator-visible
+        // document is the editor buffer, not stale disk. If the live-buffer
+        // sidecar proves the latest committed response is visible in that
+        // editor, session-check must not ask recovery to merge it into disk and
+        // risk racing the operator buffer.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        partial_staging_git(root, &["init"]);
+        partial_staging_git(root, &["config", "user.email", "t@t.com"]);
+        partial_staging_git(root, &["config", "user.name", "T"]);
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let doc = root.join("session.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:status patch=replace -->\n\n",
+            "done\n",
+            "<!-- /agent:status -->\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Prior body.\n\n",
+            "### Re: latest committed — gpt-5\n\n",
+            "Latest body.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        partial_staging_git(root, &["add", "session.md"]);
+        partial_staging_git(root, &["commit", "-m", "commit response"]);
+
+        let visible_disk_lost_latest = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:status patch=replace -->\n\n",
+            "restart/recycle your supervisor\n",
+            "done\n",
+            "<!-- /agent:status -->\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Prior body.\n",
+            "<!-- agent:boundary:working -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, visible_disk_lost_latest).unwrap();
+        crate::snapshot::save(&doc, visible_disk_lost_latest).unwrap();
+        crate::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc.to_string_lossy(),
+            committed,
+            "jetbrains-test",
+            "jetbrains",
+            "test",
+            &[crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+        crate::cycle_state::start_preflight(
+            &doc,
+            Some(visible_disk_lost_latest),
+            Some(visible_disk_lost_latest),
+        )
+        .unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(visible_disk_lost_latest),
+            Some(visible_disk_lost_latest),
+        )
+        .unwrap();
+
+        let status = inspect(&doc).unwrap();
+        match status {
+            SessionCheckStatus::Ok(msg) => {
+                assert!(msg.contains("ok"), "expected ok, got: {msg}");
+            }
+            SessionCheckStatus::Interrupted(msg) => {
+                panic!("expected Ok because live buffer contains response, got Interrupted: {msg}");
+            }
+        }
+        let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("session_check_committed_response_visible_in_live_buffer"),
+            "expected live-buffer proof marker in ops log:\n{ops_log}"
+        );
     }
 
     fn setup_partial_staging_repo(root: &std::path::Path) -> std::path::PathBuf {

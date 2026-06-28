@@ -262,6 +262,15 @@ impl LiveBufferSnapshot {
     }
 }
 
+/// Return whether this live-buffer sidecar still belongs to a live editor
+/// process when the editor id carries process identity.
+pub fn live_buffer_snapshot_editor_is_live(snapshot: &LiveBufferSnapshot) -> bool {
+    match snapshot.editor_id.as_deref() {
+        Some(editor_id) => editor_id_is_live_for_delivery(editor_id),
+        None => true,
+    }
+}
+
 struct LiveBufferSnapshotMetadata<'a> {
     editor_id: Option<&'a str>,
     editor_kind: Option<&'a str>,

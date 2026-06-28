@@ -660,6 +660,8 @@ Implementations must keep tests for these cases:
 - closeout/preflight maintenance must not send queue/backlog/status/reap
   convergence patches while an unsaved operator-visible editor buffer is ahead
   of disk;
+- session-check must accept a latest committed response that is visible in a
+  capable live editor buffer even when the stale disk file has not caught up;
 - out-of-band disk writes with no editor owner are preserved as the current
   visible file state;
 - out-of-band disk writes while an editor owns the document reconcile with the

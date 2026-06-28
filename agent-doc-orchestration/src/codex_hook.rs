@@ -240,6 +240,23 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             Ok(StopResponse::Continue { continue_: true })
         }
         crate::session_check::SessionCheckStatus::Interrupted(reason) => {
+            if is_editor_convergence_required_interruption(&reason) {
+                crate::ops_log::log_op(&file, "codex_stop_editor_convergence_required_blocked");
+                let display = file.display();
+                let message = format!(
+                    "agent-doc Stop hook found an editor-convergence blocked closeout for {display}. {reason} Do not send the final answer yet. Retry through the editor/CRDT path after the editor frontend has the required capability or the live editor state is otherwise proven. Do not run `--force-disk` unless the operator explicitly chooses that recovery."
+                );
+                if input.stop_hook_active {
+                    return Ok(StopResponse::Stop {
+                        continue_: false,
+                        stop_reason: message,
+                    });
+                }
+                return Ok(StopResponse::Block {
+                    decision: "block",
+                    reason: message,
+                });
+            }
             if !input.stop_hook_active {
                 let stop_closeout = match attempt_stop_closeout(&file, &state, input) {
                     Ok(stop_closeout) => stop_closeout,
@@ -314,6 +331,12 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             })
         }
     }
+}
+
+fn is_editor_convergence_required_interruption(reason: &str) -> bool {
+    reason.contains("closeout blocked by `editor_convergence_required`")
+        || (reason.contains("editor_convergence_required")
+            && reason.contains("operator_text_authority_v1"))
 }
 
 fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Option<StopResponse>> {

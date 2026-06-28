@@ -273,6 +273,75 @@ fn codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit() {
 }
 
 #[test]
+fn codex_hook_cli_does_not_replay_over_editor_convergence_block() {
+    let (tmp, doc) = setup_template_doc();
+    fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    let content = fs::read_to_string(&doc).unwrap();
+    agent_doc_orchestration::snapshot::save(&doc, &content).unwrap();
+    agent_doc_orchestration::debounce::record_live_buffer_digest_content_for_editor(
+        &doc.to_string_lossy(),
+        &content,
+        Some("jetbrains-old"),
+    )
+    .unwrap();
+    agent_doc_orchestration::cycle_state::start_preflight(&doc, Some(&content), Some(&content))
+        .unwrap();
+    let retained_response = "<!-- patch:exchange -->\n### Re: retained — gpt-5\nRetained patch.\n<!-- /patch:exchange -->\n";
+    agent_doc_orchestration::repair::save_pending(&doc, retained_response).unwrap();
+    agent_doc_orchestration::cycle_state::record_editor_convergence_required(
+        &doc,
+        "try_editor_converge",
+        "send_failed",
+        Some("patch-retained"),
+        Some("editor_endpoint=live"),
+    )
+    .unwrap();
+
+    let submit_payload = json!({
+        "session_id": "codex-session",
+        "turn_id": "turn-1",
+        "cwd": tmp.path().display().to_string(),
+        "prompt": format!("agent-doc {}", doc.display()),
+    });
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["hook", "codex-user-prompt-submit"])
+        .write_stdin(submit_payload.to_string())
+        .assert()
+        .success();
+
+    let stop_payload = json!({
+        "session_id": "codex-session",
+        "turn_id": "turn-1",
+        "cwd": tmp.path().display().to_string(),
+        "last_assistant_message": "<!-- patch:exchange -->\n### Re: stale stop payload — gpt-5\nThis must not replace the retained editor retry patch.\n<!-- /patch:exchange -->\n",
+        "stop_hook_active": false,
+    });
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["hook", "codex-stop"])
+        .write_stdin(stop_payload.to_string())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"decision\":\"block\""))
+        .stdout(predicate::str::contains("editor_convergence_required"))
+        .stdout(predicate::str::contains("operator_text_authority_v1"))
+        .stdout(predicate::str::contains("Do not send the final answer yet"));
+
+    let pending_path = agent_doc_orchestration::snapshot::pending_path_for(&doc).unwrap();
+    let pending = fs::read_to_string(&pending_path).unwrap();
+    assert!(
+        pending.contains("### Re: retained — gpt-5"),
+        "Stop hook must retain the editor retry patch:\n{pending}"
+    );
+    assert!(
+        !pending.contains("stale stop payload"),
+        "Stop hook must not overwrite the retained patch while editor convergence is blocked:\n{pending}"
+    );
+}
+
+#[test]
 fn codex_hook_cli_blocks_transcript_shaped_last_assistant_message() {
     let (tmp, doc) = setup_template_doc();
     init_git_repo(tmp.path(), &doc);

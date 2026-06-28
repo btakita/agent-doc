@@ -399,6 +399,10 @@ Invariants:
 
 - The old supervisor remains the only authoritative child/pty/session-socket
   owner through `PromotingLease`.
+- The supervised pane identity is stable across replacement. The standby/new
+  supervisor must inherit the active actor record's `pane_id`; it must not
+  rediscover the controller caller's current pane or bind a fresh pane unless an
+  explicit attach/new-pane actor transition is part of the handoff.
 - A standby supervisor must not read/write the child pty, dispatch queue work,
   heartbeat as the active lease, or write the session document before
   `PromotionCommitted`.

@@ -2936,6 +2936,12 @@ pub(crate) enum DeadSupervisorRecovery {
     Guidance(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DeadSupervisorColdStartTarget {
+    PreserveActorPane(String),
+    RouteAutoStart,
+}
+
 /// Inputs to [`decide_dead_supervisor_recovery`], kept as a plain struct so the
 /// decision is a pure, unit-testable function with no process/socket I/O.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2980,6 +2986,23 @@ pub(crate) fn decide_dead_supervisor_recovery(
     DeadSupervisorRecovery::ColdStart
 }
 
+fn dead_supervisor_cold_start_target<F>(
+    ctx: &SessionContext,
+    mut pane_alive: F,
+) -> DeadSupervisorColdStartTarget
+where
+    F: FnMut(&str) -> bool,
+{
+    if let Some(record) = ctx.actor_record.as_ref()
+        && record.state != ActorState::Closed
+        && !record.pane_id.trim().is_empty()
+        && pane_alive(&record.pane_id)
+    {
+        return DeadSupervisorColdStartTarget::PreserveActorPane(record.pane_id.clone());
+    }
+    DeadSupervisorColdStartTarget::RouteAutoStart
+}
+
 /// Probe the supervisor socket + caller context and classify the dead-supervisor
 /// recovery decision for `ctx`. Wraps [`decide_dead_supervisor_recovery`] with the
 /// real socket/process/tmux I/O.
@@ -2990,10 +3013,17 @@ fn classify_dead_supervisor_recovery(ctx: &SessionContext) -> DeadSupervisorReco
     );
     let caller_is_own_ancestor = caller_is_supervisor_ancestor(&ctx.canonical_file);
     // A cold-start spawns a route-owned pane via `resolve_target_session`, which
-    // needs either a live tmux session the caller is inside (`in_tmux`) or a
-    // configured project tmux session to target.
+    // needs either a live tmux session the caller is inside (`in_tmux`), a
+    // configured project tmux session to target, or an existing authoritative
+    // actor pane that can be preserved directly.
+    let tmux = Tmux::default_server();
+    let can_preserve_actor_pane = matches!(
+        dead_supervisor_cold_start_target(ctx, |pane| tmux.pane_alive(pane)),
+        DeadSupervisorColdStartTarget::PreserveActorPane(_)
+    );
     let can_resolve_tmux_target = agent_doc_orchestration::sessions::in_tmux()
-        || agent_doc_orchestration::project_config_io::project_tmux_session().is_some();
+        || agent_doc_orchestration::project_config_io::project_tmux_session().is_some()
+        || can_preserve_actor_pane;
     decide_dead_supervisor_recovery(
         &ctx.canonical_file,
         &ctx.supervisor_socket,
@@ -3025,10 +3055,80 @@ fn caller_is_supervisor_ancestor(file: &Path) -> bool {
     }
 }
 
+fn agent_doc_start_bin_for_session_restart() -> String {
+    if let Ok(override_bin) = std::env::var("AGENT_DOC_ROUTE_BIN")
+        && !override_bin.trim().is_empty()
+    {
+        return override_bin;
+    }
+
+    std::env::current_exe()
+        .unwrap_or_else(|_| "agent-doc".into())
+        .to_string_lossy()
+        .to_string()
+}
+
+fn shell_quote_arg(raw: &str) -> String {
+    if !raw.is_empty()
+        && raw
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | ':' | '+'))
+    {
+        return raw.to_string();
+    }
+    format!("'{}'", raw.replace('\'', "'\\''"))
+}
+
+fn dead_supervisor_start_command(agent_doc_bin: &str, file: &Path) -> String {
+    format!(
+        "{} start --route-owned {}",
+        shell_quote_arg(agent_doc_bin),
+        shell_quote_arg(&file.to_string_lossy())
+    )
+}
+
+fn cold_start_supervisor_in_existing_pane(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    pane_id: &str,
+) -> Result<()> {
+    let agent_doc_bin = agent_doc_start_bin_for_session_restart();
+    let start_cmd = dead_supervisor_start_command(&agent_doc_bin, &ctx.canonical_file);
+    agent_doc_orchestration::input_diag::log_text_submit(
+        Some(&ctx.canonical_file),
+        "session.restart_supervisor.cold_start_preserve_pane",
+        &format!("pane:{pane_id}"),
+        &start_cmd,
+        Some(&ctx.harness),
+        "route_owned_start_enter",
+        "Enter",
+    );
+    agent_doc_orchestration::sessions::send_submitted_text(tmux, pane_id, &start_cmd)
+        .with_context(|| {
+            format!(
+                "failed to submit replacement supervisor start command into preserved pane {pane_id}"
+            )
+        })?;
+    agent_doc_orchestration::ops_log::log_op(
+        &ctx.canonical_file,
+        &format!(
+            "supervisor_cold_start_preserved_pane file={} pane={} reason=dead_supervisor_socket",
+            ctx.canonical_file.display(),
+            pane_id
+        ),
+    );
+    println!(
+        "Cold-started a fresh supervisor for {} in existing pane {} (the previous supervisor process was dead — only a stale socket remained).",
+        ctx.canonical_file.display(),
+        pane_id
+    );
+    Ok(())
+}
+
 /// Cold-start a fresh route-owned supervisor for `ctx` after reaping a stale
-/// dead socket. Reuses the existing `route::startup::auto_start` cold-start path
-/// (the same one `sync`/route use), so the fresh supervisor comes up on the
-/// installed binary, controller-mediated.
+/// dead socket. Prefer the authoritative actor pane so the restarted supervisor
+/// supervises the same tmux pane the old supervisor supervised. Fall back to the
+/// route auto-start path only when there is no live authoritative pane to preserve.
 fn cold_start_supervisor_for(ctx: &SessionContext) -> Result<()> {
     // Reap the stale socket so the fresh supervisor can bind cleanly.
     if ctx.supervisor_socket.exists() {
@@ -3050,6 +3150,11 @@ fn cold_start_supervisor_for(ctx: &SessionContext) -> Result<()> {
         }
     }
     let tmux = Tmux::default_server();
+    if let DeadSupervisorColdStartTarget::PreserveActorPane(pane_id) =
+        dead_supervisor_cold_start_target(ctx, |pane| tmux.pane_alive(pane))
+    {
+        return cold_start_supervisor_in_existing_pane(ctx, &tmux, &pane_id);
+    }
     let file_str = ctx.canonical_file.to_string_lossy().to_string();
     let pane_id = agent_doc_orchestration::route::auto_start(
         &tmux,
@@ -3811,6 +3916,66 @@ mod tests {
         assert_eq!(
             decide_dead_supervisor_recovery(file, sock, &dead_inputs()),
             DeadSupervisorRecovery::ColdStart
+        );
+    }
+
+    #[test]
+    fn dead_supervisor_cold_start_prefers_alive_authoritative_actor_pane() {
+        let record = test_actor_record(ActorState::Ready);
+        let ctx = test_session_context(
+            record,
+            test_supervisor_runtime(Some(ActorState::Ready)),
+            None,
+        );
+
+        let target = dead_supervisor_cold_start_target(&ctx, |pane| pane == "%7");
+
+        assert_eq!(
+            target,
+            DeadSupervisorColdStartTarget::PreserveActorPane("%7".to_string())
+        );
+    }
+
+    #[test]
+    fn dead_supervisor_cold_start_falls_back_when_actor_pane_is_unavailable() {
+        let record = test_actor_record(ActorState::Ready);
+        let ctx = test_session_context(
+            record,
+            test_supervisor_runtime(Some(ActorState::Ready)),
+            None,
+        );
+
+        assert_eq!(
+            dead_supervisor_cold_start_target(&ctx, |_| false),
+            DeadSupervisorColdStartTarget::RouteAutoStart
+        );
+    }
+
+    #[test]
+    fn dead_supervisor_cold_start_ignores_closed_actor_pane() {
+        let record = test_actor_record(ActorState::Closed);
+        let ctx = test_session_context(
+            record,
+            test_supervisor_runtime(Some(ActorState::Closed)),
+            None,
+        );
+
+        assert_eq!(
+            dead_supervisor_cold_start_target(&ctx, |pane| pane == "%7"),
+            DeadSupervisorColdStartTarget::RouteAutoStart
+        );
+    }
+
+    #[test]
+    fn dead_supervisor_start_command_quotes_binary_and_file() {
+        let command = dead_supervisor_start_command(
+            "/tmp/agent doc/bin/agent-doc",
+            Path::new("/tmp/project/tasks/owner's doc.md"),
+        );
+
+        assert_eq!(
+            command,
+            "'/tmp/agent doc/bin/agent-doc' start --route-owned '/tmp/project/tasks/owner'\\''s doc.md'"
         );
     }
 

@@ -231,6 +231,16 @@ This separation keeps supervisor realtime state available to editor, tmux,
 diagnostic, and turn-executor code without making those consumers depend on the
 controller's durable store or process-kill effects.
 
+Supervisor restart and replacement must preserve the supervised pane identity.
+The old actor record's `pane_id` is the tmux pane the supervisor is supervising;
+a restarted supervisor process may be a new process, but it must register,
+heartbeat, and dispatch against that same pane unless the operator explicitly
+performs a new-pane start or attach operation that creates a new actor
+generation. If the old pane is gone, recovery must either fail closed with
+actionable guidance or take an explicit new-pane lifecycle transition. It must
+not silently rediscover the restarting process's current pane and bind that as
+the supervised pane.
+
 ## Queue Admission
 
 Turn admission consumes the realtime queue projection defined in

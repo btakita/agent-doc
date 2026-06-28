@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-core"
-version = "0.34.64"
+version = "0.34.65"
 edition = "2024"
 description = "Pure document data layer for agent-doc (component parsing, frontmatter, template, CRDT, pending, diff classification, model tier)"
 license = "MIT"
@@ -25,4 +25,4 @@ uuid = { version = "1", features = ["v4"] }
 pulldown-cmark = "0.13"
 yrs = "0.27"
 similar = "3"
-lazily = { path = "../../lazily-rs", version = "0.13.0" }
+lazily = { path = "../../lazily-rs", version = "0.13.1" }

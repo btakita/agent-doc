@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.65
+
+- **Release publish contract fix for `#suprestassoc`.** Supersedes the unpublished `0.34.64` crate attempt by depending on `lazily 0.13.1`, which publishes the `CellTree` / `SemTree` / `TextCrdt` / reconcile API that `agent-doc-core` already used through the local path dependency. The behavior change remains the `restart-supervisor` document-scoped registry lookup described in `0.34.64`; this version is the publishable release artifact.
+
 ## 0.34.64
 
 - **`#suprestassoc` — `restart-supervisor` registry re-association is scoped to the requested document, not just the reused session id.** The CLI restart path now resolves registry entries by exact canonical document path first and only keeps the legacy session-id fallback for fileless registry rows; registry keys that explicitly name another document are rejected, so restarting `equityfundingsource.md` cannot adopt a stale `agent-doc-bugs2.md` pane/session projection that happens to carry the same session id. Coverage: deterministic registry lookup regressions for rejecting a foreign same-session entry and preferring the exact target document entry. Live editor/pane confirmation remains an `[operator-verify]` follow-up.

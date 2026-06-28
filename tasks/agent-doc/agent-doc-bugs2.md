@@ -26,7 +26,6 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -212,7 +211,7 @@ Verification passed:
 - focused realtime/lifecycle spec tests
 - `make check` in `src/agent-doc` (5511 nextest tests passed, 242 skipped, doctests passed, medium sim corpus passed, Lean build passed)
 - latest GitHub Actions `CI` run on `main` is green.
-<!-- agent:boundary:de7bc772 -->
+<!-- agent:boundary:12007ce2 -->
 <!-- /agent:exchange -->
 ## Queue
 

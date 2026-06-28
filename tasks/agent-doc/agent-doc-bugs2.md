@@ -332,7 +332,34 @@ I added the `agent:signals` follow-up as `#agentsignals` at the back of the back
 Confirmed: the previous runtime committed the exchange sentence claiming #agentsignals was added, but the backlog did not contain the item. I fixed the tracked-work mutation path so tail/positioned backlog additions record same-cycle ids, and I restored #agentsignals through the fresh binary-owned backlog-add path.
 
 I also started the terminology migration: backlog is the canonical user-facing name, pending remains a legacy compatibility alias, and icebox now has granular add operations for parked work without mirroring into the runnable queue.
-<!-- agent:boundary:479b5f9e -->
+
+### Re: agent-doc-element naming and convergence closeout - gpt-5
+
+Yes: singular is the better crate-family name. I would use `agent-doc-element` as the core crate and `agent-doc-element-backlog`, `agent-doc-element-icebox`, `agent-doc-element-queue`, `agent-doc-element-signals`, `agent-doc-element-unknown`, etc. as the per-element crates.
+
+The singular form reads as "the agent-doc element subsystem" and keeps the per-element crates natural. `agent-doc-elements-*` makes every leaf name read like a collection of collections, which is less precise once each crate owns one element model.
+
+For unknown/custom elements, I would not reserve `agent:unknown` as a public document element. The fallback should be internal: `agent-doc-element-unknown` for the crate and an internal registry key such as `__unknown__`. Avoid names like `agent-doc-element--unknown` or `agent-doc-element-_unknown`; they communicate implementation mechanics in the public crate name and will be awkward in tooling, docs, and imports.
+
+Implementation closeout:
+- Added the singular `agent-doc-element` crate family and `agent-doc-document` composition/projection pieces.
+- Kept `agent-doc-merge` distinct in the architecture: document model and merge policy have separate responsibilities.
+- Fixed the closeout convergence failure seen in this live session: pre-commit pending maintenance now skips status-only housekeeping when no tracked-work closeout work exists, while completed tracked-work reaping still fails closed under a live editor unless `--force-disk` is explicitly chosen.
+- Kept the VS Code CRDT local-edit convergence guard in place so remote applies are deferred while local deltas are still forwarding.
+
+Verification:
+- Red test reproduced the status-only closeout failure with an active editor listener.
+- `cargo test -p agent-doc-orchestration closeout_pending_maintenance -- --nocapture`
+- VS Code CRDT focused tests and full `npm test` passed earlier in this cycle.
+- `cargo fmt --check`
+- `git diff --check`
+- `cargo clippy -- -D warnings`
+- `make check`
+- `make install` installed the verified local build and marked two controllers for recycle.
+- Latest checked GitHub Actions `CI` run on `main` is green.
+
+I did not use `--force-disk`, and I did not claim or override another pane's session ownership.
+<!-- agent:boundary:1524cc40 -->
 <!-- /agent:exchange -->
 ## Queue
 

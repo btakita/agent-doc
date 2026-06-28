@@ -359,18 +359,6 @@ Verification:
 
 I did not use `--force-disk`, and I did not claim or override another pane's session ownership.
 
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=4c9540ca-b336-4139-b92e-a97e8862ef8f invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=39913 candidate_hash=0df380d1aba79db35f0e5437d12fe83be0efcf32dbf126fed8cecef311bffd03 content_ours_len=41064 content_ours_hash=a7c35721230facb0a5649cf82673fc1bab08b8fd9bf100a96ade3f6e528e21ed doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782658172719
-```
-
 ### Re: agent-doc-core and orchestration decomposition — gpt-5
 
 Yes, we are still doing comprehensive extraction. I split it into two scheduled items because the responsibilities are different: `#coredecomp` covers pure-library extraction out of `agent-doc-core`, and `#orchdecomp` covers effect-boundary extraction out of `agent-doc-orchestration`.
@@ -382,7 +370,19 @@ For `agent-doc-orchestration`, the direction is effect ownership: turn lifecycle
 I also fixed the live convergence issue found in this cycle: closeout/preflight pending maintenance now runs the visible-write idle/current guard before sending queue/backlog/status/reap convergence through editor IPC, so an unsaved operator-visible buffer defers the maintenance patch instead of being speculatively replaced.
 
 Verification: red regression added for pending maintenance deferring before IPC over an unsaved operator edit; focused maintenance/visible-write/live-typing tests passed; `cargo fmt --check`, `cargo check --workspace`, full `make check`, and `make install` passed. The installed CLI is `agent-doc 0.34.65`, and the latest checked GitHub Actions `CI` run on `main` is green. Code landed in `src/agent-doc` commit `abd9ded7` and parent gitlink commit `326ec3967`; the decomposition backlog captures are committed in this session document as `#coredecomp` and `#orchdecomp`.
-<!-- agent:boundary:a4ef4b4d -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=4c9540ca-b336-4139-b92e-a97e8862ef8f invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=39913 candidate_hash=0df380d1aba79db35f0e5437d12fe83be0efcf32dbf126fed8cecef311bffd03 content_ours_len=41064 content_ours_hash=a7c35721230facb0a5649cf82673fc1bab08b8fd9bf100a96ade3f6e528e21ed doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782658172719
+```
+<!-- agent:boundary:9e81ea91 -->
 <!-- /agent:exchange -->
 ## Queue
 

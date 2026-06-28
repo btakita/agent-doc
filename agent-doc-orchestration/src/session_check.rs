@@ -1088,8 +1088,9 @@ fn blocked_closeout_message(
         .as_deref()
         .map(str::to_string)
         .unwrap_or_else(|| format!("agent-doc write --commit {}", file.display()));
+    let editor_authority = blocked_closeout_editor_authority_note(file, blocked);
     format!(
-        "[session-check] INTERRUPTED: closeout blocked by `{}` for cycle `{}` (phase={} last_event={} source={} reason={}{}{}{}). The response/patch is retained for editor retry; save or resolve the live editor buffer, then run `{}`. Use `{} --force-disk` only after an explicit operator decision to override the live-editor safety guard.",
+        "[session-check] INTERRUPTED: closeout blocked by `{}` for cycle `{}` (phase={} last_event={} source={} reason={}{}{}{}).{} The response/patch is retained for editor retry; save or resolve the live editor buffer, then run `{}`. Use `{} --force-disk` only after an explicit operator decision to override the live-editor safety guard.",
         blocked.kind,
         state.cycle_id,
         phase_name(state.phase),
@@ -1099,8 +1100,35 @@ fn blocked_closeout_message(
         patch,
         recovery,
         detail,
+        editor_authority,
         retry,
         retry,
+    )
+}
+
+fn blocked_closeout_editor_authority_note(
+    file: &Path,
+    blocked: &crate::cycle_state::BlockedCloseout,
+) -> String {
+    if blocked.kind != "editor_convergence_required" {
+        return String::new();
+    }
+    let Ok(canonical) = file.canonicalize() else {
+        return String::new();
+    };
+    let Ok(content) = std::fs::read_to_string(&canonical) else {
+        return String::new();
+    };
+    let Some(snapshot) = crate::debounce::live_buffer_delivery_missing_operator_text_authority(
+        &canonical.to_string_lossy(),
+        &content,
+    ) else {
+        return String::new();
+    };
+    let editor_id = snapshot.editor_id.as_deref().unwrap_or("unknown");
+    format!(
+        " Live editor `{editor_id}` lacks required capability `{}`; reload or restart the editor plugin before retrying so delivery can preserve operator text.",
+        crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY
     )
 }
 
@@ -5124,10 +5152,17 @@ Body\n\
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
         fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
         let doc = tmp.path().join("doc.md");
         let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nPrompt\n";
         fs::write(&doc, content).unwrap();
         crate::snapshot::save(&doc, content).unwrap();
+        crate::debounce::record_live_buffer_digest_content_for_editor(
+            &doc.to_string_lossy(),
+            content,
+            Some("jetbrains-old"),
+        )
+        .unwrap();
         crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
         crate::cycle_state::record_editor_convergence_required(
             &doc,
@@ -5150,6 +5185,9 @@ Body\n\
                 );
                 assert!(message.contains("agent-doc write --commit"), "{message}");
                 assert!(message.contains("--force-disk"), "{message}");
+                assert!(message.contains("operator_text_authority_v1"), "{message}");
+                assert!(message.contains("jetbrains-old"), "{message}");
+                assert!(message.contains("reload or restart"), "{message}");
             }
             other => panic!("expected blocked closeout interruption, got {other:?}"),
         }

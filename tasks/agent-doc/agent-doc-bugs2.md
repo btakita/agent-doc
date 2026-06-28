@@ -256,7 +256,22 @@ Suggested shape:
 The naming caveat matters: `agent-doc-tmux` is accurate only if the boundary is truly tmux-specific. If the crate is meant to cover Codex/Claude/OpenCode harness state, supervisor status, pane lifecycle, and future non-tmux adapters, `agent-doc-harness` or `agent-doc-terminal` is probably a better name. I would reserve `agent-doc-tmux` for a narrow implementation adapter under that broader boundary.
 
 So my honest answer: yes, separate the loops, but do not split away the realtime core. Make `agent-doc-realtime` the source-agnostic state machine, `agent-doc-editor` the document-editor adapter, and a harness/tmux crate the runtime-state adapter. The invariant remains: only editor/disk document projections feed merge authority; tmux/harness state can affect scheduling and interruption, but must not overwrite operator-visible document text.
-<!-- agent:boundary:61d7054b -->
+
+### Re: agent-doc-document for realtime state — gpt-5
+
+Yes, `agent-doc-document` is a strong crate boundary, but I would define it as the document model/projection crate rather than the realtime loop crate.
+
+A clean split would be:
+
+- `agent-doc-document`: canonical markdown document model, component parsing, component spans, parse diagnostics, document projections, normalized edits, stable IDs, and document-level invariants. It can expose pure or mostly pure state transitions for parse/projection state.
+- `agent-doc-merge`: pure merge functions over `agent-doc-document` structures. It resolves agent/operator edits and returns merged content, conflicts, and proofs. It does not commit.
+- `agent-doc-realtime`: lazily-rs orchestration of realtime state: source arbitration, epochs, editor/disk event ordering, apply/verify scheduling, and handoff facts. It uses `agent-doc-document` and `agent-doc-merge`.
+- `agent-doc-editor`: editor IPC/live-buffer adapter feeding document projections and ACKs into realtime.
+- `agent-doc-harness` or narrow `agent-doc-tmux`: terminal/supervisor/tmux runtime-state adapter feeding liveness/interruption/scheduling signals into realtime/turn lifecycle.
+- `agent-doc-turn`: admitted-turn lifecycle and commit decisions.
+
+So I agree with adding `agent-doc-document`, with one constraint: it should own document semantics, not runtime authority. The realtime loop may hold a `DocumentProjectionState` from `agent-doc-document`, but the ordering, source arbitration, and apply/verify lifecycle should stay in `agent-doc-realtime`. That prevents `agent-doc-document` from becoming another place where turn-based or snapshot-based authority can accidentally leak back into the hot path.
+<!-- agent:boundary:205d5029 -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -140,14 +140,35 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=18684229-af09-46a1-935f-e71902d535a3 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=19307 candidate_hash=bfac380194accf882086dee14e2c04e9a360c69ddb8ac86dffd1802b14198bdc content_ours_len=19934 content_ours_hash=7360eb5f8805cece2f5e5e0fea1136ea4655905c797bbafa8df2daada1466867 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782604802107
 ```
-<!-- agent:boundary:1de1c28a -->
+
+### Re: do #qheadstrikeauto — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#qheadstrikeauto]
+
+
+`#qheadstrikeauto` is already satisfied in the current `src/agent-doc` checkout, so I closed it without adding code in this cycle.
+
+The shipped path now keys free-text queue-head auto-striking off the binary-owned drain target / commit seam instead of requiring the agent to quote the head manually:
+- `agent-doc-orchestration/src/git.rs` calls `strike_answered_free_text_heads_at_commit_seam(file)` before staging, loading the captured `response_body` by cycle `capture_id` and invoking the shared free-text strike path.
+- `agent-doc-orchestration/src/write/queue_consume.rs` includes the `#qheadstrikeauto` drain-target marker logic and the response-matching free-text strike.
+- `git::tests::commit_seam_strikes_answered_free_text_head_from_capture` covers recovery-path parity from the capture ledger.
+
+Verification:
+- `cargo test -p agent-doc-orchestration git::tests::commit_seam_strikes_answered_free_text_head_from_capture -- --exact` passed.
+- `make check` passed: 5499 nextest tests passed, doctests passed, Lean build passed, and the medium SimWorld ignored check passed.
+- `gh run list --workflow CI --limit 1` reports latest CI run `28306093045` completed successfully.
+
+No code files changed in this cycle; this was verification and backlog closeout for a stale implementation head.
+<!-- agent:boundary:e99ecbc7 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: do [#syncbarrier]~~
-- 🚧 :pushpin: do [#qheadstrikeauto]
+- ~~:pushpin: do [#qheadstrikeauto]~~
 - :pushpin: do [#suprestassoc]
 - :pushpin: do [#2y8j]
 - :pushpin: do [#cdtcutover]
@@ -202,7 +223,6 @@ What are #next-steps to fix bugs?
 - [ ] [#provauth3bimpl] Replacement for #provauth3b: operator-origin authority cutover. Once #crdtauth6 supplies live origin deltas, replace remaining content_ours/stale-editor resurrection heuristics with origin checks and add logs/tests proving operator-origin working-tree edits are never reset. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#supstaledetectverify] Replacement for #supstaledetect: stale-install warning merge/install verification. Merge the source-mtime warning fix, install/recycle, then verify logs show a fresh build no longer warns while a genuinely stale binary still emits stale_install evidence.
 - [ ] [#suptmuxstaleverify] Replacement for #suptmuxstale: stale-supervisor pane indicator install/log proof. Merge/install the pane-title marker change, recycle, then verify .agent-doc/supervisor-stale plus pane title/turn_status logs show STALE SUPERVISOR only when the supervisor binary is actually stale.
-- [ ] [#qheadstrikeauto] #agent-doc-feature auto-strike answered free-text head WITHOUT requiring the agent to quote it as a > **Queue prompt:** blockquote — operator: "the binary should do this automatically...not the agent". Today strike_answered_free_text_queue_heads (queue_consume.rs) only fires on a blockquote/prose-prefix match, so a head answered in plain prose is never struck. Key the strike off the binary drain-target / in-progress (the marker) head identity for the cycle instead of agent prose formatting. Plan: tasks/agent-doc/plan-freetext-queue-head-autostrike.md
 - [ ] [#suprestassoc] #agent-doc-bug restart-supervisor re-associates the wrong doc: restarting the equityfundingsource.md supervisor re-bound EFS to the agent-doc-bugs2.md claude session. Actor re-register/lease-replace likely keys on pane/session not (document_id,generation) across the shared project controller. Needs live repro; fix = scope re-association to the restarted doc only + regression. Plan: tasks/agent-doc/plan-restart-supervisor-doc-reassociation.md
 - [ ] [#60ev] plan-dynamic-context-injection-ledger.md
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.

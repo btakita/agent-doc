@@ -76,6 +76,43 @@ class TypingTrackerEdtBudgetTest {
     }
 
     @Test
+    fun `open markdown buffers publish capability-bearing live-buffer reports before typing`() {
+        val trackerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
+        ).first { Files.exists(it) }
+        val lifecyclePath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"),
+        ).first { Files.exists(it) }
+        val tracker = Files.readString(trackerPath)
+        val lifecycle = Files.readString(lifecyclePath)
+
+        assertTrue(
+            "project startup must seed already-open markdown buffers with a live-buffer authority report",
+            lifecycle.contains("TypingTracker.reportOpenMarkdownDocuments(project)"),
+        )
+        assertTrue(
+            "file-open events must seed newly opened markdown buffers with a live-buffer authority report",
+            lifecycle.contains("override fun fileOpened(source: FileEditorManager, file: VirtualFile)") &&
+                lifecycle.contains("TypingTracker.scheduleOpenDocumentReport(file)"),
+        )
+        assertTrue(
+            "file-close events must clear this editor's live-buffer sidecar",
+            lifecycle.contains("override fun fileClosed(source: FileEditorManager, file: VirtualFile)") &&
+                lifecycle.contains("TypingTracker.clearOpenDocumentReport(file)"),
+        )
+        assertTrue(
+            "open-document reporting should reuse the coalesced v2 full-content reporter",
+            tracker.contains("fun reportOpenMarkdownDocuments(project: Project)") &&
+                tracker.contains("FileEditorManager.getInstance(project).openFiles") &&
+                tracker.contains("fun scheduleOpenDocumentReport(file: VirtualFile)") &&
+                tracker.contains("scheduleFullContentReport(lib, file.path, document)") &&
+                tracker.contains("agent_doc_document_changed_digest_content_for_editor_v2"),
+        )
+    }
+
+    @Test
     fun `coalesced editor op offsets use the per-op shadow not the final buffer`() {
         val reports = prepareEditorOpReports(
             finalText = "x",

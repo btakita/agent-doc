@@ -2,7 +2,10 @@ package com.github.btakita.agentdoc
 
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
+import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.VirtualFile
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
@@ -160,6 +163,33 @@ object TypingTracker : DocumentListener {
             null
         }
         return drained
+    }
+
+    fun reportOpenMarkdownDocuments(project: Project) {
+        for (file in FileEditorManager.getInstance(project).openFiles) {
+            scheduleOpenDocumentReport(file)
+        }
+    }
+
+    fun scheduleOpenDocumentReport(file: VirtualFile) {
+        if (!file.name.endsWith(".md")) return
+        val lib = AgentDocLib.get() ?: return
+        val document = FileDocumentManager.getInstance().getDocument(file) ?: return
+        scheduleFullContentReport(lib, file.path, document)
+    }
+
+    fun clearOpenDocumentReport(file: VirtualFile) {
+        if (!file.name.endsWith(".md")) return
+        val lib = AgentDocLib.get() ?: return
+        try {
+            lib.agent_doc_document_closed_for_editor(file.path, EditorIdentity.id)
+        } catch (_: UnsatisfiedLinkError) {
+            // older cdylib without per-editor close support; stale sidecar cleanup
+            // falls back to PID liveness checks in the binary.
+        } catch (_: NoSuchMethodError) {
+            // older cdylib without per-editor close support; stale sidecar cleanup
+            // falls back to PID liveness checks in the binary.
+        }
     }
 
     private fun scheduleFullContentReport(

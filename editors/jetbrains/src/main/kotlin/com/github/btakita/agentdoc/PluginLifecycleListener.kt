@@ -1,9 +1,11 @@
 package com.github.btakita.agentdoc
 
 import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManagerListener
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
 
 /**
@@ -38,6 +40,19 @@ class PluginLifecycleListener : ProjectManagerListener {
             FileEditorManagerListener.FILE_EDITOR_MANAGER,
             EditorTabSyncListener()
         )
+        project.messageBus.connect().subscribe(
+            FileEditorManagerListener.FILE_EDITOR_MANAGER,
+            object : FileEditorManagerListener {
+                override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
+                    TypingTracker.scheduleOpenDocumentReport(file)
+                }
+
+                override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
+                    TypingTracker.clearOpenDocumentReport(file)
+                }
+            }
+        )
+        TypingTracker.reportOpenMarkdownDocuments(project)
         // Detect file renames/moves and update sessions.json path
         project.messageBus.connect().subscribe(
             VirtualFileManager.VFS_CHANGES,

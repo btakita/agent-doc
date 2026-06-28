@@ -117,8 +117,12 @@ Installed:
 - Rust `agent-doc`/`libagent_doc.so` via `make install`.
 - JetBrains plugin `0.2.196` into `~/.local/share/JetBrains/IntelliJIdea2026.1`; restart IntelliJ to load the newly installed plugin.
 
-I also committed and pushed the dirty nested repos requested by the latest prompt, and kept the registered `src/agent-doc-*-wt` checkout directories out of the root commit as worktrees rather than embedded repos.
-<!-- agent:boundary:97a24d53 -->
+Commit/push closeout:
+- Dirty nested repos were committed and pushed.
+- The registered `src/agent-doc-*-wt` checkout directories were left out of the root commit as worktrees rather than embedded repositories; the dirty worktree branch itself was committed and pushed.
+
+Queue head note: `#qheadstrikeauto` remains pending. I did not implement it in this cycle because the operator superseded that queued head with the editor endpoint/root-cause fix and commit/push instructions.
+<!-- agent:boundary:6adbe5cf -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -23,11 +23,15 @@ class TypingTrackerEdtBudgetTest {
         )
         assertTrue(
             "documentChanged should enqueue the full editor buffer report for a coalesced worker",
-            listenerBody.contains("scheduleFullContentReport(lib, filePath, event.document, op)"),
+            listenerBody.contains("scheduleFullContentReport(lib, filePath, event.document)"),
         )
         assertTrue(
             "documentChanged should capture the small editor op payload for async native reporting",
             listenerBody.contains("val op = PendingEditorOp("),
+        )
+        assertTrue(
+            "documentChanged should append the small editor op payload without replacing earlier burst ops",
+            listenerBody.contains("recordPendingEditorOp(filePath, op)"),
         )
         assertFalse(
             "documentChanged must not copy the full editor buffer on every keystroke",
@@ -40,6 +44,28 @@ class TypingTrackerEdtBudgetTest {
         assertFalse(
             "documentChanged must not synchronously record editor ops through JNA",
             listenerBody.contains("reportEditorOp("),
+        )
+    }
+
+    @Test
+    fun `coalesced full content reporting preserves every editor op in a typing burst`() {
+        val trackerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
+        ).first { Files.exists(it) }
+        val source = Files.readString(trackerPath)
+
+        assertTrue(
+            "typing bursts should accumulate editor ops instead of replacing the previous op",
+            source.contains("pendingEditorOps"),
+        )
+        assertTrue(
+            "full-buffer report should drain the accumulated op burst",
+            source.contains("drainPendingEditorOps(filePath)"),
+        )
+        assertFalse(
+            "coalescing must not overwrite the previous editor op with only the newest event",
+            source.contains("scheduleFullContentReport(lib, filePath, event.document, op)"),
         )
     }
 

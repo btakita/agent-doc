@@ -31,6 +31,7 @@ object TypingTracker : DocumentListener {
         Thread(r, "agent-doc-live-buffer-report").apply { isDaemon = true }
     }
     private val pendingContentReports = ConcurrentHashMap<String, ScheduledFuture<*>>()
+    private val pendingEditorOps = ConcurrentHashMap<String, MutableList<PendingEditorOp>>()
 
     private data class PendingEditorOp(
         val offset: Int,
@@ -60,18 +61,35 @@ object TypingTracker : DocumentListener {
                 newFragment = event.newFragment.toString(),
                 remoteCrdtApply = CrdtReplicaManager.isApplyingRemote(filePath),
             )
-            scheduleFullContentReport(lib, filePath, event.document, op)
+            recordPendingEditorOp(filePath, op)
+            scheduleFullContentReport(lib, filePath, event.document)
             LOG.debug("[native] document_changed queued content report: ${vFile.name}")
         } else {
             LOG.debug("[fallback] document_changed: ${vFile.name}")
         }
     }
 
+    private fun recordPendingEditorOp(filePath: String, op: PendingEditorOp) {
+        pendingEditorOps.compute(filePath) { _, existing ->
+            (existing ?: mutableListOf()).also { it.add(op) }
+        }
+    }
+
+    private fun drainPendingEditorOps(filePath: String): List<PendingEditorOp> {
+        var drained: List<PendingEditorOp> = emptyList()
+        pendingEditorOps.compute(filePath) { _, existing ->
+            if (existing != null) {
+                drained = existing.toList()
+            }
+            null
+        }
+        return drained
+    }
+
     private fun scheduleFullContentReport(
         lib: AgentDocLib,
         filePath: String,
         document: com.intellij.openapi.editor.Document,
-        op: PendingEditorOp,
     ) {
         pendingContentReports.remove(filePath)?.cancel(false)
         val task = contentReportExecutor.schedule({
@@ -90,7 +108,7 @@ object TypingTracker : DocumentListener {
                     lib.agent_doc_document_changed_digest_content(filePath, text)
                 }
                 LOG.debug("[native] document_changed content reported: $filePath")
-                if (!op.remoteCrdtApply) {
+                for (op in drainPendingEditorOps(filePath).filterNot { it.remoteCrdtApply }) {
                     reportEditorOp(lib, filePath, text, op)
                 }
             } catch (_: UnsatisfiedLinkError) {

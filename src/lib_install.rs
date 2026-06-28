@@ -109,6 +109,7 @@ pub(crate) fn run_paths(
             profile
         );
     }
+    validate_required_editor_abi_symbols(&source_path)?;
 
     let target = match target_dir {
         Some(d) => d.to_path_buf(),
@@ -159,6 +160,36 @@ pub(crate) fn profile_lib_path(
     target_root
         .join(normalized_profile(profile))
         .join(platform_lib_name())
+}
+
+const REQUIRED_EDITOR_ABI_SYMBOLS: &[&str] = &[
+    "agent_doc_document_changed_digest_content_for_editor_v2",
+    "agent_doc_document_closed_for_editor",
+];
+
+fn validate_required_editor_abi_symbols(source: &Path) -> Result<()> {
+    let bytes = std::fs::read(source)
+        .with_context(|| format!("read shared library {}", source.display()))?;
+    let missing: Vec<&str> = REQUIRED_EDITOR_ABI_SYMBOLS
+        .iter()
+        .copied()
+        .filter(|symbol| !contains_ascii_symbol(&bytes, symbol.as_bytes()))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "[lib-install] source {} is missing required editor authority ABI symbol(s): {}. Rebuild the current checkout with `cargo build --lib` before installing.",
+        source.display(),
+        missing.join(", ")
+    );
+}
+
+fn contains_ascii_symbol(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty()
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
 }
 
 /// `#autorecycle-on-install`: default-on resolution for auto-recycling running
@@ -269,6 +300,35 @@ mod tests {
         assert!(symlink.is_symlink());
         let target = fs::read_link(&symlink).unwrap();
         assert_eq!(target.to_str().unwrap(), versioned_lib_name("1.2.3"));
+    }
+
+    #[test]
+    fn lib_install_rejects_source_missing_editor_authority_abi() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join(platform_lib_name());
+        fs::write(&source, b"fake library content").unwrap();
+
+        let err = validate_required_editor_abi_symbols(&source).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("missing required editor authority ABI"));
+        assert!(message.contains("agent_doc_document_changed_digest_content_for_editor_v2"));
+    }
+
+    #[test]
+    fn lib_install_accepts_source_with_editor_authority_abi() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join(platform_lib_name());
+        fs::write(
+            &source,
+            REQUIRED_EDITOR_ABI_SYMBOLS
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+
+        validate_required_editor_abi_symbols(&source).unwrap();
     }
 
     #[test]

@@ -367,7 +367,7 @@ be part of lifecycle closeout, but backup writes are not realtime authority.
 
 ## Merge Crate Boundary
 
-The intended pure boundary is `agent-doc-merge`. It owns document merge,
+The pure boundary is the `agent-doc-merge` crate. It owns document merge,
 conflict resolution, and operation semantics as pure functions. It has no
 access to disk, git, sockets, editor APIs, cycle state, ops logs, snapshots, or
 clocks.

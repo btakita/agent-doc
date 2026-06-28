@@ -1,5 +1,11 @@
 [workspace]
-members = ["agent-doc-core", "agent-doc-sqlite", "agent-doc-orchestration", "agent-doc-markdown-ast"]
+members = [
+    "agent-doc-core",
+    "agent-doc-sqlite",
+    "agent-doc-orchestration",
+    "agent-doc-markdown-ast",
+    "agent-doc-merge",
+]
 
 [package]
 name = "agent-doc"

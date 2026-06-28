@@ -2083,6 +2083,42 @@ fn test_manifest_uses_publishable_dependency_contract() {
 }
 
 #[test]
+fn test_agent_doc_merge_is_pure_workspace_boundary() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-merge")),
+        "agent-doc-merge must stay a first-class workspace crate"
+    );
+
+    let merge_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-merge/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&merge_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+
+    assert!(dependencies.contains_key("agent-doc-core"));
+    assert!(dependencies.contains_key("agent-doc-markdown-ast"));
+    for forbidden in [
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-merge must not depend on realtime, turn, git, editor, or sqlite crates"
+        );
+    }
+}
+
+#[test]
 fn test_codex_plugin_manifest_omits_invalid_claude_skill_path() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest_path = manifest_dir.join(".codex-plugin/plugin.json");

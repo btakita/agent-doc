@@ -7265,7 +7265,7 @@ Body\n\
             "<!-- agent:exchange -->\n",
             "❯ earlier\n### Re: earlier — gpt-5\n\nAnswered.\n",
             "<!-- agent:boundary:committed -->\n",
-            "ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle\n",
+            "ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=visible_repair_required\n",
             "<!-- /agent:exchange -->\n",
         );
         assert_eq!(

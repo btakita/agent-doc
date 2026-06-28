@@ -430,6 +430,7 @@ pub(crate) enum IpcDiskRepairReason {
     PrefixDivergence,
     IpcDedupe,
     PrefixDivergenceThenIpcDedupe,
+    LivePromptDrift,
 }
 
 impl IpcDiskRepairReason {
@@ -438,6 +439,7 @@ impl IpcDiskRepairReason {
             Self::PrefixDivergence => "prefix_divergence",
             Self::IpcDedupe => "ipc_dedupe",
             Self::PrefixDivergenceThenIpcDedupe => "prefix_divergence_then_ipc_dedupe",
+            Self::LivePromptDrift => "live_prompt_drift",
         }
     }
 
@@ -447,13 +449,14 @@ impl IpcDiskRepairReason {
             Self::IpcDedupe | Self::PrefixDivergenceThenIpcDedupe => {
                 FullContentRepairRedelivery::IpcDedupe
             }
+            Self::LivePromptDrift => FullContentRepairRedelivery::LivePromptDrift,
         }
     }
 
     fn merge_with_ipc_dedupe(self) -> Self {
         match self {
             Self::PrefixDivergence => Self::PrefixDivergenceThenIpcDedupe,
-            Self::IpcDedupe | Self::PrefixDivergenceThenIpcDedupe => self,
+            Self::IpcDedupe | Self::PrefixDivergenceThenIpcDedupe | Self::LivePromptDrift => self,
         }
     }
 }
@@ -557,13 +560,24 @@ impl IpcRepairDecision {
         self.snap_source.is_ack_content_proven()
     }
 
-    fn replace_snapshot_with_content_ours_for_live_prompt_drift(&mut self, content_ours: &str) {
+    fn replace_snapshot_with_content_ours_for_live_prompt_drift(
+        &mut self,
+        content_ours: &str,
+        visible_repair_required: bool,
+    ) {
+        let bad_state = self.snapshot_content.clone();
         self.snapshot_content = content_ours.to_string();
         self.snap_source = IpcSnapshotSource::ContentOurs;
-        self.disk_repair_reason = None;
-        self.editor_bad_state = None;
         self.normalize_prefix_lines.clear();
-        self.redeliver_editor = false;
+        if visible_repair_required {
+            self.disk_repair_reason = Some(IpcDiskRepairReason::LivePromptDrift);
+            self.editor_bad_state = Some(EditorBadStateFingerprint::new(bad_state));
+            self.redeliver_editor = true;
+        } else {
+            self.disk_repair_reason = None;
+            self.editor_bad_state = None;
+            self.redeliver_editor = false;
+        }
     }
 
     fn replace_snapshot_with_content_ours_for_prompt_duplication(
@@ -776,7 +790,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
         source,
         patch_id,
         "live_prompt_drift_after_preflight",
-        "content_ours_snapshot_next_cycle",
+        "visible_repair_required",
         &format!(
             "snap_source={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
             prior_source,
@@ -866,7 +880,12 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
                 );
             }
         }
-        decision.replace_snapshot_with_content_ours_for_live_prompt_drift(&merged_doc);
+        let visible_repair_required =
+            !ack_content_contains_latest_response(&candidate, &merged_doc);
+        decision.replace_snapshot_with_content_ours_for_live_prompt_drift(
+            &merged_doc,
+            visible_repair_required,
+        );
         return true;
     }
 
@@ -877,7 +896,9 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     // conflict-free union that preserves both sides), commit that union so the
     // response lands AND the user's edit is preserved this cycle. Anything
     // prompt-/directive-bearing, in-`exchange`, or colliding returns false and
-    // falls through to today's `content_ours_snapshot_next_cycle` carry-forward.
+    // falls through to a visible-repair-required content_ours adoption. The
+    // caller must prove the editor/worktree accepted that repaired state before
+    // closeout can commit.
     if response_target_disjoint_from_user_edit(base, &queue_reconciled_ours, &candidate)
         && let Ok(union) = crate::merge::merge_contents(base, &queue_reconciled_ours, &candidate)
         && !union.contains("<<<<<<<")
@@ -895,7 +916,11 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
                 crate::ops_log::content_hash(&union),
             ),
         );
-        decision.replace_snapshot_with_content_ours_for_live_prompt_drift(&union);
+        let visible_repair_required = !ack_content_contains_latest_response(&candidate, &union);
+        decision.replace_snapshot_with_content_ours_for_live_prompt_drift(
+            &union,
+            visible_repair_required,
+        );
         return true;
     }
 
@@ -949,8 +974,63 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
             ),
         );
     }
-    decision.replace_snapshot_with_content_ours_for_live_prompt_drift(&queue_reconciled_ours);
+    let visible_repair_required =
+        !ack_content_contains_latest_response(&candidate, &queue_reconciled_ours);
+    decision.replace_snapshot_with_content_ours_for_live_prompt_drift(
+        &queue_reconciled_ours,
+        visible_repair_required,
+    );
     true
+}
+
+fn ack_content_contains_latest_response(ack_content: &str, target: &str) -> bool {
+    let Some(response) = latest_exchange_response_block(target) else {
+        return true;
+    };
+    response_materialized_in_content(&response, ack_content)
+}
+
+fn latest_exchange_response_block(content: &str) -> Option<String> {
+    let exchange = exchange_content(content);
+    let lines = exchange
+        .split_inclusive('\n')
+        .scan(0usize, |offset, text| {
+            let start = *offset;
+            *offset += text.len();
+            Some((start, text))
+        })
+        .collect::<Vec<_>>();
+    let start = lines
+        .iter()
+        .rposition(|(_, line)| line.trim_start().starts_with("### Re:"))?;
+    let end = lines
+        .iter()
+        .enumerate()
+        .skip(start + 1)
+        .find_map(|(idx, (_, line))| {
+            (line.trim_start().starts_with("### Re:")
+                || line.trim_start().starts_with("<!-- agent:boundary:"))
+            .then_some(idx)
+        })
+        .unwrap_or(lines.len());
+    let block_start = lines[start].0;
+    let block_end = lines
+        .get(end)
+        .map(|(offset, _)| *offset)
+        .unwrap_or(exchange.len());
+    Some(exchange[block_start..block_end].to_string())
+}
+
+fn exchange_content(content: &str) -> &str {
+    component::parse(content)
+        .ok()
+        .and_then(|components| {
+            components
+                .into_iter()
+                .find(|component| component.name == "exchange")
+        })
+        .map(|component| component.content(content))
+        .unwrap_or(content)
 }
 
 pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(
@@ -1506,6 +1586,7 @@ pub(crate) fn ipc_repair_decision_from_sidecar(
 pub(crate) enum FullContentRepairRedelivery {
     NormalizationFallback,
     IpcDedupe,
+    LivePromptDrift,
 }
 
 impl FullContentRepairRedelivery {
@@ -1513,6 +1594,7 @@ impl FullContentRepairRedelivery {
         match self {
             Self::NormalizationFallback => "sidecar_normalization_fallback",
             Self::IpcDedupe => "ipc_dedupe",
+            Self::LivePromptDrift => "live_prompt_drift",
         }
     }
 
@@ -1522,6 +1604,7 @@ impl FullContentRepairRedelivery {
                 "[write] sidecar normalization fallback re-delivered to editor via full-content IPC"
             }
             Self::IpcDedupe => "[write] IPC duplicate-response repair re-delivered to editor",
+            Self::LivePromptDrift => "[write] live prompt drift repair re-delivered to editor",
         }
     }
 
@@ -1532,6 +1615,9 @@ impl FullContentRepairRedelivery {
             }
             Self::IpcDedupe => {
                 "[write] IPC duplicate-response repair was not consumed; refusing direct document write"
+            }
+            Self::LivePromptDrift => {
+                "[write] live prompt drift visible repair was not consumed; refusing direct document write"
             }
         }
     }
@@ -1544,6 +1630,10 @@ impl FullContentRepairRedelivery {
             ),
             Self::IpcDedupe => format!(
                 "[write] IPC duplicate-response repair failed: {}; refusing direct document write",
+                error
+            ),
+            Self::LivePromptDrift => format!(
+                "[write] live prompt drift visible repair failed: {}; refusing direct document write",
                 error
             ),
         }
@@ -2074,15 +2164,15 @@ pub(crate) fn repair_ipc_decision_visible_state(
                 &decision.normalize_prefix_lines,
                 patch_id,
             ),
-            IpcDiskRepairReason::IpcDedupe | IpcDiskRepairReason::PrefixDivergenceThenIpcDedupe => {
-                redeliver_full_content_repair_to_editor(
-                    file,
-                    &decision.snapshot_content,
-                    expected_bad_state.content(),
-                    reason.redelivery_kind(),
-                    patch_id,
-                )
-            }
+            IpcDiskRepairReason::IpcDedupe
+            | IpcDiskRepairReason::PrefixDivergenceThenIpcDedupe
+            | IpcDiskRepairReason::LivePromptDrift => redeliver_full_content_repair_to_editor(
+                file,
+                &decision.snapshot_content,
+                expected_bad_state.content(),
+                reason.redelivery_kind(),
+                patch_id,
+            ),
         }
     {
         return Ok(());
@@ -2496,6 +2586,99 @@ mod ack_content_snapshot_tests {
             "a structurally-clean content_ours that absorbs drift must still be adopted"
         );
         assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
+    }
+
+    #[test]
+    fn guard_live_prompt_drift_requires_visible_repair() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        let baseline = concat!("<!-- agent:exchange -->\n", "<!-- /agent:exchange -->\n");
+        let editor_ack_content = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ operator typed while closeout was running\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let response_target = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: queued prompt — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let mut decision = IpcRepairDecision::ack_content(editor_ack_content.to_string());
+
+        let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
+            &file,
+            "socket_ack_content",
+            Some("p-live"),
+            Some(baseline),
+            Some(response_target),
+            &mut decision,
+        );
+
+        assert!(
+            adopted,
+            "live editor ACK drift should choose the response target as commit candidate"
+        );
+        assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
+        assert_eq!(decision.snapshot_content, response_target);
+        assert!(
+            decision.redeliver_editor,
+            "content_ours adoption after a live editor ACK must not silently advance only the snapshot"
+        );
+        assert_eq!(
+            decision.disk_repair_reason,
+            Some(IpcDiskRepairReason::LivePromptDrift)
+        );
+        assert_eq!(
+            decision
+                .editor_bad_state
+                .as_ref()
+                .map(EditorBadStateFingerprint::content),
+            Some(editor_ack_content)
+        );
+    }
+
+    #[test]
+    fn guard_live_prompt_drift_accepts_ack_visible_union() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        let baseline = concat!("<!-- agent:exchange -->\n", "<!-- /agent:exchange -->\n");
+        let response_target = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: queued prompt — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let editor_ack_content = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ operator typed while closeout was running\n",
+            "### Re: queued prompt — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let mut decision = IpcRepairDecision::ack_content(editor_ack_content.to_string());
+
+        let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
+            &file,
+            "socket_ack_content",
+            Some("p-union"),
+            Some(baseline),
+            Some(response_target),
+            &mut decision,
+        );
+
+        assert!(
+            adopted,
+            "ACK-visible union should still use content_ours as the commit candidate"
+        );
+        assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
+        assert_eq!(decision.snapshot_content, response_target);
+        assert!(
+            !decision.redeliver_editor,
+            "ACK content already contains the response delta, so no visible repair is required"
+        );
+        assert_eq!(decision.disk_repair_reason, None);
+        assert_eq!(decision.editor_bad_state, None);
     }
 
     #[test]

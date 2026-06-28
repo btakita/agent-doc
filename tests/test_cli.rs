@@ -797,6 +797,14 @@ fn realtime_workflow_spec_pins_lazily_backed_authority() {
         "realtime workflow spec must model pluginless/out-of-band disk writes"
     );
     assert!(
+        realtime.contains("## Disk Visibility And Durability")
+            && realtime.contains("fresh\nread of the document path")
+            && realtime.contains("not on proof that the\nstorage device has durably flushed")
+            && realtime.contains("File watcher events are hints, not proof")
+            && realtime.contains("Durability barriers (`fsync`, git object writes,\nbackup snapshots, and commit recovery sidecars) belong to backup"),
+        "realtime workflow spec must distinguish hot-path read visibility from durable disk persistence"
+    );
+    assert!(
         realtime.contains("storing realtime authority only in a turn-local cycle sidecar")
             && realtime.contains("instead of a lazily-backed projection"),
         "realtime workflow spec must forbid turn-local realtime authority"
@@ -1419,7 +1427,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // in `smconv_preserves_freetext_fenced_queue_head_on_drift`, which proves a
         // multi-line free-text queue head now converges instead of blocking. Still a
         // test call, not a production guard boundary.
-        ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 17,
+        // 17 -> 21 (#live-drift-visible-repair): +4 test-only guard substrings
+        // from `guard_live_prompt_drift_requires_visible_repair`,
+        // `guard_live_prompt_drift_accepts_ack_visible_union`, and their direct
+        // calls to the existing live-prompt-drift IPC adoption guard. These prove
+        // content_ours adoption after a live editor ACK requires visible response
+        // proof unless the ACK already contains the response union.
+        ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 21,
         // 17 -> 18 (#smconv): +1 production `reason=node_keyed_semantic_merge` on
         // the new `live_prompt_drift_semantic_merged` ops_log — the node-keyed
         // merge success path, mirroring the sibling `#fintol2`
@@ -1531,7 +1545,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // finalize-tolerance forward-merge path: when a concurrent user edit is
         // disjoint from the response target (no prompt/directive, outside
         // `exchange`, conflict-free 3-way union), the gate commits the union this
-        // cycle instead of carrying it forward via `content_ours_snapshot_next_cycle`.
+        // cycle instead of carrying it forward through a snapshot-only retry.
         // A diagnostic on the tolerance path, not a new flow guard.
         // +1 (#fcc0) for the `reason=no_listener` assertion literal in the
         // `converge_document_or_disk_falls_back_to_guarded_disk_without_listener`
@@ -1548,7 +1562,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `try_editor_converge_skips_wedged_socket_when_latched_degraded`). The
         // socket failure path also now feeds `record_ipc_socket_ack_timeout` /
         // clears via `clear_ipc_socket_ack_timeouts` — no new `reason=` token.
-        ("agent-doc-orchestration/src/write.rs", "reason=") => 12,
+        // 12 -> 11 (#live-drift-visible-repair): the focused file-IPC regression
+        // now proves the earlier partial-materialization retry path instead of
+        // asserting an extra visible-repair `reason=` literal. The production
+        // recovery still logs `recovery=visible_repair_required` in write/ipc.rs.
+        ("agent-doc-orchestration/src/write.rs", "reason=") => 11,
         _ => 0,
     }
 }

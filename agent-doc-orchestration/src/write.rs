@@ -6240,7 +6240,7 @@ scratch
         );
     }
     #[test]
-    fn file_ipc_ack_content_live_prompt_drift_uses_content_ours_snapshot() {
+    fn file_ipc_ack_content_live_prompt_drift_requires_visible_repair() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
@@ -6276,8 +6276,6 @@ scratch
             "<!-- agent:exchange patch=append -->\n",
             "❯ Please reply\n",
             "❯ New prompt typed during closeout\n",
-            "### Re: Please reply — gpt-5\n\n",
-            "Answered.\n",
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, before).unwrap();
@@ -6320,18 +6318,18 @@ scratch
             Some(content_ours),
             None,
             Some("patch-live-prompt-drift"),
-        )
-        .unwrap();
+        );
         watcher.join().unwrap();
 
+        let result = result.unwrap();
         assert!(
-            result.success,
-            "IPC delivery itself should remain successful"
+            !result.success,
+            "live prompt drift without response materialization must not close out successfully"
         );
-        assert_eq!(
+        assert_ne!(
             snapshot::load(&doc).unwrap().as_deref(),
             Some(content_ours),
-            "snapshot must not absorb prompt-bearing drift typed after preflight"
+            "snapshot must not silently advance to content_ours when the visible editor/worktree still holds the drift candidate"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
@@ -6340,17 +6338,8 @@ scratch
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
-            log.contains("flow=document_mutation")
-                && log.contains("stage=ipc_snapshot_adoption")
-                && log.contains("reason=live_prompt_drift_after_preflight")
-                && log.contains("ipc_snapshot_adoption_blocked"),
-            "unsafe snapshot adoption should be logged:\n{log}"
-        );
-        assert!(
-            log.contains("ipc_proof_insufficient")
-                && log.contains("invariant=live_prompt_drift_after_preflight")
-                && log.contains("recovery=content_ours_snapshot_next_cycle"),
-            "live prompt drift should name its failed invariant and recovery:\n{log}"
+            !log.contains("snapshot_saved_file_ipc"),
+            "unsafe snapshot adoption must not be saved after an unmaterialized response:\n{log}"
         );
     }
     // #exch-intermix fixtures: a wedge requires the adopted `content_ours`

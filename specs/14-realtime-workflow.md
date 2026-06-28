@@ -50,6 +50,28 @@ both when possible, or fail closed before applying any agent delta.
 ACK-content proves what an editor observed after a patch. It does not prove that
 older snapshot text should overwrite newer operator text.
 
+## Disk Visibility And Durability
+
+Realtime disk authority is based on bytes that are visible through a fresh
+read of the document path after the write/save event, not on proof that the
+storage device has durably flushed those bytes with `fsync`.
+
+On a local OS, a completed editor save, `rename`, or atomic write is visible to
+other processes through the kernel page cache before it is necessarily durable
+on physical storage. That read-after-write visibility is the hot-path proof the
+realtime state machine needs. Durability barriers (`fsync`, git object writes,
+backup snapshots, and commit recovery sidecars) belong to backup, audit,
+crash-recovery, or turn-commit boundaries; they must not make snapshots
+hot-path authority.
+
+File watcher events are hints, not proof. After a watcher event or pluginless
+save, realtime must reopen/read the current file, compute the digest/epoch it
+will use, and either observe a stable parseable document or enter
+`ParseRecoverable`, `ParseBlocked`, `DiskDriftObserved`, or `ConflictBlocked`.
+If a writer exposes a partially written file, the realtime loop waits for a
+stable read/epoch or fails closed. It must not merge against stale buffered
+content merely because a save notification fired.
+
 ## Realtime States
 
 These states describe document authority, not the agent turn/cycle. Agent cycle

@@ -627,7 +627,7 @@ pub fn boot_resume_action(
 /// reports a boundary while a cycle is still open, an `execve` recycle would sever
 /// that connection mid-cycle and produce `live_prompt_drift_after_preflight`
 /// against the pre-recycle preflight baseline (the root of the
-/// `content_ours_snapshot_next_cycle` wedge). When `cycle_open` is true, every
+/// visible-repair-required wedge). When `cycle_open` is true, every
 /// recycle arm below is deferred (`DeferCycleOpen`) so the `execve` only fires at a
 /// TRUE quiescent boundary once the cycle commits and IPC drains. This wins over
 /// `explicit_admin` / `write_wedged` / `reexec_failed` too — none of those may

@@ -3894,7 +3894,7 @@ mod tests {
             "- do [#next]\n",
             "<!-- /agent:queue -->\n",
         );
-        let diagnostic = "ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle";
+        let diagnostic = "ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=visible_repair_required";
 
         let updated = super::append_ipc_dogfood_note_to_content(content, diagnostic)
             .unwrap()
@@ -3942,7 +3942,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         let canonical = doc.canonicalize().unwrap();
         let diagnostic = format!(
-            "ipc_proof_insufficient file={} source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle",
+            "ipc_proof_insufficient file={} source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=visible_repair_required",
             canonical.display()
         );
         write_ops_log(
@@ -3987,7 +3987,7 @@ mod tests {
 
         let cases = [
             // socket ACK content mismatch on a queue-consume write.
-            "ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle",
+            "ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=visible_repair_required",
             // queue-consume patch consumed without the response body present.
             "ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write",
         ];

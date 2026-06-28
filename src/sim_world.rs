@@ -3194,7 +3194,7 @@ fn open_agent_doc_cycle_defers_self_recycle_until_finalize_commits() {
     // flight. Firing the `execve` mid-cycle tears down the in-flight IPC listener and
     // severs the ack-content round-trip, so the next finalize validates its candidate
     // against the pre-recycle preflight baseline → `live_prompt_drift_after_preflight`
-    // → the `content_ours_snapshot_next_cycle` wedge + "no response exists to replay"
+    // → the visible-repair-required wedge + "no response exists to replay"
     // refusal chain the operator hit live. The deferral preserves the live cycle; the
     // recycle fires at the TRUE quiescent boundary once finalize commits.
     let mut world = SimWorld::new(7_777);

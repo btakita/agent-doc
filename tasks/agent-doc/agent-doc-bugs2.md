@@ -271,7 +271,39 @@ The race you are pointing at is real, but physical disk persistence is the wrong
 For attached editors, disk is even less authoritative: the live editor buffer/epoch is the operator-visible state. If the editor says the buffer has unsaved edits, a disk read can be stale by definition. In that case realtime should merge against the editor buffer projection and only let the turn lifecycle commit after the editor/disk sync barrier is satisfied or explicitly fails open with a visible save request.
 
 Spec invariant I would pin: realtime resolution waits for a stable visible content proof, not durable storage proof. Durable persistence belongs to backups and commits; operator text preservation belongs to realtime merge.
-<!-- agent:boundary:003f457d -->
+
+### Re: JetBrains slow-plugin warning and VS Code hot-path parity - gpt-5
+
+I treated the JetBrains warning as a real hot-path bug and fixed both editor frontends.
+
+Root cause: the editor change listeners were doing too much synchronous work on every Markdown edit. JetBrains had two listener paths copying full document text on `documentChanged`: `TypingTracker` for live-buffer proof and `CrdtReplicaManager` for local CRDT forwarding. VS Code had the same shape in `onDidChangeTextDocument`: it called `document.getText()`, wrote full-content live-buffer proof through native FFI, forwarded CRDT state, and recorded editor ops inline on the extension event path.
+
+Implemented:
+
+- JetBrains `TypingTracker.documentChanged` now only records the cheap native changed marker, captures the small event fragments, and schedules coalesced full-buffer proof/editor-op reporting on a daemon worker.
+- JetBrains `CrdtReplicaManager.documentChanged` now uses per-file shadows updated from `DocumentEvent` deltas. If no shadow or a mismatch exists, it seeds/attaches from the full document on the background executor rather than copying the whole buffer in the listener.
+- VS Code `onDidChangeTextDocument` now records only the cheap changed marker, schedules coalesced full-buffer proof, updates CRDT via a delta-only `handleLocalChangeDelta`, and queues native editor-op reporting off the event handler.
+- VS Code CRDT manager now has `applyReplicaTextChange` / `handleLocalChangeDelta` so it can forward local deltas from shadows without requiring `document.getText()` on every edit.
+- Added static regression guards for both plugins so full-buffer reads/native-heavy reporting do not creep back into the text-change listener paths.
+- Bumped and built JetBrains plugin `0.2.197`, then installed it to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`. IntelliJ needs a restart to activate the new classes.
+
+Commits:
+
+- `src/agent-doc`: `5083700a fix: keep editor typing listeners lightweight`
+- root pointer: `325926e46 agent-doc: keep editor typing listeners lightweight`
+
+Verification:
+
+- Red: the new JetBrains UI-thread budget guard failed against the old synchronous listener.
+- Green: focused JetBrains budget test passed after the fix.
+- `./gradlew test buildPlugin` passed for the JetBrains plugin.
+- `npm test` passed for the VS Code extension, including the new UI-thread budget guard.
+- `git diff --check` passed.
+- `make check` passed for `src/agent-doc`: 5519 tests passed, doctests passed, medium sim passed, Lean build passed.
+- Latest checked GitHub Actions CI run on `main` was green.
+
+The live fix will not affect the running JetBrains process until IntelliJ restarts; the warning may continue for the already-loaded plugin instance.
+<!-- agent:boundary:992d3b4c -->
 <!-- /agent:exchange -->
 ## Queue
 

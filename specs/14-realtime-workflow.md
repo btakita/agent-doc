@@ -29,16 +29,18 @@ be load-bearing for deciding what operator-visible state should survive.
 
 ## Source Of Truth
 
-When an editor listener owns the document, the live editor buffer is the
-source of truth for operator changes. Disk is only a projection of that buffer.
-If disk and editor state disagree, the binary must converge through the editor,
-wait for proven delivery, or fail closed. It must not use a direct disk write as
-an automatic recovery behind the editor.
+When a live editor owner or live-buffer sidecar owns the document, the live
+editor buffer is the source of truth for operator changes. Disk is only a
+projection of that buffer. If disk and editor state disagree, the binary must
+converge through the editor, wait for proven delivery, or fail closed. It must
+not use a direct disk write as an automatic recovery behind the editor.
 
-When no editor listener is active, the current visible file is the source of
-truth. A stored snapshot may seed a merge candidate, but merge still applies an
-agent delta onto the current file. It must not replace current file content
-unless the operator explicitly chose a disk-authoritative recovery.
+When no live editor owner or sidecar owns the document, the current visible file
+is the source of truth. A stored snapshot may seed a merge candidate, but merge
+still applies an agent delta onto the current file and rechecks that the file
+still matches that merge input before writing. Snapshot text must not replace
+current file content unless the operator explicitly chose a disk-authoritative
+recovery.
 
 Out-of-band disk writes, such as saving the file from an editor without the
 agent-doc plugin, are operator-authored changes. When no editor listener owns
@@ -494,11 +496,18 @@ Every document mutation that can affect a session document follows this order:
 5. If the operator changed the same node, preserve the operator change and
    either merge the agent response around it with explicit proof or fail closed.
 6. If the operator changed a disjoint node, keep both changes.
-7. Apply through the editor/CRDT transport when an editor listener is active;
-   use disk only when no listener is active or the operator explicitly chose a
-   disk-authoritative recovery. CRDT remote delivery must compare the live
-   editor text with the expected editor text captured before convergence; if the
-   editor text advanced, the delivery is stale and must not ACK or mutate.
+7. Apply through the editor/CRDT transport when an editor listener or live
+   editor sidecar owns the document. Use the guarded `DetachedDisk` path only
+   when no listener can deliver and no live editor sidecar is present, or when
+   the operator explicitly chose a disk-authoritative recovery. `DetachedDisk`
+   is the current-file realtime replica, not a snapshot fallback. CRDT remote
+   delivery must compare the live editor text with the expected editor text
+   captured before convergence; if the editor text advanced, the delivery is
+   stale and must not ACK or mutate. Socket IPC, file-IPC fallback, and
+   reposition payloads must target the live plugin-owner `editor_id` when that
+   owner lease exists; if no owner lease exists, they may target the newest live
+   editor sidecar with `operator_text_authority_v1`. Untargeted file-IPC
+   fallback is not delivery proof for an editor-owned document.
 8. Verify the post-apply source-of-truth document equals the intended target,
    contains the agent response, and still contains every operator-authored line
    observed before the apply. Editor API success alone is not proof.

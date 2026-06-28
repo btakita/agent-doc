@@ -101,8 +101,9 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
     // BEFORE the snapshot is committed, so the committed state provably holds every
     // live editor's last ops — the durable fix for the `no_ack` /
     // `ipc_proof_insufficient` / post-commit-worktree-corruption class. It is a
-    // checkpoint, never a global lock: a slow / disconnected editor is excluded
-    // from the cut and contributes on reconnect, so finalize cannot wedge.
+    // checkpoint, never a global lock: a disconnected editor is excluded from the
+    // cut and contributes on reconnect, while an attached editor with unflushed
+    // text blocks the commit boundary instead of letting stale disk win.
     // Under `CrdtAuthority::GitAuthoritative` (Detached / headless — most traffic)
     // this is a trivial no-op that touches no hub and leaves the commit path
     // byte-for-byte unchanged.

@@ -882,13 +882,41 @@ fn edit_list(file: &Path, list: TrackedList, id: &str, text: &str) -> Result<()>
     Ok(())
 }
 
+fn edit_many_list(file: &Path, list: TrackedList, edits: &[(String, String)]) -> Result<()> {
+    if edits.is_empty() {
+        return Ok(());
+    }
+    let (full_content, comp) = find_tracked_list_component(file, list)?;
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let mut new_content = existing.to_string();
+    for (id, text) in edits {
+        new_content = pending::op_edit(&new_content, id, text)?;
+    }
+    if new_content == existing {
+        return Ok(());
+    }
+    let canonical = canonicalize_tracked_list_content(file, list, &new_content);
+    let new_doc = comp.replace_content(&full_content, &canonical);
+    persist_pending_write(file, &full_content, &new_doc)?;
+    Ok(())
+}
+
 /// Edit a backlog item's text, preserving its hash id.
 pub fn edit(file: &Path, id: &str, text: &str) -> Result<()> {
     edit_list(file, TrackedList::Backlog, id, text)
 }
 
+/// Edit multiple backlog items in one read/modify/write transaction.
+pub fn edit_many(file: &Path, edits: &[(String, String)]) -> Result<()> {
+    edit_many_list(file, TrackedList::Backlog, edits)
+}
+
 pub fn icebox_edit(file: &Path, id: &str, text: &str) -> Result<()> {
     edit_list(file, TrackedList::Icebox, id, text)
+}
+
+pub fn icebox_edit_many(file: &Path, edits: &[(String, String)]) -> Result<()> {
+    edit_many_list(file, TrackedList::Icebox, edits)
 }
 
 fn clear_list(file: &Path, list: TrackedList) -> Result<()> {
@@ -1541,6 +1569,37 @@ mod tests {
             .collect();
         assert_eq!(child_lines.len(), 2, "got: {pending}");
         assert!(pending.contains("\n- [ ] [#keep1] sibling task"));
+    }
+
+    #[test]
+    fn edit_many_batches_multiple_replacements() {
+        let (_tmp, doc) = doc_with_pending(concat!(
+            "- [ ] [#first] first old text\n",
+            "- [ ] [#second] second old text\n",
+            "- [ ] [#third] third untouched\n",
+        ));
+        force_pending(|| {
+            edit_many(
+                &doc,
+                &[
+                    (
+                        "first".to_string(),
+                        "[operator-verify] first new text".to_string(),
+                    ),
+                    (
+                        "second".to_string(),
+                        "[operator-verify] second new text".to_string(),
+                    ),
+                ],
+            )
+        });
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("- [ ] [#first] [operator-verify] first new text"));
+        assert!(content.contains("- [ ] [#second] [operator-verify] second new text"));
+        assert!(content.contains("- [ ] [#third] third untouched"));
+        assert!(!content.contains("first old text"));
+        assert!(!content.contains("second old text"));
     }
 
     #[test]

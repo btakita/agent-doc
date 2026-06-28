@@ -1069,6 +1069,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             snapshot_content.as_deref(),
             head_doc.as_deref(),
         )?;
+        ensure_no_live_editor_buffer_ahead_of_disk(file, &file_content, "already_current")?;
         if let Some(kind) = post_commit_local_drift {
             if kind == PostCommitLocalDriftKind::UserFollowUp {
                 eprintln!(
@@ -1169,6 +1170,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     }
     file_content = std::fs::read_to_string(file).unwrap_or_default();
     dedupe_snapshot_and_worktree_before_commit(file, &mut snapshot_content, &mut file_content)?;
+    ensure_no_live_editor_buffer_ahead_of_disk(file, &file_content, "pre_stage")?;
     ensure_active_capture_materialized_for_commit(
         file,
         snapshot_content.as_deref().or(Some(file_content.as_str())),
@@ -2654,6 +2656,46 @@ fn ensure_active_capture_materialized_for_commit(
         "captured response body is not present in the staged snapshot for {} even though the snapshot already matches HEAD; refusing already-committed closeout. Replay the captured response with `agent-doc write --commit {}` before marking the cycle committed.",
         file.display(),
         file.display()
+    );
+}
+
+fn ensure_no_live_editor_buffer_ahead_of_disk(
+    file: &Path,
+    file_content: &str,
+    basis: &str,
+) -> Result<()> {
+    let file_str = file.display().to_string();
+    let Some(snapshot) =
+        crate::debounce::live_buffer_diverges_from_content(&file_str, file_content)
+    else {
+        return Ok(());
+    };
+    let editor_id = snapshot.editor_id.as_deref().unwrap_or("unknown");
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "commit_blocked_live_buffer_ahead_of_disk file={} basis={} editor_id={} edit_epoch={} last_synced_epoch={} buffer_len={} disk_len={}",
+            file.display(),
+            basis,
+            editor_id,
+            snapshot.edit_epoch,
+            snapshot.last_synced_epoch,
+            snapshot.len,
+            file_content.len()
+        ),
+    );
+    crate::flow::closeout::log_closeout_guard_event(
+        file,
+        crate::flow::types::FlowStage::PreCommitGuard,
+        crate::flow::types::FlowOutcome::Blocked,
+        crate::flow::closeout::CloseoutGuardReason::ReplicaDeliveryPending,
+    );
+    anyhow::bail!(
+        "live editor buffer has unflushed changes ahead of disk for {}; refusing to commit from stale disk (editor_id={}, edit_epoch={}, last_synced_epoch={})",
+        file.display(),
+        editor_id,
+        snapshot.edit_epoch,
+        snapshot.last_synced_epoch
     );
 }
 
@@ -5025,6 +5067,72 @@ Duplicate replay should stay live.
             "out-of-component local edits should be classified as working-tree drift:\n{log}"
         );
     }
+
+    #[test]
+    fn commit_blocks_already_current_noop_when_live_editor_buffer_ahead_of_disk() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/live-buffer")).unwrap();
+        init_repo(root);
+        commit_file(root, "README.md", "# test\n", "initial");
+
+        let doc = root.join("session.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: previous\n\n",
+            "previous response\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        commit_file(root, "session.md", committed, "add doc");
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(committed),
+            Some(committed),
+            "sha256",
+            None,
+        )
+        .unwrap();
+
+        let editor_visible = format!("{committed}\noperator edit accepted by editor only\n");
+        crate::debounce::document_changed_with_content_for_editor(
+            &doc.display().to_string(),
+            &editor_visible,
+            Some("jetbrains:test"),
+        );
+
+        let err = commit(&doc).expect_err(
+            "HEAD-current closeout must fail closed while the live editor buffer is ahead of disk",
+        );
+        assert!(
+            err.to_string().contains("live editor buffer"),
+            "error should identify the unresolved editor buffer:\n{err}"
+        );
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::ResponseCaptured,
+            "cycle must stay open until the live editor buffer reaches disk"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_blocked_live_buffer_ahead_of_disk file="),
+            "blocked live-buffer closeout should be logged:\n{log}"
+        );
+        assert!(
+            !log.contains("commit_already_current file="),
+            "unflushed live editor buffer must not be recorded as an already-current closeout:\n{log}"
+        );
+    }
+
     #[test]
     fn commit_seam_strikes_answered_free_text_head_from_capture() {
         // `#qheadstrike` P2: the recovery commit seam must strike an answered

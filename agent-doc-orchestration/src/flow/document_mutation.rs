@@ -455,16 +455,20 @@ pub fn decide_reconnect_buffer(
 /// editor-IPC socket even when no JB plugin is attached, so a pure-CLI session
 /// can have a *connectable* socket with no editor. Under the realtime cutover, a
 /// connectable socket that fails to prove delivery is still not permission to
-/// write the visible document behind the editor path. It must fail closed and let
-/// the controller/reconciler resolve convergence.
+/// write behind a live editor path. If no editor endpoint owns the document, the
+/// current file is the detached realtime replica and may be updated through the
+/// guarded `DetachedDisk` path.
 ///
-/// Safety invariant: unproven delivery over the editor path always fails closed.
-/// Disk writes remain reserved for explicit operator force.
+/// Safety invariant: unproven delivery to a live editor always fails closed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorlessDiskFallbackDecision {
     /// A live editor endpoint is (or may be) present and delivery is unproven —
     /// never clobber the buffer; retry the editor/CRDT path.
     FailClosed,
+    /// No editor endpoint owns the document and the editor path is absent or has
+    /// failed its delivery proof. The current file is the detached realtime
+    /// replica, so a guarded direct disk write is allowed.
+    DetachedDisk,
     /// Explicit operator force — route to the controller-host disk write.
     ForceDiskNoEditor,
     /// A live editor endpoint is present and reachable — converge through it.
@@ -475,6 +479,7 @@ impl EditorlessDiskFallbackDecision {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::FailClosed => "fail_closed",
+            Self::DetachedDisk => "detached_disk",
             Self::ForceDiskNoEditor => "force_disk_no_editor",
             Self::ConvergeViaEditor => "converge_via_editor",
         }
@@ -493,7 +498,9 @@ impl EditorlessDiskFallbackDecision {
 /// - `threshold`: how many consecutive failures prove "no delivery."
 /// - `force_disk_requested`: the operator passed `--force-disk`.
 ///
-/// Routes to disk only when the operator explicitly requested `--force-disk`.
+/// Routes to disk when no editor endpoint owns the document and the editor path
+/// is absent or has proven no delivery; explicit `--force-disk` remains a
+/// separate operator override.
 pub fn decide_editorless_disk_fallback(
     socket_connectable: bool,
     editor_endpoint_proven: bool,
@@ -513,10 +520,13 @@ pub fn decide_editorless_disk_fallback(
             EditorlessDiskFallbackDecision::ConvergeViaEditor
         };
     }
-    // No editor endpoint proven. Whether the socket is absent or merely
-    // controller-hosted, realtime writeback must not silently degrade to a disk
-    // mutation; the operator can still use explicit --force-disk.
-    let _ = socket_connectable;
+    // No editor endpoint proven. With no socket there is no editor transport to
+    // converge through; after repeated no-ACKs a controller-hosted socket has
+    // likewise proven no delivery. In both cases the current file is the
+    // detached realtime replica.
+    if !socket_connectable || (threshold > 0 && consecutive_no_ack >= threshold) {
+        return EditorlessDiskFallbackDecision::DetachedDisk;
+    }
     EditorlessDiskFallbackDecision::FailClosed
 }
 
@@ -669,17 +679,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn editorless_force_disk_only_when_forced() {
+    fn editorless_detached_disk_after_no_delivery_or_no_listener() {
         // #kcb5 cutover: connectable controller socket, no editor, every send
-        // no_acks. This now fails closed instead of routing to disk.
+        // no_acks. Once delivery is proven absent, the current file is the
+        // detached realtime replica.
         assert_eq!(
             decide_editorless_disk_fallback(true, false, 3, 3, false),
-            EditorlessDiskFallbackDecision::FailClosed
+            EditorlessDiskFallbackDecision::DetachedDisk
         );
-        // No listener at all is also fail-closed during realtime cutover.
+        // No listener at all also uses detached disk authority.
         assert_eq!(
             decide_editorless_disk_fallback(false, false, 0, 3, false),
-            EditorlessDiskFallbackDecision::FailClosed
+            EditorlessDiskFallbackDecision::DetachedDisk
         );
         // Explicit --force-disk overrides everything.
         assert_eq!(

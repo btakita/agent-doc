@@ -1717,6 +1717,17 @@ fn consume_queue_prompts_for_done_ids_closeout(
     }
 }
 
+fn parse_tracked_work_edits(raw: &[String], flag: &str) -> Result<Vec<(String, String)>> {
+    raw.iter()
+        .map(|pair| {
+            let (id, text) = pair
+                .split_once('=')
+                .with_context(|| format!("{flag} expects 'id=text', got: {pair}"))?;
+            Ok((id.to_string(), text.to_string()))
+        })
+        .collect()
+}
+
 pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<()> {
     let file = options.file.as_path();
 
@@ -1936,17 +1947,13 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             if !same_cycle_added_ids.is_empty() {
                 crate::cycle_state::record_pending_added_ids(file, &same_cycle_added_ids)?;
             }
-            for pair in &options.pending_edit {
-                let (id, text) = pair
-                    .split_once('=')
-                    .with_context(|| format!("--backlog-edit expects 'id=text', got: {}", pair))?;
-                crate::pending_cmd::edit(file, id, text)?;
+            if !options.pending_edit.is_empty() {
+                let edits = parse_tracked_work_edits(&options.pending_edit, "--backlog-edit")?;
+                crate::pending_cmd::edit_many(file, &edits)?;
             }
-            for pair in &options.icebox_edit {
-                let (id, text) = pair
-                    .split_once('=')
-                    .with_context(|| format!("--icebox-edit expects 'id=text', got: {}", pair))?;
-                crate::pending_cmd::icebox_edit(file, id, text)?;
+            if !options.icebox_edit.is_empty() {
+                let edits = parse_tracked_work_edits(&options.icebox_edit, "--icebox-edit")?;
+                crate::pending_cmd::icebox_edit_many(file, &edits)?;
             }
             for id in &options.pending_gate {
                 crate::pending_cmd::gate(file, id)?;
@@ -2383,6 +2390,7 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
         CommitMode::None => Ok(()),
         CommitMode::BestEffort => {
             if crate::git::is_in_git_repo(file) {
+                let session_document = is_session_document(file)?;
                 // `#crdtauth4` — authority-gated commit barrier (plan phase 4).
                 // No-op under `GitAuthoritative` (Detached); under `MultiReplica`
                 // flushes live editor replicas to a consistent cut before commit.
@@ -2398,13 +2406,27 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
                         "[commit] skipped: live editor replica delivery is still pending for {}",
                         file.display()
                     );
+                    if session_document {
+                        anyhow::bail!(
+                            "live editor replica delivery is still pending for {}; retry after the editor buffer reaches disk",
+                            file.display()
+                        );
+                    }
                     return Ok(());
                 }
                 match crate::git::commit(file) {
                     // `#staleinmem` — record what we just committed so a later
                     // out-of-band disk correction is detectable at the next barrier.
                     Ok(_) => crate::crdt_relay_host::record_committed_baseline_for_file(file),
-                    Err(e) => eprintln!("[commit] warning: {}", e),
+                    Err(e) => {
+                        eprintln!("[commit] warning: {}", e);
+                        if session_document {
+                            return Err(e.context(format!(
+                                "session-document best-effort commit failed for {}",
+                                file.display()
+                            )));
+                        }
+                    }
                 }
                 crate::session_check::enforce_clean_closeout(file)?;
             } else {
@@ -4750,6 +4772,82 @@ mod tests {
             "an .agent-doc/ sidecar write must not record document provenance"
         );
     }
+
+    #[test]
+    fn best_effort_session_commit_fails_closed_when_live_buffer_is_ahead_of_disk() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/live-buffer")).unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: previous\n\n",
+            "previous response\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        let editor_visible = format!("{committed}\neditor-only mutation\n");
+        crate::debounce::document_changed_with_content_for_editor(
+            &doc.display().to_string(),
+            &editor_visible,
+            Some("jetbrains:test"),
+        );
+
+        let err = finalize_commit(&doc, CommitMode::BestEffort)
+            .expect_err("session best-effort commit must fail closed on an unflushed live buffer");
+        assert!(
+            err.to_string()
+                .contains("session-document best-effort commit failed")
+                || err.to_string().contains("live editor buffer"),
+            "error should identify the unresolved session closeout:\n{err}"
+        );
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted,
+            "best-effort session commit must not mark the turn committed"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_blocked_live_buffer_ahead_of_disk file="),
+            "blocked live-buffer commit should be logged:\n{log}"
+        );
+    }
+
     /// `#codefence-strip`: detection-log regression — a write that drops a
     /// triple-backtick fence opening must surface a `fence_count_dropped`
     /// ops.log marker so the operator can grep for the incident.

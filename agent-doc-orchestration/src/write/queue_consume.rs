@@ -3951,12 +3951,11 @@ mod core_tests {
     }
 
     #[test]
-    fn strike_orphan_id_backed_queue_head_fails_closed_without_listener() {
+    fn strike_orphan_id_backed_queue_head_writes_detached_disk_without_listener() {
         // #orphanqhead: an id-backed head whose backing backlog item was reaped
         // (absent from agent:backlog) is undrainable — `queue consume` rejects it
-        // and `--done` is a no-op. The escape hatch must still route through
-        // editor-converged writeback; without a listener it fails closed instead
-        // of writing behind the editor.
+        // and `--done` is a no-op. With no editor listener or live sidecar, the
+        // escape hatch writes the guarded detached disk replica.
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("s.md");
@@ -3978,15 +3977,18 @@ mod core_tests {
 
         let keys = id_backed_head_node_keys(content, "orphangone").unwrap();
         assert_eq!(keys.len(), 1, "the orphaned head must be targetable");
-        let err = strike_orphan_id_backed_queue_head(&doc, "orphangone").unwrap_err();
-        assert!(
-            err.to_string().contains("failed to write document"),
-            "unexpected error: {err:#}"
-        );
+        assert!(strike_orphan_id_backed_queue_head(&doc, "orphangone").unwrap());
         let result = std::fs::read_to_string(&doc).unwrap();
-        assert_eq!(result, content, "no-listener strike must not mutate disk");
+        assert!(
+            result.contains("~~do [#orphangone]~~"),
+            "detached disk strike should mark the orphaned head:\n{result}"
+        );
+        assert!(
+            result.contains("- do [#liveone]\n"),
+            "drainable open id head must remain queued:\n{result}"
+        );
         let snap = snapshot::load(&doc).unwrap().unwrap();
-        assert_eq!(snap, content, "no-listener strike must not mutate snapshot");
+        assert_eq!(snap, result, "detached disk strike must update snapshot");
     }
     #[test]
     fn strike_orphan_id_backed_queue_head_refuses_open_backlog_item() {
@@ -4812,7 +4814,7 @@ Old.
     }
 
     #[test]
-    fn prune_noise_plans_interleaved_noise_and_fails_closed_without_listener() {
+    fn prune_noise_plans_interleaved_noise_and_writes_detached_disk_without_listener() {
         // #goqstall2: `queue prune-noise` strikes non-drainable NOISE at ANY
         // position — including noise interleaved BEHIND id-backed `do [#id]` heads,
         // which the leading-run `queue consume` stops at and can never reach — while
@@ -4876,16 +4878,15 @@ Old.
             "tail noise struck:\n{planned}"
         );
 
-        let err = prune_noise_queue_heads(&doc).unwrap_err();
-        assert!(
-            err.to_string().contains("failed to write document"),
-            "unexpected error: {err:#}"
-        );
-        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        assert_eq!(prune_noise_queue_heads(&doc).unwrap(), 3);
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(result, planned, "detached disk prune should apply plan");
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(snap, planned, "detached disk prune should update snapshot");
     }
 
     #[test]
-    fn prune_noise_plans_orphan_id_heads_and_fails_closed_without_listener() {
+    fn prune_noise_plans_orphan_id_heads_and_writes_detached_disk_without_listener() {
         // #orphanqhead / #qchurn: `queue prune-noise` strikes an orphan id-backed
         // head (id absent from the open backlog) — which `queue consume` rejects and
         // `--done` cannot reap — so it stops blocking the leading-run consume and
@@ -4926,16 +4927,15 @@ Old.
             "open backlog id head must be preserved:\n{planned}"
         );
 
-        let err = prune_noise_queue_heads(&doc).unwrap_err();
-        assert!(
-            err.to_string().contains("failed to write document"),
-            "unexpected error: {err:#}"
-        );
-        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        assert_eq!(prune_noise_queue_heads(&doc).unwrap(), 1);
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(result, planned, "detached disk prune should apply plan");
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(snap, planned, "detached disk prune should update snapshot");
     }
 
     #[test]
-    fn acknowledge_open_id_head_fails_closed_without_listener() {
+    fn acknowledge_open_id_head_writes_detached_disk_without_listener() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("s.md");
@@ -4958,24 +4958,24 @@ Old.
             1,
             "exact id-backed correction head should be targetable"
         );
-        let err = acknowledge_open_id_backed_queue_head(&doc, "freshqueueauth").unwrap_err();
-        assert!(
-            err.to_string().contains("failed to write document"),
-            "unexpected error: {err:#}"
-        );
+        assert!(acknowledge_open_id_backed_queue_head(&doc, "freshqueueauth").unwrap());
 
         let result = std::fs::read_to_string(&doc).unwrap();
-        assert_eq!(result, content, "no-listener ack must not mutate disk");
+        assert_ne!(
+            result, content,
+            "detached disk ack must mutate the queue head"
+        );
         let snap = snapshot::load(&doc).unwrap().expect("snapshot saved");
-        assert_eq!(snap, content, "no-listener ack must not mutate snapshot");
+        assert_ne!(snap, content, "detached disk ack must mutate snapshot");
         assert!(
             result.contains("- [ ] [#freshqueueauth] preserve fresh operator queue heads"),
             "underlying backlog item must remain open:\n{result}"
         );
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("open_id_head_ack_writeback") && ops_log.contains("transport=blocked"),
-            "blocked acknowledgement attempt must be auditable:\n{ops_log}"
+            ops_log.contains("open_id_head_ack_writeback")
+                && ops_log.contains("transport=disk_detached"),
+            "detached acknowledgement writeback must be auditable:\n{ops_log}"
         );
     }
 
@@ -5034,7 +5034,7 @@ Old.
     }
 
     #[test]
-    fn prune_noise_plans_all_log_multiline_blocks_and_fails_closed_without_listener() {
+    fn prune_noise_plans_all_log_multiline_blocks_and_writes_detached_disk_without_listener() {
         // #qnoise-multiline-strike: operator-pasted console dumps
         // land in the queue as multiline `---`-fenced Prompt blocks. They are NOT
         // bulleted list items and contain a ``` fence, so the bullet-only
@@ -5090,11 +5090,10 @@ Old.
             "the prose diagnostic report must be preserved as drainable work:\n{planned}"
         );
 
-        let err = prune_noise_queue_heads(&doc).unwrap_err();
-        assert!(
-            err.to_string().contains("failed to write document"),
-            "unexpected error: {err:#}"
-        );
-        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        assert_eq!(prune_noise_queue_heads(&doc).unwrap(), 1);
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(result, planned, "detached disk prune should apply plan");
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(snap, planned, "detached disk prune should update snapshot");
     }
 }

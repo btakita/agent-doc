@@ -1223,10 +1223,10 @@ fn live_prompt_drift_response_patches(
 /// `#6b5h`: at a proven-no-delivery editor-converge refusal point, fail closed.
 ///
 /// The realtime cutover removes the old synchronous "send patch, wait, then
-/// disk-fallback" branch: once a listener is active/connectable, missing or
-/// untrusted ACK proof marks editor convergence required. Absence of a listener
-/// is also a fail-closed convergence condition; only explicit force-disk paths
-/// may bypass this converger.
+/// disk-fallback" branch: once a live editor owner or sidecar is observed,
+/// missing or untrusted ACK proof marks editor convergence required. A direct
+/// disk write is allowed only in detached realtime, after the current visible
+/// file is rechecked as the merge input.
 fn refuse_unproven_editor_delivery(
     file: &Path,
     source: &str,
@@ -1235,7 +1235,8 @@ fn refuse_unproven_editor_delivery(
 ) -> Result<bool> {
     let editor_endpoint = if crate::merge_control_state_machine::disk_write_permitted_for_file(
         &file.to_string_lossy(),
-    ) {
+    ) && !live_editor_sidecar_present(file)
+    {
         "absent"
     } else {
         "live"
@@ -1265,6 +1266,50 @@ fn refuse_unproven_editor_delivery(
         "{source}: refused direct disk write for {} while editor convergence is unproven (reason={reason}, editor_endpoint={editor_endpoint})",
         file.display()
     );
+}
+
+fn live_editor_sidecar_present(file: &Path) -> bool {
+    let indicator_path = file
+        .canonicalize()
+        .unwrap_or_else(|_| file.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    crate::debounce::live_buffer_snapshots(&indicator_path)
+        .iter()
+        .any(crate::debounce::live_buffer_snapshot_editor_is_live)
+}
+
+fn try_detached_disk_write(
+    file: &Path,
+    current: &str,
+    target: &str,
+    source: &str,
+    reason: &str,
+) -> Result<bool> {
+    if !crate::merge_control_state_machine::disk_write_permitted_for_file(&file.to_string_lossy())
+        || live_editor_sidecar_present(file)
+    {
+        return Ok(false);
+    }
+
+    guard_visible_write_idle_and_current(file, source, current)?;
+    atomic_write(file, target).with_context(|| {
+        format!(
+            "{source}: failed detached disk write for {}",
+            file.display()
+        )
+    })?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "{source}_writeback file={} transport=disk_detached reason={} len={} hash={}",
+            file.display(),
+            reason,
+            target.len(),
+            crate::ops_log::content_hash(target)
+        ),
+    );
+    Ok(true)
 }
 
 fn blank_components_named(doc: &str, names: &[&str]) -> Option<String> {
@@ -1672,6 +1717,15 @@ pub fn try_editor_converge(
             let Some(payload) =
                 editor_convergence_payload(&canonical, target, current_content, source, &patch_id)?
             else {
+                if try_detached_disk_write(
+                    file,
+                    current_content,
+                    target,
+                    source,
+                    "listener_degraded_no_component_delta",
+                )? {
+                    return Ok(true);
+                }
                 crate::ops_log::log_op(
                     file,
                     &format!(
@@ -1695,6 +1749,15 @@ pub fn try_editor_converge(
             )? {
                 return Ok(true);
             }
+            if try_detached_disk_write(
+                file,
+                current_content,
+                target,
+                source,
+                "listener_degraded_editor_detached",
+            )? {
+                return Ok(true);
+            }
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -1715,6 +1778,9 @@ pub fn try_editor_converge(
         }
     }
     if !crate::ipc_socket::is_listener_active(&project_root) {
+        if try_detached_disk_write(file, current_content, target, source, "no_listener")? {
+            return Ok(true);
+        }
         return refuse_unproven_editor_delivery(file, source, "no_listener", None);
     }
 
@@ -1723,6 +1789,9 @@ pub fn try_editor_converge(
     let Some(payload) =
         editor_convergence_payload(&canonical, target, current_content, source, &patch_id)?
     else {
+        if try_detached_disk_write(file, current_content, target, source, "no_component_delta")? {
+            return Ok(true);
+        }
         crate::ops_log::log_op(
             file,
             &format!(
@@ -1839,8 +1908,11 @@ pub fn try_editor_converge(
             }
         }
         Ok(None) => {
-            // Missing ACK marks the editor path stale; it must not trigger a
-            // direct disk fallback.
+            if try_detached_disk_write(file, current_content, target, source, "no_ack")? {
+                return Ok(true);
+            }
+            // Missing ACK against a live editor marks the editor path stale; it
+            // must not trigger a direct disk fallback.
             refuse_unproven_editor_delivery(file, source, "no_ack", Some(&patch_id))
         }
         Err(err) => {
@@ -1896,8 +1968,11 @@ pub fn try_editor_converge(
                     ),
                 }
             }
-            // Send failure marks the editor path stale; it must not trigger a
-            // direct disk fallback.
+            if try_detached_disk_write(file, current_content, target, source, "send_failed")? {
+                return Ok(true);
+            }
+            // Send failure against a live editor marks the editor path stale; it
+            // must not trigger a direct disk fallback.
             refuse_unproven_editor_delivery(file, source, "send_failed", Some(&patch_id))
         }
     }
@@ -2511,9 +2586,10 @@ mod core_tests {
     }
 
     #[test]
-    fn try_compact_editor_converge_blocks_without_listener() {
-        // Realtime cutover: with no live editor listener, compact convergence
-        // must fail closed instead of authorizing a guarded disk fallback.
+    fn try_compact_editor_converge_writes_detached_disk_without_listener() {
+        // Detached realtime: with no live editor listener and no live editor
+        // sidecar, the current file is authoritative and the converger may use a
+        // guarded direct disk write. This is not a snapshot fallback.
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("plan.md");
@@ -2521,24 +2597,19 @@ mod core_tests {
         let compacted = crate::test_support::drift_content_ours();
         std::fs::write(&doc, &current).unwrap();
 
-        let err = try_editor_converge(&doc, &compacted, &current, "compact")
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("no_listener"),
-            "without a live editor listener, compact must fail closed: {err}"
-        );
+        let converged = try_editor_converge(&doc, &compacted, &current, "compact").unwrap();
+        assert!(converged, "detached compact should write the target");
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            current,
-            "no-listener compact convergence must not write the compacted target"
+            compacted,
+            "no-listener compact convergence should write the compacted target"
         );
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("compact_writeback")
-                && log.contains("transport=blocked")
+                && log.contains("transport=disk_detached")
                 && log.contains("reason=no_listener"),
-            "no-listener compact must record a blocked writeback:\n{log}"
+            "no-listener compact must record a detached disk writeback:\n{log}"
         );
         assert!(
             !log.contains("transport=disk_fallback"),
@@ -3026,9 +3097,10 @@ mod core_tests {
         );
     }
     #[test]
-    fn converge_document_or_disk_blocks_guarded_disk_without_listener() {
-        // Realtime cutover: with no live editor listener the shared converger
-        // must refuse the guarded disk fallback and leave the file unchanged.
+    fn converge_document_or_disk_writes_detached_disk_without_listener() {
+        // Detached realtime: with no live editor listener and no live editor
+        // sidecar, the current file is authoritative and the shared converger
+        // may use a guarded direct disk write.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -3038,25 +3110,20 @@ mod core_tests {
         let target = crate::test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
-        let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("no_listener"),
-            "with no live editor listener the converger must fail closed: {err}"
-        );
+        converge_document_or_disk(&doc, &target, &source, "queue_consume")
+            .expect("detached queue consume should write the target");
 
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            source,
-            "with no listener the converger must not write the target to disk"
+            target,
+            "with no listener the converger should write the target to disk"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             log.contains("queue_consume_writeback")
-                && log.contains("transport=blocked")
+                && log.contains("transport=disk_detached")
                 && log.contains("reason=no_listener"),
-            "a no-listener queue consume must record the source-labelled blocked writeback:\n{log}"
+            "a no-listener queue consume must record the source-labelled detached writeback:\n{log}"
         );
         assert!(
             !log.contains("transport=disk_fallback"),
@@ -3303,7 +3370,7 @@ mod core_tests {
     }
 
     #[test]
-    fn converge_document_or_disk_does_not_capability_block_capable_live_buffer() {
+    fn converge_document_or_disk_blocks_detached_disk_with_capable_live_buffer() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -3329,23 +3396,32 @@ mod core_tests {
             .to_string();
         assert!(
             err.contains("no_listener"),
-            "capable sidecar should continue into the existing listener/no-listener guard: {err}"
+            "capable sidecar without listener should fail closed instead of detached disk: {err}"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            source,
+            "live editor sidecar must leave the on-disk document unchanged"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             !log.contains("reason=editor_capability_missing"),
             "capable sidecar must not trip the capability guard:\n{log}"
         );
+        assert!(
+            !log.contains("transport=disk_detached"),
+            "live editor sidecar must block detached disk write:\n{log}"
+        );
     }
 
     #[test]
-    fn converge_document_or_disk_route_source_blocks_without_listener() {
+    fn converge_document_or_disk_route_source_writes_detached_disk_without_listener() {
         // `#fccroute`: the three route/dispatch session-document write sites
         // (`route_session_id`, `route_dedup_scrub`, `route_queue_activation`) now
         // route their disk writes through `converge_document_or_disk` so a live JB
         // editor converges them instead of hitting the File Cache Conflict dialog.
-        // With no listener, realtime cutover fails closed instead of authorizing
-        // a source-labelled disk fallback. Cover each route source label so a
+        // With no listener or live editor sidecar, detached realtime writes the
+        // current file through the guarded disk path. Cover each route label so a
         // future regression on any one of them is caught.
         for source_label in [
             "route_session_id",
@@ -3361,25 +3437,20 @@ mod core_tests {
             let target = crate::test_support::queue_consume_convergence_target();
             fs::write(&doc, &source).unwrap();
 
-            let err = converge_document_or_disk(&doc, &target, &source, source_label)
-                .unwrap_err()
-                .to_string();
-            assert!(
-                err.contains("no_listener"),
-                "{source_label}: no listener must fail closed: {err}"
-            );
+            converge_document_or_disk(&doc, &target, &source, source_label)
+                .unwrap_or_else(|err| panic!("{source_label}: detached write failed: {err}"));
 
             assert_eq!(
                 fs::read_to_string(&doc).unwrap(),
-                source,
-                "{source_label}: with no listener the converger must leave disk unchanged"
+                target,
+                "{source_label}: with no listener the converger must write the target"
             );
             let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
             assert!(
                 log.contains(&format!("{source_label}_writeback"))
-                    && log.contains("transport=blocked")
+                    && log.contains("transport=disk_detached")
                     && log.contains("reason=no_listener"),
-                "{source_label}: no-listener route write must record a source-labelled blocked writeback:\n{log}"
+                "{source_label}: no-listener route write must record a source-labelled detached writeback:\n{log}"
             );
             assert!(
                 !log.contains("transport=disk_fallback"),
@@ -3433,11 +3504,11 @@ mod core_tests {
         );
     }
     #[test]
-    fn converge_or_disk_write_blocks_plain_disk_without_listener() {
-        // Realtime cutover: the old unguarded converge-or-disk gate (used by the
-        // pending/review, dedupe, preflight-maintenance, and pipeline-mirror
-        // write sites) must fail closed with no live editor listener instead of
-        // landing the target via a plain disk write.
+    fn converge_or_disk_write_writes_detached_disk_without_listener() {
+        // Detached realtime: the converge-or-disk gate used by pending/review,
+        // dedupe, preflight-maintenance, and pipeline-mirror write sites may
+        // write disk directly only when no editor endpoint or live sidecar owns
+        // the document.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -3447,25 +3518,20 @@ mod core_tests {
         let target = crate::test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
-        let err = converge_or_disk_write(&doc, &source, &target, "pending_write")
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("no_listener"),
-            "with no live editor listener the plain write gate must fail closed: {err}"
-        );
+        converge_or_disk_write(&doc, &source, &target, "pending_write")
+            .expect("detached pending write should write the target");
 
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            source,
-            "with no listener the converger must not write the target to disk"
+            target,
+            "with no listener the converger must write the target to disk"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             log.contains("pending_write_writeback")
-                && log.contains("transport=blocked")
+                && log.contains("transport=disk_detached")
                 && log.contains("reason=no_listener"),
-            "a no-listener plain converge must record the source-labelled blocked writeback:\n{log}"
+            "a no-listener plain converge must record the source-labelled detached writeback:\n{log}"
         );
         assert!(
             !log.contains("transport=disk_fallback"),

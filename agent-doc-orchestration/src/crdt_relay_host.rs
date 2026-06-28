@@ -392,10 +392,9 @@ pub fn recover_hub_from_disk(file: &Path, projection: &[u8]) -> Result<()> {
 /// - [`CrdtAuthority::MultiReplica`] (**EditorAttached**): drives the per-document
 ///   hub's commit barrier and returns its consistent-cut result.
 ///
-/// Failures are logged and treated as a non-fatal "proceed" so the barrier can
-/// never wedge a live closeout (the existing patch-ack / CRDT-merge path remains
-/// the durable fallback). The authority resolution itself is the only thing that
-/// gates behavior.
+/// Under editor authority, unresolved delivery is a failed commit barrier. A
+/// closeout may retry once the editor buffer reaches disk, but it must not mark a
+/// turn committed from stale disk while a live editor has newer text.
 pub fn commit_barrier_for_file(file: &Path) -> bool {
     let file_str = file.display().to_string();
     let authority = authority_for_file(&file_str);
@@ -414,7 +413,9 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
         // unchanged.
         return true;
     }
-    settle_or_flush_editor_sync_barrier(file, "commit_barrier");
+    if !settle_or_flush_editor_sync_barrier(file, "commit_barrier") {
+        return false;
+    }
     // `#staleinmem` — out-of-band baseline reconcile, BEFORE flushing live editors
     // into the canonical for the commit cut. If the document was corrected out of
     // band on disk since this hub's last commit (a `git checkout HEAD` /
@@ -471,8 +472,6 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
             ready && delivery_converged
         }
         Ok(Err(e)) => {
-            // A barrier error must never wedge a live closeout — log and proceed
-            // on the existing patch-ack / CRDT-merge fallback.
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -481,7 +480,7 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
                     e
                 ),
             );
-            true
+            false
         }
         Err(e) => {
             crate::ops_log::log_op(
@@ -492,7 +491,7 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
                     e
                 ),
             );
-            true
+            false
         }
     }
 }
@@ -582,7 +581,7 @@ pub fn reconcile_disk_projection_for_file(file: &Path, projection: &[u8]) -> Res
         // baseline-wins load path in snapshot.rs already handles stale disk.
         return Ok(None);
     }
-    settle_or_flush_editor_sync_barrier(file, "disk_projection_reconcile");
+    let _ = settle_or_flush_editor_sync_barrier(file, "disk_projection_reconcile");
     let changed =
         with_hub_seeded_from_file(file, |hub| hub.reconcile_disk_projection(projection))??;
     crate::ops_log::log_op(
@@ -596,7 +595,7 @@ pub fn reconcile_disk_projection_for_file(file: &Path, projection: &[u8]) -> Res
     Ok(Some(changed))
 }
 
-fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) {
+fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
     let file_str = file.display().to_string();
     let outcome = crate::debounce::await_editor_sync_barrier(
         &file_str,
@@ -621,7 +620,7 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) {
         ),
     );
     if outcome.kind != crate::debounce::EditorSyncBarrierKind::TimedOut {
-        return;
+        return true;
     }
 
     let canonical = match file.canonicalize() {
@@ -636,7 +635,7 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) {
                     e
                 ),
             );
-            return;
+            return false;
         }
     };
     let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
@@ -649,41 +648,73 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) {
                 reason
             ),
         );
-        return;
+        return false;
     }
 
     let patch_id = uuid::Uuid::new_v4().to_string();
     let path_str = canonical.to_string_lossy().to_string();
     match crate::ipc_socket::send_save_document(&project_root, &path_str, &patch_id) {
-        Ok(true) => crate::ops_log::log_op(
-            file,
-            &format!(
-                "editor_sync_barrier_flush_requested file={} reason={} patch_id={}",
-                file.display(),
-                reason,
-                patch_id
-            ),
-        ),
-        Ok(false) => crate::ops_log::log_op(
-            file,
-            &format!(
-                "editor_sync_barrier_flush_not_acked file={} reason={} patch_id={}",
-                file.display(),
-                reason,
-                patch_id
-            ),
-        ),
-        Err(e) => crate::ops_log::log_op(
-            file,
-            &format!(
-                "editor_sync_barrier_flush_error file={} reason={} patch_id={} error={}",
-                file.display(),
-                reason,
-                patch_id,
-                e
-            ),
-        ),
+        Ok(true) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "editor_sync_barrier_flush_requested file={} reason={} patch_id={}",
+                    file.display(),
+                    reason,
+                    patch_id
+                ),
+            );
+        }
+        Ok(false) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "editor_sync_barrier_flush_not_acked file={} reason={} patch_id={}",
+                    file.display(),
+                    reason,
+                    patch_id
+                ),
+            );
+            return false;
+        }
+        Err(e) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "editor_sync_barrier_flush_error file={} reason={} patch_id={} error={}",
+                    file.display(),
+                    reason,
+                    patch_id,
+                    e
+                ),
+            );
+            return false;
+        }
     }
+
+    let after_flush = crate::debounce::await_editor_sync_barrier(
+        &file_str,
+        EDITOR_SYNC_SETTLE_MS,
+        EDITOR_SYNC_TIMEOUT_MS,
+    );
+    let in_flight = after_flush
+        .statuses
+        .iter()
+        .filter(|status| status.in_flight)
+        .count();
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "editor_sync_barrier_after_flush file={} reason={} outcome={:?} statuses={} in_flight={} typing_recent={}",
+            file.display(),
+            reason,
+            after_flush.kind,
+            after_flush.statuses.len(),
+            in_flight,
+            after_flush.typing_recent
+        ),
+    );
+    after_flush.kind != crate::debounce::EditorSyncBarrierKind::TimedOut
 }
 
 #[cfg(test)]
@@ -757,13 +788,13 @@ mod tests {
         );
 
         let start = std::time::Instant::now();
-        assert!(commit_barrier_for_file_with_authority(
+        assert!(!commit_barrier_for_file_with_authority(
             &doc,
             CrdtAuthority::MultiReplica
         ));
         assert!(
             start.elapsed() >= std::time::Duration::from_millis(100),
-            "multi-replica commit barrier must defer briefly for an in-flight editor epoch"
+            "multi-replica commit barrier must defer briefly before failing closed on an in-flight editor epoch"
         );
     }
 

@@ -3,6 +3,10 @@ package com.github.btakita.agentdoc
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import java.util.UUID
 
 object EditorIdentity {
@@ -21,56 +25,85 @@ object TypingTracker : DocumentListener {
 
     const val DEBOUNCE_MS = 500L
     private const val TIMEOUT_MS = 30000L
+    private const val CONTENT_REPORT_DELAY_MS = 75L
     private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(TypingTracker::class.java)
+    private val contentReportExecutor = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "agent-doc-live-buffer-report").apply { isDaemon = true }
+    }
+    private val pendingContentReports = ConcurrentHashMap<String, ScheduledFuture<*>>()
+
+    private data class PendingEditorOp(
+        val offset: Int,
+        val oldFragment: String,
+        val newFragment: String,
+        val remoteCrdtApply: Boolean,
+    )
 
     override fun documentChanged(event: DocumentEvent) {
         val vFile = FileDocumentManager.getInstance().getFile(event.document) ?: return
         if (!vFile.name.endsWith(".md")) return
+        val filePath = vFile.path
+        lastChangeMs = System.currentTimeMillis()
 
-        // Forward to FFI debounce tracker
         val lib = AgentDocLib.get()
         if (lib != null) {
-            val text = event.document.text
-            val remoteCrdtApply = CrdtReplicaManager.isApplyingRemote(vFile.path)
-            // #pcp6: send the full editor buffer content for .md session documents
-            // so the CLI visible-write reconcile guard can positively confirm the
-            // editor buffer equals on-disk content (no unsaved edit ahead of disk)
-            // instead of inferring from a len/hash digest. The text stays local to
-            // the project .agent-doc/ state dir.
             try {
-                lib.agent_doc_document_changed_digest_content_for_editor(
-                    vFile.path,
-                    text,
-                    EditorIdentity.id,
-                )
+                lib.agent_doc_document_changed(filePath)
             } catch (_: UnsatisfiedLinkError) {
-                lib.agent_doc_document_changed_digest_content(vFile.path, text)
+                // older cdylib without the lightweight marker; fall back to local debounce
             } catch (_: NoSuchMethodError) {
-                lib.agent_doc_document_changed_digest_content(vFile.path, text)
+                // older cdylib without the lightweight marker; fall back to local debounce
             }
-            LOG.debug("[native] document_changed (content): ${vFile.name}")
-
-            // #qnodemerge4wire Phase 4: report the real editor op (split a
-            // replacement into delete+insert) so a concurrent agent merge aligns
-            // to the user's actual edit boundaries instead of a text diff-guess.
-            // Best-effort and isolated — a reporting failure must never perturb
-            // the typing path; a missing FFI symbol (older cdylib) is ignored.
-            try {
-                if (!remoteCrdtApply) {
-                    reportEditorOp(lib, vFile.path, text, event)
-                }
-            } catch (_: UnsatisfiedLinkError) {
-                // older cdylib without the op-capture symbols; skip
-            } catch (_: NoSuchMethodError) {
-                // older cdylib without the op-capture symbols; skip
-            } catch (e: Throwable) {
-                LOG.debug("[native] reportEditorOp skipped: ${e.message}")
-            }
+            val op = PendingEditorOp(
+                offset = event.offset,
+                oldFragment = event.oldFragment.toString(),
+                newFragment = event.newFragment.toString(),
+                remoteCrdtApply = CrdtReplicaManager.isApplyingRemote(filePath),
+            )
+            scheduleFullContentReport(lib, filePath, event.document, op)
+            LOG.debug("[native] document_changed queued content report: ${vFile.name}")
         } else {
-            // Fallback: track locally if FFI unavailable
-            lastChangeMs = System.currentTimeMillis()
             LOG.debug("[fallback] document_changed: ${vFile.name}")
         }
+    }
+
+    private fun scheduleFullContentReport(
+        lib: AgentDocLib,
+        filePath: String,
+        document: com.intellij.openapi.editor.Document,
+        op: PendingEditorOp,
+    ) {
+        pendingContentReports.remove(filePath)?.cancel(false)
+        val task = contentReportExecutor.schedule({
+            try {
+                val text = com.intellij.openapi.application.ApplicationManager.getApplication()
+                    .runReadAction<String> { document.text }
+                try {
+                    lib.agent_doc_document_changed_digest_content_for_editor(
+                        filePath,
+                        text,
+                        EditorIdentity.id,
+                    )
+                } catch (_: UnsatisfiedLinkError) {
+                    lib.agent_doc_document_changed_digest_content(filePath, text)
+                } catch (_: NoSuchMethodError) {
+                    lib.agent_doc_document_changed_digest_content(filePath, text)
+                }
+                LOG.debug("[native] document_changed content reported: $filePath")
+                if (!op.remoteCrdtApply) {
+                    reportEditorOp(lib, filePath, text, op)
+                }
+            } catch (_: UnsatisfiedLinkError) {
+                // older cdylib without full-content sidecar support; skip
+            } catch (_: NoSuchMethodError) {
+                // older cdylib without full-content sidecar support; skip
+            } catch (e: Throwable) {
+                LOG.debug("[native] content report skipped: ${e.message}")
+            } finally {
+                pendingContentReports.remove(filePath)
+            }
+        }, CONTENT_REPORT_DELAY_MS, TimeUnit.MILLISECONDS)
+        pendingContentReports[filePath] = task
     }
 
     /**
@@ -87,10 +120,10 @@ object TypingTracker : DocumentListener {
         lib: AgentDocLib,
         filePath: String,
         newText: String,
-        event: DocumentEvent,
+        op: PendingEditorOp,
     ) {
-        val oldFragment = event.oldFragment
-        val newFragment = event.newFragment
+        val oldFragment = op.oldFragment
+        val newFragment = op.newFragment
         if (oldFragment.isEmpty() && newFragment.isEmpty()) return
 
         // Resolve the base hash captured ops must align to; skip (diff-guess
@@ -103,7 +136,7 @@ object TypingTracker : DocumentListener {
         }
         if (baseHash.isNullOrEmpty()) return
 
-        val utf16Offset = event.offset
+        val utf16Offset = op.offset
         val byteOffset = newText
             .substring(0, minOf(utf16Offset, newText.length))
             .toByteArray(Charsets.UTF_8)
@@ -111,7 +144,7 @@ object TypingTracker : DocumentListener {
             .toLong()
 
         if (oldFragment.isNotEmpty()) {
-            val deleteBytes = oldFragment.toString().toByteArray(Charsets.UTF_8).size.toLong()
+            val deleteBytes = oldFragment.toByteArray(Charsets.UTF_8).size.toLong()
             lib.agent_doc_record_editor_op(filePath, baseHash, "delete", byteOffset, null, deleteBytes)
         }
         if (newFragment.isNotEmpty()) {
@@ -120,7 +153,7 @@ object TypingTracker : DocumentListener {
                 baseHash,
                 "insert",
                 byteOffset,
-                newFragment.toString(),
+                newFragment,
                 0L,
             )
         }

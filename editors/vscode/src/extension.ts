@@ -65,6 +65,7 @@ const FOCUS_CLI_TIMEOUT_MS = 750;
 const ROUTE_CANCEL_WAIT_MS = 5_000;
 const ROUTE_WAIT_FOR_READY_SECONDS = '120';
 const EDITOR_ID = `vscode-${process.pid}-${crypto.randomUUID()}`;
+const LIVE_BUFFER_REPORT_DELAY_MS = 75;
 
 // #qnodemerge4wire Phase 4: per-document text shadow (the previous full text).
 // VS Code's onDidChangeTextDocument carries only rangeLength (UTF-16) for the
@@ -72,31 +73,73 @@ const EDITOR_ID = `vscode-${process.pid}-${crypto.randomUUID()}`;
 // the deleted UTF-8 byte length and the byte offset of a change.
 const editorOpShadows = new Map<string, string>();
 
+interface PendingEditorOpReport {
+    fsPath: string;
+    oldText: string;
+    change: ReplicaTextChange;
+    projectRoot?: string;
+}
+
+function applyTextDocumentChange(
+    oldText: string,
+    change: vscode.TextDocumentContentChangeEvent | ReplicaTextChange,
+): string | null {
+    const start = Math.max(0, Math.min(change.rangeOffset, oldText.length));
+    const end = Math.max(start, Math.min(start + change.rangeLength, oldText.length));
+    return oldText.slice(0, start) + change.text + oldText.slice(end);
+}
+
+function seedEditorOpShadow(fsPath: string, text: string): void {
+    editorOpShadows.set(fsPath, text);
+}
+
+function clearEditorOpShadow(fsPath: string): void {
+    editorOpShadows.delete(fsPath);
+}
+
 /**
  * #qnodemerge4wire Phase 4: report a markdown document change as byte-offset
  * editor op(s) for CRDT-aligned merge. Converts VS Code's UTF-16 offsets to
  * UTF-8 bytes against the document shadow (the pre-change text). Only single
  * content-change events are captured (the common keystroke/paste/delete case);
  * multi-change events are skipped (the merge's replay gate would reject
- * misaligned ops anyway — safe diff-guess fallback). The shadow is refreshed to
- * the new text every event regardless. Best-effort; never throws into the
- * typing path.
+ * misaligned ops anyway — safe diff-guess fallback). Native recording is queued
+ * off the text-change listener path. Best-effort; never throws into typing.
  */
-function reportEditorChange(
+function captureEditorChangeReport(
     fsPath: string,
-    newText: string,
     changes: readonly vscode.TextDocumentContentChangeEvent[],
     projectRoot: string | undefined,
-): void {
+): PendingEditorOpReport | null {
     try {
         const oldText = editorOpShadows.get(fsPath);
-        // Always refresh the shadow so the next event has the correct prior text.
-        editorOpShadows.set(fsPath, newText);
         // No prior shadow (first edit after open) or a multi-change event: skip
         // capture this edit and let the merge fall back to the diff-guess.
-        if (oldText === undefined || changes.length !== 1) return;
+        if (oldText === undefined || changes.length !== 1) return null;
 
         const change = changes[0];
+        const nextText = applyTextDocumentChange(oldText, change);
+        if (nextText == null) return null;
+        editorOpShadows.set(fsPath, nextText);
+        return {
+            fsPath,
+            oldText,
+            projectRoot,
+            change: {
+                rangeOffset: change.rangeOffset,
+                rangeLength: change.rangeLength,
+                text: change.text,
+            },
+        };
+    } catch (e: any) {
+        console.warn(`[agent-doc] captureEditorChangeReport skipped: ${e?.message ?? e}`);
+        return null;
+    }
+}
+
+function reportEditorChange(report: PendingEditorOpReport): void {
+    try {
+        const { fsPath, oldText, change, projectRoot } = report;
         // rangeOffset/rangeLength are UTF-16 units in the OLD doc — convert against
         // the shadow (old text) to the UTF-8 byte offset + deleted byte length.
         const { byteOffset, deleteBytes } = native.utf16RangeToUtf8Bytes(
@@ -1861,6 +1904,11 @@ class PatchWatcher implements vscode.Disposable {
     private pendingPatchRetries = new Set<string>();
     /** Documents for which this VS Code instance has published plugin-owner proof. */
     private ownedDocs = new Set<string>();
+    /** Coalesced full-buffer live reports; never run from onDidChangeTextDocument. */
+    private liveBufferReportTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    /** Native editor-op writes are queued off the text-change listener path. */
+    private pendingEditorOpReports: PendingEditorOpReport[] = [];
+    private editorOpReportTimer: ReturnType<typeof setTimeout> | undefined;
 
     constructor() {
         this.outputChannel = vscode.window.createOutputChannel('Agent Doc Patches');
@@ -1907,9 +1955,7 @@ class PatchWatcher implements vscode.Disposable {
         this.crdtReplicas = new CrdtReplicaManager({
             projectRoot,
             identity: EDITOR_ID,
-            listDocuments: () => vscode.workspace.textDocuments
-                .filter((document) => this.targetsProjectMarkdown(document, projectRoot))
-                .map((document) => ({ filePath: document.uri.fsPath, text: document.getText() })),
+            listDocuments: () => this.currentProjectMarkdownSnapshots(projectRoot),
             applyText: (filePath, text) => this.applyCrdtReplicaText(filePath, text),
             logger: {
                 debug: (message) => this.outputChannel.appendLine(message),
@@ -1919,40 +1965,38 @@ class PatchWatcher implements vscode.Disposable {
         this.crdtReplicas.start();
         this.openListener = vscode.workspace.onDidOpenTextDocument((document) => {
             if (!this.targetsProjectMarkdown(document, projectRoot)) return;
-            void this.crdtReplicas?.attachDocument(document.uri.fsPath, document.getText());
+            const text = document.getText();
+            seedEditorOpShadow(document.uri.fsPath, text);
+            void this.crdtReplicas?.attachDocument(document.uri.fsPath, text);
+            this.scheduleLiveBufferReport(document, projectRoot);
         });
 
         // Track typing events for debounce (TS fallback + FFI)
         this.typingListener = vscode.workspace.onDidChangeTextDocument((e) => {
             if (e.document.languageId === 'markdown' && e.contentChanges.length > 0) {
                 const fsPath = e.document.uri.fsPath;
-                const text = e.document.getText();
                 const remoteCrdtApply = this.crdtReplicas?.isApplyingRemote(fsPath) ?? false;
                 if (!remoteCrdtApply) {
                     this.lastTypingTime.set(fsPath, Date.now());
                 }
-                // Also record in FFI debounce tracker (shared with JB plugin).
-                // #pcp6: send the FULL editor buffer content (not just len/hash) so
-                // the CLI visible-write reconcile guard can positively confirm the
-                // editor buffer equals on-disk content instead of inferring from a
-                // digest. Mirrors TypingTracker.documentChanged in the JB plugin.
                 const eventProjectRoot = this.patchesDir
                     ? path.dirname(path.dirname(this.patchesDir))
                     : undefined;
-                native.documentChangedDigestContent(fsPath, text, eventProjectRoot, EDITOR_ID);
+                native.documentChanged(fsPath, eventProjectRoot);
+                this.scheduleLiveBufferReport(e.document, eventProjectRoot);
                 const changes: ReplicaTextChange[] = e.contentChanges.map((change) => ({
                     rangeOffset: change.rangeOffset,
                     rangeLength: change.rangeLength,
                     text: change.text,
                 }));
-                const crdtForward = this.crdtReplicas?.handleLocalChange(fsPath, text, changes);
+                const crdtForward = this.crdtReplicas?.handleLocalChangeDelta(fsPath, changes);
                 crdtForward?.catch((err: any) => {
                     this.outputChannel.appendLine(`crdt-replica: local change skipped for ${fsPath}: ${err?.message ?? err}`);
                 });
                 // #qnodemerge4wire Phase 4: report the real editor op so a concurrent
                 // agent merge aligns to the user's actual edit boundaries.
                 if (!remoteCrdtApply) {
-                    reportEditorChange(fsPath, text, e.contentChanges, eventProjectRoot);
+                    this.scheduleEditorOpReport(fsPath, e.contentChanges, eventProjectRoot);
                 }
             }
         });
@@ -2460,6 +2504,51 @@ class PatchWatcher implements vscode.Disposable {
         return this.applyMinimalTextEdit(document, targetContent);
     }
 
+    private currentProjectMarkdownSnapshots(projectRoot: string): Array<{ filePath: string; text: string }> {
+        return vscode.workspace.textDocuments
+            .filter((document) => this.targetsProjectMarkdown(document, projectRoot))
+            .map((document) => {
+                const text = document.getText();
+                seedEditorOpShadow(document.uri.fsPath, text);
+                return { filePath: document.uri.fsPath, text };
+            });
+    }
+
+    private scheduleLiveBufferReport(document: vscode.TextDocument, projectRoot: string | undefined): void {
+        const fsPath = document.uri.fsPath;
+        const previous = this.liveBufferReportTimers.get(fsPath);
+        if (previous) clearTimeout(previous);
+        const timer = setTimeout(() => {
+            this.liveBufferReportTimers.delete(fsPath);
+            const latest = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === fsPath);
+            if (!latest || latest.languageId !== 'markdown' || latest.uri.scheme !== 'file') return;
+            const text = latest.getText();
+            seedEditorOpShadow(fsPath, text);
+            native.documentChangedDigestContent(fsPath, text, projectRoot, EDITOR_ID);
+        }, LIVE_BUFFER_REPORT_DELAY_MS);
+        this.liveBufferReportTimers.set(fsPath, timer);
+    }
+
+    private scheduleEditorOpReport(
+        fsPath: string,
+        changes: readonly vscode.TextDocumentContentChangeEvent[],
+        projectRoot: string | undefined,
+    ): void {
+        const report = captureEditorChangeReport(fsPath, changes, projectRoot);
+        if (!report) return;
+        this.pendingEditorOpReports.push(report);
+        if (this.editorOpReportTimer) return;
+        this.editorOpReportTimer = setTimeout(() => this.flushEditorOpReports(), 0);
+    }
+
+    private flushEditorOpReports(): void {
+        this.editorOpReportTimer = undefined;
+        const reports = this.pendingEditorOpReports.splice(0);
+        for (const report of reports) {
+            reportEditorChange(report);
+        }
+    }
+
     private targetsProjectMarkdown(document: vscode.TextDocument, projectRoot: string): boolean {
         return document.languageId === 'markdown'
             && document.uri.scheme === 'file'
@@ -2469,6 +2558,11 @@ class PatchWatcher implements vscode.Disposable {
     handleDocumentClosed(filePath: string): void {
         native.pluginOwnerRelease(filePath, EDITOR_ID, this.projectRoot());
         this.ownedDocs.delete(filePath);
+        const timer = this.liveBufferReportTimers.get(filePath);
+        if (timer) clearTimeout(timer);
+        this.liveBufferReportTimers.delete(filePath);
+        this.pendingEditorOpReports = this.pendingEditorOpReports.filter((report) => report.fsPath !== filePath);
+        clearEditorOpShadow(filePath);
         void this.crdtReplicas?.handleDocumentClosed(filePath);
     }
 
@@ -2781,6 +2875,13 @@ class PatchWatcher implements vscode.Disposable {
             native.pluginOwnerRelease(filePath, EDITOR_ID, this.projectRoot());
         }
         this.ownedDocs.clear();
+        for (const timer of this.liveBufferReportTimers.values()) {
+            clearTimeout(timer);
+        }
+        this.liveBufferReportTimers.clear();
+        if (this.editorOpReportTimer) clearTimeout(this.editorOpReportTimer);
+        this.editorOpReportTimer = undefined;
+        this.pendingEditorOpReports = [];
         this.crdtReplicas?.dispose();
         this.outputChannel.dispose();
     }

@@ -32,6 +32,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         Thread(r, "agent-doc-crdt-replica-poller").apply { isDaemon = true }
     }
     private val forwarders = ConcurrentHashMap<String, CrdtReplicaForwarder>()
+    private val shadows = ConcurrentHashMap<String, String>()
     private val applyingRemote = ConcurrentHashMap.newKeySet<String>()
     private val pendingLocalEdits = ConcurrentHashMap<String, AtomicInteger>()
     @Volatile private var pollTask: ScheduledFuture<*>? = null
@@ -52,6 +53,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         pollTask = null
         forwarders.values.forEach { it.deregister() }
         forwarders.clear()
+        shadows.clear()
         executor.shutdownNow()
     }
 
@@ -63,10 +65,16 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val newFragment = event.newFragment.toString()
         val oldFragment = event.oldFragment.toString()
         if (newFragment.isEmpty() && oldFragment.isEmpty()) return
-        val afterText = event.document.text
-        val beforeText = afterText.substring(0, event.offset) +
-            oldFragment +
-            afterText.substring(event.offset + newFragment.length)
+        val beforeText = shadows[filePath] ?: run {
+            seedAndAttachFromDocument(filePath, event.document)
+            return
+        }
+        val nextText = applyEventToShadow(beforeText, event.offset, oldFragment, newFragment) ?: run {
+            shadows.remove(filePath)
+            seedAndAttachFromDocument(filePath, event.document)
+            return
+        }
+        shadows[filePath] = nextText
         val offset = codePointOffset(beforeText, event.offset)
         val deleteLen = oldFragment.codePointCount(0, oldFragment.length)
         markLocalPending(filePath)
@@ -74,6 +82,21 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             try {
                 val forwarder = forwarderFor(filePath, beforeText)
                 forwarder?.forwardLocalDelta(offset, deleteLen, newFragment)
+            } finally {
+                clearLocalPending(filePath)
+            }
+        }
+    }
+
+    private fun seedAndAttachFromDocument(filePath: String, document: Document) {
+        markLocalPending(filePath)
+        executor.execute {
+            try {
+                val text = ApplicationManager.getApplication().runReadAction<String> { document.text }
+                shadows[filePath] = text
+                forwarderFor(filePath, text)
+            } catch (e: Exception) {
+                log.debug("[crdt-replica] seed skipped for $filePath: ${e.message}")
             } finally {
                 clearLocalPending(filePath)
             }
@@ -115,6 +138,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 return@invokeAndWait
             }
             if (before == converged) {
+                shadows[filePath] = converged
                 applied = true
                 return@invokeAndWait
             }
@@ -123,6 +147,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             try {
                 runUndoableRemoteUpdateCommand(document) {
                     applyMinimalDocumentEditUtil(document, before, converged)
+                    shadows[filePath] = converged
                     applied = true
                 }
             } finally {
@@ -198,6 +223,23 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private fun codePointOffset(text: String, utf16Offset: Int): Int {
         val bounded = utf16Offset.coerceIn(0, text.length)
         return text.codePointCount(0, bounded)
+    }
+
+    private fun applyEventToShadow(
+        oldText: String,
+        offset: Int,
+        oldFragment: String,
+        newFragment: String,
+    ): String? {
+        val bounded = offset.coerceIn(0, oldText.length)
+        val oldEnd = bounded + oldFragment.length
+        if (oldEnd > oldText.length) return null
+        if (oldFragment.isNotEmpty() && oldText.substring(bounded, oldEnd) != oldFragment) {
+            return null
+        }
+        return oldText.substring(0, bounded) +
+            newFragment +
+            oldText.substring(oldEnd)
     }
 
     companion object {

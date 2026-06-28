@@ -90,6 +90,12 @@ export function utf16RangeToCodePoints(
     };
 }
 
+export function applyReplicaTextChange(oldText: string, change: ReplicaTextChange): string | null {
+    const start = Math.max(0, Math.min(change.rangeOffset, oldText.length));
+    const end = Math.max(start, Math.min(start + change.rangeLength, oldText.length));
+    return oldText.slice(0, start) + change.text + oldText.slice(end);
+}
+
 export function shouldApplyRemoteUpdate(update: ReplicaRemoteUpdate, clientId: number): boolean {
     return update.origin !== clientId;
 }
@@ -391,6 +397,32 @@ export class CrdtReplicaManager {
         if (oldText === undefined || changes.length !== 1) return;
 
         const change = changes[0];
+        const { offset, deleteLen } = utf16RangeToCodePoints(
+            oldText,
+            change.rangeOffset,
+            change.rangeLength,
+        );
+        const forwarder = await this.forwarderFor(filePath);
+        await forwarder?.forwardLocalDelta(offset, deleteLen, change.text);
+    }
+
+    async handleLocalChangeDelta(
+        filePath: string,
+        changes: readonly ReplicaTextChange[],
+    ): Promise<void> {
+        if (this.applyingRemote.has(filePath)) {
+            return;
+        }
+        const oldText = this.shadows.get(filePath);
+        if (oldText === undefined || changes.length !== 1) return;
+
+        const change = changes[0];
+        const newText = applyReplicaTextChange(oldText, change);
+        if (newText == null) {
+            this.shadows.delete(filePath);
+            return;
+        }
+        this.shadows.set(filePath, newText);
         const { offset, deleteLen } = utf16RangeToCodePoints(
             oldText,
             change.rangeOffset,

@@ -255,7 +255,7 @@ I would allow `agent-doc-document` to expose low-level helpers such as “apply 
 The reason to keep them separate is practical, not aesthetic: editor plugins, parse diagnostics, and read-only tooling should be able to use `agent-doc-document` without pulling in CRDT/merge policy. Realtime and turn lifecycle code should call `agent-doc-merge` explicitly when they need conflict resolution. That makes it much harder for snapshot/turn authority to leak back into the document model under the name of “normalization.”
 
 So my answer is: keep `agent-doc-merge` as a separate crate, built on `agent-doc-document`. If early extraction overhead is annoying, start as distinct modules with the same dependency rule, then split the crate once the API stabilizes.
-<!-- agent:boundary:8ee769cb -->
+<!-- agent:boundary:0d42051b -->
 <!-- /agent:exchange -->
 ## Queue
 

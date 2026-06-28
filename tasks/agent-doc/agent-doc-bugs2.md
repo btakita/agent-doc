@@ -26,6 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -303,7 +304,7 @@ Verification:
 - Latest checked GitHub Actions CI run on `main` was green.
 
 The live fix will not affect the running JetBrains process until IntelliJ restarts; the warning may continue for the already-loaded plugin instance.
-<!-- agent:boundary:47bc7630 -->
+<!-- agent:boundary:b0adf380 -->
 <!-- /agent:exchange -->
 ## Queue
 

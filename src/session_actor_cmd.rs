@@ -2820,22 +2820,76 @@ fn lookup_registry_entry(
     canonical_file: &Path,
 ) -> Result<Option<SessionEntry>> {
     let registry = agent_doc_orchestration::sessions::load_in(base_dir)?;
-    Ok(find_registry_entry(&registry, session_id, canonical_file))
+    Ok(find_registry_entry(
+        base_dir,
+        &registry,
+        session_id,
+        canonical_file,
+    ))
 }
 
 fn find_registry_entry(
+    base_dir: &Path,
     registry: &SessionRegistry,
     session_id: &str,
     canonical_file: &Path,
 ) -> Option<SessionEntry> {
-    let canonical = canonical_file.to_string_lossy();
+    if let Some(entry) = registry.iter().find_map(|(key, entry)| {
+        registry_entry_matches_file(base_dir, key, entry, canonical_file).then(|| entry.clone())
+    }) {
+        return Some(entry);
+    }
+
+    // Legacy registries used the session id as the map key and left `file`
+    // empty. Keep that fallback, but do not let a session-id collision adopt a
+    // registry entry that explicitly names a different document.
     registry.iter().find_map(|(key, entry)| {
-        if entry.session_id == session_id || key == canonical.as_ref() || entry.file == canonical {
+        if entry.session_id == session_id
+            && entry.file.trim().is_empty()
+            && !registry_key_names_foreign_file(base_dir, key, canonical_file)
+        {
             Some(entry.clone())
         } else {
             None
         }
     })
+}
+
+fn registry_entry_matches_file(
+    base_dir: &Path,
+    key: &str,
+    entry: &SessionEntry,
+    canonical_file: &Path,
+) -> bool {
+    path_text_matches_file(base_dir, key, canonical_file)
+        || path_text_matches_file(base_dir, &entry.file, canonical_file)
+}
+
+fn registry_key_names_foreign_file(base_dir: &Path, key: &str, canonical_file: &Path) -> bool {
+    let trimmed = key.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let path = Path::new(trimmed);
+    let looks_path = path.is_absolute()
+        || trimmed.contains(std::path::MAIN_SEPARATOR)
+        || trimmed.contains('/')
+        || path.extension().is_some();
+    looks_path && !path_text_matches_file(base_dir, trimmed, canonical_file)
+}
+
+fn path_text_matches_file(base_dir: &Path, raw: &str, canonical_file: &Path) -> bool {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let path = Path::new(trimmed);
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base_dir.join(path)
+    };
+    absolute.canonicalize().unwrap_or(absolute) == canonical_file
 }
 
 fn resolve_attach_pane(pane: Option<&str>) -> Result<String> {
@@ -3889,6 +3943,70 @@ mod tests {
             supervisor_runtime: runtime,
             supervisor_socket: PathBuf::from("/tmp/supervisor.sock"),
         }
+    }
+
+    fn test_registry_entry(session_id: &str, file: &str, pane: &str) -> SessionEntry {
+        SessionEntry {
+            pane: pane.to_string(),
+            pid: 100,
+            cwd: "/tmp/project".to_string(),
+            started: "now".to_string(),
+            session_id: session_id.to_string(),
+            file: file.to_string(),
+            window: "@1".to_string(),
+            supervisor_instance_id: "sup".to_string(),
+        }
+    }
+
+    #[test]
+    fn registry_lookup_rejects_same_session_entry_for_foreign_document_suprestassoc() {
+        // #suprestassoc: restart-supervisor must not combine the target document
+        // with a stale registry projection from a different document that happens
+        // to carry the same session id.
+        let dir = tempfile::TempDir::new().unwrap();
+        let base = dir.path();
+        let target = base.join("tasks/equityfundingsource.md");
+        let foreign = base.join("tasks/agent-doc-bugs2.md");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "").unwrap();
+        std::fs::write(&foreign, "").unwrap();
+
+        let mut registry = SessionRegistry::new();
+        registry.insert(
+            foreign.to_string_lossy().to_string(),
+            test_registry_entry("shared-session", &foreign.to_string_lossy(), "%12"),
+        );
+
+        assert!(
+            find_registry_entry(base, &registry, "shared-session", &target).is_none(),
+            "foreign document projection must not be adopted by session-id match"
+        );
+    }
+
+    #[test]
+    fn registry_lookup_prefers_exact_document_over_foreign_same_session_suprestassoc() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let base = dir.path();
+        let target = base.join("tasks/equityfundingsource.md");
+        let foreign = base.join("tasks/agent-doc-bugs2.md");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "").unwrap();
+        std::fs::write(&foreign, "").unwrap();
+
+        let mut registry = SessionRegistry::new();
+        registry.insert(
+            foreign.to_string_lossy().to_string(),
+            test_registry_entry("shared-session", &foreign.to_string_lossy(), "%12"),
+        );
+        registry.insert(
+            target.to_string_lossy().to_string(),
+            test_registry_entry("shared-session", "tasks/equityfundingsource.md", "%14"),
+        );
+
+        let entry = find_registry_entry(base, &registry, "shared-session", &target)
+            .expect("target document entry should be found");
+        assert_eq!(entry.pane, "%14");
+        assert_eq!(entry.file, "tasks/equityfundingsource.md");
     }
 
     #[test]

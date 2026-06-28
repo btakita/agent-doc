@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.64
+
+- **`#suprestassoc` — `restart-supervisor` registry re-association is scoped to the requested document, not just the reused session id.** The CLI restart path now resolves registry entries by exact canonical document path first and only keeps the legacy session-id fallback for fileless registry rows; registry keys that explicitly name another document are rejected, so restarting `equityfundingsource.md` cannot adopt a stale `agent-doc-bugs2.md` pane/session projection that happens to carry the same session id. Coverage: deterministic registry lookup regressions for rejecting a foreign same-session entry and preferring the exact target document entry. Live editor/pane confirmation remains an `[operator-verify]` follow-up.
+
 ## 0.34.63
 
 - **Agent-doc skill installs now ship an OKF concept bundle for durable dynamic-context vocabulary.** The shared `SKILL.md` router points concept/vocabulary lookups at `okf/index.md`, while branch procedures remain in runbooks and current-state packs remain in `preflight`/`plan`/`tsift` output. `agent-doc skill install` now reconciles bundled OKF Markdown files beside each managed harness surface (`.claude/skills/agent-doc/okf`, `.codex/okf`, `.opencode/skills/agent-doc/okf`, plus Cursor/Generic paths), reaping stale managed Markdown while preserving local non-Markdown artifacts. README, SPEC, and dev instructions now treat bundled OKF resources as part of the instruction-surface contract. Coverage: installer unit tests for OKF paths/reaping/all-env installs plus the CLI skill-install integration test proving the OKF index is installed.

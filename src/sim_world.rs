@@ -2202,7 +2202,7 @@ fn route_sim_restart_drain_waits_for_dispatch_ready_prompt_before_send() {
 fn route_sim_harness_switch_defers_then_idle_watch_drives_fresh_restart() {
     // `#actorswitchdefer` Part B: the operator switched the doc frontmatter
     // `agent: codex → opencode` while a HEALTHY codex authoritative actor owns the
-    // live pane (the equityfundingsource.md report). Route must DEFER (not replace
+    // live pane (the sampleportal.md report). Route must DEFER (not replace
     // the live codex pane), and the supervisor idle-watch must drive the deferred
     // restart sequence at a quiet dispatch-ready boundary:
     //   harness_change_detected → agent_restart_triggered → agent_restart_performed.
@@ -5185,7 +5185,7 @@ fn hap7_sim_operator_deleted_agent_targeted_node_noted_in_exchange() {
     );
 }
 
-// #mrhpcdrift2: the recurring `ipc_socket_already_applied_live_buffer_diverged`
+// #samplepcdrift2: the recurring `ipc_socket_already_applied_live_buffer_diverged`
 // drift must always be RECOVERED, never silently lost. When the socket reports
 // `already_applied` but the live buffer diverged with the assistant response
 // fragmented out of `exchange` (plus a fresh user keystroke), the recovery
@@ -6237,7 +6237,7 @@ fn jb_cache_conflict_cancel_branch_auto_recovers_via_preflight() {
 // the repro logged on tasks/agent-doc/agent-doc-bugs2.md [#wkbs].
 //
 // Real-world incidents repro'd this on 2026-05-26 (`tasks/software/tsift.md`)
-// and 2026-05-27 (`boost-client/tasks/astro-listings.md`). Sequence:
+// and 2026-05-27 (`sample-app/tasks/astro-listings.md`). Sequence:
 //
 // 1. The agent-doc cycle reaches `Committed` cleanly (response in HEAD).
 // 2. While the cycle was open, IntelliJ surfaced a File Cache Conflict dialog
@@ -6265,7 +6265,7 @@ fn jb_cache_conflict_accept_late_replays_duplicate_response_today() {
     // response payload back into the working tree. `self.doc` ends up with two
     // `### Re: sim closeout` blocks while `self.snapshot` still matches the
     // single-response commit — exactly the shape observed on
-    // `boost-client/tasks/astro-listings.md` on 2026-05-27.
+    // `sample-app/tasks/astro-listings.md` on 2026-05-27.
     //
     // When the binary-side fix lands (plan steps 2–5 in
     // `plan-jb-cache-conflict-accept-duplicates-response.md`), the plugin /

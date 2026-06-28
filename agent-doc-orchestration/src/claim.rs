@@ -895,7 +895,7 @@ mod tests {
     #[test]
     fn registry_entry_matches_claimed_document_for_normalized_registry_key() {
         let tmp = tempdir().unwrap();
-        let file = tmp.path().join("monsterrodholders.md");
+        let file = tmp.path().join("sampleorders.md");
         std::fs::write(&file, "# test\n").unwrap();
         let file = file.canonicalize().unwrap();
         let entry = SessionEntry {
@@ -904,7 +904,7 @@ mod tests {
             cwd: tmp.path().to_string_lossy().to_string(),
             started: "2026-05-02T23:44:31Z".to_string(),
             session_id: "a9421282-fd96-4943-9af5-3561ed5cb799".to_string(),
-            file: "tasks/monsterrodholders.md".to_string(),
+            file: "tasks/sampleorders.md".to_string(),
             window: "@73".to_string(),
             supervisor_instance_id: String::new(),
         };
@@ -922,7 +922,7 @@ mod tests {
         let tmp = tempdir().unwrap();
         let _cwd = crate::test_support::ScopedCurrentDir::set(tmp.path());
 
-        let file = tmp.path().join("tasks/monsterrodholders.md");
+        let file = tmp.path().join("tasks/sampleorders.md");
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
         std::fs::write(&file, "# test\n").unwrap();
         let file = file.canonicalize().unwrap();
@@ -932,7 +932,7 @@ mod tests {
             cwd: tmp.path().to_string_lossy().to_string(),
             started: "2026-05-02T23:44:31Z".to_string(),
             session_id: "a9421282-fd96-4943-9af5-3561ed5cb799".to_string(),
-            file: "tasks/monsterrodholders.md".to_string(),
+            file: "tasks/sampleorders.md".to_string(),
             window: "@73".to_string(),
             supervisor_instance_id: String::new(),
         };

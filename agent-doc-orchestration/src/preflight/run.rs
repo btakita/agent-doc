@@ -1760,10 +1760,10 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
         std::fs::write(
             dir.path().join(".agent-doc/config.toml"),
-            "[ssh.docs.\"tasks/monsterrodholders.md\"]\nprofile = \"missing\"\n",
+            "[ssh.docs.\"tasks/sampleorders.md\"]\nprofile = \"missing\"\n",
         )
         .unwrap();
-        let doc = dir.path().join("tasks/monsterrodholders.md");
+        let doc = dir.path().join("tasks/sampleorders.md");
         std::fs::write(&doc, "---\nagent: codex\n---\n\n## User\n\nHello\n").unwrap();
 
         let err = run(&doc).unwrap_err();
@@ -1819,7 +1819,7 @@ mod tests {
         let dir = setup_project();
         let root = dir.path();
 
-        let doc = root.join("monsterrodholders.md");
+        let doc = root.join("sampleorders.md");
         let committed = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
@@ -1833,7 +1833,7 @@ mod tests {
         snapshot::save(&doc, committed).unwrap();
         Command::new("git")
             .current_dir(root)
-            .args(["add", "monsterrodholders.md"])
+            .args(["add", "sampleorders.md"])
             .output()
             .unwrap();
         Command::new("git")

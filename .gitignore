@@ -6,6 +6,7 @@
 .tsift/
 CLAUDE.local.md
 AGENTS.local.md
+.agent-doc-private-denylist
 plan.md
 research.md
 tmp/

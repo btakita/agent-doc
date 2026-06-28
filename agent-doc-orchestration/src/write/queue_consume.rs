@@ -3420,7 +3420,7 @@ mod core_tests {
         // #free-text-queue-owner-consume: a free-text head that MENTIONS ids in
         // prose (but is not a pure id directive) is still free text — it has no
         // single id to `--done`, so it must complete on being answered. This is
-        // the live repro head from src/boost-client/tasks/monsterrodholders.md.
+        // the live repro head from src/sample-app/tasks/sampleorders.md.
         let id_mentioning = concat!(
             "---\nqueue_active: true\n---\n\n",
             "<!-- agent:queue auto -->\n",
@@ -4193,7 +4193,7 @@ mod core_tests {
         // the full normalized node text never struck it. Matching on the prose prefix
         // must now strike it.
         let head = concat!(
-            "JB `Run Agent Doc` on equityfundingsource.md did not submit\n",
+            "JB `Run Agent Doc` on sampleportal.md did not submit\n",
             "```\n",
             "claude exited cleanly.\n",
             "Press Enter to restart, or 'q' to exit.\n",
@@ -4203,7 +4203,7 @@ mod core_tests {
         let response = concat!(
             "### Re: did not submit — opus\n\n",
             "> **Queue prompt:**\n",
-            "> JB `Run Agent Doc` on equityfundingsource.md did not submit.\n\n",
+            "> JB `Run Agent Doc` on sampleportal.md did not submit.\n\n",
             "Triaged.\n",
         );
         assert!(
@@ -4213,7 +4213,7 @@ mod core_tests {
         // Prose prefix is just the lead line, not the whole log.
         assert_eq!(
             free_text_head_match_prose(head).trim(),
-            "JB `Run Agent Doc` on equityfundingsource.md did not submit"
+            "JB `Run Agent Doc` on sampleportal.md did not submit"
         );
         // FALSE-STRIKE GUARD: a head that is ALL log (no prose lead) has an empty
         // prose prefix and must never match.

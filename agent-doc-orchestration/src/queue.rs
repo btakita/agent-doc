@@ -3426,18 +3426,18 @@ mod tests {
         // multiplicity, just like the single-line free-text case.
         let pin = concat!(
             "---\n",
-            ":round_pushpin: switch harness on equityfundingsource\n",
+            ":round_pushpin: switch harness on sampleportal\n",
             "route defer error\n",
             "---\n",
         );
         let snapshot = parse(pin).unwrap();
         let entries = parse(concat!(
             // authored copy
-            "---\n:round_pushpin: switch harness on equityfundingsource\nroute defer error\n---\n",
+            "---\n:round_pushpin: switch harness on sampleportal\nroute defer error\n---\n",
             // phantom: pin-variant (:pushpin:) — strip_priority_markers collapses it
-            "---\n:pushpin: switch harness on equityfundingsource\nroute defer error\n---\n",
+            "---\n:pushpin: switch harness on sampleportal\nroute defer error\n---\n",
             // phantom: whitespace-only variant — normalize_multiline_dedup_text collapses it
-            "---\n:round_pushpin:   switch harness on equityfundingsource\n\nroute defer error\n---\n",
+            "---\n:round_pushpin:   switch harness on sampleportal\n\nroute defer error\n---\n",
         ))
         .unwrap();
         let deduped = dedup_free_text_heads(&entries, &snapshot)
@@ -3458,8 +3458,8 @@ mod tests {
         // convergence artifact and must both survive — the snapshot-authored
         // multiplicity guard keys them separately.
         let entries = parse(concat!(
-            "---\n:round_pushpin: switch harness on equityfundingsource\nroute defer error\n---\n",
-            "---\n:round_pushpin: restart supervisor on monsterrodholders\ndifferent body\n---\n",
+            "---\n:round_pushpin: switch harness on sampleportal\nroute defer error\n---\n",
+            "---\n:round_pushpin: restart supervisor on sampleorders\ndifferent body\n---\n",
         ))
         .unwrap();
         assert!(

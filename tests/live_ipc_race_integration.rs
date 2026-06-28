@@ -77,7 +77,7 @@ fn snapshot_path(root: &Path, doc: &Path) -> PathBuf {
 }
 
 #[test]
-fn finalize_file_ipc_preserves_live_queue_drift_without_snapshot_absorb() {
+fn finalize_file_ipc_commits_ack_proven_live_queue_drift() {
     let tmp = TempDir::new().unwrap();
     let agent_doc_dir = tmp.path().join(".agent-doc");
     for subdir in [
@@ -184,7 +184,7 @@ fn finalize_file_ipc_preserves_live_queue_drift_without_snapshot_absorb() {
         false
     });
 
-    let response = "<!-- patch:exchange -->\n### Re: live queue IPC race — gpt-5\nChanged paths: src/agent-doc/specs/07-closeout-commands.md, src/agent-doc/tests/live_ipc_race_integration.rs.\nCommands: cargo test finalize_file_ipc_preserves_live_queue_drift_without_snapshot_absorb.\nVerification: passed.\nCommit: deferred to the test harness.\nPush: deferred to the test harness.\nConfidence: high.\n<!-- /patch:exchange -->\n";
+    let response = "<!-- patch:exchange -->\n### Re: live queue IPC race — gpt-5\nChanged paths: src/agent-doc/specs/07-closeout-commands.md, src/agent-doc/tests/live_ipc_race_integration.rs.\nCommands: cargo test finalize_file_ipc_commits_ack_proven_live_queue_drift.\nVerification: passed.\nCommit: deferred to the test harness.\nPush: deferred to the test harness.\nConfidence: high.\n<!-- /patch:exchange -->\n";
 
     agent_doc()
         .current_dir(tmp.path())
@@ -226,16 +226,18 @@ fn finalize_file_ipc_preserves_live_queue_drift_without_snapshot_absorb() {
 
     let head = head_blob(tmp.path());
     assert!(head.contains("### Re: live queue IPC race — gpt-5"));
-    assert!(
-        !head.contains(live_queue_prompt),
-        "live queue prompt typed after preflight must not be absorbed into the response commit:\n{head}"
+    assert_eq!(
+        head.matches(live_queue_prompt).count(),
+        1,
+        "ACK-proven live queue prompt should be committed exactly once:\n{head}"
     );
 
     let snapshot = fs::read_to_string(snapshot_path(tmp.path(), &doc)).unwrap();
     assert!(snapshot.contains("### Re: live queue IPC race — gpt-5"));
-    assert!(
-        !snapshot.contains(live_queue_prompt),
-        "snapshot must stay on content_ours so the live queue prompt remains a next-cycle diff:\n{snapshot}"
+    assert_eq!(
+        snapshot.matches(live_queue_prompt).count(),
+        1,
+        "ACK-proven snapshot should preserve the live queue prompt exactly once:\n{snapshot}"
     );
 
     let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
@@ -251,7 +253,7 @@ fn finalize_file_ipc_preserves_live_queue_drift_without_snapshot_absorb() {
 }
 
 #[test]
-fn finalize_preserves_cycle_1779845677327_scratch_directives_without_snapshot_absorb() {
+fn finalize_commits_ack_proven_cycle_1779845677327_scratch_directives() {
     let tmp = TempDir::new().unwrap();
     let agent_doc_dir = tmp.path().join(".agent-doc");
     for subdir in [
@@ -361,7 +363,7 @@ fn finalize_preserves_cycle_1779845677327_scratch_directives_without_snapshot_ab
         false
     });
 
-    let response = "<!-- patch:exchange -->\n### Re: cycle 1779845677327 IPC race — gpt-5\nChanged paths: src/agent-doc/tests/live_ipc_race_integration.rs.\nCommands: cargo test finalize_preserves_cycle_1779845677327_scratch_directives_without_snapshot_absorb.\nVerification: passed.\nCommit: deferred to the test harness.\nPush: deferred to the test harness.\nConfidence: high.\n<!-- /patch:exchange -->\n";
+    let response = "<!-- patch:exchange -->\n### Re: cycle 1779845677327 IPC race — gpt-5\nChanged paths: src/agent-doc/tests/live_ipc_race_integration.rs.\nCommands: cargo test finalize_commits_ack_proven_cycle_1779845677327_scratch_directives.\nVerification: passed.\nCommit: deferred to the test harness.\nPush: deferred to the test harness.\nConfidence: high.\n<!-- /patch:exchange -->\n";
 
     agent_doc()
         .current_dir(tmp.path())
@@ -413,23 +415,25 @@ fn finalize_preserves_cycle_1779845677327_scratch_directives_without_snapshot_ab
 
     let head = head_blob(tmp.path());
     assert!(head.contains("### Re: cycle 1779845677327 IPC race — gpt-5"));
-    assert!(
-        !head.contains(scratch_prompt),
-        "post-preflight scratch edits must not be absorbed into the response commit:\n{head}"
+    assert_eq!(
+        head.matches(scratch_prompt).count(),
+        1,
+        "ACK-proven scratch prompt should be committed exactly once:\n{head}"
     );
 
     let snapshot = fs::read_to_string(snapshot_path(tmp.path(), &doc)).unwrap();
     assert!(snapshot.contains("### Re: cycle 1779845677327 IPC race — gpt-5"));
-    assert!(
-        !snapshot.contains(scratch_prompt),
-        "snapshot must stay on content_ours so scratch prompt text remains a next-cycle diff:\n{snapshot}"
+    assert_eq!(
+        snapshot.matches(scratch_prompt).count(),
+        1,
+        "ACK-proven snapshot should preserve scratch prompt text exactly once:\n{snapshot}"
     );
 
     let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
     assert!(
         ops_log.contains("ipc_snapshot_adoption_blocked")
             && ops_log.contains("reason=live_prompt_drift_after_preflight"),
-        "IPC snapshot adoption should explicitly block scratch directive absorption:\n{ops_log}"
+        "IPC snapshot adoption should explicitly record live prompt drift:\n{ops_log}"
     );
     assert!(
         !ops_log.contains("snapshot_absorb"),

@@ -800,7 +800,9 @@ fn realtime_workflow_spec_pins_lazily_backed_authority() {
 
     assert!(
         realtime.contains("## Lazily-RS State Backbone")
-            && realtime.contains("`agent-doc-realtime` must use `lazily-rs`")
+            && realtime.contains("`agent-doc-document-realtime` must use `lazily-rs`")
+            && realtime.contains("Other realtime loops")
+            && realtime.contains("tmux, supervisor, editor-plugin, and controller")
             && realtime.contains("lazily::ThreadSafeStateMachine")
             && realtime.contains("lazily::ThreadSafeContext")
             && realtime.contains("lazily-spec")
@@ -847,7 +849,9 @@ fn realtime_workflow_spec_pins_lazily_backed_authority() {
         "realtime workflow spec must keep editor UI/extension-host text-change callbacks fast"
     );
     assert!(
-        spec.contains("realtime state machine") && spec.contains("lazily-rs-backed state"),
+        spec.contains("document realtime state\n  machine")
+            && spec.contains("`agent-doc-document-realtime`")
+            && spec.contains("lazily-rs-backed state"),
         "top-level spec must surface the lazily-backed realtime authority invariant"
     );
 }
@@ -1318,7 +1322,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // regression test-fn name (substring `guard_`). The fix itself drops `md`
         // from `is_partial_staging_relevant_path` and adds no `guard_` token.
         // +2 (#eqrecovery): the
-        // `committed_without_response_body_guard_skips_equityfundingsource_noop_queue_recovery`
+        // `committed_without_response_body_guard_skips_noop_queue_recovery`
         // regression test-fn name plus direct guard/log assertions. It proves a
         // drained queue/backlog recovery carrying queue-turn evidence remains
         // terminal when the commit event is `commit_already_current`.
@@ -1341,7 +1345,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // state's `blocked_closeout` surface instead of a generic repair branch.
         ("agent-doc-orchestration/src/session_check.rs", "reason=") => 3,
         ("agent-doc-orchestration/src/session_check/closeout_guards.rs", "guard_") => 4,
-        // +3 (#mrhqueuepreserve): the audited
+        // +3 (#samplequeuepreserve): the audited
         // `queue_head_removal_guard_proof` diagnostic plus two regression test
         // names proving removed id-backed/free-text queue heads log their proof
         // source instead of disappearing silently.
@@ -1395,7 +1399,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `<!-- no-pending-done-guard -->` still matches the committed HEAD/archive
         // blob and `stuck_captured_cycle` stops false-alarming. Reuses the existing
         // `git::strip_guard_markers` helper — no new flow guard token.
-        // +1 (#mrhipcdrift) for the audited visible-write idle/current guard on
+        // +1 (#sampleipcdrift) for the audited visible-write idle/current guard on
         // the socket already_applied missing-disk-response repair path. The
         // recovery writes only the visible response materialization, then keeps
         // the committed snapshot on content_ours instead of falling back through
@@ -1720,14 +1724,14 @@ fn test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clea
         "<!-- /agent:exchange -->\n\n",
         "## Queue\n\n",
         "<!-- agent:queue preset=\"#spec-test-commit-push\" priority go -->\n",
-        "- advance [#mrhfeed-prop]\n",
+        "- advance [#samplefeed-prop]\n",
         "- advance [#gvj5]\n",
         "<!-- /agent:queue -->\n\n",
         "## Backlog\n\n",
         "<!-- agent:backlog priority queue -->\n",
         "- [ ] [#2qrx] [P1] Offline click-upload backfill\n",
         "- [ ] [#rating-emails] [P2] Enable review opt-in\n",
-        "- [ ] [#mrhfeed-prop] [P3] Existing advance head\n",
+        "- [ ] [#samplefeed-prop] [P3] Existing advance head\n",
         "- [ ] [#cf-txn-email] [P3] Transactional email migration\n",
         "- [ ] [#884m] [P3] News sitemap cleanup\n",
         "- [ ] [#gvj5] [P3] Existing advance head\n",
@@ -1750,7 +1754,7 @@ fn test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clea
     );
     assert!(
         sync_stdout.contains(
-            "skipped already represented backlog id(s): #mrhfeed-prop, #gvj5 (reason: already_in_queue)"
+            "skipped already represented backlog id(s): #samplefeed-prop, #gvj5 (reason: already_in_queue)"
         ),
         "sync should explain ids represented by existing non-do heads:\n{sync_stdout}"
     );
@@ -1760,7 +1764,7 @@ fn test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clea
     );
 
     let synced = fs::read_to_string(&doc).unwrap();
-    assert!(synced.contains("- advance [#mrhfeed-prop]"));
+    assert!(synced.contains("- advance [#samplefeed-prop]"));
     assert!(synced.contains("- advance [#gvj5]"));
     assert!(synced.contains("- do [#2qrx]"));
     assert!(synced.contains("- do [#rating-emails]"));
@@ -1769,7 +1773,7 @@ fn test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clea
     assert!(synced.contains("- do [#tk2p]"));
     assert!(synced.contains("- do [#pdp-video-footage]"));
     assert_eq!(
-        synced.matches("do [#mrhfeed-prop]").count(),
+        synced.matches("do [#samplefeed-prop]").count(),
         0,
         "existing advance head should prevent duplicate do head:\n{synced}"
     );
@@ -2165,6 +2169,19 @@ fn test_agent_doc_merge_is_pure_workspace_boundary() {
             .iter()
             .any(|member| member.as_str() == Some("agent-doc-merge")),
         "agent-doc-merge must stay a first-class workspace crate"
+    );
+    assert!(
+        !members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-document-merge")),
+        "merge policy should stay in agent-doc-merge, not under the pure document crate family"
+    );
+    let realtime_spec =
+        fs::read_to_string(manifest_dir.join("specs/14-realtime-workflow.md")).unwrap();
+    assert!(
+        realtime_spec.contains("`agent-doc-merge` for pure merge semantics")
+            && !realtime_spec.contains("agent-doc-document-merge"),
+        "realtime spec must keep agent-doc-merge as the pure merge-policy boundary"
     );
 
     let merge_manifest =

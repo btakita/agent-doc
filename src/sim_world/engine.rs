@@ -1840,7 +1840,7 @@ impl SimWorld {
     }
 
     /// Model the `ipc_socket_already_applied_live_buffer_diverged` recovery
-    /// (`#mrhpcdrift2`): the socket reported `already_applied` but the live
+    /// (`#samplepcdrift2`): the socket reported `already_applied` but the live
     /// buffer diverged with the assistant response fragmented out of `exchange`.
     /// The recovery materializes the response from `content_ours` back into the
     /// visible buffer so it is never silently lost (zero UNRECOVERED drift),

@@ -6704,7 +6704,7 @@ mod tests {
         let submodule = dir.path().join("src/session-share");
         let tasks = submodule.join("tasks");
         std::fs::create_dir_all(&tasks).unwrap();
-        let registered = tasks.join("monsterrodholders.md");
+        let registered = tasks.join("sampleorders.md");
         let requested = tasks.join("claudescore-3.md");
         std::fs::write(&registered, "# registered\n").unwrap();
         std::fs::write(&requested, "# requested\n").unwrap();
@@ -6713,7 +6713,7 @@ mod tests {
             dir.path(),
             "session-a",
             "%401",
-            "tasks/monsterrodholders.md",
+            "tasks/sampleorders.md",
             1234,
             "@1",
             &submodule.to_string_lossy(),
@@ -6972,7 +6972,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     fn dispatch_only_busy_refusal_message_distinguishes_active_turn_from_cold_wait() {
         use crate::session_actor::ActorState;
         let harness = HarnessConfig::claude();
-        let file = std::path::Path::new("/tmp/monsterrodholders.md");
+        let file = std::path::Path::new("/tmp/sampleorders.md");
 
         let active = dispatch_only_busy_refusal_message(
             &harness,

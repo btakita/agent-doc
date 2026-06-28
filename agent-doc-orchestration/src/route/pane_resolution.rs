@@ -2043,7 +2043,7 @@ mod tests {
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        let doc = dir.path().join("tasks/professional/equityfundingsource.md");
+        let doc = dir.path().join("tasks/professional/sampleportal.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
@@ -2117,8 +2117,8 @@ mod tests {
         );
         assert!(
             err.to_string()
-                .contains("tasks/professional/equityfundingsource.md"),
-            "startup-window refusal should preserve the EFS document path: {err:#}"
+                .contains("tasks/professional/sampleportal.md"),
+            "startup-window refusal should preserve the sample portal document path: {err:#}"
         );
         let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
         assert!(

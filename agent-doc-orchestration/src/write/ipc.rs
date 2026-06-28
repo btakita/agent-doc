@@ -978,11 +978,21 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
             ),
         );
     }
-    let visible_repair_required =
-        !ack_content_contains_latest_response(&candidate, &queue_reconciled_ours);
-    decision.replace_snapshot_with_content_ours_for_live_prompt_drift(
-        &queue_reconciled_ours,
-        visible_repair_required,
+    let live_candidate_contains_response =
+        ack_content_contains_latest_response(&candidate, &queue_reconciled_ours);
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "live_prompt_drift_agent_target_not_snapshot_authority file={} source={} patch_id={} live_candidate_contains_response={} candidate_len={} candidate_hash={} agent_target_len={} agent_target_hash={}",
+            file.display(),
+            source,
+            patch_id.unwrap_or("-"),
+            live_candidate_contains_response,
+            candidate.len(),
+            crate::ops_log::content_hash(&candidate),
+            queue_reconciled_ours.len(),
+            crate::ops_log::content_hash(&queue_reconciled_ours),
+        ),
     );
     true
 }
@@ -1264,7 +1274,7 @@ pub(crate) fn preserve_ipcfullprompt_forensic(
 /// socket reports `already_applied` but the live buffer diverged with the
 /// response fragmented out of `exchange`, materialize `expected_response` back
 /// into the buffer's `exchange` so the response is never silently lost
-/// (`#mrhpcdrift2` zero-UNRECOVERED-drift guarantee). Returns `Some(current)`
+/// (`#samplepcdrift2` zero-UNRECOVERED-drift guarantee). Returns `Some(current)`
 /// unchanged when the response is already materialized (no duplication), and
 /// `None` when the buffer has no parseable `exchange` to repair into.
 pub fn materialize_response_in_current_exchange(
@@ -2629,27 +2639,44 @@ mod ack_content_snapshot_tests {
     }
 
     #[test]
-    fn guard_adopts_clean_content_ours_on_drift() {
+    fn guard_keeps_live_ack_candidate_when_agent_target_would_absorb_drift() {
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("doc.md");
-        // A structurally-clean content_ours that absorbs live drift (differs
-        // outside exchange from both baseline and candidate) must still adopt —
-        // the #dupcontent structural gate does not break the normal path.
-        let clean_ours = "<!-- agent:status -->\nC\n<!-- /agent:status -->\n<!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n";
-        let mut decision = IpcRepairDecision::file_read(DC_CANDIDATE.to_string());
+        let baseline = concat!("<!-- agent:exchange -->\n", "<!-- /agent:exchange -->\n");
+        let live_ack_content = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ operator typed while closeout was running\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let agent_target = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: queued prompt — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let mut decision = IpcRepairDecision::ack_content(live_ack_content.to_string());
+
         let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
             &file,
-            "test",
-            Some("p2"),
-            Some(DC_BASELINE),
-            Some(clean_ours),
+            "socket_ack_content",
+            Some("p-live-no-snapshot"),
+            Some(baseline),
+            Some(agent_target),
             &mut decision,
         );
+
         assert!(
             adopted,
-            "a structurally-clean content_ours that absorbs drift must still be adopted"
+            "live prompt drift should still be classified and logged"
         );
-        assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
+        assert_eq!(
+            decision.snap_source,
+            IpcSnapshotSource::AckContentSidecar,
+            "the binary agent target must not replace the live editor ACK as snapshot authority"
+        );
+        assert_eq!(decision.snapshot_content, live_ack_content);
+        assert_eq!(decision.disk_repair_reason, None);
+        assert!(!decision.redeliver_editor);
     }
 
     #[test]
@@ -2681,25 +2708,20 @@ mod ack_content_snapshot_tests {
 
         assert!(
             adopted,
-            "live editor ACK drift should choose the response target as commit candidate"
+            "live editor ACK drift should be classified and logged"
         );
-        assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
-        assert_eq!(decision.snapshot_content, response_target);
+        assert_eq!(
+            decision.snap_source,
+            IpcSnapshotSource::AckContentSidecar,
+            "the turn path must not promote the agent target to snapshot authority without realtime proof"
+        );
+        assert_eq!(decision.snapshot_content, editor_ack_content);
         assert!(
-            decision.redeliver_editor,
-            "content_ours adoption after a live editor ACK must not silently advance only the snapshot"
+            !decision.redeliver_editor,
+            "the turn path must fail closed/retry rather than repair the live editor from the agent target"
         );
-        assert_eq!(
-            decision.disk_repair_reason,
-            Some(IpcDiskRepairReason::LivePromptDrift)
-        );
-        assert_eq!(
-            decision
-                .editor_bad_state
-                .as_ref()
-                .map(EditorBadStateFingerprint::content),
-            Some(editor_ack_content)
-        );
+        assert_eq!(decision.disk_repair_reason, None);
+        assert_eq!(decision.editor_bad_state, None);
     }
 
     #[test]
@@ -2731,15 +2753,12 @@ mod ack_content_snapshot_tests {
             &mut decision,
         );
 
-        assert!(
-            adopted,
-            "ACK-visible union should still use content_ours as the commit candidate"
-        );
-        assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
-        assert_eq!(decision.snapshot_content, response_target);
+        assert!(adopted, "ACK-visible union should be classified and logged");
+        assert_eq!(decision.snap_source, IpcSnapshotSource::AckContentSidecar);
+        assert_eq!(decision.snapshot_content, editor_ack_content);
         assert!(
             !decision.redeliver_editor,
-            "ACK content already contains the response delta, so no visible repair is required"
+            "ACK content already contains the response delta, so no turn-local repair is required"
         );
         assert_eq!(decision.disk_repair_reason, None);
         assert_eq!(decision.editor_bad_state, None);
@@ -4861,7 +4880,7 @@ mod core_tests {
     use tempfile::TempDir;
 
     #[test]
-    fn ipc_live_prompt_drift_content_ours_ignores_unproven_live_queue_deletions() {
+    fn ipc_live_prompt_drift_keeps_live_ack_candidate_and_records_queue_proof() {
         let dir = tempfile::tempdir().unwrap();
         let baseline = concat!(
             "---\nqueue_active: true\n---\n\n",
@@ -4912,25 +4931,31 @@ mod core_tests {
         );
 
         assert!(blocked);
-        assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
-        assert!(
-            decision
-                .snapshot_content
-                .contains("### Re: original prompt — gpt-5")
+        assert_eq!(
+            decision.snap_source,
+            IpcSnapshotSource::AckContentSidecar,
+            "turn closeout must not promote the agent target to snapshot authority"
         );
         assert!(
             !decision
                 .snapshot_content
-                .contains("❯ live prompt after preflight")
-        );
-        assert!(
-            !decision.snapshot_content.contains("do [#manual]"),
-            "live queue addition must not be absorbed into the response commit:\n{}",
+                .contains("### Re: original prompt — gpt-5"),
+            "the missing response remains unproven; the caller must retry instead of saving a snapshot:\n{}",
             decision.snapshot_content
         );
         assert!(
-            decision.snapshot_content.contains("do [#deleted]"),
-            "unproven live queue deletion from a stale IPC candidate must not be folded into content_ours:\n{}",
+            decision
+                .snapshot_content
+                .contains("❯ live prompt after preflight")
+        );
+        assert!(
+            decision.snapshot_content.contains("do [#manual]"),
+            "operator-visible queue additions stay in the live ACK candidate:\n{}",
+            decision.snapshot_content
+        );
+        assert!(
+            !decision.snapshot_content.contains("do [#deleted]"),
+            "the live ACK candidate is preserved as observed; no turn-local repair is applied:\n{}",
             decision.snapshot_content
         );
         let log =

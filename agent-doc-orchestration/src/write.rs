@@ -670,11 +670,11 @@ fn strip_markdown_checkbox_marker(line: &str) -> Option<&str> {
 ///    own target), so a new prompt, a response-body rewrite, or a re-typed answer
 ///    can never be spliced — those stay on the carry-forward / fail-closed path;
 /// 2. none of the user's added lines (the candidate-added lines the response did
-///    not write) is a carry-forward signal — a prompt, question, `dispatch` /
-///    `do #` directive, or `#tag`. Those are next-cycle instructions and are
-///    preserved as a next-cycle diff, never folded into the commit (this keeps
-///    the `EFS_LIVE_PROMPT` / scratch-directive / `#next-steps` integration tests
-///    carrying their content forward);
+///    not write) is an instruction signal — a prompt, question, `dispatch` /
+///    `do #` directive, or `#tag`. This helper is only the conservative
+///    disjoint-content fast path. Instruction-shaped live edits require the
+///    realtime/IPC proof path to preserve them in the same turn; without that
+///    proof they stay on the carry-forward / fail-closed path;
 /// 3. a 3-way merge (base = `baseline`, ours = `content_ours`, theirs =
 ///    `candidate`) produces no git conflict markers and preserves every non-blank
 ///    line the response added AND every non-blank line the user added — `git
@@ -957,7 +957,7 @@ fn dropped_queue_prompt_lines_after_content_ours(
 ///
 /// This used to fold candidate queue deletions into `content_ours`, but the
 /// candidate can be stale editor/ack content. On active docs like
-/// `monsterrodholders.md`, that made an old empty queue body authoritative and
+/// `sampleorders.md`, that made an old empty queue body authoritative and
 /// repeatedly erased live queue work. Preserve `content_ours`; callers log the
 /// ignored deletion count and keep the deletion out of forward-merge unions.
 fn preserve_content_ours_over_live_queue_deletions(

@@ -6102,7 +6102,7 @@ mod tests {
             Some(crate_root.clone())
         );
 
-        let efs_doc = write_doc("tasks/professional/equityfundingsource.md");
+        let efs_doc = write_doc("tasks/professional/sampleportal.md");
         assert!(
             dogfood_agent_doc_crate_root(&efs_doc).is_none(),
             "unrelated project sessions must not inherit agent-doc auto-install"

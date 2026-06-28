@@ -210,7 +210,7 @@ pub(crate) fn duplicate_exchange_tail_prompt_lines(
         // typed — even when its text matches a previously-answered prompt (e.g.
         // a re-typed "go"/"yes"/"continue") — and must never be scrubbed.
         // Without this guard the text-only match silently ate live prompts
-        // (#ipcfullprompt-recur: "go" on monsterrodholders.md).
+        // (#ipcfullprompt-recur: "go" on sampleorders.md).
         if !trimmed.starts_with('❯') {
             return None;
         }

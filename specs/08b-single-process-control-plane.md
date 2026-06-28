@@ -483,7 +483,7 @@ idle supervisor may run `make install` only when the served document is an
 agent-doc dogfood session document: a document inside the agent-doc source checkout, under
 `tasks/agent-doc/`, or one of the legacy agent-doc task documents. A sibling
 project session in the same superproject, such as
-`tasks/professional/equityfundingsource.md` or `tasks/software/lazily-rs.md`,
+`tasks/professional/sampleportal.md` or `tasks/software/lazily-rs.md`,
 must not resolve `src/agent-doc` as its auto-install crate root even when the
 env/frontmatter/project auto-install knob is truthy.
 

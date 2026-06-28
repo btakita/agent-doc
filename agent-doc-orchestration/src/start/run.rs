@@ -2171,18 +2171,18 @@ mod tests {
     #[test]
     fn idle_queue_drain_payload_uses_trigger_for_codex() {
         let payload = idle_queue_drain_payload(
-            "tasks/monsterrodholders.md",
+            "tasks/sampleorders.md",
             &crate::harness::HarnessConfig::codex(),
-            "JB Run Agent Doc on monsterrodholders.md stalled.",
+            "JB Run Agent Doc on sampleorders.md stalled.",
         );
 
-        assert_eq!(payload, "agent-doc tasks/monsterrodholders.md");
+        assert_eq!(payload, "agent-doc tasks/sampleorders.md");
         assert!(!payload.contains("Agent-doc active queue continuation"));
-        assert!(!payload.contains("JB Run Agent Doc on monsterrodholders.md stalled."));
+        assert!(!payload.contains("JB Run Agent Doc on sampleorders.md stalled."));
         assert_eq!(
             idle_queue_drain_payload_kind(
                 &crate::harness::HarnessConfig::codex(),
-                "JB Run Agent Doc on monsterrodholders.md stalled."
+                "JB Run Agent Doc on sampleorders.md stalled."
             ),
             "trigger"
         );

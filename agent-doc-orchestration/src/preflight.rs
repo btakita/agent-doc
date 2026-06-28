@@ -3559,7 +3559,7 @@ mod tests {
     }
     #[test]
     fn detect_identity_collisions_flags_preset_vs_backlog_id() {
-        // #preset-item-id-collision: monsterrodholders.md repro — a #next-steps
+        // #preset-item-id-collision: sampleorders.md repro — a #next-steps
         // prompt preset AND an active #next-steps backlog item collide.
         let content = concat!(
             "---\n",

@@ -610,14 +610,14 @@ mod tests {
     #[test]
     fn column_memory_cross_root_doc_restores_from_submodule_path() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let submodule = tmp.path().join("src/boost-client/tasks");
+        let submodule = tmp.path().join("src/sample-app/tasks");
         std::fs::create_dir_all(&submodule).unwrap();
 
         let root_doc = tmp.path().join("tasks/bugs.md");
         std::fs::create_dir_all(root_doc.parent().unwrap()).unwrap();
         std::fs::write(&root_doc, "---\nagent_doc_session: root-sess\n---\n").unwrap();
 
-        let child_doc = submodule.join("monsterrodholders.md");
+        let child_doc = submodule.join("sampleorders.md");
         std::fs::write(&child_doc, "---\nagent_doc_session: monster-sess\n---\n").unwrap();
 
         let root_path = root_doc
@@ -769,7 +769,7 @@ mod tests {
     fn explicit_non_agent_window_preserves_layout_when_session_lacks_agent_doc_window() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
-        let subroot = root.join("src/boost-client");
+        let subroot = root.join("src/sample-app");
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::fs::create_dir_all(root.join("tasks")).unwrap();
         std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
@@ -787,7 +787,7 @@ mod tests {
             "# plain markdown without agent-doc frontmatter\n",
         )
         .unwrap();
-        let child_doc = subroot.join("tasks/monsterrodholders.md");
+        let child_doc = subroot.join("tasks/sampleorders.md");
         std::fs::write(
             &child_doc,
             "---\nagent_doc_session: monster-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",

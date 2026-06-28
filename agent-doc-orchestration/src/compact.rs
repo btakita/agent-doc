@@ -423,7 +423,7 @@ fn non_exchange_opening_markers(content: &str) -> BTreeMap<String, String> {
 /// `#compactqattr`: fail closed if a compaction rewrite altered any non-exchange
 /// component's opening marker — most importantly dropping inline attributes
 /// (`priority`, `preset="..."`, `go`) from an `agent:queue` marker. Operator
-/// observed (monsterrodholders.md) post-compaction wiping all `agent:queue`
+/// observed (sampleorders.md) post-compaction wiping all `agent:queue`
 /// attributes ("too much blast radius").
 ///
 /// The deterministic compaction rebuild (`Component::replace_content`, byte-offset
@@ -2495,7 +2495,7 @@ mod tests {
             "7. **Committed / Awaiting Wire**: lender committed.\n",
             "6. **Ready to Commit**: lender account is linked.\n",
             "5. **Lender Setup**: admin needs setup.\n",
-            "4. **Accreditation Current**: EFS approved.\n",
+            "4. **Accreditation Current**: sample portal approved.\n",
             "3. **Accreditation Under Review**: submitted.\n",
             "2. **Accreditation Not Started**: lender still needs to submit.\n",
             "1. **Signed Up**: account exists.\n",
@@ -2506,7 +2506,7 @@ mod tests {
             "7. **Committed / Awaiting Wire**: lender committed.\n",
             "6. **Ready to Commit**: lender account is linked.\n",
             "5. **Lender Setup**: admin needs setup.\n",
-            "4. **Accreditation Current**: EFS approved.\n",
+            "4. **Accreditation Current**: sample portal approved.\n",
             "3. **Accreditation Under Review**: submitted.\n",
             "2. **Accreditation Not Started**: lender still needs to submit.\n",
             "1. **Signed Up**: account exists.\n\n",
@@ -2515,7 +2515,7 @@ mod tests {
             "1. **Signed Up**: account exists.\n",
             "2. **Accreditation Not Started**: lender still needs to submit.\n",
             "3. **Accreditation Under Review**: submitted.\n",
-            "4. **Accreditation Current**: EFS approved.\n",
+            "4. **Accreditation Current**: sample portal approved.\n",
             "5. **Lender Setup**: admin needs setup.\n",
             "6. **Ready to Commit**: lender account is linked.\n",
             "7. **Committed / Awaiting Wire**: lender committed.\n",
@@ -2717,7 +2717,7 @@ mod tests {
     /// `#compactqattr`: compacting the exchange must leave every non-exchange
     /// component opening marker byte-identical, including inline attributes
     /// (`priority`, `preset="..."`, `go`) on an `agent:queue` marker. Operator
-    /// observed (monsterrodholders.md) post-compaction wiping all `agent:queue`
+    /// observed (sampleorders.md) post-compaction wiping all `agent:queue`
     /// attributes ("too much blast radius").
     #[test]
     fn compact_preserves_queue_marker_inline_attributes() {

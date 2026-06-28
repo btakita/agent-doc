@@ -4097,7 +4097,7 @@ Done.\n\
     fn extract_required_response_blocks_preserves_code_fence_context() {
         let diff = "--- snapshot\n+++ document\n@@ -1,2 +1,7 @@\n\
             ctx\n\
-            +❯ In src/boost-client, why did patchback miss the prefix?\n\
+            +❯ In src/sample-app, why did patchback miss the prefix?\n\
             +See my inquiry:\n\
             +```text\n\
             +line one\n\
@@ -4106,7 +4106,7 @@ Done.\n\
 
         let blocks = extract_required_response_blocks(diff);
         assert_eq!(blocks.len(), 1);
-        assert!(blocks[0].contains("❯ In src/boost-client"));
+        assert!(blocks[0].contains("❯ In src/sample-app"));
         assert!(blocks[0].contains("```text\nline one\nline two\n```"));
     }
 
@@ -4139,7 +4139,7 @@ Done.\n\
     fn prompt_prefix_normalization_targets_preserve_prompt_context_and_skip_fences() {
         let diff = "--- snapshot\n+++ document\n@@ -1,2 +1,7 @@\n\
             ctx\n\
-            +❯ In src/boost-client, why did patchback miss the prefix?\n\
+            +❯ In src/sample-app, why did patchback miss the prefix?\n\
             +See my inquiry:\n\
             +- keep this markdown bullet bare\n\
             +  - keep nested markdown bullets bare\n\

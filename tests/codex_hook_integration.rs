@@ -99,7 +99,7 @@ fn session_check_codex_final_gate_blocks_on_active_auto_queue() {
 
 #[test]
 fn codex_hook_cli_replays_plain_final_answer_after_repeated_auto_queue_stop() {
-    // Reproduces the monsterrodholders shape: a clean template/CRDT Codex
+    // Reproduces the sampleorders shape: a clean template/CRDT Codex
     // session doc has an active auto queue, the first Stop hook asks Codex to
     // continue in-pane, and the second Stop hook receives a plain final answer
     // for the same queue head. The answer must be written into agent:exchange.
@@ -151,7 +151,7 @@ fn codex_hook_cli_replays_plain_final_answer_after_repeated_auto_queue_stop() {
         "session_id": "codex-session",
         "turn_id": "turn-1",
         "cwd": tmp.path().display().to_string(),
-        "last_assistant_message": "Completed the queue task.\n\nVerification: reproduced the monsterrodholders Codex stop-hook shape.",
+        "last_assistant_message": "Completed the queue task.\n\nVerification: reproduced the sampleorders Codex stop-hook shape.",
         "stop_hook_active": true,
     });
 
@@ -170,9 +170,7 @@ fn codex_hook_cli_replays_plain_final_answer_after_repeated_auto_queue_stop() {
     let content = fs::read_to_string(&doc).unwrap();
     assert!(content.contains("### Re: do [#seopdp] deploy product page — gpt-5"));
     assert!(content.contains("Completed the queue task."));
-    assert!(
-        content.contains("Verification: reproduced the monsterrodholders Codex stop-hook shape.")
-    );
+    assert!(content.contains("Verification: reproduced the sampleorders Codex stop-hook shape."));
     assert!(
         !content.contains("- do [#seopdp] deploy product page"),
         "completed head should not remain live:\n{content}"

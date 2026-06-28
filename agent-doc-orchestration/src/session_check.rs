@@ -1772,7 +1772,7 @@ mod tests {
         .unwrap();
         doc
     }
-    // `#queue-clear-unrun-items` — committed doc with the six monsterrodholders
+    // `#queue-clear-unrun-items` — committed doc with the six sampleorders
     // heads removed from the queue while their backlog items stay open, the
     // convqa head consumed/done. Recorded preflight heads = all six.
     fn queue_clear_fixture(queue_body: &str) -> String {
@@ -1815,7 +1815,7 @@ mod tests {
             .unwrap();
         crate::capture::mark_committed(doc).unwrap();
     }
-    // `#manual-queue-head-loss` — a fixture mirroring the monsterrodholders repro:
+    // `#manual-queue-head-loss` — a fixture mirroring the sampleorders repro:
     // backlog keeps `#shipstationaudit` open; the committed queue does NOT contain
     // the head (it was dropped during a stalled dispatch). The head was never in
     // the preflight-recorded set; only `observe_live_queue_heads` (the live
@@ -2540,8 +2540,8 @@ Body\n\
         ));
     }
     #[test]
-    fn committed_without_response_body_guard_skips_equityfundingsource_noop_queue_recovery() {
-        // #eqrecovery: the equityfundingsource reentrant recovery cycle had already
+    fn committed_without_response_body_guard_skips_sampleportal_noop_queue_recovery() {
+        // #eqrecovery: the sampleportal reentrant recovery cycle had already
         // converged the drained queue/backlog state. A later no-op closeout still
         // carried queue-turn evidence, but `commit_already_current` means no new
         // binary-owned content was committed without a response body.
@@ -6899,7 +6899,7 @@ Body\n\
     #[test]
     fn free_text_queue_head_guard_fires_when_binary_consume_lacks_response() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let head = "monsterrodholders.md queue items that are completed lack exchange history";
+        let head = "sampleorders.md queue items that are completed lack exchange history";
         let with_head = format!(
             concat!(
                 "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
@@ -6941,7 +6941,7 @@ Body\n\
     #[test]
     fn free_text_queue_head_guard_passes_with_committed_response_echo() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let head = "monsterrodholders.md queue items that are completed lack exchange history";
+        let head = "sampleorders.md queue items that are completed lack exchange history";
         let with_head = format!(
             concat!(
                 "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
@@ -7280,13 +7280,13 @@ Body\n\
             "---\nagent_doc_session: test\n---\n\n",
             "<!-- agent:exchange -->\n",
             "<!-- agent:boundary:committed -->\n",
-            "❯ JB Run Agent Doc on monsterrodholders.md stalled.\n",
+            "❯ JB Run Agent Doc on sampleorders.md stalled.\n",
             "### Re: do [#6cmx] — gpt-5\n\nI gated #6cmx.\n",
             "<!-- /agent:exchange -->\n",
         );
         assert_eq!(
             unresolved_exchange_prompt_in_content(content).as_deref(),
-            Some("JB Run Agent Doc on monsterrodholders.md stalled."),
+            Some("JB Run Agent Doc on sampleorders.md stalled."),
             "a free-text prompt followed only by a queue-continuation response must stay unresolved"
         );
     }
@@ -7613,7 +7613,7 @@ Body\n\
             "Deploy completed.\n\n",
             "| File | Change |\n",
             "|------|--------|\n",
-            "| mrh-performance.php | Reverted caching changes |\n",
+            "| sample-performance.php | Reverted caching changes |\n",
             "| test script | Updated assertions |\n",
             "<!-- /agent:exchange -->\n",
         );

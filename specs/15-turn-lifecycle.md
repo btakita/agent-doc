@@ -4,10 +4,10 @@ This spec owns the document turn lifecycle state machine. It is distinct from
 the realtime document-authority state machine in
 [Real-Time Workflow Authority](14-realtime-workflow.md).
 
-Realtime owns live source-of-truth selection, editor/disk epochs, merge/apply
-planning, realtime parse-state projection, and post-apply visible-state
-verification. The turn lifecycle owns admission, preflight, agent dispatch,
-response capture, pending-operation
+Document realtime owns live source-of-truth selection, editor/disk epochs,
+merge/apply planning, realtime parse-state projection, and post-apply
+visible-state verification. The turn lifecycle owns admission, preflight, agent
+dispatch, response capture, pending-operation
 decisions, selected write policy, backup/audit updates, and commits.
 The Rust pure lifecycle state machine lives in `agent-doc-turn`.
 
@@ -15,7 +15,7 @@ Hard invariants:
 
 - document turn lifecycle owns commits;
 - agent-doc-merge does not commit;
-- `agent-doc-realtime` does not commit;
+- `agent-doc-document-realtime` does not commit;
 - realtime handoff proof is an input to turn closeout, not a commit by itself;
 - turn-executor readiness gates dispatch, but executors do not own document
   merge, queue projection, or commits;
@@ -133,7 +133,8 @@ Forbidden transitions:
 
 - `RealtimeApplyPending -> CommitPending` without a realtime handoff proof;
 - `ResponseCaptured -> CommitPending` without realtime merge/apply verification;
-- `agent-doc-merge` or `agent-doc-realtime` directly entering `CommitPending`;
+- `agent-doc-merge` or `agent-doc-document-realtime` directly entering
+  `CommitPending`;
 - `PreflightOpened -> PromptDispatched` while realtime parse state is
   `ParseBlocked`;
 - `CommitPending -> Committed` when the current source-of-truth document lost
@@ -273,9 +274,9 @@ selected write policy, post-apply verification, backup/audit persistence, and
 post-commit cleanup.
 
 `agent-doc-merge` has no access to git, disk, sockets, editor APIs, clocks,
-cycle state, or ops logs. `agent-doc-realtime` may deliver and verify a patch,
-but it must hand the result back to this lifecycle state machine. It must not
-mark a cycle committed, write terminal cycle state, or decide that an
+cycle state, or ops logs. `agent-doc-document-realtime` may deliver and verify
+a patch, but it must hand the result back to this lifecycle state machine. It
+must not mark a cycle committed, write terminal cycle state, or decide that an
 interrupted turn is complete.
 
 ## Crash And Retry Rules

@@ -2294,7 +2294,7 @@ Fix applied to skip non-agent <!-- sequences.
             "- do [#vapk]\n",
             "- [#s93y]: Add to resume\n",
             "- [#ca8w]\n",
-            "Add MonsterRodHolders and EFS to the resume if not already added.",
+            "Add SampleOrders and sample portal to the resume if not already added.",
         );
         let snapshot = concat!(
             "- [#yfg1]: I dropped the real-time asset-generation. Kept the investor demos.\n",
@@ -2303,7 +2303,7 @@ Fix applied to skip non-agent <!-- sequences.
             "- do [#vapk]\n",
             "- [#s93y]: Add to\n",
             "- [#ca8w]\n",
-            "Add MonsterRodHolders and EFS to the resume if not already added.",
+            "Add SampleOrders and sample portal to the resume if not already added.",
         );
         assert!(
             append_patch_already_present(live, snapshot),
@@ -2336,7 +2336,7 @@ Fix applied to skip non-agent <!-- sequences.
             "- [#yfg1]: ok\n",
             "- [#s93y]: Add to resume\n",
             "- [#ca8w]\n",
-            "Add MonsterRodHolders and EFS to the resume if not already added.\n",
+            "Add SampleOrders and sample portal to the resume if not already added.\n",
             "<!-- /agent:exchange -->\n",
         );
         let components = parse(doc).unwrap();
@@ -2345,7 +2345,7 @@ Fix applied to skip non-agent <!-- sequences.
             "- [#yfg1]: ok\n",
             "- [#s93y]: Add to\n",
             "- [#ca8w]\n",
-            "Add MonsterRodHolders and EFS to the resume if not already added.",
+            "Add SampleOrders and sample portal to the resume if not already added.",
         );
         let result = exchange.append_with_boundary(doc, snapshot, "70bccf9b");
         assert_eq!(

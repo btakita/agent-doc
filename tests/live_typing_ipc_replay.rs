@@ -9,16 +9,16 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
-const EFS_LIVE_PROMPT: &str = "Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrower sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?";
+const LIVE_TYPING_PROMPT: &str = "Does the portal message center have admin notifications? Can the operator reply from email and have the reply appear in the portal chat? Can portal users receive an email when the operator responds?";
 
 fn agent_doc() -> Command {
     cargo_bin_cmd!("agent-doc")
 }
 
-fn equityfundingsource_doc_content() -> String {
+fn live_typing_doc_content() -> String {
     concat!(
         "---\n",
-        "agent_doc_session: equityfundingsource-replay\n",
+        "agent_doc_session: live-typing-replay\n",
         "agent: codex\n",
         "agent_doc_format: template\n",
         "agent_doc_write: crdt\n",
@@ -29,17 +29,17 @@ fn equityfundingsource_doc_content() -> String {
         "---\n\n",
         "## Status\n\n",
         "<!-- agent:status patch=replace -->\n",
-        "EFS workers.dev production is deployed; custom-domain cutover is deferred.\n",
+        "The portal test fixture is deployed; custom-domain cutover is deferred.\n",
         "<!-- /agent:status -->\n\n",
         "## Exchange\n\n",
         "<!-- agent:exchange patch=append -->\n",
         "### Session Summary\n\n",
-        "*Compacted. Content archived to `.agent-doc/archives/efs-replay.md`*\n\n",
-        "- In addition to the Apply for Loan, I need a Borrower Login button.\n",
-        "- The footer email should be info@equityfundingsource.com\n",
+        "*Compacted. Content archived to `.agent-doc/archives/live-typing-replay.md`*\n\n",
+        "- In addition to the apply form, I need an account login button.\n",
+        "- The footer email should use the shared support mailbox.\n",
         "- http://localhost:4200/apply responds with a 404\n\n",
         "#spec-test-commit-push-deploy\n",
-        "<!-- agent:boundary:efsreplay -->\n",
+        "<!-- agent:boundary:livetype -->\n",
         "<!-- /agent:exchange -->\n",
         "###\n",
         "<!--\n",
@@ -48,7 +48,7 @@ fn equityfundingsource_doc_content() -> String {
         "<!-- /agent:queue -->\n\n",
         "## Backlog\n\n",
         "<!-- agent:backlog -->\n",
-        "- [ ] [#efsreplay] Deterministic IPC replay fixture.\n",
+        "- [ ] [#livetype] Deterministic IPC replay fixture.\n",
         "<!-- /agent:backlog -->\n"
     )
     .to_string()
@@ -155,7 +155,7 @@ impl ReplayProject {
 
     fn type_live_prompt_after_preflight(&self) {
         let current = fs::read_to_string(&self.doc).unwrap();
-        let updated = current.replace("<!--\n-->\n", &format!("<!--\n{EFS_LIVE_PROMPT}\n-->\n"));
+        let updated = current.replace("<!--\n-->\n", &format!("<!--\n{LIVE_TYPING_PROMPT}\n-->\n"));
         assert_ne!(current, updated, "fixture comment shell should be present");
         fs::write(&self.doc, updated).unwrap();
     }
@@ -180,7 +180,7 @@ fn setup_replay_project(with_patches_dir: bool) -> ReplayProject {
     }
 
     let doc = tmp.path().join("session.md");
-    let original = equityfundingsource_doc_content();
+    let original = live_typing_doc_content();
     fs::write(&doc, &original).unwrap();
     init_git_repo(tmp.path(), &doc);
 
@@ -269,13 +269,13 @@ fn assert_live_prompt_visible_but_uncommitted(project: &ReplayProject, topic: &s
         "response missing from visible file:\n{visible}"
     );
     assert!(
-        visible.contains(EFS_LIVE_PROMPT),
-        "live EFS prompt should remain visible for the next cycle:\n{visible}"
+        visible.contains(LIVE_TYPING_PROMPT),
+        "live prompt should remain visible for the next cycle:\n{visible}"
     );
     assert_eq!(
-        visible.matches(EFS_LIVE_PROMPT).count(),
+        visible.matches(LIVE_TYPING_PROMPT).count(),
         1,
-        "live EFS prompt should not duplicate:\n{visible}"
+        "live prompt should not duplicate:\n{visible}"
     );
 
     let head = project.head();
@@ -284,8 +284,8 @@ fn assert_live_prompt_visible_but_uncommitted(project: &ReplayProject, topic: &s
         "response missing from HEAD:\n{head}"
     );
     assert!(
-        !head.contains(EFS_LIVE_PROMPT),
-        "live EFS prompt typed after preflight must not be committed:\n{head}"
+        !head.contains(LIVE_TYPING_PROMPT),
+        "live prompt typed after preflight must not be committed:\n{head}"
     );
 
     let snapshot = project.snapshot();
@@ -294,8 +294,45 @@ fn assert_live_prompt_visible_but_uncommitted(project: &ReplayProject, topic: &s
         "response missing from snapshot:\n{snapshot}"
     );
     assert!(
-        !snapshot.contains(EFS_LIVE_PROMPT),
-        "snapshot must stay on content_ours and leave the live EFS prompt for the next cycle:\n{snapshot}"
+        !snapshot.contains(LIVE_TYPING_PROMPT),
+        "snapshot must stay on content_ours and leave the live prompt for the next cycle:\n{snapshot}"
+    );
+}
+
+fn assert_live_prompt_visible_and_committed(project: &ReplayProject, topic: &str) {
+    let heading = response_heading(topic);
+    let body = response_payload_line(topic);
+    let visible = project.visible();
+    assert!(
+        visible.contains(&heading) && visible.contains(&body),
+        "response missing from visible file:\n{visible}"
+    );
+    assert_eq!(
+        visible.matches(LIVE_TYPING_PROMPT).count(),
+        1,
+        "live prompt should remain visible exactly once:\n{visible}"
+    );
+
+    let head = project.head();
+    assert!(
+        head.contains(&heading) && head.contains(&body),
+        "response missing from HEAD:\n{head}"
+    );
+    assert_eq!(
+        head.matches(LIVE_TYPING_PROMPT).count(),
+        1,
+        "ACK-proven live prompt should be committed exactly once:\n{head}"
+    );
+
+    let snapshot = project.snapshot();
+    assert!(
+        snapshot.contains(&heading) && snapshot.contains(&body),
+        "response missing from snapshot:\n{snapshot}"
+    );
+    assert_eq!(
+        snapshot.matches(LIVE_TYPING_PROMPT).count(),
+        1,
+        "ACK-proven snapshot should preserve the live prompt exactly once:\n{snapshot}"
     );
 }
 
@@ -325,8 +362,8 @@ fn assert_retry_left_live_prompt_without_response(project: &ReplayProject, topic
     let body = response_payload_line(topic);
     let visible = project.visible();
     assert!(
-        visible.contains(EFS_LIVE_PROMPT),
-        "live EFS prompt should remain visible for retry:\n{visible}"
+        visible.contains(LIVE_TYPING_PROMPT),
+        "live prompt should remain visible for retry:\n{visible}"
     );
     assert!(
         !visible.contains(&heading) && !visible.contains(&body),
@@ -335,8 +372,8 @@ fn assert_retry_left_live_prompt_without_response(project: &ReplayProject, topic
 
     let head = project.head();
     assert!(
-        !head.contains(EFS_LIVE_PROMPT),
-        "live EFS prompt typed after preflight must not be committed:\n{head}"
+        !head.contains(LIVE_TYPING_PROMPT),
+        "live prompt typed after preflight must not be committed:\n{head}"
     );
     assert!(
         !head.contains(&heading) && !head.contains(&body),
@@ -345,7 +382,7 @@ fn assert_retry_left_live_prompt_without_response(project: &ReplayProject, topic
 
     let snapshot = project.snapshot();
     assert!(
-        !snapshot.contains(EFS_LIVE_PROMPT),
+        !snapshot.contains(LIVE_TYPING_PROMPT),
         "retry failure must not absorb the live prompt into the snapshot:\n{snapshot}"
     );
     assert!(
@@ -355,7 +392,7 @@ fn assert_retry_left_live_prompt_without_response(project: &ReplayProject, topic
 }
 
 #[test]
-fn equityfundingsource_socket_ipc_replays_typing_during_finalize() {
+fn socket_ipc_replays_live_typing_during_finalize() {
     let project = setup_replay_project(true);
     project.type_live_prompt_after_preflight();
 
@@ -388,7 +425,7 @@ fn equityfundingsource_socket_ipc_replays_typing_during_finalize() {
         "fake socket listener did not start"
     );
 
-    run_finalize(&project, "EFS socket replay", 0, &[]);
+    run_finalize(&project, "socket live typing replay", 0, &[]);
 
     let _ = fs::remove_file(agent_doc_orchestration::ipc_socket::socket_path(
         project.root(),
@@ -402,14 +439,14 @@ fn equityfundingsource_socket_ipc_replays_typing_during_finalize() {
         .expect("socket listener should capture IPC payload");
     assert!(
         payload.get("fullContent").is_none(),
-        "EFS socket replay must stay component-scoped: {payload}"
+        "socket live typing replay must stay component-scoped: {payload}"
     );
-    assert_live_prompt_visible_but_uncommitted(&project, "EFS socket replay");
+    assert_live_prompt_visible_and_committed(&project, "socket live typing replay");
     assert_no_patch_jsons(&project);
 }
 
 #[test]
-fn equityfundingsource_file_ipc_ack_sidecar_replays_typing_during_finalize() {
+fn file_ipc_ack_sidecar_replays_live_typing_during_finalize() {
     let project = setup_replay_project(true);
     project.type_live_prompt_after_preflight();
 
@@ -446,7 +483,7 @@ fn equityfundingsource_file_ipc_ack_sidecar_replays_typing_during_finalize() {
         false
     });
 
-    run_finalize(&project, "EFS file IPC replay", 0, &[]);
+    run_finalize(&project, "file IPC live typing replay", 0, &[]);
     assert!(watcher.join().unwrap(), "file IPC watcher saw no patch");
 
     let ack_content = seen_ack
@@ -455,20 +492,20 @@ fn equityfundingsource_file_ipc_ack_sidecar_replays_typing_during_finalize() {
         .clone()
         .expect("watcher should capture ACK sidecar content");
     assert!(
-        ack_content.contains(EFS_LIVE_PROMPT),
+        ack_content.contains(LIVE_TYPING_PROMPT),
         "ACK sidecar should model the editor-visible buffer with live typing:\n{ack_content}"
     );
-    assert_live_prompt_visible_but_uncommitted(&project, "EFS file IPC replay");
+    assert_live_prompt_visible_and_committed(&project, "file IPC live typing replay");
 }
 
 #[test]
-fn equityfundingsource_timeout_retains_patch_for_editor_retry() {
+fn live_typing_timeout_retains_patch_for_editor_retry() {
     let project = setup_replay_project(true);
     project.type_live_prompt_after_preflight();
 
-    run_finalize(&project, "EFS stale patch replay", 1, &[]);
+    run_finalize(&project, "stale patch live typing replay", 1, &[]);
 
-    assert_retry_left_live_prompt_without_response(&project, "EFS stale patch replay");
+    assert_retry_left_live_prompt_without_response(&project, "stale patch live typing replay");
     let patches = patch_jsons(&project);
     assert!(
         !patches.is_empty(),
@@ -490,12 +527,17 @@ fn equityfundingsource_timeout_retains_patch_for_editor_retry() {
 }
 
 #[test]
-fn equityfundingsource_force_disk_finalize_replays_typing_without_ipc() {
+fn force_disk_finalize_replays_live_typing_without_ipc() {
     let project = setup_replay_project(true);
     project.type_live_prompt_after_preflight();
 
-    run_finalize(&project, "EFS direct disk replay", 0, &["--force-disk"]);
+    run_finalize(
+        &project,
+        "direct disk live typing replay",
+        0,
+        &["--force-disk"],
+    );
 
-    assert_live_prompt_visible_but_uncommitted(&project, "EFS direct disk replay");
+    assert_live_prompt_visible_but_uncommitted(&project, "direct disk live typing replay");
     assert_no_patch_jsons(&project);
 }

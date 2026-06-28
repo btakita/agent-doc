@@ -31,8 +31,9 @@
 //! here as shims so moved bodies need no `crate::` rewriting.
 //!
 //! The next boundary is to retire this crate as an authority holder. Pure
-//! document projection lives in `agent-doc-document`, turn lifecycle state in
-//! `agent-doc-turn`, shared turn-executor vocabulary in
+//! document projection lives in `agent-doc-document`, document authority
+//! scheduling should move into `agent-doc-document-realtime`, turn lifecycle
+//! state lives in `agent-doc-turn`, shared turn-executor vocabulary in
 //! `agent-doc-turn-executor`, shared tmux facts/effects in the
 //! `agent-doc-tmux` crate family, and tmux-to-turn readiness in
 //! `agent-doc-turn-executor-tmux`. This crate remains a transitional adapter

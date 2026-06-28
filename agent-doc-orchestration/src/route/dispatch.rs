@@ -2271,7 +2271,7 @@ preflight complete
 │ >_ OpenAI Codex (v0.142.0)                  │
 ╰─────────────────────────────────────────────╯
 
-› agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md
+› agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/sampleportal.md
 
 ■ Conversation interrupted - tell the model what to do differently.
 
@@ -2282,7 +2282,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
         assert!(
             !direct_pane_existing_draft_visible(
                 interrupted_with_new_draft,
-                "agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md",
+                "agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/sampleportal.md",
                 &harness
             ),
             "a cancelled route trigger in scrollback must not receive Enter when a newer composer draft exists"
@@ -2346,10 +2346,11 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
     #[test]
     fn direct_pane_existing_draft_detection_matches_relative_codex_path() {
         let harness = HarnessConfig::codex();
-        let trigger = "agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md";
+        let trigger =
+            "agent-doc /home/brian/work/btakita/agent-loop/src/sample-app/tasks/sampleorders.md";
         let drafted = "\
-› agent-doc tasks/monsterrodholders.md
-gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client · Context 0% used
+› agent-doc tasks/sampleorders.md
+gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% used
 ";
 
         assert!(
@@ -2358,7 +2359,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client · Context 0% used
         );
 
         let stale_scrollback = "\
-› agent-doc tasks/monsterrodholders.md
+› agent-doc tasks/sampleorders.md
 preflight complete
 ›
 ";
@@ -2368,8 +2369,8 @@ preflight complete
         );
 
         let different_target = "\
-› agent-doc tasks/equityfundingsource.md
-gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client · Context 0% used
+› agent-doc tasks/sampleportal.md
+gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% used
 ";
         assert!(
             !direct_pane_existing_draft_visible(different_target, trigger, &harness),

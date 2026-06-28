@@ -470,7 +470,7 @@ fn queue_prompt_id(text: &str) -> Option<String> {
 }
 
 /// Returns true when `text` references a session document other than `file`
-/// (e.g. a `monsterrodholders.md` prompt leaked into this document's queue via
+/// (e.g. a `sampleorders.md` prompt leaked into this document's queue via
 /// cross-document contamination). Such prompts are non-restorable here.
 fn is_foreign_owned(text: &str, file: &Path) -> bool {
     foreign_doc_reference(text, file).is_some()
@@ -636,7 +636,7 @@ mod tests {
         let file = dir.path().join("session.md");
         fs::write(
             &file,
-            doc_with_queue("- review the monsterrodholders.md test-email CSV row\n", ""),
+            doc_with_queue("- review the sampleorders.md test-email CSV row\n", ""),
         )
         .unwrap();
         run_git(dir.path(), &["init"]);
@@ -651,7 +651,7 @@ mod tests {
         let candidate = &report.git_history_only_candidates[0];
         assert!(!candidate.restorable);
         assert!(candidate.recommendation.contains("Non-restorable"));
-        assert!(candidate.recommendation.contains("monsterrodholders.md"));
+        assert!(candidate.recommendation.contains("sampleorders.md"));
     }
 
     #[test]
@@ -661,10 +661,7 @@ mod tests {
         let file = dir.path().join("session.md");
         fs::write(
             &file,
-            doc_with_queue(
-                "- do [#fromgit]\n- review monsterrodholders.md CSV row\n",
-                "",
-            ),
+            doc_with_queue("- do [#fromgit]\n- review sampleorders.md CSV row\n", ""),
         )
         .unwrap();
         run_git(dir.path(), &["init"]);

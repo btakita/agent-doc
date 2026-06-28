@@ -645,7 +645,7 @@ fn file_ipc_partial_response_materialization_fails_closed_before_commit() {
 }
 
 #[test]
-fn socket_ipc_post_block_prompt_drift_uses_content_ours_snapshot() {
+fn socket_ipc_post_block_prompt_drift_commits_ack_authority_snapshot() {
     let (tmp, doc, baseline, _original) = setup_project(true);
     let root = tmp.path();
     let agent_doc_dir = root.join(".agent-doc");
@@ -718,20 +718,23 @@ fn socket_ipc_post_block_prompt_drift_uses_content_ours_snapshot() {
 
     let head = head_blob(root);
     assert!(head.contains(&response_body("socket prompt drift")));
-    assert!(
-        !head.contains(live_note),
-        "post-block prompt drift must not be absorbed into the commit:\n{head}"
+    assert_eq!(
+        head.matches(live_note).count(),
+        1,
+        "ACK-proven post-block prompt drift should be committed exactly once:\n{head}"
     );
     let visible = fs::read_to_string(&doc).unwrap();
-    assert!(
-        visible.contains(live_note),
-        "post-block prompt drift should remain visible for the next cycle:\n{visible}"
+    assert_eq!(
+        visible.matches(live_note).count(),
+        1,
+        "post-block prompt drift should remain visible exactly once:\n{visible}"
     );
     let snapshot = fs::read_to_string(snapshot_path(root, &doc)).unwrap();
     assert!(snapshot.contains(&response_body("socket prompt drift")));
-    assert!(
-        !snapshot.contains(live_note),
-        "snapshot must stay on content_ours when socket ACK includes live prompt drift:\n{snapshot}"
+    assert_eq!(
+        snapshot.matches(live_note).count(),
+        1,
+        "ACK-proven snapshot should preserve post-block prompt drift exactly once:\n{snapshot}"
     );
     let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
     assert!(

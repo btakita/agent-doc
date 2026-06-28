@@ -762,7 +762,7 @@ mod tests {
 
         let shadow_dir = outer.join("tasks");
         fs::create_dir_all(&shadow_dir).unwrap();
-        fs::write(shadow_dir.join("monsterrodholders.md"), "outer shadow\n").unwrap();
+        fs::write(shadow_dir.join("sampleorders.md"), "outer shadow\n").unwrap();
         fs::write(outer.join("README.md"), "# outer\n").unwrap();
         Command::new("git")
             .current_dir(outer)
@@ -793,11 +793,7 @@ mod tests {
             .output()
             .unwrap();
         fs::create_dir_all(sub_origin.join("tasks")).unwrap();
-        fs::write(
-            sub_origin.join("tasks/monsterrodholders.md"),
-            "submodule doc\n",
-        )
-        .unwrap();
+        fs::write(sub_origin.join("tasks/sampleorders.md"), "submodule doc\n").unwrap();
         Command::new("git")
             .current_dir(sub_origin)
             .args(["add", "."])
@@ -818,7 +814,7 @@ mod tests {
                 "submodule",
                 "add",
                 &sub_url,
-                "src/boost-client",
+                "src/sample-app",
             ])
             .output()
             .unwrap();
@@ -833,12 +829,10 @@ mod tests {
             .output()
             .unwrap();
 
-        let submodule_root = outer.join("src/boost-client");
-        let (super_root, resolved) = resolve_relative_to_git_root_from(
-            &submodule_root,
-            Path::new("tasks/monsterrodholders.md"),
-        )
-        .unwrap();
+        let submodule_root = outer.join("src/sample-app");
+        let (super_root, resolved) =
+            resolve_relative_to_git_root_from(&submodule_root, Path::new("tasks/sampleorders.md"))
+                .unwrap();
 
         assert_eq!(
             super_root, outer,
@@ -847,7 +841,7 @@ mod tests {
         assert_eq!(
             resolved,
             submodule_root
-                .join("tasks/monsterrodholders.md")
+                .join("tasks/sampleorders.md")
                 .canonicalize()
                 .unwrap(),
             "relative path should resolve to the existing submodule file, not the outer shadow file"

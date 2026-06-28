@@ -22,7 +22,7 @@
 //!
 //! A recycle is a property of the **supervisor/project controller**, not one
 //! document. The breaking recycle in the live repro was triggered for
-//! `agent-doc-bugs2.md` / `tsift.md` yet broke an `equityfundingsource.md`
+//! `agent-doc-bugs2.md` / `tsift.md` yet broke an `sampleportal.md`
 //! dispatch — all three share one project controller. So this marker is keyed
 //! on the project root (nearest ancestor `.agent-doc/` directory) with a FIXED
 //! filename, shared across every document the controller hosts. The dispatch
@@ -276,7 +276,7 @@ mod tests {
         // Two sibling documents under one project root resolve to the SAME
         // marker path — a recycle marked for one doc gates a dispatch for the
         // other (the cross-document #jbdisprecycle repro: agent-doc-bugs2.md
-        // recycle broke an equityfundingsource.md dispatch).
+        // recycle broke an sampleportal.md dispatch).
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc_a = dir.path().join("a.md");

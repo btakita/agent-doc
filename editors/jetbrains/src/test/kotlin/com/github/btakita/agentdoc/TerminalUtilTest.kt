@@ -125,15 +125,15 @@ class TerminalUtilTest {
         val args = TerminalUtil.buildRouteLayoutArgs(
             visibleMdFiles = listOf(
                 "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-                "/repo/src/boost-client/tasks/monsterrodholders.md",
+                "/repo/src/sample-app/tasks/sampleorders.md",
             ),
             editorLayout = EditorLayout(
                 listOf(
                     LayoutColumn(listOf("/repo/tasks/agent-doc/agent-doc-bugs2.md")),
-                    LayoutColumn(listOf("/repo/src/boost-client/tasks/monsterrodholders.md")),
+                    LayoutColumn(listOf("/repo/src/sample-app/tasks/sampleorders.md")),
                 )
             ),
-            focusedFile = "/repo/src/boost-client/tasks/monsterrodholders.md",
+            focusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
         )
 
         assertEquals(
@@ -141,9 +141,9 @@ class TerminalUtilTest {
                 "--col",
                 "/repo/tasks/agent-doc/agent-doc-bugs2.md",
                 "--col",
-                "/repo/src/boost-client/tasks/monsterrodholders.md",
+                "/repo/src/sample-app/tasks/sampleorders.md",
                 "--focus",
-                "/repo/src/boost-client/tasks/monsterrodholders.md",
+                "/repo/src/sample-app/tasks/sampleorders.md",
             ),
             args,
         )
@@ -152,14 +152,14 @@ class TerminalUtilTest {
     @Test
     fun `route layout args preserve empty split columns for mixed layouts`() {
         val args = TerminalUtil.buildRouteLayoutArgs(
-            visibleMdFiles = listOf("/repo/src/boost-client/tasks/monsterrodholders.md"),
+            visibleMdFiles = listOf("/repo/src/sample-app/tasks/sampleorders.md"),
             editorLayout = EditorLayout(
                 listOf(
                     LayoutColumn(emptyList()),
-                    LayoutColumn(listOf("/repo/src/boost-client/tasks/monsterrodholders.md")),
+                    LayoutColumn(listOf("/repo/src/sample-app/tasks/sampleorders.md")),
                 )
             ),
-            focusedFile = "/repo/src/boost-client/tasks/monsterrodholders.md",
+            focusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
         )
 
         assertEquals(
@@ -167,9 +167,9 @@ class TerminalUtilTest {
                 "--col",
                 "",
                 "--col",
-                "/repo/src/boost-client/tasks/monsterrodholders.md",
+                "/repo/src/sample-app/tasks/sampleorders.md",
                 "--focus",
-                "/repo/src/boost-client/tasks/monsterrodholders.md",
+                "/repo/src/sample-app/tasks/sampleorders.md",
             ),
             args,
         )
@@ -237,13 +237,13 @@ class TerminalUtilTest {
     @Test
     fun `latest-run boot timeout is reported immediately while active-turn busy is not retried`() {
         val activeTurn = """
-            Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again
+            Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/professional/sampleportal.md because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again
         """.trimIndent()
         val timedOut = """
-            Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
+            Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/professional/sampleportal.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
         """.trimIndent()
         val shellSearch = """
-            Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (interactive shell reverse-i-search); wait for the pane to become ready and reroute again
+            Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/professional/sampleportal.md because the latest run is still booting and never reached a dispatch-ready prompt (interactive shell reverse-i-search); wait for the pane to become ready and reroute again
         """.trimIndent()
 
         assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.BUSY_RUNNING, TerminalUtil.classifyRunAgentDocRouteFailure(activeTurn))
@@ -260,7 +260,7 @@ class TerminalUtilTest {
 
     @Test
     fun `active codex turn route refusal is reported as still running not persistent failure`() {
-        val relativePath = "tasks/professional/equityfundingsource.md"
+        val relativePath = "tasks/professional/sampleportal.md"
         val output = """
             Error: dispatch-only codex reopen refused to inject into pane %42 for $relativePath because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again
         """.trimIndent()
@@ -275,7 +275,7 @@ class TerminalUtilTest {
 
     @Test
     fun `active-turn skip-wait route refusal is reported as still running immediately`() {
-        val relativePath = "tasks/monsterrodholders.md"
+        val relativePath = "tasks/sampleorders.md"
         val output = """
             Error: authoritative actor generation 242 for $relativePath owns pane %30 but dispatch-only route will not inject a new trigger because the pane is busy on an active codex turn (Working (1m 34s - esc to interrupt)); restore an idle prompt and retry
         """.trimIndent()
@@ -310,7 +310,7 @@ class TerminalUtilTest {
         // Run Agent Doc on a busy Codex pane. The route now fails closed with this
         // message instead of silently succeeding, and the plugin notifies the
         // operator immediately rather than silently re-waiting the ready timeout.
-        val relativePath = "tasks/monsterrodholders.md"
+        val relativePath = "tasks/sampleorders.md"
         val output = """
             Error: authoritative actor generation 244 for $relativePath owns pane %40 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Run `agent-doc session status $relativePath` and wait for an idle prompt.
         """.trimIndent()
@@ -341,7 +341,7 @@ class TerminalUtilTest {
 
     @Test
     fun `protected prompt input route refusal is actionable not persistent failure`() {
-        val relativePath = "tasks/professional/equityfundingsource.md"
+        val relativePath = "tasks/professional/sampleportal.md"
         val snapshot = "/tmp/agent-doc-route-snapshot.txt"
         val output = """
             Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/$relativePath into pane %3 for /home/brian/work/btakita/agent-loop/$relativePath because the composer contains protected prompt input (drafted prompt input) draft_preview="› Implement {feature}"; clear or submit that draft, then rerun agent-doc route snapshot_path=$snapshot
@@ -426,7 +426,7 @@ class TerminalUtilTest {
 
     @Test
     fun `actor-switch defer on not-ready pane offers interrupt restart`() {
-        val relativePath = "tasks/professional/equityfundingsource.md"
+        val relativePath = "tasks/professional/sampleportal.md"
         val output = """
             Error: authoritative actor record for $relativePath is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane. pane is busy (not dispatch-ready) — run: agent-doc session restart-supervisor $relativePath --force
         """.trimIndent()
@@ -623,13 +623,13 @@ class TerminalUtilTest {
     @Test
     fun `busy clear refusal parses generic command wrapper output`() {
         val output = """
-            agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because pane %13 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="● Tip Override global tool settings per agent configuration"). Run `agent-doc session status /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.
+            agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/sample-app/tasks/sampleorders.md because pane %13 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="● Tip Override global tool settings per agent configuration"). Run `agent-doc session status /home/brian/work/btakita/agent-loop/src/sample-app/tasks/sampleorders.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.
         """.trimIndent()
 
         val refusal = TerminalUtil.parseBusySessionClearRefusal(output)
 
         assertNotNull(refusal)
-        assertEquals("/home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md", refusal!!.file)
+        assertEquals("/home/brian/work/btakita/agent-loop/src/sample-app/tasks/sampleorders.md", refusal!!.file)
         assertEquals("%13", refusal.pane)
         assertEquals("authoritative_actor", refusal.source)
         assertEquals("agent-doc", refusal.currentCommand)

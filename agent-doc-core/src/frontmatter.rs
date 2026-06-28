@@ -2853,7 +2853,7 @@ mod tests {
 
     #[test]
     fn parse_agent_args_and_harness_aliases() {
-        let content = "---\nagent_args: \"--json\"\nclaude_args: \"--dangerously-skip-permissions\"\ncodex_args: \"-s danger-full-access\"\nopencode_args: \"--dangerously-skip-permissions\"\ncodex_network_access: enabled\nrequired_ssh_targets:\n  - monsterrodholders-server\n---\nBody\n";
+        let content = "---\nagent_args: \"--json\"\nclaude_args: \"--dangerously-skip-permissions\"\ncodex_args: \"-s danger-full-access\"\nopencode_args: \"--dangerously-skip-permissions\"\ncodex_network_access: enabled\nrequired_ssh_targets:\n  - sampleorders-server\n---\nBody\n";
         let (fm, _) = parse(content).unwrap();
         assert_eq!(fm.agent_args.as_deref(), Some("--json"));
         assert_eq!(
@@ -2868,7 +2868,7 @@ mod tests {
         assert_eq!(fm.codex_network_access, Some(CodexNetworkAccess::Enabled));
         assert_eq!(
             fm.required_ssh_targets,
-            vec!["monsterrodholders-server".to_string()]
+            vec!["sampleorders-server".to_string()]
         );
     }
 
@@ -2879,7 +2879,7 @@ mod tests {
             codex_args: Some("-s danger-full-access".to_string()),
             opencode_args: Some("--dangerously-skip-permissions".to_string()),
             codex_network_access: Some(CodexNetworkAccess::Enabled),
-            required_ssh_targets: vec!["monsterrodholders-server".to_string()],
+            required_ssh_targets: vec!["sampleorders-server".to_string()],
             ..Default::default()
         };
         let written = write(&fm, "body\n").unwrap();
@@ -2893,7 +2893,7 @@ mod tests {
         assert_eq!(fm2.codex_network_access, Some(CodexNetworkAccess::Enabled));
         assert_eq!(
             fm2.required_ssh_targets,
-            vec!["monsterrodholders-server".to_string()]
+            vec!["sampleorders-server".to_string()]
         );
     }
 
@@ -2939,14 +2939,14 @@ mod tests {
         let content = "Body\n";
         let result = merge_fields(
             content,
-            "required_ssh_targets:\n  - monsterrodholders-server\n  - root@50.28.2.199",
+            "required_ssh_targets:\n  - sampleorders-server\n  - root@50.28.2.199",
         )
         .unwrap();
         let (fm, _) = parse(&result).unwrap();
         assert_eq!(
             fm.required_ssh_targets,
             vec![
-                "monsterrodholders-server".to_string(),
+                "sampleorders-server".to_string(),
                 "root@50.28.2.199".to_string(),
             ]
         );
@@ -2955,12 +2955,9 @@ mod tests {
     #[test]
     fn merge_fields_required_ssh_profile() {
         let content = "Body\n";
-        let result = merge_fields(content, "required_ssh_profile: monsterrodholders").unwrap();
+        let result = merge_fields(content, "required_ssh_profile: sampleorders").unwrap();
         let (fm, _) = parse(&result).unwrap();
-        assert_eq!(
-            fm.required_ssh_profile.as_deref(),
-            Some("monsterrodholders")
-        );
+        assert_eq!(fm.required_ssh_profile.as_deref(), Some("sampleorders"));
     }
 
     // --- resolve_harness_model tests ---

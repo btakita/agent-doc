@@ -3759,19 +3759,19 @@ Done.
     fn idle_queue_drain_payload_keeps_trigger_for_non_codex_harnesses() {
         assert_eq!(
             idle_queue_drain_payload(
-                "tasks/monsterrodholders.md",
+                "tasks/sampleorders.md",
                 &crate::harness::HarnessConfig::claude(),
                 "ignored",
             ),
-            "/agent-doc tasks/monsterrodholders.md"
+            "/agent-doc tasks/sampleorders.md"
         );
         assert_eq!(
             idle_queue_drain_payload(
-                "tasks/monsterrodholders.md",
+                "tasks/sampleorders.md",
                 &crate::harness::HarnessConfig::opencode(),
                 "ignored",
             ),
-            "/agent-doc tasks/monsterrodholders.md"
+            "/agent-doc tasks/sampleorders.md"
         );
         assert_eq!(
             idle_queue_drain_payload_kind(&crate::harness::HarnessConfig::claude(), "ignored"),
@@ -3779,9 +3779,9 @@ Done.
         );
     }
     #[test]
-    fn idle_queue_restart_drain_does_not_clear_ordinary_monsterrodholders_head() {
+    fn idle_queue_restart_drain_does_not_clear_ordinary_sampleorders_head() {
         let harness = crate::harness::HarnessConfig::codex();
-        let head = "JB Run Agent Doc on monsterrodholders.md stalled after a restart with /clear.";
+        let head = "JB Run Agent Doc on sampleorders.md stalled after a restart with /clear.";
 
         assert!(!crate::start::decisions::clean_session_head_forces_context_reset(false, false,));
         assert_eq!(
@@ -3793,8 +3793,8 @@ Done.
             IdleQueueDrainDecision::Dispatch
         );
         assert_eq!(
-            idle_queue_drain_payload("tasks/monsterrodholders.md", &harness, head),
-            "agent-doc tasks/monsterrodholders.md"
+            idle_queue_drain_payload("tasks/sampleorders.md", &harness, head),
+            "agent-doc tasks/sampleorders.md"
         );
         assert_eq!(idle_queue_drain_payload_kind(&harness, head), "trigger");
     }
@@ -3806,7 +3806,7 @@ Done.
             crate::harness::HarnessConfig::opencode(),
         ] {
             assert_eq!(
-                idle_queue_drain_payload("tasks/monsterrodholders.md", &harness, "  /clear  "),
+                idle_queue_drain_payload("tasks/sampleorders.md", &harness, "  /clear  "),
                 "/clear"
             );
             assert_eq!(
@@ -3819,7 +3819,7 @@ Done.
     fn idle_queue_drain_payload_submits_any_literal_slash_command() {
         let harness = crate::harness::HarnessConfig::codex();
         assert_eq!(
-            idle_queue_drain_payload("tasks/monsterrodholders.md", &harness, "/model sonnet"),
+            idle_queue_drain_payload("tasks/sampleorders.md", &harness, "/model sonnet"),
             "/model sonnet"
         );
         assert_eq!(

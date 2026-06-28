@@ -2524,7 +2524,7 @@ mod tests {
         // following an abandoned recursive invocation), the "Nothing changed"
         // output must surface the prior abnormal state instead of Clean.
         let st: crate::cycle_state::CycleState = serde_json::from_str(
-            r#"{"cycle_id":"cycle-repair-1","file":"tasks/monsterrodholders.md","phase":"committed","last_event":"commit_success","started_at":0,"updated_at":0,"had_pending_mutations":true,"reaped_pending_ids":["stale-item"]}"#,
+            r#"{"cycle_id":"cycle-repair-1","file":"tasks/sampleorders.md","phase":"committed","last_event":"commit_success","started_at":0,"updated_at":0,"had_pending_mutations":true,"reaped_pending_ids":["stale-item"]}"#,
         )
         .unwrap();
         match classify_no_change_cycle_state(Some(&st)) {
@@ -2532,7 +2532,7 @@ mod tests {
                 assert!(summary.contains("cycle-repair-1"));
                 assert!(summary.contains("bookkeeping-only"));
                 assert!(summary.contains("commit_success"));
-                assert!(recovery.contains("tasks/monsterrodholders.md"));
+                assert!(recovery.contains("tasks/sampleorders.md"));
                 assert!(recovery.contains("non-owner pane"));
                 assert!(recovery.contains("agent-doc start"));
             }
@@ -3013,7 +3013,7 @@ old status\n\
     }
 
     #[test]
-    fn apply_template_response_normalizes_monsterrodholders_style_backlog_patch() {
+    fn apply_template_response_normalizes_sampleorders_style_backlog_patch() {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("test.md");
@@ -3038,7 +3038,7 @@ old status\n\
 
         let response = concat!(
             "<!-- patch:exchange -->\n",
-            "### Re: monsterrodholders backlog follow-up — gpt-5\n\n",
+            "### Re: sampleorders backlog follow-up — gpt-5\n\n",
             "Captured the requested backlog update.\n",
             "<!-- /patch:exchange -->\n\n",
             "<!-- patch:backlog -->\n",
@@ -3053,10 +3053,10 @@ old status\n\
         );
 
         apply_template_response(&doc, baseline, response, false)
-            .expect("run path should normalize monsterrodholders-style backlog patches");
+            .expect("run path should normalize sampleorders-style backlog patches");
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("### Re: monsterrodholders backlog follow-up — gpt-5"));
+        assert!(updated.contains("### Re: sampleorders backlog follow-up — gpt-5"));
         assert!(updated.contains("- [ ] [#new1] Verify direct rerun completed cleanly"));
         assert!(updated.contains("- [ ] [#yckq] [#ss01] ShipStation fix"));
         assert!(updated.contains("- [ ] [#2gdt] [#wpmem] WP memory limits"));

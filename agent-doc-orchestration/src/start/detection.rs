@@ -472,13 +472,14 @@ mod tests {
     #[test]
     fn supervisor_pending_payload_matches_relative_codex_agent_doc_draft() {
         let harness = crate::harness::HarnessConfig::codex();
-        let payload = "agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md";
+        let payload =
+            "agent-doc /home/brian/work/btakita/agent-loop/src/sample-app/tasks/sampleorders.md";
         let content = "\
-› agent-doc tasks/monsterrodholders.md
-agent-doc tasks/monsterrodholders.md
-agent-doc tasks/monsterrodholders.md
-agent-doc tasks/monsterrodholders.md
-gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client · Context 0% use
+› agent-doc tasks/sampleorders.md
+agent-doc tasks/sampleorders.md
+agent-doc tasks/sampleorders.md
+agent-doc tasks/sampleorders.md
+gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
 ";
 
         assert!(

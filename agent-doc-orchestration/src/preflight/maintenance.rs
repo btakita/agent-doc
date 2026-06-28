@@ -7226,11 +7226,11 @@ mod tests {
             "---\n\n",
             "<!-- agent:exchange patch=append -->\n",
             "### Re: agent switch isn't reactive — opus-4-8\n\n",
-            "> **Queue prompt:** JB Run Agent Doc on equityfundingsource after switching from codex to opencode any agent change has this issue\n\n",
+            "> **Queue prompt:** JB Run Agent Doc on sampleportal after switching from codex to opencode any agent change has this issue\n\n",
             "Diagnosed: a paused stale parent supervisor. Restart it.\n",
             "<!-- /agent:exchange -->\n\n",
             "<!-- agent:queue priority go -->\n",
-            "🚧 :pushpin: JB Run Agent Doc on equityfundingsource after switching from codex to opencode any agent change has this issue\n",
+            "🚧 :pushpin: JB Run Agent Doc on sampleportal after switching from codex to opencode any agent change has this issue\n",
             "```\n",
             "[route] target tmux session: 0\n",
             "Error: authoritative actor record deferring to boundary agent restart\n",
@@ -7275,13 +7275,13 @@ mod tests {
         assert!(
             !active
                 .iter()
-                .any(|t| t.contains("JB Run Agent Doc on equityfundingsource")),
+                .any(|t| t.contains("JB Run Agent Doc on sampleportal")),
             "answered head must NOT remain an active Prompt:\nactive={active:?}"
         );
         assert!(
             completed
                 .iter()
-                .any(|t| t.contains("JB Run Agent Doc on equityfundingsource")),
+                .any(|t| t.contains("JB Run Agent Doc on sampleportal")),
             "answered head must be moved to a Completed (struck) entry:\ncompleted={completed:?}\n{updated}"
         );
         // The unanswered id-backed head survives the strike pass, still active.

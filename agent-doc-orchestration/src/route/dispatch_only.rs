@@ -953,8 +953,8 @@ mod tests {
     use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
     #[test]
-    fn dispatch_only_starting_pane_not_ready_error_matches_equityfundingsource_active_turn() {
-        let file = std::path::Path::new("tasks/professional/equityfundingsource.md");
+    fn dispatch_only_starting_pane_not_ready_error_matches_sampleportal_active_turn() {
+        let file = std::path::Path::new("tasks/professional/sampleportal.md");
         let message = dispatch_only_starting_pane_not_ready_error(
             &HarnessConfig::codex(),
             "%42",
@@ -963,7 +963,7 @@ mod tests {
         );
 
         assert!(message.contains("dispatch-only codex reopen refused"));
-        assert!(message.contains("tasks/professional/equityfundingsource.md"));
+        assert!(message.contains("tasks/professional/sampleportal.md"));
         assert!(message.contains("latest run is still booting"));
         assert!(message.contains("never reached a dispatch-ready prompt"));
         assert!(message.contains("(active codex turn)"));
@@ -1219,7 +1219,7 @@ mod tests {
     #[test]
     fn dispatch_only_sent_log_marks_opencode_accepted_only_scope() {
         let message = route_dispatch_only_sent_log_message(
-            Path::new("/tmp/monsterrodholders.md"),
+            Path::new("/tmp/sampleorders.md"),
             "%13",
             &HarnessConfig::opencode(),
             DispatchOnlyReopenDelivery::DirectPaneSubmit,
@@ -1233,7 +1233,7 @@ mod tests {
     #[test]
     fn dispatch_only_sent_log_marks_opencode_pane_state_dispatch_scope() {
         let message = route_dispatch_only_sent_log_message(
-            Path::new("/tmp/monsterrodholders.md"),
+            Path::new("/tmp/sampleorders.md"),
             "%13",
             &HarnessConfig::opencode(),
             DispatchOnlyReopenDelivery::DirectPaneSubmit,
@@ -1247,7 +1247,7 @@ mod tests {
     #[test]
     fn dispatch_only_opencode_accepted_only_proof_is_successful_delivery() {
         require_dispatch_only_dispatch_start_proof(
-            Path::new("/tmp/monsterrodholders.md"),
+            Path::new("/tmp/sampleorders.md"),
             "%13",
             &HarnessConfig::opencode(),
             DispatchOnlyReopenDelivery::DirectPaneSubmit,
@@ -1258,7 +1258,7 @@ mod tests {
     #[test]
     fn dispatch_only_opencode_pane_state_proof_is_successful_delivery() {
         require_dispatch_only_dispatch_start_proof(
-            Path::new("/tmp/monsterrodholders.md"),
+            Path::new("/tmp/sampleorders.md"),
             "%13",
             &HarnessConfig::opencode(),
             DispatchOnlyReopenDelivery::DirectPaneSubmit,

@@ -2470,7 +2470,7 @@ fn controller_serve_project_root(pid: u32) -> Option<PathBuf> {
 /// The per-project reaper [`reap_orphaned_preparing_controllers_for_caller`] only
 /// reaps controllers whose `--project-root` matches the caller's, and gc runs only
 /// for the triggering project. A controller wedged in ANOTHER project root (a
-/// `boost-client` handoff that died while the operator is working in `agent-loop`)
+/// `sample-app` handoff that died while the operator is working in `agent-loop`)
 /// stays invisible until agent-doc is next invoked there. M1's self-watchdog
 /// already covers this without any external tick, but this sweep is the
 /// belt-and-suspenders breadth rung: it walks `/proc` for ANY `agent-doc ...
@@ -6839,30 +6839,30 @@ agent:queue\n\
             "controller".to_string(),
             "serve".to_string(),
             "--project-root".to_string(),
-            "/home/me/work/boost-client".to_string(),
+            "/home/me/work/sample-app".to_string(),
             "--handoff-state".to_string(),
             "preparing".to_string(),
         ];
         assert_eq!(
             controller_serve_project_root_from_args(&args),
-            Some(PathBuf::from("/home/me/work/boost-client"))
+            Some(PathBuf::from("/home/me/work/sample-app"))
         );
 
         let shell_sentinel = vec![
             "sh".to_string(),
             "-c".to_string(),
             "sleep 30; :".to_string(),
-            "/home/me/work/boost-client/agent-doc".to_string(),
+            "/home/me/work/sample-app/agent-doc".to_string(),
             "controller".to_string(),
             "serve".to_string(),
             "--project-root".to_string(),
-            "/home/me/work/boost-client".to_string(),
+            "/home/me/work/sample-app".to_string(),
             "--handoff-state".to_string(),
             "preparing".to_string(),
         ];
         assert_eq!(
             controller_serve_project_root_from_args(&shell_sentinel),
-            Some(PathBuf::from("/home/me/work/boost-client"))
+            Some(PathBuf::from("/home/me/work/sample-app"))
         );
 
         let tmux_launcher = vec![
@@ -6872,7 +6872,7 @@ agent:queue\n\
             "controller".to_string(),
             "serve".to_string(),
             "--project-root".to_string(),
-            "/home/me/work/boost-client".to_string(),
+            "/home/me/work/sample-app".to_string(),
         ];
         assert_eq!(
             controller_serve_project_root_from_args(&tmux_launcher),

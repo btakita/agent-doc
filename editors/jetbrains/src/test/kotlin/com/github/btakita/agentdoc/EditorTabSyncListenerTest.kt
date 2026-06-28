@@ -18,12 +18,12 @@ class EditorTabSyncListenerTest {
     fun `selection event file wins over stale selected editor file`() {
         val visibleMdFiles = listOf(
             "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            "/repo/tasks/professional/equityfundingsource.md",
+            "/repo/tasks/professional/sampleportal.md",
         )
 
         val activeFile = EditorTabSyncListener.AutomaticCommandPlanner.resolveActiveFilePath(
             preferredActiveFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            selectedEditorFile = "/repo/tasks/professional/equityfundingsource.md",
+            selectedEditorFile = "/repo/tasks/professional/sampleportal.md",
             visibleMdFiles = visibleMdFiles,
         )
 
@@ -34,15 +34,15 @@ class EditorTabSyncListenerTest {
     fun `selection change keeps split layouts on sync when visible markdown set is unchanged`() {
         val visibleMdFiles = listOf(
             "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            "/repo/src/boost-client/tasks/monsterrodholders.md",
+            "/repo/src/sample-app/tasks/sampleorders.md",
         )
         val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
             visibleMdFiles = visibleMdFiles,
             visibleSignature = visibleSignature(visibleMdFiles),
-            focusedFile = "/repo/src/boost-client/tasks/monsterrodholders.md",
+            focusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
             previousVisibleSignature = visibleSignature(
                 listOf(
-                    "/repo/src/boost-client/tasks/monsterrodholders.md",
+                    "/repo/src/sample-app/tasks/sampleorders.md",
                     "/repo/tasks/agent-doc/agent-doc-bugs2.md",
                 )
             ),
@@ -54,11 +54,11 @@ class EditorTabSyncListenerTest {
 
     @Test
     fun `single visible markdown file still uses sync when selection changes`() {
-        val visibleMdFiles = listOf("/repo/src/boost-client/tasks/monsterrodholders.md")
+        val visibleMdFiles = listOf("/repo/src/sample-app/tasks/sampleorders.md")
         val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
             visibleMdFiles = visibleMdFiles,
             visibleSignature = visibleSignature(visibleMdFiles),
-            focusedFile = "/repo/src/boost-client/tasks/monsterrodholders.md",
+            focusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
             previousVisibleSignature = visibleSignature(visibleMdFiles),
             previousFocusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
         )
@@ -70,12 +70,12 @@ class EditorTabSyncListenerTest {
     fun `visible markdown changes trigger non destructive sync`() {
         val visibleMdFiles = listOf(
             "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            "/repo/src/boost-client/tasks/monsterrodholders.md",
+            "/repo/src/sample-app/tasks/sampleorders.md",
         )
         val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
             visibleMdFiles = visibleMdFiles,
             visibleSignature = visibleSignature(visibleMdFiles),
-            focusedFile = "/repo/src/boost-client/tasks/monsterrodholders.md",
+            focusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
             previousVisibleSignature = visibleSignature(listOf("/repo/tasks/agent-doc/agent-doc-bugs2.md")),
             previousFocusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
         )
@@ -87,9 +87,9 @@ class EditorTabSyncListenerTest {
     fun `unchanged selection state does not rerun commands`() {
         val visibleMdFiles = listOf(
             "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            "/repo/src/boost-client/tasks/monsterrodholders.md",
+            "/repo/src/sample-app/tasks/sampleorders.md",
         )
-        val focusedFile = "/repo/src/boost-client/tasks/monsterrodholders.md"
+        val focusedFile = "/repo/src/sample-app/tasks/sampleorders.md"
 
         assertNull(
             EditorTabSyncListener.AutomaticCommandPlanner.plan(
@@ -123,7 +123,7 @@ class EditorTabSyncListenerTest {
     fun `opposite pane selection still dispatches sync when visible split is unchanged`() {
         val visibleMdFiles = listOf(
             "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            "/repo/src/boost-client/tasks/monsterrodholders.md",
+            "/repo/src/sample-app/tasks/sampleorders.md",
         )
         val visibleSignature = visibleSignature(visibleMdFiles)
 
@@ -132,7 +132,7 @@ class EditorTabSyncListenerTest {
             visibleSignature = visibleSignature,
             focusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
             previousVisibleSignature = visibleSignature,
-            previousFocusedFile = "/repo/src/boost-client/tasks/monsterrodholders.md",
+            previousFocusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
         )
 
         assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
@@ -142,14 +142,14 @@ class EditorTabSyncListenerTest {
     fun `visible set changes still dispatch sync`() {
         val visibleMdFiles = listOf(
             "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            "/repo/src/boost-client/tasks/monsterrodholders.md",
+            "/repo/src/sample-app/tasks/sampleorders.md",
         )
         val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
             visibleMdFiles = visibleMdFiles,
             visibleSignature = visibleSignature(visibleMdFiles),
             focusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
             previousVisibleSignature = visibleSignature(listOf("/repo/tasks/agent-doc/agent-doc-bugs2.md")),
-            previousFocusedFile = "/repo/src/boost-client/tasks/monsterrodholders.md",
+            previousFocusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
         )
 
         assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
@@ -159,14 +159,14 @@ class EditorTabSyncListenerTest {
     fun `selection change to a different file still dispatches sync`() {
         val visibleMdFiles = listOf(
             "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            "/repo/src/boost-client/tasks/monsterrodholders.md",
+            "/repo/src/sample-app/tasks/sampleorders.md",
         )
         val visibleSignature = visibleSignature(visibleMdFiles)
 
         val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
             visibleMdFiles = visibleMdFiles,
             visibleSignature = visibleSignature,
-            focusedFile = "/repo/src/boost-client/tasks/monsterrodholders.md",
+            focusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
             previousVisibleSignature = visibleSignature,
             previousFocusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
         )
@@ -277,17 +277,17 @@ class EditorTabSyncListenerTest {
     fun `column aware signatures preserve splitter identity for replayed requests`() {
         val visibleMdFiles = listOf(
             "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            "/repo/src/boost-client/tasks/monsterrodholders.md",
+            "/repo/src/sample-app/tasks/sampleorders.md",
         )
         val previousLayout = EditorLayout(
             columns = listOf(
                 LayoutColumn(listOf("/repo/tasks/agent-doc/agent-doc-bugs2.md")),
-                LayoutColumn(listOf("/repo/src/boost-client/tasks/monsterrodholders.md")),
+                LayoutColumn(listOf("/repo/src/sample-app/tasks/sampleorders.md")),
             )
         )
         val latestLayout = EditorLayout(
             columns = listOf(
-                LayoutColumn(listOf("/repo/src/boost-client/tasks/monsterrodholders.md")),
+                LayoutColumn(listOf("/repo/src/sample-app/tasks/sampleorders.md")),
                 LayoutColumn(listOf("/repo/tasks/agent-doc/agent-doc-bugs2.md")),
             )
         )

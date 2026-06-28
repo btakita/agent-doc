@@ -2281,7 +2281,7 @@ Done.
 "#;
 
         let prompt =
-            "Please analyze failed orders and bot traffic on monsterrodholders.com. #next-steps";
+            "Please analyze failed orders and bot traffic on sampleorders.com. #next-steps";
         let current = baseline.replace(
             "<!-- /agent:exchange -->",
             &format!("{prompt}\n<!-- /agent:exchange -->"),

@@ -13,14 +13,14 @@ import {
 describe('buildTabChangeCommand', () => {
     it('returns sync with no autostart when the visible markdown set changes', () => {
         const planned = buildTabChangeCommand({
-            activeFile: 'src/boost-client/tasks/monsterrodholders.md',
+            activeFile: 'src/sample-app/tasks/sampleorders.md',
             visibleMd: [
                 'tasks/agent-doc/agent-doc-bugs2.md',
-                'src/boost-client/tasks/monsterrodholders.md',
+                'src/sample-app/tasks/sampleorders.md',
             ],
             visibleColumns: [
                 ['tasks/agent-doc/agent-doc-bugs2.md'],
-                ['src/boost-client/tasks/monsterrodholders.md'],
+                ['src/sample-app/tasks/sampleorders.md'],
             ],
             previous: {
                 activeFile: 'tasks/agent-doc/agent-doc-bugs2.md',
@@ -35,9 +35,9 @@ describe('buildTabChangeCommand', () => {
                 '--col',
                 'tasks/agent-doc/agent-doc-bugs2.md',
                 '--col',
-                'src/boost-client/tasks/monsterrodholders.md',
+                'src/sample-app/tasks/sampleorders.md',
                 '--focus',
-                'src/boost-client/tasks/monsterrodholders.md',
+                'src/sample-app/tasks/sampleorders.md',
                 '--exact-visible',
                 '--no-autostart',
             ],
@@ -46,20 +46,20 @@ describe('buildTabChangeCommand', () => {
 
     it('keeps split layouts on sync when only the active file changes', () => {
         const planned = buildTabChangeCommand({
-            activeFile: 'src/boost-client/tasks/monsterrodholders.md',
+            activeFile: 'src/sample-app/tasks/sampleorders.md',
             visibleMd: [
                 'tasks/agent-doc/agent-doc-bugs2.md',
-                'src/boost-client/tasks/monsterrodholders.md',
+                'src/sample-app/tasks/sampleorders.md',
             ],
             visibleColumns: [
                 ['tasks/agent-doc/agent-doc-bugs2.md'],
-                ['src/boost-client/tasks/monsterrodholders.md'],
+                ['src/sample-app/tasks/sampleorders.md'],
             ],
             previous: {
                 activeFile: 'tasks/agent-doc/agent-doc-bugs2.md',
                 visibleSignature: visibleSignatureFromColumns([
                     ['tasks/agent-doc/agent-doc-bugs2.md'],
-                    ['src/boost-client/tasks/monsterrodholders.md'],
+                    ['src/sample-app/tasks/sampleorders.md'],
                 ]),
             },
         });
@@ -71,9 +71,9 @@ describe('buildTabChangeCommand', () => {
                 '--col',
                 'tasks/agent-doc/agent-doc-bugs2.md',
                 '--col',
-                'src/boost-client/tasks/monsterrodholders.md',
+                'src/sample-app/tasks/sampleorders.md',
                 '--focus',
-                'src/boost-client/tasks/monsterrodholders.md',
+                'src/sample-app/tasks/sampleorders.md',
                 '--exact-visible',
                 '--no-autostart',
             ],
@@ -82,12 +82,12 @@ describe('buildTabChangeCommand', () => {
 
     it('uses passive sync instead of focus when a single visible markdown file stays selected', () => {
         const planned = buildTabChangeCommand({
-            activeFile: 'src/boost-client/tasks/monsterrodholders.md',
-            visibleMd: ['src/boost-client/tasks/monsterrodholders.md'],
+            activeFile: 'src/sample-app/tasks/sampleorders.md',
+            visibleMd: ['src/sample-app/tasks/sampleorders.md'],
             previous: {
                 activeFile: 'tasks/agent-doc/agent-doc-bugs2.md',
                 visibleSignature: visibleSignatureFromColumns([
-                    ['src/boost-client/tasks/monsterrodholders.md'],
+                    ['src/sample-app/tasks/sampleorders.md'],
                 ]),
             },
         });
@@ -97,9 +97,9 @@ describe('buildTabChangeCommand', () => {
             args: [
                 'sync',
                 '--col',
-                'src/boost-client/tasks/monsterrodholders.md',
+                'src/sample-app/tasks/sampleorders.md',
                 '--focus',
-                'src/boost-client/tasks/monsterrodholders.md',
+                'src/sample-app/tasks/sampleorders.md',
                 '--exact-visible',
                 '--no-autostart',
             ],
@@ -169,20 +169,20 @@ describe('buildTabChangeCommand', () => {
 
     it('returns null when the selection state is unchanged', () => {
         const result = buildTabChangeCommand({
-            activeFile: 'src/boost-client/tasks/monsterrodholders.md',
+            activeFile: 'src/sample-app/tasks/sampleorders.md',
             visibleMd: [
                 'tasks/agent-doc/agent-doc-bugs2.md',
-                'src/boost-client/tasks/monsterrodholders.md',
+                'src/sample-app/tasks/sampleorders.md',
             ],
             visibleColumns: [
                 ['tasks/agent-doc/agent-doc-bugs2.md'],
-                ['src/boost-client/tasks/monsterrodholders.md'],
+                ['src/sample-app/tasks/sampleorders.md'],
             ],
             previous: {
-                activeFile: 'src/boost-client/tasks/monsterrodholders.md',
+                activeFile: 'src/sample-app/tasks/sampleorders.md',
                 visibleSignature: visibleSignatureFromColumns([
                     ['tasks/agent-doc/agent-doc-bugs2.md'],
-                    ['src/boost-client/tasks/monsterrodholders.md'],
+                    ['src/sample-app/tasks/sampleorders.md'],
                 ]),
             },
         });
@@ -195,17 +195,17 @@ describe('buildTabChangeCommand', () => {
             activeFile: 'tasks/agent-doc/agent-doc-bugs2.md',
             visibleMd: [
                 'tasks/agent-doc/agent-doc-bugs2.md',
-                'src/boost-client/tasks/monsterrodholders.md',
+                'src/sample-app/tasks/sampleorders.md',
             ],
             visibleColumns: [
                 ['tasks/agent-doc/agent-doc-bugs2.md'],
-                ['src/boost-client/tasks/monsterrodholders.md'],
+                ['src/sample-app/tasks/sampleorders.md'],
             ],
             previous: {
-                activeFile: 'src/boost-client/tasks/monsterrodholders.md',
+                activeFile: 'src/sample-app/tasks/sampleorders.md',
                 visibleSignature: visibleSignatureFromColumns([
                     ['tasks/agent-doc/agent-doc-bugs2.md'],
-                    ['src/boost-client/tasks/monsterrodholders.md'],
+                    ['src/sample-app/tasks/sampleorders.md'],
                 ]),
             },
         });
@@ -218,14 +218,14 @@ describe('buildTabChangeCommand', () => {
             activeFile: 'tasks/agent-doc/agent-doc-bugs2.md',
             visibleMd: [
                 'tasks/agent-doc/agent-doc-bugs2.md',
-                'src/boost-client/tasks/monsterrodholders.md',
+                'src/sample-app/tasks/sampleorders.md',
             ],
             visibleColumns: [
                 ['tasks/agent-doc/agent-doc-bugs2.md'],
-                ['src/boost-client/tasks/monsterrodholders.md'],
+                ['src/sample-app/tasks/sampleorders.md'],
             ],
             previous: {
-                activeFile: 'src/boost-client/tasks/monsterrodholders.md',
+                activeFile: 'src/sample-app/tasks/sampleorders.md',
                 visibleSignature: visibleSignatureFromColumns([
                     ['tasks/agent-doc/agent-doc-bugs2.md'],
                 ]),

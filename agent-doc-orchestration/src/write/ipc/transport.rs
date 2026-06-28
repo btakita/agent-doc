@@ -2374,7 +2374,7 @@ mod submodule_patch_routing_tests {
             ],
         );
 
-        // Submodule has its own .agent-doc/ — mirrors the real boost-client layout.
+        // Submodule has its own .agent-doc/ — mirrors the real sample-app layout.
         let submodule_root = parent.join("src/submodule");
         std::fs::create_dir_all(submodule_root.join(".agent-doc/snapshots")).unwrap();
         std::fs::create_dir_all(submodule_root.join(".agent-doc/crdt")).unwrap();

@@ -1500,7 +1500,7 @@ mod tests {
         let pane = concat!(
             "• Working (7m 47s · esc to interrupt)\n",
             "› Summarize recent commits\n",
-            "  gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client · Context 60% used\n",
+            "  gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 60% used\n",
             "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n",
         );
         assert_eq!(
@@ -2234,9 +2234,9 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
     fn protected_prompt_input_reason_ignores_agent_doc_session_control_commands() {
         let h = HarnessConfig::codex();
         for prompt in [
-            "❯ agent-doc session clear tasks/monsterrodholders.md",
-            "› agent-doc session interrupt-clear tasks/monsterrodholders.md",
-            "> /usr/local/bin/agent-doc session stop tasks/monsterrodholders.md",
+            "❯ agent-doc session clear tasks/sampleorders.md",
+            "› agent-doc session interrupt-clear tasks/sampleorders.md",
+            "> /usr/local/bin/agent-doc session stop tasks/sampleorders.md",
         ] {
             let output =
                 format!("{prompt}\ngpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used\n");

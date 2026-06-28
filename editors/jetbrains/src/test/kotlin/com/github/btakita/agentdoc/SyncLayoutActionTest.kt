@@ -151,14 +151,14 @@ class SyncLayoutActionTest {
     fun `sync command preserves empty columns so sync can restore remembered panes`() {
         val cmd = SyncLayoutAction.buildSyncCommand(
             agentDoc = "agent-doc",
-            visibleMdFiles = listOf("/repo/src/boost-client/tasks/monsterrodholders.md"),
+            visibleMdFiles = listOf("/repo/src/sample-app/tasks/sampleorders.md"),
             editorLayout = EditorLayout(
                 listOf(
                     LayoutColumn(emptyList()),
-                    LayoutColumn(listOf("/repo/src/boost-client/tasks/monsterrodholders.md")),
+                    LayoutColumn(listOf("/repo/src/sample-app/tasks/sampleorders.md")),
                 )
             ),
-            focusedFile = "/repo/src/boost-client/tasks/monsterrodholders.md",
+            focusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
             noAutostart = false,
         )
 
@@ -169,9 +169,9 @@ class SyncLayoutActionTest {
                 "--col",
                 "",
                 "--col",
-                "/repo/src/boost-client/tasks/monsterrodholders.md",
+                "/repo/src/sample-app/tasks/sampleorders.md",
                 "--focus",
-                "/repo/src/boost-client/tasks/monsterrodholders.md",
+                "/repo/src/sample-app/tasks/sampleorders.md",
             ),
             cmd,
         )
@@ -207,11 +207,11 @@ class SyncLayoutActionTest {
     fun `normalize editor layout rewrites workspace relative files into submodule relative files`() {
         val normalized = SyncLayoutAction.normalizeEditorLayout(
             basePath = "/repo",
-            projectRoot = "/repo/src/boost-client",
+            projectRoot = "/repo/src/sample-app",
             editorLayout = EditorLayout(
                 listOf(
-                    LayoutColumn(listOf("src/boost-client/tasks/one.md")),
-                    LayoutColumn(listOf("src/boost-client/tasks/two.md", "tasks/ignored.md")),
+                    LayoutColumn(listOf("src/sample-app/tasks/one.md")),
+                    LayoutColumn(listOf("src/sample-app/tasks/two.md", "tasks/ignored.md")),
                 )
             ),
         )
@@ -231,11 +231,11 @@ class SyncLayoutActionTest {
     fun `normalize editor layout preserves empty columns for non markdown siblings`() {
         val normalized = SyncLayoutAction.normalizeEditorLayout(
             basePath = "/repo",
-            projectRoot = "/repo/src/boost-client",
+            projectRoot = "/repo/src/sample-app",
             editorLayout = EditorLayout(
                 listOf(
                     LayoutColumn(emptyList()),
-                    LayoutColumn(listOf("src/boost-client/tasks/monsterrodholders.md")),
+                    LayoutColumn(listOf("src/sample-app/tasks/sampleorders.md")),
                 )
             ),
         )
@@ -244,7 +244,7 @@ class SyncLayoutActionTest {
             EditorLayout(
                 listOf(
                     LayoutColumn(emptyList()),
-                    LayoutColumn(listOf("tasks/monsterrodholders.md")),
+                    LayoutColumn(listOf("tasks/sampleorders.md")),
                 )
             ),
             normalized,
@@ -255,11 +255,11 @@ class SyncLayoutActionTest {
     fun `normalize editor layout preserves cross root markdown files as absolute paths`() {
         val normalized = SyncLayoutAction.normalizeEditorLayout(
             basePath = "/repo",
-            projectRoot = "/repo/src/boost-client",
+            projectRoot = "/repo/src/sample-app",
             editorLayout = EditorLayout(
                 listOf(
                     LayoutColumn(listOf("tasks/agent-doc/agent-doc-bugs2.md")),
-                    LayoutColumn(listOf("src/boost-client/tasks/monsterrodholders.md")),
+                    LayoutColumn(listOf("src/sample-app/tasks/sampleorders.md")),
                 )
             ),
         )
@@ -268,7 +268,7 @@ class SyncLayoutActionTest {
             EditorLayout(
                 listOf(
                     LayoutColumn(listOf("/repo/tasks/agent-doc/agent-doc-bugs2.md")),
-                    LayoutColumn(listOf("tasks/monsterrodholders.md")),
+                    LayoutColumn(listOf("tasks/sampleorders.md")),
                 )
             ),
             normalized,
@@ -278,7 +278,7 @@ class SyncLayoutActionTest {
     @Test
     fun `absolutize editor layout rewrites project relative files into absolute paths`() {
         val absolute = SyncLayoutAction.absolutizeEditorLayout(
-            projectRoot = "/repo/src/boost-client",
+            projectRoot = "/repo/src/sample-app",
             editorLayout = EditorLayout(
                 listOf(
                     LayoutColumn(listOf("tasks/one.md")),
@@ -290,8 +290,8 @@ class SyncLayoutActionTest {
         assertEquals(
             EditorLayout(
                 listOf(
-                    LayoutColumn(listOf("/repo/src/boost-client/tasks/one.md")),
-                    LayoutColumn(listOf("/already/absolute.md", "/repo/src/boost-client/tasks/two.md")),
+                    LayoutColumn(listOf("/repo/src/sample-app/tasks/one.md")),
+                    LayoutColumn(listOf("/already/absolute.md", "/repo/src/sample-app/tasks/two.md")),
                 )
             ),
             absolute,
@@ -301,11 +301,11 @@ class SyncLayoutActionTest {
     @Test
     fun `absolutize editor layout preserves empty columns`() {
         val absolute = SyncLayoutAction.absolutizeEditorLayout(
-            projectRoot = "/repo/src/boost-client",
+            projectRoot = "/repo/src/sample-app",
             editorLayout = EditorLayout(
                 listOf(
                     LayoutColumn(emptyList()),
-                    LayoutColumn(listOf("tasks/monsterrodholders.md")),
+                    LayoutColumn(listOf("tasks/sampleorders.md")),
                 )
             ),
         )
@@ -314,7 +314,7 @@ class SyncLayoutActionTest {
             EditorLayout(
                 listOf(
                     LayoutColumn(emptyList()),
-                    LayoutColumn(listOf("/repo/src/boost-client/tasks/monsterrodholders.md")),
+                    LayoutColumn(listOf("/repo/src/sample-app/tasks/sampleorders.md")),
                 )
             ),
             absolute,
@@ -325,14 +325,14 @@ class SyncLayoutActionTest {
     fun `collect visible markdown files keeps cross root paths`() {
         val visible = arrayOf(
             FakeVirtualFile("/repo/tasks/agent-doc/agent-doc-bugs2.md"),
-            FakeVirtualFile("/repo/src/boost-client/tasks/monsterrodholders.md"),
+            FakeVirtualFile("/repo/src/sample-app/tasks/sampleorders.md"),
             FakeVirtualFile("/repo/notes/todo.txt"),
         )
 
         assertEquals(
             listOf(
                 "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-                "/repo/src/boost-client/tasks/monsterrodholders.md",
+                "/repo/src/sample-app/tasks/sampleorders.md",
             ),
             SyncLayoutAction.collectVisibleMarkdownFiles(visible),
         )
@@ -341,13 +341,13 @@ class SyncLayoutActionTest {
     @Test
     fun `choose sync project root keeps single root sync scoped to that root`() {
         assertEquals(
-            "/repo/src/boost-client",
+            "/repo/src/sample-app",
             SyncLayoutAction.chooseSyncProjectRoot(
                 basePath = "/repo",
-                fallbackRoot = "/repo/src/boost-client",
+                fallbackRoot = "/repo/src/sample-app",
                 visibleMarkdownFiles = listOf(
-                    "/repo/src/boost-client/tasks/monsterrodholders.md",
-                    "/repo/src/boost-client/tasks/buildparty.md",
+                    "/repo/src/sample-app/tasks/sampleorders.md",
+                    "/repo/src/sample-app/tasks/buildparty.md",
                 ),
             ),
         )
@@ -362,7 +362,7 @@ class SyncLayoutActionTest {
                 fallbackRoot = "/repo/src/agent-doc",
                 visibleMarkdownFiles = listOf(
                     "/repo/src/agent-doc/specs/08-session-routing.md",
-                    "/repo/src/boost-client/tasks/monsterrodholders.md",
+                    "/repo/src/sample-app/tasks/sampleorders.md",
                 ),
             ),
         )

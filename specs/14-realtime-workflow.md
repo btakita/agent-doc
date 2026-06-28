@@ -339,7 +339,7 @@ Forbidden transitions:
 - `DiskDriftObserved -> AgentDeltaReady` before reconciling disk and editor
   operator sources;
 - `MergePlanned` or `ApplyInFlight` to any document commit;
-- `agent-doc-merge` or `agent-doc-realtime` running `git commit`;
+- `agent-doc-merge` or `agent-doc-document-realtime` running `git commit`;
 - any transition that drops visible operator text to match `content_ours`, a
   snapshot, a CRDT sidecar, or an ACK-content sidecar.
 
@@ -351,13 +351,13 @@ different question: can the binary safely identify document components, spans,
 frontmatter, response blocks, queue/backlog nodes, and operation targets without
 guessing?
 
-The parse state is a lazily-backed projection in `agent-doc-realtime`. It is
-recomputed after every editor or disk epoch and is mirrored to editor plugins
-through the lazily-spec snapshot/delta graph. The parser should be pure
-document logic, with no access to turns, git, sockets, clocks, or repair policy.
-A future `agent-doc-parse` or document-model crate may own this pure parser, but
-the realtime scheduler owns when the latest parse projection is observed and
-published.
+The parse state is a lazily-backed projection in
+`agent-doc-document-realtime`. It is recomputed after every editor or disk epoch
+and is mirrored to editor plugins through the lazily-spec snapshot/delta graph.
+The parser should be pure document logic, with no access to turns, git, sockets,
+clocks, or repair policy. A future `agent-doc-parse` or document-model crate may
+own this pure parser, but the document realtime scheduler owns when the latest
+parse projection is observed and published.
 
 | State | Meaning | Allowed next action |
 |---|---|---|
@@ -508,10 +508,10 @@ Every document mutation that can affect a session document follows this order:
 ## Commit Boundary
 
 CRDT merge does not commit. `agent-doc-merge` returns only a merged
-document/patch plan or a typed conflict. `agent-doc-realtime` may schedule,
-deliver, and verify that plan against the current editor or disk source of
-truth, but merge/realtime paths must not run git commit, advance the document
-turn lifecycle, or decide closeout success.
+document/patch plan or a typed conflict. `agent-doc-document-realtime` may
+schedule, deliver, and verify that plan against the current editor or disk
+source of truth, but merge/document-realtime paths must not run git commit,
+advance the document turn lifecycle, or decide closeout success.
 
 The document turn lifecycle owns commits. It may commit after it has the
 captured response, pending-operation decisions, verified apply proof, current
@@ -519,6 +519,7 @@ source-of-truth text, and the selected write policy. It may also intentionally
 leave a verified realtime merge uncommitted, such as a compact preview, a retry
 handoff, or an operator-selected no-commit flow. Saving backup/audit state can
 be part of lifecycle closeout, but backup writes are not realtime authority.
+Invariant: document turn lifecycle owns commits; merge/realtime paths must not run git commit.
 
 ## Document Projection Crate Boundary
 
@@ -532,15 +533,16 @@ state. Current responsibilities include:
 - future pure parse/document views used by realtime diagnostics.
 
 `agent-doc-document` does not commit, dispatch turns, run repair, call tmux,
-or decide lifecycle closeout. It returns document-state facts for
-`agent-doc-realtime` and `agent-doc-turn` to consume.
+open IPC, own editor/disk epochs, or decide lifecycle closeout. It returns
+document-state facts for `agent-doc-document-realtime` and `agent-doc-turn` to
+consume.
 
 ## Merge Crate Boundary
 
-The pure boundary is the `agent-doc-merge` crate. It owns document merge,
-conflict resolution, and operation semantics as pure functions. It has no
-access to disk, git, sockets, editor APIs, cycle state, ops logs, snapshots, or
-clocks.
+The pure boundary is the `agent-doc-merge` crate.
+Use `agent-doc-merge` for pure merge semantics: document merge, conflict
+resolution, and operation semantics as pure functions. It has no access to
+disk, git, sockets, editor APIs, cycle state, ops logs, snapshots, or clocks.
 
 Inputs include:
 
@@ -555,18 +557,21 @@ must preserve disjoint operator edits, keep same-node operator changes unless
 the operation explicitly owns the node with proof, and distinguish normal
 response append from explicit exchange replacement.
 
-`agent-doc-realtime` is a separate later boundary for scheduling/lifecycle:
-editor ownership, debounce, CRDT transport, live-buffer publication, retry
-timing, and owner leases. Realtime orchestration may decide when to call the
-merge core and how to deliver its patch plan, but it must not redefine document
-authority.
+`agent-doc-document-realtime` is the document-specific realtime boundary:
+editor ownership, disk visibility epochs, debounce, CRDT transport,
+live-buffer publication, parse diagnostics, retry timing, and owner leases.
+Other realtime loops, such as tmux, supervisor, editor-plugin, and controller
+loops, use their own crate names. Document realtime orchestration may decide
+when to call the merge core and how to deliver its patch plan, but it must not
+redefine document authority.
 
 ## Lazily-RS State Backbone
 
-`agent-doc-realtime` must use `lazily-rs` for realtime state. The authority
-state machine above, editor/disk epochs, owner leases, in-flight apply facts,
-disk-drift facts, and retry/fail-closed decisions are lazily-backed state
-projections, not ad hoc globals, snapshots, or turn-local sidecars.
+`agent-doc-document-realtime` must use `lazily-rs` for document realtime state.
+The authority state machine above, editor/disk epochs, owner leases, in-flight
+apply facts, disk-drift facts, parse projections, and retry/fail-closed
+decisions are lazily-backed state projections, not ad hoc globals, snapshots,
+or turn-local sidecars.
 
 The Rust implementation uses `lazily::ThreadSafeStateMachine` for closed
 transition domains and `lazily::ThreadSafeContext` for the per-document
@@ -586,8 +591,9 @@ but the hot path reads the lazily-backed projection when deciding:
 
 Cycle state remains separate. It may request work or retain a captured response,
 but it must not carry realtime document authority. Any future
-`agent-doc-realtime` crate should therefore depend on `agent-doc-document` for
-pure document projections, `agent-doc-merge` for pure merge semantics,
+`agent-doc-document-realtime` crate should therefore depend on
+`agent-doc-document` for pure document projections, `agent-doc-merge` for pure
+merge semantics, editor adapter crates for live buffer facts,
 `agent-doc-turn-executor`/executor-specific model crates for dispatch-readiness
 facts, `agent-doc-tmux` for shared tmux observations where tmux is the active
 executor family, `agent-doc-supervisor` for supervisor realtime observations and

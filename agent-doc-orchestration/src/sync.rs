@@ -5630,20 +5630,20 @@ mod tests {
     }
     #[test]
     fn cmdline_owns_other_document_blocks_cross_root_commandeer() {
-        // The exact awear/monsterrodholders cross-root repro: a brand-new
+        // The exact awear/sampleorders cross-root repro: a brand-new
         // superproject document is claimed onto a pane already running a live
         // submodule Codex session for a different document.
         let claimed = "tasks/recruit/awear.md";
         assert!(
             cmdline_owns_other_document(
-                "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/monsterrodholders.md",
+                "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/sampleorders.md",
                 claimed,
             ),
             "a pane owning a different document must block commandeering"
         );
         assert!(
             cmdline_owns_other_document(
-                "/usr/bin/codex /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md",
+                "/usr/bin/codex /home/brian/work/btakita/agent-loop/src/sample-app/tasks/sampleorders.md",
                 claimed,
             ),
             "a harness session for another document must block commandeering"
@@ -6899,7 +6899,7 @@ mod tests {
     fn layout_state_path_uses_shared_sync_scope_root() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
-        let child = root.join("src/boost-client");
+        let child = root.join("src/sample-app");
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::fs::create_dir_all(child.join(".agent-doc")).unwrap();
         std::fs::create_dir_all(root.join("tasks")).unwrap();

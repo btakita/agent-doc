@@ -13,16 +13,20 @@ Notable invariants:
   must never authorize a recovery, IPC patch, harness hook, or disk write that
   drops operator-visible text. Snapshots are durable backup/audit state, not
   hot-path authority; legacy snapshot-derived candidates must be narrowed and
-  merged into the latest source-of-truth document. The realtime state machine,
-  source-authority projection, editor/disk epochs, owner leases, and in-flight
-  apply facts are lazily-rs-backed state, not turn-local sidecars. The realtime
-  parse state projection is also lazily-backed: parse issues surface as
-  realtime editor diagnostics and preflight repair is a crash/retry backstop,
-  not the hot-path way to make live documents parse. CRDT merge and realtime
-  apply/verify do not commit; the document turn lifecycle owns commit
-  decisions. See
+  merged into the latest source-of-truth document. The document realtime state
+  machine, source-authority projection, editor/disk epochs, owner leases, and
+  in-flight apply facts belong to `agent-doc-document-realtime` and are
+  lazily-rs-backed state, not turn-local sidecars. The realtime parse state
+  projection is also lazily-backed: parse issues surface as realtime editor
+  diagnostics and preflight repair is a crash/retry backstop, not the hot-path
+  way to make live documents parse. `agent-doc-document` remains the pure
+  document model/projection crate. CRDT merge and document realtime
+  apply/verify do not commit; the document turn lifecycle owns commit decisions.
+  See
   [Real-Time Workflow Authority](specs/14-realtime-workflow.md)
   and [Turn Lifecycle Authority](specs/15-turn-lifecycle.md).
+  Invariant: parse state projection drives editor diagnostics; preflight repair
+  is not the live parse hot path.
 - `agent-doc commit` remains snapshot-selective. It may repair narrowly-classified missed agent-owned drift before staging, but it must not absorb free-form user prompts from the working tree. Already-committed historical response drift may repair the snapshot only when the working tree matches `HEAD` modulo transient boundary / `(HEAD)` markers. On an already-current no-op closeout, a stale agent-owned exchange collapse (committed `### Re:` heading missing from the working exchange, with only committed exchange lines remaining and a duplicated queue-prompt blockquote proving the missing response id) is restored from `HEAD`; independent local queue/backlog/prompt drift outside `agent:exchange` remains visible and uncommitted.
 - When the snapshot already matches `HEAD`, post-commit local drift classification must reuse the canonical prompt-bearing diff classifier. Queue/backlog directive edits that preflight would surface as prompt targets are `user_follow_up` drift, not anomalous `working_tree_edits`; inline content corrections remain working-tree edits.
 - `agent-doc prompt --all` must normalize OpenCode horizontal permission prompts before editor plugins render them. When the OpenCode pane exposes option controls but no explicit `← ...` question line, the reported question is the neutral `Permission required`; earlier shell command text, including ANSI-literal `printf` prompt fixtures, must never become the user-facing JetBrains or VS Code prompt label.

@@ -3020,7 +3020,7 @@ real stderr
     #[test]
     fn opencode_child_probe_classifies_socket_eperm_as_ssh_sandbox_denial() {
         let err = validate_opencode_child_probe_marker_output(
-            r#"{"type":"message","text":"ssh monsterrodholders-server true\nsocket: Operation not permitted"}"#,
+            r#"{"type":"message","text":"ssh sampleorders-server true\nsocket: Operation not permitted"}"#,
             "",
             OPENCODE_CHILD_SSH_PROBE_MARKER,
             "ssh",
@@ -3058,7 +3058,7 @@ printf '%s\n' '{{"type":"message","text":"{}\n"}}'
         let old_path = std::env::var("PATH").unwrap_or_default();
         env.insert("PATH".to_string(), format!("{path_dir}:{old_path}"));
         let mut fm = Frontmatter::default();
-        fm.required_ssh_targets = vec!["monsterrodholders-server".to_string()];
+        fm.required_ssh_targets = vec!["sampleorders-server".to_string()];
 
         let event = prove_managed_session_capabilities(
             &opencode,
@@ -3389,8 +3389,8 @@ if [ "$1" = "-G" ]; then
   exit 0
 fi
 case "$*" in
-  *monsterrodholders-server*)
-    echo "ssh: Could not resolve hostname monsterrodholders-server: Name or service not known" >&2
+  *sampleorders-server*)
+    echo "ssh: Could not resolve hostname sampleorders-server: Name or service not known" >&2
     exit 255
     ;;
   *50.28.2.199*)
@@ -3402,13 +3402,13 @@ exit 0
         );
         let codex = Codex::new(None, None)
             .with_env(vec![("PATH".to_string(), Some(path_dir))])
-            .with_required_ssh_targets(vec!["monsterrodholders-server".to_string()]);
+            .with_required_ssh_targets(vec!["sampleorders-server".to_string()]);
 
         let err = codex
             .prove_required_ssh_capability()
             .unwrap_err()
             .to_string();
-        assert!(err.contains("monsterrodholders-server"), "got: {err}");
+        assert!(err.contains("sampleorders-server"), "got: {err}");
         assert!(err.contains("isolated direct host probe"), "got: {err}");
     }
 
@@ -3437,7 +3437,7 @@ exit 0
                     Some(log_path.to_string_lossy().into_owned()),
                 ),
             ])
-            .with_required_ssh_targets(vec!["monsterrodholders-server".to_string()]);
+            .with_required_ssh_targets(vec!["sampleorders-server".to_string()]);
 
         codex.prove_required_ssh_capability().unwrap();
 
@@ -3459,12 +3459,12 @@ exit 0
 
     #[test]
     fn required_ssh_failure_detects_bare_socket_eperm_when_command_proves_ssh_context() {
-        let line = r#"{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"ssh monsterrodholders-server true","aggregated_output":"socket: Operation not permitted","exit_code":255,"status":"completed"}}"#;
+        let line = r#"{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"ssh sampleorders-server true","aggregated_output":"socket: Operation not permitted","exit_code":255,"status":"completed"}}"#;
 
         assert_eq!(
-            transcript_has_required_ssh_failure(line, &["monsterrodholders-server".to_string()]),
+            transcript_has_required_ssh_failure(line, &["sampleorders-server".to_string()]),
             Some(
-                "command `ssh monsterrodholders-server true`: socket: Operation not permitted"
+                "command `ssh sampleorders-server true`: socket: Operation not permitted"
                     .to_string()
             )
         );
@@ -3475,17 +3475,17 @@ exit 0
         let line = r#"{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"chromium-bridge list","aggregated_output":"socket: Operation not permitted","exit_code":1,"status":"completed"}}"#;
 
         assert_eq!(
-            transcript_has_required_ssh_failure(line, &["monsterrodholders-server".to_string()]),
+            transcript_has_required_ssh_failure(line, &["sampleorders-server".to_string()]),
             None
         );
     }
 
     #[test]
     fn required_ssh_failure_ignores_historical_capture_grep_output() {
-        let line = r#"{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"rg 'Operation not permitted' .agent-doc/captures","aggregated_output":".agent-doc/captures/old/cycle.json:16: \"response_body\": \"required SSH capability failed for target(s) monsterrodholders-server: socket: Operation not permitted\"","exit_code":0,"status":"completed"}}"#;
+        let line = r#"{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"rg 'Operation not permitted' .agent-doc/captures","aggregated_output":".agent-doc/captures/old/cycle.json:16: \"response_body\": \"required SSH capability failed for target(s) sampleorders-server: socket: Operation not permitted\"","exit_code":0,"status":"completed"}}"#;
 
         assert_eq!(
-            transcript_has_required_ssh_failure(line, &["monsterrodholders-server".to_string()]),
+            transcript_has_required_ssh_failure(line, &["sampleorders-server".to_string()]),
             None
         );
     }
@@ -3497,10 +3497,7 @@ exit 0
         assert_eq!(
             transcript_has_required_ssh_failure(
                 line,
-                &[
-                    "monsterrodholders-server".to_string(),
-                    "50.28.2.199".to_string()
-                ]
+                &["sampleorders-server".to_string(), "50.28.2.199".to_string()]
             ),
             Some("ssh: connect to host 50.28.2.199 port 22: Operation not permitted".to_string())
         );
@@ -3550,7 +3547,7 @@ exit 0
             r#"#!/bin/sh
 if [ "$2" = "resume" ]; then
   printf '%s\n' '{"type":"thread.started","thread_id":"stale-thread"}'
-  printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"ssh monsterrodholders-server true","aggregated_output":"socket: Operation not permitted","exit_code":255,"status":"completed"}}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"ssh sampleorders-server true","aggregated_output":"socket: Operation not permitted","exit_code":255,"status":"completed"}}'
   printf '%s\n' '{"type":"turn.completed","usage":{}}'
 else
   printf '%s\n' '{"type":"thread.started","thread_id":"fresh-thread"}'
@@ -3561,7 +3558,7 @@ fi
         );
         let codex = Codex::new(Some(script), None)
             .with_env(vec![("PATH".to_string(), Some(path_dir))])
-            .with_required_ssh_targets(vec!["monsterrodholders-server".to_string()]);
+            .with_required_ssh_targets(vec!["sampleorders-server".to_string()]);
 
         let response = codex
             .send("prompt", Some("resume-123"), false, None)
@@ -3600,7 +3597,7 @@ fi
         );
         let codex = Codex::new(Some(script), None)
             .with_env(vec![("PATH".to_string(), Some(path_dir))])
-            .with_required_ssh_targets(vec!["monsterrodholders-server".to_string()]);
+            .with_required_ssh_targets(vec!["sampleorders-server".to_string()]);
 
         let response = codex
             .send("prompt", Some("resume-123"), false, None)
@@ -3671,7 +3668,7 @@ fi
         );
         let codex = Codex::new(Some(script), None)
             .with_env(vec![("PATH".to_string(), Some(path_dir))])
-            .with_required_ssh_targets(vec!["monsterrodholders-server".to_string()]);
+            .with_required_ssh_targets(vec!["sampleorders-server".to_string()]);
 
         let chunks: Vec<_> = codex
             .send_streaming("prompt", Some("resume-123"), false, None)
@@ -3705,7 +3702,7 @@ exit 0
             r#"#!/bin/sh
 if [ "$2" = "resume" ]; then
   printf '%s\n' '{"type":"thread.started","thread_id":"stale-thread"}'
-  printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"ssh monsterrodholders-server true","aggregated_output":"socket: Operation not permitted","exit_code":255,"status":"completed"}}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"ssh sampleorders-server true","aggregated_output":"socket: Operation not permitted","exit_code":255,"status":"completed"}}'
   printf '%s\n' '{"type":"turn.completed","usage":{}}'
 else
   printf '%s\n' '{"type":"thread.started","thread_id":"fresh-thread"}'
@@ -3716,7 +3713,7 @@ fi
         );
         let codex = Codex::new(Some(script), None)
             .with_env(vec![("PATH".to_string(), Some(path_dir))])
-            .with_required_ssh_targets(vec!["monsterrodholders-server".to_string()]);
+            .with_required_ssh_targets(vec!["sampleorders-server".to_string()]);
 
         let chunks: Vec<_> = codex
             .send_streaming("prompt", Some("resume-123"), false, None)
@@ -3751,11 +3748,11 @@ exit 0
 if [ "$2" = "resume" ]; then
   printf '%s\n' '{"type":"thread.started","thread_id":"stale-thread"}'
   printf '%s\n' '{"type":"item.completed","item":{"id":"msg-1","type":"agent_message","text":"I am retrying the SSH step now.\n"}}'
-  printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"ssh monsterrodholders-server true","aggregated_output":"socket: Operation not permitted","exit_code":255,"status":"completed"}}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"ssh sampleorders-server true","aggregated_output":"socket: Operation not permitted","exit_code":255,"status":"completed"}}'
   printf '%s\n' '{"type":"turn.completed","usage":{}}'
 else
   printf '%s\n' '{"type":"thread.started","thread_id":"fresh-thread"}'
-  printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-2","type":"command_execution","command":"ssh monsterrodholders-server true","aggregated_output":"","exit_code":0,"status":"completed"}}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-2","type":"command_execution","command":"ssh sampleorders-server true","aggregated_output":"","exit_code":0,"status":"completed"}}'
   printf '%s\n' '{"type":"item.completed","item":{"id":"msg-2","type":"agent_message","text":"fresh response"}}'
   printf '%s\n' '{"type":"turn.completed","usage":{}}'
 fi
@@ -3763,7 +3760,7 @@ fi
         );
         let codex = Codex::new(Some(script), None)
             .with_env(vec![("PATH".to_string(), Some(path_dir))])
-            .with_required_ssh_targets(vec!["monsterrodholders-server".to_string()]);
+            .with_required_ssh_targets(vec!["sampleorders-server".to_string()]);
 
         let chunks: Vec<_> = codex
             .send_streaming("prompt", Some("resume-123"), false, None)
@@ -3805,14 +3802,14 @@ exit 0
             r#"#!/bin/sh
 printf '%s\n' '{"type":"thread.started","thread_id":"resume-thread"}'
 printf '%s\n' '{"type":"item.completed","item":{"id":"msg-1","type":"agent_message","text":"I am checking SSH first.\n"}}'
-printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"ssh monsterrodholders-server true","aggregated_output":"","exit_code":0,"status":"completed"}}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"ssh sampleorders-server true","aggregated_output":"","exit_code":0,"status":"completed"}}'
 printf '%s\n' '{"type":"item.completed","item":{"id":"msg-2","type":"agent_message","text":"SSH worked."}}'
 printf '%s\n' '{"type":"turn.completed","usage":{}}'
 "#,
         );
         let codex = Codex::new(Some(script), None)
             .with_env(vec![("PATH".to_string(), Some(path_dir))])
-            .with_required_ssh_targets(vec!["monsterrodholders-server".to_string()]);
+            .with_required_ssh_targets(vec!["sampleorders-server".to_string()]);
 
         let chunks: Vec<_> = codex
             .send_streaming("prompt", Some("resume-123"), false, None)

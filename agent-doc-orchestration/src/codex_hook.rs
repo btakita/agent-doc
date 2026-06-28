@@ -3180,7 +3180,7 @@ agent-doc {}\n",
 
     #[test]
     fn stop_blocks_from_durable_marker_when_session_state_missing() {
-        // #codex-auto-queue-stalled-final-gate live regression (monsterrodholders
+        // #codex-auto-queue-stalled-final-gate live regression (sampleorders
         // shape): the completed head was consumed, `#seopdp` remains, queue_active
         // is true with `agent:queue auto`, and the document is clean — but the
         // Stop hook has NO tracked in-memory session state (the live failure). The

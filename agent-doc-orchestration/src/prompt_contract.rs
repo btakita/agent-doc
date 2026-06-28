@@ -769,7 +769,7 @@ mod tests {
         assert_eq!(
             requested_prompt_presets(
                 &[
-                    "Please analyze failed orders and bot traffic on monsterrodholders.com. #next-steps"
+                    "Please analyze failed orders and bot traffic on sampleorders.com. #next-steps"
                         .to_string()
                 ],
                 &[],

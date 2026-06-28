@@ -4130,7 +4130,7 @@ mod tests {
         // to carry the same session id.
         let dir = tempfile::TempDir::new().unwrap();
         let base = dir.path();
-        let target = base.join("tasks/equityfundingsource.md");
+        let target = base.join("tasks/sampleportal.md");
         let foreign = base.join("tasks/agent-doc-bugs2.md");
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         std::fs::write(&target, "").unwrap();
@@ -4152,7 +4152,7 @@ mod tests {
     fn registry_lookup_prefers_exact_document_over_foreign_same_session_suprestassoc() {
         let dir = tempfile::TempDir::new().unwrap();
         let base = dir.path();
-        let target = base.join("tasks/equityfundingsource.md");
+        let target = base.join("tasks/sampleportal.md");
         let foreign = base.join("tasks/agent-doc-bugs2.md");
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         std::fs::write(&target, "").unwrap();
@@ -4165,13 +4165,13 @@ mod tests {
         );
         registry.insert(
             target.to_string_lossy().to_string(),
-            test_registry_entry("shared-session", "tasks/equityfundingsource.md", "%14"),
+            test_registry_entry("shared-session", "tasks/sampleportal.md", "%14"),
         );
 
         let entry = find_registry_entry(base, &registry, "shared-session", &target)
             .expect("target document entry should be found");
         assert_eq!(entry.pane, "%14");
-        assert_eq!(entry.file, "tasks/equityfundingsource.md");
+        assert_eq!(entry.file, "tasks/sampleportal.md");
     }
 
     #[test]

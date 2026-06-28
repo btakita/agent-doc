@@ -255,7 +255,32 @@ I would allow `agent-doc-document` to expose low-level helpers such as “apply 
 The reason to keep them separate is practical, not aesthetic: editor plugins, parse diagnostics, and read-only tooling should be able to use `agent-doc-document` without pulling in CRDT/merge policy. Realtime and turn lifecycle code should call `agent-doc-merge` explicitly when they need conflict resolution. That makes it much harder for snapshot/turn authority to leak back into the document model under the name of “normalization.”
 
 So my answer is: keep `agent-doc-merge` as a separate crate, built on `agent-doc-document`. If early extraction overhead is annoying, start as distinct modules with the same dependency rule, then split the crate once the API stabilizes.
-<!-- agent:boundary:0d42051b -->
+
+### Re: Disk save visibility, live drift IPC, and realtime proof — gpt-5
+
+We should not wait for physical disk durability on the realtime hot path. A saved file should mean: reopen/read the document path, compute the digest/epoch from the bytes the OS now exposes, and verify those bytes are stable/parseable enough for the next transition. On a local OS, those bytes usually come from the kernel page cache before they are necessarily flushed to physical storage. `fsync` durability belongs to backup, crash recovery, git object/commit boundaries, and audit state, not to realtime authority.
+
+The race to guard against is not “did the SSD platter flush finish?” The real race is “did the watcher fire before the writer finished, or did an editor expose a partial in-place save?” So realtime must treat watcher events as hints, then do a fresh read and either observe a stable parseable file, wait/debounce for a stable epoch, or enter parse/merge blocked state. Atomic write + rename gives a coherent path-level read; pluginless in-place saves can temporarily expose partial bytes, so those must be handled as `ParseRecoverable`, `ParseBlocked`, `DiskDriftObserved`, or retry, not merged from stale buffered content.
+
+I encoded that in `specs/14-realtime-workflow.md` under `Disk Visibility And Durability`, with a test guard so we do not regress into treating fsync/snapshots as hot-path authority.
+
+I also fixed the live-drift IPC behavior that was still too snapshot-shaped:
+
+- If ACK content already contains the latest response block plus operator-visible drift, we accept that ACK-visible union for the visible document while keeping the commit snapshot on the response-only `content_ours` candidate. This preserves operator typing without absorbing next-cycle prompts into the current commit.
+- If ACK content does not contain the response block, we no longer silently advance the snapshot to `content_ours`; the path retries/fails closed instead of creating the “committed but visible file missing response” state.
+- The old `content_ours_snapshot_next_cycle` recovery label is replaced with `visible_repair_required`.
+
+Commits:
+- `src/agent-doc`: `7e52d9c6 fix: require visible proof for live drift IPC`
+- root pointer: `a8627702c agent-doc: require visible proof for live drift IPC`
+
+Verification passed:
+- `cargo fmt --check`
+- `git diff --check`
+- focused live-drift / EFS replay / live IPC race / FlowCore / realtime spec tests
+- full `make check` in `src/agent-doc`: 5519 tests passed, doctests passed, medium sim passed, Lean build passed
+- latest checked GitHub Actions CI run was green.
+<!-- agent:boundary:46d49bf4 -->
 <!-- /agent:exchange -->
 ## Queue
 

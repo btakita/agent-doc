@@ -161,7 +161,32 @@ Verification:
 - `gh run list --workflow CI --limit 1` reports latest CI run `28306093045` completed successfully.
 
 No code files changed in this cycle; this was verification and backlog closeout for a stale implementation head.
-<!-- agent:boundary:5fde3f4b -->
+
+### Re: do #suprestassoc — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#suprestassoc]
+
+
+Implemented and released `#suprestassoc`.
+
+The restart-supervisor registry lookup is now scoped to the requested document instead of accepting any registry row with the same session id. The CLI path now prefers an exact canonical file match and only falls back to session-id lookup for legacy fileless registry rows; registry keys that explicitly name another document are rejected. This prevents an EFS restart from adopting a stale `agent-doc-bugs2.md` pane/session projection.
+
+Code and release:
+- `src/agent-doc/src/session_actor_cmd.rs` adds document-scoped registry matching plus regressions for rejecting a foreign same-session row and preferring the exact target document row.
+- Published `lazily 0.13.1` because the agent-doc crate publish path needed the local `lazily` API on crates.io.
+- Published `agent-doc 0.34.65` to crates.io and uploaded the PyPI `0.34.65` source distribution. `0.34.64` was tagged but superseded before crates/PyPI publish because its publish verification still depended on crates.io `lazily 0.13.0`.
+- Installed `agent-doc 0.34.65` locally and pushed the root submodule pointers.
+
+Verification:
+- `cargo test suprestassoc` passed.
+- `make check` passed for `src/agent-doc`.
+- `make check` passed for `src/lazily-rs`.
+- GitHub Actions CI is green for `agent-doc` release commit `9aa073d2` and `lazily-rs` release commit `bf6a920`.
+
+Remaining operator-only proof is tracked as `#suprestassoc-live`: restart the EFS supervisor in a live editor/tmux setup and verify the projection stays associated with EFS, not this session.
+<!-- agent:boundary:00271b92 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -169,7 +194,7 @@ No code files changed in this cycle; this was verification and backlog closeout 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~:pushpin: do [#syncbarrier]~~
 - ~~:pushpin: do [#qheadstrikeauto]~~
-- 🚧 :pushpin: do [#suprestassoc]
+- ~~:pushpin: do [#suprestassoc]~~
 - :pushpin: do [#2y8j]
 - :pushpin: do [#cdtcutover]
 - :pushpin: do [#crdtauth6]
@@ -223,13 +248,13 @@ What are #next-steps to fix bugs?
 - [ ] [#provauth3bimpl] Replacement for #provauth3b: operator-origin authority cutover. Once #crdtauth6 supplies live origin deltas, replace remaining content_ours/stale-editor resurrection heuristics with origin checks and add logs/tests proving operator-origin working-tree edits are never reset. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#supstaledetectverify] Replacement for #supstaledetect: stale-install warning merge/install verification. Merge the source-mtime warning fix, install/recycle, then verify logs show a fresh build no longer warns while a genuinely stale binary still emits stale_install evidence.
 - [ ] [#suptmuxstaleverify] Replacement for #suptmuxstale: stale-supervisor pane indicator install/log proof. Merge/install the pane-title marker change, recycle, then verify .agent-doc/supervisor-stale plus pane title/turn_status logs show STALE SUPERVISOR only when the supervisor binary is actually stale.
-- [ ] 🚧 [#suprestassoc] #agent-doc-bug restart-supervisor re-associates the wrong doc: restarting the equityfundingsource.md supervisor re-bound EFS to the agent-doc-bugs2.md claude session. Actor re-register/lease-replace likely keys on pane/session not (document_id,generation) across the shared project controller. Needs live repro; fix = scope re-association to the restarted doc only + regression. Plan: tasks/agent-doc/plan-restart-supervisor-doc-reassociation.md
 - [ ] [#60ev] plan-dynamic-context-injection-ledger.md
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
 - [ ] [#crdtauth6] [operator-verify] crdtauth5 live hookup: thin JB DocumentListener calling CrdtReplicaForwarder.forwardLocalDelta + a Kotlin Unix-socket ReplicaTransport client (writes NDJSON register/deregister/update, delivers inbound update_b64 to applyRemoteUpdate); plus the deferred VS Code koffi replica seam (editors/vscode/src/native.ts out-param marshaling). Rust fan-out + Kotlin seam already merged + tested. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
 - [ ] [#kj5flive] [operator-verify] #mergestatemachine3 live proof replacement for cleared review #kj5f: after the latest JB plugin update is installed, verify JB+VSCode attach/detach/ownership facts flow through the merge-ownership state machine via #lazilystatesync, then run live editor-attached/detached repros for File Cache Conflict and the #6b5h wedge with logs sufficient to prove/disprove the fix before filing follow-up bugs. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
+- [ ] [#suprestassoc-live] [operator-verify] Restart the `tasks/professional/equityfundingsource.md` supervisor in a live editor/tmux setup and verify the actor/admin projection keeps EFS bound to its own pane/session without re-associating to `tasks/agent-doc/agent-doc-bugs2.md`.
 <!-- /agent:backlog -->
 
 ## Review

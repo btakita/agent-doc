@@ -303,7 +303,29 @@ Verification:
 - Latest checked GitHub Actions CI run on `main` was green.
 
 The live fix will not affect the running JetBrains process until IntelliJ restarts; the warning may continue for the already-loaded plugin instance.
-<!-- agent:boundary:d23e5d8d -->
+
+### Re: Fix the convergence issue
+
+Implemented the convergence fix.
+
+I reproduced the live failure with a red test: the editor socket accepts the patch and emits the early pending ack, then returns a terminal status:error while the file-IPC watcher can still apply the same patch and write ack-content. The fix keeps raw disk writes disabled, but when the socket returns `IPC ack status error` it retries the same convergence patch through the plugin-owned file-IPC queue and only succeeds if ack-content proves the target content.
+
+Committed:
+- agent-doc submodule: `6ae50897 fix: retry editor convergence through file ipc`
+- superproject pointer: `fa7d9a7dc agent-doc: retry convergence through file ipc`
+
+Verification:
+- `cargo test -p agent-doc-orchestration socket_status_error`
+- `cargo test -p agent-doc-orchestration try_editor_converge`
+- `cargo test -p agent-doc-orchestration active_listener_without_ack_content`
+- `cargo test -p agent-doc-orchestration queue_consume`
+- `cargo fmt --check`
+- `cargo check -p agent-doc-orchestration`
+- `make check`
+- `make install`
+
+I added the `agent:signals` follow-up as `#agentsignals` at the back of the backlog. GitHub Actions status could not be checked because GitHub returned an API rate-limit error for `gh run list --workflow CI --limit 1`.
+<!-- agent:boundary:ec92014e -->
 <!-- /agent:exchange -->
 ## Queue
 

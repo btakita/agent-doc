@@ -303,7 +303,7 @@ Verification:
 - Latest checked GitHub Actions CI run on `main` was green.
 
 The live fix will not affect the running JetBrains process until IntelliJ restarts; the warning may continue for the already-loaded plugin instance.
-<!-- agent:boundary:992d3b4c -->
+<!-- agent:boundary:47bc7630 -->
 <!-- /agent:exchange -->
 ## Queue
 

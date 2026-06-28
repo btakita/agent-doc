@@ -280,7 +280,23 @@ Verification passed:
 - focused live-drift / EFS replay / live IPC race / FlowCore / realtime spec tests
 - full `make check` in `src/agent-doc`: 5519 tests passed, doctests passed, medium sim passed, Lean build passed
 - latest checked GitHub Actions CI run was green.
-<!-- agent:boundary:46d49bf4 -->
+
+### Re: disk save visibility and persistence races - gpt-5
+
+We should not wait for the bytes to be physically durable on storage before realtime resolution. The hot path should read a fresh, coherent file image from the OS after a save/write signal, which usually means page cache contents visible through `open`/`read`, not an `fsync`-confirmed platter/NVMe commit.
+
+So the split should be:
+
+- Realtime merge authority: latest operator-visible/editor buffer if an editor plugin is attached; otherwise a freshly reopened disk read after a watcher event or poll tick.
+- Hot-path proof: content hash/epoch plus parseability and a short stability check. A watcher event is only a hint; it is not proof of the bytes we should merge.
+- Durability proof: `fsync`, snapshots, git objects, and backup sidecars. These matter for crash recovery and turn closeout, not for accepting operator text into realtime resolution.
+
+The race you are pointing at is real, but physical disk persistence is the wrong boundary. The important race is whether the producing process has finished making a coherent file image visible through the filesystem namespace. For pluginless/out-of-band writers, the realtime state machine should handle this by reopening the path, reading bytes, computing digest/metadata, requiring a stable parseable image across a quiet interval, and staying in `DiskWriteObserved` / `Parsing` / `ParseBlocked` if the file is truncated, changing, or invalid. Editors that save via temp-file-plus-rename give a cleaner atomic image; direct truncate-and-rewrite can expose partial content, so we must treat unparseable/short reads as pending input, not corruption to repair.
+
+For attached editors, disk is even less authoritative: the live editor buffer/epoch is the operator-visible state. If the editor says the buffer has unsaved edits, a disk read can be stale by definition. In that case realtime should merge against the editor buffer projection and only let the turn lifecycle commit after the editor/disk sync barrier is satisfied or explicitly fails open with a visible save request.
+
+Spec invariant I would pin: realtime resolution waits for a stable visible content proof, not durable storage proof. Durable persistence belongs to backups and commits; operator text preservation belongs to realtime merge.
+<!-- agent:boundary:913a73cd -->
 <!-- /agent:exchange -->
 ## Queue
 

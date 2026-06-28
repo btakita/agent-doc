@@ -240,7 +240,23 @@ The honest boundary is:
 So: yes to `agent-doc-turn`, but not as a place to put realtime authority. It should consume realtime handoff facts and merge results, then decide the turn lifecycle outcome. That keeps the invariant intact: realtime resolution is independent from turns, while commits remain part of the document turn lifecycle.
 
 I also added an active editor-IPC regression around the compact-exchange/partial-word failure mode: the test keeps an operator-typed partial word inside the exchange while adding the missing assistant response, verifies the editor IPC path is used, and verifies we do not silently fall back to disk. Full `make check` passed after this, and the latest CI run I checked was green.
-<!-- agent:boundary:c6e90dca -->
+
+### Re: Should agent-doc-realtime split into editor and tmux crates? — gpt-5
+
+I would not decompose `agent-doc-realtime` into `agent-doc-editor` and `agent-doc-tmux` as two replacement peers. I would keep a small `agent-doc-realtime` core, then extract editor/tmux as adapter crates when the interfaces are stable.
+
+Suggested shape:
+
+- `agent-doc-realtime`: lazily-rs state machines for realtime document authority, epochs, parse projection, source arbitration, apply/verify scheduling, and handoff facts. This is the invariant-bearing core.
+- `agent-doc-editor`: editor/plugin IPC protocol, live-buffer sidecars, editor ownership proof, editor epoch sync, diagnostics publication, and patch ACK handling. It publishes `EditorEvent`/`EditorSnapshot`/`EditorAck` into realtime; it does not decide turn commits.
+- `agent-doc-tmux` or better `agent-doc-harness`: terminal/session/supervisor/tmux state observation. It publishes agent activity, pane/session liveness, interruption, and lifecycle signals. It should not be a document-authority source unless it is actually observing document text.
+- `agent-doc-turn`: admitted-turn lifecycle decisions and commit ownership, consuming realtime handoff facts.
+- `agent-doc-merge`: pure document merge functions.
+
+The naming caveat matters: `agent-doc-tmux` is accurate only if the boundary is truly tmux-specific. If the crate is meant to cover Codex/Claude/OpenCode harness state, supervisor status, pane lifecycle, and future non-tmux adapters, `agent-doc-harness` or `agent-doc-terminal` is probably a better name. I would reserve `agent-doc-tmux` for a narrow implementation adapter under that broader boundary.
+
+So my honest answer: yes, separate the loops, but do not split away the realtime core. Make `agent-doc-realtime` the source-agnostic state machine, `agent-doc-editor` the document-editor adapter, and a harness/tmux crate the runtime-state adapter. The invariant remains: only editor/disk document projections feed merge authority; tmux/harness state can affect scheduling and interruption, but must not overwrite operator-visible document text.
+<!-- agent:boundary:61d7054b -->
 <!-- /agent:exchange -->
 ## Queue
 

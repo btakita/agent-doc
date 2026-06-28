@@ -128,7 +128,19 @@ Queue head note: `#qheadstrikeauto` remains pending. I did not implement it in t
 `#qheadstrikeauto` remains pending. This cycle intentionally followed the newer operator prompts for the editor endpoint root-cause fix, VS Code parity, JetBrains build/install, Rust install, and commit/push closeout instead of consuming that queued feature head.
 
 <!-- no-free-text-queue-head-guard -->
-<!-- agent:boundary:e2888eef -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=18684229-af09-46a1-935f-e71902d535a3 invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=19307 candidate_hash=bfac380194accf882086dee14e2c04e9a360c69ddb8ac86dffd1802b14198bdc content_ours_len=19934 content_ours_hash=7360eb5f8805cece2f5e5e0fea1136ea4655905c797bbafa8df2daada1466867 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782604802107
+```
+<!-- agent:boundary:1de1c28a -->
 <!-- /agent:exchange -->
 ## Queue
 

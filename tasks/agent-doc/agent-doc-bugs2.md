@@ -225,7 +225,22 @@ Updated commits: agent-doc submodule `e3f52cda`, root pointer `760a08f7b`.
 Verification: `cargo fmt --check`, `git diff --check`, focused realtime/turn lifecycle tests, the new partial-word test, IPC snapshot tests, full `make check` with 5516 nextest tests passed, doctests passed, medium sim passed, Lean passed, and latest GitHub Actions CI is green.
 
 I am not marking the overarching goal complete yet because a real editor-attached live typing proof in `agent-doc-bugs2.md` is still external evidence I did not observe in this turn. The automated harness now covers the exact post-preflight partial-word merge shape, and the live document/session is ready for that operator/plugin proof.
-<!-- agent:boundary:9e708a77 -->
+
+### Re: Should we extract an agent-doc-turn crate? — gpt-5
+
+Yes, I think `agent-doc-turn` is a good extraction, but it should come after the `agent-doc-merge` and realtime boundaries are stabilized.
+
+The honest boundary is:
+
+- `agent-doc-merge`: pure merge/CRDT-ish document operations. It returns a merged document, typed conflicts/proofs, and verification facts. It never commits.
+- `agent-doc-realtime`: lazily-rs-backed realtime lifecycle: editor IPC, disk observation, out-of-band writes, parse state, epochs, apply/verify scheduling. It keeps working regardless of whether the agent is idle, in preflight, dispatching, or closing out.
+- `agent-doc-turn`: admitted-turn lifecycle: admit -> preflight -> dispatch -> response capture -> handoff to realtime merge/apply -> commit/no-commit/blocked. It owns the decision that a turn may commit, but should emit effects rather than directly owning git/socket/disk IO.
+- `agent-doc-orchestration`: CLI/harness adapters, git implementation, editor socket implementation, tmux/supervisor integration, and compatibility glue.
+
+So: yes to `agent-doc-turn`, but not as a place to put realtime authority. It should consume realtime handoff facts and merge results, then decide the turn lifecycle outcome. That keeps the invariant intact: realtime resolution is independent from turns, while commits remain part of the document turn lifecycle.
+
+I also added an active editor-IPC regression around the compact-exchange/partial-word failure mode: the test keeps an operator-typed partial word inside the exchange while adding the missing assistant response, verifies the editor IPC path is used, and verifies we do not silently fall back to disk. Full `make check` passed after this, and the latest CI run I checked was green.
+<!-- agent:boundary:c6e90dca -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -97,6 +97,32 @@ fn response_marker_committed_in_head(file: &std::path::Path, marker: &str) -> an
     Ok(head_norm.lines().any(|line| line.trim() == needle))
 }
 
+fn latest_committed_head_response_missing_from_working(file: &Path) -> Result<Option<String>> {
+    let Some(head) = crate::git::show_head(file)? else {
+        return Ok(None);
+    };
+    let working = match std::fs::read_to_string(file) {
+        Ok(content) => content,
+        Err(_) => return Ok(None),
+    };
+    let head_norm = crate::git::normalize_transient_agent_doc_markers(&head);
+    let working_norm = crate::git::normalize_transient_agent_doc_markers(&working);
+    let Some(heading) = head_norm
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            trimmed.starts_with("### Re:").then(|| trimmed.to_string())
+        })
+        .next_back()
+    else {
+        return Ok(None);
+    };
+    if working_norm.lines().any(|line| line.trim() == heading) {
+        return Ok(None);
+    }
+    Ok(Some(heading))
+}
+
 /// Event name prefix emitted by `preflight::run` that indicates a cycle
 /// started but may have been abandoned. If this is the final entry in
 /// ops.log, the previous cycle did not complete.
@@ -833,6 +859,16 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 )));
             }
         }
+        if let Some(heading) = latest_committed_head_response_missing_from_working(file)? {
+            return Ok(SessionCheckStatus::Interrupted(format!(
+                "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the current visible document is missing the latest committed HEAD response `{}`. Preserve any current operator edits, then rerun `agent-doc write --commit {}` so realtime closeout can merge the committed response back into the visible document.",
+                state.cycle_id,
+                phase_name(state.phase),
+                state.last_event,
+                heading,
+                file.display()
+            )));
+        }
         if let Some(marker) = detect_active_session_post_commit_drift(file)? {
             return Ok(SessionCheckStatus::Interrupted(format!(
                 "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the hook recover it from the final assistant message.",
@@ -1542,6 +1578,83 @@ mod tests {
         assert!(
             !response_marker_committed_in_head(&doc, "### Re: never committed — opus-4-8").unwrap()
         );
+    }
+
+    #[test]
+    fn session_check_interrupts_when_visible_file_lost_latest_committed_response() {
+        // A stale editor buffer can overwrite the working file after closeout so
+        // HEAD contains the response but the visible document has lost it. A
+        // committed cycle must not report OK for that state; the next retry must
+        // merge the committed response back into the visible document while
+        // preserving any operator edits.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        partial_staging_git(root, &["init"]);
+        partial_staging_git(root, &["config", "user.email", "t@t.com"]);
+        partial_staging_git(root, &["config", "user.name", "T"]);
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let doc = root.join("session.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:status patch=replace -->\n\n",
+            "done\n",
+            "<!-- /agent:status -->\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Prior body.\n\n",
+            "### Re: latest committed — gpt-5\n\n",
+            "Latest body.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        partial_staging_git(root, &["add", "session.md"]);
+        partial_staging_git(root, &["commit", "-m", "commit response"]);
+
+        let visible_lost_latest = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:status patch=replace -->\n\n",
+            "restart/recycle your supervisor\n",
+            "done\n",
+            "<!-- /agent:status -->\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Prior body.\n",
+            "<!-- agent:boundary:working -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, visible_lost_latest).unwrap();
+        crate::snapshot::save(&doc, visible_lost_latest).unwrap();
+        crate::cycle_state::start_preflight(
+            &doc,
+            Some(visible_lost_latest),
+            Some(visible_lost_latest),
+        )
+        .unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(visible_lost_latest),
+            Some(visible_lost_latest),
+        )
+        .unwrap();
+
+        let status = inspect(&doc).unwrap();
+        match status {
+            SessionCheckStatus::Interrupted(msg) => {
+                assert!(
+                    msg.contains(
+                        "current visible document is missing the latest committed HEAD response"
+                    ) && msg.contains("### Re: latest committed"),
+                    "expected missing committed response interruption, got: {msg}"
+                );
+            }
+            SessionCheckStatus::Ok(msg) => {
+                panic!("expected Interrupted, got Ok: {msg}");
+            }
+        }
     }
 
     fn setup_partial_staging_repo(root: &std::path::Path) -> std::path::PathBuf {

@@ -2293,6 +2293,13 @@ fn stale_supervisor_content_ours_adoption_warning(file: &Path) -> Option<String>
         return Some("test supervisor_binary_stale".to_string());
     }
 
+    #[cfg(test)]
+    {
+        let _ = file;
+        return None;
+    }
+
+    #[cfg(not(test))]
     crate::project_controller::stale_supervisor_warning_for_doc(file)
 }
 

@@ -2334,6 +2334,9 @@ fn log_closeout_guard(
 fn recover_empty_response_for_strict_closeout(file: &Path, flags: &WriteFlags) -> Result<bool> {
     if flags.strict_closeout {
         let outcome = repair::run(file)?;
+        if recover_missing_committed_head_response(file)? {
+            return Ok(true);
+        }
         if outcome.repaired() {
             eprintln!(
                 "[write] empty response stdin; recovered existing agent-doc response state with {:?}",
@@ -2352,6 +2355,103 @@ fn recover_empty_response_for_strict_closeout(file: &Path, flags: &WriteFlags) -
         return Ok(true);
     }
     Ok(false)
+}
+
+fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
+    let Some(head_content) = crate::git::show_head(file)? else {
+        return Ok(false);
+    };
+    let current = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let Some(response_block) = latest_response_block_missing_from_current(&head_content, &current)
+    else {
+        return Ok(false);
+    };
+    let Some(recovered) = splice_response_block_into_current_exchange(&current, &response_block)
+    else {
+        return Ok(false);
+    };
+    if recovered == current {
+        return Ok(false);
+    }
+    eprintln!(
+        "[write] empty response stdin; merged latest committed HEAD response back into visible document for {}",
+        file.display()
+    );
+    guard_visible_write_idle_and_current(file, "recover_committed_head_response", &current)?;
+    atomic_write(file, &recovered)?;
+    crate::snapshot::save(file, &recovered)?;
+    crate::git::commit(file)?;
+    Ok(true)
+}
+
+fn latest_response_block_missing_from_current(head: &str, current: &str) -> Option<String> {
+    let head_norm = crate::git::normalize_transient_agent_doc_markers(head);
+    let current_norm = crate::git::normalize_transient_agent_doc_markers(current);
+    let heading = head_norm
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            trimmed.starts_with("### Re:").then_some(trimmed)
+        })
+        .next_back()?;
+    if current_norm.lines().any(|line| line.trim() == heading) {
+        return None;
+    }
+    let head_components = crate::component::parse(head).ok()?;
+    let head_exchange = head_components
+        .iter()
+        .find(|component| component.name == "exchange")?;
+    latest_response_block_from_exchange_body(head_exchange.content(head))
+}
+
+fn latest_response_block_from_exchange_body(body: &str) -> Option<String> {
+    let lines: Vec<&str> = body.lines().collect();
+    let start = lines
+        .iter()
+        .rposition(|line| line.trim().starts_with("### Re:"))?;
+    let end = lines
+        .iter()
+        .enumerate()
+        .skip(start + 1)
+        .find_map(|(idx, line)| {
+            let trimmed = line.trim();
+            (trimmed.starts_with("### Re:") || trimmed.starts_with("<!-- agent:boundary:"))
+                .then_some(idx)
+        })
+        .unwrap_or(lines.len());
+    let block = lines[start..end].join("\n");
+    let block = block.trim();
+    if block.is_empty() {
+        return None;
+    }
+    Some(format!("{block}\n"))
+}
+
+fn splice_response_block_into_current_exchange(
+    current: &str,
+    response_block: &str,
+) -> Option<String> {
+    let components = crate::component::parse(current).ok()?;
+    let exchange = components
+        .iter()
+        .find(|component| component.name == "exchange")?;
+    let body = exchange.content(current);
+    let insert_at = body.rfind("<!-- agent:boundary:").unwrap_or(body.len());
+    let (before_boundary, boundary_and_after) = body.split_at(insert_at);
+    let mut new_body = before_boundary.to_string();
+    if !new_body.ends_with('\n') {
+        new_body.push('\n');
+    }
+    if !new_body.ends_with("\n\n") {
+        new_body.push('\n');
+    }
+    new_body.push_str(response_block.trim());
+    new_body.push('\n');
+    if !boundary_and_after.is_empty() {
+        new_body.push_str(boundary_and_after);
+    }
+    Some(exchange.replace_content(current, &new_body))
 }
 
 /// When `agent-doc write --commit <FILE>` runs with empty stdin and the
@@ -7799,6 +7899,184 @@ scratch
             "no ❯  prefix should appear in pending patches"
         );
     }
+
+    #[test]
+    fn empty_response_recovery_merges_missing_committed_head_response() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .current_dir(root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Test"]);
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n\n",
+            "done\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Prior body.\n\n",
+            "### Re: latest committed — gpt-5\n\n",
+            "Latest body.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        git(&["add", "doc.md"]);
+        git(&["commit", "-m", "commit response"]);
+
+        let visible = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n\n",
+            "restart/recycle your supervisor\n",
+            "done\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Prior body.\n",
+            "<!-- agent:boundary:working -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, visible).unwrap();
+        crate::snapshot::save(&doc, visible).unwrap();
+
+        assert!(
+            recover_missing_committed_head_response(&doc).unwrap(),
+            "missing committed response should be recovered"
+        );
+
+        let recovered = fs::read_to_string(&doc).unwrap();
+        assert!(
+            recovered.contains("restart/recycle your supervisor"),
+            "operator/current status edit must be preserved:\n{recovered}"
+        );
+        assert!(
+            recovered.contains("### Re: latest committed — gpt-5")
+                && recovered.contains("Latest body."),
+            "latest committed response must be merged back into the visible file:\n{recovered}"
+        );
+        let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(snapshot, recovered);
+
+        let head_after = std::process::Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:doc.md"])
+            .output()
+            .unwrap();
+        assert!(head_after.status.success());
+        let head_after = String::from_utf8(head_after.stdout).unwrap();
+        assert_eq!(
+            head_after, recovered,
+            "recovery should commit the merged visible document"
+        );
+    }
+
+    #[test]
+    fn strict_empty_response_recovery_continues_after_stale_preflight_repair() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .current_dir(root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Test"]);
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n\n",
+            "done\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Prior body.\n\n",
+            "### Re: latest committed — gpt-5\n\n",
+            "Latest body.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        git(&["add", "doc.md"]);
+        git(&["commit", "-m", "commit response"]);
+
+        let visible = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n\n",
+            "restart/recycle your supervisor\n",
+            "done\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Prior body.\n",
+            "<!-- agent:boundary:working -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, visible).unwrap();
+        crate::snapshot::save(&doc, visible).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(visible), Some(visible)).unwrap();
+
+        let strict = WriteFlags {
+            strict_closeout: true,
+            ..Default::default()
+        };
+        assert!(
+            recover_empty_response_for_strict_closeout(&doc, &strict).unwrap(),
+            "strict empty response recovery should continue past stale preflight repair"
+        );
+
+        let recovered = fs::read_to_string(&doc).unwrap();
+        assert!(
+            recovered.contains("restart/recycle your supervisor")
+                && recovered.contains("### Re: latest committed — gpt-5"),
+            "strict recovery must preserve current edits and restore committed response:\n{recovered}"
+        );
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        let head_after = crate::git::show_head(&doc).unwrap().unwrap();
+        assert_eq!(head_after, recovered);
+    }
+
     // ── agent-response-block tracking ────────────────────────────────────────
     // ── safety rail: normalize_user_prompts_in_exchange_safe ────────────────
     // --- exchange shrink guard tests ---

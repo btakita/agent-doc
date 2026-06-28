@@ -776,6 +776,116 @@ fn test_codex_shared_closeout_spec_invariants() {
 }
 
 #[test]
+fn realtime_workflow_spec_pins_lazily_backed_authority() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let realtime = fs::read_to_string(root.join("specs/14-realtime-workflow.md")).unwrap();
+    let spec = fs::read_to_string(root.join("SPEC.md")).unwrap();
+
+    assert!(
+        realtime.contains("## Lazily-RS State Backbone")
+            && realtime.contains("`agent-doc-realtime` must use `lazily-rs`")
+            && realtime.contains("lazily::ThreadSafeStateMachine")
+            && realtime.contains("lazily::ThreadSafeContext")
+            && realtime.contains("lazily-spec")
+            && realtime.contains("snapshot/delta graph"),
+        "realtime workflow spec must require lazily-rs for realtime state"
+    );
+    assert!(
+        realtime.contains("DiskDriftObserved")
+            && realtime.contains("Pluginless editor or external process saves the file")
+            && realtime.contains("out-of-band disk write"),
+        "realtime workflow spec must model pluginless/out-of-band disk writes"
+    );
+    assert!(
+        realtime.contains("storing realtime authority only in a turn-local cycle sidecar")
+            && realtime.contains("instead of a lazily-backed projection"),
+        "realtime workflow spec must forbid turn-local realtime authority"
+    );
+    assert!(
+        spec.contains("realtime state machine") && spec.contains("lazily-rs-backed state"),
+        "top-level spec must surface the lazily-backed realtime authority invariant"
+    );
+}
+
+#[test]
+fn realtime_workflow_spec_keeps_merge_and_commit_lifecycles_distinct() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let realtime = fs::read_to_string(root.join("specs/14-realtime-workflow.md")).unwrap();
+
+    assert!(
+        realtime.contains("CRDT merge does not commit")
+            && realtime.contains("document turn lifecycle owns commits")
+            && realtime.contains("merge/realtime paths must not run git commit"),
+        "realtime workflow spec must keep pure merge/realtime application separate from turn closeout commits"
+    );
+}
+
+#[test]
+fn realtime_workflow_spec_models_parse_state_and_editor_feedback() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let realtime = fs::read_to_string(root.join("specs/14-realtime-workflow.md")).unwrap();
+    let lifecycle = fs::read_to_string(root.join("specs/15-turn-lifecycle.md")).unwrap();
+    let spec = fs::read_to_string(root.join("SPEC.md")).unwrap();
+
+    assert!(
+        realtime.contains("## Realtime Parse State")
+            && realtime.contains("ParseValid")
+            && realtime.contains("ParseRecoverable")
+            && realtime.contains("ParseBlocked"),
+        "realtime workflow spec must define a separate parse-state machine"
+    );
+    assert!(
+        realtime.contains("editor plugins must surface")
+            && realtime.contains("inline diagnostics")
+            && realtime.contains("quick-fix proposals"),
+        "parse issues must be visible as realtime editor feedback"
+    );
+    assert!(
+        realtime.contains("preflight repair must not be the normal parse recovery path")
+            && lifecycle.contains("ParseBlocked")
+            && lifecycle.contains("InterruptedBlocked"),
+        "preflight/turn lifecycle must consume parse state instead of repairing as the hot path"
+    );
+    assert!(
+        spec.contains("parse state projection")
+            && spec.contains("editor diagnostics")
+            && spec.contains("preflight repair"),
+        "top-level spec must surface realtime parse-state authority"
+    );
+}
+
+#[test]
+fn turn_lifecycle_spec_cross_links_realtime_state_machine() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let realtime = fs::read_to_string(root.join("specs/14-realtime-workflow.md")).unwrap();
+    let lifecycle = fs::read_to_string(root.join("specs/15-turn-lifecycle.md")).unwrap();
+    let spec = fs::read_to_string(root.join("SPEC.md")).unwrap();
+
+    assert!(
+        spec.contains("[Turn Lifecycle Authority](specs/15-turn-lifecycle.md)")
+            && realtime.contains("[Turn Lifecycle Authority](15-turn-lifecycle.md)")
+            && lifecycle.contains("[Real-Time Workflow Authority](14-realtime-workflow.md)"),
+        "realtime and turn lifecycle specs must cross-link their distinct state machines"
+    );
+    assert!(
+        lifecycle.contains("## Turn States")
+            && lifecycle.contains("## Turn State Transitions")
+            && lifecycle.contains("flowchart LR")
+            && lifecycle.contains("CommitPending")
+            && lifecycle.contains("NoCommitComplete")
+            && lifecycle.contains("InterruptedBlocked")
+            && lifecycle.contains("document turn lifecycle owns commits"),
+        "turn lifecycle spec must define states, transitions, diagrams, and commit ownership"
+    );
+    assert!(
+        lifecycle.contains("agent-doc-merge does not commit")
+            && lifecycle.contains("realtime handoff proof")
+            && lifecycle.contains("commit is optional when the selected turn policy is no-commit"),
+        "turn lifecycle spec must consume realtime proofs without making merge/realtime commit"
+    );
+}
+
+#[test]
 fn live_tmux_tests_are_not_in_default_development_suite() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [
@@ -1240,7 +1350,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // snapshot reset-drift guard before granular pending/review/status
         // mutations, so a failed finalize cannot alter backlog state without the
         // exchange response. Reuses the existing reset-drift boundary.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 46,
+        // +1 (#missing-head-response-recovery): strict empty-response closeout
+        // uses the existing visible-write idle/current guard before merging a
+        // committed HEAD response back into a stale visible document. This is an
+        // audited reuse of the document-write guard, not a new authority source.
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 47,
         ("agent-doc-orchestration/src/write/pending_checks.rs", "guard_") => 4,
         ("agent-doc-orchestration/src/write/materialize.rs", "guard_") => 3,
         ("agent-doc-orchestration/src/write/exchange_reconcile.rs", "guard_") => 5,
@@ -1328,7 +1442,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // and its no-provenance fail-closed safety-rail test call the same existing
         // `guard_no_stale_snapshot_reset_drift` boundary. Still test-only coverage;
         // the production guard boundary is unchanged.
-        ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 11,
+        // -2 (#realtime-authority): removed stale doc-comment references to
+        // snapshot-adoption guard fallbacks. The production guard boundary count
+        // is unchanged; the comment now describes current-document merge instead.
+        ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 9,
         // +9 (#fcc0-no-external-write): active editor listeners no longer allow
         // disk fallback when component convergence cannot prove editor apply.
         // The added `reason=` tokens are the blocked production reasons

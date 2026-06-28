@@ -2437,6 +2437,16 @@ mod tests {
     }
 
     #[test]
+    fn bundled_skill_preserves_operator_visible_document_authority() {
+        assert!(SKILL_TEMPLATE.contains("Operator-visible document text is authoritative"));
+        assert!(SKILL_TEMPLATE.contains("content_ours"));
+        assert!(
+            SKILL_TEMPLATE.contains("Snapshots are backup/audit state, not hot-path authority")
+        );
+        assert!(SKILL_TEMPLATE.contains("fail closed or retry through the editor"));
+    }
+
+    #[test]
     fn bundled_skill_treats_harness_native_entrypoints_as_binary_owned_cycles() {
         assert!(SKILL_TEMPLATE.contains(
             "Harness-native `agent-doc` entrypoints start the binary-owned response cycle"

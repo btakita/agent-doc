@@ -383,63 +383,152 @@ fn is_exchange_boundary(line: &str) -> bool {
     line.trim_start().starts_with("<!-- agent:boundary:")
 }
 
-/// `#exch-intermix`: discriminator for the benign `live_prompt_drift_after_preflight`
-/// closeout wedge. After the IPC drift guard adopts `content_ours` as the snapshot
-/// (`guard_ipc_snapshot_adoption_against_live_prompt_drift`), that snapshot
-/// (baseline + the `### Re:` response) is LARGER than the fragmented visible file,
-/// so the next commit fails closed via `guard_no_stale_snapshot_reset_drift`
-/// ("looks like a manual cleanup"). The response is not lost — it is intact in the
-/// adopted snapshot — but the cycle is wedged and the operator must hand-recover.
+/// `#exch-intermix`: realtime resolver for the `live_prompt_drift_after_preflight`
+/// closeout wedge. After the IPC drift guard carries the agent response in the
+/// snapshot candidate, the visible document may still be missing that response
+/// while carrying newer operator-visible edits. Recovery must rebase only the
+/// missing response block onto the current document; it must not adopt the
+/// snapshot as a whole-document authority.
 ///
-/// This returns true only when that drift is provably the benign IPC/boundary
-/// pattern: every prompt-bearing user line on disk is already owned by the
-/// snapshot, so adopting the snapshot drops NO user content. It returns false
-/// (fail closed) the instant the visible file carries a prompt target or a queue
-/// `do [#id]` the snapshot lacks — genuine post-preflight user typing must never
-/// be auto-recovered away. This is the airtight safety gate for automatic data
-/// mutation, so it is intentionally conservative: it is baseline-free and only
-/// trusts direct snapshot↔disk containment.
+/// This returns true only when the current realtime document can preserve the
+/// operator-visible state and accept the missing agent response as a delta. It
+/// never authorizes wholesale snapshot adoption: queue/backlog/frontmatter and
+/// other disjoint operator edits stay as they are in `file_content`, while only
+/// the newest missing `### Re:` block from `snapshot` may be appended to
+/// `agent:exchange`. Prompt-target edits inside the visible file still fail
+/// closed because the resolver cannot prove where the response should land
+/// relative to a newly typed prompt.
 pub fn live_prompt_drift_auto_recovery_safe(snapshot: &str, file_content: &str) -> bool {
-    // Must be the wedge shape: snapshot meaningfully larger than the visible file.
-    // (Boundary markers are stripped before the length comparison, so `(HEAD)` /
-    // guard annotations cannot manufacture or mask the wedge.)
-    if stale_snapshot_reset_drift(snapshot, file_content).is_none() {
-        return false;
+    live_prompt_drift_recovery_target(snapshot, file_content).is_some()
+}
+
+fn live_prompt_drift_recovery_target(snapshot: &str, file_content: &str) -> Option<String> {
+    // A newly typed prompt inside `agent:exchange` makes response placement
+    // ambiguous. Queue/backlog prompt text is disjoint operator state and is
+    // preserved by the merged target below.
+    if exchange_has_disk_only_prompt_target(snapshot, file_content) {
+        return None;
     }
-    // Any prompt-bearing PromptTarget present on disk but absent from the snapshot
-    // is a genuine user prompt that adopting `content_ours` would drop — fail closed.
-    let disk_only_changes = prompt_bearing_user_changes_between(snapshot, file_content);
-    if disk_only_changes
+
+    let response_block = latest_missing_snapshot_response_block(snapshot, file_content)?;
+    let components = component::parse(file_content).ok()?;
+    let exchange = components
         .iter()
-        .any(|change| change.kind == crate::diff::PromptBearingChangeKind::PromptTarget)
-    {
-        return false;
-    }
-    // Same containment check for the queue component: a user-added `do [#id]` on
-    // disk that the snapshot does not contain must not be silently dropped.
-    let snapshot_queue_counts =
-        queue_prompt_counts(&queue_prompt_texts(&queue_component_text(snapshot)));
-    let file_queue_prompts = queue_prompt_texts(&queue_component_text(file_content));
+        .find(|component| component.name == AGENT_RESPONSE_COMPONENT)?;
+    let mut exchange_body = exchange.content(file_content).to_string();
+    push_materialization_segment(&mut exchange_body, &response_block);
+    let recovered = exchange.replace_content(file_content, &exchange_body);
+    (normalize_visible_recovery_compare(&recovered)
+        != normalize_visible_recovery_compare(file_content))
+    .then_some(recovered)
+}
+
+fn exchange_has_disk_only_prompt_target(snapshot: &str, file_content: &str) -> bool {
+    let (Ok(snapshot_components), Ok(file_components)) =
+        (component::parse(snapshot), component::parse(file_content))
+    else {
+        return true;
+    };
+    let (Some(snapshot_exchange), Some(file_exchange)) = (
+        snapshot_components
+            .iter()
+            .find(|component| component.name == AGENT_RESPONSE_COMPONENT),
+        file_components
+            .iter()
+            .find(|component| component.name == AGENT_RESPONSE_COMPONENT),
+    ) else {
+        return true;
+    };
+    let snapshot_counts = exchange_prompt_target_counts(snapshot_exchange.content(snapshot));
     let mut seen: HashMap<String, usize> = HashMap::new();
-    for prompt in file_queue_prompts {
+    for prompt in exchange_prompt_target_lines(file_exchange.content(file_content)) {
         let count = seen.entry(prompt.clone()).or_insert(0);
         *count += 1;
-        if *count > queue_prompt_count(&snapshot_queue_counts, &prompt) {
-            return false;
+        if *count > snapshot_counts.get(&prompt).copied().unwrap_or(0) {
+            return true;
         }
     }
-    true
+    false
+}
+
+fn exchange_prompt_target_counts(exchange_body: &str) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for prompt in exchange_prompt_target_lines(exchange_body) {
+        *counts.entry(prompt).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn exchange_prompt_target_lines(exchange_body: &str) -> Vec<String> {
+    exchange_body
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with('❯') || crate::diff::text_line_looks_like_prompt_target(trimmed)
+            {
+                Some(
+                    trimmed
+                        .strip_prefix('❯')
+                        .unwrap_or(trimmed)
+                        .trim()
+                        .to_string(),
+                )
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn latest_missing_snapshot_response_block(snapshot: &str, file_content: &str) -> Option<String> {
+    let (Ok(snapshot_components), Ok(file_components)) =
+        (component::parse(snapshot), component::parse(file_content))
+    else {
+        return None;
+    };
+    let (Some(snapshot_exchange), Some(file_exchange)) = (
+        snapshot_components
+            .iter()
+            .find(|component| component.name == AGENT_RESPONSE_COMPONENT),
+        file_components
+            .iter()
+            .find(|component| component.name == AGENT_RESPONSE_COMPONENT),
+    ) else {
+        return None;
+    };
+    let snapshot_body = snapshot_exchange.content(snapshot);
+    let file_body = file_exchange.content(file_content);
+    let file_norm = normalize_visible_recovery_compare(file_body);
+    for range in exchange_response_block_ranges(snapshot_body)
+        .into_iter()
+        .rev()
+    {
+        let block = &snapshot_body[range];
+        let block_norm = normalize_visible_recovery_compare(block);
+        let block_trimmed = block_norm.trim();
+        if block_trimmed.is_empty() {
+            continue;
+        }
+        if !file_norm.contains(block_trimmed) {
+            return Some(block.to_string());
+        }
+    }
+    None
+}
+
+fn normalize_visible_recovery_compare(content: &str) -> String {
+    crate::git::normalize_transient_agent_doc_markers(&strip_boundary_for_dedup(content))
 }
 
 /// `#exch-intermix-falsedrop`: true when a recorded dropped prompt is still
-/// present in the snapshot auto-recovery would adopt — as an active line, a
+/// present in the response candidate — as an active line, a
 /// struck/consumed queue item (`~~…~~`), or echoed in a `### Re:` heading — so
-/// adopting the snapshot loses nothing. The drift-time dropped-prompt record
+/// response recovery loses nothing. The drift-time dropped-prompt record
 /// compares the divergent IPC candidate against `content_ours` and therefore
 /// false-positives on prompts that `content_ours` consumed or preserved; this
-/// containment check reconciles those against the snapshot text. Returns false
-/// only when the prompt text genuinely does not appear in the snapshot (real
-/// user-content loss → fail closed). Strike markers are stripped from both sides
+/// containment check reconciles those against the response candidate text.
+/// Returns false only when the prompt text genuinely does not appear in the
+/// candidate (real user-content loss -> fail closed). Strike markers are stripped from both sides
 /// so a consumed item still matches its recorded prompt text.
 pub(crate) fn snapshot_contains_dropped_prompt(snapshot: &str, prompt: &str) -> bool {
     let stripped = prompt.replace("~~", "");
@@ -450,25 +539,18 @@ pub(crate) fn snapshot_contains_dropped_prompt(snapshot: &str, prompt: &str) -> 
     snapshot.replace("~~", "").contains(needle)
 }
 
-/// `#exch-intermix`: auto-recover the benign `live_prompt_drift_after_preflight`
-/// closeout wedge instead of stranding the response and forcing a manual
-/// `git checkout HEAD` / `reset --from-current --preserve-session` / `finalize
-/// --force-disk` recovery. When the IPC drift guard fired this cycle
-/// (`content_ours` adopted as snapshot) and the snapshot is provably a superset of
-/// the visible file's user content, write the snapshot to the working-tree file
-/// (the `--force-disk` half of the manual recovery, with agent write-provenance)
-/// so the commit boundary can stage the full response. Returns the recovered file
-/// content on success (the caller must refresh its `file_content`), or `None` when
-/// no recovery applies — leaving the existing fail-closed guard to handle it.
+/// `#exch-intermix`: auto-recover the `live_prompt_drift_after_preflight`
+/// closeout wedge by rebasing the missing agent response onto the realtime
+/// document. Returns the recovered file content on success (the caller must
+/// refresh its `file_content` and snapshot), or `None` when no recovery applies —
+/// leaving the existing fail-closed guard to handle it.
 ///
 /// Because this is automatic data mutation it is intentionally narrow and fails
 /// closed on any doubt:
 /// - the cycle must carry the `ipc_snapshot_adoption_blocked` flag (the drift
-///   guard ran this cycle and adopted `content_ours`),
-/// - no dropped exchange/queue prompts may have been recorded this cycle (those
-///   are the genuine-user-content-loss class `session-check` fails closed on),
-/// - the current on-disk file must pass `live_prompt_drift_auto_recovery_safe`
-///   (no disk-only user prompt the snapshot lacks).
+///   guard ran and preserved the response candidate for recovery),
+/// - any recorded dropped prompt must still be present in the response candidate,
+/// - realtime resolution must produce a response-only merge target.
 pub fn try_auto_recover_live_prompt_drift(
     file: &Path,
     snapshot: &str,
@@ -482,12 +564,12 @@ pub fn try_auto_recover_live_prompt_drift(
     }
     // #exch-intermix-falsedrop: a recorded dropped exchange/queue prompt only
     // represents real user-content loss when it is genuinely ABSENT from the
-    // snapshot auto-recovery would adopt. A queue item consumed (struck) this
-    // cycle, or a user prompt `content_ours` preserved, is recorded as "dropped"
-    // by the drift-time candidate-vs-`content_ours` heuristic yet still survives
-    // in the snapshot — adopting it loses nothing. Only bail when a dropped
-    // prompt is missing from the snapshot; the snapshot↔disk containment gate
-    // below stays authoritative for current on-disk content.
+    // response candidate. A queue item consumed (struck) this cycle, or a user
+    // prompt `content_ours` preserved, is recorded as "dropped" by the
+    // drift-time candidate-vs-`content_ours` heuristic yet still survives in the
+    // candidate. Only bail when a dropped prompt is missing from that candidate;
+    // the realtime merge target below remains authoritative for current
+    // operator-visible content.
     let dropped_missing_from_snapshot = cycle
         .dropped_exchange_prompts
         .iter()
@@ -496,9 +578,9 @@ pub fn try_auto_recover_live_prompt_drift(
     if dropped_missing_from_snapshot {
         return Ok(None);
     }
-    if !live_prompt_drift_auto_recovery_safe(snapshot, file_content) {
+    let Some(recovery_target) = live_prompt_drift_recovery_target(snapshot, file_content) else {
         return Ok(None);
-    }
+    };
 
     let ipc_project_root = file
         .canonicalize()
@@ -512,11 +594,16 @@ pub fn try_auto_recover_live_prompt_drift(
     if let Some(project_root) = ipc_project_root.as_deref()
         && ipc_listener_active
     {
-        match try_editor_converge_live_prompt_drift(file, project_root, snapshot, file_content) {
+        match try_editor_converge_live_prompt_drift(
+            file,
+            project_root,
+            &recovery_target,
+            file_content,
+        ) {
             Ok(Some(recovered)) => {
                 log_live_prompt_drift_auto_recovered(
                     file,
-                    snapshot,
+                    &recovery_target,
                     file_content,
                     true,
                     "editor_ipc",
@@ -533,7 +620,7 @@ pub fn try_auto_recover_live_prompt_drift(
                 eprintln!(
                     "[commit] auto-recovered live_prompt_drift wedge for {} via editor IPC convergence ({} bytes)",
                     file.display(),
-                    snapshot.len()
+                    recovery_target.len()
                 );
                 return Ok(Some(recovered));
             }
@@ -555,23 +642,26 @@ pub fn try_auto_recover_live_prompt_drift(
         crate::ops_log::log_op(
             file,
             &format!(
-                "[jbstalecache] auto_recovery_disk_write_blocked file={} snap_len={} reason=editor_ipc_unconfirmed",
+                "[jbstalecache] auto_recovery_disk_write_blocked file={} target_len={} reason=editor_ipc_unconfirmed",
                 file.display(),
-                snapshot.len()
+                recovery_target.len()
             ),
         );
         return Ok(None);
     }
 
-    atomic_write(file, snapshot).with_context(|| {
+    atomic_write(file, &recovery_target).with_context(|| {
         format!(
             "live_prompt_drift auto-recover write for {}",
             file.display()
         )
     })?;
+    crate::snapshot::save(file, &recovery_target)?;
+    let crdt_doc = crate::crdt::CrdtDoc::from_text(&recovery_target);
+    crate::snapshot::save_document_crdt(file, &crdt_doc.encode_state(), &recovery_target)?;
     log_live_prompt_drift_auto_recovered(
         file,
-        snapshot,
+        &recovery_target,
         file_content,
         ipc_listener_active,
         "disk_fallback",
@@ -586,16 +676,16 @@ pub fn try_auto_recover_live_prompt_drift(
         .with_reason("live_prompt_drift_auto_recovered"),
     );
     eprintln!(
-        "[commit] auto-recovered live_prompt_drift wedge for {} — wrote adopted snapshot ({} bytes) to disk so the response lands instead of failing closed as a manual cleanup",
+        "[commit] auto-recovered live_prompt_drift wedge for {} — merged the missing response into the realtime document ({} bytes) so operator-visible edits stay authoritative",
         file.display(),
-        snapshot.len()
+        recovery_target.len()
     );
-    Ok(Some(snapshot.to_string()))
+    Ok(Some(recovery_target))
 }
 
 pub(crate) fn log_live_prompt_drift_auto_recovered(
     file: &Path,
-    snapshot: &str,
+    target: &str,
     file_content: &str,
     ipc_listener_active: bool,
     transport: &str,
@@ -603,11 +693,11 @@ pub(crate) fn log_live_prompt_drift_auto_recovered(
     crate::ops_log::log_op(
         file,
         &format!(
-            "live_prompt_drift_auto_recovered file={} snap_len={} file_len={} snap_hash={} ipc_listener_active={} transport={}",
+            "live_prompt_drift_auto_recovered file={} target_len={} file_len={} target_hash={} ipc_listener_active={} transport={}",
             file.display(),
-            snapshot.len(),
+            target.len(),
             file_content.len(),
-            crate::ops_log::content_hash(snapshot),
+            crate::ops_log::content_hash(target),
             ipc_listener_active,
             transport
         ),
@@ -943,11 +1033,11 @@ pub fn reconcile_postcommit_queue_strikes_to_head(working: &str, head: &str) -> 
 pub(crate) fn try_editor_converge_live_prompt_drift(
     file: &Path,
     project_root: &Path,
-    snapshot: &str,
+    target: &str,
     file_content: &str,
 ) -> Result<Option<String>> {
-    let patches = live_prompt_drift_convergence_patches(file_content, snapshot)?;
-    let frontmatter = live_prompt_drift_convergence_frontmatter(file_content, snapshot);
+    let patches = live_prompt_drift_response_patches(file_content, target)?;
+    let frontmatter = None;
     if patches.is_empty() && frontmatter.is_none() {
         crate::ops_log::log_op(
             file,
@@ -981,7 +1071,7 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
     crate::ops_log::log_op(
         file,
         &format!(
-            "[jbstalecache] editor_convergence_attempt file={} patch_id={} patches={} frontmatter={} snap_hash={}",
+            "[jbstalecache] editor_convergence_attempt file={} patch_id={} patches={} frontmatter={} target_hash={}",
             file.display(),
             payload
                 .get("patch_id")
@@ -993,7 +1083,7 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
                 .map(Vec::len)
                 .unwrap_or(0),
             payload.get("frontmatter").is_some(),
-            crate::ops_log::content_hash(snapshot)
+            crate::ops_log::content_hash(target)
         ),
     );
 
@@ -1021,7 +1111,7 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
                 return Ok(None);
             };
             if crate::git::normalize_transient_agent_doc_markers(&recovered)
-                == crate::git::normalize_transient_agent_doc_markers(snapshot)
+                == crate::git::normalize_transient_agent_doc_markers(target)
             {
                 crate::ops_log::log_op(
                     file,
@@ -1033,7 +1123,7 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
                     ),
                 );
                 Ok(Some(recovered))
-            } else if convergence_recovered_editor_wins_outside_response(&recovered, snapshot) {
+            } else if convergence_recovered_editor_wins_outside_response(&recovered, target) {
                 // `#qpcwcmerge`: the editor buffer diverges from `content_ours` only
                 // INSIDE components other than the agent's response component — its
                 // live queue + same-cycle auto-strikes, or any plugin-defined
@@ -1046,11 +1136,11 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "[jbstalecache] editor_convergence_succeeded file={} patch_id={} recovered_len={} snap_len={} transport=editor_ipc resolution=editor_wins_outside_response #qpcwcmerge",
+                        "[jbstalecache] editor_convergence_succeeded file={} patch_id={} recovered_len={} target_len={} transport=editor_ipc resolution=editor_wins_outside_response #qpcwcmerge",
                         file.display(),
                         patch_id,
                         recovered.len(),
-                        snapshot.len()
+                        target.len()
                     ),
                 );
                 Ok(Some(recovered))
@@ -1058,11 +1148,11 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "[jbstalecache] editor_convergence_ack_mismatch file={} patch_id={} recovered_len={} snap_len={} action=block_external_disk_write",
+                        "[jbstalecache] editor_convergence_ack_mismatch file={} patch_id={} recovered_len={} target_len={} action=block_external_disk_write",
                         file.display(),
                         patch_id,
                         recovered.len(),
-                        snapshot.len()
+                        target.len()
                     ),
                 );
                 Ok(None)
@@ -1090,6 +1180,22 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
             Ok(None)
         }
     }
+}
+
+fn live_prompt_drift_response_patches(
+    file_content: &str,
+    snapshot: &str,
+) -> Result<Vec<serde_json::Value>> {
+    let mut patches = live_prompt_drift_convergence_patches(file_content, snapshot)?;
+    // `live_prompt_drift` recovery is only authorized to materialize the agent's
+    // response node. Non-response components and frontmatter belong to the live
+    // editor/operator in this recovery path; if they differ, the containment gate
+    // above has already failed closed instead of sending a patch that could reset
+    // operator text.
+    patches.retain(|patch| {
+        patch.get("component").and_then(|value| value.as_str()) == Some(AGENT_RESPONSE_COMPONENT)
+    });
+    Ok(patches)
 }
 
 /// `#w42v`: converge a compacted document through the editor instead of a direct
@@ -1831,31 +1937,31 @@ pub fn converge_or_disk_write(
 
 pub(crate) fn live_prompt_drift_convergence_patches(
     file_content: &str,
-    snapshot: &str,
+    target: &str,
 ) -> Result<Vec<serde_json::Value>> {
     let current_components = component::parse(file_content)
         .with_context(|| "failed to parse current document for editor convergence")?;
-    let snapshot_components = component::parse(snapshot)
-        .with_context(|| "failed to parse adopted snapshot for editor convergence")?;
+    let target_components = component::parse(target)
+        .with_context(|| "failed to parse target document for editor convergence")?;
     let current_by_name: HashMap<&str, &component::Component> = current_components
         .iter()
         .map(|component| (component.name.as_str(), component))
         .collect();
     let mut patches = Vec::new();
-    for snapshot_component in &snapshot_components {
-        let Some(current_component) = current_by_name.get(snapshot_component.name.as_str()) else {
+    for target_component in &target_components {
+        let Some(current_component) = current_by_name.get(target_component.name.as_str()) else {
             continue;
         };
         let current_body = current_component.content(file_content);
-        let snapshot_body = snapshot_component.content(snapshot);
+        let target_body = target_component.content(target);
         if crate::git::normalize_transient_agent_doc_markers(current_body)
-            == crate::git::normalize_transient_agent_doc_markers(snapshot_body)
+            == crate::git::normalize_transient_agent_doc_markers(target_body)
         {
             continue;
         }
         patches.push(serde_json::json!({
-            "component": snapshot_component.name,
-            "content": snapshot_body,
+            "component": target_component.name,
+            "content": target_body,
             "op": "replace",
         }));
     }
@@ -2225,6 +2331,37 @@ mod core_tests {
             "replace payload should carry the recovered response body: {patches:?}"
         );
     }
+
+    #[test]
+    fn live_prompt_drift_response_patches_ignore_operator_owned_components() {
+        let snapshot = format!(
+            "{}\n<!-- agent:backlog -->\n- existing backlog text\n<!-- /agent:backlog -->\n",
+            crate::test_support::drift_content_ours()
+        );
+        let fragmented = format!(
+            "{}\n<!-- agent:backlog -->\n- existing backlog text with operator word\n<!-- /agent:backlog -->\n",
+            crate::test_support::drift_baseline()
+        );
+
+        let generic = live_prompt_drift_convergence_patches(&fragmented, &snapshot).unwrap();
+        let generic_components: Vec<&str> = generic
+            .iter()
+            .filter_map(|patch| patch.get("component").and_then(|value| value.as_str()))
+            .collect();
+        assert!(
+            generic_components.contains(&"exchange") && generic_components.contains(&"backlog"),
+            "generic convergence should notice both component deltas: {generic:?}"
+        );
+
+        let response_only = live_prompt_drift_response_patches(&fragmented, &snapshot).unwrap();
+        assert_eq!(
+            response_only.len(),
+            1,
+            "live drift recovery only owns exchange"
+        );
+        assert_eq!(response_only[0]["component"], "exchange");
+    }
+
     #[test]
     fn try_compact_editor_converge_blocks_without_listener() {
         // Realtime cutover: with no live editor listener, compact convergence
@@ -2928,21 +3065,175 @@ mod core_tests {
         );
     }
     #[test]
-    fn live_prompt_drift_auto_recovery_safe_rejects_disk_only_queue_item() {
-        // A user-added `do [#id]` queue line on disk the snapshot lacks must
-        // block auto-recovery (the silent-queue-deletion class).
+    fn live_prompt_drift_auto_recovery_preserves_disk_only_queue_item() {
+        // A user-added `do [#id]` queue line is disjoint realtime state: the
+        // response can land while the queue edit remains in the merged target.
         let snapshot = crate::test_support::drift_content_ours();
         let fragmented = crate::test_support::drift_baseline().replace(
             "- do [#fix]\n<!-- /agent:queue -->",
             "- do [#fix]\n- do [#user-added-queue-item]\n<!-- /agent:queue -->",
         );
+        let target = live_prompt_drift_recovery_target(&snapshot, &fragmented)
+            .expect("queue edits should be preserved while the response lands");
+        assert!(target.contains("### Re: do #fix"));
+        assert!(target.contains("- do [#user-added-queue-item]"));
+    }
+
+    #[test]
+    fn live_prompt_drift_auto_recovery_preserves_partial_exchange_word() {
+        // A raw word typed into the exchange after preflight is operator-visible
+        // document text even when it is not yet a complete prompt. Recovery may
+        // append the missing agent response, but it must not reset the exchange
+        // back to the pre-typing snapshot.
+        let snapshot = crate::test_support::drift_content_ours();
+        let fragmented = crate::test_support::drift_baseline().replace(
+            "❯ do #fix\n<!-- /agent:exchange -->",
+            "❯ do #fix\noperator-partial-wo\n<!-- /agent:exchange -->",
+        );
+
+        let target = live_prompt_drift_recovery_target(&snapshot, &fragmented)
+            .expect("partial exchange text should be preserved while the response lands");
+        assert!(target.contains("### Re: do #fix"));
         assert!(
-            !live_prompt_drift_auto_recovery_safe(&snapshot, &fragmented),
-            "a disk-only queue item must block auto-recovery"
+            target.contains("operator-partial-wo"),
+            "operator-typed partial word must survive recovery:\n{target}"
         );
     }
+
     #[test]
-    fn try_auto_recover_live_prompt_drift_writes_snapshot_when_blocked_and_safe() {
+    fn live_prompt_drift_auto_recovery_preserves_disk_only_backlog_text() {
+        // Ordinary operator text is just as authoritative as prompt-shaped text:
+        // realtime recovery keeps it and adds only the missing response.
+        let snapshot = format!(
+            "{}\n<!-- agent:backlog -->\n- existing backlog text\n<!-- /agent:backlog -->\n",
+            crate::test_support::drift_content_ours()
+        );
+        let fragmented = format!(
+            "{}\n<!-- agent:backlog -->\n- existing backlog text with operator word\n<!-- /agent:backlog -->\n",
+            crate::test_support::drift_baseline()
+        );
+
+        let target = live_prompt_drift_recovery_target(&snapshot, &fragmented)
+            .expect("backlog edits should be preserved while the response lands");
+        assert!(target.contains("### Re: do #fix"));
+        assert!(target.contains("- existing backlog text with operator word"));
+        assert!(!target.contains("- existing backlog text\n<!-- /agent:backlog -->"));
+    }
+
+    #[test]
+    fn live_prompt_drift_auto_recovery_preserves_operator_deleted_backlog_text() {
+        // Operator deletions are also authoritative. Recovery must not resurrect
+        // a deleted backlog line while restoring the agent response.
+        let snapshot = format!(
+            "{}\n<!-- agent:backlog -->\n- keep this\n- operator deleted this\n<!-- /agent:backlog -->\n",
+            crate::test_support::drift_content_ours()
+        );
+        let fragmented = format!(
+            "{}\n<!-- agent:backlog -->\n- keep this\n<!-- /agent:backlog -->\n",
+            crate::test_support::drift_baseline()
+        );
+
+        let target = live_prompt_drift_recovery_target(&snapshot, &fragmented)
+            .expect("backlog deletions should be preserved while the response lands");
+        assert!(target.contains("### Re: do #fix"));
+        assert!(target.contains("- keep this"));
+        assert!(!target.contains("operator deleted this"));
+    }
+
+    #[test]
+    fn live_prompt_drift_auto_recovery_preserves_operator_edited_backlog_text() {
+        // Same for edits/replacements: the file line is not a prompt, but the
+        // operator-visible value must win over the older snapshot value.
+        let snapshot = format!(
+            "{}\n<!-- agent:backlog -->\n- original backlog wording\n<!-- /agent:backlog -->\n",
+            crate::test_support::drift_content_ours()
+        );
+        let fragmented = format!(
+            "{}\n<!-- agent:backlog -->\n- edited backlog wording\n<!-- /agent:backlog -->\n",
+            crate::test_support::drift_baseline()
+        );
+
+        let target = live_prompt_drift_recovery_target(&snapshot, &fragmented)
+            .expect("backlog edits should be preserved while the response lands");
+        assert!(target.contains("### Re: do #fix"));
+        assert!(target.contains("- edited backlog wording"));
+        assert!(!target.contains("- original backlog wording"));
+    }
+
+    #[test]
+    fn try_auto_recover_live_prompt_drift_rebases_onto_post_preflight_response_block_deletion() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+
+        let historical =
+            "### Re: do #old — gpt-5\n\nHistorical answer the operator deleted after preflight.\n";
+        let preflight = crate::test_support::drift_baseline().replace(
+            "❯ do #fix\n",
+            &format!("❯ do #old\n{historical}❯ do #fix\n"),
+        );
+        let snapshot = crate::test_support::drift_content_ours().replace(
+            "❯ do #fix\n",
+            &format!("❯ do #old\n{historical}❯ do #fix\n"),
+        );
+        let current = preflight.replace(historical, "");
+        fs::write(&doc, &current).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        // Preflight observed the historical response. The operator deleted it
+        // before auto-recovery ran, so recovery must not resurrect it while
+        // trying to restore the new response.
+        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&preflight)).unwrap();
+        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+
+        let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &current).unwrap();
+        assert!(
+            recovered.as_deref().is_some_and(|content| {
+                content.contains("### Re: do #fix")
+                    && !content.contains("Historical answer the operator deleted")
+            }),
+            "post-preflight response-block deletion should be preserved while the new response lands"
+        );
+        let disk = fs::read_to_string(&doc).unwrap();
+        assert!(disk.contains("### Re: do #fix"));
+        assert!(!disk.contains("Historical answer the operator deleted"));
+    }
+
+    #[test]
+    fn try_auto_recover_live_prompt_drift_advances_snapshot_to_operator_preserving_merge() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+
+        let snapshot = format!(
+            "{}\n<!-- agent:backlog -->\n- original backlog wording\n<!-- /agent:backlog -->\n",
+            crate::test_support::drift_content_ours()
+        );
+        let fragmented = format!(
+            "{}\n<!-- agent:backlog -->\n- edited backlog wording\n<!-- /agent:backlog -->\n",
+            crate::test_support::drift_baseline()
+        );
+        fs::write(&doc, &fragmented).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
+        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+
+        let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented)
+            .unwrap()
+            .expect("response should merge onto edited backlog");
+
+        assert!(recovered.contains("### Re: do #fix"));
+        assert!(recovered.contains("- edited backlog wording"));
+        assert!(!recovered.contains("- original backlog wording"));
+        assert_eq!(fs::read_to_string(&doc).unwrap(), recovered);
+        assert_eq!(
+            snapshot::load(&doc).unwrap().as_deref(),
+            Some(recovered.as_str()),
+            "snapshot must advance to the operator-preserving merged document"
+        );
+    }
+
+    #[test]
+    fn try_auto_recover_live_prompt_drift_writes_realtime_merge_when_blocked_and_safe() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -2960,7 +3251,7 @@ mod core_tests {
         assert_eq!(
             recovered.as_deref(),
             Some(snapshot.as_str()),
-            "recovery should return the adopted snapshot content"
+            "the no-operator-drift merge equals the candidate response snapshot"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
@@ -3021,6 +3312,53 @@ mod core_tests {
             "successful editor convergence must not take the stale-cache disk fallback:\n{log}"
         );
     }
+
+    #[test]
+    fn try_auto_recover_live_prompt_drift_editor_ipc_preserves_partial_exchange_word() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        let doc = dir.path().join("test.md");
+
+        let snapshot = crate::test_support::drift_content_ours();
+        let fragmented = crate::test_support::drift_baseline().replace(
+            "❯ do #fix\n<!-- /agent:exchange -->",
+            "❯ do #fix\noperator-partial-wo\n<!-- /agent:exchange -->",
+        );
+        let recovery_target = live_prompt_drift_recovery_target(&snapshot, &fragmented)
+            .expect("partial exchange text should be preserved in the target");
+        fs::write(&doc, &fragmented).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
+        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+
+        let _listener = crate::test_support::start_live_prompt_drift_ack_listener(
+            dir.path(),
+            recovery_target.clone(),
+        );
+        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+
+        let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
+        assert_eq!(
+            recovered.as_deref(),
+            Some(recovery_target.as_str()),
+            "editor IPC recovery should accept the operator-preserving target"
+        );
+        let visible = fs::read_to_string(&doc).unwrap();
+        assert!(
+            visible.contains("operator-partial-wo") && visible.contains("### Re: do #fix"),
+            "the fake editor listener must retain the partial word and land the response:\n{visible}"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("transport=editor_ipc")
+                && log.contains("ipc_listener_active=true")
+                && !log.contains("transport=disk_fallback"),
+            "partial-word recovery must go through editor IPC without disk fallback:\n{log}"
+        );
+    }
+
     #[test]
     fn try_auto_recover_live_prompt_drift_blocks_disk_fallback_with_active_listener_without_ack_content()
      {
@@ -3048,7 +3386,7 @@ mod core_tests {
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
             fragmented,
-            "auto-recovery must not write the adopted snapshot behind the editor"
+            "auto-recovery must not write the merged target behind the editor"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
@@ -3163,7 +3501,7 @@ mod core_tests {
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
             snapshot,
-            "auto-recovery must write the adopted snapshot to disk"
+            "auto-recovery must write the realtime merge target to disk"
         );
 
         // `#jbstalecache`: the recovery write records the IPC-listener state so the

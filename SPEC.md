@@ -6,6 +6,23 @@
 Individual specs are in `specs/`. This file is the index.
 
 Notable invariants:
+- Real-time document authority is operator-first. The editor-visible document
+  state owns every operator-authored change, including ordinary non-prompt text,
+  queue/backlog edits, frontmatter, comments, whitespace, and partial words.
+  `content_ours`, snapshots, and ACK-content are merge candidates only; they
+  must never authorize a recovery, IPC patch, harness hook, or disk write that
+  drops operator-visible text. Snapshots are durable backup/audit state, not
+  hot-path authority; legacy snapshot-derived candidates must be narrowed and
+  merged into the latest source-of-truth document. The realtime state machine,
+  source-authority projection, editor/disk epochs, owner leases, and in-flight
+  apply facts are lazily-rs-backed state, not turn-local sidecars. The realtime
+  parse state projection is also lazily-backed: parse issues surface as
+  realtime editor diagnostics and preflight repair is a crash/retry backstop,
+  not the hot-path way to make live documents parse. CRDT merge and realtime
+  apply/verify do not commit; the document turn lifecycle owns commit
+  decisions. See
+  [Real-Time Workflow Authority](specs/14-realtime-workflow.md)
+  and [Turn Lifecycle Authority](specs/15-turn-lifecycle.md).
 - `agent-doc commit` remains snapshot-selective. It may repair narrowly-classified missed agent-owned drift before staging, but it must not absorb free-form user prompts from the working tree. Already-committed historical response drift may repair the snapshot only when the working tree matches `HEAD` modulo transient boundary / `(HEAD)` markers. On an already-current no-op closeout, a stale agent-owned exchange collapse (committed `### Re:` heading missing from the working exchange, with only committed exchange lines remaining and a duplicated queue-prompt blockquote proving the missing response id) is restored from `HEAD`; independent local queue/backlog/prompt drift outside `agent:exchange` remains visible and uncommitted.
 - When the snapshot already matches `HEAD`, post-commit local drift classification must reuse the canonical prompt-bearing diff classifier. Queue/backlog directive edits that preflight would surface as prompt targets are `user_follow_up` drift, not anomalous `working_tree_edits`; inline content corrections remain working-tree edits.
 - `agent-doc prompt --all` must normalize OpenCode horizontal permission prompts before editor plugins render them. When the OpenCode pane exposes option controls but no explicit `← ...` question line, the reported question is the neutral `Permission required`; earlier shell command text, including ANSI-literal `printf` prompt fixtures, must never become the user-facing JetBrains or VS Code prompt label.
@@ -22,7 +39,7 @@ Notable invariants:
 - `agent-doc preflight` must surface `warnings[].code = "stuck_captured_cycle"` when persisted cycle state says `committed` but the matching durable capture's materialized response body is absent from `HEAD`. Detection must match the active cycle/capture id and response hash, ignore discarded captures, tolerate template patch materialization and prompt-prefix stripping, and stay quiet when `HEAD` already contains the response.
 - `agent-doc preflight` and `agent-doc session-check` must surface a stale-hosting-supervisor warning (`#fccsupwarn`) when the LIVE controller/supervisor hosting the document is serving a stale agent-doc binary — its recorded launch `controller_binary` identity no longer matches the freshly-installed binary (`current_binary_identity`). Preflight emits `warnings[].code = "supervisor_binary_stale"`; session-check appends an equivalent `[session-check] WARNING:` line. The message tells the operator to recycle (`agent-doc admin recycle`) or `agent-doc session restart-supervisor <FILE>`. This is read-only detection over the controller status — it must NOT touch the live write path, and it is fail-open (an inactive controller, a missing recorded identity, an unreachable controller, or any stat error yields no warning and never blocks the cycle), so it surfaces the otherwise-silent "already-running supervisor keeps using the OLD binary until restarted" `#fcc0`/`#ipcdrift` File-Cache-Conflict churn class instead of leaving the operator to re-file dialog reports.
 - Streaming agent paths must also save durable partial-response checkpoints while generation is still in progress. The first non-empty partial response and then changed partial output at most once every 30 seconds are written to `.agent-doc/captures/<doc-hash>/<cycle-id>.partial.json` for diagnostics/manual recovery, without advancing the cycle to `response_captured`. Partial checkpoint writers are cycle-scoped: once the persisted cycle changes, commits, or is abandoned, the writer must stop instead of updating a stale `<cycle-id>.partial.json` ledger.
-- Every appended response must cross a commit boundary unless the user explicitly asks to leave it uncommitted. The normal happy path is `agent-doc finalize <file>`; the documented repair path for an already-present prompt is `agent-doc write --commit <file>`.
+- Every appended response must cross a commit boundary in the document turn lifecycle unless the user explicitly asks to leave it uncommitted. The normal happy path is `agent-doc finalize <file>`; the documented repair path for an already-present prompt is `agent-doc write --commit <file>`. CRDT merge/realtime convergence may provide the verified document state for closeout, but it must not run the commit as a side effect.
 - Strict `write --commit` with empty stdin may only commit when it first recovers an agent-doc-owned visible response or applies explicit pending mutations. Empty stdin with no recoverable response and no pending mutation must fail before commit so live prompt drift remains unresolved for the next cycle.
 - Once a closeout cycle reaches `Committed`, any delayed IPC/file fallback patch for the same cycle must be rejected. The write path checks `cycle_state::phase` before applying fallback patches and cleans up leftover `.agent-doc/patches/<hash>.json` files after successful closeout. Active IPC timeout before commit leaves the queued patch/pending response for retry and must not perform a local document write or commit. IPC payloads include the current `cycle_id` so the plugin can also reject stale patches. Late fallback rejection is logged with patch id, cycle id, document path, and a typed FlowCore `closeout/terminal_guard` event. Terminal cycle-state and capture-state updates are idempotent: later repair/replay/no-op bookkeeping for the same committed cycle must not rewrite lifecycle state, reopen the cycle, or re-log `capture_committed_after_replay`.
 - Explicit `--force-disk` closeout is the operator-controlled direct-write escape hatch for stale/wedged editor listeners. When used with strict `write --commit` / `finalize`, the force flag must apply to the whole binary-owned closeout path: response placement, pending-maintenance reap, queue consumption, done-id marking, and free-text queue strike. Ordinary preflight/route maintenance still fails closed under active listeners unless the caller explicitly selected this force-disk recovery path, and force-disk maintenance writes must remain attributable in `ops.log`.
@@ -178,7 +195,9 @@ Notable invariants:
 | 11 | [Debounce](specs/11-debounce.md) | Debounce system gaps, limitations, and improvements |
 | 12 | [Deterministic Simulation Testing](specs/12-deterministic-simulation.md) | Fast seeded workflow simulation for closeout edge cases |
 | 13 | [State Backbone](specs/13-state-backbone.md) | Cycle FSM boundary, typed event ledger, projections, and actor ownership |
-| 14 | [Codex Support](specs/codex-support.md) | Harness-specific differences for Codex vs Claude Code |
+| 14 | [Real-Time Workflow Authority](specs/14-realtime-workflow.md) | Operator-first source-of-truth and live mutation invariants |
+| 15 | [Turn Lifecycle Authority](specs/15-turn-lifecycle.md) | Turn/closeout state machine, realtime handoff, and commit ownership |
+| 16 | [Codex Support](specs/codex-support.md) | Harness-specific differences for Codex vs Claude Code |
 
 Command sub-specs:
 - [Core Commands](specs/07-core-commands.md)

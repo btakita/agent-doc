@@ -754,16 +754,15 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     );
     // #exch-intermix: before failing closed on the `live_prompt_drift_after_preflight`
     // wedge (adopted `content_ours` snapshot larger than the fragmented visible
-    // file), auto-recover when the snapshot provably owns every on-disk user
-    // prompt. Writes the adopted snapshot to disk so the response lands this cycle
-    // instead of stranding it for a manual `git checkout HEAD` / `reset
-    // --from-current` / `finalize --force-disk` recovery. Fails closed (returns
-    // None) on any dropped-prompt record or disk-only user prompt.
+    // file), rebase the missing agent response onto the realtime document. This
+    // is not snapshot adoption: queue/backlog/frontmatter and other
+    // operator-visible state stay as they are in `file_content`.
     if let Some(snapshot) = snapshot_content.as_deref()
         && let Some(recovered) =
             crate::write::try_auto_recover_live_prompt_drift(file, snapshot, &file_content)?
     {
         file_content = recovered;
+        snapshot_content = crate::snapshot::load(file)?;
     }
     if crate::write::guard_no_stale_snapshot_reset_drift(
         file,

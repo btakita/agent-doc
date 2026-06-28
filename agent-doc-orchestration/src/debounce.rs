@@ -887,6 +887,53 @@ pub fn live_buffer_divergence_missing_operator_text_authority(
         .filter(|snapshot| !snapshot.has_capability(OPERATOR_TEXT_AUTHORITY_CAPABILITY))
 }
 
+pub fn live_buffer_delivery_missing_operator_text_authority(
+    file: &str,
+    content: &str,
+) -> Option<LiveBufferSnapshot> {
+    live_buffer_snapshots(file)
+        .into_iter()
+        .filter(|snapshot| live_buffer_snapshot_can_receive_delivery(file, snapshot, content))
+        .filter(|snapshot| !snapshot.has_capability(OPERATOR_TEXT_AUTHORITY_CAPABILITY))
+        .max_by_key(|snapshot| snapshot.timestamp_ms)
+}
+
+fn live_buffer_snapshot_can_receive_delivery(
+    file: &str,
+    snapshot: &LiveBufferSnapshot,
+    content: &str,
+) -> bool {
+    if let Some(editor_id) = snapshot.editor_id.as_deref()
+        && !editor_id_is_live_for_delivery(editor_id)
+    {
+        return false;
+    }
+
+    let expected_len = content.len();
+    let expected_hash = content_hash(content);
+    if snapshot.len == expected_len && snapshot.hash.eq_ignore_ascii_case(&expected_hash) {
+        return true;
+    }
+
+    live_buffer_snapshot_diverges_from_content(file, snapshot, content)
+}
+
+fn editor_id_is_live_for_delivery(editor_id: &str) -> bool {
+    match jetbrains_editor_id_pid_for_delivery(editor_id) {
+        Some(pid) => crate::hooks::pid_is_live(pid),
+        None => true,
+    }
+}
+
+fn jetbrains_editor_id_pid_for_delivery(editor_id: &str) -> Option<u32> {
+    let rest = editor_id.strip_prefix("jetbrains-")?;
+    let pid_str = rest.split('-').next()?;
+    if pid_str.is_empty() || !pid_str.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    pid_str.parse::<u32>().ok()
+}
+
 fn live_buffer_snapshot_diverges_from_content(
     file: &str,
     snapshot: &LiveBufferSnapshot,
@@ -1679,6 +1726,23 @@ mod tests {
 
         let snap = live_buffer_divergence_missing_operator_text_authority(&doc_str, "saved")
             .expect("old sidecar diverges without authority capability");
+        assert_eq!(snap.editor_id.as_deref(), Some("jetbrains-old"));
+        assert!(!snap.has_capability(OPERATOR_TEXT_AUTHORITY_CAPABILITY));
+    }
+
+    #[test]
+    fn matching_live_buffer_without_operator_authority_capability_blocks_delivery() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("cap-missing-clean.md");
+        std::fs::write(&doc, "saved").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        record_live_buffer_digest_content_for_editor(&doc_str, "saved", Some("jetbrains-old"))
+            .unwrap();
+
+        let snap = live_buffer_delivery_missing_operator_text_authority(&doc_str, "saved")
+            .expect("old matching live editor sidecar still lacks safe delivery proof");
         assert_eq!(snap.editor_id.as_deref(), Some("jetbrains-old"));
         assert!(!snap.has_capability(OPERATOR_TEXT_AUTHORITY_CAPABILITY));
     }

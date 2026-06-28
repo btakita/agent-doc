@@ -1534,7 +1534,7 @@ pub fn try_editor_converge(
         );
         return Ok(true);
     }
-    if let Some(snapshot) = crate::debounce::live_buffer_divergence_missing_operator_text_authority(
+    if let Some(snapshot) = crate::debounce::live_buffer_delivery_missing_operator_text_authority(
         &canonical_file.to_string_lossy(),
         current_content,
     ) {
@@ -2995,6 +2995,47 @@ mod core_tests {
                 && log.contains("editor_id=jetbrains-old")
                 && !log.contains("queue_consume_editor_convergence_attempt"),
             "capability guard must fire before IPC attempt:\n{log}"
+        );
+    }
+
+    #[test]
+    fn converge_document_or_disk_blocks_matching_under_capable_live_buffer_before_ipc() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = crate::test_support::queue_consume_convergence_source();
+        let target = crate::test_support::queue_consume_convergence_target();
+        fs::write(&doc, &source).unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+        crate::debounce::record_live_buffer_digest_content_for_editor(
+            &doc_str,
+            &source,
+            Some("jetbrains-old"),
+        )
+        .unwrap();
+
+        let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("operator_text_authority_v1"),
+            "matching under-capable editor sidecar must block delivery too: {err}"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            source,
+            "matching under-capable editor sidecar must not let the converger mutate disk"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("reason=editor_capability_missing")
+                && log.contains("capability=operator_text_authority_v1")
+                && log.contains("editor_id=jetbrains-old")
+                && !log.contains("queue_consume_editor_convergence_attempt"),
+            "delivery capability guard must fire before IPC attempt:\n{log}"
         );
     }
 

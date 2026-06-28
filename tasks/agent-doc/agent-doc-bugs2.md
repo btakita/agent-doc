@@ -382,7 +382,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_ack_content patch_id=4c9540ca-b336-4139-b92e-a97e8862ef8f invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle snap_source=ack_content_sidecar candidate_len=39913 candidate_hash=0df380d1aba79db35f0e5437d12fe83be0efcf32dbf126fed8cecef311bffd03 content_ours_len=41064 content_ours_hash=a7c35721230facb0a5649cf82673fc1bab08b8fd9bf100a96ade3f6e528e21ed doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782658172719
 ```
-<!-- agent:boundary:9e81ea91 -->
+<!-- agent:boundary:b2f266cc -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -439,7 +439,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tmuxsynccrashlog] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md
+- [ ] [#tmuxsynccrashlog] [operator-verify] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md
 - [ ] [#qftlossproof] Replacement for #qftloss: live proof for the already-required operator-wins invariant. After the operator types unsaved queue/free-text/ordinary text during concurrent finalize, inspect .agent-doc/live-buffer journal evidence plus ops.log qdurcrash/live-buffer replay markers; close only if the operator text survives end-to-end, otherwise file a focused invariant-loss bug with artifact paths. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#midturnrecycleproof] Replacement for #midturn-recycle-resume: Phase A recycle interlock live proof. Drive a recycle in the preflight->finalize window, inspect ops.log cycle-open recycle-defer/commit markers and editor writeback proof; close only if no live_prompt_drift_after_preflight appears, otherwise file a regression. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
 - [ ] [#midturnresumeimpl] Replacement for #midturnresumeb: Phase B durable turn checkpoint resume. Implement and verify consumption of the #durablerecycle turn checkpoint on fresh supervisor boot, with ops-log markers proving interrupted-child redispatch versus surviving-child no-op and deferred-too-long escalation coverage. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md

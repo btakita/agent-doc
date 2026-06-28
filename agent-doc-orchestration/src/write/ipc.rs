@@ -1644,6 +1644,43 @@ impl FullContentRepairRedelivery {
     }
 }
 
+fn redelivery_missing_operator_text_authority(
+    file: &Path,
+    expected_bad_state: &str,
+    label: &str,
+    source_patch_id: Option<&str>,
+) -> bool {
+    let indicator_path = file
+        .canonicalize()
+        .unwrap_or_else(|_| file.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    let Some(live) = crate::debounce::live_buffer_delivery_missing_operator_text_authority(
+        &indicator_path,
+        expected_bad_state,
+    ) else {
+        return false;
+    };
+    let editor_id = live.editor_id.as_deref().unwrap_or("unknown");
+    eprintln!(
+        "[write] {label} editor repair skipped: live editor buffer {editor_id} lacks required capability {}",
+        crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "{label}_editor_redelivery_skipped file={} patch_id={} skip=editor_capability_missing capability={} editor_id={} live_len={} live_hash={}",
+            file.display(),
+            source_patch_id.unwrap_or("-"),
+            crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            editor_id,
+            live.len,
+            live.hash
+        ),
+    );
+    true
+}
+
 pub(crate) fn redeliver_full_content_repair_to_editor(
     file: &Path,
     repaired_content: &str,
@@ -1705,6 +1742,15 @@ pub(crate) fn redeliver_full_content_repair_to_editor(
                 crate::ops_log::content_hash(&current_content)
             ),
         );
+        return false;
+    }
+
+    if redelivery_missing_operator_text_authority(
+        file,
+        expected_bad_state,
+        kind.label(),
+        source_patch_id,
+    ) {
         return false;
     }
 
@@ -1932,6 +1978,15 @@ pub(crate) fn try_ipc_normalization_repair_patch(
         return Ok(false);
     }
 
+    if redelivery_missing_operator_text_authority(
+        file,
+        expected_bad_state,
+        "sidecar_normalization_fallback_narrow_repair",
+        source_patch_id,
+    ) {
+        return Ok(false);
+    }
+
     let canonical = file.canonicalize()?;
     let project_root = resolve_ipc_project_root(&canonical);
     let patch_id = uuid::Uuid::new_v4().to_string();
@@ -2064,6 +2119,15 @@ pub(crate) fn redeliver_normalization_fallback_to_editor(
     normalize_prefix_lines: &[String],
     source_patch_id: Option<&str>,
 ) -> bool {
+    if redelivery_missing_operator_text_authority(
+        file,
+        expected_bad_state,
+        "sidecar_normalization_fallback_narrow_repair",
+        source_patch_id,
+    ) {
+        return false;
+    }
+
     match try_ipc_normalization_repair_patch(
         file,
         repaired_content,
@@ -3874,8 +3938,15 @@ Stale response that the operator cleared.
 <!-- agent:exchange patch=append -->
 <!-- /agent:exchange -->
 ";
-        crate::debounce::record_live_buffer_digest_content(&indicator_path, cleared_buffer)
-            .unwrap();
+        crate::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &indicator_path,
+            cleared_buffer,
+            "jetbrains-capable-diverged",
+            "jetbrains",
+            "test",
+            &[crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
 
         let repaired = bad_state; // the stale snapshot the repair would re-apply
         let delivered = redeliver_ipc_dedupe_to_editor(&doc, repaired, bad_state);
@@ -3890,6 +3961,110 @@ Stale response that the operator cleared.
         assert!(
             ops_log.contains("skip=live_buffer_diverges"),
             "live-buffer divergence skip should be logged:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn normalization_redelivery_blocks_capability_unknown_live_editor_before_ipc() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let bad_state = "\
+<!-- agent:exchange patch=append -->
+do #old-editor. spec-test-build-install-commit-push
+### Re: #old-editor — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+";
+        let repaired = "\
+<!-- agent:exchange patch=append -->
+❯ do #old-editor. spec-test-build-install-commit-push
+### Re: #old-editor — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc, bad_state).unwrap();
+
+        let indicator_path = doc
+            .canonicalize()
+            .unwrap_or_else(|_| doc.clone())
+            .to_string_lossy()
+            .to_string();
+        crate::debounce::record_live_buffer_digest_content_for_editor(
+            &indicator_path,
+            bad_state,
+            Some("jetbrains-old-editor"),
+        )
+        .unwrap();
+
+        let call_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let listener_root = dir.path().to_path_buf();
+        let listener_doc = doc.clone();
+        let listener_count = call_count.clone();
+        std::fs::create_dir_all(listener_root.join(".agent-doc")).unwrap();
+        let _listener = std::thread::spawn(move || {
+            let _ = crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                listener_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                if let Some(lines) = v.get("normalize_prefix_lines").and_then(|value| {
+                    value.as_array().map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| item.as_str().map(str::to_string))
+                            .collect::<Vec<_>>()
+                    })
+                }) {
+                    let current = std::fs::read_to_string(&listener_doc).ok()?;
+                    let repaired = normalize_exchange_prefixes_for_targets(&current, &lines);
+                    let _ = std::fs::write(&listener_doc, repaired);
+                }
+                Some(serde_json::json!({"type": "ack"}).to_string())
+            });
+        });
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(dir.path()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            crate::ipc_socket::is_listener_active(dir.path()),
+            "fake socket listener did not start"
+        );
+
+        let delivered = redeliver_normalization_fallback_to_editor(
+            &doc,
+            repaired,
+            bad_state,
+            &["do #old-editor. spec-test-build-install-commit-push".to_string()],
+            Some("source-patch-old-editor"),
+        );
+
+        assert!(
+            !delivered,
+            "capability-unknown editor must not receive normalization repair"
+        );
+        assert_eq!(
+            call_count.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "capability guard must fire before any socket IPC delivery"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), bad_state);
+        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("skip=editor_capability_missing")
+                && ops_log.contains(crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY),
+            "missing-capability redelivery skip should be logged:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("sidecar_normalization_fallback_narrow_repair_attempt"),
+            "guard must run before repair IPC attempt:\n{ops_log}"
         );
     }
 

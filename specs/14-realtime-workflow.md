@@ -222,9 +222,12 @@ capability-unknown frontend is still authoritative operator input, but it is not
 safe delivery proof. This is true even when the reported buffer currently equals
 disk: the unsafe race is between delivery and the operator's next keystroke. The
 controller must enter `ConflictBlocked` (or an equivalent fail-closed closeout)
-before sending a patch that could overwrite that buffer. Reloading/updating the
-editor frontend can replace the sidecar with a capability-bearing report; direct
-disk overwrite remains an explicit operator escape hatch only.
+before sending a patch that could overwrite that buffer. This applies to every
+editor mutation transport, including normal writeback, compact exchange,
+normalization repair, IPC dedupe repair, full-content repair redelivery, socket
+delivery, and file-IPC fallback. Reloading/updating the editor frontend can
+replace the sidecar with a capability-bearing report; direct disk overwrite
+remains an explicit operator escape hatch only.
 
 Snapshots never create a realtime state. A snapshot can contribute a candidate
 delta to `AgentDeltaReady`; it cannot move a document to `MergePlanned`,

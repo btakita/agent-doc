@@ -2819,21 +2819,27 @@ fn render_done_archive_entry(today: &str, item: &crate::pending::PendingItem) ->
     entry
 }
 
-/// Read the claims log and truncate it. Returns lines as a `Vec<String>`.
-/// Returns an empty vec if the log doesn't exist or can't be read.
-fn read_and_truncate_claims(file: &Path) -> Vec<String> {
+fn claims_log_path(file: &Path) -> Option<std::path::PathBuf> {
     // Canonicalize to find project root reliably.
     let canonical = match file.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return vec![],
+        Ok(path) => path,
+        Err(_) => return None,
     };
 
     let root = match snapshot::find_project_root(&canonical) {
-        Some(r) => r,
-        None => return vec![],
+        Some(root) => root,
+        None => return None,
     };
 
-    let log_path = root.join(".agent-doc/claims.log");
+    Some(root.join(".agent-doc/claims.log"))
+}
+
+/// Read the claims log without mutating it. Returns lines as a `Vec<String>`.
+/// Returns an empty vec if the log doesn't exist or can't be read.
+fn read_claims(file: &Path) -> Vec<String> {
+    let Some(log_path) = claims_log_path(file) else {
+        return vec![];
+    };
 
     let contents = match std::fs::read_to_string(&log_path) {
         Ok(s) => s,
@@ -2850,6 +2856,21 @@ fn read_and_truncate_claims(file: &Path) -> Vec<String> {
         .filter(|l| !l.trim().is_empty())
         .map(|l| l.to_string())
         .collect();
+
+    claims
+}
+
+/// Read the claims log and truncate it. Returns lines as a `Vec<String>`.
+/// Returns an empty vec if the log doesn't exist or can't be read.
+fn read_and_truncate_claims(file: &Path) -> Vec<String> {
+    let Some(log_path) = claims_log_path(file) else {
+        return vec![];
+    };
+
+    let claims = read_claims(file);
+    if claims.is_empty() {
+        return claims;
+    }
 
     // Truncate the log.
     if let Err(e) = std::fs::write(&log_path, "") {

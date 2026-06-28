@@ -157,6 +157,29 @@ lifecycle still chooses commit/no-commit/retry policy. A verified realtime merge
 is sufficient to update backup/audit state only when the lifecycle state says
 that backup update is part of the selected closeout action.
 
+## Queue Admission
+
+Turn admission consumes the realtime queue projection defined in
+[Realtime Queue + Exchange Rules](14-realtime-workflow.md#realtime-queue--exchange-rules).
+It must not classify every raw queue-body diff as a new prompt. The lifecycle
+opens or updates a turn from realtime queue/exchange state only when the
+classified state is active-turn input:
+
+- the selected head is newly synthesized as queue continuation with no other
+  prompt-bearing document diff;
+- the selected head itself was edited and the edit is settled enough to adopt;
+- auto-DAG, priority, dependency, done/review, or backlog-sync recomputation
+  changes the selected active HEAD identity for this turn.
+
+Edits to non-selected queue heads update future queue state and backup/audit
+state, but they do not replace the current turn checkpoint when the selected
+active HEAD identity for this turn is unchanged. The realtime projection may
+place `🚧` on more than one queue head only when the scheduler has proven
+multiple active HEADs are concurrently running; the lifecycle still records the
+head identity relevant to each turn. Edits to `agent:exchange` are different:
+`ExchangeUpdated` and `MixedExchangeAndQueueUpdate` are always prompt-bearing
+active-turn input, even if the same source epoch also edits future queue heads.
+
 ## Commit Ownership
 
 The document turn lifecycle owns commits because commit meaning depends on more

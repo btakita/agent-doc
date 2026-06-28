@@ -90,7 +90,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
 
     // Step 0a: Auto-GC (at most once per day).
     // Checks .agent-doc/gc.stamp — if missing or >24 hours old, runs lightweight GC.
-    {
+    if !options.probe {
         let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
         if let Some(root) = snapshot::find_project_root(&canonical) {
             match crate::project_controller::close_stale_starting_actors_for_caller(
@@ -137,12 +137,18 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // duplicate-residue cleanup all write the visible document or its sidecars.
     // Do not let those paths race an editor buffer that is still publishing a
     // prompt.
-    let debounce_ms = preflight_debounce_ms(file);
-    wait_for_typing_idle_before_mutation(file, debounce_ms)?;
+    if !options.probe {
+        let debounce_ms = preflight_debounce_ms(file);
+        wait_for_typing_idle_before_mutation(file, debounce_ms)?;
+    }
 
     // Step 0-pre: interrupted-cycle guard (#cyc1). Use exact persisted cycle
     // state instead of inferring solely from `ops.log`.
-    let (recovered_prior, committed_prior) = enforce_cycle_completion(file)?;
+    let (recovered_prior, committed_prior) = if options.probe {
+        (false, false)
+    } else {
+        enforce_cycle_completion(file)?
+    };
 
     // Step 0: Check tmux layout health.
     eprintln!("[preflight] step 0: layout check");
@@ -155,12 +161,14 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // consecutive preflights, auto-run `resync --fix` to clean the registry.
     // State lives in `.agent-doc/state/drift.count` so we only auto-fix after
     // the second consecutive detection (one false positive is tolerated).
-    maybe_auto_resync_on_drift(file, &layout_issues);
+    if !options.probe {
+        maybe_auto_resync_on_drift(file, &layout_issues);
+    }
 
     // Step 0c: Auto-repair base-index compliance — when window index 0 is
     // missing, run repair_layout immediately so this preflight reports the
     // post-repair layout state.
-    if maybe_auto_repair_base_index(file, &layout_issues) {
+    if !options.probe && maybe_auto_repair_base_index(file, &layout_issues) {
         layout_issues = check_layout();
         if layout_issues.is_empty() {
             eprintln!("[preflight] layout repair cleared base-index issues");
@@ -178,7 +186,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let open_cycle = crate::cycle_state::load(file)?
         .map(|state| state.is_open())
         .unwrap_or(false);
-    if !open_cycle && crate::session_check::detect_unstarted_prompt_bearing_diff(file)?.is_none() {
+    if !options.probe
+        && !open_cycle
+        && crate::session_check::detect_unstarted_prompt_bearing_diff(file)?.is_none()
+    {
         enforce_no_uncommitted_closeout_drift(file, &rc)?;
     }
 
@@ -190,7 +201,9 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // byte-precise hot path never re-serializes frontmatter through `write()`
     // (which would drop it). Strip it directly on disk + snapshot, but ONLY when
     // the canonical `queue:` control is present so no queue state is lost. Idempotent.
-    if let Ok(current) = std::fs::read_to_string(file) {
+    if !options.probe
+        && let Ok(current) = std::fs::read_to_string(file)
+    {
         let migrated = frontmatter::strip_deprecated_queue_active_line(&current);
         if migrated != current {
             match crate::write::atomic_write_pub(file, &migrated) {
@@ -233,19 +246,21 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // a one-time terminal `Discarded`, so a later archive GC cannot resurface the
     // false-positive stuck warning. After this, `stuck_captured_cycle` sees a
     // discarded capture and returns None for the same case.
-    match crate::flow::closeout::reconcile_compacted_committed_capture(file) {
-        Ok(true) => {
-            eprintln!(
-                "[preflight] reconciled compacted committed capture for {}",
-                file.display()
-            );
-        }
-        Ok(false) => {}
-        Err(err) => {
-            eprintln!(
-                "[preflight] warning: failed to reconcile compacted committed capture for {}: {err}",
-                file.display()
-            );
+    if !options.probe {
+        match crate::flow::closeout::reconcile_compacted_committed_capture(file) {
+            Ok(true) => {
+                eprintln!(
+                    "[preflight] reconciled compacted committed capture for {}",
+                    file.display()
+                );
+            }
+            Ok(false) => {}
+            Err(err) => {
+                eprintln!(
+                    "[preflight] warning: failed to reconcile compacted committed capture for {}: {err}",
+                    file.display()
+                );
+            }
         }
     }
     if let Some(info) = crate::flow::closeout::stuck_captured_cycle(file) {
@@ -265,23 +280,29 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         });
     }
     let mut recovered = recovered_prior
-        || match repair::run(file) {
-            Ok(outcome) => outcome.repaired(),
-            Err(e) => {
-                let message = e.to_string();
-                if message.contains(repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
-                    || message.contains(repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR)
-                {
-                    return Err(e);
+        || if options.probe {
+            false
+        } else {
+            match repair::run(file) {
+                Ok(outcome) => outcome.repaired(),
+                Err(e) => {
+                    let message = e.to_string();
+                    if message.contains(repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
+                        || message.contains(repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR)
+                    {
+                        return Err(e);
+                    }
+                    eprintln!("[preflight] repair warning: {}", e);
+                    false
                 }
-                eprintln!("[preflight] repair warning: {}", e);
-                false
             }
         };
 
     // Step 1b: Ensure document is initialized (snapshot + git baseline).
     // If no snapshot exists, creates one and commits the file.
-    if let Err(e) = snapshot::ensure_initialized(file) {
+    if !options.probe
+        && let Err(e) = snapshot::ensure_initialized(file)
+    {
         eprintln!("[preflight] warning: auto-init failed: {}", e);
     }
 
@@ -289,7 +310,9 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // mutates backlog state or runs the generic commit path. Otherwise a
     // snapshot/file pair that already contains a visible response could be
     // normalized into a misleading `no_changes` result.
-    enforce_no_uncommitted_closeout_drift(file, &rc)?;
+    if !options.probe {
+        enforce_no_uncommitted_closeout_drift(file, &rc)?;
+    }
 
     // Step 1c: Pending component maintenance — lazy backfill, reap, archive, and
     // reorder detection. MUST run BEFORE step 2 commit so the single step-2
@@ -301,7 +324,11 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // Maintenance applies its mutations to BOTH the working tree file AND the
     // snapshot (surgically, via component replace), so the upcoming step-2
     // commit which stages from snapshot picks them up atomically.
-    let pending_report = run_pending_maintenance(file)?;
+    let pending_report = if options.probe {
+        PendingMaintenanceReport::default()
+    } else {
+        run_pending_maintenance(file)?
+    };
     let pending_reordered = pending_report.reordered;
     let pending_gated_count = pending_report.pending_gated_count;
 
@@ -313,11 +340,15 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         .gate_autoverify
         .or(rc.project_config().agent_doc_gate_autoverify)
         .unwrap_or(false);
-    let gate_verify_results = match run_gate_verify(file, gate_autoverify_optin) {
-        Ok(results) => results,
-        Err(e) => {
-            eprintln!("[preflight] optverify: scan skipped: {}", e);
-            Vec::new()
+    let gate_verify_results = if options.probe {
+        Vec::new()
+    } else {
+        match run_gate_verify(file, gate_autoverify_optin) {
+            Ok(results) => results,
+            Err(e) => {
+                eprintln!("[preflight] optverify: scan skipped: {}", e);
+                Vec::new()
+            }
         }
     };
     if pending_report.legacy_gated_in_backlog_count > 0 {
@@ -334,10 +365,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     }
     enforce_no_shadow_open_backlog(file)?;
     enforce_no_dropped_backlog(file, &rc)?;
-    if remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)? {
+    if !options.probe && remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)? {
         recovered = true;
     }
-    if remove_post_exchange_duplicate_prompt_comments_for_preflight(file, &rc)? {
+    if !options.probe && remove_post_exchange_duplicate_prompt_comments_for_preflight(file, &rc)? {
         recovered = true;
     }
 
@@ -345,25 +376,30 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     eprintln!("[preflight] step 2: commit");
     let mut did_commit_this_preflight = false;
     let committed = committed_prior
-        || match git::commit(file) {
-            Ok(did_commit) => {
-                if did_commit {
-                    rc.invalidate_head_content();
-                    did_commit_this_preflight = true;
+        || if options.probe {
+            false
+        } else {
+            match git::commit(file) {
+                Ok(did_commit) => {
+                    if did_commit {
+                        rc.invalidate_head_content();
+                        did_commit_this_preflight = true;
+                    }
+                    did_commit
                 }
-                did_commit
-            }
-            Err(e) => {
-                eprintln!("[preflight] commit warning: {}", e);
-                false
+                Err(e) => {
+                    eprintln!("[preflight] commit warning: {}", e);
+                    false
+                }
             }
         };
-    if committed {
+    if !options.probe && committed {
         maybe_record_preflight_terminal_closeout_proof(file, did_commit_this_preflight);
     }
 
-    if let Some(repaired_doc) =
-        relocate_out_of_exchange_prompt_before_diff(file, &std::fs::read_to_string(file)?)?
+    if !options.probe
+        && let Some(repaired_doc) =
+            relocate_out_of_exchange_prompt_before_diff(file, &std::fs::read_to_string(file)?)?
     {
         crate::write::atomic_write_pub(file, &repaired_doc)?;
         crate::ops_log::log_op(
@@ -379,10 +415,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         );
         recovered = true;
     }
-    if remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)? {
+    if !options.probe && remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)? {
         recovered = true;
     }
-    if remove_post_exchange_duplicate_prompt_comments_for_preflight(file, &rc)? {
+    if !options.probe && remove_post_exchange_duplicate_prompt_comments_for_preflight(file, &rc)? {
         recovered = true;
     }
 
@@ -390,7 +426,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // project that have uncommitted snapshot content. Turns preflight into a catch-all
     // backstop: even if a previous session's commit was skipped, the next preflight
     // from any document in the project will pick it up.
-    {
+    if !options.probe {
         let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
         if let Some(root) = snapshot::find_project_root(&canonical)
             && let Ok(registry) = sessions::load_in(&root)
@@ -499,7 +535,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             }
         }
     }
-    {
+    if !options.probe {
         let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
         if let Some(root) = snapshot::find_project_root(&canonical) {
             match crate::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
@@ -522,13 +558,17 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
 
     // Step 3: Read and truncate the claims log.
     eprintln!("[preflight] step 3: claims");
-    let claims = read_and_truncate_claims(file);
+    let claims = if options.probe {
+        read_claims(file)
+    } else {
+        read_and_truncate_claims(file)
+    };
 
     // Step 3b: Wait for file to settle (mtime + typing indicator debounce).
     // Check both file mtime (disk-level) and cross-process typing indicator
     // (buffer-level) to avoid picking up mid-typing edits.
     // Default: 2000ms (configurable via `agent_doc_debounce` frontmatter field).
-    {
+    if !options.probe {
         let debounce_ms = preflight_debounce_ms(file);
         let debounce = std::time::Duration::from_millis(debounce_ms);
         let max_wait = preflight_debounce_max_wait(debounce_ms);
@@ -588,7 +628,11 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
 
     // Step 3c: Check related documents for changes.
     eprintln!("[preflight] step 3c: related docs");
-    let linked_changes = check_linked_docs(file);
+    let linked_changes = if options.probe {
+        Vec::new()
+    } else {
+        check_linked_docs(file)
+    };
     for change in &linked_changes {
         eprintln!(
             "[preflight] related doc change: {} — {}",
@@ -603,7 +647,11 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // for the diff. This keeps the merge baseline, visible file, and prompt
     // contract in one transaction even if an editor replay lands during the
     // earlier debounce window.
-    let baseline_file = save_baseline_content(file, &diff_result_with_current.current);
+    let baseline_file = if options.probe {
+        None
+    } else {
+        save_baseline_content(file, &diff_result_with_current.current)
+    };
     let raw_diff = diff_result_with_current.diff;
     let harness_diff = crate::harness_prompt::synthetic_diff_for_file(file)?;
     let initial_diff = raw_diff.clone().or(harness_diff.clone());
@@ -643,10 +691,17 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // is otherwise empty, an active queue head item becomes the prompt diff for
     // this cycle. This preserves bare no-op invocations while letting persisted
     // `queue_active: true` advance without requiring a fresh document edit.
-    let queue_state = run_queue_maintenance(file, diff_result.as_deref()).unwrap_or_else(|e| {
-        eprintln!("[preflight] queue maintenance warning: {}", e);
-        QueueState::default()
-    });
+    let queue_state = if options.probe {
+        inspect_queue_state(file, diff_result.as_deref()).unwrap_or_else(|e| {
+            eprintln!("[preflight] queue probe warning: {}", e);
+            QueueState::default()
+        })
+    } else {
+        run_queue_maintenance(file, diff_result.as_deref()).unwrap_or_else(|e| {
+            eprintln!("[preflight] queue maintenance warning: {}", e);
+            QueueState::default()
+        })
+    };
     warnings.extend(queue_state.warnings.clone());
     // #qconvbaseline: the queue maintenance above may converge the live editor
     // buffer to a corrected queue shape (auto-pins, backlog→queue mirrors, do-prompt
@@ -664,7 +719,8 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // are unaffected — their disk write already matches the snapshot, and when
     // nothing converged the snapshot equals the pre-maintenance content so this is
     // a no-op.
-    if let Ok(Some(converged_snapshot)) = crate::snapshot::load(file)
+    if !options.probe
+        && let Ok(Some(converged_snapshot)) = crate::snapshot::load(file)
         && let Some(realigned) = realign_baseline_to_converged_queue(
             &diff_result_with_current.current,
             &converged_snapshot,
@@ -672,6 +728,19 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     {
         let _ = save_baseline_content(file, &realigned);
         eprintln!("[preflight] baseline re-aligned to converged queue shape (#qconvbaseline)");
+    }
+    if diff_result.is_some()
+        && queue_state.queue_active == Some(true)
+        && let Some(selected_head) = queue_state.queue_prompts.first()
+        && queue_body_diff_is_non_selected_future_state(
+            &diff_result_with_current.previous,
+            &diff_result_with_current.current,
+            selected_head,
+        )
+    {
+        diff_result = None;
+        classification = None;
+        eprintln!("[preflight] queue: absorbed non-selected queue edit into future queue state");
     }
     // `#agent-doc-bug` auto-queue stall: when there is no real user/document diff
     // this cycle, an active queue head is synthesized as the cycle's prompt diff.
@@ -709,14 +778,16 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let no_changes = diff_result.is_none();
     if !no_changes {
         if let Some(commands) = slash_command_only_diff_commands.as_ref() {
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "preflight_slash_command_only_handoff file={} commands={:?}",
-                    file.display(),
-                    commands
-                ),
-            );
+            if !options.probe {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "preflight_slash_command_only_handoff file={} commands={:?}",
+                        file.display(),
+                        commands
+                    ),
+                );
+            }
             eprintln!(
                 "[preflight] slash command diff {:?} is command-only; skipping preflight_started so the harness/supervisor can submit it without an agent-doc response cycle",
                 commands
@@ -727,13 +798,6 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             // diff/queue state below, but leaving an open cycle behind is the
             // side effect that later wedges `session-check` (the empty-cycle
             // churn from the recursive owner-pane diagnostic path).
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "preflight_probe_no_cycle file={} reason=probe_inspection_only",
-                    file.display()
-                ),
-            );
             eprintln!("[preflight] probe: skipping preflight_started cycle (inspection only)");
         } else {
             let snap = crate::snapshot::load(file).unwrap_or(None);
@@ -793,13 +857,15 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         crate::flow::session_cycle::prompt_targets_from_changes(&prompt_bearing_changes);
     let directive_target_ids = crate::session_check::do_directive_target_ids(&prompt_targets);
     let checkpoint_queue_task_id = directive_target_ids.first().map(String::as_str);
-    crate::cycle_state::record_turn_checkpoint(
-        file,
-        baseline_file.as_deref(),
-        &prompt_targets,
-        checkpoint_queue_task_id,
-        checkpoint_queue_task_id,
-    )?;
+    if !options.probe {
+        crate::cycle_state::record_turn_checkpoint(
+            file,
+            baseline_file.as_deref(),
+            &prompt_targets,
+            checkpoint_queue_task_id,
+            checkpoint_queue_task_id,
+        )?;
+    }
     let mut added_diff_lines = prompt_diff_result
         .as_ref()
         .map(|d| crate::prompt_contract::collect_added_diff_lines(d))
@@ -827,7 +893,9 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // #op-scoped-drift-1: persist this cycle's node ops to the durable op log,
     // tagged with actor + causal (Lamport / session-origin) clock. Best effort:
     // the durable substrate must never block or fail a preflight cycle.
-    if let Some(summary) = semantic_diff.as_ref() {
+    if !options.probe
+        && let Some(summary) = semantic_diff.as_ref()
+    {
         persist_op_log(file, &rc, initial_frontmatter.session.as_deref(), summary);
     }
 
@@ -893,7 +961,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // do not replace that owner's persisted scope with the sibling queue edit's
     // derived scope. The edit must stay as document state until the current
     // closeout merges it.
-    if !prompt_edit_independent_of_active_turn {
+    if !options.probe && !prompt_edit_independent_of_active_turn {
         match turn_scope.as_ref() {
             Some(scope) => {
                 if let Err(err) = crate::turn_scope_store::save(file, scope) {
@@ -1129,7 +1197,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             filter_expect_done_or_gate_ids(&directive_target_ids, &open_backlog, &synced_queue_ids)
         }
     };
-    if !no_changes {
+    if !options.probe && !no_changes {
         crate::cycle_state::record_backlog_capture_requirement(file, backlog_capture_required)?;
         crate::cycle_state::record_backlog_target_requirements(
             file,
@@ -1339,7 +1407,9 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             if let crate::drain_stall::StallVerdict::Stalled(message) =
                 crate::drain_stall::classify_stall(&facts)
             {
-                crate::ops_log::log_op(file, &message);
+                if !options.probe {
+                    crate::ops_log::log_op(file, &message);
+                }
                 warnings.push(PreflightWarning {
                     code: "queue_stall_detected".to_string(),
                     message,
@@ -1348,7 +1418,9 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 });
             }
             // One-shot: clear the marker on every reconciliation outcome.
-            crate::drain_stall::clear_continuation_pending(&file_str);
+            if !options.probe {
+                crate::drain_stall::clear_continuation_pending(&file_str);
+            }
         }
     }
 
@@ -1446,6 +1518,78 @@ fn realign_baseline_to_converged_queue(current: &str, converged: &str) -> Option
     Some(spliced)
 }
 
+fn queue_body_diff_is_non_selected_future_state(
+    previous: &str,
+    current: &str,
+    selected_head: &str,
+) -> bool {
+    let Some(previous_head) = first_queue_prompt_identity(previous) else {
+        return false;
+    };
+    if previous_head != queue_prompt_identity(selected_head) {
+        return false;
+    }
+    let Some(previous_outside_queue_body) = content_without_queue_body(previous) else {
+        return false;
+    };
+    let Some(current_outside_queue_body) = content_without_queue_body(current) else {
+        return false;
+    };
+    if strip_exchange_boundary_lines(&previous_outside_queue_body)
+        != strip_exchange_boundary_lines(&current_outside_queue_body)
+    {
+        return false;
+    }
+    queue_body(previous) != queue_body(current)
+}
+
+fn first_queue_prompt_identity(content: &str) -> Option<String> {
+    let components = crate::component::parse(content).ok()?;
+    let queue = components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    let body = &content[queue.open_end..queue.close_start];
+    let entries = crate::queue::parse(body).ok()?;
+    crate::queue::prompts(&entries)
+        .first()
+        .map(|prompt| queue_prompt_identity(&prompt.text))
+}
+
+fn queue_prompt_identity(prompt: &str) -> String {
+    crate::queue::strip_priority_markers(prompt)
+}
+
+fn content_without_queue_body(content: &str) -> Option<String> {
+    let components = crate::component::parse(content).ok()?;
+    let queue = components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    let mut out = String::with_capacity(content.len());
+    out.push_str(&content[..queue.open_end]);
+    out.push_str(&content[queue.close_start..]);
+    Some(out)
+}
+
+fn queue_body(content: &str) -> Option<&str> {
+    let components = crate::component::parse(content).ok()?;
+    let queue = components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    Some(&content[queue.open_end..queue.close_start])
+}
+
+fn strip_exchange_boundary_lines(content: &str) -> String {
+    let mut out = String::with_capacity(content.len());
+    for segment in content.split_inclusive('\n') {
+        let line = segment.trim_end_matches(['\r', '\n']);
+        if line.trim_start().starts_with("<!-- agent:boundary:") {
+            continue;
+        }
+        out.push_str(segment);
+    }
+    out
+}
+
 fn realign_component_when_only_in_progress_marker_changed(
     current: &str,
     converged: &str,
@@ -1484,6 +1628,42 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
+
+    #[test]
+    fn queue_body_diff_future_state_ignores_exchange_boundary_churn() {
+        let previous = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- 🚧 do [#active]\n",
+            "- do [#old]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "Done.\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- 🚧 do [#active]\n",
+            "- do [#new]\n",
+            "<!-- /agent:queue -->\n"
+        );
+
+        assert!(queue_body_diff_is_non_selected_future_state(
+            previous,
+            current,
+            "do [#active]"
+        ));
+        let current_with_exchange_edit = current.replace("Done.", "Done.\nOperator follow-up.");
+        assert!(!queue_body_diff_is_non_selected_future_state(
+            previous,
+            &current_with_exchange_edit,
+            "do [#active]"
+        ));
+    }
+
     #[test]
     fn preflight_produces_valid_json() {
         let dir = setup_project();
@@ -1797,6 +1977,159 @@ mod tests {
             "active queue prompt should open a cycle even when the file matches the snapshot"
         );
     }
+
+    #[test]
+    fn preflight_non_active_queue_edit_updates_future_state_without_retargeting_turn() {
+        // A settled edit to a non-selected queue head must update the future queue
+        // state, but it must not become this turn's prompt while the selected
+        // head remains unchanged.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- 🚧 do [#active]\n",
+            "- do [#future-old]\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#active] active work\n",
+            "- [ ] [#future-new] future work\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let current_content = snapshot_content.replace("do [#future-old]", "do [#future-new]");
+        std::fs::write(&doc, &current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        run(&doc).unwrap();
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.queue_task_id.as_deref(), Some("#active"));
+        assert!(
+            state
+                .prompt_targets
+                .iter()
+                .all(|target| !target.contains("#future-new")),
+            "future queue edit must not retarget the active turn: {:?}",
+            state.prompt_targets
+        );
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("do [#future-new]"),
+            "snapshot must adopt the future queue edit for later turns:\n{snap}"
+        );
+    }
+
+    #[test]
+    fn preflight_auto_dag_queue_edit_that_changes_selected_head_affects_turn() {
+        // The exception to non-active isolation: if a future queue edit changes
+        // the auto-DAG's selected head, the current turn must follow the new
+        // selected head.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority -->\n",
+            "- 🚧 do [#active] after=#blocker\n",
+            "- do [#old]\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#active] active work after=#blocker\n",
+            "- [ ] [#blocker] blocker work\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let current_content = snapshot_content.replace("do [#old]", "do [#blocker]");
+        std::fs::write(&doc, &current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        run(&doc).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("- 🚧 :round_pushpin: do [#blocker]\n- do [#active] after=#blocker"),
+            "auto-DAG must reselect the blocker as the active head:\n{updated}"
+        );
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.queue_task_id.as_deref(), Some("#blocker"));
+    }
+
+    #[test]
+    fn preflight_exchange_edit_stays_active_turn_affecting_with_future_queue_edit() {
+        // Exchange edits are direct turn input. Even when the same edit also
+        // updates a non-selected future queue head, the exchange delta must keep
+        // the turn scoped to the operator's latest exchange text instead of being
+        // absorbed as future queue state.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- 🚧 do [#active]\n",
+            "- do [#future-old]\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#active] active work\n",
+            "- [ ] [#future-new] future work\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let current_content = snapshot_content
+            .replace("do [#future-old]", "do [#future-new]")
+            .replace(
+                "Done.\n<!-- /agent:exchange -->",
+                "Done.\n\nOperator follow-up.\n<!-- /agent:exchange -->",
+            );
+        std::fs::write(&doc, &current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        run(&doc).unwrap();
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_ne!(
+            state.queue_task_id.as_deref(),
+            Some("#active"),
+            "exchange edit must not be collapsed into queue-head-only continuation"
+        );
+        assert!(
+            state
+                .prompt_targets
+                .iter()
+                .any(|target| target.contains("Operator follow-up")),
+            "exchange edit must remain prompt-bearing: {:?}",
+            state.prompt_targets
+        );
+    }
     #[test]
     fn preflight_does_not_open_cycle_from_active_queue_slash_command() {
         let dir = setup_project();
@@ -1838,12 +2171,13 @@ mod tests {
         );
     }
     #[test]
-    fn preflight_probe_does_not_open_cycle_even_with_dispatchable_diff() {
+    fn preflight_probe_is_read_only_even_with_dispatchable_queue_work() {
         // #preflight-probe-side-effect-free: the SAME active-queue input that
         // opens a `preflight_started` cycle in the dispatch path (see
         // `preflight_opens_cycle_from_active_queue_when_document_has_no_diff`)
-        // must leave NO open cycle when run as a pure inspection probe, so a
-        // diagnostic preflight never wedges a later `session-check`.
+        // must leave no document, snapshot, baseline, claims, or cycle mutation
+        // when run as a pure inspection probe, so a diagnostic preflight never
+        // wedges a later `session-check`.
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = concat!(
@@ -1851,6 +2185,7 @@ mod tests {
             "agent_doc_session: test\n",
             "agent_doc_format: template\n",
             "agent_doc_write: crdt\n",
+            "queue: go\n",
             "queue_active: true\n",
             "---\n\n",
             "## Exchange\n\n",
@@ -1858,34 +2193,34 @@ mod tests {
             "### Re: prior — gpt-5\n\n",
             "Done.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
-            "- do [#oobpmt]\n",
+            "<!-- agent:queue -->\n",
             "<!-- /agent:queue -->\n\n",
             "## Backlog\n\n",
-            "<!-- agent:backlog -->\n",
+            "<!-- agent:backlog priority queue -->\n",
             "- [ ] [#oobpmt] Fix OOB prompt absorption.\n",
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
+        let snapshot_before = crate::snapshot::load(&doc).unwrap();
+        let baseline_path = crate::snapshot::baseline_path_for(&doc).unwrap();
+        let claims_log = dir.path().join(".agent-doc/claims.log");
+        std::fs::write(&claims_log, "claim-one\n").unwrap();
 
         run_with_options(&doc, PreflightOptions { probe: true }).unwrap();
 
-        // The probe must not leave an OPEN cycle (`preflight_started` /
-        // `response_captured` / `write_applied`) — that is the state that wedges
-        // a later `session-check`. A terminal `committed`/`abandoned` cycle from
-        // the (idempotent) commit step is acceptable.
-        if let Some(state) = crate::cycle_state::load(&doc).unwrap() {
-            assert!(
-                matches!(
-                    state.phase,
-                    crate::cycle_state::CyclePhase::Committed
-                        | crate::cycle_state::CyclePhase::Abandoned
-                ),
-                "a probe preflight must not leave an open cycle, got {:?}",
-                state.phase
-            );
-        }
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        assert_eq!(crate::snapshot::load(&doc).unwrap(), snapshot_before);
+        assert_eq!(std::fs::read_to_string(&claims_log).unwrap(), "claim-one\n");
+        assert!(
+            !baseline_path.exists(),
+            "probe must not save a turn baseline at {}",
+            baseline_path.display()
+        );
+        assert!(
+            crate::cycle_state::load(&doc).unwrap().is_none(),
+            "probe must not create or advance cycle state"
+        );
     }
     use super::realign_baseline_to_converged_queue;
 

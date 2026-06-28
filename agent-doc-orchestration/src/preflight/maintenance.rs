@@ -1626,6 +1626,151 @@ fn adopt_live_buffer_queue_deletions(file: &Path, disk_content: &mut String) -> 
     Ok(true)
 }
 
+/// Read-only queue inspection for `preflight --probe`.
+///
+/// This intentionally does not run queue convergence, backlog mirroring,
+/// in-progress marker updates, journals, or snapshot/frontmatter writes. It only
+/// computes the queue facts needed for preflight JSON from the current document.
+pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState> {
+    let content = match std::fs::read_to_string(file) {
+        Ok(content) => content,
+        Err(_) => return Ok(QueueState::default()),
+    };
+    let components = match crate::component::parse(&content) {
+        Ok(components) => components,
+        Err(_) => return Ok(QueueState::default()),
+    };
+    let comp = match components
+        .iter()
+        .find(|component| component.name == "queue")
+    {
+        Some(component) => component,
+        None => return Ok(QueueState::default()),
+    };
+
+    let body = &content[comp.open_end..comp.close_start];
+    let entries = match crate::queue::parse(body) {
+        Ok(entries) => entries,
+        Err(err) => {
+            eprintln!("[preflight] queue probe parse warning: {err}");
+            return Ok(QueueState::default());
+        }
+    };
+
+    let marker_control = crate::queue::marker_control(&comp.attrs);
+    let marker_stop = matches!(
+        marker_control,
+        Some(agent_doc_core::frontmatter::QueueControl::Stop)
+    );
+    let has_auto = crate::queue::has_auto_attr(&comp.attrs)
+        || matches!(
+            marker_control,
+            Some(agent_doc_core::frontmatter::QueueControl::Start)
+        );
+    let exchange_triggered = diff.map(crate::diff::detect_queue_trigger).unwrap_or(false);
+    let (fm, _) = frontmatter::parse(&content).unwrap_or_default();
+    let persisted_active = fm.queue_active.unwrap_or(false);
+
+    let mut activation =
+        crate::queue::resolve_activation(&entries, has_auto, exchange_triggered, persisted_active);
+    if marker_stop && activation.active {
+        activation = crate::queue::QueueActivation {
+            entries_after: activation.entries_after,
+            ..Default::default()
+        };
+    }
+
+    if activation.active && crate::queue::has_stop_fence_at_head(&activation.entries_after) {
+        return Ok(QueueState {
+            queue_prompts: vec![],
+            queue_active: Some(false),
+            queue_deferred: false,
+            queue_start_at: None,
+            queue_trigger: activation.trigger,
+            queue_halted: Some("stop_fence".to_string()),
+            queue_paused: false,
+            queue_pause_reason: None,
+            queue_drainable_head_count: 0,
+            queue_continuation_required: false,
+            queue_supervisor_drainable: false,
+            synced_queue_ids: vec![],
+            warnings: vec![],
+        });
+    }
+
+    if activation.active
+        && let Some(start_at) = crate::queue::time_gate_at_head(&activation.entries_after)
+    {
+        return Ok(QueueState {
+            queue_prompts: vec![],
+            queue_active: None,
+            queue_deferred: true,
+            queue_start_at: Some(start_at.to_string()),
+            queue_trigger: activation.trigger,
+            queue_halted: None,
+            queue_paused: false,
+            queue_pause_reason: None,
+            queue_drainable_head_count: 0,
+            queue_continuation_required: false,
+            queue_supervisor_drainable: false,
+            synced_queue_ids: vec![],
+            warnings: vec![],
+        });
+    }
+
+    let queue_prompts = if activation.active {
+        crate::queue::prompts(&activation.entries_after)
+            .iter()
+            .map(|prompt| crate::queue::strip_in_progress_marker(&prompt.text))
+            .collect()
+    } else {
+        vec![]
+    };
+    let queue_pause_reason =
+        crate::queue_continuation::document_queue_controller_pause_reason(file);
+    let queue_paused = queue_pause_reason.is_some();
+    let drainability_content = if activation.active {
+        let body = crate::queue::render(&activation.entries_after);
+        let projected = comp.replace_content(&content, &body);
+        frontmatter::merge_queue_state(&projected, true).unwrap_or(projected)
+    } else {
+        content.clone()
+    };
+    let queue_drainable_head_count = if activation.active {
+        crate::queue_continuation::drainable_head_count(file, &drainability_content)
+    } else {
+        0
+    };
+    let queue_continuation_required = activation.active && queue_drainable_head_count > 0;
+    let queue_supervisor_drainable = activation.active
+        && crate::queue_continuation::live_drainable_continuation_head(file, &drainability_content)
+            .is_some();
+
+    Ok(QueueState {
+        queue_prompts,
+        queue_active: if activation.active {
+            Some(true)
+        } else if activation.deferred {
+            None
+        } else if persisted_active {
+            Some(false)
+        } else {
+            None
+        },
+        queue_deferred: activation.deferred,
+        queue_start_at: activation.start_at,
+        queue_trigger: activation.trigger,
+        queue_halted: None,
+        queue_paused,
+        queue_pause_reason,
+        queue_drainable_head_count,
+        queue_continuation_required,
+        queue_supervisor_drainable,
+        synced_queue_ids: vec![],
+        warnings: vec![],
+    })
+}
+
 pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
     // #sqedit-race Phase 2: defer ALL queue maintenance mutation while a different,
     // live process holds a fresh queue-edit lease (a direct `queue prune-noise` /
@@ -2923,6 +3068,10 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         mutated = true;
         in_progress_markers_changed = true;
     }
+    let need_sync_active_queue_future_state_snapshot = activation.active
+        && snapshot_was_active
+        && selected_queue_head_unchanged_in_snapshot(file, &activation.entries_after)
+        && queue_region_differs_from_snapshot(file, &current_content);
 
     // Persist file mutations.
     if mutated {
@@ -2937,7 +3086,9 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // Persist snapshot mutations. For newly activated queues, sync the queue
     // component from the visible document into the snapshot so later closeout
     // consumption can prove the same head prompt in both places.
-    if (mutated || need_sync_newly_activated_queue_snapshot)
+    if (mutated
+        || need_sync_newly_activated_queue_snapshot
+        || need_sync_active_queue_future_state_snapshot)
         && let Ok(Some(snap_content)) = snapshot::load(file)
     {
         let mut new_snap = snap_content.clone();
@@ -2961,7 +3112,8 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             }
         }
 
-        if need_sync_newly_activated_queue_snapshot
+        if (need_sync_newly_activated_queue_snapshot
+            || need_sync_active_queue_future_state_snapshot)
             && let Ok(current_comps) = crate::component::parse(&current_content)
             && let Some(current_q) = current_comps
                 .iter()
@@ -3500,6 +3652,64 @@ pub(crate) fn adopt_edited_queue_head_into_snapshot(file: &Path, current_content
     }
 }
 
+fn selected_queue_head_unchanged_in_snapshot(
+    file: &Path,
+    current_entries: &[crate::queue::QueueEntry],
+) -> bool {
+    let current_prompts = crate::queue::prompts(current_entries);
+    let Some(current_head) = current_prompts.first() else {
+        return false;
+    };
+    let Ok(Some(snapshot_content)) = snapshot::load(file) else {
+        return false;
+    };
+    let Ok(snapshot_components) = crate::component::parse(&snapshot_content) else {
+        return false;
+    };
+    let Some(snapshot_queue) = snapshot_components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return false;
+    };
+    let snapshot_body = &snapshot_content[snapshot_queue.open_end..snapshot_queue.close_start];
+    let Ok(snapshot_entries) = crate::queue::parse(snapshot_body) else {
+        return false;
+    };
+    let snapshot_prompts = crate::queue::prompts(&snapshot_entries);
+    let Some(snapshot_head) = snapshot_prompts.first() else {
+        return false;
+    };
+    crate::queue::strip_priority_markers(&snapshot_head.text)
+        == crate::queue::strip_priority_markers(&current_head.text)
+}
+
+fn queue_region_differs_from_snapshot(file: &Path, current_content: &str) -> bool {
+    let Ok(Some(snapshot_content)) = snapshot::load(file) else {
+        return false;
+    };
+    let Ok(current_components) = crate::component::parse(current_content) else {
+        return false;
+    };
+    let Some(current_queue) = current_components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return false;
+    };
+    let Ok(snapshot_components) = crate::component::parse(&snapshot_content) else {
+        return false;
+    };
+    let Some(snapshot_queue) = snapshot_components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return false;
+    };
+    current_content[current_queue.open_start..current_queue.close_end]
+        != snapshot_content[snapshot_queue.open_start..snapshot_queue.close_end]
+}
+
 /// True when the current inactive-queue entry set differs from the queue body
 /// recorded in the snapshot (the committed baseline for this cycle). Used to
 /// scope the `inactive_queue_residue` warning to genuine operator edits instead
@@ -3549,6 +3759,41 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
+    #[test]
+    fn inspect_queue_state_simulates_activation_without_persisting() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior - gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#alpha] first\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        let snapshot_before = snapshot::load(&doc).unwrap();
+
+        let state = inspect_queue_state(&doc, None).unwrap();
+
+        assert_eq!(state.queue_active, Some(true));
+        assert_eq!(state.queue_prompts, vec!["do [#alpha]".to_string()]);
+        assert_eq!(state.queue_drainable_head_count, 1);
+        assert!(state.queue_continuation_required);
+        assert!(state.queue_supervisor_drainable);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        assert_eq!(snapshot::load(&doc).unwrap(), snapshot_before);
+    }
+
     #[test]
     fn run_queue_maintenance_syncs_backlog_into_empty_queue() {
         // #backlog-queue-sync-attr: a backlog carrying `queue=sync` regenerates

@@ -50,6 +50,71 @@ both when possible, or fail closed before applying any agent delta.
 ACK-content proves what an editor observed after a patch. It does not prove that
 older snapshot text should overwrite newer operator text.
 
+## Realtime Queue + Exchange Rules
+
+The `agent:queue` and `agent:exchange` components are realtime document state,
+not turn-local state. The operator may edit queue items and exchange text while
+the queue is running. Every realtime observation must recompute the in-memory
+queue projection and exchange update classification from the latest
+source-of-truth document, including editor-buffer changes, pluginless disk
+saves, backlog mirror inputs, priority markers, auto-DAG dependencies, and
+exchange body additions/edits.
+
+Queue recomputation is allowed to update future queue state without retargeting
+the current turn. The active HEAD set is the runnable prompt or prompts the
+realtime scheduler has proven are currently executing after queue normalization,
+backlog sync, priority sorting, auto-DAG topological ordering, and done/review
+catch-up strikes. In the common single-owner drain this set has one head. If the
+scheduler explicitly owns multiple concurrent heads, the active HEAD set may
+have multiple heads.
+
+The `🚧` marker is a projection of the active HEAD set into the visible document;
+it is not operator intent, not queue identity, and not an independent scheduling
+input. Realtime must update the document so every actively running HEAD carries
+the `🚧` marker, and no inactive/drained head carries it. Cosmetic markers such
+as `🚧`, `:pushpin:`, and `:round_pushpin:` do not change selected head identity.
+
+| Operator edit | Realtime queue effect | Current turn effect |
+|---|---|---|
+| Edit, insert, delete, or reorder a non-selected queue head | Update the in-memory queue projection and backup/audit state. | Does not change the active turn when the selected head identity is unchanged. |
+| Edit the selected queue head | Update the queue projection. | Affects the active turn. If the buffer is still being edited, wait/pause; once settled, adopt the edited head as active input. |
+| Edit a non-selected head so auto-DAG/priority recomputation changes the selected head | Recompute and persist the new queue projection. | Affects the active turn because the selected head changed. |
+| Edit backlog/icebox/pending dependency metadata used by auto-DAG | Recompute dependency order from the latest source. | Affects the active turn when the selected head changes; otherwise it updates future queue state only. |
+| Active HEAD set changes for any reason | Move the `🚧` projection to the active HEAD set in the visible document and backup/audit projection. | Affects a turn only when that turn's active HEAD identity changed or other active-turn input changed. |
+| Edit `agent:exchange` | Preserve and merge the exchange update. | Always affects the active turn. Exchange edits are never hidden as future queue-only state, even when the same source epoch also changes non-selected queue heads. |
+
+The combined realtime diff state is therefore not simply "file changed" or
+"queue changed". It must classify at least these cases:
+
+- `FutureQueueStateOnly`: queue projection changed, selected head identity is
+  unchanged, and no exchange update or other active-turn input changed;
+- `SelectedQueueHeadChanged`: selected head identity changed because the head
+  text changed or queue normalization/auto-DAG selected a different head;
+- `ExchangeUpdated`: exchange body or prompt-bearing exchange text changed;
+- `MixedExchangeAndQueueUpdate`: exchange updated and queue projection changed
+  in the same source epoch.
+
+`FutureQueueStateOnly` may update realtime/backup queue state, including moving
+or correcting the `🚧` projection when the active HEAD set identities relevant
+to the current turn are unchanged, without replacing the active turn checkpoint.
+`SelectedQueueHeadChanged`, `ExchangeUpdated`, and
+`MixedExchangeAndQueueUpdate` are active-turn-affecting and must be surfaced to
+the turn lifecycle. This classification belongs to realtime authority;
+preflight and other lifecycle consumers should consume the classified state
+rather than re-deriving it from raw unified diff text.
+
+Auto-DAG is part of realtime queue projection. Dependency edges such as
+`after=#id`, queue/backlog priority, and operator/agent priority pins are
+recomputed before turn admission decides which queue head is active. A
+non-selected queue edit is future-only only after this recomputation proves the
+selected head identity did not change. If recomputation selects a different
+head, the edit is active-turn input.
+
+This rule separates queue-state convergence from turn lifecycle. Realtime may
+apply and verify queue projection updates, but it must not commit them. The
+turn lifecycle decides whether the verified state is committed; see
+[Turn Lifecycle Authority](15-turn-lifecycle.md).
+
 ## Disk Visibility And Durability
 
 Realtime disk authority is based on bytes that are visible through a fresh

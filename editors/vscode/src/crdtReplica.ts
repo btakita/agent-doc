@@ -321,7 +321,7 @@ export interface CrdtReplicaManagerOptions {
     transport?: ReplicaTransport;
     nodeFactory?: () => ReplicaNode;
     listDocuments: () => ReplicaDocumentSnapshot[];
-    applyText: (filePath: string, text: string) => Promise<boolean>;
+    applyText: (filePath: string, text: string, expectedText: string) => Promise<boolean>;
     logger?: ReplicaLogger;
 }
 
@@ -454,12 +454,14 @@ export class CrdtReplicaManager {
                     await forwarder.ackRemoteUpdate(update);
                     continue;
                 }
+                const expectedText = this.shadows.get(filePath);
+                if (expectedText === undefined) continue;
                 const converged = forwarder.applyRemoteUpdate(update.update);
                 if (converged == null) continue;
                 if (this.hasPendingLocal(filePath)) continue;
                 this.applyingRemote.add(filePath);
                 try {
-                    const applied = await this.options.applyText(filePath, converged);
+                    const applied = await this.options.applyText(filePath, converged, expectedText);
                     if (applied) {
                         this.shadows.set(filePath, converged);
                         await forwarder.ackRemoteUpdate(update);

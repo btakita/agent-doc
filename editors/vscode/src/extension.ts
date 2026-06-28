@@ -1958,7 +1958,7 @@ class PatchWatcher implements vscode.Disposable {
             projectRoot,
             identity: EDITOR_ID,
             listDocuments: () => this.currentProjectMarkdownSnapshots(projectRoot),
-            applyText: (filePath, text) => this.applyCrdtReplicaText(filePath, text),
+            applyText: (filePath, text, expectedText) => this.applyCrdtReplicaText(filePath, text, expectedText),
             logger: {
                 debug: (message) => this.outputChannel.appendLine(message),
                 warn: (message) => this.outputChannel.appendLine(message),
@@ -2488,9 +2488,17 @@ class PatchWatcher implements vscode.Disposable {
         return vscode.workspace.applyEdit(edit);
     }
 
-    private async applyCrdtReplicaText(filePath: string, targetContent: string): Promise<boolean> {
+    private async applyCrdtReplicaText(filePath: string, targetContent: string, expectedContent: string): Promise<boolean> {
         const document = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === filePath);
         if (!document) return false;
+        const currentContent = document.getText();
+        if (currentContent === targetContent) {
+            return true;
+        }
+        if (currentContent !== expectedContent) {
+            this.outputChannel.appendLine(`PatchWatcher: stale CRDT remote update for ${filePath}; editor text advanced before apply`);
+            return false;
+        }
         const projectRoot = this.patchesDir
             ? path.dirname(path.dirname(this.patchesDir))
             : undefined;

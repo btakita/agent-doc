@@ -194,6 +194,13 @@ class CrdtReplicaForwarderTest {
     }
 
     @Test
+    fun `remote apply boundary rejects stale targets after editor text advances`() {
+        assertTrue(remoteCrdtApplyStillCurrentUtil("base", "base", "base remote"))
+        assertTrue(remoteCrdtApplyStillCurrentUtil("base", "base remote", "base remote"))
+        assertFalse(remoteCrdtApplyStillCurrentUtil("base", "base typed", "base remote"))
+    }
+
+    @Test
     fun `a refused register leaves the forwarder detached and no-ops local deltas`() {
         // The Detached / headless path: the supervisor refuses register, so the
         // plugin must fall back (attached=false) and never ship deltas.

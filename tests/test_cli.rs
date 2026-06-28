@@ -815,7 +815,8 @@ fn realtime_workflow_spec_pins_lazily_backed_authority() {
             && realtime.contains("safe delivery proof")
             && realtime.contains("even when the reported buffer currently equals\ndisk:")
             && realtime.contains("normalization repair")
-            && realtime.contains("file-IPC fallback"),
+            && realtime.contains("file-IPC fallback")
+            && realtime.contains("expected editor text"),
         "realtime workflow spec must require frontend capability proof before trusting editor mutation delivery"
     );
     assert!(

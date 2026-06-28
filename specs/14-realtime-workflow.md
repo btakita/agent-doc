@@ -311,10 +311,10 @@ Realtime transitions are continuous and must work regardless of agent state:
 | Agent response, queue operation, pending mutation, or compact operation is captured | Any source state | `AgentDeltaReady` | The operation is narrowed to the binary-owned node/intent; snapshots are only a fallback source for this candidate. |
 | Merge succeeds | `AgentDeltaReady` plus latest realtime source | `MergePlanned` | `agent-doc-merge` proves operator text is preserved or explicitly owned by the operation. |
 | Merge conflicts | `AgentDeltaReady` plus latest realtime source | `ConflictBlocked` | Typed conflict describing the same-node or ambiguous placement failure. |
-| Editor/CRDT delivery starts | `MergePlanned` with editor owner | `ApplyInFlight` | Patch plan targets the current editor-visible baseline or node proof. |
+| Editor/CRDT delivery starts | `MergePlanned` with editor owner | `ApplyInFlight` | Patch plan targets the current editor-visible baseline or node proof. For CRDT remote text delivery, the handoff carries the expected editor text observed before convergence. |
 | Disk delivery starts | `MergePlanned` with no editor owner | `ApplyInFlight` | Current file still matches the merge input, or the merge is recomputed first. |
 | Delivery ACK/content verifies | `ApplyInFlight` | `AppliedVerified` | Owner-visible text contains the agent delta and every observed operator edit. |
-| Delivery fails, ACK mismatches, or a newer operator edit appears | `ApplyInFlight` | `EditorDirty`, `DiskAuthoritative`, or `ConflictBlocked` | The stale plan is discarded; the next attempt must re-read source-of-truth and merge again. |
+| Delivery fails, ACK mismatches, expected editor text mismatches, or a newer operator edit appears | `ApplyInFlight` | `EditorDirty`, `DiskAuthoritative`, or `ConflictBlocked` | The stale plan is discarded; the next attempt must re-read source-of-truth and merge again. |
 | Realtime handoff completes | `AppliedVerified` | `EditorQuiescent` or `DiskAuthoritative` | Realtime publishes the verified apply proof and latest source-of-truth text without committing. |
 
 Forbidden transitions:
@@ -482,7 +482,9 @@ Every document mutation that can affect a session document follows this order:
 6. If the operator changed a disjoint node, keep both changes.
 7. Apply through the editor/CRDT transport when an editor listener is active;
    use disk only when no listener is active or the operator explicitly chose a
-   disk-authoritative recovery.
+   disk-authoritative recovery. CRDT remote delivery must compare the live
+   editor text with the expected editor text captured before convergence; if the
+   editor text advanced, the delivery is stale and must not ACK or mutate.
 8. Verify the post-apply source-of-truth document contains the agent response
    and still contains every operator-authored line observed before the apply.
 9. Return the verified apply proof and latest source-of-truth text to the

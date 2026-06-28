@@ -144,7 +144,7 @@ describe('crdt replica manager', () => {
         const node = new FakeNode();
         const transport = new FakeTransport();
         const filePath = '/work/plan.md';
-        const applied: string[] = [];
+        const applied: Array<{ text: string; expectedText: string | undefined }> = [];
         transport.pending = [{
             patchId: 'crdt:1:2:3',
             origin: 1,
@@ -158,8 +158,8 @@ describe('crdt replica manager', () => {
             transport,
             nodeFactory: () => node,
             listDocuments: () => [],
-            applyText: async (_file, text) => {
-                applied.push(text);
+            applyText: async (_file, text, expectedText) => {
+                applied.push({ text, expectedText });
                 return true;
             },
         });
@@ -167,8 +167,42 @@ describe('crdt replica manager', () => {
         assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
         await manager.pollRemoteUpdates();
 
-        assert.deepStrictEqual(applied, ['remote text']);
+        assert.deepStrictEqual(applied, [{ text: 'remote text', expectedText: 'base' }]);
         assert.deepStrictEqual(transport.acked, [{ patchId: 'crdt:1:2:3', generation: 3 }]);
+    });
+
+    it('passes expected editor text so stale CRDT remote targets are not ACKed over typing', async () => {
+        const node = new FakeNode();
+        const transport = new FakeTransport();
+        const filePath = '/work/plan.md';
+        let editorText = 'base';
+        transport.pending = [{
+            patchId: 'crdt:1:42:8',
+            origin: 1,
+            target: 42,
+            generation: 8,
+            update: Buffer.from([8]),
+        }];
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => node,
+            listDocuments: () => [],
+            applyText: async (_file, targetText, expectedText) => {
+                assert.strictEqual(expectedText, 'base');
+                editorText = 'base typed';
+                if (editorText !== expectedText) return false;
+                editorText = targetText;
+                return true;
+            },
+        });
+
+        assert.strictEqual(await manager.attachDocument(filePath, editorText), true);
+        await manager.pollRemoteUpdates();
+
+        assert.strictEqual(editorText, 'base typed');
+        assert.deepStrictEqual(transport.acked, []);
     });
 
     it('ACKs self-echo remote updates without applying text', async () => {

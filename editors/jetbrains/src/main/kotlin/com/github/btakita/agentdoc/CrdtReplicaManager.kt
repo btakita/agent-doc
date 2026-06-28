@@ -114,21 +114,32 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     forwarder.ackRemoteUpdate(update)
                     continue
                 }
+                val expectedText = shadows[filePath] ?: continue
                 val converged = forwarder.applyRemoteUpdate(update.update) ?: continue
                 if (hasPendingLocal(filePath)) continue
-                if (applyRemoteText(filePath, converged)) {
+                if (applyRemoteText(filePath, expectedText, converged)) {
                     forwarder.ackRemoteUpdate(update)
                 }
             }
         }
     }
 
-    private fun applyRemoteText(filePath: String, converged: String): Boolean {
+    private fun applyRemoteText(filePath: String, expectedText: String, converged: String): Boolean {
         var applied = false
         ApplicationManager.getApplication().invokeAndWait {
             val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeAndWait
             val document = FileDocumentManager.getInstance().getDocument(targetFile) ?: return@invokeAndWait
             val before = document.text
+            if (before == converged) {
+                shadows[filePath] = converged
+                applied = true
+                return@invokeAndWait
+            }
+            if (hasPendingLocal(filePath)) return@invokeAndWait
+            if (!remoteCrdtApplyStillCurrentUtil(expectedText, before, converged)) {
+                log.warn("[crdt-replica] stale remote update rejected for $filePath; editor text advanced before apply")
+                return@invokeAndWait
+            }
             val normalized = NativePatching.normalizeTemplateStructure(converged) ?: run {
                 log.warn("[crdt-replica] remote update rejected by template-structure guard for $filePath")
                 return@invokeAndWait
@@ -137,12 +148,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 log.warn("[crdt-replica] remote update requires template-structure repair for $filePath; rejecting to keep replica state coherent")
                 return@invokeAndWait
             }
-            if (before == converged) {
-                shadows[filePath] = converged
-                applied = true
-                return@invokeAndWait
-            }
-            if (hasPendingLocal(filePath)) return@invokeAndWait
             applyingRemote.add(filePath)
             try {
                 runUndoableRemoteUpdateCommand(document) {
@@ -261,3 +266,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
 internal fun shouldApplyRemoteCrdtUpdateUtil(update: ReplicaRemoteUpdate, clientId: Long): Boolean =
     update.origin != clientId
+
+internal fun remoteCrdtApplyStillCurrentUtil(
+    expectedText: String,
+    currentText: String,
+    targetText: String,
+): Boolean =
+    currentText == expectedText || currentText == targetText

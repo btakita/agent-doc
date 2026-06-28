@@ -113,6 +113,45 @@ class TypingTrackerEdtBudgetTest {
     }
 
     @Test
+    fun `socket live-buffer publication is read-only and authority-bearing`() {
+        val trackerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
+        ).first { Files.exists(it) }
+        val watcherPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+        ).first { Files.exists(it) }
+        val tracker = Files.readString(trackerPath)
+        val watcher = Files.readString(watcherPath)
+
+        assertTrue(
+            "socket IPC should expose a read-only live-buffer publication command",
+            watcher.contains("\"publish_live_buffer\" -> {") &&
+                watcher.contains("TypingTracker.publishLiveBufferNow(file)"),
+        )
+
+        val publishBody = tracker.substringAfter("fun publishLiveBufferNow")
+            .substringBefore("private fun scheduleFullContentReport")
+        assertTrue(
+            "socket-triggered publication should resolve the live editor document and publish without queued-op side effects",
+            publishBody.contains("LocalFileSystem.getInstance().findFileByPath(filePath)") &&
+                publishBody.contains("return reportFullContentNow(") &&
+                publishBody.contains("drainEditorOps = false") &&
+                publishBody.contains("requireAuthority = true"),
+        )
+
+        val reporterBody = tracker.substringAfter("private fun reportFullContentNow")
+            .substringBefore("private fun reportLiveBufferContentV1")
+        assertTrue(
+            "authority refresh must require the v2 capability-bearing ABI and keep legacy fallback only for non-authority reports",
+            reporterBody.contains("agent_doc_document_changed_digest_content_for_editor_v2") &&
+                reporterBody.contains("if (requireAuthority) false else") &&
+                reporterBody.contains("if (drainEditorOps)"),
+        )
+    }
+
+    @Test
     fun `coalesced editor op offsets use the per-op shadow not the final buffer`() {
         val reports = prepareEditorOpReports(
             finalText = "x",

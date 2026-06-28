@@ -1650,14 +1650,10 @@ fn redelivery_missing_operator_text_authority(
     label: &str,
     source_patch_id: Option<&str>,
 ) -> bool {
-    let indicator_path = file
-        .canonicalize()
-        .unwrap_or_else(|_| file.to_path_buf())
-        .to_string_lossy()
-        .to_string();
-    let Some(live) = crate::debounce::live_buffer_delivery_missing_operator_text_authority(
-        &indicator_path,
+    let Some(live) = live_buffer_delivery_missing_operator_text_authority_after_refresh(
+        file,
         expected_bad_state,
+        label,
     ) else {
         return false;
     };
@@ -4004,14 +4000,17 @@ Done.
         .unwrap();
 
         let call_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(None::<serde_json::Value>));
         let listener_root = dir.path().to_path_buf();
         let listener_doc = doc.clone();
         let listener_count = call_count.clone();
+        let captured_clone = captured.clone();
         std::fs::create_dir_all(listener_root.join(".agent-doc")).unwrap();
         let _listener = std::thread::spawn(move || {
             let _ = crate::ipc_socket::start_listener(&listener_root, move |msg| {
                 listener_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                *captured_clone.lock().unwrap() = Some(v.clone());
                 if let Some(lines) = v.get("normalize_prefix_lines").and_then(|value| {
                     value.as_array().map(|items| {
                         items
@@ -4052,8 +4051,21 @@ Done.
         );
         assert_eq!(
             call_count.load(std::sync::atomic::Ordering::SeqCst),
-            0,
-            "capability guard must fire before any socket IPC delivery"
+            1,
+            "capability guard may only send one read-only authority refresh before blocking repair IPC"
+        );
+        let msg = captured
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("listener should receive the authority refresh");
+        assert_eq!(msg["type"], "publish_live_buffer");
+        assert_eq!(msg["file"], indicator_path);
+        assert!(
+            msg.get("content").is_none()
+                && msg.get("patches").is_none()
+                && msg.get("normalize_prefix_lines").is_none(),
+            "authority refresh must not carry repair or document mutation payload: {msg}"
         );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), bad_state);
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
@@ -4061,6 +4073,12 @@ Done.
             ops_log.contains("skip=editor_capability_missing")
                 && ops_log.contains(crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY),
             "missing-capability redelivery skip should be logged:\n{ops_log}"
+        );
+        assert!(
+            ops_log
+                .contains("sidecar_normalization_fallback_narrow_repair_editor_authority_refresh")
+                && ops_log.contains("action=publish_live_buffer"),
+            "missing-capability redelivery should log the read-only authority refresh:\n{ops_log}"
         );
         assert!(
             !ops_log.contains("sidecar_normalization_fallback_narrow_repair_attempt"),

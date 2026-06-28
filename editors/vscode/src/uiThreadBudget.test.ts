@@ -48,4 +48,29 @@ describe('editor UI thread budget', () => {
         assert.ok(scheduler.includes('setTimeout(() => {'));
         assert.ok(scheduler.includes('handleLocalChangeDelta(fsPath, changes)'));
     });
+
+    it('VS Code publish-live-buffer signal is read-only and off the typing listener', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        assert.ok(source.includes("'publish-live-buffer.signal'"));
+        assert.ok(source.includes('this.onPublishLiveBufferSignal(patchesDir)'));
+
+        const handlerStart = source.indexOf('private async processPublishLiveBufferSignal');
+        assert.ok(handlerStart >= 0, 'publish-live-buffer signal handler should exist');
+        const handlerEnd = source.indexOf('private writeAckContent', handlerStart);
+        assert.ok(handlerEnd > handlerStart, 'handler should precede ack-content helper');
+        const handler = source.slice(handlerStart, handlerEnd);
+        assert.ok(handler.includes('this.publishLiveBufferNow(document, projectRoot);'));
+        assert.strictEqual(handler.includes('workspace.applyEdit'), false);
+        assert.strictEqual(handler.includes('.save('), false);
+
+        const publishStart = source.indexOf('private publishLiveBufferNow');
+        assert.ok(publishStart >= 0, 'immediate live-buffer publisher should exist');
+        const publishEnd = source.indexOf('private scheduleEditorOpReport', publishStart);
+        assert.ok(publishEnd > publishStart, 'publisher should precede editor-op scheduler');
+        const publisher = source.slice(publishStart, publishEnd);
+        assert.ok(publisher.includes('document.getText()'));
+        assert.ok(publisher.includes('native.documentChangedDigestContent(fsPath, text, projectRoot, EDITOR_ID);'));
+        assert.strictEqual(publisher.includes('workspace.applyEdit'), false);
+        assert.strictEqual(publisher.includes('.save('), false);
+    });
 });

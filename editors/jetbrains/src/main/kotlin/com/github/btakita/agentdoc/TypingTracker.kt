@@ -5,6 +5,7 @@ import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -192,6 +193,20 @@ object TypingTracker : DocumentListener {
         }
     }
 
+    fun publishLiveBufferNow(filePath: String): Boolean {
+        val lib = AgentDocLib.get() ?: return false
+        val file = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return false
+        if (!file.name.endsWith(".md")) return false
+        val document = FileDocumentManager.getInstance().getDocument(file) ?: return false
+        return reportFullContentNow(
+            lib = lib,
+            filePath = filePath,
+            document = document,
+            drainEditorOps = false,
+            requireAuthority = true,
+        )
+    }
+
     private fun scheduleFullContentReport(
         lib: AgentDocLib,
         filePath: String,
@@ -200,27 +215,13 @@ object TypingTracker : DocumentListener {
         pendingContentReports.remove(filePath)?.cancel(false)
         val task = contentReportExecutor.schedule({
             try {
-                val text = com.intellij.openapi.application.ApplicationManager.getApplication()
-                    .runReadAction<String> { document.text }
-                try {
-                    lib.agent_doc_document_changed_digest_content_for_editor_v2(
-                        filePath,
-                        text,
-                        EditorIdentity.id,
-                        "jetbrains",
-                        pluginVersion(),
-                        OPERATOR_TEXT_AUTHORITY_CAPABILITY,
-                    )
-                } catch (_: UnsatisfiedLinkError) {
-                    reportLiveBufferContentV1(lib, filePath, text)
-                } catch (_: NoSuchMethodError) {
-                    reportLiveBufferContentV1(lib, filePath, text)
-                }
-                LOG.debug("[native] document_changed content reported: $filePath")
-                val opReports = prepareEditorOpReports(text, drainPendingEditorOps(filePath))
-                for (op in opReports) {
-                    reportEditorOp(lib, filePath, op)
-                }
+                reportFullContentNow(
+                    lib = lib,
+                    filePath = filePath,
+                    document = document,
+                    drainEditorOps = true,
+                    requireAuthority = false,
+                )
             } catch (_: UnsatisfiedLinkError) {
                 // older cdylib without full-content sidecar support; skip
             } catch (_: NoSuchMethodError) {
@@ -232,6 +233,56 @@ object TypingTracker : DocumentListener {
             }
         }, CONTENT_REPORT_DELAY_MS, TimeUnit.MILLISECONDS)
         pendingContentReports[filePath] = task
+    }
+
+    private fun reportFullContentNow(
+        lib: AgentDocLib,
+        filePath: String,
+        document: com.intellij.openapi.editor.Document,
+        drainEditorOps: Boolean,
+        requireAuthority: Boolean,
+    ): Boolean {
+        return try {
+            val text = com.intellij.openapi.application.ApplicationManager.getApplication()
+                .runReadAction<String> { document.text }
+            val reported = try {
+                lib.agent_doc_document_changed_digest_content_for_editor_v2(
+                    filePath,
+                    text,
+                    EditorIdentity.id,
+                    "jetbrains",
+                    pluginVersion(),
+                    OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+                )
+                true
+            } catch (_: UnsatisfiedLinkError) {
+                if (requireAuthority) false else {
+                    reportLiveBufferContentV1(lib, filePath, text)
+                    true
+                }
+            } catch (_: NoSuchMethodError) {
+                if (requireAuthority) false else {
+                    reportLiveBufferContentV1(lib, filePath, text)
+                    true
+                }
+            }
+            if (!reported) return false
+            LOG.debug("[native] document_changed content reported: $filePath")
+            if (drainEditorOps) {
+                val opReports = prepareEditorOpReports(text, drainPendingEditorOps(filePath))
+                for (op in opReports) {
+                    reportEditorOp(lib, filePath, op)
+                }
+            }
+            true
+        } catch (_: UnsatisfiedLinkError) {
+            false
+        } catch (_: NoSuchMethodError) {
+            false
+        } catch (e: Throwable) {
+            LOG.debug("[native] content report skipped: ${e.message}")
+            false
+        }
     }
 
     private fun reportLiveBufferContentV1(lib: AgentDocLib, filePath: String, text: String) {

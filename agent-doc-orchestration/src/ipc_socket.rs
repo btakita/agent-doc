@@ -24,8 +24,14 @@
 //! - `{"type": "refresh_content", "file": "...", "content": "...",
 //!   "expected_content_hash": "...", "expected_content_len": N}` — replace a
 //!   stale editor buffer with committed content after a HEAD-authoritative repair
+//! - `{"type": "publish_live_buffer", "file": "..."}` — ask the editor to
+//!   republish its current visible-buffer proof without mutating the document
 //! - `{"type": "vcs_refresh"}` — trigger VCS refresh
 //! - `{"type": "ack", "id": "..."}` — acknowledgment from plugin
+//!
+//! VS Code does not run the socket listener. For read-only live-buffer proof
+//! refreshes it consumes `.agent-doc/patches/publish-live-buffer.signal` with the
+//! same `{type,file}` payload.
 
 use anyhow::{Context, Result};
 use interprocess::local_socket::{
@@ -525,6 +531,50 @@ pub fn send_refresh_content(
     send_message(project_root, &message).map(|_| true)
 }
 
+/// Ask the live editor to republish its current visible-buffer sidecar for
+/// `file` without changing the document.
+pub fn send_publish_live_buffer(project_root: &Path, file: &str) -> Result<bool> {
+    let message = serde_json::json!({
+        "type": "publish_live_buffer",
+        "file": file,
+    });
+
+    send_message(project_root, &message).map(|_| true)
+}
+
+/// Write a VS Code-style file IPC signal asking the editor to republish its
+/// current visible-buffer sidecar for `file` without changing the document.
+pub fn send_publish_live_buffer_file_signal(project_root: &Path, file: &str) -> Result<bool> {
+    let patches_dir = project_root.join(".agent-doc").join("patches");
+    std::fs::create_dir_all(&patches_dir)
+        .with_context(|| format!("failed to create {}", patches_dir.display()))?;
+    let signal_file = patches_dir.join("publish-live-buffer.signal");
+    let tmp_file = patches_dir.join(format!(
+        "publish-live-buffer.signal.{}.tmp",
+        std::process::id()
+    ));
+    let payload = serde_json::json!({
+        "type": "publish_live_buffer",
+        "file": file,
+    });
+    std::fs::write(&tmp_file, serde_json::to_vec(&payload)?)
+        .with_context(|| format!("failed to write {}", tmp_file.display()))?;
+    match std::fs::rename(&tmp_file, &signal_file) {
+        Ok(()) => Ok(true),
+        Err(first_err) => {
+            let _ = std::fs::remove_file(&signal_file);
+            std::fs::rename(&tmp_file, &signal_file).with_context(|| {
+                format!(
+                    "failed to replace {} after initial rename error: {}",
+                    signal_file.display(),
+                    first_err
+                )
+            })?;
+            Ok(true)
+        }
+    }
+}
+
 /// Send a VCS refresh signal.
 pub fn send_vcs_refresh(project_root: &Path) -> Result<bool> {
     let message = serde_json::json!({
@@ -784,6 +834,67 @@ mod tests {
 
         let _ = std::fs::remove_file(socket_path(&root));
         drop(server);
+    }
+
+    #[test]
+    fn send_publish_live_buffer_sends_readonly_file_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(None::<serde_json::Value>));
+        let captured_clone = captured.clone();
+        let root_clone = root.clone();
+        let server = thread::spawn(move || {
+            start_listener(&root_clone, move |msg| {
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                *captured_clone.lock().unwrap() = Some(v);
+                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            })
+            .ok();
+        });
+
+        thread::sleep(Duration::from_millis(100));
+
+        let ok = send_publish_live_buffer(&root, "/tmp/plan.md").unwrap();
+        assert!(ok, "publish_live_buffer should succeed on an ok ack");
+
+        let msg = captured
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("listener saw a message");
+        assert_eq!(msg["type"], "publish_live_buffer");
+        assert_eq!(msg["file"], "/tmp/plan.md");
+        assert!(
+            msg.get("content").is_none() && msg.get("patches").is_none(),
+            "publish_live_buffer must not carry document mutation payload: {msg}"
+        );
+
+        let _ = std::fs::remove_file(socket_path(&root));
+        drop(server);
+    }
+
+    #[test]
+    fn send_publish_live_buffer_file_signal_writes_readonly_payload() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+
+        let ok = send_publish_live_buffer_file_signal(&root, "/tmp/plan.md").unwrap();
+        assert!(ok, "publish-live-buffer file signal should be written");
+
+        let signal = root
+            .join(".agent-doc")
+            .join("patches")
+            .join("publish-live-buffer.signal");
+        let msg: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(signal).unwrap()).unwrap();
+        assert_eq!(msg["type"], "publish_live_buffer");
+        assert_eq!(msg["file"], "/tmp/plan.md");
+        assert!(
+            msg.get("content").is_none() && msg.get("patches").is_none(),
+            "publish-live-buffer signal must not carry document mutation payload: {msg}"
+        );
     }
 
     #[test]

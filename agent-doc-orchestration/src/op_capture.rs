@@ -78,6 +78,29 @@ fn base_hash_cache() -> &'static Mutex<HashMap<PathBuf, (BaseFingerprint, String
 /// Count of full (cache-miss) base-hash recomputations, for memoization tests.
 pub(crate) static BASE_HASH_RECOMPUTES: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(test)]
+fn base_hash_recomputes_by_doc_for_tests() -> &'static Mutex<HashMap<PathBuf, u64>> {
+    static COUNTS: OnceLock<Mutex<HashMap<PathBuf, u64>>> = OnceLock::new();
+    COUNTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(test)]
+fn record_base_hash_recompute_for_tests(doc: &Path) {
+    if let Ok(mut counts) = base_hash_recomputes_by_doc_for_tests().lock() {
+        *counts.entry(doc.to_path_buf()).or_insert(0) += 1;
+    }
+}
+
+#[cfg(test)]
+fn base_hash_recomputes_for_doc_for_tests(doc: &Path) -> u64 {
+    let key = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    base_hash_recomputes_by_doc_for_tests()
+        .lock()
+        .ok()
+        .and_then(|counts| counts.get(&key).copied())
+        .unwrap_or(0)
+}
+
 /// The per-document op-capture sidecar.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OpCaptureSidecar {
@@ -208,6 +231,8 @@ pub fn current_base_hash(doc: &Path) -> Result<String> {
     }
 
     BASE_HASH_RECOMPUTES.fetch_add(1, Ordering::Relaxed);
+    #[cfg(test)]
+    record_base_hash_recompute_for_tests(&cache_key);
     let baseline = read_optional_text(&snapshot_path)?.unwrap_or_default();
     let base = crate::snapshot::crdt_merge_base_state(doc, &baseline)?;
     let base_text = agent_doc_core::crdt::CrdtDoc::decode_state(&base.state)
@@ -378,14 +403,14 @@ mod tests {
         // `#qbasehashmemo`: a typing burst leaves the snapshot + overlay
         // unchanged, so repeated `current_base_hash` calls (one per keystroke)
         // must be served from the memo without rebuilding the full-document CRDT
-        // merge base. Process-isolated under nextest, so the global recompute
-        // counter measures exactly this test's calls.
+        // merge base. The per-document recompute counter avoids parallel-test
+        // noise from other temp documents.
         let (_dir, doc) = setup_doc();
         crate::snapshot::save(&doc, "# base\n\n## section\n").unwrap();
 
-        let before = BASE_HASH_RECOMPUTES.load(Ordering::Relaxed);
+        let before = base_hash_recomputes_for_doc_for_tests(&doc);
         let h1 = current_base_hash(&doc).unwrap();
-        let after_first = BASE_HASH_RECOMPUTES.load(Ordering::Relaxed);
+        let after_first = base_hash_recomputes_for_doc_for_tests(&doc);
         assert_eq!(after_first, before + 1, "first call must recompute once");
 
         // Simulate a typing burst: many calls against the same unchanged base.
@@ -393,7 +418,7 @@ mod tests {
             assert_eq!(current_base_hash(&doc).unwrap(), h1);
         }
         assert_eq!(
-            BASE_HASH_RECOMPUTES.load(Ordering::Relaxed),
+            base_hash_recomputes_for_doc_for_tests(&doc),
             after_first,
             "repeated calls against an unchanged base must be cache hits"
         );
@@ -403,7 +428,7 @@ mod tests {
         let h2 = current_base_hash(&doc).unwrap();
         assert_ne!(h1, h2, "a changed snapshot must yield a fresh base hash");
         assert!(
-            BASE_HASH_RECOMPUTES.load(Ordering::Relaxed) > after_first,
+            base_hash_recomputes_for_doc_for_tests(&doc) > after_first,
             "a changed base must trigger a recompute"
         );
     }

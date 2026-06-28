@@ -1893,6 +1893,7 @@ class PatchWatcher implements vscode.Disposable {
     private watcher: vscode.FileSystemWatcher | undefined;
     private signalWatcher: vscode.FileSystemWatcher | undefined;
     private saveSignalWatcher: vscode.FileSystemWatcher | undefined;
+    private liveBufferSignalWatcher: vscode.FileSystemWatcher | undefined;
     private typingListener: vscode.Disposable | undefined;
     private openListener: vscode.Disposable | undefined;
     private crdtReplicas: CrdtReplicaManager | undefined;
@@ -1955,6 +1956,14 @@ class PatchWatcher implements vscode.Disposable {
         this.saveSignalWatcher.onDidCreate(() => this.onSaveDocumentSignal(patchesDir));
         this.saveSignalWatcher.onDidChange(() => this.onSaveDocumentSignal(patchesDir));
 
+        // Watch for read-only live-buffer publication requests. This mirrors the
+        // JB plugin's socket `publish_live_buffer` path, but stays on VS Code's
+        // existing file-signal transport.
+        const liveBufferSignalPattern = new vscode.RelativePattern(patchesDir, 'publish-live-buffer.signal');
+        this.liveBufferSignalWatcher = vscode.workspace.createFileSystemWatcher(liveBufferSignalPattern, false, false, true);
+        this.liveBufferSignalWatcher.onDidCreate(() => this.onPublishLiveBufferSignal(patchesDir));
+        this.liveBufferSignalWatcher.onDidChange(() => this.onPublishLiveBufferSignal(patchesDir));
+
         const projectRoot = path.dirname(path.dirname(patchesDir));
         this.crdtReplicas = new CrdtReplicaManager({
             projectRoot,
@@ -2007,6 +2016,7 @@ class PatchWatcher implements vscode.Disposable {
         // Process any existing patch files and signals on startup
         this.processVcsRefreshSignal(patchesDir);
         void this.processSaveDocumentSignal(patchesDir);
+        void this.processPublishLiveBufferSignal(patchesDir);
         this.processPendingPatches(patchesDir);
 
         // #yzer / #evmhplugin: activation is the VS Code analog of the JB plugin's
@@ -2090,6 +2100,10 @@ class PatchWatcher implements vscode.Disposable {
         void this.processSaveDocumentSignal(patchesDir);
     }
 
+    private onPublishLiveBufferSignal(patchesDir: string): void {
+        void this.processPublishLiveBufferSignal(patchesDir);
+    }
+
     /**
      * Handle a legacy `save-document.signal` file written by the binary. Realtime
      * cutover disables plugin-driven saves; the signal is consumed and logged so
@@ -2117,6 +2131,47 @@ class PatchWatcher implements vscode.Disposable {
             return;
         }
         this.outputChannel.appendLine(`save_document IPC is disabled for ${signal.file}`);
+    }
+
+    /**
+     * Handle a read-only live-buffer publication request from the binary. The
+     * signal asks VS Code to republish its current visible-buffer proof; it must
+     * not mutate or save the document.
+     */
+    private async processPublishLiveBufferSignal(patchesDir: string): Promise<void> {
+        const signalFile = path.join(patchesDir, 'publish-live-buffer.signal');
+        let raw: string;
+        try {
+            raw = fs.readFileSync(signalFile, 'utf8');
+        } catch {
+            return;
+        }
+        try {
+            fs.unlinkSync(signalFile);
+        } catch {
+            // Already consumed by a concurrent watcher pass.
+        }
+
+        let parsed: any;
+        try {
+            parsed = JSON.parse(raw);
+        } catch {
+            this.outputChannel.appendLine('publish_live_buffer: malformed signal payload, ignoring');
+            return;
+        }
+        const file = typeof parsed?.file === 'string' ? parsed.file : undefined;
+        if (!file) {
+            this.outputChannel.appendLine('publish_live_buffer: missing file field, ignoring');
+            return;
+        }
+
+        const projectRoot = path.dirname(path.dirname(patchesDir));
+        const document = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === file);
+        if (!document || !this.targetsProjectMarkdown(document, projectRoot)) {
+            this.outputChannel.appendLine(`publish_live_buffer: no open markdown document for ${file}`);
+            return;
+        }
+        this.publishLiveBufferNow(document, projectRoot);
     }
 
     /**
@@ -2559,11 +2614,21 @@ class PatchWatcher implements vscode.Disposable {
             this.liveBufferReportTimers.delete(fsPath);
             const latest = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === fsPath);
             if (!latest || latest.languageId !== 'markdown' || latest.uri.scheme !== 'file') return;
-            const text = latest.getText();
-            seedEditorOpShadow(fsPath, text);
-            native.documentChangedDigestContent(fsPath, text, projectRoot, EDITOR_ID);
+            this.publishLiveBufferNow(latest, projectRoot);
         }, LIVE_BUFFER_REPORT_DELAY_MS);
         this.liveBufferReportTimers.set(fsPath, timer);
+    }
+
+    private publishLiveBufferNow(document: vscode.TextDocument, projectRoot: string | undefined): void {
+        const fsPath = document.uri.fsPath;
+        const timer = this.liveBufferReportTimers.get(fsPath);
+        if (timer) {
+            clearTimeout(timer);
+            this.liveBufferReportTimers.delete(fsPath);
+        }
+        const text = document.getText();
+        seedEditorOpShadow(fsPath, text);
+        native.documentChangedDigestContent(fsPath, text, projectRoot, EDITOR_ID);
     }
 
     private scheduleEditorOpReport(
@@ -2914,6 +2979,7 @@ class PatchWatcher implements vscode.Disposable {
         this.watcher?.dispose();
         this.signalWatcher?.dispose();
         this.saveSignalWatcher?.dispose();
+        this.liveBufferSignalWatcher?.dispose();
         this.typingListener?.dispose();
         this.openListener?.dispose();
         for (const filePath of this.ownedDocs) {

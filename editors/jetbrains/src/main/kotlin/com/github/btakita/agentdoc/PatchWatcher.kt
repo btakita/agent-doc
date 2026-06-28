@@ -532,6 +532,14 @@ class PatchWatcher(private val project: Project) : Disposable {
                     APPLY_FAILED
                 }
             }
+            "publish_live_buffer" -> {
+                val file = extractStringField(json, "file") ?: return APPLY_FAILED
+                if (TypingTracker.publishLiveBufferNow(file)) {
+                    APPLY_APPLIED
+                } else {
+                    APPLY_FAILED
+                }
+            }
             "vcs_refresh" -> {
                 recordProjectSurfaceOps("vcs_refresh", "refresh_vcs", "commit_vcs_refresh", "triggered")
                 refreshVcs()

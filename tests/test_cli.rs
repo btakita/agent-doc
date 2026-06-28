@@ -1514,7 +1514,6 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // -2 (#realtime-authority): removed stale doc-comment references to
         // snapshot-adoption guard fallbacks. The production guard boundary count
         // is unchanged; the comment now describes current-document merge instead.
-        ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 9,
         // +9 (#fcc0-no-external-write): active editor listeners no longer allow
         // disk fallback when component convergence cannot prove editor apply.
         // The added `reason=` tokens are the blocked production reasons
@@ -1565,7 +1564,15 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // from a capability-unknown editor also fails closed before IPC send. This
         // covers the delivery-vs-next-keystroke race while using the same
         // `reason=editor_capability_missing` converge boundary.
-        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 24,
+        // 9 -> 11 (#operator-text-authority-refresh): two regression test names
+        // contain `capability_guard_`; the production guard boundary is unchanged.
+        ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 11,
+        // 24 -> 26 (#operator-text-authority-refresh): a missing-authority sidecar
+        // now asks the editor to republish a read-only live-buffer proof before
+        // failing closed. The two `reason=publish_live_buffer_failed` diagnostics
+        // explain the blocked convergence closeout when that refresh cannot prove
+        // authority.
+        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 26,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

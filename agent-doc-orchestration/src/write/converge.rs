@@ -1506,6 +1506,112 @@ fn refresh_editor_after_ack_mismatch(
     }
 }
 
+pub(crate) fn live_buffer_delivery_missing_operator_text_authority_after_refresh(
+    file: &Path,
+    content: &str,
+    source: &str,
+) -> Option<crate::debounce::LiveBufferSnapshot> {
+    let canonical_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let indicator_path = canonical_file.to_string_lossy().to_string();
+    let missing = crate::debounce::live_buffer_delivery_missing_operator_text_authority(
+        &indicator_path,
+        content,
+    )?;
+    let project_root = resolve_ipc_project_root_pub(&canonical_file);
+    if !crate::ipc_socket::is_listener_active(&project_root) {
+        return match crate::ipc_socket::send_publish_live_buffer_file_signal(
+            &project_root,
+            &indicator_path,
+        ) {
+            Ok(true) => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "{source}_editor_authority_refresh file={} transport=file_signal action=publish_live_buffer",
+                        file.display()
+                    ),
+                );
+                wait_for_operator_text_authority_refresh(&indicator_path, content, missing)
+            }
+            Ok(false) => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "{source}_editor_authority_refresh file={} transport=blocked outcome=publish_live_buffer_file_signal_unavailable action=editor_reload_required",
+                        file.display()
+                    ),
+                );
+                Some(missing)
+            }
+            Err(err) => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "{source}_editor_authority_refresh file={} transport=blocked outcome=publish_live_buffer_file_signal_failed error={} action=editor_reload_required",
+                        file.display(),
+                        err
+                    ),
+                );
+                Some(missing)
+            }
+        };
+    }
+
+    match crate::ipc_socket::send_publish_live_buffer(&project_root, &indicator_path) {
+        Ok(true) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "{source}_editor_authority_refresh file={} transport=editor_ipc action=publish_live_buffer",
+                    file.display()
+                ),
+            );
+            wait_for_operator_text_authority_refresh(&indicator_path, content, missing)
+        }
+        Ok(false) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "{source}_editor_authority_refresh file={} transport=blocked reason=publish_live_buffer_failed action=editor_reload_required",
+                    file.display()
+                ),
+            );
+            Some(missing)
+        }
+        Err(err) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "{source}_editor_authority_refresh file={} transport=blocked reason=publish_live_buffer_failed error={} action=editor_reload_required",
+                    file.display(),
+                    err
+                ),
+            );
+            Some(missing)
+        }
+    }
+}
+
+fn wait_for_operator_text_authority_refresh(
+    indicator_path: &str,
+    content: &str,
+    mut latest_missing: crate::debounce::LiveBufferSnapshot,
+) -> Option<crate::debounce::LiveBufferSnapshot> {
+    for _ in 0..20 {
+        match crate::debounce::live_buffer_delivery_missing_operator_text_authority(
+            indicator_path,
+            content,
+        ) {
+            Some(still_missing) => {
+                latest_missing = still_missing;
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            None => return None,
+        }
+    }
+    Some(latest_missing)
+}
+
 pub fn try_editor_converge(
     file: &Path,
     target: &str,
@@ -1534,9 +1640,10 @@ pub fn try_editor_converge(
         );
         return Ok(true);
     }
-    if let Some(snapshot) = crate::debounce::live_buffer_delivery_missing_operator_text_authority(
-        &canonical_file.to_string_lossy(),
+    if let Some(snapshot) = live_buffer_delivery_missing_operator_text_authority_after_refresh(
+        &canonical_file,
         current_content,
+        source,
     ) {
         let editor_id = snapshot.editor_id.as_deref().unwrap_or("unknown");
         crate::ops_log::log_op(
@@ -3036,6 +3143,162 @@ mod core_tests {
                 && log.contains("editor_id=jetbrains-old")
                 && !log.contains("queue_consume_editor_convergence_attempt"),
             "delivery capability guard must fire before IPC attempt:\n{log}"
+        );
+    }
+
+    #[test]
+    fn capability_guard_refreshes_live_buffer_sidecar_over_editor_ipc() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = crate::test_support::queue_consume_convergence_source();
+        fs::write(&doc, &source).unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+        crate::debounce::record_live_buffer_digest_content_for_editor(
+            &doc_str,
+            &source,
+            Some("jetbrains-old"),
+        )
+        .unwrap();
+
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(None::<serde_json::Value>));
+        let captured_clone = captured.clone();
+        let listener_root = dir.path().to_path_buf();
+        let doc_for_listener = doc_str.clone();
+        let source_for_listener = source.clone();
+        let server = std::thread::spawn(move || {
+            let _ = crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                *captured_clone.lock().unwrap() = Some(v.clone());
+                if v.get("type").and_then(|value| value.as_str()) == Some("publish_live_buffer") {
+                    let published =
+                        crate::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+                            &doc_for_listener,
+                            &source_for_listener,
+                            "jetbrains-old",
+                            "jetbrains",
+                            "test",
+                            &[crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+                        );
+                    published.ok()?;
+                }
+                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            });
+        });
+        std::thread::sleep(Duration::from_millis(120));
+
+        let missing = live_buffer_delivery_missing_operator_text_authority_after_refresh(
+            &doc,
+            &source,
+            "queue_consume",
+        );
+        assert!(
+            missing.is_none(),
+            "a capable editor refresh should clear the stale missing-authority sidecar"
+        );
+        let msg = captured
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("listener saw publish_live_buffer");
+        assert_eq!(msg["type"], "publish_live_buffer");
+        assert_eq!(msg["file"], doc_str);
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("queue_consume_editor_authority_refresh")
+                && log.contains("transport=editor_ipc")
+                && log.contains("action=publish_live_buffer"),
+            "authority refresh should be logged as read-only editor IPC:\n{log}"
+        );
+
+        let _ = std::fs::remove_file(crate::ipc_socket::socket_path(dir.path()));
+        drop(server);
+    }
+
+    #[test]
+    fn capability_guard_refreshes_live_buffer_sidecar_over_file_signal() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = crate::test_support::queue_consume_convergence_source();
+        fs::write(&doc, &source).unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+        crate::debounce::record_live_buffer_digest_content_for_editor(
+            &doc_str,
+            &source,
+            Some("vscode-old"),
+        )
+        .unwrap();
+
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(None::<serde_json::Value>));
+        let captured_clone = captured.clone();
+        let signal_root = dir.path().to_path_buf();
+        let doc_for_signal = doc_str.clone();
+        let source_for_signal = source.clone();
+        let signal_thread = std::thread::spawn(move || {
+            let signal = signal_root
+                .join(".agent-doc")
+                .join("patches")
+                .join("publish-live-buffer.signal");
+            for _ in 0..100 {
+                if let Ok(raw) = fs::read_to_string(&signal) {
+                    let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+                    *captured_clone.lock().unwrap() = Some(v.clone());
+                    if v.get("type").and_then(|value| value.as_str()) == Some("publish_live_buffer")
+                    {
+                        crate::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+                            &doc_for_signal,
+                            &source_for_signal,
+                            "vscode-old",
+                            "vscode",
+                            "test",
+                            &[crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+                        )
+                        .unwrap();
+                    }
+                    let _ = fs::remove_file(&signal);
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            panic!("publish-live-buffer file signal was not written");
+        });
+
+        let missing = live_buffer_delivery_missing_operator_text_authority_after_refresh(
+            &doc,
+            &source,
+            "queue_consume",
+        );
+        signal_thread.join().unwrap();
+        assert!(
+            missing.is_none(),
+            "a capable file-signal refresh should clear the stale missing-authority sidecar"
+        );
+        let msg = captured
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("file signal was captured");
+        assert_eq!(msg["type"], "publish_live_buffer");
+        assert_eq!(msg["file"], doc_str);
+        assert!(
+            msg.get("content").is_none() && msg.get("patches").is_none(),
+            "publish-live-buffer signal must be read-only: {msg}"
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("queue_consume_editor_authority_refresh")
+                && log.contains("transport=file_signal")
+                && log.contains("action=publish_live_buffer"),
+            "authority refresh should be logged as read-only file signal IPC:\n{log}"
         );
     }
 

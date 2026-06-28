@@ -25,6 +25,7 @@ the dynamic file that owns its details:
 - **Context strategy:** See [`runbooks/dynamic-context.md`](runbooks/dynamic-context.md) for the AGENTS/SKILL pattern, dynamic context service shape, and storage guidance.
 - **agent-doc workflow:** See [`.claude/skills/agent-doc/SKILL.md`](.claude/skills/agent-doc/SKILL.md); load its linked runbooks only when that workflow branch is active.
 - **Code navigation:** See [`runbooks/code-navigation.md`](runbooks/code-navigation.md); use `tsift` envelopes instead of copying search, diff, log, or transcript content into prompts.
+- **Private name hygiene:** See [`runbooks/private-name-hygiene.md`](runbooks/private-name-hygiene.md) before editing public or shared subrepos from this private workspace.
 - **Task-specific procedures:** Use the referenced file under [`runbooks/`](runbooks/) rather than expanding procedures inline.
 
 **Full workflow:** See [`.claude/skills/agent-doc/SKILL.md`](.claude/skills/agent-doc/SKILL.md) for the complete agent-doc workflow (preflight, respond, persist, pending ops, auto-loop).

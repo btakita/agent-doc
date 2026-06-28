@@ -744,6 +744,8 @@ fn test_codex_shared_closeout_spec_invariants() {
     let codex_support = fs::read_to_string(root.join("specs/codex-support.md")).unwrap();
     let agent_backend = fs::read_to_string(root.join("specs/05-agent-backend.md")).unwrap();
     let closeout = fs::read_to_string(root.join("specs/07-closeout-commands.md")).unwrap();
+    let commit_runbook = fs::read_to_string(root.join("runbooks/commit.md")).unwrap();
+    let harness_runbook = fs::read_to_string(root.join("runbooks/harness-invocation.md")).unwrap();
 
     assert!(
         codex_support.contains("Codex differs from Claude Code")
@@ -772,6 +774,21 @@ fn test_codex_shared_closeout_spec_invariants() {
             && closeout.contains("Codex Stop hook")
             && closeout.contains("recovery/backstop inputs"),
         "closeout spec must route Codex hook recovery through shared finalize/write machinery"
+    );
+    assert!(
+        commit_runbook.contains("editor_convergence_required")
+            && commit_runbook.contains("operator_text_authority_v1")
+            && commit_runbook
+                .contains("Do not continue queue drain or final-answer delivery past this guard")
+            && commit_runbook.contains("Do not run `--force-disk` from a harness"),
+        "commit runbook must keep editor convergence failures from becoming harness-level success"
+    );
+    assert!(
+        harness_runbook.contains("editor_convergence_required")
+            && harness_runbook.contains("operator_text_authority_v1")
+            && harness_runbook.contains("Do not report success, stop, continue an auto-queue")
+            && harness_runbook.contains("Do not run `--force-disk`"),
+        "harness invocation runbook must forbid bypassing operator-text authority guards"
     );
 }
 

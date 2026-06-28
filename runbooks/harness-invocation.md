@@ -10,6 +10,11 @@ The core workflow (preflight, respond, persist the response) is identical across
 - Do **not** treat that turn as successful until the response crosses `agent-doc finalize <FILE>` for the normal path or `agent-doc write --commit <FILE>` for a repair path.
 - Do **not** end a normal harness-native `agent-doc` turn with "not committed" or equivalent wording unless the user explicitly asked to leave the response uncommitted.
 - MCP auth / OAuth steps are part of that same turn. If a tool pauses for authentication or browser approval, resume the managed response afterward and still finish with `finalize` / `write --commit` plus `session-check`; the auth step is not the success boundary.
+- If `finalize`, `write --commit`, or `session-check` reports
+  `editor_convergence_required` or missing `operator_text_authority_v1`, the
+  harness has not proven that delivery preserves operator text. Do not report success, stop, continue an auto-queue, or emit a final answer that implies
+  closeout succeeded. Retry through the editor/CRDT path after the frontend has
+  the required capability or the live editor state is otherwise proven. Do not run `--force-disk` unless the operator explicitly chooses that recovery.
 
 ## Directive Semantics
 

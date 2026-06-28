@@ -1413,12 +1413,32 @@ pub fn sort_prompts_by_dag_with_operator_authored(
 
 fn parse_completed_inline(text: &str) -> Option<&str> {
     let trimmed = text.trim();
-    trimmed
+    let inner = parse_completed_inline_once(trimmed)?;
+    let inner = parse_completed_inline_once(inner).unwrap_or(inner);
+    let inner = inner.trim();
+    (!inner.is_empty()).then_some(inner)
+}
+
+fn parse_completed_inline_once(trimmed: &str) -> Option<&str> {
+    if let Some(inner) = trimmed
         .strip_prefix("~~")
         .and_then(|s| s.strip_suffix("~~"))
-        .or_else(|| trimmed.strip_prefix('~').and_then(|s| s.strip_suffix('~')))
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
+    {
+        let inner = inner.trim();
+        return (!inner.is_empty()).then_some(inner);
+    }
+    if let Some(inner) = trimmed.strip_prefix('~').and_then(|s| s.strip_suffix('~')) {
+        let inner = inner.trim();
+        return (!inner.is_empty()).then_some(inner);
+    }
+    let rest = trimmed.strip_prefix("~~")?;
+    let needle = format!(
+        "~~{}",
+        agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR
+    );
+    let close = rest.find(&needle)?;
+    let inner = rest[..close].trim();
+    (!inner.is_empty()).then_some(inner)
 }
 
 fn is_start_fence(line: &str) -> bool {
@@ -3783,6 +3803,34 @@ mod tests {
         assert!(matches!(&entries[1], QueueEntry::Prompt(p) if p.text == "do #fix2"));
         assert_eq!(prompts(&entries).len(), 1);
         assert_eq!(render(&entries), "- ~~do #fix1~~\n- do #fix2\n");
+    }
+
+    #[test]
+    fn parse_completed_annotated_free_text_item() {
+        // `#qstrikenote`: the visible auto-struck explanation lives outside the
+        // `~~...~~` wrapper, but the queue runtime must still treat the row as
+        // completed. Otherwise maintenance/journal replay sees it as a live
+        // prompt and can re-strike it into `~~~~text~~ note~~`.
+        let body = "- ~~JB `File Cache Conflict` occurrences~~ — auto-struck: answered this cycle (#ftstrike)\n";
+        let entries = parse(body).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert!(
+            matches!(&entries[0], QueueEntry::Completed(p) if p.text == "JB `File Cache Conflict` occurrences"),
+            "{entries:?}"
+        );
+        assert_eq!(prompts(&entries).len(), 0);
+    }
+
+    #[test]
+    fn parse_completed_nested_annotated_restrike_artifact() {
+        let body = "- ~~~~JB `File Cache Conflict` occurrences~~ — auto-struck: answered this cycle (#ftstrike)~~\n";
+        let entries = parse(body).unwrap();
+
+        assert!(
+            matches!(&entries[0], QueueEntry::Completed(p) if p.text == "JB `File Cache Conflict` occurrences"),
+            "{entries:?}"
+        );
     }
 
     #[test]

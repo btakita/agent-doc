@@ -433,6 +433,15 @@ class PatchWatcher(private val project: Project) : Disposable {
                     LOG.info("[socket] dedup: patch_id ${patch.patchId} already applied — emitting already_applied")
                     return APPLY_ALREADY_APPLIED
                 }
+                // #8bfz / #fcconeowner: socket IPC is also an editor apply path, so
+                // it must publish the same live-owner lease as file IPC before it
+                // can ACK. Without this, Rust sees ACK-content from an open editor
+                // but no plugin-owner sidecar and misclassifies the editor endpoint
+                // as absent during closeout recovery.
+                if (!ownsDocument(patch.file)) {
+                    LOG.info("[socket] #8bfz single-owner: not the live owner of ${patch.file}, refusing socket patch so the owner instance can apply")
+                    return APPLY_FAILED
+                }
                 val stateGeneration = StateProjectionBridge.recordEditorPatchQueued(patch.file, patch.patchId)
                 if (!patch.fullContent.isNullOrEmpty()) {
                     LOG.warn("[socket] full-content IPC is disabled; rejecting patch_id ${patch.patchId} for ${patch.file}")

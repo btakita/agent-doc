@@ -180,6 +180,15 @@ struct LivePaneEvidence {
     tail: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RestartBusyAction {
+    DeferToSupervisorHandoff,
+}
+
+fn restart_busy_action(_evidence: &LivePaneEvidence) -> RestartBusyAction {
+    RestartBusyAction::DeferToSupervisorHandoff
+}
+
 pub fn status(file: &Path) -> Result<()> {
     let mut ctx = build_context(file)?;
     let tmux = Tmux::default_server();
@@ -498,11 +507,9 @@ pub fn stop_agent(file: &Path, reason: Option<String>) -> Result<()> {
 fn prepare_restart_live_busy_pane(ctx: &SessionContext, tmux: &Tmux, force: bool) -> Result<()> {
     let evidence = live_pane_evidence(ctx, tmux);
     // #hj7s: refuse if a terminal editor (e.g. Claude Code `ctrl+g` edit-in-nvim)
-    // owns the pane TTY. A raw `C-c` is swallowed by the editor and the follow-up
-    // restart-command keystrokes would land in the editor buffer. The editor is a
-    // legitimate operator state, so do not force-quit it or SIGINT around it —
-    // refuse and let the operator close it manually. `--force` must NOT bypass this
-    // (it runs before the force branch).
+    // owns the pane TTY. The editor is a legitimate operator state, so do not
+    // force-quit it or route restart control around it; let the operator close it
+    // manually. `--force` must NOT bypass this (it runs before the force branch).
     if let Some(command) = evidence.current_command.as_deref()
         && terminal_editor_command(command)
     {
@@ -519,57 +526,26 @@ fn prepare_restart_live_busy_pane(ctx: &SessionContext, tmux: &Tmux, force: bool
             )
         );
     }
-    if !force {
+    if !force && evidence.state != LivePaneState::AliveBusy {
         return guard_destructive_operator_on_live_busy_pane(ctx, tmux, "session_restart");
     }
     if evidence.state == LivePaneState::AliveBusy {
         if pane_shows_clean_exit_prompt(ctx, tmux, &evidence) {
             return Ok(());
         }
-        force_restart_live_busy_pane(ctx, tmux, &evidence)?;
+        match restart_busy_action(&evidence) {
+            RestartBusyAction::DeferToSupervisorHandoff => {
+                log_restart_evidence_event(
+                    ctx,
+                    "session_restart_busy_deferred_to_supervisor_handoff",
+                    &evidence,
+                );
+            }
+        }
         return Ok(());
     }
     if evidence.state == LivePaneState::AliveIdle {
         reconcile_idle_projection_from_evidence(ctx, &evidence)?;
-    }
-    Ok(())
-}
-
-fn force_restart_live_busy_pane(
-    ctx: &SessionContext,
-    tmux: &Tmux,
-    evidence: &LivePaneEvidence,
-) -> Result<()> {
-    let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
-    log_restart_evidence_event(ctx, "session_restart_force_used", evidence);
-    let codex_shell_search = codex_pane_in_shell_search_state(ctx, tmux, evidence);
-    if let Err(err) = send_operator_interrupt_sequence(tmux, pane, &ctx.harness, codex_shell_search)
-    {
-        agent_doc_orchestration::ops_log::log_op(
-            &ctx.canonical_file,
-            &format!(
-                "session_restart_force_interrupt_failed file={} pane={} source={} error={:?}",
-                ctx.canonical_file.display(),
-                pane,
-                evidence.source,
-                err.to_string()
-            ),
-        );
-        log_restart_evidence_event(ctx, "session_restart_busy_force_killed", evidence);
-        return Ok(());
-    }
-
-    match wait_for_restart_interrupt_settle(ctx, tmux, pane, Duration::from_secs(2)) {
-        RestartInterruptSettleOutcome::Idle { evidence } => {
-            let _ = reconcile_idle_projection_from_evidence(ctx, &evidence);
-            log_restart_evidence_event(ctx, "session_restart_busy_pre_interrupt_idle", &evidence);
-        }
-        RestartInterruptSettleOutcome::Closed { evidence } => {
-            log_restart_evidence_event(ctx, "session_restart_busy_force_killed", &evidence);
-        }
-        RestartInterruptSettleOutcome::TimedOut { evidence } => {
-            log_restart_evidence_event(ctx, "session_restart_busy_force_killed", &evidence);
-        }
     }
     Ok(())
 }
@@ -1118,7 +1094,9 @@ fn starting_operator_guard_refusal_message(
         file.display()
     );
     if action == OperatorAction::Restart {
-        message.push_str(" Pass `--force` to interrupt the running turn and restart anyway.");
+        message.push_str(
+            " Pass `--force` to bypass the starting-state guard and request a supervisor-mediated restart.",
+        );
     }
     message
 }
@@ -2424,37 +2402,6 @@ fn wait_for_interrupt_clear_settle(
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum RestartInterruptSettleOutcome {
-    Idle { evidence: LivePaneEvidence },
-    Closed { evidence: LivePaneEvidence },
-    TimedOut { evidence: LivePaneEvidence },
-}
-
-fn wait_for_restart_interrupt_settle(
-    ctx: &SessionContext,
-    tmux: &Tmux,
-    pane: &str,
-    timeout: Duration,
-) -> RestartInterruptSettleOutcome {
-    let deadline = Instant::now() + timeout;
-    loop {
-        if !tmux.pane_alive(pane) {
-            return RestartInterruptSettleOutcome::Closed {
-                evidence: live_pane_evidence(ctx, tmux),
-            };
-        }
-        let evidence = live_pane_evidence(ctx, tmux);
-        if evidence.state == LivePaneState::AliveIdle {
-            return RestartInterruptSettleOutcome::Idle { evidence };
-        }
-        if Instant::now() >= deadline {
-            return RestartInterruptSettleOutcome::TimedOut { evidence };
-        }
-        std::thread::sleep(Duration::from_millis(250));
-    }
-}
-
 fn resolve_direct_submit_pane(
     ctx: &SessionContext,
     tmux: &Tmux,
@@ -2538,7 +2485,7 @@ pub(crate) fn restart_busy_refusal_message(
     tail: &str,
 ) -> String {
     format!(
-        "session_restart refused for {} because pane {} is alive-busy (source={}, current_command={}, busy_proof={:?}, tail={:?}). Run `agent-doc session status {}` and wait for an idle prompt, or pass `--force` to interrupt the running turn and restart anyway.",
+        "session_restart refused for {} because pane {} is alive-busy (source={}, current_command={}, busy_proof={:?}, tail={:?}). Run `agent-doc session status {}` and wait for an idle prompt, or pass `--force` to bypass this stale busy-state refusal and request a supervisor-mediated restart.",
         file.display(),
         pane,
         source,
@@ -2553,8 +2500,8 @@ pub(crate) fn restart_busy_refusal_message(
 /// restart. Mirrors `restart_busy_refusal_message`'s field convention
 /// (`source=`/`current_command=`/`tail=`) so the JB plugin can parse it. The
 /// header (`is held by editor <command>`) is the distinctive marker the editor
-/// refusal parser keys off. Applies to both `Restart` and `--force`
-/// `Interrupt and Restart`: the operator must close the editor manually.
+/// refusal parser keys off. Applies to both `Restart` and `--force`: the
+/// operator must close the editor manually.
 pub(crate) fn restart_editor_holds_pane_refusal_message(
     file: &Path,
     pane: &str,
@@ -2563,7 +2510,7 @@ pub(crate) fn restart_editor_holds_pane_refusal_message(
     tail: &str,
 ) -> String {
     format!(
-        "session_restart refused for {} because pane {} is held by editor {} (source={}, current_command={}, tail={:?}). Run `agent-doc session status {}` to inspect the pane. A terminal editor (for example Claude Code `ctrl+g` edit-in-nvim) owns the pane, so the restart interrupt is swallowed and the restart command would type into the editor buffer. Close the editor (for example `:wq` in nvim) and retry.",
+        "session_restart refused for {} because pane {} is held by editor {} (source={}, current_command={}, tail={:?}). Run `agent-doc session status {}` to inspect the pane. A terminal editor (for example Claude Code `ctrl+g` edit-in-nvim) owns the pane TTY, so supervisor control should wait until the editor is closed. Close the editor (for example `:wq` in nvim) and retry.",
         file.display(),
         pane,
         command,
@@ -4343,7 +4290,46 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert!(message.contains("bypass permissions"));
         assert!(message.contains("agent-doc session status /tmp/doc.md"));
         assert!(message.contains("pass `--force`"));
-        assert!(message.contains("interrupt the running turn and restart anyway"));
+        assert!(message.contains("request a supervisor-mediated restart"));
+    }
+
+    #[test]
+    fn restart_busy_current_pane_defers_to_supervisor_handoff() {
+        // #restart-current-pane-handoff: when the operator runs
+        // `restart-supervisor --force` from the pane that currently owns the
+        // session, the CLI must not send interrupt keys into that same pane.
+        // It should submit the supervisor restart request and let the supervisor
+        // drain/reexec/continue the session.
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%12".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveBusy,
+            current_command: Some("node".to_string()),
+            prompt_ready: Some(false),
+            tail: Some("gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 30% used".to_string()),
+        };
+
+        assert_eq!(
+            restart_busy_action(&evidence),
+            RestartBusyAction::DeferToSupervisorHandoff
+        );
+    }
+
+    #[test]
+    fn restart_busy_foreign_pane_defers_to_supervisor_handoff() {
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%12".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveBusy,
+            current_command: Some("node".to_string()),
+            prompt_ready: Some(false),
+            tail: Some("• Working (2m · esc to interrupt)".to_string()),
+        };
+
+        assert_eq!(
+            restart_busy_action(&evidence),
+            RestartBusyAction::DeferToSupervisorHandoff
+        );
     }
 
     #[test]
@@ -4689,7 +4675,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert!(message.contains("the document changed after the last committed cycle"));
         assert!(message.contains("agent-doc session status /tmp/doc.md"));
         assert!(message.contains("Pass `--force`"));
-        assert!(message.contains("interrupt the running turn and restart anyway"));
+        assert!(message.contains("request a supervisor-mediated restart"));
     }
 
     #[test]

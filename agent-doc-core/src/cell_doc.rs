@@ -739,8 +739,9 @@ fn compose_occurrence(
     // identities that side *touched* (Insert/Update/Move) and which it *removed*.
     // The per-key resolution below composes the two op streams: an identity
     // touched on one side but not the other takes that side; an identity updated
-    // on BOTH sides to different text is a real conflict; an identity removed on
-    // one side and untouched on the other is dropped.
+    // on BOTH sides to different text is a real conflict; an identity removed by
+    // the authoritative owner is dropped even if the other side updated it.
+    // Clean one-sided removes keep the legacy behavior otherwise.
     let base_to_ours = reconcile(&base.keyed_for_diff(), &ours.keyed_for_diff());
     let base_to_theirs = reconcile(&base.keyed_for_diff(), &theirs.keyed_for_diff());
     let ours_removed = removed_keys(&base_to_ours);
@@ -839,10 +840,15 @@ fn compose_occurrence(
                 }
             }
             // Present only in ours: ours kept/edited it, or theirs removed it.
-            // Honor theirs' removal only if ours did NOT touch it (and it is not
-            // protected append-only `exchange` history).
+            // For operator-owned components (`TheirsWins`), an operator delete
+            // is authoritative even if the agent side concurrently updated or
+            // struck the same item; otherwise the stale agent side resurrects a
+            // queue line the operator explicitly removed. `exchange` remains
+            // protected append-only history.
             (Some(o), None) => {
-                if theirs_removed.contains(id) && !ours_updated.contains(id) && !is_exchange {
+                let authoritative_theirs_delete =
+                    policy == ConflictPolicy::TheirsWins || !ours_updated.contains(id);
+                if theirs_removed.contains(id) && authoritative_theirs_delete && !is_exchange {
                     None
                 } else {
                     Some(o.clone())
@@ -1828,6 +1834,31 @@ agent_doc_format: template
             removes[0],
             DiffOp::Remove { key } if key == "queue:0:id:beta"
         ));
+    }
+
+    #[test]
+    fn operator_queue_delete_wins_over_agent_update() {
+        let ours = DOC.replace(
+            "- do [#beta] second task\n",
+            "- ~~do [#beta] second task~~\n",
+        );
+        let theirs = DOC.replace("- do [#beta] second task\n", "");
+
+        let outcome = merge_3way(DOC, &ours, &theirs);
+
+        assert!(!outcome.fell_back, "cell merge should handle queue delete");
+        assert!(
+            outcome.conflicts.is_empty(),
+            "authoritative operator delete is not a conflict: {:?}",
+            outcome.conflicts
+        );
+        assert!(
+            !outcome.merged_text.contains("[#beta]"),
+            "operator-deleted queue item must not be resurrected:\n{}",
+            outcome.merged_text
+        );
+        assert!(outcome.merged_text.contains("[#alpha]"));
+        assert!(outcome.merged_text.contains("[#gamma]"));
     }
 
     #[test]

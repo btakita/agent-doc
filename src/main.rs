@@ -2103,7 +2103,7 @@ enum SessionAction {
         /// Request a fresh restart instead of the default continue-mode restart
         #[arg(long)]
         fresh: bool,
-        /// Interrupt a busy live pane and restart the supervisor anyway
+        /// Bypass stale busy-state refusal and request supervisor-mediated restart
         #[arg(long)]
         force: bool,
     },

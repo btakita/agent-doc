@@ -1859,6 +1859,8 @@ class PatchWatcher implements vscode.Disposable {
     private lastTypingTime = new Map<string, number>();
     /** Patch files delayed because the target document is still being edited. */
     private pendingPatchRetries = new Set<string>();
+    /** Documents for which this VS Code instance has published plugin-owner proof. */
+    private ownedDocs = new Set<string>();
 
     constructor() {
         this.outputChannel = vscode.window.createOutputChannel('Agent Doc Patches');
@@ -2117,6 +2119,20 @@ class PatchWatcher implements vscode.Disposable {
         return true;
     }
 
+    private projectRoot(): string | undefined {
+        return this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined;
+    }
+
+    private ownsDocument(filePath: string, projectRoot?: string): boolean {
+        const owns = native.pluginOwnerTryAcquire(filePath, EDITOR_ID, process.pid, projectRoot);
+        if (owns) {
+            this.ownedDocs.add(filePath);
+        } else {
+            this.ownedDocs.delete(filePath);
+        }
+        return owns;
+    }
+
     private async onPatchFileCreated(uri: vscode.Uri): Promise<void> {
         try {
             const raw = fs.readFileSync(uri.fsPath, 'utf-8');
@@ -2163,6 +2179,10 @@ class PatchWatcher implements vscode.Disposable {
             }
 
             const projectRoot = this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined;
+            if (!this.ownsDocument(patch.file, projectRoot)) {
+                this.outputChannel.appendLine(`PatchWatcher: not the live owner of ${patch.file}, leaving patch for owner instance: ${uri.fsPath}`);
+                return;
+            }
             const stateGeneration = native.recordEditorPatchQueued(patch.file, patch.patch_id, projectRoot);
             if (!this.awaitIdleBeforeDocumentMutation(patch.file, 'file patch', uri.fsPath)) {
                 native.recordEditorRetryRequested(
@@ -2447,6 +2467,8 @@ class PatchWatcher implements vscode.Disposable {
     }
 
     handleDocumentClosed(filePath: string): void {
+        native.pluginOwnerRelease(filePath, EDITOR_ID, this.projectRoot());
+        this.ownedDocs.delete(filePath);
         void this.crdtReplicas?.handleDocumentClosed(filePath);
     }
 
@@ -2755,6 +2777,10 @@ class PatchWatcher implements vscode.Disposable {
         this.saveSignalWatcher?.dispose();
         this.typingListener?.dispose();
         this.openListener?.dispose();
+        for (const filePath of this.ownedDocs) {
+            native.pluginOwnerRelease(filePath, EDITOR_ID, this.projectRoot());
+        }
+        this.ownedDocs.clear();
         this.crdtReplicas?.dispose();
         this.outputChannel.dispose();
     }

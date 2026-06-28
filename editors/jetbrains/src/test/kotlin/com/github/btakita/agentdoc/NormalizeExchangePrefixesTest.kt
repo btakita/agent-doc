@@ -472,6 +472,27 @@ One.
     }
 
     @Test
+    fun `socket patch publishes plugin owner before editor ack`() {
+        val patchWatcherPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+        ).first { Files.exists(it) }
+        val patchWatcher = Files.readString(patchWatcherPath)
+        val socketBranch = patchWatcher
+            .substringAfter("\"patch\" -> {")
+            .substringBefore("when {")
+
+        val owner = socketBranch.indexOf("ownsDocument(patch.file)")
+        val queued = socketBranch.indexOf("StateProjectionBridge.recordEditorPatchQueued")
+        val apply = socketBranch.indexOf("applyPatch(patch)")
+        val ack = socketBranch.indexOf("StateProjectionBridge.recordEditorAckObserved")
+
+        assertTrue("socket IPC must acquire/publish plugin-owner proof before queueing", owner >= 0 && owner < queued)
+        assertTrue("socket IPC must acquire/publish plugin-owner proof before applying", owner >= 0 && owner < apply)
+        assertTrue("socket IPC must acquire/publish plugin-owner proof before ACKing", owner >= 0 && owner < ack)
+    }
+
+    @Test
     fun `handles line at very start of user region`() {
         // First line of the user region (no leading newline before it)
         val doc = "<!-- agent:exchange patch=append -->\nFirst line.\nSecond line.\n<!-- /agent:exchange -->\n"

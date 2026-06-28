@@ -119,6 +119,8 @@ function resetBindings(): void {
     _document_changed_digest_for_editor = null;
     _document_changed_digest_content_for_editor = null;
     _document_closed_for_editor = null;
+    _plugin_owner_try_acquire = null;
+    _plugin_owner_release = null;
     _resolve_project_path = null;
     _free_state = null;
     _free_string = null;
@@ -237,6 +239,8 @@ let _document_changed_digest_content: any = null;
 let _document_changed_digest_for_editor: any = null;
 let _document_changed_digest_content_for_editor: any = null;
 let _document_closed_for_editor: any = null;
+let _plugin_owner_try_acquire: any = null;
+let _plugin_owner_release: any = null;
 let _is_tracked: any = null;
 let _resolve_project_path: any = null;
 let _free_state: any = null;
@@ -354,6 +358,22 @@ function bindFunctions(): void {
         _document_changed_digest_for_editor = null;
         _document_changed_digest_content_for_editor = null;
         _document_closed_for_editor = null;
+    }
+    try {
+        _plugin_owner_try_acquire = lib.func(
+            'agent_doc_plugin_owner_try_acquire',
+            'int32',
+            ['str', 'str', 'int64'],
+        );
+        _plugin_owner_release = lib.func(
+            'agent_doc_plugin_owner_release',
+            'void',
+            ['str', 'str'],
+        );
+    } catch (e: any) {
+        console.log(`[agent-doc/native] plugin-owner ABI unavailable: ${e.message}`);
+        _plugin_owner_try_acquire = null;
+        _plugin_owner_release = null;
     }
     _is_tracked = lib.func('agent_doc_is_tracked', 'bool', ['str']);
     _resolve_project_path = lib.func('agent_doc_resolve_project_path', FfiProjectPathType, ['str']);
@@ -1451,6 +1471,38 @@ export function documentClosedForEditor(
     bindFunctions();
     if (_document_closed_for_editor) {
         _document_closed_for_editor(filePath, editorId);
+    }
+}
+
+export function pluginOwnerTryAcquire(
+    filePath: string,
+    consumerId: string,
+    pid: number,
+    projectRoot?: string,
+): boolean {
+    if (!ensureLoaded(projectRoot)) return true;
+    bindFunctions();
+    if (!_plugin_owner_try_acquire) return true;
+    try {
+        return _plugin_owner_try_acquire(filePath, consumerId, pid) === 1;
+    } catch (e: any) {
+        console.warn(`[agent-doc/native] pluginOwnerTryAcquire error: ${e.message}`);
+        return true;
+    }
+}
+
+export function pluginOwnerRelease(
+    filePath: string,
+    consumerId: string,
+    projectRoot?: string,
+): void {
+    if (!ensureLoaded(projectRoot)) return;
+    bindFunctions();
+    if (!_plugin_owner_release) return;
+    try {
+        _plugin_owner_release(filePath, consumerId);
+    } catch (e: any) {
+        console.warn(`[agent-doc/native] pluginOwnerRelease error: ${e.message}`);
     }
 }
 

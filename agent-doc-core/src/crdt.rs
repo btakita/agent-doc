@@ -1083,9 +1083,12 @@ fn reconcile_component_body(
                     Some(merge(base_state.as_deref(), &o.text, &t.text).ok()?)
                 }
             }
-            // Present only in ours: insert by ours, or delete by theirs.
+            // Present only in ours: insert by ours, or delete by theirs. For list
+            // components, theirs is the live/operator side, so its delete is
+            // authoritative even when ours concurrently updated or struck the item.
             (Some(o), None) => match in_b {
                 None => Some(o.text.clone()),
+                Some(_) if lifecycle_governed => None,
                 Some(b) if protect_deletes || o.text != b.text => Some(o.text.clone()),
                 Some(_) => None,
             },
@@ -2995,6 +2998,39 @@ Second answer line three.
         assert!(
             merged.contains("<!-- agent:queue priority go -->"),
             "operator marker attribute lost (reverted to ours' marker):\n{merged}"
+        );
+    }
+
+    #[test]
+    fn merge_by_component_legacy_operator_queue_delete_wins_over_agent_update() {
+        // With the cell-merge kill-switch off, the legacy keyed-child fallback must
+        // still treat an operator-side queue delete as authoritative. The stale
+        // agent side may have updated/struck the item, but it must not resurrect it.
+        let _guard = crate::cell_doc::CELL_MERGE_ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized under the lock and restored before assertions.
+        unsafe {
+            std::env::set_var(crate::cell_doc::CELL_MERGE_ENV, "0");
+        }
+
+        let base = doc_with_exchange_queue("Q.", "- do [#a1] keep\n- do [#b2] delete me");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let ours = doc_with_exchange_queue("Q.", "- do [#a1] keep\n- ~~do [#b2] delete me~~");
+        let theirs = doc_with_exchange_queue("Q.", "- do [#a1] keep");
+        let result = merge_by_component(Some(&base_state), &ours, &theirs);
+
+        // SAFETY: still holding the lock.
+        unsafe {
+            std::env::remove_var(crate::cell_doc::CELL_MERGE_ENV);
+        }
+
+        let merged = result.unwrap();
+        assert!(
+            merged.contains("[#a1]"),
+            "untouched queue item lost:\n{merged}"
+        );
+        assert!(
+            !merged.contains("[#b2]"),
+            "operator-deleted queue item resurrected by legacy fallback:\n{merged}"
         );
     }
 

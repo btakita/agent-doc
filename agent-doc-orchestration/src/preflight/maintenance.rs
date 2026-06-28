@@ -1519,6 +1519,113 @@ fn record_queue_worklist_state(
     Ok(())
 }
 
+type QueueDeleteCounts = std::collections::HashMap<String, usize>;
+
+fn queue_entry_delete_key(entry: &crate::queue::QueueEntry) -> Option<String> {
+    match entry {
+        crate::queue::QueueEntry::Prompt(prompt) | crate::queue::QueueEntry::Completed(prompt) => {
+            let key = crate::queue::strip_priority_markers(&prompt.text);
+            (!key.is_empty()).then_some(key)
+        }
+        _ => None,
+    }
+}
+
+fn queue_delete_counts(body: &str) -> Option<QueueDeleteCounts> {
+    let entries = crate::queue::parse(body).ok()?;
+    let mut counts = std::collections::HashMap::new();
+    for entry in &entries {
+        if let Some(key) = queue_entry_delete_key(entry) {
+            *counts.entry(key).or_insert(0) += 1;
+        }
+    }
+    Some(counts)
+}
+
+fn queue_counts_are_subset(live: &QueueDeleteCounts, disk: &QueueDeleteCounts) -> bool {
+    live.iter()
+        .all(|(key, live_count)| *live_count <= disk.get(key).copied().unwrap_or(0))
+}
+
+fn queue_counts_have_deletion(disk: &QueueDeleteCounts, live: &QueueDeleteCounts) -> bool {
+    disk.iter()
+        .any(|(key, disk_count)| live.get(key).copied().unwrap_or(0) < *disk_count)
+}
+
+/// Fold a proven editor-buffer queue deletion into the preflight queue source.
+///
+/// Queue maintenance normally starts from disk and then converges that queue
+/// shape back into a live editor buffer. When the operator deletes queue rows in
+/// the editor during a turn, that delete may be unsaved: blindly starting from
+/// disk re-pushes the stale rows and makes them "reappear". Only adopt the live
+/// queue when the live-buffer classifier says it is a real unsaved buffer and
+/// the live queue is a count-wise subset of disk after stripping cosmetic
+/// progress/pin markers. That covers deleting one duplicate row or all copies of
+/// a row without treating same-cycle queue additions as an implicit merge.
+fn adopt_live_buffer_queue_deletions(file: &Path, disk_content: &mut String) -> Result<bool> {
+    let Some(file_str) = file.to_str() else {
+        return Ok(false);
+    };
+    let Some(snapshot) = crate::debounce::live_buffer_diverges_from_content(file_str, disk_content)
+    else {
+        return Ok(false);
+    };
+    let Some(live_content) = snapshot.content.as_deref() else {
+        return Ok(false);
+    };
+    let disk_components = crate::component::parse(disk_content)?;
+    let live_components = crate::component::parse(live_content)?;
+    let Some(disk_queue) = disk_components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(false);
+    };
+    let Some(live_queue) = live_components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(false);
+    };
+    let disk_body = disk_queue.content(disk_content);
+    let live_body = live_queue.content(live_content);
+    if disk_body == live_body {
+        return Ok(false);
+    }
+    let Some(disk_counts) = queue_delete_counts(disk_body) else {
+        return Ok(false);
+    };
+    let Some(live_counts) = queue_delete_counts(live_body) else {
+        return Ok(false);
+    };
+    if !queue_counts_have_deletion(&disk_counts, &live_counts)
+        || !queue_counts_are_subset(&live_counts, &disk_counts)
+    {
+        return Ok(false);
+    }
+
+    let deleted_count: usize = disk_counts
+        .iter()
+        .map(|(key, disk_count)| {
+            disk_count.saturating_sub(live_counts.get(key).copied().unwrap_or(0))
+        })
+        .sum();
+    *disk_content = disk_queue.replace_content(disk_content, live_body);
+    eprintln!(
+        "[preflight] queue: adopted {deleted_count} live editor queue deletion(s) before maintenance (#qeditdelete)"
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "queue_live_buffer_delete_adopted file={} deleted_count={} buffer_timestamp_ms={} (#qeditdelete)",
+            file.display(),
+            deleted_count,
+            snapshot.timestamp_ms
+        ),
+    );
+    Ok(true)
+}
+
 pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
     // #sqedit-race Phase 2: defer ALL queue maintenance mutation while a different,
     // live process holds a fresh queue-edit lease (a direct `queue prune-noise` /
@@ -1541,10 +1648,12 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         );
         return Ok(QueueState::default());
     }
-    let content = match std::fs::read_to_string(file) {
+    let mut content = match std::fs::read_to_string(file) {
         Ok(c) => c,
         Err(_) => return Ok(QueueState::default()),
     };
+    let adopted_live_queue_delete =
+        adopt_live_buffer_queue_deletions(file, &mut content).unwrap_or(false);
     let components = match crate::component::parse(&content) {
         Ok(cs) => cs,
         Err(_) => return Ok(QueueState::default()),
@@ -1564,7 +1673,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     };
 
     let mut entries = entries;
-    let mut mutated = false;
+    let mut mutated = adopted_live_queue_delete;
     let mut current_content = content.clone();
     let mut queue_warnings = Vec::new();
     let mut synced_queue_ids = Vec::new();
@@ -3549,6 +3658,63 @@ mod tests {
             std::fs::read_to_string(&doc)
                 .unwrap()
                 .contains("- do [#alpha]")
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_adopts_live_buffer_queue_duplicate_delete() {
+        // #qeditdelete: the operator deletes one duplicate queue row in the live
+        // editor while disk still has both copies. Queue maintenance must start
+        // from that editor-authored deletion before it converges queue shape back
+        // to the editor, or the stale disk copy reappears.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- :pushpin: do [#dup]\n",
+            "- :pushpin: do [#dup]\n",
+            "- :pushpin: do [#keep]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let live_content = content.replacen(
+            "- :pushpin: do [#dup]\n- :pushpin: do [#dup]\n",
+            "- :pushpin: do [#dup]\n",
+            1,
+        );
+        crate::debounce::record_live_buffer_digest_content(&doc.to_string_lossy(), &live_content)
+            .unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            updated.matches("do [#dup]").count(),
+            1,
+            "the operator-deleted duplicate must not be re-pushed from stale disk:\n{updated}"
+        );
+        assert!(
+            updated.contains("do [#keep]"),
+            "unrelated queue rows must survive:\n{updated}"
+        );
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            snap.matches("do [#dup]").count(),
+            1,
+            "snapshot must adopt the deleted duplicate too:\n{snap}"
         );
     }
 

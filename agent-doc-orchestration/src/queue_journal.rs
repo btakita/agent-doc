@@ -246,11 +246,24 @@ pub fn replay_missing(file: &Path, content: &str) -> Vec<QueueJournalEntry> {
     }
     // Present = a live prompt with the same text, OR a struck/completed entry
     // (the operator already worked/cancelled it — do NOT resurrect).
-    let present_texts = present_queue_texts(content);
+    let mut present_texts = present_queue_texts(content);
+    present_texts.extend(durable_queue_texts(file));
     journal
         .into_iter()
         .filter(|entry| !present_texts.contains(&entry.text))
         .collect()
+}
+
+/// Queue prompt texts that have reached the binary's durable snapshot. If such a
+/// prompt is absent from the live document, treat that absence as an operator
+/// deletion rather than a crash-lost add; the journal has already served its
+/// purpose once the prompt is snapshot-visible.
+fn durable_queue_texts(file: &Path) -> std::collections::HashSet<String> {
+    crate::snapshot::load(file)
+        .ok()
+        .flatten()
+        .map(|content| present_queue_texts(&content))
+        .unwrap_or_default()
 }
 
 /// All queue prompt texts currently represented in `content` — live `Prompt`
@@ -405,6 +418,34 @@ mod tests {
         assert!(
             missing.is_empty(),
             "a struck/consumed item must not be resurrected: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn replay_does_not_resurrect_operator_deleted_snapshot_completed_items() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = doc(
+            dir.path(),
+            &[
+                "- :pushpin: do [#qeditdup] [#qftloss#qftloss]",
+                "- :pushpin: JB `File Cache Conflict` occurrences",
+            ],
+        );
+        record(&path, &content_of(&path)).unwrap();
+
+        let snapshot_content = doc_body(&[
+            "- ~~:pushpin: do [#qeditdup] [#qftloss#qftloss]~~",
+            "- ~~:pushpin: JB `File Cache Conflict` occurrences~~ — auto-struck: answered this cycle (#ftstrike)",
+        ]);
+        crate::snapshot::save(&path, &snapshot_content).unwrap();
+
+        let current_after_operator_delete = doc_body(&["- do [#stillopen]"]);
+        std::fs::write(&path, &current_after_operator_delete).unwrap();
+
+        let missing = replay_missing(&path, &current_after_operator_delete);
+        assert!(
+            missing.is_empty(),
+            "snapshot-completed rows deleted by the operator must not be journal-replayed: {missing:?}"
         );
     }
 

@@ -102,6 +102,29 @@ describe('patchGuard', () => {
         assert.ok(source.includes('ackContentSidecarPath(patchesDir, patchId)'));
     });
 
+    it('publishes plugin owner before VS Code patch ack', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        const nativeSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'native.ts'), 'utf-8');
+        const branch = source.slice(
+            source.indexOf('private async onPatchFileCreated('),
+            source.indexOf('private async applyPatch(', source.indexOf('private async onPatchFileCreated(')),
+        );
+
+        const ownerIdx = branch.indexOf('this.ownsDocument(patch.file, projectRoot)');
+        const queuedIdx = branch.indexOf('native.recordEditorPatchQueued');
+        const applyIdx = branch.indexOf('const applied = await this.applyPatch(patch, uri.fsPath)');
+        const ackIdx = branch.indexOf('native.recordEditorAckObserved');
+
+        assert.ok(ownerIdx >= 0 && ownerIdx < queuedIdx, 'VS Code must acquire/publish plugin-owner proof before queueing');
+        assert.ok(ownerIdx >= 0 && ownerIdx < applyIdx, 'VS Code must acquire/publish plugin-owner proof before applying');
+        assert.ok(ownerIdx >= 0 && ownerIdx < ackIdx, 'VS Code must acquire/publish plugin-owner proof before ACKing');
+        assert.ok(source.includes('private ownsDocument('));
+        assert.ok(source.includes('native.pluginOwnerTryAcquire(filePath, EDITOR_ID, process.pid, projectRoot)'));
+        assert.ok(source.includes('native.pluginOwnerRelease(filePath, EDITOR_ID, this.projectRoot())'));
+        assert.ok(nativeSource.includes('agent_doc_plugin_owner_try_acquire'));
+        assert.ok(nativeSource.includes('export function pluginOwnerTryAcquire('));
+    });
+
     it('does not autosave command paths', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         const sessionCommandStart = source.indexOf('async function runSessionCommandForActiveFile(');

@@ -26,7 +26,6 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -191,7 +190,28 @@ Remaining operator-only proof is tracked as `#suprestassoc-live`: restart the EF
 ### Re: continue — gpt-5
 
 Continuing after the `#suprestassoc` closeout. That item is closed/released as `agent-doc 0.34.65`; the remaining live proof is tracked as `#suprestassoc-live`, so the queue should proceed to the next actionable head after this repair boundary.
-<!-- agent:boundary:d17a7759 -->
+
+### Re: CRDT realtime authority, turn lifecycle split, and lifecycle diagrams — gpt-5
+
+Implemented and verified the realtime/turn split.
+
+- Submodule commit: `7b38ceb6 fix: preserve operator edits during realtime recovery`.
+- `specs/14-realtime-workflow.md` is now the realtime authority spec: operator-visible text is authoritative across idle, post-preflight, compact exchange, editor-owned, disk-owned, and out-of-band disk-write states. Both Mermaid diagrams are `flowchart LR` and pin colors for light/dark readability.
+- `specs/15-turn-lifecycle.md` is the separate turn lifecycle spec: it has a state diagram and transition table for admission, preflight, dispatch, response capture, realtime handoff, commit/no-commit, interruption, and abandon. It states that CRDT merge/realtime apply do not commit; the document turn lifecycle owns commits.
+- The two specs cross-link so readers can move between the realtime state machine and the turn/closeout state machine.
+- `SPEC.md` surfaces both invariants at the top level.
+- Added regression guards in `tests/test_cli.rs` for lazily-rs-backed realtime authority, merge-vs-commit separation, and the lifecycle/realtime cross-links.
+
+Red-green-refactor notes: I added failing spec guards first, made them pass with the new/updated specs, then ran focused tests and the full check.
+
+Verification passed:
+
+- `cargo fmt --check`
+- `git diff --check`
+- focused realtime/lifecycle spec tests
+- `make check` in `src/agent-doc` (5511 nextest tests passed, 242 skipped, doctests passed, medium sim corpus passed, Lean build passed)
+- latest GitHub Actions `CI` run on `main` is green.
+<!-- agent:boundary:5442b109 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -247,16 +267,16 @@ What are #next-steps to fix bugs?
 
 <!-- agent:backlog priority queue -->
 - [ ] [#tmuxsynccrashlog] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md
-- [ ] [#qftlossproof] Replacement for #qftloss: free-text prompt preservation live proof. After the operator types an unsaved queue/free-text prompt during concurrent finalize, inspect .agent-doc/live-buffer journal evidence plus ops.log qdurcrash/live-buffer replay markers; close only if the prompt survives end-to-end, otherwise file a focused loss bug with artifact paths. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
+- [ ] [#qftlossproof] Replacement for #qftloss: live proof for the already-required operator-wins invariant. After the operator types unsaved queue/free-text/ordinary text during concurrent finalize, inspect .agent-doc/live-buffer journal evidence plus ops.log qdurcrash/live-buffer replay markers; close only if the operator text survives end-to-end, otherwise file a focused invariant-loss bug with artifact paths. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#midturnrecycleproof] Replacement for #midturn-recycle-resume: Phase A recycle interlock live proof. Drive a recycle in the preflight->finalize window, inspect ops.log cycle-open recycle-defer/commit markers and editor writeback proof; close only if no live_prompt_drift_after_preflight appears, otherwise file a regression. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
 - [ ] [#midturnresumeimpl] Replacement for #midturnresumeb: Phase B durable turn checkpoint resume. Implement and verify consumption of the #durablerecycle turn checkpoint on fresh supervisor boot, with ops-log markers proving interrupted-child redispatch versus surviving-child no-op and deferred-too-long escalation coverage. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
-- [ ] [#provauth3bimpl] Replacement for #provauth3b: operator-origin authority cutover. Once #crdtauth6 supplies live origin deltas, replace remaining content_ours/stale-editor resurrection heuristics with origin checks and add logs/tests proving operator-origin working-tree edits are never reset. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
+- [ ] [#provauth3bimpl] Replacement for #provauth3b: operator-origin authority audit under the hard invariant. Replace any remaining content_ours/stale-editor resurrection heuristic that can reset operator-visible text with an operator-preserving merge or fail-closed path; add logs/tests proving operator-origin working-tree/editor edits are never reset. Do not gate the invariant on #crdtauth6. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#supstaledetectverify] Replacement for #supstaledetect: stale-install warning merge/install verification. Merge the source-mtime warning fix, install/recycle, then verify logs show a fresh build no longer warns while a genuinely stale binary still emits stale_install evidence.
 - [ ] [#suptmuxstaleverify] Replacement for #suptmuxstale: stale-supervisor pane indicator install/log proof. Merge/install the pane-title marker change, recycle, then verify .agent-doc/supervisor-stale plus pane title/turn_status logs show STALE SUPERVISOR only when the supervisor binary is actually stale.
 - [ ] [#60ev] plan-dynamic-context-injection-ledger.md
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
-- [ ] [#crdtauth6] [operator-verify] crdtauth5 live hookup: thin JB DocumentListener calling CrdtReplicaForwarder.forwardLocalDelta + a Kotlin Unix-socket ReplicaTransport client (writes NDJSON register/deregister/update, delivers inbound update_b64 to applyRemoteUpdate); plus the deferred VS Code koffi replica seam (editors/vscode/src/native.ts out-param marshaling). Rust fan-out + Kotlin seam already merged + tested. Plan: tasks/agent-doc/plan-crdt-authority-model.md
+- [ ] [#crdtauth6] [operator-verify] CRDT authority live proof: verify the existing JB DocumentListener -> CrdtReplicaForwarder.forwardLocalDelta path, Kotlin Unix-socket ReplicaTransport, VS Code koffi replica seam, and Rust fan-out stay connected in a live editor session. This is proof/parity work only; operator-visible text is already authoritative and must not wait on this item. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
 - [ ] [#kj5flive] [operator-verify] #mergestatemachine3 live proof replacement for cleared review #kj5f: after the latest JB plugin update is installed, verify JB+VSCode attach/detach/ownership facts flow through the merge-ownership state machine via #lazilystatesync, then run live editor-attached/detached repros for File Cache Conflict and the #6b5h wedge with logs sufficient to prove/disprove the fix before filing follow-up bugs. Plan: tasks/agent-doc/plan-merge-control-state-machine.md
 - [ ] [#suprestassoc-live] [operator-verify] Restart the `tasks/professional/equityfundingsource.md` supervisor in a live editor/tmux setup and verify the actor/admin projection keeps EFS bound to its own pane/session without re-associating to `tasks/agent-doc/agent-doc-bugs2.md`.

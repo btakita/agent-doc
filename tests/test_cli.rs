@@ -1166,6 +1166,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // 5 -> 6 (`reason={}`): typed deferred queue-head projection records the
         // owning defer reason for stop/time-gated heads.
         ("agent-doc-orchestration/src/preflight/maintenance.rs", "reason=") => 6,
+        // +1 (#pm-live-buffer-guard): pending maintenance now reuses the shared
+        // visible-write idle/current guard before it can send queue/backlog/status
+        // convergence through editor IPC. This prevents a maintenance reap from
+        // touching an unsaved operator-visible buffer ahead of disk.
+        ("agent-doc-orchestration/src/preflight/maintenance.rs", "guard_") => 1,
         ("agent-doc-orchestration/src/repair.rs", "guard_") => 10,
         ("agent-doc-orchestration/src/repair.rs", "reason=") => 5,
         ("agent-doc-orchestration/src/route.rs", "accepted_only") => 2,

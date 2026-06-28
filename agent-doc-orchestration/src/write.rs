@@ -3341,7 +3341,7 @@ pub(crate) enum VisibleWriteReconcile {
     DiskDrifted { fresh_current: String },
 }
 
-fn guard_visible_write_idle_and_current(
+pub(crate) fn guard_visible_write_idle_and_current(
     file: &Path,
     source: &str,
     expected_current: &str,
@@ -5284,6 +5284,67 @@ mod tests {
                 && log.contains("transport=disk_force")
                 && log.contains(&reason_marker),
             "force-disk maintenance should leave an attributable transport log:\n{log}"
+        );
+    }
+
+    #[test]
+    fn closeout_pending_maintenance_defers_before_ipc_when_live_buffer_has_operator_edit() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let source = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [x] [#done1] Reap me\n",
+            "- [ ] [#keep1] Keep me\n",
+            "<!-- /agent:backlog -->\n",
+        )
+        .to_string();
+        fs::write(&doc, &source).unwrap();
+        snapshot::save(&doc, &source).unwrap();
+
+        let live_operator_buffer = source.replace(
+            "<!-- /agent:backlog -->",
+            "- [ ] [#operator] unsaved operator edit\n<!-- /agent:backlog -->",
+        );
+        let doc_str = doc.to_string_lossy().to_string();
+        crate::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            &live_operator_buffer,
+            "test-editor",
+            "test",
+            "1",
+            &[crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+
+        let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
+        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        crate::plugin_owner::write_plugin_owner_lease_for_test(
+            doc.to_str().unwrap(),
+            std::process::id(),
+        );
+
+        let err = run_closeout_pending_maintenance(&doc, CommitMode::Required, false).unwrap_err();
+        let err = format!("{err:?}");
+        assert!(
+            err.contains("visible editor buffer"),
+            "pending maintenance should defer on unsaved operator buffer before IPC: {err}"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            source,
+            "deferred maintenance must leave the visible disk document untouched"
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("visible_write_deferred_live_buffer_changed")
+                && log.contains("source=pending_maintenance"),
+            "defer should be attributed to the visible-write guard:\n{log}"
+        );
+        assert!(
+            !log.contains("pending_maintenance_editor_convergence_attempt"),
+            "pending maintenance must not send an editor patch while operator edits are ahead of disk:\n{log}"
         );
     }
 

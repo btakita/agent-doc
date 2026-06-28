@@ -657,6 +657,9 @@ Implementations must keep tests for these cases:
   realtime document;
 - compact exchange remains explicit `agent:exchange` replacement and preserves
   concurrent non-exchange edits;
+- closeout/preflight maintenance must not send queue/backlog/status/reap
+  convergence patches while an unsaved operator-visible editor buffer is ahead
+  of disk;
 - out-of-band disk writes with no editor owner are preserved as the current
   visible file state;
 - out-of-band disk writes while an editor owns the document reconcile with the

@@ -480,6 +480,7 @@ fn persist_pending_maintenance_doc(
         return Ok(());
     }
 
+    crate::write::guard_visible_write_idle_and_current(file, source, current)?;
     crate::write::converge_or_disk_write(file, current, target, source)
 }
 

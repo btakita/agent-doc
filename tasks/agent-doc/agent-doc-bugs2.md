@@ -26,7 +26,6 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -359,7 +358,7 @@ Verification:
 - Latest checked GitHub Actions `CI` run on `main` is green.
 
 I did not use `--force-disk`, and I did not claim or override another pane's session ownership.
-<!-- agent:boundary:1524cc40 -->
+<!-- agent:boundary:ee16fe8d -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -373,7 +372,7 @@ I did not use `--force-disk`, and I did not claim or override another pane's ses
 - :pushpin: do [#crdtauth6]
 - :pushpin: do [#nsfz]
 - :pushpin: do [#kj5flive]
-- :pushpin: do [#tmuxsynccrashlog]
+- 🚧 :pushpin: do [#tmuxsynccrashlog]
 - :pushpin: do [#qftlossproof]
 - :pushpin: do [#midturnrecycleproof]
 - :pushpin: do [#midturnresumeimpl]
@@ -390,6 +389,7 @@ I did not use `--force-disk`, and I did not claim or override another pane's ses
 - :pushpin: do [#60ev]
 - do [#suprestassoc-live]
 - do [#agentsignals]
+- do [#coredecomp]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -416,7 +416,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tmuxsynccrashlog] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md
+- [ ] 🚧 [#tmuxsynccrashlog] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md
 - [ ] [#qftlossproof] Replacement for #qftloss: live proof for the already-required operator-wins invariant. After the operator types unsaved queue/free-text/ordinary text during concurrent finalize, inspect .agent-doc/live-buffer journal evidence plus ops.log qdurcrash/live-buffer replay markers; close only if the operator text survives end-to-end, otherwise file a focused invariant-loss bug with artifact paths. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#midturnrecycleproof] Replacement for #midturn-recycle-resume: Phase A recycle interlock live proof. Drive a recycle in the preflight->finalize window, inspect ops.log cycle-open recycle-defer/commit markers and editor writeback proof; close only if no live_prompt_drift_after_preflight appears, otherwise file a regression. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
 - [ ] [#midturnresumeimpl] Replacement for #midturnresumeb: Phase B durable turn checkpoint resume. Implement and verify consumption of the #durablerecycle turn checkpoint on fresh supervisor boot, with ops-log markers proving interrupted-child redispatch versus surviving-child no-op and deferred-too-long escalation coverage. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
@@ -426,6 +426,7 @@ What are #next-steps to fix bugs?
 - [ ] [#60ev] plan-dynamic-context-injection-ledger.md
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
+- [ ] [#coredecomp] [focused-cycle] Decompose the `agent-doc-core` God crate into owned pure crates. Audit `pending.rs`, `queue_item_lifecycle.rs`, `template.rs`, `crdt_sync.rs`, `component.rs`, and related modules; move element-local semantics into `agent-doc-element-*`, document composition into `agent-doc-document`, merge/CRDT merge policy into `agent-doc-merge`, FFI ABI into `agent-doc-ffi`, and leave `agent-doc-core` as a deprecated compatibility facade until downstream users migrate. Do not move runtime IO, snapshots, commits, IPC, tmux, or controller effects into pure crates.
 - [ ] [#crdtauth6] [operator-verify] CRDT authority live proof: verify the existing JB DocumentListener -> CrdtReplicaForwarder.forwardLocalDelta path, Kotlin Unix-socket ReplicaTransport, VS Code koffi replica seam, and Rust fan-out stay connected in a live editor session. This is proof/parity work only; operator-visible text is already authoritative and must not wait on this item. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
 - [ ] [#kj5flive] [operator-verify] #mergestatemachine3 live proof replacement for cleared review #kj5f: after the latest JB plugin update is installed, verify JB+VSCode attach/detach/ownership facts flow through the merge-ownership state machine via #lazilystatesync, then run live editor-attached/detached repros for File Cache Conflict and the #6b5h wedge with logs sufficient to prove/disprove the fix before filing follow-up bugs. Plan: tasks/agent-doc/plan-merge-control-state-machine.md

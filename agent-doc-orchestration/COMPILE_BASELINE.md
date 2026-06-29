@@ -3,14 +3,14 @@
 Tracks the orchestration-crate extraction (`#adoc-orchestration-crate` / `#bz6s`).
 See `tasks/agent-doc/plan-agent-doc-orchestration-extraction.md` for the wave plan.
 
-The headline cold-build comparison (CLI shell vs full crate vs core) becomes
-meaningful only after Wave 5 (prune CLI deps), once the heavy orchestration
+The headline cold-build comparison (CLI shell vs full crate vs focused crates)
+became meaningful after Wave 5 (prune CLI deps), once the heavy orchestration
 dependency tree (tokio/hyper/rustls/interprocess/notify/rusqlite/git/zstd/
-tmux-router) has actually left the `agent-doc` CLI crate.
+tmux-router) left the `agent-doc` CLI crate.
 
 ## Wave log
 
-- **Wave 0 + 1a** — scaffold the crate (depends on `agent-doc-core`) and move
+- **Wave 0 + 1a** — scaffold the crate and move
   the one dependency-free leaf module, `ipc_socket` (414 LOC, deps:
   `anyhow`/`interprocess`/`serde_json`). Main re-exports via
   `pub use agent_doc_orchestration::ipc_socket`. 11 inline tests moved with it.

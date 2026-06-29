@@ -9,7 +9,7 @@ LOCAL_INSTALL_TARGET_DIR ?= target/local-install
 LOCAL_LINKER ?= $(shell if command -v mold >/dev/null 2>&1; then printf '%s' mold; elif command -v ld.lld >/dev/null 2>&1 || command -v lld >/dev/null 2>&1; then printf '%s' lld; fi)
 LOCAL_RUSTFLAGS ?= $(if $(LOCAL_LINKER),-C link-arg=-fuse-ld=$(LOCAL_LINKER),)
 LOCAL_CARGO_ENV = CARGO_INCREMENTAL=1
-CRATES_IO_PUBLISH_ORDER = tmux-router agent-doc-debounce agent-doc-template agent-doc-diff agent-doc-frontmatter agent-doc-turn agent-doc-syntax agent-doc-topic agent-doc-markdown-ast agent-doc-merge agent-doc-ffi agent-doc-core agent-doc-sqlite agent-doc-queue agent-doc-work-graph agent-doc-orchestration agent-doc
+CRATES_IO_PUBLISH_ORDER = tmux-router agent-doc-debounce agent-doc-template agent-doc-diff agent-doc-frontmatter agent-doc-turn agent-doc-syntax agent-doc-topic agent-doc-markdown-ast agent-doc-merge agent-doc-ffi agent-doc-sqlite agent-doc-queue agent-doc-work-graph agent-doc-orchestration agent-doc
 ifneq ($(strip $(LOCAL_RUSTFLAGS)),)
 LOCAL_CARGO_ENV += RUSTFLAGS="$(LOCAL_RUSTFLAGS)"
 endif
@@ -69,7 +69,7 @@ version-sync:
 		echo "ERROR: version mismatch — Cargo.toml=$$cargo_ver pyproject.toml=$$pypi_ver"; \
 		exit 1; \
 	fi; \
-	for manifest in agent-doc-debounce/Cargo.toml agent-doc-template/Cargo.toml agent-doc-diff/Cargo.toml agent-doc-frontmatter/Cargo.toml agent-doc-turn/Cargo.toml agent-doc-syntax/Cargo.toml agent-doc-topic/Cargo.toml agent-doc-markdown-ast/Cargo.toml agent-doc-merge/Cargo.toml agent-doc-ffi/Cargo.toml agent-doc-core/Cargo.toml agent-doc-sqlite/Cargo.toml agent-doc-queue/Cargo.toml agent-doc-work-graph/Cargo.toml agent-doc-orchestration/Cargo.toml; do \
+	for manifest in agent-doc-debounce/Cargo.toml agent-doc-template/Cargo.toml agent-doc-diff/Cargo.toml agent-doc-frontmatter/Cargo.toml agent-doc-turn/Cargo.toml agent-doc-syntax/Cargo.toml agent-doc-topic/Cargo.toml agent-doc-markdown-ast/Cargo.toml agent-doc-merge/Cargo.toml agent-doc-ffi/Cargo.toml agent-doc-sqlite/Cargo.toml agent-doc-queue/Cargo.toml agent-doc-work-graph/Cargo.toml agent-doc-orchestration/Cargo.toml; do \
 		crate_ver=$$(grep '^version' "$$manifest" | head -1 | sed 's/.*"\(.*\)"/\1/'); \
 		if [ "$$cargo_ver" != "$$crate_ver" ]; then \
 			echo "ERROR: version mismatch — Cargo.toml=$$cargo_ver $$manifest=$$crate_ver"; \

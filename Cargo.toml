@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "agent-doc-core",
     "agent-doc-log-time",
     "agent-doc-debounce",
     "agent-doc-template",

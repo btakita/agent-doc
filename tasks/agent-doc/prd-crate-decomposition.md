@@ -2,17 +2,19 @@
 
 ## Problem
 
-`agent-doc-core` and `agent-doc-orchestration` are still aggregation crates.
-They contain policy that should live in focused domain crates, which makes the
-system harder to reason about and makes realtime/turn invariants easier to
-regress accidentally.
+`agent-doc-orchestration` is still an aggregation crate. `agent-doc-core` was
+deleted after its policy moved into focused crates; it must not come back as an
+empty facade. Remaining orchestration policy should live in focused domain
+crates, because mixed effect/policy modules make realtime and turn invariants
+easier to regress accidentally.
 
-This PRD tracks the extraction work needed to make those transitional crates
-small enough that they are adapters rather than God crates.
+This PRD tracks the extraction work needed to keep deleted core APIs gone and
+make orchestration small enough that it is an adapter rather than a God crate.
 
 ## Goals
 
-- Move new domain policy out of `agent-doc-core` and `agent-doc-orchestration`.
+- Keep `agent-doc-core` deleted; move new domain policy out of
+  `agent-doc-orchestration`.
 - Keep durable system rules in the canonical specs:
   [Real-Time Workflow Authority](../../specs/14-realtime-workflow.md) and
   [Turn Lifecycle Authority](../../specs/15-turn-lifecycle.md).
@@ -72,6 +74,9 @@ small enough that they are adapters rather than God crates.
 | `topic.rs` | `agent-doc-topic` | Extracted. Exchange topic section parsing is pure text segmentation shared by compaction/archive flows. |
 | `ffi.rs` | `agent-doc-ffi` | Extracted. C/JNA ABI exports depend on focused crates directly. |
 
+`agent-doc-core` itself is deleted. Focused crates are the only Rust API
+surface for extracted policy.
+
 ## Orchestration Split Targets
 
 | Current area | Target crate | Notes |
@@ -87,8 +92,9 @@ small enough that they are adapters rather than God crates.
 
 ## Acceptance Criteria
 
-- `agent-doc-core` no longer owns new document policy; new policy lands in a
-  focused crate or has an explicit temporary bridge comment naming the target.
+- `agent-doc-core` is absent from the workspace and from crate dependencies.
+  New policy lands in a focused crate or has an explicit temporary bridge
+  comment naming the target.
 - `agent-doc-orchestration` no longer owns new domain policy for merge,
   realtime document authority, turn lifecycle, tmux state, supervisor state, or
   controller CAS.
@@ -115,7 +121,7 @@ callers with focused crate APIs and mark the crate deprecated or remove it.
 
 ## Completion Signal
 
-This PRD is complete when `agent-doc-core` and `agent-doc-orchestration` are no
-longer God crates by behavior: they may still adapt effectful boundaries, but
-their remaining modules do not define durable domain policy that belongs to the
-focused crates above.
+This PRD is complete when `agent-doc-core` remains deleted and
+`agent-doc-orchestration` is no longer a God crate by behavior: orchestration may
+still adapt effectful boundaries, but its remaining modules do not define durable
+domain policy that belongs to the focused crates above.

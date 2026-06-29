@@ -7,16 +7,15 @@ Tracks the build-profile payoff of the `agent-doc-orchestration` extraction
 ## Layering
 
 ```
-agent-doc (CLI shell)  →  agent-doc-orchestration  →  agent-doc-core
-  main.rs + commands       cluster/sessions/route/      pure data layer
-  + ffi cdylib             git/sync/supervisor/...      (published 0.1.0)
+agent-doc (CLI shell)  →  agent-doc-orchestration  →  focused crates
+  main.rs + commands       cluster/sessions/route/      merge/turn/queue/
+  + ffi cdylib             git/sync/supervisor/...      document/realtime/...
 ```
 
 ## Dependency-tree footprint (after Wave 5)
 
 | Crate | Resolved deps (incl. transitive) | Notes |
 |-------|----------------------------------|-------|
-| `agent-doc-core` | 93 | pure data layer; cold-builds ~9.87s / 74 crates (original `#adcr` baseline) |
 | `agent-doc-orchestration` | 340 | holds the heavy tree (ureq/notify/rusqlite/interprocess/portable-pty/alacritty_terminal/tmux-router/zip/yrs/…) |
 | `agent-doc` (CLI shell) | **24 direct deps** (was 36 pre-extraction) | heavy deps reach it only transitively through orchestration |
 
@@ -37,7 +36,8 @@ boundary, so shell-only edits no longer pay for it.
 
 ## Acceptance criteria status (#bz6s)
 
-1. ✅ `agent-doc-orchestration` compiles standalone on `agent-doc-core`.
+1. ✅ `agent-doc-core` has been deleted; focused crates own the pure data and
+   policy surfaces directly.
 2. ✅ CLI shell builds **without** the heavy deps as **direct** deps — confirmed
    via `cargo tree -p agent-doc -e no-dev --depth 1` (none of
    `rusqlite`/`alacritty_terminal`/`portable-pty`/`interprocess`/`signal-hook`/

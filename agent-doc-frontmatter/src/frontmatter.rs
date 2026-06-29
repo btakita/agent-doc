@@ -277,9 +277,9 @@ pub struct StreamConfig {
 /// writes it at each phase transition and clears it once the cycle reaches a terminal
 /// phase. `step` is a free-form string (the orchestration `CyclePhase` rendered
 /// lowercase, e.g. `preflight_started` / `response_captured` / `write_applied` /
-/// `committed`) so an older core build round-trips a newer phase name without data
-/// loss, and so `agent-doc-core` need not depend on the orchestration `CyclePhase`
-/// enum.
+/// `committed`) so frontmatter parsing round-trips newer phase names without data
+/// loss, and so this focused crate need not depend on the orchestration
+/// `CyclePhase` enum.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentDocPipeline {
     /// Logical turn identifier — the backlog/queue task ID driving this cycle

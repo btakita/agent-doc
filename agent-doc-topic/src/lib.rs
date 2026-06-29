@@ -8,8 +8,8 @@
 //!   from the parsed output.
 //!
 //! ## Agentic Contracts
-//! - Lives in `agent-doc-topic` so compaction/archive flows can parse topic sections without
-//!   depending on the `agent-doc-core` compatibility facade.
+//! - Lives in `agent-doc-topic` so compaction/archive flows can parse topic sections through the
+//!   focused crate directly.
 //!
 //! ## Evals
 //! - parse_topic_sections_basic: `### Re:` headings split into sections

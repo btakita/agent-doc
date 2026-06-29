@@ -7,7 +7,7 @@ splicing content across unrelated regions of the document.
 > describes the failure mode this architecture exists to eliminate.
 
 > **Maintenance:** This document tracks the merge engine in
-> [`agent-doc-core/src/crdt.rs`](../../agent-doc-core/src/crdt.rs). When the merge logic
+> [`agent-doc-merge/src/lib.rs`](../../agent-doc-merge/src/lib.rs). When the merge logic
 > changes (`merge`, `merge_by_component`, `segment_into_cells`, or the roadmap phases
 > below), update this file in the same change.
 

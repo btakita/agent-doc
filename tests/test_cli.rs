@@ -2182,31 +2182,35 @@ fn test_manifest_uses_publishable_dependency_contract() {
         );
     }
 
-    let core_manifest =
-        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("agent-doc-core/Cargo.toml"))
-            .unwrap();
-    let core_parsed: toml::Value = toml::from_str(&core_manifest).unwrap();
-    let core_dependencies = core_parsed["dependencies"].as_table().unwrap();
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let members = parsed["workspace"]["members"].as_array().unwrap();
     assert!(
-        core_dependencies.is_empty(),
-        "agent-doc-core is an empty transitional crate and must not retain facade dependencies"
+        !members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-core")),
+        "agent-doc-core must not be retained as an empty facade workspace crate"
     );
-    for crate_name in [
-        "agent-doc-element",
-        "agent-doc-element-queue",
-        "agent-doc-template",
-        "agent-doc-diff",
-        "agent-doc-frontmatter",
-        "agent-doc-turn",
-        "agent-doc-syntax",
-        "agent-doc-topic",
-        "agent-doc-merge",
-        "agent-doc-model-tier",
-        "agent-doc-ffi",
-    ] {
+    assert!(
+        !manifest_dir.join("agent-doc-core/Cargo.toml").exists(),
+        "agent-doc-core manifest should be deleted once focused crates own the API"
+    );
+
+    for manifest in
+        std::iter::once(manifest_dir.join("Cargo.toml")).chain(members.iter().map(|member| {
+            manifest_dir
+                .join(member.as_str().unwrap())
+                .join("Cargo.toml")
+        }))
+    {
+        let manifest_content = fs::read_to_string(&manifest).unwrap();
+        let parsed_manifest: toml::Value = toml::from_str(&manifest_content).unwrap();
+        let dependencies = parsed_manifest
+            .get("dependencies")
+            .and_then(toml::Value::as_table);
         assert!(
-            !core_dependencies.contains_key(crate_name),
-            "{crate_name} must not be retained as an agent-doc-core facade dependency"
+            dependencies.is_none_or(|dependencies| !dependencies.contains_key("agent-doc-core")),
+            "{} must not depend on deleted agent-doc-core",
+            manifest.display()
         );
     }
 

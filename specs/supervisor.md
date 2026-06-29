@@ -357,7 +357,7 @@ The supervisor is architecturally independent of tmux — it owns claude behind 
 
 ## Logging
 
-Single log file per session at `.agent-doc/logs/<session-uuid>.log`, same path as today. Supervisor events use a `[supervisor]` tag prefix on each line for filtering. Format: `[<timestamp>] [supervisor] <event> key=value ...`, where `<timestamp>` is a human-readable ISO-8601 UTC stamp `YYYY-MM-DDTHH:MM:SSZ` (`#opslogts`) so operators reading the log can correlate events to wall-clock time. The staleness / accretion / startup-miss / `gate_verify` scanners read it back through `agent_doc_core::log_time::parse_log_timestamp`, which also still accepts the pre-`#opslogts` bare-epoch form for backward compatibility.
+Single log file per session at `.agent-doc/logs/<session-uuid>.log`, same path as today. Supervisor events use a `[supervisor]` tag prefix on each line for filtering. Format: `[<timestamp>] [supervisor] <event> key=value ...`, where `<timestamp>` is a human-readable ISO-8601 UTC stamp `YYYY-MM-DDTHH:MM:SSZ` (`#opslogts`) so operators reading the log can correlate events to wall-clock time. The staleness / accretion / startup-miss / `gate_verify` scanners read it back through `agent_doc_log_time::parse_log_timestamp`, which also still accepts the pre-`#opslogts` bare-epoch form for backward compatibility.
 
 Example:
 ```

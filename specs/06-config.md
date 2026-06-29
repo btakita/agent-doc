@@ -94,7 +94,7 @@ Fields:
 
 ## Opt-in Document Gate
 
-A plain `.md` is **not** auto-converted into an agent-doc session. `route`, `run`, and `start` fail closed before injecting `agent_doc_session:` frontmatter unless the document opts in. The pure predicate `agent_doc_core::project_config::is_agent_doc_document(rel_path, content, config)` (FFI: `agent_doc_is_session_document(path)`) returns true when ANY of:
+A plain `.md` is **not** auto-converted into an agent-doc session. `route`, `run`, and `start` fail closed before injecting `agent_doc_session:` frontmatter unless the document opts in. The pure predicate `agent_doc_frontmatter::project_config::is_agent_doc_document(rel_path, content, config)` (FFI: `agent_doc_is_session_document(path)`) returns true when ANY of:
 
 1. `documents.auto_session_for_all_md = true` (escape hatch).
 2. Frontmatter carries any agent-doc-managed field — `Frontmatter::has_agent_doc_marker()` (e.g. `agent_doc_session`/`session`, `agent_doc_format`, `agent_doc_write`, `agent_doc_mode`, `agent_doc_stream`, `agent`, `resume`, model overrides, `*_args`, `branch`, `queue_active`, `prompt_presets`, `agent_doc_pipeline`). Existing sessions stay sessions.

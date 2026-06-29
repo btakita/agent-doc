@@ -2,13 +2,12 @@
 //!
 //! Pure subset of the FFI surface: functions that depend only on focused
 //! data/merge crates and need no orchestration-layer state. The full
-//! editor-plugin FFI lives in `agent_doc::ffi` (main crate), which re-exports
-//! the symbols defined here through the `agent_doc_ffi::*` compatibility
-//! path.
+//! editor-plugin FFI lives in `agent_doc::ffi` (main crate), which force-links
+//! these symbols into the single shipped cdylib.
 //!
 //! Wave 5 / `#k9e1` of `#adcr` — proof-of-concept relocation. Adding more
 //! pure functions to this module is tracked under follow-up sub-tasks of
-//! `#k9e1`. See `tasks/agent-doc/plan-agent-doc-core-extraction.md`.
+//! `#k9e1`. See `tasks/agent-doc/prd-crate-decomposition.md`.
 //!
 //! `#k9e1-ffi-simple` (`#epv5`) relocated the four simplest pure FFI
 //! functions (`agent_doc_parse_components`, `agent_doc_visual_tokens_json`,

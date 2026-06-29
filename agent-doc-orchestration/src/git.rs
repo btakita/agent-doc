@@ -98,6 +98,11 @@ use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use agent_doc_document_realtime::write_policy::{
+    classify_committed_historical_agent_doc_mutation, classify_safe_out_of_band_agent_doc_mutation,
+    detect_reintroduced_reaped_pending_ids, is_empty_template_scaffold_snapshot,
+    is_safe_user_follow_up_exchange_growth,
+};
 use agent_doc_element::element::is_backlog_component;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -283,9 +288,6 @@ pub fn is_in_git_repo(file: &Path) -> bool {
 mod normalize;
 pub use normalize::*;
 
-mod safe_mutation;
-pub use safe_mutation::*;
-
 #[cfg(test)]
 fn has_non_exchange_component_drift(snapshot_doc: &str, file_doc: &str) -> bool {
     has_non_exchange_component_drift_scoped(snapshot_doc, file_doc, None)
@@ -404,29 +406,6 @@ fn non_exchange_change_is_turn_independent(
         )
         .affects_turn()
     })
-}
-
-#[cfg(test)]
-fn classify_safe_committed_historical_agent_doc_mutation(
-    snapshot_doc: &str,
-    file_doc: &str,
-) -> Option<&'static str> {
-    if has_non_exchange_component_drift(snapshot_doc, file_doc) {
-        None
-    } else {
-        match classify_committed_historical_agent_doc_mutation(snapshot_doc, file_doc) {
-            Some("exchange") => Some("exchange"),
-            None if crate::session_check::detect_bypassed_response_write_between(
-                snapshot_doc,
-                file_doc,
-            )
-            .is_some() =>
-            {
-                Some("exchange")
-            }
-            _ => None,
-        }
-    }
 }
 
 fn is_safe_user_only_follow_up_after_committed_head(head_doc: &str, current_doc: &str) -> bool {

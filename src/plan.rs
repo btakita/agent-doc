@@ -51,6 +51,10 @@ use agent_doc_element_backlog::backlog;
 use agent_doc_diff as diff;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_orchestration::{diff_io, frontmatter_io, security};
+use agent_doc_workflow::session_cycle::{
+    FinalizePendingMutation, FinalizePendingMutationKind, SessionExecutionScope,
+    classify_execution_scope, finalize_command, prompt_targets_from_changes,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -233,9 +237,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     };
 
     let prompt_bearing_changes = diff::classify_prompt_bearing_changes(&prompt_diff_text);
-    let prompt_targets = agent_doc_orchestration::flow::session_cycle::prompt_targets_from_changes(
-        &prompt_bearing_changes,
-    );
+    let prompt_targets = prompt_targets_from_changes(&prompt_bearing_changes);
     let added_diff_lines =
         agent_doc_orchestration::prompt_contract::collect_added_diff_lines(&prompt_diff_text);
 
@@ -442,18 +444,14 @@ fn execution_scope_for_prompt_targets(
     harness_prompt_only: bool,
     prompt_presets: &indexmap::IndexMap<String, String>,
 ) -> ExecutionScope {
-    match agent_doc_orchestration::flow::session_cycle::classify_execution_scope(
+    match classify_execution_scope(
         prompt_targets,
         added_diff_lines,
         harness_prompt_only,
         prompt_presets,
     ) {
-        agent_doc_orchestration::flow::session_cycle::SessionExecutionScope::PlanBacklogOnly => {
-            ExecutionScope::PlanBacklogOnly
-        }
-        agent_doc_orchestration::flow::session_cycle::SessionExecutionScope::Normal => {
-            ExecutionScope::Normal
-        }
+        SessionExecutionScope::PlanBacklogOnly => ExecutionScope::PlanBacklogOnly,
+        SessionExecutionScope::Normal => ExecutionScope::Normal,
     }
 }
 
@@ -487,28 +485,18 @@ fn finalize_placeholder_commands(
 ) -> Vec<String> {
     let pending = pending_mutations
         .iter()
-        .map(
-            |mutation| agent_doc_orchestration::flow::session_cycle::FinalizePendingMutation {
-                kind: match mutation.kind {
-                    PendingMutationKind::ResolveExisting => {
-                        agent_doc_orchestration::flow::session_cycle::FinalizePendingMutationKind::ResolveExisting
-                    }
-                    PendingMutationKind::ExpectAdd => {
-                        agent_doc_orchestration::flow::session_cycle::FinalizePendingMutationKind::ExpectAdd
-                    }
-                },
-                id: &mutation.id,
-                target_files: &mutation.target_files,
+        .map(|mutation| FinalizePendingMutation {
+            kind: match mutation.kind {
+                PendingMutationKind::ResolveExisting => {
+                    FinalizePendingMutationKind::ResolveExisting
+                }
+                PendingMutationKind::ExpectAdd => FinalizePendingMutationKind::ExpectAdd,
             },
-        )
+            id: &mutation.id,
+            target_files: &mutation.target_files,
+        })
         .collect::<Vec<_>>();
-    vec![
-        agent_doc_orchestration::flow::session_cycle::finalize_command(
-            file,
-            fm.resolve_mode(),
-            &pending,
-        ),
-    ]
+    vec![finalize_command(file, fm.resolve_mode(), &pending)]
 }
 
 struct RoutingFields {

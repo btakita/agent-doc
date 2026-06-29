@@ -40,8 +40,9 @@ use std::io::BufRead;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
-use super::streaming::{StreamChunk, StreamingAgent, parse_stream_line};
+use super::streaming::StreamingAgent;
 use super::{Agent, AgentResponse};
+use agent_doc_turn_executor::agent_stream::{StreamChunk, parse_stream_line};
 
 pub struct Claude {
     command: String,

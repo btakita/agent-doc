@@ -59,9 +59,10 @@ use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use super::streaming::{StreamChunk, StreamingAgent};
+use super::streaming::StreamingAgent;
 use super::{Agent, AgentResponse};
 use agent_doc_frontmatter::frontmatter::{CodexNetworkAccess, Frontmatter};
+use agent_doc_turn_executor::agent_stream::{StreamChunk, parse_codex_line};
 
 #[derive(Clone)]
 pub struct Codex {
@@ -1811,69 +1812,6 @@ impl Codex {
     }
 }
 
-/// Parse a single JSONL line from Codex output into a StreamChunk.
-pub fn parse_codex_line(line: &str) -> Result<StreamChunk> {
-    let json: serde_json::Value = serde_json::from_str(line)
-        .map_err(|e| anyhow::anyhow!("failed to parse Codex JSONL: {}: {}", e, line))?;
-
-    let event_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("");
-
-    match event_type {
-        "thread.started" => {
-            let session_id = json
-                .get("thread_id")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            Ok(StreamChunk {
-                text: String::new(),
-                thinking: None,
-                is_final: false,
-                session_id,
-            })
-        }
-        "item.completed" => {
-            let item = json.get("item");
-            let item_type = item
-                .and_then(|i| i.get("type"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-
-            if item_type == "agent_message" {
-                let text = item
-                    .and_then(|i| i.get("text"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                Ok(StreamChunk {
-                    text,
-                    thinking: None,
-                    is_final: false,
-                    session_id: None,
-                })
-            } else {
-                Ok(StreamChunk {
-                    text: String::new(),
-                    thinking: None,
-                    is_final: false,
-                    session_id: None,
-                })
-            }
-        }
-        "turn.completed" => Ok(StreamChunk {
-            text: String::new(),
-            thinking: None,
-            is_final: true,
-            session_id: None,
-        }),
-        _ => Ok(StreamChunk {
-            text: String::new(),
-            thinking: None,
-            is_final: false,
-            session_id: None,
-        }),
-    }
-}
-
 impl Agent for Codex {
     fn send(
         &self,
@@ -2551,123 +2489,6 @@ real stderr
             .map(OsStr::to_string_lossy)
             .map(|s| s.into_owned())
             .collect()
-    }
-
-    #[test]
-    fn parse_thread_started() {
-        let line =
-            r#"{"type":"thread.started","thread_id":"019db613-e57b-77d2-844c-9e7dca83ad01"}"#;
-        let chunk = parse_codex_line(line).unwrap();
-        assert_eq!(chunk.text, "");
-        assert!(!chunk.is_final);
-        assert_eq!(
-            chunk.session_id.as_deref(),
-            Some("019db613-e57b-77d2-844c-9e7dca83ad01")
-        );
-    }
-
-    #[test]
-    fn parse_agent_message() {
-        let line = r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"hello world"}}"#;
-        let chunk = parse_codex_line(line).unwrap();
-        assert_eq!(chunk.text, "hello world");
-        assert!(!chunk.is_final);
-        assert!(chunk.session_id.is_none());
-    }
-
-    #[test]
-    fn parse_command_execution() {
-        let line = r#"{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"ls","aggregated_output":"foo\n","exit_code":0,"status":"completed"}}"#;
-        let chunk = parse_codex_line(line).unwrap();
-        assert_eq!(chunk.text, "");
-        assert!(!chunk.is_final);
-    }
-
-    #[test]
-    fn parse_turn_completed() {
-        let line = r#"{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":20}}"#;
-        let chunk = parse_codex_line(line).unwrap();
-        assert!(chunk.is_final);
-        assert_eq!(chunk.text, "");
-    }
-
-    #[test]
-    fn parse_turn_started() {
-        let line = r#"{"type":"turn.started"}"#;
-        let chunk = parse_codex_line(line).unwrap();
-        assert!(!chunk.is_final);
-        assert_eq!(chunk.text, "");
-    }
-
-    #[test]
-    fn parse_item_started() {
-        let line = r#"{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"ls","aggregated_output":"","exit_code":null,"status":"in_progress"}}"#;
-        let chunk = parse_codex_line(line).unwrap();
-        assert!(!chunk.is_final);
-        assert_eq!(chunk.text, "");
-    }
-
-    #[test]
-    fn parse_unknown_event() {
-        let line = r#"{"type":"some.future.event","data":42}"#;
-        let chunk = parse_codex_line(line).unwrap();
-        assert!(!chunk.is_final);
-        assert_eq!(chunk.text, "");
-    }
-
-    #[test]
-    fn parse_malformed_json() {
-        let result = parse_codex_line("not json");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn parse_agent_message_missing_text() {
-        let line = r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message"}}"#;
-        let chunk = parse_codex_line(line).unwrap();
-        assert_eq!(chunk.text, "");
-        assert!(!chunk.is_final);
-    }
-
-    #[test]
-    fn stream_iterator_propagates_session_id_to_final() {
-        // Simulate the iterator behavior: session_id from thread.started
-        // should appear on the final (turn.completed) chunk
-        let lines = vec![
-            r#"{"type":"thread.started","thread_id":"abc-123"}"#,
-            r#"{"type":"turn.started"}"#,
-            r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"hi"}}"#,
-            r#"{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}"#,
-        ];
-
-        // Parse individually and verify the propagation logic
-        let mut session_id: Option<String> = None;
-        let mut chunks: Vec<StreamChunk> = Vec::new();
-
-        for line in &lines {
-            let mut chunk = parse_codex_line(line).unwrap();
-            if chunk.session_id.is_some() && !chunk.is_final {
-                session_id = chunk.session_id.take();
-            }
-            if chunk.is_final {
-                chunk.session_id = session_id.take();
-            }
-            // Filter same as iterator: skip empty non-final
-            if !chunk.is_final
-                && chunk.text.is_empty()
-                && chunk.thinking.is_none()
-                && chunk.session_id.is_none()
-            {
-                continue;
-            }
-            chunks.push(chunk);
-        }
-
-        assert_eq!(chunks.len(), 2);
-        assert_eq!(chunks[0].text, "hi");
-        assert!(!chunks[0].is_final);
-        assert!(chunks[1].is_final);
-        assert_eq!(chunks[1].session_id.as_deref(), Some("abc-123"));
     }
 
     #[test]

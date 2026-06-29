@@ -69,11 +69,11 @@ use crate::{
 use agent_doc_diff as diff;
 use agent_doc_orchestration::{
     agent,
-    agent::streaming::StreamChunk,
     config::{AgentConfig, Config},
     preflight::PreflightOutput,
     snapshot, write,
 };
+use agent_doc_turn_executor::agent_stream::StreamChunk;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum OrchestrateMode {

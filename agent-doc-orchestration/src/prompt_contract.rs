@@ -67,14 +67,6 @@ pub fn prompt_requests_backlog_work(
         .any(|text| text_requests_backlog_work(text))
 }
 
-pub fn prompt_targets_reference_preset(
-    prompt_targets: &[String],
-    prompt_presets: &IndexMap<String, String>,
-    preset_name: &str,
-) -> bool {
-    effective_prompt_references_preset(prompt_targets, &[], prompt_presets, preset_name)
-}
-
 pub fn requested_prompt_presets(
     prompt_targets: &[String],
     added_diff_lines: &[String],
@@ -716,26 +708,6 @@ mod tests {
                     .to_string(),
             ],
             &presets
-        ));
-    }
-
-    #[test]
-    fn prompt_targets_reference_preset_only_considers_prompt_targets() {
-        let presets = IndexMap::from([(
-            "#agent-doc-bug".to_string(),
-            "Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/bugs.md"
-                .to_string(),
-        )]);
-
-        assert!(prompt_targets_reference_preset(
-            &["Please report this agent-doc missing feature. #agent-doc-bug".to_string()],
-            &presets,
-            "#agent-doc-bug",
-        ));
-        assert!(!prompt_targets_reference_preset(
-            &["do #pbct. spec-test-build-install-commit-push".to_string()],
-            &presets,
-            "#agent-doc-bug",
         ));
     }
 

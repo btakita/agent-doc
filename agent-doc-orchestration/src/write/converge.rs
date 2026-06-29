@@ -5,8 +5,8 @@ use super::*;
 use agent_doc_document_realtime::write_policy::live_prompt_drift_auto_recovery_safe;
 use agent_doc_document_realtime::write_policy::{
     AckMismatchRecovery, classify_ack_mismatch_recovery,
-    exchange_change_is_safe_historical_reduction, live_prompt_drift_recovery_target,
-    snapshot_contains_dropped_prompt,
+    classify_safe_out_of_band_agent_doc_mutation, exchange_change_is_safe_historical_reduction,
+    live_prompt_drift_recovery_target, snapshot_contains_dropped_prompt,
 };
 
 pub(crate) fn stale_snapshot_reset_drift(
@@ -24,9 +24,7 @@ pub(crate) fn stale_snapshot_reset_drift(
     if current_len as f64 / snapshot_len as f64 >= STALE_SNAPSHOT_RESET_DRIFT_MAX_RATIO {
         return None;
     }
-    if crate::git::classify_safe_out_of_band_agent_doc_mutation(&snapshot_clean, &current_clean)
-        .is_some()
-    {
+    if classify_safe_out_of_band_agent_doc_mutation(&snapshot_clean, &current_clean).is_some() {
         return None;
     }
 

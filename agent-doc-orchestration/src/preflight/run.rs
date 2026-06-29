@@ -871,7 +871,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         );
     }
     let prompt_targets =
-        crate::flow::session_cycle::prompt_targets_from_changes(&prompt_bearing_changes);
+        agent_doc_workflow::session_cycle::prompt_targets_from_changes(&prompt_bearing_changes);
     let directive_target_ids =
         agent_doc_queue::queue_directive::do_directive_target_ids(&prompt_targets);
     let checkpoint_queue_task_id = directive_target_ids.first().map(String::as_str);

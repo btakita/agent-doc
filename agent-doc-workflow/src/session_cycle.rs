@@ -1,0 +1,333 @@
+use indexmap::IndexMap;
+use std::collections::{HashSet, VecDeque};
+use std::path::Path;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionExecutionScope {
+    Normal,
+    PlanBacklogOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FinalizePendingMutationKind {
+    ResolveExisting,
+    ExpectAdd,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct FinalizePendingMutation<'a> {
+    pub kind: FinalizePendingMutationKind,
+    pub id: &'a str,
+    pub target_files: &'a [String],
+}
+
+pub fn prompt_targets_from_changes(changes: &[agent_doc_diff::PromptBearingChange]) -> Vec<String> {
+    changes
+        .iter()
+        .filter(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget)
+        .map(|change| change.text.clone())
+        .collect()
+}
+
+pub fn classify_execution_scope(
+    prompt_targets: &[String],
+    added_diff_lines: &[String],
+    harness_prompt_only: bool,
+    prompt_presets: &IndexMap<String, String>,
+) -> SessionExecutionScope {
+    let agent_doc_bug_requested =
+        prompt_targets_reference_preset(prompt_targets, prompt_presets, "#agent-doc-bug")
+            || harness_prompt_only
+                && prompt_targets_reference_preset(
+                    added_diff_lines,
+                    prompt_presets,
+                    "#agent-doc-bug",
+                );
+    if agent_doc_bug_requested {
+        SessionExecutionScope::PlanBacklogOnly
+    } else {
+        SessionExecutionScope::Normal
+    }
+}
+
+pub fn finalize_command(
+    file: &Path,
+    mode: agent_doc_frontmatter::frontmatter::ResolvedMode,
+    pending_mutations: &[FinalizePendingMutation<'_>],
+) -> String {
+    let mut finalize = format!(
+        "agent-doc finalize {} --baseline-file <preflight.baseline_file> --origin skill",
+        file.display()
+    );
+    for mutation in pending_mutations
+        .iter()
+        .filter(|mutation| mutation.kind == FinalizePendingMutationKind::ResolveExisting)
+    {
+        finalize.push_str(" --done ");
+        finalize.push_str(mutation.id);
+    }
+    for mutation in pending_mutations
+        .iter()
+        .filter(|mutation| mutation.kind == FinalizePendingMutationKind::ExpectAdd)
+    {
+        for target in mutation.target_files {
+            finalize.push_str(" --pending-add-to ");
+            finalize.push_str(target);
+            finalize.push_str(" \"<item>\"");
+        }
+    }
+    if mode.is_crdt() {
+        finalize.push_str(" --stream");
+    } else if mode.is_template() {
+        finalize.push_str(" --template");
+    }
+    finalize
+}
+
+fn prompt_targets_reference_preset(
+    prompt_targets: &[String],
+    prompt_presets: &IndexMap<String, String>,
+    preset_name: &str,
+) -> bool {
+    effective_prompt_texts(prompt_targets, &[], prompt_presets)
+        .iter()
+        .any(|text| {
+            referenced_presets_in_text(text, prompt_presets)
+                .iter()
+                .any(|preset| preset == preset_name)
+        })
+}
+
+fn effective_prompt_texts(
+    prompt_targets: &[String],
+    added_diff_lines: &[String],
+    prompt_presets: &IndexMap<String, String>,
+) -> Vec<String> {
+    let mut queue = prompt_targets.iter().cloned().collect::<VecDeque<_>>();
+    queue.extend(added_diff_lines.iter().cloned());
+    let mut seen_presets = HashSet::new();
+    let mut texts = Vec::new();
+
+    while let Some(text) = queue.pop_front() {
+        let text = without_prompt_preset_definition_lines(&text, prompt_presets);
+        if text.trim().is_empty() {
+            continue;
+        }
+
+        texts.push(text.clone());
+        for preset in referenced_presets_in_text(&text, prompt_presets) {
+            if seen_presets.insert(preset.clone())
+                && let Some(body) = prompt_presets.get(&preset)
+            {
+                queue.push_back(body.clone());
+            }
+        }
+    }
+
+    texts
+}
+
+fn referenced_presets_in_text(
+    text: &str,
+    prompt_presets: &IndexMap<String, String>,
+) -> Vec<String> {
+    let mut referenced = Vec::new();
+
+    for line in text.lines() {
+        if line_defines_prompt_preset(line, prompt_presets) {
+            continue;
+        }
+
+        for preset in agent_doc_diff::extract_prompt_preset_requests_from_text(line) {
+            if let Some(preset) = agent_doc_frontmatter::frontmatter::resolve_prompt_preset_key(
+                prompt_presets,
+                &preset,
+            ) && !referenced.iter().any(|existing| existing == &preset)
+            {
+                referenced.push(preset);
+            }
+        }
+
+        for token in extract_hashtag_tokens(line) {
+            if prompt_presets.contains_key(token.as_str())
+                && !referenced.iter().any(|existing| existing == &token)
+            {
+                referenced.push(token);
+            }
+        }
+    }
+
+    referenced
+}
+
+fn without_prompt_preset_definition_lines(
+    text: &str,
+    prompt_presets: &IndexMap<String, String>,
+) -> String {
+    text.lines()
+        .filter(|line| !line_defines_prompt_preset(line, prompt_presets))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn line_defines_prompt_preset(line: &str, prompt_presets: &IndexMap<String, String>) -> bool {
+    let trimmed = line.trim_start();
+    prompt_presets
+        .keys()
+        .any(|preset| line_starts_with_yaml_key(trimmed, preset))
+}
+
+fn line_starts_with_yaml_key(line: &str, key: &str) -> bool {
+    if let Some(rest) = line.strip_prefix(key) {
+        return rest.trim_start().starts_with(':');
+    }
+
+    for quote in ['\'', '"'] {
+        let Some(rest) = line.strip_prefix(quote) else {
+            continue;
+        };
+        let Some(rest) = rest.strip_prefix(key) else {
+            continue;
+        };
+        let Some(rest) = rest.strip_prefix(quote) else {
+            continue;
+        };
+        if rest.trim_start().starts_with(':') {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn extract_hashtag_tokens(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let chars = text.char_indices().collect::<Vec<_>>();
+    let mut idx = 0usize;
+
+    while idx < chars.len() {
+        let (byte_idx, ch) = chars[idx];
+        if ch != '#' {
+            idx += 1;
+            continue;
+        }
+
+        let start = byte_idx;
+        let mut end = start + ch.len_utf8();
+        let mut cursor = idx + 1;
+        while cursor < chars.len() {
+            let (next_byte, next_ch) = chars[cursor];
+            if next_ch.is_ascii_alphanumeric() || next_ch == '-' || next_ch == '_' {
+                end = next_byte + next_ch.len_utf8();
+                cursor += 1;
+                continue;
+            }
+            break;
+        }
+
+        if end > start + 1 {
+            let token = text[start..end].to_string();
+            if !tokens.iter().any(|existing| existing == &token) {
+                tokens.push(token);
+            }
+        }
+        idx = cursor;
+    }
+
+    tokens
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prompt_change(text: &str) -> agent_doc_diff::PromptBearingChange {
+        agent_doc_diff::PromptBearingChange {
+            kind: agent_doc_diff::PromptBearingChangeKind::PromptTarget,
+            text: text.to_string(),
+        }
+    }
+
+    #[test]
+    fn prompt_targets_keep_prompt_target_order() {
+        let changes = vec![prompt_change("first"), prompt_change("second")];
+
+        assert_eq!(
+            prompt_targets_from_changes(&changes),
+            vec!["first".to_string(), "second".to_string()]
+        );
+    }
+
+    #[test]
+    fn classify_execution_scope_keeps_agent_doc_bug_plan_only() {
+        let mut presets = IndexMap::new();
+        presets.insert(
+            "#agent-doc-bug".to_string(),
+            "Please create a plan.".to_string(),
+        );
+
+        let scope = classify_execution_scope(
+            &["#agent-doc-bug\nBroken flow".to_string()],
+            &[],
+            false,
+            &presets,
+        );
+
+        assert_eq!(scope, SessionExecutionScope::PlanBacklogOnly);
+    }
+
+    #[test]
+    fn classify_execution_scope_uses_harness_only_added_diff_lines() {
+        let mut presets = IndexMap::new();
+        presets.insert(
+            "#agent-doc-bug".to_string(),
+            "Please create a plan.".to_string(),
+        );
+
+        assert_eq!(
+            classify_execution_scope(
+                &[],
+                &["Please inspect #agent-doc-bug".to_string()],
+                true,
+                &presets,
+            ),
+            SessionExecutionScope::PlanBacklogOnly
+        );
+        assert_eq!(
+            classify_execution_scope(
+                &[],
+                &["Please inspect #agent-doc-bug".to_string()],
+                false,
+                &presets,
+            ),
+            SessionExecutionScope::Normal
+        );
+    }
+
+    #[test]
+    fn finalize_command_includes_done_flags_and_stream_mode() {
+        let targets = vec!["tasks/bugs.md".to_string()];
+        let pending = vec![
+            FinalizePendingMutation {
+                kind: FinalizePendingMutationKind::ResolveExisting,
+                id: "abc1",
+                target_files: &[],
+            },
+            FinalizePendingMutation {
+                kind: FinalizePendingMutationKind::ExpectAdd,
+                id: "",
+                target_files: &targets,
+            },
+        ];
+        let mode = agent_doc_frontmatter::frontmatter::ResolvedMode {
+            format: agent_doc_frontmatter::frontmatter::AgentDocFormat::Template,
+            write: agent_doc_frontmatter::frontmatter::AgentDocWrite::Crdt,
+        };
+
+        let command = finalize_command(Path::new("tasks/doc.md"), mode, &pending);
+
+        assert!(command.contains("--done abc1"));
+        assert!(command.contains("--pending-add-to tasks/bugs.md \"<item>\""));
+        assert!(command.ends_with(" --stream"));
+    }
+}

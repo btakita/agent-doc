@@ -1042,7 +1042,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let hot_paths = [
         "agent-doc-orchestration/src/git.rs",
-        "agent-doc-orchestration/src/git/safe_mutation.rs",
+        "agent-doc-document-realtime/src/write_policy.rs",
         "agent-doc-orchestration/src/git/normalize.rs",
         "agent-doc-orchestration/src/git/dirs.rs",
         "src/orchestrate.rs",
@@ -1127,6 +1127,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // with `CloseoutGuardReason::ReplicaDeliveryPending`, blocking stale
         // already-current/pre-stage commits until editor delivery is proven.
         ("agent-doc-orchestration/src/git.rs", "guard_") => 20,
+        // #safe-mutation-extract: safe out-of-band mutation classification moved
+        // into the focused realtime write policy crate. The four `guard_` tokens
+        // are the existing transient marker stripper name/call plus two policy
+        // unit-test names, not new orchestration guard boundaries.
+        ("agent-doc-document-realtime/src/write_policy.rs", "guard_") => 4,
         ("agent-doc-orchestration/src/git/normalize.rs", "guard_") => 1,
         // `#pcwcrt`: the legacy post-commit working-tree revert tower
         // (`postcommit_worktree_lost_committed_content` / `send_postcommit_editor_refresh`
@@ -2378,6 +2383,129 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
             && codex_hook.contains("clear_decision")
             && codex_hook.contains("Harness"),
         "codex hook should use focused context usage policy directly"
+    );
+}
+
+#[test]
+fn test_agent_doc_prompt_cache_owns_prompt_cache_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let package_version = workspace["package"]["version"].as_str();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-prompt-cache")),
+        "agent-doc-prompt-cache must stay a first-class workspace crate"
+    );
+
+    let prompt_cache_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-cache/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "pub const PROMPT_CACHE_BOUNDARY",
+        "pub const PROMPT_CACHE_CONTROL",
+        "pub struct PromptCacheBlocks",
+        "pub struct PromptCacheReplayKey",
+        "pub struct PromptCacheSessionCostSample",
+        "pub struct PromptCacheEffectivenessSample",
+        "pub struct PromptCacheMissCause",
+        "pub struct PromptCacheTrendThresholds",
+        "pub enum PromptCacheTrendStatus",
+        "pub struct PromptCacheTrendCheck",
+        "pub fn render_prompt_cache_blocks",
+        "pub fn rank_cache_miss_causes",
+        "pub fn check_prompt_cache_effectiveness_trend",
+        "pub fn render_cache_miss_ranking",
+    ] {
+        assert!(
+            prompt_cache_source.contains(required_snippet),
+            "prompt-cache policy crate must own {required_snippet}"
+        );
+    }
+
+    let prompt_cache_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-cache/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&prompt_cache_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    assert!(dependencies.contains_key("serde"));
+    assert!(dependencies.contains_key("sha2"));
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-prompt-cache must stay free of core, orchestration, git, editor IPC, sqlite, or tmux crates"
+        );
+    }
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    let dependency = orchestration_dependencies["agent-doc-prompt-cache"]
+        .as_table()
+        .unwrap();
+    assert_eq!(
+        dependency.get("path").and_then(toml::Value::as_str),
+        Some("../agent-doc-prompt-cache")
+    );
+    assert_eq!(
+        dependency.get("version").and_then(toml::Value::as_str),
+        package_version
+    );
+
+    let orchestration_prompt_cache =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt_cache.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub use agent_doc_prompt_cache",
+        "pub const PROMPT_CACHE_BOUNDARY",
+        "pub const PROMPT_CACHE_CONTROL",
+        "pub struct PromptCacheBlocks",
+        "pub struct PromptCacheReplayKey",
+        "pub struct PromptCacheSessionCostSample",
+        "pub struct PromptCacheEffectivenessSample",
+        "pub struct PromptCacheMissCause",
+        "pub struct PromptCacheTrendThresholds",
+        "pub enum PromptCacheTrendStatus",
+        "pub struct PromptCacheTrendCheck",
+        "pub fn render_prompt_cache_blocks",
+        "pub fn rank_cache_miss_causes",
+        "pub fn check_prompt_cache_effectiveness_trend",
+        "pub fn render_cache_miss_ranking",
+        "fn cached_input_loss",
+        "fn creation_token_spike",
+        "fn content_sha256",
+    ] {
+        assert!(
+            !orchestration_prompt_cache.contains(forbidden_snippet),
+            "orchestration must not define or re-export prompt-cache policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        orchestration_prompt_cache.contains("append_prompt_cache_effectiveness_sample"),
+        "orchestration may keep prompt-cache history file IO adapters"
+    );
+
+    let run_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    assert!(
+        run_source.contains("use agent_doc_prompt_cache::{"),
+        "run.rs should import focused prompt-cache APIs directly"
+    );
+    assert!(
+        !run_source.contains("crate::prompt_cache::PromptCache")
+            && !run_source.contains("crate::prompt_cache::PROMPT_CACHE")
+            && !run_source.contains("crate::prompt_cache::render_cache_miss_ranking"),
+        "run.rs must not route pure prompt-cache policy through orchestration"
     );
 }
 
@@ -3651,6 +3779,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/lib.rs")).unwrap();
     for required in [
         "pub mod invariants;",
+        "pub mod session_cycle;",
         "pub enum WorkflowEvidenceKind",
         "pub enum WorkflowProof",
         "pub enum WorkflowMutation",
@@ -3664,6 +3793,21 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         assert!(
             workflow_source.contains(required),
             "agent-doc-workflow must own workflow kernel policy: {required}"
+        );
+    }
+    let session_cycle_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/session_cycle.rs")).unwrap();
+    for required in [
+        "pub enum SessionExecutionScope",
+        "pub enum FinalizePendingMutationKind",
+        "pub struct FinalizePendingMutation",
+        "pub fn prompt_targets_from_changes",
+        "pub fn classify_execution_scope",
+        "pub fn finalize_command",
+    ] {
+        assert!(
+            session_cycle_policy.contains(required),
+            "agent-doc-workflow must own session-cycle workflow policy: {required}"
         );
     }
     let workflow_invariants =
@@ -3692,6 +3836,28 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         !flow_mod.contains("pub mod workflow_invariants"),
         "orchestration must not expose a workflow_invariants facade"
     );
+    for forbidden in [
+        "pub use agent_doc_workflow::session_cycle",
+        "SessionExecutionScope",
+        "FinalizePendingMutation",
+    ] {
+        assert!(
+            !flow_mod.contains(forbidden),
+            "orchestration flow module must not re-export session-cycle workflow policy: {forbidden}"
+        );
+    }
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    for forbidden in [
+        "pub use agent_doc_workflow::session_cycle",
+        "SessionExecutionScope",
+        "FinalizePendingMutation",
+    ] {
+        assert!(
+            !orchestration_lib.contains(forbidden),
+            "orchestration lib must not re-export session-cycle workflow policy: {forbidden}"
+        );
+    }
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/flow/workflow_state.rs")
@@ -3703,6 +3869,51 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
             .join("agent-doc-orchestration/src/flow/workflow_invariants.rs")
             .exists(),
         "orchestration must not keep a workflow_invariants module after extraction"
+    );
+    let orchestration_session_cycle =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/session_cycle.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub enum SessionExecutionScope",
+        "pub enum FinalizePendingMutationKind",
+        "pub struct FinalizePendingMutation",
+        "pub fn prompt_targets_from_changes",
+        "pub fn classify_execution_scope",
+        "pub fn finalize_command",
+        "pub use agent_doc_workflow::session_cycle",
+        "agent_doc_workflow::session_cycle::SessionExecutionScope",
+        "agent_doc_workflow::session_cycle::FinalizePendingMutation",
+    ] {
+        assert!(
+            !orchestration_session_cycle.contains(forbidden),
+            "orchestration must not define or re-export session-cycle workflow policy: {forbidden}"
+        );
+    }
+    let preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    assert!(
+        preflight_run.contains("agent_doc_workflow::session_cycle::prompt_targets_from_changes"),
+        "preflight should call focused session-cycle workflow policy directly"
+    );
+    let plan_source = fs::read_to_string(manifest_dir.join("src/plan.rs")).unwrap();
+    assert!(
+        plan_source.contains("use agent_doc_workflow::session_cycle::{")
+            && plan_source.contains("classify_execution_scope")
+            && plan_source.contains("finalize_command")
+            && plan_source.contains("prompt_targets_from_changes"),
+        "plan.rs should call focused session-cycle workflow policy directly"
+    );
+    assert!(
+        !plan_source.contains("agent_doc_orchestration::flow::session_cycle::"),
+        "plan.rs must not route session-cycle workflow policy through orchestration"
+    );
+    let prompt_contract =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt_contract.rs"))
+            .unwrap();
+    assert!(
+        !prompt_contract.contains("pub fn prompt_targets_reference_preset"),
+        "orchestration must not keep a public preset-reference facade for session-cycle policy"
     );
     for relative_path in [
         "agent-doc-orchestration/src/doctor.rs",
@@ -3723,16 +3934,23 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         .and_then(toml::Value::as_table)
         .cloned()
         .unwrap_or_default();
-    for expected in ["serde", "serde_json"] {
+    for expected in [
+        "agent-doc-diff",
+        "agent-doc-frontmatter",
+        "indexmap",
+        "serde",
+        "serde_json",
+    ] {
         assert!(
             dependencies.contains_key(expected),
-            "agent-doc-workflow invariant catalog may use serialization dependency: {expected}"
+            "agent-doc-workflow may use focused pure-policy dependency: {expected}"
         );
     }
     assert!(
-        dependencies
-            .keys()
-            .all(|dependency| matches!(dependency.as_str(), "serde" | "serde_json")),
+        dependencies.keys().all(|dependency| matches!(
+            dependency.as_str(),
+            "agent-doc-diff" | "agent-doc-frontmatter" | "indexmap" | "serde" | "serde_json"
+        )),
         "agent-doc-workflow should remain pure and free of orchestration, git, editor IPC, sqlite, or tmux dependencies"
     );
 }
@@ -5155,6 +5373,9 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     let executor_codex_launch =
         fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/codex_launch.rs"))
             .unwrap();
+    let executor_agent_stream =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/agent_stream.rs"))
+            .unwrap();
     for required_snippet in [
         "pub struct ManagedProofPolicy",
         "pub struct ManagedProofPolicyInputs",
@@ -5188,6 +5409,16 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         assert!(
             executor_codex_launch.contains(required_snippet),
             "agent-doc-turn-executor should own Codex resume launch policy directly: {required_snippet}"
+        );
+    }
+    for required_snippet in [
+        "pub struct StreamChunk",
+        "pub fn parse_stream_line(",
+        "pub fn parse_codex_line(",
+    ] {
+        assert!(
+            executor_agent_stream.contains(required_snippet),
+            "agent-doc-turn-executor should own agent stream parsing directly: {required_snippet}"
         );
     }
 
@@ -5271,6 +5502,39 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             "agent_doc_turn_executor::capability_proof::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT"
         ),
         "codex probe tests should use the focused capability-proof defaults directly"
+    );
+    let streaming =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/streaming.rs"))
+            .unwrap();
+    let claude =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/claude.rs"))
+            .unwrap();
+    let stream =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/stream.rs")).unwrap();
+    for (name, source) in [
+        ("agent/streaming.rs", streaming.as_str()),
+        ("agent/codex.rs", codex.as_str()),
+    ] {
+        for forbidden_snippet in [
+            "pub struct StreamChunk",
+            "pub fn parse_stream_line(",
+            "pub fn parse_codex_line(",
+            "pub use",
+        ] {
+            assert!(
+                !source.contains(forbidden_snippet),
+                "{name} must not define or reexport focused stream parser API: {forbidden_snippet}"
+            );
+        }
+    }
+    assert!(
+        streaming.contains("use agent_doc_turn_executor::agent_stream::StreamChunk;")
+            && claude.contains("agent_doc_turn_executor::agent_stream::{")
+            && claude.contains("parse_stream_line")
+            && codex.contains("agent_doc_turn_executor::agent_stream::{")
+            && codex.contains("parse_codex_line")
+            && stream.contains("use agent_doc_turn_executor::agent_stream::StreamChunk;"),
+        "orchestration should call focused agent stream parsing/chunk APIs directly"
     );
 
     let executor_manifest =
@@ -6197,6 +6461,57 @@ fn test_agent_doc_document_realtime_owns_ack_mismatch_policy() {
         converge_source.contains("agent_doc_document_realtime::write_policy::{")
             && converge_source.contains("classify_ack_mismatch_recovery("),
         "write::converge should call the focused realtime ACK-mismatch policy directly"
+    );
+}
+
+#[test]
+fn test_agent_doc_document_realtime_owns_safe_mutation_classification() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let realtime_write_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/write_policy.rs"))
+            .unwrap();
+    for required_snippet in [
+        "pub fn classify_safe_out_of_band_agent_doc_mutation",
+        "pub fn classify_committed_historical_agent_doc_mutation",
+        "pub fn detect_reintroduced_reaped_pending_ids",
+        "pub fn is_empty_template_scaffold_snapshot",
+        "pub fn is_safe_user_follow_up_exchange_growth",
+    ] {
+        assert!(
+            realtime_write_policy.contains(required_snippet),
+            "agent-doc-document-realtime must own safe mutation classification: {required_snippet}"
+        );
+    }
+
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/git/safe_mutation.rs")
+            .exists(),
+        "agent-doc-orchestration must not keep a safe_mutation policy module"
+    );
+
+    let git_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    for forbidden_snippet in [
+        "mod safe_mutation",
+        "pub use safe_mutation",
+        "fn classify_safe_out_of_band_agent_doc_mutation",
+        "fn classify_committed_historical_agent_doc_mutation(",
+        "classify_committed_historical_agent_doc_mutation_policy",
+        "fn detect_reintroduced_reaped_pending_ids",
+        "fn is_empty_template_scaffold_snapshot",
+        "fn is_safe_user_follow_up_exchange_growth",
+    ] {
+        assert!(
+            !git_source.contains(forbidden_snippet),
+            "git.rs must not define or reexport safe mutation classification: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        git_source.contains("agent_doc_document_realtime::write_policy::{")
+            && git_source.contains("classify_safe_out_of_band_agent_doc_mutation")
+            && git_source.contains("classify_committed_historical_agent_doc_mutation"),
+        "git.rs should call the focused realtime safe mutation policy directly"
     );
 }
 

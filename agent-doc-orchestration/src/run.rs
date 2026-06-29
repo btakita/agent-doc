@@ -123,6 +123,11 @@ use agent_doc_element::element;
 
 use agent_doc_diff as diff;
 use agent_doc_frontmatter::frontmatter;
+#[cfg(test)]
+use agent_doc_prompt_cache::{PROMPT_CACHE_BOUNDARY, PROMPT_CACHE_CONTROL};
+use agent_doc_prompt_cache::{
+    PromptCacheBlocks, PromptCacheSessionCostSample, render_cache_miss_ranking,
+};
 use agent_doc_template as template;
 
 use crate::{
@@ -595,17 +600,15 @@ fn run_once(
         eprintln!("--- Diff ---");
         print!("{}", the_diff);
         eprintln!("--- Prompt would be {} bytes ---", prompt.len());
-        if let Some(blocks) = crate::prompt_cache::PromptCacheBlocks::from_rendered(&prompt) {
+        if let Some(blocks) = PromptCacheBlocks::from_rendered(&prompt) {
             let replay_key = blocks.replay_key(&prompt_cache_routing_affinity);
             let adapter_state = if prompt_fm.resume.is_some() {
                 "resumed"
             } else {
                 "fresh"
             };
-            let current_cost = crate::prompt_cache::PromptCacheSessionCostSample::from_replay_key(
-                &replay_key,
-                adapter_state,
-            );
+            let current_cost =
+                PromptCacheSessionCostSample::from_replay_key(&replay_key, adapter_state);
             eprintln!(
                 "--- Prompt cache stable_prefix_sha256={} provider_cache_key={} cache_control={} routing_affinity={} ---",
                 replay_key.stable_prefix_sha256,
@@ -615,7 +618,7 @@ fn run_once(
             );
             eprintln!(
                 "--- Prompt cache session_cost {} ---",
-                crate::prompt_cache::render_cache_miss_ranking(None, &current_cost)
+                render_cache_miss_ranking(None, &current_cost)
             );
         }
         return Ok(RunCycleOutcome {
@@ -1720,7 +1723,7 @@ fn build_prompt(
     let stable_prefix = build_prompt_stable_prefix(run_mode);
     let volatile_suffix =
         build_prompt_volatile_suffix(file, run_mode, fm, the_diff, content, session_accretion);
-    crate::prompt_cache::PromptCacheBlocks::new(stable_prefix, volatile_suffix).render()
+    PromptCacheBlocks::new(stable_prefix, volatile_suffix).render()
 }
 
 fn prompt_cache_routing_affinity(
@@ -2651,7 +2654,7 @@ mod tests {
             Some(&report),
         );
         let boundary = prompt
-            .find(crate::prompt_cache::PROMPT_CACHE_BOUNDARY)
+            .find(PROMPT_CACHE_BOUNDARY)
             .expect("direct-run prompt should expose cache boundary");
         for volatile in [
             "<diff>",
@@ -2713,7 +2716,7 @@ old status\n\
             doc,
             Some(&report),
         );
-        let boundary = crate::prompt_cache::PROMPT_CACHE_BOUNDARY;
+        let boundary = PROMPT_CACHE_BOUNDARY;
         let (stable, volatile) = prompt
             .split_once(boundary)
             .expect("direct-run prompt should expose cache boundary");
@@ -2826,25 +2829,22 @@ old status\n\
 
         let routing_affinity =
             prompt_cache_routing_affinity(RunMode::Template, "codex", Some("gpt-5"));
-        let base_key = crate::prompt_cache::PromptCacheBlocks::from_rendered(&base_prompt)
+        let base_key = PromptCacheBlocks::from_rendered(&base_prompt)
             .expect("template prompt should expose prompt-cache blocks")
             .replay_key(&routing_affinity);
-        let churn_key = crate::prompt_cache::PromptCacheBlocks::from_rendered(&churn_prompt)
+        let churn_key = PromptCacheBlocks::from_rendered(&churn_prompt)
             .expect("churn prompt should expose prompt-cache blocks")
             .replay_key(&routing_affinity);
 
         assert_eq!(base_key, churn_key);
-        assert_eq!(
-            base_key.cache_control,
-            crate::prompt_cache::PROMPT_CACHE_CONTROL
-        );
+        assert_eq!(base_key.cache_control, PROMPT_CACHE_CONTROL);
         assert_eq!(
             base_key.routing_affinity,
             "agent_doc_run:v1;agent=codex;model=gpt-5;mode=template"
         );
 
         let churn_boundary = churn_prompt
-            .find(crate::prompt_cache::PROMPT_CACHE_BOUNDARY)
+            .find(PROMPT_CACHE_BOUNDARY)
             .expect("prompt-cache boundary should be present");
         for volatile in [
             "working",
@@ -2869,10 +2869,9 @@ old status\n\
             base_doc,
             Some(&report),
         );
-        let append_same_route_key =
-            crate::prompt_cache::PromptCacheBlocks::from_rendered(&append_prompt)
-                .expect("append prompt should expose prompt-cache blocks")
-                .replay_key(&base_key.routing_affinity);
+        let append_same_route_key = PromptCacheBlocks::from_rendered(&append_prompt)
+            .expect("append prompt should expose prompt-cache blocks")
+            .replay_key(&base_key.routing_affinity);
         assert_eq!(
             append_same_route_key.routing_affinity,
             base_key.routing_affinity

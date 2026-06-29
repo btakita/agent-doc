@@ -11,6 +11,7 @@ members = [
     "agent-doc-topic",
     "agent-doc-fs",
     "agent-doc-model-tier",
+    "agent-doc-prompt-cache",
     "agent-doc-secret-redact",
     "agent-doc-element",
     "agent-doc-element-backlog",
@@ -93,6 +94,7 @@ agent-doc-supervisor = { path = "agent-doc-supervisor", version = "0.34.65" }
 agent-doc-template = { path = "agent-doc-template", version = "0.34.65" }
 agent-doc-tmux-commands = { path = "agent-doc-tmux-commands", version = "0.34.65" }
 agent-doc-turn = { path = "agent-doc-turn", version = "0.34.65" }
+agent-doc-turn-executor = { path = "agent-doc-turn-executor", version = "0.34.65" }
 agent-doc-workflow = { path = "agent-doc-workflow", version = "0.34.65" }
 agent-doc-work-graph = { path = "agent-doc-work-graph", version = "0.34.65" }
 anyhow = "1"

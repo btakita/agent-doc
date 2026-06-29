@@ -6,11 +6,26 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.65
 
+- **Prompt-cache policy moved to `agent-doc-prompt-cache`.** Stable-prefix
+  boundary rendering, replay-key construction, prompt-cache effectiveness
+  samples, miss-cause ranking, and trend checks now live in the focused pure
+  crate. Orchestration keeps only JSONL history file adapters, and run prompt
+  assembly imports the focused API directly.
+
+- **Session-cycle workflow policy moved to `agent-doc-workflow`.**
+  `SessionExecutionScope`, finalize pending mutation vocabulary, prompt-target
+  extraction, execution-scope classification, and finalize-command rendering now
+  live in `agent_doc_workflow::session_cycle`. Orchestration keeps only
+  `FlowEvent` adaptation for session-cycle events and imports the focused API
+  directly.
+
 - **Release publish contract fix for `#suprestassoc`.** Supersedes the unpublished `0.34.64` crate attempt by depending on `lazily 0.13.1`, which publishes the `CellTree` / `SemTree` / `TextCrdt` / reconcile API that `agent-doc-core` already used through the local path dependency. The behavior change remains the `restart-supervisor` document-scoped registry lookup described in `0.34.64`; this version is the publishable release artifact.
 
 - **Realtime write/reconnect policy moved to `agent-doc-document-realtime`.** Visible-write idle admission, full-content source proof/replacement rejection, reconnect-buffer reconciliation, and editorless disk fallback decisions now live in `agent_doc_document_realtime::write_policy`. Orchestration keeps only sidecar/editor/git/file adapters and flow-event formatting, and callers import the focused realtime API directly rather than using orchestration facades.
 
 - **Realtime exchange recovery policy moved to `agent-doc-document-realtime`.** Exchange response-block parsing, safe historical exchange-reduction classification, live-prompt-drift recovery target construction, and dropped-prompt containment checks now live in `agent_doc_document_realtime::write_policy`. Orchestration keeps only cycle-state, IPC, snapshot, CRDT, ops-log, and transient-marker normalization adapters.
+
+- **Safe out-of-band mutation classification moved to `agent-doc-document-realtime`.** Agent-doc snapshot/file mutation classification for safe status, exchange, pending/backlog, committed historical exchange drift, reaped pending-id reintroduction, user-follow-up exchange growth, and empty bootstrap scaffold detection now lives in `agent_doc_document_realtime::write_policy`. Orchestration keeps git/snapshot/file/ops-log effects and imports the focused realtime policy directly.
 
 - **CRDT authority policy moved to `agent-doc-document-realtime`.** CRDT
   authority classification, liveness-derived authority selection, sync
@@ -35,6 +50,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   parsing now live in `agent_doc_turn::closeout_guard`. Orchestration keeps only
   `FlowEvent`/ops-log formatting and no longer owns a duplicate closeout state
   vocabulary.
+
+- **Agent streaming output parsing moved to `agent-doc-turn-executor`.** The
+  shared `StreamChunk` type, Claude `stream-json` line parser, and Codex JSONL
+  line parser now live in `agent_doc_turn_executor::agent_stream`. Orchestration
+  keeps only streaming backend adapters and imports the focused parser/chunk APIs
+  directly.
 
 - **Template patchback policy moved to `agent-doc-template`.** Patchback shape vocabulary/classification, marker/component counting, pure parse-plan construction, and the orchestrate patchback contract now live in `agent_doc_template::patchback`. `flow::document_mutation` keeps only file-scoped ops-log and FlowEvent adaptation, while write and orchestration-batch callers use the focused template API directly.
 

@@ -6,6 +6,7 @@
 //! evidence -> decision -> mutation -> proof boundary.
 
 pub mod invariants;
+pub mod session_cycle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum WorkflowEvidenceKind {

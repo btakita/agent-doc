@@ -75,11 +75,12 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::agent::streaming::{StreamChunk, StreamingAgent};
+use crate::agent::streaming::StreamingAgent;
 use agent_doc_diff as diff;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_merge::crdt;
 use agent_doc_template as template;
+use agent_doc_turn_executor::agent_stream::StreamChunk;
 
 use crate::{agent, config::Config, diff_io, git, repair, snapshot, template_io};
 
@@ -632,7 +633,7 @@ fn resolve_streaming(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::streaming::StreamChunk;
+    use agent_doc_turn_executor::agent_stream::StreamChunk;
 
     /// Create a mock chunk iterator from a list of chunks.
     fn mock_chunks(chunks: Vec<StreamChunk>) -> Box<dyn Iterator<Item = Result<StreamChunk>>> {

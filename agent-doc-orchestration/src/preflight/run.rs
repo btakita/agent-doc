@@ -1384,10 +1384,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let queue_continuation_required =
         queue_state.queue_continuation_required && !recycle_yield_pending;
     let queue_continuation_guidance = if recycle_yield_pending {
-        Some(crate::queue_continuation::RECYCLE_YIELD_GUIDANCE.to_string())
+        Some(agent_doc_queue::queue_continuation::RECYCLE_YIELD_GUIDANCE.to_string())
     } else {
         queue_continuation_required.then(|| {
-            crate::queue_continuation::continuation_guidance(
+            agent_doc_queue::queue_continuation::continuation_guidance(
                 queue_state.queue_pause_reason.as_deref(),
             )
         })

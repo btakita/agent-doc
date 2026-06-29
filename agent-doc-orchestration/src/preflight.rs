@@ -484,7 +484,7 @@ pub struct PreflightOutput {
     pub queue_continuation_required: bool,
     /// `#degraded-ipc-no-stall`: explicit non-stall guidance, populated only
     /// when `queue_continuation_required == true`. Centralized in
-    /// [`crate::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE`] so the
+    /// [`agent_doc_queue::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE`] so the
     /// agent has a binary-authoritative "keep draining" signal and does not
     /// re-derive a stop reason by hand from a degraded transport (file-IPC
     /// fallback / stale supervisor), session-accretion, or a

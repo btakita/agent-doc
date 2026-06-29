@@ -197,7 +197,7 @@ pub fn run(file: &Path) -> Result<()> {
 /// `#qpausemix`: the queue-continuation guidance `session-check` prints when
 /// `queue_continuation_required == true`, resolved against the controller pause
 /// state. Reads the effective `admin queue pause` reason and composes the
-/// pause-aware [`crate::queue_continuation::continuation_guidance`] — the SAME
+/// pause-aware [`agent_doc_queue::queue_continuation::continuation_guidance`] — the SAME
 /// single source consumed by the preflight `queue_continuation_guidance` field.
 ///
 /// Printing the bare `CONTINUATION_NO_STALL_GUIDANCE` constant here (the prior
@@ -209,7 +209,7 @@ pub fn run(file: &Path) -> Result<()> {
 /// contradiction" preamble and recorded reason whenever the queue is paused.
 fn continuation_guidance_for(file: &Path) -> String {
     let pause_reason = crate::queue_continuation::document_queue_controller_pause_reason(file);
-    crate::queue_continuation::continuation_guidance(pause_reason.as_deref())
+    agent_doc_queue::queue_continuation::continuation_guidance(pause_reason.as_deref())
 }
 
 fn log_supervisor_drain_handoff(file: &Path, head: &str, outcome_fields: &str) {
@@ -260,7 +260,7 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 );
                 eprintln!(
                     "[session-check] {}",
-                    crate::queue_continuation::RECYCLE_YIELD_GUIDANCE
+                    agent_doc_queue::queue_continuation::RECYCLE_YIELD_GUIDANCE
                 );
                 return Ok(());
             }
@@ -8043,7 +8043,7 @@ Body\n\
         let unpaused = continuation_guidance_for(&doc);
         assert_eq!(
             unpaused,
-            crate::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE,
+            agent_doc_queue::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE,
             "an unpaused queue must print the bare no-stall guidance: {unpaused}"
         );
 
@@ -8064,7 +8064,7 @@ Body\n\
             "paused session-check guidance must surface the recorded reason: {paused}"
         );
         assert!(
-            paused.contains(crate::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE),
+            paused.contains(agent_doc_queue::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE),
             "paused guidance must still preserve the normal no-stall rules: {paused}"
         );
     }

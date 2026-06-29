@@ -37,42 +37,6 @@ pub struct QueueContinuation {
     pub reason: String,
 }
 
-/// Shared non-stall guidance surfaced wherever `queue_continuation_required ==
-/// true`. Centralizing the wording keeps preflight JSON
-/// (`queue_continuation_guidance`) and `session-check` stdout in agreement
-/// (`#degraded-ipc-no-stall`).
-///
-/// The failure this guards against: a `finalize` that reached `committed` +
-/// `session-check ok` through a **proven file-IPC editor fallback** (socket ack
-/// timeouts / a stale or wedged route-owned supervisor) is a *successful*
-/// closeout — the in-session loop does not depend on the socket itself. The
-/// agent must not invent a stop reason from the degraded-but-proven transport.
-/// Unproven IPC (`retry_without_disk_write`, missing response proof, no ack) or
-/// a direct session-document disk fallback is different: it stops the loop until
-/// the editor/CRDT path is retried and proven. The normal closeout states that
-/// stop the loop are a FAILED closeout, an unproven IPC/delivery retry
-/// condition, a `session-check` interruption, or a `lint-gate` block. Degraded
-/// / file-IPC-fallback IPC after proof, high session-accretion, a
-/// `semantic_completion_match` warning, and a `[clean-session]` head wanting
-/// "fresh context" are NOT stop reasons. A stale-binary supervisor is not a
-/// passive keep-going condition either: recycle/yield at the boundary, then
-/// continue on the fresh binary.
-pub const CONTINUATION_NO_STALL_GUIDANCE: &str = "queue continuation required — keep draining after a proven closeout. A closeout that reached committed + session-check ok is successful even via a proven file-IPC editor fallback (socket degraded): the in-session loop does not depend on the socket itself. IPC timeout, missing response proof, recovery=retry_without_disk_write, or recovery=direct_write_fallback are not successful closeouts for an active editor buffer; retry the editor/CRDT path instead of using a direct session-document disk write. Only a failed closeout, unproven IPC/delivery retry condition, session-check interruption, or lint-gate block stops the loop. Degraded IPC after proof, high session-accretion, and semantic_completion_match warnings are NOT stop reasons. A stale-binary supervisor is a recycle/yield concern: follow recycle-yield or stale_install guidance so the supervisor recycles, then continue the drain on the fresh binary.";
-
-/// `#wd40` / `#staleloop-recycle-restart` — guidance surfaced when the route-owned
-/// supervisor is running a stale binary and has asked the in-session loop to YIELD
-/// one inter-item boundary so the supervisor can `execve`-hot-reload onto the
-/// freshly-installed binary.
-///
-/// This is a *temporary, intentional* drop of `queue_continuation_required`, NOT a
-/// drained queue or a stop reason: end the current turn cleanly (do not re-trigger
-/// `agent-doc <FILE>`); the resulting idle boundary lets the stale supervisor
-/// recycle, and the drain resumes automatically on the fresh binary. Releasing the
-/// drain-owner lease (`agent-doc drain-claim <FILE> --release`) hands the drain
-/// back to the freshly-recycled supervisor immediately instead of waiting for the
-/// lease TTL.
-pub const RECYCLE_YIELD_GUIDANCE: &str = "supervisor recycle pending — the route-owned supervisor is running a STALE agent-doc binary and has asked this loop to YIELD one boundary so it can hot-reload onto the freshly-installed binary. This is intentional and temporary, NOT a drained queue or a stop reason. End this turn cleanly (do NOT re-trigger agent-doc <FILE>); the idle boundary lets the stale supervisor execve-recycle and the drain resumes automatically on the fresh binary. Optionally run `agent-doc drain-claim <FILE> --release` to hand the drain back to the recycled supervisor immediately rather than waiting for the lease TTL. Do not run `make install` / `admin recycle` by hand — the supervisor now automates the recycle once you yield.";
-
 /// Detect whether `file` currently requires queue continuation.
 ///
 /// True only when: frontmatter `queue_active: true`,
@@ -102,7 +66,8 @@ pub fn detect(file: &Path) -> Result<Option<QueueContinuation>> {
     // loop ends its turn. The idle boundary lets the `execve` recycle fire; the
     // fresh supervisor clears the request and the drain resumes. This is a
     // *temporary* yield (the request is short-TTL and cleared post-recycle), not a
-    // drained queue — surfaces are expected to print [`RECYCLE_YIELD_GUIDANCE`].
+    // drained queue — surfaces are expected to print
+    // [`agent_doc_queue::queue_continuation::RECYCLE_YIELD_GUIDANCE`].
     // The supervisor's OWN idle-watch drain uses `live_drainable_continuation_head`
     // (not this), so it is unaffected and resumes the drain after recycling.
     if crate::recycle_yield::recycle_yield_pending(file) {
@@ -148,8 +113,9 @@ pub fn document_queue_controller_paused(file: &Path) -> bool {
 ///
 /// Surfacing the reason is what resolves the operator-perceived "mixed signal"
 /// (`queue_paused: true` alongside `queue_continuation_required: true`): the
-/// reason and the pause-aware [`continuation_guidance`] preamble let the agent
-/// see *why* the queue was paused and that the pause only suppresses the
+/// reason and the pause-aware
+/// [`agent_doc_queue::queue_continuation::continuation_guidance`] preamble let
+/// the agent see *why* the queue was paused and that the pause only suppresses the
 /// unattended supervisor idle-watch, instead of guessing whether the pause is
 /// operator intent or transient drain-coordination state. Same best-effort,
 /// read-only error handling as [`document_queue_controller_paused`].
@@ -186,35 +152,6 @@ pub fn document_queue_controller_pause_reason(file: &Path) -> Option<String> {
                 file.display()
             );
             None
-        }
-    }
-}
-
-/// Compose the binary-authoritative queue-continuation guidance, resolving the
-/// `queue_paused` + `queue_continuation_required` "mixed signal" (`#qpausemix`).
-///
-/// When the queue is not controller-paused (`pause_reason == None`), this returns
-/// the base [`CONTINUATION_NO_STALL_GUIDANCE`] verbatim. When an accepted
-/// `admin queue pause` is in effect, it prepends a preamble that explicitly
-/// states the two signals are NOT contradictory — the controller pause suppresses
-/// only the *unattended* supervisor idle-watch auto-injection, while the attended
-/// in-session loop remains the legitimate single-owner drain — and surfaces the
-/// recorded pause reason. This is the single source consumed by both preflight
-/// JSON (`queue_continuation_guidance`) and `session-check` stdout so they stay
-/// in agreement.
-pub fn continuation_guidance(pause_reason: Option<&str>) -> String {
-    match pause_reason {
-        None => CONTINUATION_NO_STALL_GUIDANCE.to_string(),
-        Some(reason) => {
-            let reason = reason.trim();
-            let reason_clause = if reason.is_empty() {
-                "no reason recorded".to_string()
-            } else {
-                format!("recorded pause reason: {reason}")
-            };
-            format!(
-                "queue_paused is set but is NOT a contradiction with queue_continuation_required — an accepted `admin queue pause` suppresses ONLY the unattended supervisor idle-watch auto-injection (the flood guard); the attended in-session loop remains the legitimate single-owner drain and must keep draining proven-closeout work. Do not stop the loop on the pause; to actually stop the in-session loop use `queue: stop` frontmatter or a `--- stop` fence, not pause ({reason_clause}). {CONTINUATION_NO_STALL_GUIDANCE}"
-            )
         }
     }
 }
@@ -679,53 +616,6 @@ mod tests {
         live_drainable_continuation_head, open_review_item_count, queue_stale_noise_lines,
         review_phase_routed, supervisor_deferred_backlog_ids,
     };
-
-    /// `#degraded-ipc-no-stall`: the shared no-stall guidance must distinguish
-    /// proven degraded editor transport from unproven IPC/direct-write fallback
-    /// so neither preflight nor session-check can drift into licensing data loss.
-    #[test]
-    fn continuation_guidance_names_degraded_ipc_and_exhaustive_stop_list() {
-        let g = CONTINUATION_NO_STALL_GUIDANCE;
-        assert!(g.contains("file-IPC"), "must name the file-IPC fallback");
-        assert!(
-            g.contains("committed") && g.contains("session-check") && g.contains("proven"),
-            "must state the successful-closeout proof"
-        );
-        assert!(
-            g.contains("recovery=retry_without_disk_write")
-                && g.contains("recovery=direct_write_fallback")
-                && g.contains("not successful closeouts"),
-            "must reject unproven IPC/direct-write fallback"
-        );
-        assert!(
-            g.contains("failed closeout")
-                && g.contains("unproven IPC/delivery retry condition")
-                && g.contains("session-check interruption")
-                && g.contains("lint-gate"),
-            "must enumerate the exhaustive stop list"
-        );
-        assert!(
-            g.contains("NOT stop reasons"),
-            "must say degraded IPC / stale supervisor / accretion are NOT stop reasons"
-        );
-    }
-
-    #[test]
-    fn continuation_guidance_explains_controller_pause_reason() {
-        let g = continuation_guidance(Some("operator pause"));
-        assert!(
-            g.contains("queue_paused is set but is NOT a contradiction"),
-            "pause-aware guidance must explain the mixed-signal shape: {g}"
-        );
-        assert!(
-            g.contains("recorded pause reason: operator pause"),
-            "pause-aware guidance must carry the controller-recorded reason: {g}"
-        );
-        assert!(
-            g.contains(CONTINUATION_NO_STALL_GUIDANCE),
-            "pause-aware guidance must preserve the normal no-stall closeout rules: {g}"
-        );
-    }
 
     fn write_doc(dir: &Path, prompts: &[&str], queue_active: bool, has_auto: bool) -> PathBuf {
         let queue_attrs = if has_auto { " auto" } else { "" };

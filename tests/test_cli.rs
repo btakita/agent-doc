@@ -3138,6 +3138,50 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
 }
 
 #[test]
+fn test_agent_doc_queue_owns_continuation_guidance_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_continuation.rs")).unwrap();
+    assert!(
+        queue_policy.contains("pub const CONTINUATION_NO_STALL_GUIDANCE")
+            && queue_policy.contains("pub const RECYCLE_YIELD_GUIDANCE")
+            && queue_policy.contains("pub fn continuation_guidance"),
+        "agent-doc-queue must own queue continuation guidance policy"
+    );
+
+    let orchestration_adapter =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_continuation.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub const CONTINUATION_NO_STALL_GUIDANCE",
+        "pub const RECYCLE_YIELD_GUIDANCE",
+        "pub fn continuation_guidance",
+    ] {
+        assert!(
+            !orchestration_adapter.contains(forbidden),
+            "orchestration must not keep queue continuation guidance facades"
+        );
+    }
+
+    let preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    let session_check =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
+            .unwrap();
+    for source in [preflight_run, session_check] {
+        assert!(
+            source.contains("agent_doc_queue::queue_continuation::continuation_guidance")
+                || source.contains("agent_doc_queue::queue_continuation::RECYCLE_YIELD_GUIDANCE")
+                || source.contains(
+                    "agent_doc_queue::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE"
+                ),
+            "orchestration callers should use agent-doc-queue guidance directly"
+        );
+    }
+}
+
+#[test]
 fn test_focus_no_stash_promote_compatibility_shim_is_removed() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     for relative in [

@@ -30,6 +30,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Terminal resize effects moved to `agent-doc-supervisor-process`.** `ResizeWatcher` and `query_terminal_size` now live in the focused process-effect crate; orchestration's supervisor module no longer owns or re-exports `supervisor::resize`. Added a guard so the resize facade does not return.
 
+- **Queue continuation guidance moved to `agent-doc-queue`.** The no-stall/recycle-yield guidance constants and pause-aware `continuation_guidance` builder now live beside the pure queue continuation drainability policy; preflight and session-check import `agent_doc_queue::queue_continuation` directly, and orchestration keeps only file/controller/marker adapters. Added a guard so the guidance facade does not return.
+
 ## 0.34.64
 
 - **`#suprestassoc` — `restart-supervisor` registry re-association is scoped to the requested document, not just the reused session id.** The CLI restart path now resolves registry entries by exact canonical document path first and only keeps the legacy session-id fallback for fileless registry rows; registry keys that explicitly name another document are rejected, so restarting `sampleportal.md` cannot adopt a stale `agent-doc-bugs2.md` pane/session projection that happens to carry the same session id. Coverage: deterministic registry lookup regressions for rejecting a foreign same-session entry and preferring the exact target document entry. Live editor/pane confirmation remains an `[operator-verify]` follow-up.

@@ -3577,6 +3577,97 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
 }
 
 #[test]
+fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let package_version = workspace["package"]["version"].as_str();
+
+    let executor_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/capability_proof.rs"))
+            .unwrap();
+    for required_snippet in [
+        "pub struct ManagedProofPolicy",
+        "pub struct ManagedProofPolicyInputs",
+        "pub enum ProofRetryDecision",
+        "pub fn resolve_managed_proof_policy(",
+        "pub fn proof_retry_decision(",
+    ] {
+        assert!(
+            executor_policy.contains(required_snippet),
+            "agent-doc-turn-executor should own capability-proof policy directly: {required_snippet}"
+        );
+    }
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    let dependency = orchestration_dependencies["agent-doc-turn-executor"]
+        .as_table()
+        .unwrap();
+    assert_eq!(
+        dependency.get("path").and_then(toml::Value::as_str),
+        Some("../agent-doc-turn-executor")
+    );
+    assert_eq!(
+        dependency.get("version").and_then(toml::Value::as_str),
+        package_version
+    );
+
+    let agent_mod =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/mod.rs")).unwrap();
+    for forbidden_snippet in [
+        "pub struct ManagedProofPolicy",
+        "pub enum ProofRetryDecision",
+        "pub fn resolve_managed_proof_policy(",
+        "pub fn proof_retry_decision(",
+        "DEFAULT_MANAGED_PROOF",
+        "MAX_MANAGED_PROOF",
+    ] {
+        assert!(
+            !agent_mod.contains(forbidden_snippet),
+            "agent::mod must not re-own capability-proof policy: {forbidden_snippet}"
+        );
+    }
+
+    let start =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+    assert!(
+        start.contains("agent_doc_turn_executor::capability_proof::resolve_managed_proof_policy")
+            && start.contains("agent_doc_turn_executor::capability_proof::proof_retry_decision"),
+        "start should call the focused capability-proof policy directly"
+    );
+    let codex = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/codex.rs"))
+        .unwrap();
+    assert!(
+        codex.contains(
+            "agent_doc_turn_executor::capability_proof::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT"
+        ),
+        "codex probe tests should use the focused capability-proof defaults directly"
+    );
+
+    let executor_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&executor_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-turn-executor must stay pure and free of core, orchestration, git, editor IPC, sqlite, or tmux crates"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     assert!(

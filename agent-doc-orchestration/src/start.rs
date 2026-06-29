@@ -1959,7 +1959,16 @@ fn spawn_managed_capability_proof_thread(
         mut session_log,
     } = task;
     let thread_name = format!("{harness_binary}-capability-proof");
-    let policy = crate::agent::resolve_managed_proof_policy(&frontmatter, &global_config);
+    let policy = agent_doc_turn_executor::capability_proof::resolve_managed_proof_policy(
+        agent_doc_turn_executor::capability_proof::ManagedProofPolicyInputs {
+            frontmatter_max_attempts: frontmatter.managed_proof_max_attempts,
+            config_max_attempts: global_config.managed_proof_max_attempts,
+            frontmatter_retry_backoff_secs: frontmatter.managed_proof_retry_backoff_secs,
+            config_retry_backoff_secs: global_config.managed_proof_retry_backoff_secs,
+            frontmatter_probe_timeout_secs: frontmatter.managed_proof_probe_timeout_secs,
+            config_probe_timeout_secs: global_config.managed_proof_probe_timeout_secs,
+        },
+    );
     std::thread::Builder::new()
         .name(thread_name)
         .spawn(move || {
@@ -2017,12 +2026,14 @@ fn spawn_managed_capability_proof_thread(
                     }
                     Err(err) => {
                         let detail = err.to_string();
-                        match crate::agent::proof_retry_decision(
+                        match agent_doc_turn_executor::capability_proof::proof_retry_decision(
                             attempt,
                             policy.max_attempts,
                             policy.base_backoff,
                         ) {
-                            crate::agent::ProofRetryDecision::Retry { backoff } => {
+                            agent_doc_turn_executor::capability_proof::ProofRetryDecision::Retry {
+                                backoff,
+                            } => {
                                 // Keep the gate `Pending` (gated but not failed)
                                 // while we back off and re-prove.
                                 if !shared.set_capability_proof_gate_for_epoch(
@@ -2054,7 +2065,7 @@ fn spawn_managed_capability_proof_thread(
                                 }
                                 continue;
                             }
-                            crate::agent::ProofRetryDecision::GiveUp => {
+                            agent_doc_turn_executor::capability_proof::ProofRetryDecision::GiveUp => {
                                 if !shared.set_capability_proof_gate_for_epoch(
                                     proof_epoch,
                                     CapabilityProofGate::Failed,

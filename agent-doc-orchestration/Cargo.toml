@@ -43,6 +43,7 @@ agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.34.65" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.65" }
 agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.65" }
 agent-doc-topic = { path = "../agent-doc-topic", version = "0.34.65" }
+agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.34.65" }
 agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.34.65" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.65" }
 lazily = "0.13.1"

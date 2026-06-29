@@ -10,6 +10,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Lease TTL freshness moved to `agent-doc-lease`.** Drain-owner, plugin-owner, queue-edit-owner, recycle-yield, and recycle-inflight sidecars now call `agent_doc_lease::timestamp_is_fresh` directly instead of each re-owning the same saturating timestamp policy. The domain modules keep only lease/request bodies, paths, TTL env knobs, and side-effect adapters, with boundary coverage preventing local `*_is_fresh` wrappers from returning.
 
+- **Managed capability-proof retry policy moved to `agent-doc-turn-executor`.** The proof retry budget, probe timeout defaults, frontmatter/config precedence, and exponential backoff decision now live in `agent_doc_turn_executor::capability_proof`. The supervisor start path gathers frontmatter/config facts and calls the focused API directly, while `agent::mod` keeps only backend resolution/runtime helpers and no longer owns the policy or retry decision.
+
 - **No-follow-up closeout heuristic moved to `agent-doc-turn`.** Explicit "no actionable follow-up" response detection now lives in `agent_doc_turn::heuristics` beside pending-capture recommendation detection. Session-check and pre-commit guards import the focused turn API directly, and boundary coverage prevents `prompt_contract` from re-owning the phrase policy.
 
 - **Reaped directive response-loss detection moved to `agent-doc-turn`.** The pure detector that decides whether a reaped `do #id` queue head lost its `### Re:` response now lives in `agent_doc_turn::closeout_signal`. Session-check still gathers cycle state, live exchange text, and HEAD compact archives, but calls the focused turn API directly and keeps only guard formatting/ops-log adapters.

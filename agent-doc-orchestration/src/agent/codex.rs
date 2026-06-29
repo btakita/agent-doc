@@ -3071,7 +3071,7 @@ printf '%s\n' '{{"type":"message","text":"{}\n"}}'
             &fm,
             &crate::config::Config::default(),
             "opencode",
-            crate::agent::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT,
+            agent_doc_turn_executor::capability_proof::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT,
         )
         .unwrap()
         .unwrap();
@@ -3109,7 +3109,7 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
             &fm,
             &crate::config::Config::default(),
             "codex",
-            crate::agent::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT,
+            agent_doc_turn_executor::capability_proof::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT,
         )
         .unwrap()
         .unwrap();
@@ -3151,7 +3151,7 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
             &fm,
             &crate::config::Config::default(),
             "codex",
-            crate::agent::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT,
+            agent_doc_turn_executor::capability_proof::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT,
         )
         .unwrap()
         .unwrap();
@@ -3362,7 +3362,7 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
             &["-s".to_string(), "danger-full-access".to_string()],
             &env,
             "codex",
-            crate::agent::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT,
+            agent_doc_turn_executor::capability_proof::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT,
         )
         .unwrap();
     }

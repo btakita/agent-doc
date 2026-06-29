@@ -5,6 +5,8 @@
 //! it is the realtime document subject/source/sink. This crate is pure model
 //! vocabulary; concrete IO ports live in executor-specific adapter crates.
 
+pub mod capability_proof;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

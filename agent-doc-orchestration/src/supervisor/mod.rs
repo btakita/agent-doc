@@ -12,7 +12,6 @@
 //!   per supervisor lifetime and reused across every restart.
 //! - `pty` — pty allocation, child spawn, stdin/stdout forwarding threads.
 //! - `screen` — alacritty_terminal-backed screen state for owned PTY output.
-//! - `state` — crash classifier, restart history ring buffer, state machine.
 //! - `ipc` — per-session Unix-domain socket for lifecycle control.
 
 pub mod cwd;
@@ -21,4 +20,3 @@ pub mod in_process;
 pub mod ipc;
 pub mod pty;
 pub mod screen;
-pub mod state;

@@ -3247,14 +3247,35 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-supervisor must own pure run-loop exit dispatch"
     );
     assert!(
+        manifest_dir
+            .join("agent-doc-supervisor/src/crash_policy.rs")
+            .exists(),
+        "agent-doc-supervisor must own child crash/restart policy"
+    );
+    assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/start/decisions.rs")
             .exists(),
         "orchestration must not keep a start::decisions facade over focused policy crates"
     );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/supervisor/state.rs")
+            .exists(),
+        "orchestration must not keep a supervisor::state facade over crash policy"
+    );
+
+    let supervisor_mod =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/mod.rs"))
+            .unwrap();
+    assert!(
+        !supervisor_mod.contains("pub mod state"),
+        "orchestration supervisor module must not re-export crash policy state"
+    );
 
     for relative in [
         "agent-doc-orchestration/src/start.rs",
+        "agent-doc-orchestration/src/supervisor/in_process.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
         "agent-doc-orchestration/src/start/run.rs",
         "agent-doc-orchestration/src/harness.rs",
@@ -3264,8 +3285,21 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         assert!(
             !source.contains("start::decisions")
                 && !source.contains("pub mod decisions")
-                && !source.contains("super::decisions"),
+                && !source.contains("super::decisions")
+                && !source.contains("supervisor::state")
+                && !source.contains("super::state"),
             "{relative} must call focused supervisor/queue/process crates directly"
+        );
+    }
+
+    for relative in [
+        "agent-doc-orchestration/src/start.rs",
+        "agent-doc-orchestration/src/supervisor/in_process.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_supervisor::crash_policy::{"),
+            "{relative} should call focused crash policy directly"
         );
     }
 

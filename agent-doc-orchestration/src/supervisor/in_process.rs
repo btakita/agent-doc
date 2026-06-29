@@ -43,7 +43,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 
-use super::state::{CrashPolicy, RestartAction, SupervisorState};
+use agent_doc_supervisor::crash_policy::{CrashPolicy, RestartAction, SupervisorState};
 
 /// A child process the supervisor owns. Abstracted so the adapter logic is
 /// testable with a deterministic fake while the production path wraps a real

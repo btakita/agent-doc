@@ -134,7 +134,6 @@ use crate::supervisor::{
     in_process::{InProcessSupervisor, PtySupervisedChild, TickOutcome},
     ipc::{IpcMethod, IpcResponse, SupervisorIpc},
     pty::PtySpawnConfig,
-    state::{CrashPolicy, RestartAction, SupervisorState},
 };
 use agent_doc_frontmatter::frontmatter;
 #[cfg(test)]
@@ -142,6 +141,7 @@ use agent_doc_queue::queue::{
     IdleQueueContextResetDecision, IdleQueueDrainDecision, clean_session_head_forces_context_reset,
     idle_queue_context_reset_decision, idle_queue_drain_decision,
 };
+use agent_doc_supervisor::crash_policy::{CrashPolicy, RestartAction, SupervisorState};
 #[cfg(unix)]
 use agent_doc_supervisor_process::ReexecState;
 

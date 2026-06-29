@@ -1,4 +1,4 @@
-//! # Module: supervisor::state
+//! Pure supervisor child crash classification and restart policy.
 //!
 //! Crash classifier, restart history ring buffer, and supervisor state machine.
 //!
@@ -7,7 +7,7 @@
 //!
 //! The supervisor tracks every child exit in a bounded ring buffer and uses the
 //! recent-exit frequency to classify each exit as Clean, Transient, or Flapping.
-//! The classification drives a state machine (Healthy → Degraded → Halted) that
+//! The classification drives a state machine (Healthy -> Degraded -> Halted) that
 //! determines whether and how the child should be restarted.
 //!
 //! ## State Machine
@@ -16,22 +16,22 @@
 //! on exit code c:
 //!   append to ring buffer (last 10 exits with timestamps)
 //!   classify:
-//!     c == 0                          → Clean
-//!     c != 0 AND exits_in_60s < 3    → Transient
-//!     c != 0 AND exits_in_60s >= 3   → Flapping
+//!     c == 0                          -> Clean
+//!     c != 0 AND exits_in_60s < 3    -> Transient
+//!     c != 0 AND exits_in_60s >= 3   -> Flapping
 //!   transition:
-//!     Clean     → Healthy, reset consecutive counter
-//!     Transient → Healthy
-//!     Flapping  → Degraded, increment consecutive flap counter
-//!                  5th consecutive → Halted
+//!     Clean     -> Healthy, reset consecutive counter
+//!     Transient -> Healthy
+//!     Flapping  -> Degraded, increment consecutive flap counter
+//!                  5th consecutive -> Halted
 //! ```
 //!
 //! ## Invariants
 //!
 //! - Ring buffer is capped at 10 entries. Older entries are evicted on push.
 //! - `exits_in_window` only counts non-zero exit codes within the time window.
-//! - Once Halted, the policy stays Halted until externally reset (not modeled
-//!   here — the `supervisor resume` CLI command calls `CrashPolicy::reset`).
+//! - Halted non-zero exits keep returning `RestartAction::Halt`; callers can
+//!   explicitly clear the policy with `CrashPolicy::reset`.
 //! - `RestartAction` is a value type — the caller (future `start.rs` wire-up)
 //!   matches on it and performs the actual sleep/prompt/halt.
 
@@ -116,7 +116,7 @@ pub struct ExitRecord {
 
 /// Bounded ring buffer of recent child exits.
 #[derive(Debug)]
-pub(crate) struct RestartHistory {
+struct RestartHistory {
     entries: VecDeque<ExitRecord>,
 }
 
@@ -153,9 +153,9 @@ impl RestartHistory {
 
 /// Crash policy: classifies exits, tracks state, and recommends restart actions.
 #[derive(Debug)]
-pub(crate) struct CrashPolicy {
+pub struct CrashPolicy {
     pub state: SupervisorState,
-    pub history: RestartHistory,
+    history: RestartHistory,
     /// Number of consecutive Flapping classifications without an intervening
     /// Clean exit.
     consecutive_flaps: usize,
@@ -263,6 +263,12 @@ impl CrashPolicy {
     #[allow(dead_code)] // API surface — used by tests and IPC state response (future)
     pub fn consecutive_flaps(&self) -> usize {
         self.consecutive_flaps
+    }
+}
+
+impl Default for CrashPolicy {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -379,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn halted_always_returns_halt() {
+    fn nonzero_exit_while_halted_returns_halt() {
         let mut policy = CrashPolicy::new();
         let base = Instant::now();
         // Drive to Halted
@@ -388,9 +394,7 @@ mod tests {
         }
         assert_eq!(policy.state, SupervisorState::Halted);
 
-        // Even a clean exit while Halted returns Halt (Halted is sticky).
-        // Note: clean exit does reset state to Healthy in transition(), but
-        // let's verify the non-zero case stays Halted.
+        // The non-zero path stays halted until reset.
         let action = policy.on_exit_at(1, offset(base, 8));
         assert_eq!(action, RestartAction::Halt);
     }

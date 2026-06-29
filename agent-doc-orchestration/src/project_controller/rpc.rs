@@ -384,9 +384,10 @@ pub use agent_doc_controller::dispatch::DISPATCH_STALE_GENERATION_REDIRECT_MARKE
 /// carries the human reason + manual hint, so a `reexec_failed` fallback stays
 /// actionable without pointing routine stale-binary refresh at a destructive force
 /// path.
-pub const DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER: &str = "supervisor_restart_redirect";
-pub const STALE_QUEUE_PAUSE_INVARIANT_ID: &str = "stale_queue_pause";
-pub const STALE_QUEUE_PAUSE_NEXT_ACTION: &str = "restart_supervisor_once_and_retry";
+pub use agent_doc_controller::dispatch::{
+    DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER, STALE_QUEUE_PAUSE_INVARIANT_ID,
+    STALE_QUEUE_PAUSE_NEXT_ACTION,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StaleQueuePauseRecovery {
@@ -425,27 +426,8 @@ impl StaleQueuePauseRecovery {
 /// spent-preset pause, or a genuinely-wedged queue stays terminal and never triggers a
 /// restart. Pure and UTF-8 safe.
 pub fn dispatch_error_stale_queue_pause_recovery(message: &str) -> Option<StaleQueuePauseRecovery> {
-    if message.contains(DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER) {
-        let pid = message
-            .split("stale_pid=")
-            .nth(1)
-            .map(|rest| {
-                rest.chars()
-                    .take_while(|c| c.is_ascii_digit())
-                    .collect::<String>()
-            })
-            .and_then(|digits| digits.parse::<u32>().ok())
-            .unwrap_or(0);
-        return Some(StaleQueuePauseRecovery::new(pid));
-    }
-    if message.contains("failed_stage=queue_paused")
-        && pause_reason_is_stale_supervisor_churn_stop(message)
-    {
-        return Some(StaleQueuePauseRecovery::new(
-            stale_supervisor_pid_from_pause_reason(message).unwrap_or(0),
-        ));
-    }
-    None
+    agent_doc_controller::dispatch::stale_queue_pause_pid_from_dispatch_error(message)
+        .map(StaleQueuePauseRecovery::new)
 }
 
 pub fn dispatch_error_supervisor_restart_redirect(message: &str) -> Option<u32> {
@@ -1578,18 +1560,7 @@ fn run_supervisor_auto_install_with_retry(
 /// misleading reason string must not start a restart loop without the live staleness
 /// confirmation. Wiring into the dispatch bail is the clean-session remainder of `#jbrestale`.
 pub(crate) fn pause_reason_is_stale_supervisor_churn_stop(reason: &str) -> bool {
-    let r = reason.to_ascii_lowercase();
-    if r.contains("supervisor_binary_stale")
-        || r.contains("stale supervisor")
-        || r.contains("stale host supervisor")
-        || r.contains("stale route-owned supervisor")
-    {
-        return true;
-    }
-    // "needs operator recycle" only counts on a churn-stop (the remedy text the churn
-    // detector writes); a bare "recycle" mention elsewhere must not match.
-    let is_churn_stop = r.contains("churn-stop") || r.contains("churn_stop");
-    is_churn_stop && r.contains("needs operator recycle")
+    agent_doc_controller::dispatch::pause_reason_is_stale_supervisor_churn_stop(reason)
 }
 
 /// `#jbrestale` — best-effort extraction of the stale supervisor PID named in a churn-stop
@@ -1598,57 +1569,11 @@ pub(crate) fn pause_reason_is_stale_supervisor_churn_stop(reason: &str) -> bool 
 /// `pid<N>` / `pid <N>` token is present. Pure and UTF-8 safe (operates on the lowercased
 /// copy and slices only at ASCII boundaries via `split`).
 pub(crate) fn stale_supervisor_pid_from_pause_reason(reason: &str) -> Option<u32> {
-    let lower = reason.to_ascii_lowercase();
-    let rest = lower.split("pid").nth(1)?;
-    let digits: String = rest
-        .trim_start_matches([' ', '=', ':', '#'])
-        .chars()
-        .take_while(|c| c.is_ascii_digit())
-        .collect();
-    if digits.is_empty() {
-        None
-    } else {
-        digits.parse().ok()
-    }
+    agent_doc_controller::dispatch::stale_supervisor_pid_from_pause_reason(reason)
 }
 
 pub(crate) fn spent_preset_id_from_pause_reason(reason: &str) -> Option<String> {
-    let marker = " preset head is spent";
-    let lower = reason.to_ascii_lowercase();
-    if let Some(idx) = lower.find(marker) {
-        let candidate = lower[..idx]
-            .rsplit(|ch: char| ch.is_whitespace() || matches!(ch, ':' | ';' | ',' | '(' | '['))
-            .next()?
-            .trim()
-            .trim_start_matches('#');
-        if valid_preset_pause_id(candidate) {
-            return Some(candidate.to_string());
-        }
-    }
-    preset_token_unserviceable_id_from_pause_reason(&lower)
-}
-
-fn preset_token_unserviceable_id_from_pause_reason(lower_reason: &str) -> Option<String> {
-    if !lower_reason.contains("preset-token") || !lower_reason.contains("un-drainable") {
-        return None;
-    }
-    let (_, rest) = lower_reason.split_once("(#")?;
-    let candidate: String = rest
-        .chars()
-        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
-        .collect();
-    if valid_preset_pause_id(&candidate) {
-        Some(candidate)
-    } else {
-        None
-    }
-}
-
-fn valid_preset_pause_id(candidate: &str) -> bool {
-    !candidate.is_empty()
-        && candidate
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+    agent_doc_controller::dispatch::spent_preset_id_from_pause_reason(reason)
 }
 
 fn active_queue_head_is_registered_preset(content: &str, preset_id: &str) -> Result<bool> {

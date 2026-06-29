@@ -2,7 +2,7 @@
   Lean model of the agent-doc unified wait-machinery state machine (`#waitmachine4`).
 
   Mirrors the Rust `wait_machine::tick` in
-  `agent-doc-orchestration/src/wait_machine.rs` 1:1. The Rust `tick` is the
+  `agent-doc-turn/src/wait_machine.rs` 1:1. The Rust `tick` is the
   SOURCE OF TRUTH; this `Step` relation must match it (kept in lockstep by review
   + the Rust↔Lean parity test `lean_parity_transition_table`).
 

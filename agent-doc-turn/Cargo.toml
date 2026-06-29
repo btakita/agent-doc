@@ -12,3 +12,6 @@ name = "agent_doc_turn"
 [dependencies]
 lazily = "0.13.1"
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+proptest = "1"

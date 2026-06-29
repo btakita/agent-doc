@@ -338,6 +338,7 @@ name = "agent-doc-turn"
 version = "0.34.65"
 dependencies = [
  "lazily 0.13.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "proptest",
  "serde",
 ]
 

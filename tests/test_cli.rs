@@ -3172,6 +3172,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
     )
     .unwrap();
+    let project_controller_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
+            .unwrap();
     for forbidden_snippet in [
         "pub use agent_doc_controller::dispatch",
         "pub fn dispatch_error_stale_generation_redirect_target",
@@ -3194,6 +3197,23 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         rpc_source.contains("use agent_doc_controller::dispatch::{"),
         "project_controller::rpc should import focused controller dispatch helpers privately"
     );
+    for forbidden_snippet in [
+        "fn agent_doc_controller_serve_arg_index(args:",
+        "fn controller_serve_project_root_from_args(args:",
+    ] {
+        assert!(
+            !project_controller_source.contains(forbidden_snippet),
+            "project_controller must not wrap pure controller command-line helpers: {forbidden_snippet}"
+        );
+    }
+    for source in [&rpc_source, &project_controller_source] {
+        assert!(
+            source.contains(
+                "agent_doc_controller::command_line::controller_serve_project_root_from_args"
+            ),
+            "orchestration should call focused controller command-line parsing directly"
+        );
+    }
 
     let authoritative_actor = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/route/authoritative_actor.rs"),

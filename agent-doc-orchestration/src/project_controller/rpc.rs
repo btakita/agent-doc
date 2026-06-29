@@ -1545,12 +1545,8 @@ pub(crate) fn is_same_project_controller_pid(project_root: &Path, pid: u32) -> b
 }
 
 pub(crate) fn args_match_same_project_controller(args: &[String], project_root: &Path) -> bool {
-    let Some(controller_idx) = agent_doc_controller_serve_arg_index(args) else {
-        return false;
-    };
-    let Some(raw_root) = args[controller_idx + 3..]
-        .windows(2)
-        .find_map(|window| (window[0] == "--project-root").then(|| PathBuf::from(&window[1])))
+    let Some(raw_root) =
+        agent_doc_controller::command_line::controller_serve_project_root_from_args(args)
     else {
         return false;
     };
@@ -5839,6 +5835,8 @@ mod tests {
     }
     #[test]
     fn controller_serve_project_root_from_args_rejects_non_controllers() {
+        use agent_doc_controller::command_line::controller_serve_project_root_from_args;
+
         // `controller serve` window present but no `--project-root`.
         assert_eq!(
             controller_serve_project_root_from_args(&[

@@ -48,6 +48,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Stale host-supervisor binary policy moved fully to `agent-doc-supervisor`.** `agent_doc_supervisor::config` now owns the auto-install retry decision and route-owned host supervisor inode staleness predicate. `project_controller::rpc` calls the focused crate directly, with boundary coverage preventing those wrappers from returning.
 
+- **Controller command-line recognition no longer has orchestration wrappers.** Project-controller process scanning and duplicate-controller matching call `agent_doc_controller::command_line` directly. Boundary coverage prevents the local forwarding helpers from returning.
+
 ## 0.34.64
 
 - **`#suprestassoc` — `restart-supervisor` registry re-association is scoped to the requested document, not just the reused session id.** The CLI restart path now resolves registry entries by exact canonical document path first and only keeps the legacy session-id fallback for fileless registry rows; registry keys that explicitly name another document are rejected, so restarting `sampleportal.md` cannot adopt a stale `agent-doc-bugs2.md` pane/session projection that happens to carry the same session id. Coverage: deterministic registry lookup regressions for rejecting a foreign same-session entry and preferring the exact target document entry. Live editor/pane confirmation remains an `[operator-verify]` follow-up.

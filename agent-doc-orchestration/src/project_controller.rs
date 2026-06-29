@@ -2418,19 +2418,6 @@ pub fn reap_orphaned_preparing_controllers(
     reap_orphaned_preparing_controllers_for_caller(project_root, stale_after, dry_run, "gc")
 }
 
-/// Parse a `/proc/<pid>/cmdline` arg vector and, if it is an `agent-doc ...
-/// controller serve --project-root <root> ...` process, return that `<root>` —
-/// regardless of which project it belongs to. The project-scoped
-/// [`args_match_same_project_controller`] only answers "is this MY project's
-/// controller?"; M5 needs "is this ANY project's controller, and which one?".
-fn agent_doc_controller_serve_arg_index(args: &[String]) -> Option<usize> {
-    agent_doc_controller::command_line::agent_doc_controller_serve_arg_index(args)
-}
-
-fn controller_serve_project_root_from_args(args: &[String]) -> Option<PathBuf> {
-    agent_doc_controller::command_line::controller_serve_project_root_from_args(args)
-}
-
 fn controller_serve_project_root(pid: u32) -> Option<PathBuf> {
     let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
     let args: Vec<String> = cmdline
@@ -2438,7 +2425,7 @@ fn controller_serve_project_root(pid: u32) -> Option<PathBuf> {
         .filter(|arg| !arg.is_empty())
         .map(|arg| String::from_utf8_lossy(arg).to_string())
         .collect();
-    controller_serve_project_root_from_args(&args)
+    agent_doc_controller::command_line::controller_serve_project_root_from_args(&args)
 }
 
 /// M5 (#stuckhandoff2) — cross-project process-scan sweep for wedged `Preparing`
@@ -6847,6 +6834,8 @@ agent:queue\n\
     // ---- M5 (#stuckhandoff2): cross-project orphaned-preparing sweep ----
     #[test]
     fn controller_serve_project_root_from_args_extracts_root_for_any_project() {
+        use agent_doc_controller::command_line::controller_serve_project_root_from_args;
+
         // The cmdline shape a sentinel/real controller presents in `/proc`, for a
         // project root that is NOT the caller's — the breadth M5 adds over the
         // per-project reaper.

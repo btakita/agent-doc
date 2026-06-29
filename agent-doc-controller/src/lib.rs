@@ -8,6 +8,7 @@ use agent_doc_supervisor::{SupervisorBinding, SupervisorState};
 use serde::{Deserialize, Serialize};
 
 pub mod dispatch;
+pub mod recycle;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ActorRecord {

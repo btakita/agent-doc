@@ -1760,11 +1760,12 @@ pub(crate) fn recycle_debounce_decision(
     now: Instant,
     grace: Duration,
 ) -> (bool, Option<Instant>) {
-    match (wants_recycle_and_idle, stale_since) {
-        (false, _) => (false, None),
-        (true, None) => (false, Some(now)),
-        (true, Some(since)) => (now.duration_since(since) >= grace, Some(since)),
-    }
+    agent_doc_controller::recycle::recycle_debounce_decision(
+        wants_recycle_and_idle,
+        stale_since,
+        now,
+        grace,
+    )
 }
 
 pub(crate) fn discover_stale_duplicate_pids(
@@ -2568,7 +2569,7 @@ pub(crate) fn controller_recycle_idle(runtime: &ControllerRuntime) -> bool {
 /// controller is `Stable` (never mid-handoff — a forced recycle must still not
 /// strand a half-promoted replacement). Side-effect free for deterministic tests.
 pub(crate) fn force_overrides_in_flight_gate(recycle_forced: bool, handoff_stable: bool) -> bool {
-    recycle_forced && handoff_stable
+    agent_doc_controller::recycle::force_overrides_in_flight_gate(recycle_forced, handoff_stable)
 }
 
 /// `#ctlrecycle` R1/R2 — record the recycle and let the serve loop exit so the next

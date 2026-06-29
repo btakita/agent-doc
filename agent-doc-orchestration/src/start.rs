@@ -150,7 +150,8 @@ use agent_doc_supervisor::crash_policy::{
 use agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision;
 use agent_doc_supervisor::route_owned::{
     RouteOwnedLivenessReason, RouteOwnedReapDecision, RouteOwnedReapPolicy,
-    route_owned_reap_decision,
+    route_owned_backlog_has_live_items, route_owned_exchange_tail_has_unresolved_prompt,
+    route_owned_queue_has_prompts, route_owned_reap_decision,
 };
 #[cfg(unix)]
 use agent_doc_supervisor_process::ReexecState;
@@ -663,45 +664,6 @@ fn route_owned_file_dirty_after_commit(
         .file_hash
         .as_ref()
         .is_some_and(|hash| crate::ops_log::content_hash(content) != *hash)
-}
-
-fn route_owned_backlog_has_live_items(body: &str) -> bool {
-    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
-    items
-        .iter()
-        .any(|item| item.state != agent_doc_element_backlog::backlog::PendingState::Done)
-}
-
-fn route_owned_queue_has_prompts(body: &str) -> bool {
-    match agent_doc_queue::document_queue::parse(body) {
-        Ok(entries) => !agent_doc_queue::document_queue::prompts(&entries).is_empty(),
-        Err(_) => !body.trim().is_empty(),
-    }
-}
-
-fn route_owned_exchange_tail_has_unresolved_prompt(body: &str) -> bool {
-    let mut tail_start = 0usize;
-    let mut line_start = 0usize;
-    for line in body.split_inclusive('\n') {
-        if route_owned_line_is_response_heading(line.trim()) {
-            tail_start = line_start + line.len();
-        }
-        line_start += line.len();
-    }
-    if line_start < body.len() && route_owned_line_is_response_heading(body[line_start..].trim()) {
-        tail_start = body.len();
-    }
-
-    body[tail_start..]
-        .lines()
-        .any(agent_doc_diff::text_line_looks_like_prompt_target)
-}
-
-fn route_owned_line_is_response_heading(line: &str) -> bool {
-    line == "## Assistant"
-        || line.starts_with("### Re:")
-        || line.starts_with("#### Re:")
-        || line.starts_with("##### Re:")
 }
 
 fn route_owned_liveness_reason(

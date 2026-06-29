@@ -130,6 +130,45 @@ pub fn route_owned_reap_decision(
     }
 }
 
+pub fn route_owned_backlog_has_live_items(body: &str) -> bool {
+    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
+    items
+        .iter()
+        .any(|item| item.state != agent_doc_element_backlog::backlog::PendingState::Done)
+}
+
+pub fn route_owned_queue_has_prompts(body: &str) -> bool {
+    match agent_doc_queue::document_queue::parse(body) {
+        Ok(entries) => !agent_doc_queue::document_queue::prompts(&entries).is_empty(),
+        Err(_) => !body.trim().is_empty(),
+    }
+}
+
+pub fn route_owned_exchange_tail_has_unresolved_prompt(body: &str) -> bool {
+    let mut tail_start = 0usize;
+    let mut line_start = 0usize;
+    for line in body.split_inclusive('\n') {
+        if route_owned_line_is_response_heading(line.trim()) {
+            tail_start = line_start + line.len();
+        }
+        line_start += line.len();
+    }
+    if line_start < body.len() && route_owned_line_is_response_heading(body[line_start..].trim()) {
+        tail_start = body.len();
+    }
+
+    body[tail_start..]
+        .lines()
+        .any(agent_doc_diff::text_line_looks_like_prompt_target)
+}
+
+fn route_owned_line_is_response_heading(line: &str) -> bool {
+    line == "## Assistant"
+        || line.starts_with("### Re:")
+        || line.starts_with("#### Re:")
+        || line.starts_with("##### Re:")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,5 +258,39 @@ mod tests {
         assert_eq!("keep-alive".parse(), Ok(RouteOwnedReapPolicy::KeepAlive));
         assert_eq!("keep_alive".parse(), Ok(RouteOwnedReapPolicy::KeepAlive));
         assert!("never".parse::<RouteOwnedReapPolicy>().is_err());
+    }
+
+    #[test]
+    fn route_owned_body_liveness_detects_backlog_queue_and_exchange_tail() {
+        assert!(route_owned_backlog_has_live_items(
+            "- [ ] [#next] Continue\n- [x] [#done] Finished\n"
+        ));
+        assert!(!route_owned_backlog_has_live_items(
+            "- [x] [#done] Finished\n"
+        ));
+
+        assert!(route_owned_queue_has_prompts("- do #next\n"));
+        assert!(!route_owned_queue_has_prompts("<!-- empty -->\n"));
+
+        let body = "\
+### Re: done — gpt-5
+Done.
+
+do #next
+";
+        assert!(route_owned_exchange_tail_has_unresolved_prompt(body));
+    }
+
+    #[test]
+    fn route_owned_exchange_tail_ignores_prompt_text_before_latest_response() {
+        let body = "\
+### Re: earlier — gpt-5
+Do #old after this.
+
+### Re: latest — gpt-5
+Done.
+";
+
+        assert!(!route_owned_exchange_tail_has_unresolved_prompt(body));
     }
 }

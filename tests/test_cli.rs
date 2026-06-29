@@ -4806,6 +4806,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub enum RouteOwnedLivenessReason",
         "pub struct RouteOwnedReapDecision",
         "pub fn route_owned_reap_decision(",
+        "pub fn route_owned_backlog_has_live_items(",
+        "pub fn route_owned_queue_has_prompts(",
+        "pub fn route_owned_exchange_tail_has_unresolved_prompt(",
     ] {
         assert!(
             supervisor_route_owned.contains(required_snippet),
@@ -4817,10 +4820,24 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub enum RouteOwnedLivenessReason",
         "struct RouteOwnedReapDecision",
         "fn route_owned_reap_decision(",
+        "fn route_owned_backlog_has_live_items(",
+        "fn route_owned_queue_has_prompts(",
+        "fn route_owned_exchange_tail_has_unresolved_prompt(",
+        "fn route_owned_line_is_response_heading(",
     ] {
         assert!(
             !start_source.contains(forbidden_snippet),
             "start.rs must not re-own pure route-owned reap policy: {forbidden_snippet}"
+        );
+    }
+    for required_snippet in [
+        "route_owned_backlog_has_live_items",
+        "route_owned_queue_has_prompts",
+        "route_owned_exchange_tail_has_unresolved_prompt",
+    ] {
+        assert!(
+            start_source.contains(required_snippet),
+            "start.rs should call focused route-owned liveness policy directly: {required_snippet}"
         );
     }
     let cli_main = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();

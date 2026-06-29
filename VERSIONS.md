@@ -128,6 +128,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Route-owned reap policy moved to `agent-doc-supervisor`.** The route-owned supervisor completion reap policy, liveness reason vocabulary, and hidden CLI reap-policy parser now live in `agent_doc_supervisor::route_owned`. The start path keeps only document liveness/file adapters and calls the focused supervisor API directly; the CLI shell imports the focused type instead of preserving an orchestration API path.
 
+- **Route-owned document liveness policy moved to `agent-doc-supervisor`.** Backlog body, queue body, and exchange-tail prompt classifiers used by route-owned reap decisions now live beside the route-owned reap policy in `agent_doc_supervisor::route_owned`. The start path keeps only file reads, component slicing, and committed-hash comparison.
+
 - **Stale install-artifact policy moved to `agent-doc-supervisor`.** The `#install-stale-guard` grace window and timestamp classifier now live in `agent_doc_supervisor::config` beside auto-install/stale-binary policy. Preflight still discovers artifact mtimes and formats the warning, but calls the focused supervisor API directly instead of owning the staleness rule.
 
 - **Supervisor prompt/exit-code policy moved to `agent-doc-supervisor`.** Restart/quit prompt input classification and forwarded Ctrl-C clean-exit normalization now live in `agent_doc_supervisor::crash_policy` beside the child crash/restart policy. The start supervisor loop still owns stdin, tty, and child status adapters, but calls the focused supervisor API directly.

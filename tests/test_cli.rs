@@ -4676,6 +4676,62 @@ fn test_agent_doc_tmux_owns_focus_pane_decision() {
 }
 
 #[test]
+fn test_agent_doc_tmux_owns_pane_position_selection() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmux_manifest = fs::read_to_string(manifest_dir.join("agent-doc-tmux/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&tmux_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+
+    let tmux_source = fs::read_to_string(manifest_dir.join("agent-doc-tmux/src/lib.rs")).unwrap();
+    for required in [
+        "pub const TMUX_PANE_GEOMETRY_FORMAT",
+        "pub enum PanePosition",
+        "pub struct TmuxPaneGeometry",
+        "pub fn parse_tmux_pane_geometry(",
+        "pub fn select_pane_by_position(",
+    ] {
+        assert!(
+            tmux_source.contains(required),
+            "agent-doc-tmux must own pure pane position selection: {required}"
+        );
+    }
+
+    let sessions_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sessions.rs")).unwrap();
+    for forbidden in [
+        "fn select_pane_by_position(",
+        "Vec<(String, u32, u32, u32, u32)>",
+        "\"#{pane_id} #{pane_left} #{pane_top} #{pane_width} #{pane_height}\"",
+    ] {
+        assert!(
+            !sessions_source.contains(forbidden),
+            "sessions.rs must query tmux, not re-own pane geometry selection: {forbidden}"
+        );
+    }
+    assert!(
+        sessions_source.contains("use agent_doc_tmux::{")
+            && sessions_source.contains("TMUX_PANE_GEOMETRY_FORMAT")
+            && sessions_source.contains("select_pane_by_position"),
+        "sessions.rs should call the focused tmux pane position API directly"
+    );
+
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-tmux pane position policy must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let tmux_commands_manifest =

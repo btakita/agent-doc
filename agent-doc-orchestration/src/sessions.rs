@@ -5,8 +5,9 @@
 //!
 //! Registry lives at `.agent-doc/sessions.json` relative to the project root.
 //! Agent-doc-specific operations (registry load/save with the hardcoded
-//! `.agent-doc/sessions.json` path, pane/window queries, positional pane
-//! resolution) live here. Callers that need tmux-router types import them from
+//! `.agent-doc/sessions.json` path, pane/window queries, and positional pane
+//! query execution) live here. Pure tmux geometry selection lives in
+//! `agent_doc_tmux`. Callers that need tmux-router types import them from
 //! `tmux_router` directly.
 //!
 //! ## Spec
@@ -86,6 +87,7 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use agent_doc_tmux::{TMUX_PANE_GEOMETRY_FORMAT, select_pane_by_position};
 use agent_doc_tmux_commands::{
     TmuxSubmitProfile, text_only_command, text_submit_command, tmux_submit_profile_for_harness,
 };
@@ -1136,47 +1138,13 @@ pub fn pane_by_position(position: &str) -> Result<String> {
 
 pub fn pane_by_position_with_mux(mux: &dyn Multiplexer, position: &str) -> Result<String> {
     let text = mux
-        .list_panes(
-            None,
-            "#{pane_id} #{pane_left} #{pane_top} #{pane_width} #{pane_height}",
-        )
+        .list_panes(None, TMUX_PANE_GEOMETRY_FORMAT)
         .context("failed to query multiplexer panes")?;
-    select_pane_by_position(&text, position, "current multiplexer window")
-}
-
-fn select_pane_by_position(text: &str, position: &str, scope: &str) -> Result<String> {
-    let mut panes: Vec<(String, u32, u32, u32, u32)> = Vec::new();
-    for line in text.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 5 {
-            let id = parts[0].to_string();
-            let left: u32 = parts[1].parse().unwrap_or(0);
-            let top: u32 = parts[2].parse().unwrap_or(0);
-            let width: u32 = parts[3].parse().unwrap_or(0);
-            let height: u32 = parts[4].parse().unwrap_or(0);
-            panes.push((id, left, top, width, height));
-        }
-    }
-    if panes.is_empty() {
-        anyhow::bail!("no panes found in {}", scope);
-    }
-    if panes.len() == 1 {
-        return Ok(panes[0].0.clone());
-    }
-    let selected = match position {
-        "left" => panes.iter().min_by_key(|p| p.1),
-        "right" => panes.iter().max_by_key(|p| p.1 + p.3),
-        "top" => panes.iter().min_by_key(|p| p.2),
-        "bottom" => panes.iter().max_by_key(|p| p.2 + p.4),
-        _ => anyhow::bail!(
-            "invalid position '{}' — use left, right, top, or bottom",
-            position
-        ),
-    };
-    match selected {
-        Some(pane) => Ok(pane.0.clone()),
-        None => anyhow::bail!("could not resolve pane for position '{}'", position),
-    }
+    Ok(select_pane_by_position(
+        &text,
+        position,
+        "current multiplexer window",
+    )?)
 }
 
 /// Resolve a pane by positional hint within a specific tmux window.
@@ -1191,12 +1159,13 @@ pub fn pane_by_position_in_window_with_mux(
     window: &str,
 ) -> Result<String> {
     let text = mux
-        .list_panes(
-            Some(window),
-            "#{pane_id} #{pane_left} #{pane_top} #{pane_width} #{pane_height}",
-        )
+        .list_panes(Some(window), TMUX_PANE_GEOMETRY_FORMAT)
         .with_context(|| format!("failed to query multiplexer panes for window {}", window))?;
-    select_pane_by_position(&text, position, &format!("multiplexer window {}", window))
+    Ok(select_pane_by_position(
+        &text,
+        position,
+        &format!("multiplexer window {}", window),
+    )?)
 }
 
 /// Check if we're inside tmux.
@@ -1313,15 +1282,6 @@ mod tests {
             pane_by_position_in_window_with_mux(&mux, "bottom", "@1").unwrap(),
             "%low"
         );
-    }
-
-    #[test]
-    fn multiplexer_position_rejects_unknown_direction() {
-        let err = select_pane_by_position("%0 0 0 80 24\n%1 80 0 80 24\n", "middle", "test")
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("invalid position 'middle'"));
     }
 
     #[test]

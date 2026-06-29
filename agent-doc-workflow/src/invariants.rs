@@ -727,7 +727,7 @@ fn parent_gitlink_invariant() -> WorkflowInvariant {
             coverage(
                 RegressionCoverageKind::UnitTest,
                 "workflow invariant catalog parent_gitlink entry stays complete",
-                Some("cargo test -p agent-doc-orchestration workflow_invariant_catalog"),
+                Some("cargo test -p agent-doc-workflow workflow_invariant_catalog"),
             ),
         ],
     }

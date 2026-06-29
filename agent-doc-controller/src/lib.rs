@@ -12,6 +12,7 @@ pub mod command_line;
 pub mod dispatch;
 pub mod operator_clear;
 pub mod recycle;
+pub mod status;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ActorRecord {

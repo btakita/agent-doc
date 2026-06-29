@@ -1141,7 +1141,7 @@ pub(crate) fn queue_entry_do_id(
     match entry {
         agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
         | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
-            queue_prompt_done_id(&prompt.text)
+            agent_doc_queue::queue_response::queue_prompt_done_id(&prompt.text)
         }
         _ => None,
     }
@@ -1260,7 +1260,7 @@ fn queue_prompt_projection_rows(
         .filter_map(|entry| match entry {
             agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
                 let text = agent_doc_queue::document_queue::strip_in_progress_marker(&prompt.text);
-                let id = queue_prompt_done_id(&text);
+                let id = agent_doc_queue::queue_response::queue_prompt_done_id(&text);
                 let projectable_default =
                     !agent_doc_queue::queue_continuation::is_noise_queue_head(
                         &text,
@@ -1431,7 +1431,7 @@ fn record_selected_queue_head_state(
         crate::state_backbone::StateFact::QueueHeadSelected {
             document_hash: document_hash.clone(),
             node_key: node_key.clone(),
-            backlog_id: queue_prompt_done_id(head_text),
+            backlog_id: agent_doc_queue::queue_response::queue_prompt_done_id(head_text),
             prompt_text: Some(head_text.to_string()),
             drainable,
             hosting_epoch: None,
@@ -1478,7 +1478,7 @@ fn record_deferred_queue_head_state(
         crate::state_backbone::StateFact::QueueHeadSelected {
             document_hash: document_hash.clone(),
             node_key: node_key.clone(),
-            backlog_id: queue_prompt_done_id(head_text),
+            backlog_id: agent_doc_queue::queue_response::queue_prompt_done_id(head_text),
             prompt_text: Some(head_text.to_string()),
             drainable: false,
             hosting_epoch: None,
@@ -1568,7 +1568,7 @@ fn queue_worklist_entries(
                     kind: crate::state_backbone::QueueWorklistEntryKind::Prompt,
                     text,
                     node_key,
-                    backlog_id: queue_prompt_done_id(&prompt.text),
+                    backlog_id: agent_doc_queue::queue_response::queue_prompt_done_id(&prompt.text),
                     drainable: true,
                 })
             }
@@ -2549,7 +2549,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         };
         mutated = true;
         for prompt in &struck {
-            let source = match queue_prompt_done_id(&prompt.text) {
+            let source = match agent_doc_queue::queue_response::queue_prompt_done_id(&prompt.text) {
                 Some(id) if done_ids.contains(&id) => "done",
                 Some(id) if gated_ids.contains(&id) => "review_gated",
                 _ => "unknown",
@@ -3248,7 +3248,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     let active_queue_prompt_texts = active_queue_projection.prompts;
     let current_head_ids = active_queue_prompt_texts
         .iter()
-        .filter_map(|text| queue_prompt_done_id(text))
+        .filter_map(|text| agent_doc_queue::queue_response::queue_prompt_done_id(text))
         .collect::<std::collections::HashSet<_>>();
     if let Some(marked_entries) = agent_doc_queue::document_queue::set_prompts_in_progress(
         &activation.entries_after,

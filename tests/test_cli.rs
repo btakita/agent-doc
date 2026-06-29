@@ -2513,6 +2513,61 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
 }
 
 #[test]
+fn test_agent_doc_queue_owns_queue_response_head_matching_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_response =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_response.rs")).unwrap();
+    let queue_directive =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_directive.rs")).unwrap();
+
+    for required in [
+        "pub fn queue_prompt_done_id",
+        "pub fn normalize_done_id",
+        "pub fn response_heading_topic",
+        "pub fn response_topic_matches_queue_head",
+        "pub fn normalize_queue_prompt_text",
+        "pub fn queue_prompt_text_matches",
+    ] {
+        assert!(
+            queue_response.contains(required),
+            "agent-doc-queue must own queue response/head matching policy: {required}"
+        );
+    }
+    for required in [
+        "pub fn topic_resolves_to_exact_id",
+        "pub fn topic_resolves_to_only_id_directives",
+    ] {
+        assert!(
+            queue_directive.contains(required),
+            "agent-doc-queue must own queue topic id-resolution policy: {required}"
+        );
+    }
+
+    for relative in [
+        "agent-doc-orchestration/src/write/queue_consume.rs",
+        "agent-doc-orchestration/src/preflight.rs",
+        "agent-doc-orchestration/src/preflight/maintenance.rs",
+        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-orchestration/src/project_controller/rpc.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        for forbidden in [
+            "fn queue_prompt_done_id(",
+            "fn normalize_done_id(",
+            "fn response_heading_topic(",
+            "fn response_topic_matches_queue_head(",
+            "fn topic_resolves_to_exact_id(",
+            "fn topic_resolves_to_only_id_directives(",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{relative} must not re-own queue response/head matching policy: {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
 fn test_agent_doc_queue_owns_queue_command_classification() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let queue_command =
@@ -3499,6 +3554,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     let workflow_source =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/lib.rs")).unwrap();
     for required in [
+        "pub mod invariants;",
         "pub enum WorkflowEvidenceKind",
         "pub enum WorkflowProof",
         "pub enum WorkflowMutation",
@@ -3514,6 +3570,21 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
             "agent-doc-workflow must own workflow kernel policy: {required}"
         );
     }
+    let workflow_invariants =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/invariants.rs")).unwrap();
+    for required in [
+        "pub struct WorkflowInvariantCatalog",
+        "pub enum WorkflowInvariantId",
+        "pub enum FactSourceKind",
+        "pub enum RemediationAction",
+        "pub fn workflow_invariant_catalog",
+        "pub fn workflow_invariant_catalog_json",
+    ] {
+        assert!(
+            workflow_invariants.contains(required),
+            "agent-doc-workflow must own workflow invariant catalog policy: {required}"
+        );
+    }
 
     let flow_mod =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
@@ -3522,11 +3593,31 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "orchestration must not expose a workflow_state facade"
     );
     assert!(
+        !flow_mod.contains("pub mod workflow_invariants"),
+        "orchestration must not expose a workflow_invariants facade"
+    );
+    assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/flow/workflow_state.rs")
             .exists(),
         "orchestration must not keep a workflow_state module after extraction"
     );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/flow/workflow_invariants.rs")
+            .exists(),
+        "orchestration must not keep a workflow_invariants module after extraction"
+    );
+    for relative_path in [
+        "agent-doc-orchestration/src/doctor.rs",
+        "agent-doc-orchestration/src/autofix.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            source.contains("agent_doc_workflow::invariants::{"),
+            "{relative_path} should call the focused workflow invariant catalog API directly"
+        );
+    }
 
     let workflow_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/Cargo.toml")).unwrap();
@@ -3536,9 +3627,17 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         .and_then(toml::Value::as_table)
         .cloned()
         .unwrap_or_default();
+    for expected in ["serde", "serde_json"] {
+        assert!(
+            dependencies.contains_key(expected),
+            "agent-doc-workflow invariant catalog may use serialization dependency: {expected}"
+        );
+    }
     assert!(
-        dependencies.is_empty(),
-        "agent-doc-workflow should remain a pure dependency-free decision kernel"
+        dependencies
+            .keys()
+            .all(|dependency| matches!(dependency.as_str(), "serde" | "serde_json")),
+        "agent-doc-workflow should remain pure and free of orchestration, git, editor IPC, sqlite, or tmux dependencies"
     );
 }
 
@@ -4041,6 +4140,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .unwrap();
     let command_line_source =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/command_line.rs")).unwrap();
+    let controller_status =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/status.rs")).unwrap();
     for required_snippet in [
         "pub fn cmdline_is_agent_doc_owner_session(",
         "pub fn cmdline_references_md_document(",
@@ -4051,8 +4152,29 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             "agent-doc-controller should own process command-line ownership recognition: {required_snippet}"
         );
     }
+    for required_snippet in [
+        "pub struct ControllerProcessFreshness",
+        "pub struct ControllerFreshnessStatus",
+        "pub struct ControlPlaneStatus",
+        "pub struct ControlPlaneActorStatus",
+        "pub enum ControllerHandoffState",
+        "pub fn default_control_plane_status(",
+        "pub fn status_categories",
+        "pub fn control_plane_status(",
+        "pub fn controller_status_from_bootstrap(",
+        "pub fn inactive_controller_status(",
+        "pub fn controller_freshness_status(",
+        "pub fn controller_process_freshness_from_inodes(",
+        "pub fn parse_handoff_state(",
+    ] {
+        assert!(
+            controller_status.contains(required_snippet),
+            "agent-doc-controller should own controller status/freshness projection: {required_snippet}"
+        );
+    }
     for forbidden_snippet in [
         "pub use agent_doc_controller::dispatch",
+        "pub use agent_doc_controller::status",
         "pub fn dispatch_error_stale_generation_redirect_target",
         "pub fn dispatch_error_supervisor_restart_redirect",
         "pub(crate) fn dispatch_command_kind_is_operator_reopen",
@@ -4072,9 +4194,34 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             "project_controller::rpc must not re-export or wrap pure controller dispatch helpers: {forbidden_snippet}"
         );
     }
+    for forbidden_snippet in [
+        "pub struct ControllerProcessFreshness",
+        "pub struct ControllerFreshnessStatus",
+        "pub struct ControlPlaneStatus",
+        "pub struct ControlPlaneActorStatus",
+        "pub enum ControllerHandoffState",
+        "fn default_control_plane_status(",
+        "fn control_plane_status(",
+        "fn controller_status_from_bootstrap(",
+        "fn inactive_controller_status(",
+        "fn controller_freshness_status(",
+        "fn controller_process_freshness_from_inodes(",
+        "fn parse_handoff_state(",
+        "pub use agent_doc_controller::status",
+    ] {
+        assert!(
+            !project_controller_source.contains(forbidden_snippet),
+            "project_controller must not re-own or facade controller status/freshness projection: {forbidden_snippet}"
+        );
+    }
     assert!(
         rpc_source.contains("use agent_doc_controller::dispatch::{"),
         "project_controller::rpc should import focused controller dispatch helpers privately"
+    );
+    assert!(
+        rpc_source.contains("use agent_doc_controller::status")
+            && project_controller_source.contains("use agent_doc_controller::status::{"),
+        "orchestration should call focused controller status/freshness helpers directly"
     );
     for forbidden_snippet in [
         "fn agent_doc_controller_serve_arg_index(args:",
@@ -5824,6 +5971,11 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             .join("agent-doc-document-realtime/src/read_authority.rs")
             .exists()
     );
+    assert!(
+        manifest_dir
+            .join("agent-doc-document-realtime/src/crdt_authority.rs")
+            .exists()
+    );
     let orchestration_realtime =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/realtime_model.rs"))
             .unwrap();
@@ -5859,6 +6011,21 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             "agent-doc-document-realtime must own write/reconnect policy: {required_snippet}"
         );
     }
+    let realtime_crdt_authority =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/crdt_authority.rs"))
+            .unwrap();
+    for required_snippet in [
+        "pub enum CrdtAuthority",
+        "pub fn authority_for(",
+        "pub fn authority_from_liveness(",
+        "pub fn sync_under_authority(",
+        "pub fn commit_barrier_under_authority(",
+    ] {
+        assert!(
+            realtime_crdt_authority.contains(required_snippet),
+            "agent-doc-document-realtime must own CRDT authority policy: {required_snippet}"
+        );
+    }
     let orchestration_document_mutation = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/flow/document_mutation.rs"),
     )
@@ -5881,6 +6048,22 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             "orchestration must not re-own or facade realtime write policy: {forbidden_snippet}"
         );
     }
+    let orchestration_crdt_authority =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/crdt_authority.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub enum CrdtAuthority",
+        "pub fn authority_for(",
+        "pub fn authority_from_liveness(",
+        "pub fn sync_under_authority(",
+        "pub fn commit_barrier_under_authority(",
+        "pub use agent_doc_document_realtime::crdt_authority",
+    ] {
+        assert!(
+            !orchestration_crdt_authority.contains(forbidden_snippet),
+            "orchestration must not re-own or facade CRDT authority policy: {forbidden_snippet}"
+        );
+    }
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
     assert!(
@@ -5896,6 +6079,22 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             .contains("agent_doc_document_realtime::write_policy::FullContentSourceProof"),
         "normalization repair payloads should use the focused source-proof type directly"
     );
+    for relative in [
+        "agent-doc-orchestration/src/crdt_relay.rs",
+        "agent-doc-orchestration/src/crdt_relay_host.rs",
+        "src/sim_world.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_document_realtime::crdt_authority::CrdtAuthority"),
+            "{relative} must import CrdtAuthority from the focused realtime crate"
+        );
+        assert!(
+            !source.contains("agent_doc_orchestration::crdt_authority::CrdtAuthority")
+                && !source.contains("use crate::crdt_authority::CrdtAuthority"),
+            "{relative} must not import CrdtAuthority through orchestration"
+        );
+    }
     for forbidden in [
         "agent-doc-core",
         "agent-doc-orchestration",

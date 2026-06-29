@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::frontmatter_io;
+use agent_doc_controller::status::LaunchMode;
 use agent_doc_supervisor::{
     agent_change::harness_change_forces_fresh_spawn,
     lifecycle::{BootResumeAction, boot_resume_action},
@@ -533,10 +534,7 @@ pub fn run_with_reap_policy(
             start_generation
         ),
     );
-    crate::project_controller::ensure_controller_running(
-        &project_root,
-        crate::project_controller::LaunchMode::Lazy,
-    )?;
+    crate::project_controller::ensure_controller_running(&project_root, LaunchMode::Lazy)?;
     // `#jbdisprecycle` R2: a `start_session` that races a supervisor `execve`
     // hot-reload (lib-install auto-recycle / operator restart) fails because the
     // project controller is mid-teardown (the live repro's terminal
@@ -603,7 +601,7 @@ pub fn run_with_reap_policy(
                     // Re-ensure the freshly-recycled controller is reachable before retry.
                     crate::project_controller::ensure_controller_running(
                         &project_root,
-                        crate::project_controller::LaunchMode::Lazy,
+                        LaunchMode::Lazy,
                     )?;
                 }
             }

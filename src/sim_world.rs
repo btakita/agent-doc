@@ -7348,7 +7348,7 @@ mod hosting_sim {
 /// Deterministic SimWorld for the CRDT-authority state machine (`#crdtauth1`).
 ///
 /// Models the additive authority layer
-/// (`agent_doc_orchestration::crdt_authority`) riding the EXISTING per-document
+/// (`agent_doc_document_realtime::crdt_authority`) riding the EXISTING per-document
 /// hosting-epoch backbone (`state_backbone::EventLedger`). The authority follows
 /// the live editor: a document with a proven live editor-IPC transport is
 /// `MultiReplica` (durable-projection semantics); a headless / detached / stale
@@ -7357,7 +7357,8 @@ mod hosting_sim {
 /// stale-overlay replay for one document cannot flip another's authority — no live
 /// editor / tmux required.
 mod crdt_authority_sim {
-    use agent_doc_orchestration::crdt_authority::{CrdtAuthority, authority_for_document};
+    use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
+    use agent_doc_orchestration::crdt_authority::authority_for_document;
     use agent_doc_orchestration::state_backbone::{
         ActorLifecycleEvent, EventLedger, StateEvent, StateFact, StateOwner,
     };
@@ -7674,7 +7675,7 @@ mod crdt_authority_sim {
 /// reconnect catch-up, and unique-client-id enforcement are all asserted
 /// deterministically.
 mod crdt_relay_sim {
-    use agent_doc_orchestration::crdt_authority::CrdtAuthority;
+    use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
     use agent_doc_orchestration::crdt_relay::{AwarenessState, RelayHub, mint_client_id};
 
     /// A supervisor pane hosting one document over the relay hub, plus an in-flight
@@ -7968,7 +7969,7 @@ mod crdt_relay_sim {
 /// (c) flush live replicas to a consistent cut for the EditorAttached path — all
 /// keyed per-document through a real tracked path, no live editor / tmux / socket.
 mod crdt_relay_host_sim {
-    use agent_doc_orchestration::crdt_authority::CrdtAuthority;
+    use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
     use agent_doc_orchestration::crdt_relay::mint_client_id;
     use agent_doc_orchestration::crdt_relay_host::{
         commit_barrier_for_file_with_authority, recover_hub_from_disk, with_hub,

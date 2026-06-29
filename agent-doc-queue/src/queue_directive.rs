@@ -72,6 +72,50 @@ pub fn do_directive_target_ids_in_line(line: &str) -> Vec<String> {
     Vec::new()
 }
 
+/// True when `topic` resolves to exactly `#<head_id>` (optionally `do `-prefixed
+/// or `[#id]` bracketed) with no trailing modifiers. Case-insensitive; `head_id`
+/// is expected normalized lowercase by `queue_prompt_done_id`.
+pub fn topic_resolves_to_exact_id(topic: &str, head_id: &str) -> bool {
+    let norm = topic.trim().trim_start_matches('❯').trim();
+    let norm = norm.strip_prefix("do ").unwrap_or(norm).trim();
+    let inner = norm
+        .strip_prefix("[#")
+        .and_then(|rest| rest.strip_suffix(']'))
+        .or_else(|| norm.strip_prefix('#'));
+    matches!(inner, Some(id) if id.eq_ignore_ascii_case(head_id))
+}
+
+/// The `#id` directive tokens a head resolves to when the entire head is
+/// composed of nothing but `do` plus one or more id directives (`[#id]` / `#id`),
+/// whitespace-separated. Returns `None` as soon as any token is prose.
+///
+/// `#qmultiidstrike`: multi-id directive heads (`do [#a] [#b]`) are id-backed
+/// regardless of id count and must not fall through to free-text positional
+/// consumption before their referenced ids are reaped.
+pub fn topic_resolves_to_only_id_directives(topic: &str) -> Option<Vec<String>> {
+    let norm = topic.trim().trim_start_matches('❯').trim();
+    let norm = norm.strip_prefix("do ").unwrap_or(norm).trim();
+    if norm.is_empty() {
+        return None;
+    }
+    let mut ids = Vec::new();
+    for token in norm.split_whitespace() {
+        let inner = token
+            .strip_prefix("[#")
+            .and_then(|rest| rest.strip_suffix(']'))
+            .or_else(|| token.strip_prefix('#'))?;
+        if inner.is_empty()
+            || !inner
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        {
+            return None;
+        }
+        ids.push(inner.to_ascii_lowercase());
+    }
+    Some(ids)
+}
+
 /// Optional-`do` Stage 2: true when a normalized directive head leads with a
 /// bare id token (`[#id]` or `#id`) that should execute / reap id-backed. A
 /// trailing `:` after the token marks prose, not a directive (`[#id]: note`).
@@ -148,5 +192,42 @@ mod tests {
         ];
         let ids = do_directive_target_ids(&prompts);
         assert_eq!(ids, vec!["solo", "listed", "hashbare", "explicit"]);
+    }
+
+    #[test]
+    fn topic_resolves_to_exact_id_rejects_modifiers() {
+        assert!(topic_resolves_to_exact_id(
+            "#spec-test-build-install-commit-push",
+            "spec-test-build-install-commit-push"
+        ));
+        assert!(topic_resolves_to_exact_id("do [#foo]", "foo"));
+        assert!(topic_resolves_to_exact_id("#Foo", "foo")); // case-insensitive
+        // Trailing modifiers (#queue-strike-on-halt) must never resolve to the id.
+        assert!(!topic_resolves_to_exact_id("#foo halt", "foo"));
+        assert!(!topic_resolves_to_exact_id("#foo deferred", "foo"));
+        assert!(!topic_resolves_to_exact_id("#other", "foo"));
+    }
+
+    #[test]
+    fn multi_id_topic_resolves_to_only_id_directives() {
+        assert_eq!(
+            topic_resolves_to_only_id_directives("do #syncbarrier #crdtsvdom"),
+            Some(vec!["syncbarrier".to_string(), "crdtsvdom".to_string()])
+        );
+        assert_eq!(
+            topic_resolves_to_only_id_directives("do [#a] [#b]"),
+            Some(vec!["a".to_string(), "b".to_string()])
+        );
+        assert_eq!(
+            topic_resolves_to_only_id_directives("#foo"),
+            Some(vec!["foo".to_string()])
+        );
+        assert_eq!(
+            topic_resolves_to_only_id_directives("do #foo then ship it"),
+            None
+        );
+        assert_eq!(topic_resolves_to_only_id_directives("re [#id]"), None);
+        assert_eq!(topic_resolves_to_only_id_directives("just prose"), None);
+        assert_eq!(topic_resolves_to_only_id_directives(""), None);
     }
 }

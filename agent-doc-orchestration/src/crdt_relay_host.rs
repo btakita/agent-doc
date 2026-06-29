@@ -2,8 +2,8 @@
 //! (`#crdtauth4` cutover).
 //!
 //! The state-vector sync primitive ([`agent_doc_merge::crdt_sync`]), the authority
-//! state machine ([`crate::crdt_authority`]), and the relay hub
-//! ([`crate::crdt_relay`]) were built and tested as standalone modules. This
+//! state machine ([`agent_doc_document_realtime::crdt_authority`]), and the relay
+//! hub ([`crate::crdt_relay`]) were built and tested as standalone modules. This
 //! module is the **live cutover**: it routes the real `finalize` commit point and
 //! the real `.yrs` load/merge call-sites through the authority-gated barrier,
 //! while keeping the headless / [`CrdtAuthority::GitAuthoritative`] path
@@ -53,8 +53,9 @@ use std::sync::{Mutex, OnceLock};
 
 use anyhow::Result;
 
-use crate::crdt_authority::{CrdtAuthority, authority_for_file};
+use crate::crdt_authority::authority_for_file;
 use crate::crdt_relay::{PendingReplicaUpdate, RelayHub, ReplicaDeliverySnapshot};
+use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
 
 /// The canonical replica's reserved yrs client-id for every per-document hub. The
 /// supervisor's canonical replica is the hub authority; editor replicas mint

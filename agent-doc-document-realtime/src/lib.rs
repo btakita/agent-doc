@@ -8,6 +8,7 @@ use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 
 pub mod convergence_gate;
+pub mod crdt_authority;
 pub mod ipc_corruption;
 pub mod read_authority;
 pub mod watch_authority;

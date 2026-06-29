@@ -8,6 +8,10 @@ use agent_doc_controller::dispatch::{
     dispatch_should_coalesce_in_flight, pause_reason_is_stale_supervisor_churn_stop,
     spent_preset_id_from_pause_reason, stale_supervisor_pid_from_pause_reason,
 };
+use agent_doc_controller::status;
+use agent_doc_queue::{
+    queue_directive::topic_resolves_to_exact_id, queue_response::normalize_queue_prompt_text,
+};
 
 pub(crate) fn connect(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
     connect_path(&socket_path(project_root))
@@ -910,12 +914,30 @@ pub fn status(project_root: &Path) -> Result<ControllerStatus> {
                 .context("failed to parse project controller status response")?;
             status.active = true;
             status.stale_duplicate_pids = discover_stale_duplicate_pids(project_root, status.pid);
-            status.freshness = Some(controller_freshness_status(status.pid, None));
+            status.freshness = Some(status::controller_freshness_status(
+                controller_freshness_facts(status.pid, None),
+            ));
             Ok(status)
         }
         Err(_) => {
             let bootstrap = read_bootstrap(project_root)?;
-            inactive_controller_status(project_root, bootstrap)
+            let bootstrap_facts = bootstrap.as_ref().map(controller_bootstrap_status_facts);
+            let controller_pid = bootstrap_facts.as_ref().map(|state| state.pid);
+            Ok(status::inactive_controller_status(
+                project_root,
+                socket_path(project_root),
+                bootstrap_facts.as_ref(),
+                discover_stale_duplicate_pids(project_root, None),
+                status::controller_freshness_status(controller_freshness_facts(
+                    controller_pid,
+                    None,
+                )),
+                status::control_plane_status(
+                    false,
+                    control_plane_store_counts(project_root)?,
+                    None,
+                ),
+            ))
         }
     }
 }
@@ -1320,11 +1342,9 @@ fn active_queue_head_is_registered_preset(content: &str, preset_id: &str) -> Res
     let Some(head) = crate::write::active_queue_head_text(content)? else {
         return Ok(false);
     };
-    let normalized = crate::write::normalize_queue_prompt_text(&head);
-    Ok(
-        crate::write::topic_resolves_to_exact_id(&normalized, preset_id)
-            && crate::write::head_id_is_registered_preset(content, preset_id),
-    )
+    let normalized = normalize_queue_prompt_text(&head);
+    Ok(topic_resolves_to_exact_id(&normalized, preset_id)
+        && crate::write::head_id_is_registered_preset(content, preset_id))
 }
 
 fn resume_spent_preset_pause(
@@ -2386,11 +2406,25 @@ pub(crate) fn handle_request_locked(
     let request: ControllerRequest = serde_json::from_str(line.trim())?;
     let bootstrap_snapshot = runtime.bootstrap_snapshot()?;
     match request.command.as_str() {
-        "status" => Ok(serde_json::to_string(&controller_status_from_bootstrap(
-            &bootstrap_snapshot,
-            true,
-            Some(runtime.memory_categories()?),
-        )?)?),
+        "status" => Ok(serde_json::to_string(
+            &status::controller_status_from_bootstrap(
+                &controller_bootstrap_status_facts(&bootstrap_snapshot),
+                true,
+                discover_stale_duplicate_pids(
+                    &bootstrap_snapshot.project_root,
+                    Some(bootstrap_snapshot.pid),
+                ),
+                status::controller_freshness_status(controller_freshness_facts(
+                    Some(bootstrap_snapshot.pid),
+                    None,
+                )),
+                status::control_plane_status(
+                    true,
+                    control_plane_store_counts(&bootstrap_snapshot.project_root)?,
+                    Some(runtime.memory_categories()?),
+                ),
+            ),
+        )?),
         "prepare_handoff" => {
             let mut state = runtime
                 .bootstrap
@@ -3635,9 +3669,8 @@ pub(crate) fn handle_inspect_actor(
         document_id,
         record,
         supervisor_lease,
-        freshness: Some(controller_freshness_status(
-            Some(bootstrap.pid),
-            supervisor_pid,
+        freshness: Some(status::controller_freshness_status(
+            controller_freshness_facts(Some(bootstrap.pid), supervisor_pid),
         )),
         queue_head,
         queue_control,
@@ -4198,7 +4231,7 @@ pub fn run_serve(
         listen_socket.map(Path::to_path_buf),
         controller_generation,
         previous_controller_pid,
-        parse_handoff_state(handoff_state)?,
+        status::parse_handoff_state(handoff_state)?,
     )
 }
 

@@ -10,11 +10,23 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Realtime write/reconnect policy moved to `agent-doc-document-realtime`.** Visible-write idle admission, full-content source proof/replacement rejection, reconnect-buffer reconciliation, and editorless disk fallback decisions now live in `agent_doc_document_realtime::write_policy`. Orchestration keeps only sidecar/editor/git/file adapters and flow-event formatting, and callers import the focused realtime API directly rather than using orchestration facades.
 
+- **CRDT authority policy moved to `agent-doc-document-realtime`.** CRDT
+  authority classification, liveness-derived authority selection, sync
+  admission, and commit-barrier gating now live in
+  `agent_doc_document_realtime::crdt_authority`. Orchestration keeps only
+  plugin-owner liveness IO and CRDT relay/backbone adapters.
+
 - **Operator-clear guard policy moved to `agent-doc-controller`.** The
   operator-clear input-state vocabulary and guard outcome table now live in
   `agent_doc_controller::operator_clear`. Orchestration keeps only the
   `FlowEvent`/ops-log adapter and CLI call sites import the focused controller
   policy directly.
+
+- **Controller status projection moved to `agent-doc-controller`.** Controller
+  process freshness, control-plane status, actor status, bootstrap status
+  projection, and handoff-state parsing now live in
+  `agent_doc_controller::status`. Orchestration supplies SQLite counts, process
+  inode facts, bootstrap facts, duplicate-pid facts, and socket/process effects.
 
 - **Closeout guard vocabulary moved to `agent-doc-turn`.** The stable closeout
   guard reason labels, terminal guard outcome table, and closeout cycle-phase
@@ -50,8 +62,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 - **Cross-cutting workflow kernel moved to `agent-doc-workflow`.** The pure
   evidence-to-decision-to-mutation/proof transition table for stale supervisors,
   queue drainability, captured responses, and live-buffer drift now lives in a
-  dependency-free focused crate. Orchestration no longer exposes a
+  focused pure-policy crate. Orchestration no longer exposes a
   `flow::workflow_state` module.
+
+- **Workflow invariant catalog moved to `agent-doc-workflow`.** The stable
+  invariant ids, fact-source vocabulary, remediation actions, catalog builder,
+  and JSON serialization now live in `agent_doc_workflow::invariants`.
+  Orchestration doctor/autofix commands consume that focused catalog directly
+  and no longer own a `flow::workflow_invariants` module.
 
 - **Append response heading normalization moved to `agent-doc-turn`.** The helper
   that strips echoed `## Assistant` / trailing `## User` headings before append
@@ -67,6 +85,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   count comparison used to prove live editor buffer deletions now lives with
   queue syntax and identity normalization. Preflight maintenance keeps only the
   live-buffer/document mutation adapter and calls `agent_doc_queue` directly.
+
+- **Queue response/head matching policy moved to `agent-doc-queue`.** Response
+  heading topic parsing, done-id normalization, exact id/topic resolution, and
+  queue prompt text matching now live in `agent_doc_queue::queue_response` and
+  `agent_doc_queue::queue_directive`. Orchestration keeps only lifecycle,
+  document IO, and mutation adapters.
 
 - **Imperative response contract policy moved to `agent-doc-turn`.** The
   status-only/meta-refusal/blocker/evidence classifier used by the executable
@@ -664,7 +688,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 - **The tmux submit profile no longer carries a fake delivery choice.** The follow-up review correctly called out that the one-variant delivery enum made Codex support look more special than it is. `TmuxSubmitProfile` is now a single policy surface: it always emits `tmux_text_enter`, and `Enter` is the diagnostic submit-key label.
 - **Workflow invariants now have an autofix planner (`#wfinvautofix`).** Added `agent-doc autofix <FILE>` to consume the doctor report and `workflow-invariant-catalog-v1`, plan invariant-keyed remediations, record `workflow_autofix:<invariant>:<hash>` proof markers in the append-only proof ledger, de-duplicate repeated symptoms by invariant id/fingerprint, and execute only the v1 whitelisted safe repairs under `--apply`. Operator/destructive/manual actions remain gated with exact commands or required proof. Coverage: `cargo test -p agent-doc-orchestration autofix`.
 - **Workflow invariants now have a diagnostic doctor command (`#wfinvdoctor`).** Added `agent-doc doctor <FILE>` (alias `diagnose`) to evaluate `workflow-invariant-catalog-v1` against optional preflight/session-check JSON, live session-check inspection, cycle state, ops-log markers, controller freshness, git/snapshot state, parent gitlink drift, and editor sidecars. Each invariant reports `ok`, `recoverable`, `operator`, or `blocked` with exact repair commands or operator actions; missing required evidence is blocked with the command to gather it. Coverage: `cargo test -p agent-doc-orchestration doctor`.
-- **Workflow invariants now have a machine-readable catalog (`#wfinvcatalog`).** Added `flow::workflow_invariants` with stable ids, fact sources, ok predicates, disproof markers, severity, safe remediation, operator-gated remediation, and SimWorld/regression coverage for queue continuation, stale supervisor, closeout commit, editor convergence, generation redirect, and parent gitlink invariants. The catalog serializes as `workflow-invariant-catalog-v1` so doctor/autofix work can evaluate data instead of scraping prose.
+- **Workflow invariants now have a machine-readable catalog (`#wfinvcatalog`).** Added `agent_doc_workflow::invariants` with stable ids, fact sources, ok predicates, disproof markers, severity, safe remediation, operator-gated remediation, and SimWorld/regression coverage for queue continuation, stale supervisor, closeout commit, editor convergence, generation redirect, and parent gitlink invariants. The catalog serializes as `workflow-invariant-catalog-v1` so doctor/autofix work can evaluate data instead of scraping prose.
 - **Route/write UI outcomes now use a typed vocabulary (`#archuistates`).** Added the `ui-outcome-v1` user-facing outcome contract with stable tokens for `queued_behind_owner`, `recovered_and_retried`, `deferred_for_operator_proof`, `no_drainable_work`, `real_component_conflict`, and `blocked_with_exact_unblocker`. Route, session-check, controller dispatch-blocked proof payloads, and JetBrains route/write conflict surfaces now emit these fields while preserving legacy prose for compatibility.
 - **Closeout recovery transition table coverage is explicit (`#smtransitiontests`).** `CloseoutRecoveryState::ALL` now drives pure decision-table tests for every recovery state, prompt-context priority, and stale-capture supersession proof. A proptest integration guard checks the same policy boundary across generated state/input combinations, and SimWorld now has an umbrella scenario covering queue edits during write fragmentation, stale compaction/full-content sources, stale/sidecar ACK repair, already-applied ACK recovery, and JB `Run Agent Doc` prompt-context queuing during an open closeout.
 - **Closeout recovery mutations share one primitive (`#smrecoverymutate`).** `flow::closeout::apply_closeout_recovery_mutation` now owns replay-baseline refresh, sidecar rebuild/reset-from-visible, restore-from-HEAD, and stale-capture retirement mechanics. `capture::validate_replay`, `repair` stale-capture retirement, and metadata recovery now route through that primitive and log `closeout_recovery_mutation ... reason=...`, so queue-only replay, reset-from-visible, and stale-capture retire paths cannot drift in snapshot/CRDT/capture-state side effects.

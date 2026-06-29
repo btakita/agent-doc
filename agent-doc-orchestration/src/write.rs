@@ -2242,7 +2242,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             )?
             && !queue_completion_ids
                 .iter()
-                .any(|id| normalize_done_id(id) == head_id)
+                .any(|id| agent_doc_queue::queue_response::normalize_done_id(id) == head_id)
         {
             queue_completion_ids.push(head_id);
         }

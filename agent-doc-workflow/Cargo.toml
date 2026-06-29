@@ -10,3 +10,5 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_workflow"
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

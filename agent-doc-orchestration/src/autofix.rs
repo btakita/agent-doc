@@ -20,7 +20,7 @@ use crate::flow::proof_ledger::{
     OperationProofInput, OperationProofRecord, ProofEvidenceKind, ProofOperationKind, ProofOutcome,
     append_operation_proof, proof_ledger_path, read_operation_proofs,
 };
-use crate::flow::workflow_invariants::{
+use agent_doc_workflow::invariants::{
     RemediationAction, RemediationStep, WorkflowInvariantCatalog, WorkflowInvariantId,
     workflow_invariant_catalog,
 };

@@ -24,6 +24,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::sessions;
+use agent_doc_controller::status::{ControllerFreshnessStatus, ControllerProcessFreshness};
 use agent_doc_sqlite::state_store::ActorState;
 use tmux_router::{Registry as SessionRegistry, Tmux};
 
@@ -87,9 +88,7 @@ fn resolve_root_for_target(
     resolve_root(None)
 }
 
-fn freshness_label(
-    process: &crate::project_controller::ControllerProcessFreshness,
-) -> &'static str {
+fn freshness_label(process: &ControllerProcessFreshness) -> &'static str {
     match process.matches_installed {
         Some(true) => "fresh",
         Some(false) => "stale",
@@ -97,9 +96,7 @@ fn freshness_label(
     }
 }
 
-fn freshness_summary(
-    freshness: Option<&crate::project_controller::ControllerFreshnessStatus>,
-) -> String {
+fn freshness_summary(freshness: Option<&ControllerFreshnessStatus>) -> String {
     let Some(freshness) = freshness else {
         return "unknown".to_string();
     };

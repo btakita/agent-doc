@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-use crate::flow::workflow_invariants::{
+use agent_doc_workflow::invariants::{
     RemediationAction, WorkflowInvariant, WorkflowInvariantCatalog, WorkflowInvariantId,
     workflow_invariant_catalog,
 };

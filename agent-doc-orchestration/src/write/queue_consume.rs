@@ -1,6 +1,14 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_queue::{
+    queue_directive::{topic_resolves_to_exact_id, topic_resolves_to_only_id_directives},
+    queue_response::{
+        display_queue_prompt_text, normalize_done_id, normalize_queue_prompt_text,
+        queue_prompt_done_id, queue_prompt_text_matches, response_heading_topic,
+        response_topic_matches_queue_head,
+    },
+};
 
 pub(crate) struct QueueConsumptionPlan {
     pub(crate) consumed_text: String,
@@ -754,10 +762,6 @@ pub(crate) fn queue_head_matches_done_ids(content: &str, done_ids: &[String]) ->
     Ok(done_ids.iter().any(|id| normalize_done_id(id) == head_id))
 }
 
-pub(crate) fn queue_prompt_text_matches(prompt_change: &str, queue_head: &str) -> bool {
-    normalize_queue_prompt_text(prompt_change) == normalize_queue_prompt_text(queue_head)
-}
-
 pub fn response_explicitly_targets_active_queue_head(file: &Path, response: &str) -> Result<bool> {
     let content =
         std::fs::read_to_string(file).context("queue consume guard: failed to read document")?;
@@ -775,35 +779,6 @@ pub(crate) fn response_explicitly_targets_queue_head(response: &str, queue_head:
         .lines()
         .filter_map(response_heading_topic)
         .any(|topic| response_topic_matches_queue_head(topic, queue_head))
-}
-
-pub(crate) fn response_heading_topic(line: &str) -> Option<&str> {
-    let trimmed = line.trim().trim_start_matches('❯').trim();
-    let topic = trimmed.strip_prefix("### Re:")?.trim();
-    Some(
-        topic
-            .split_once(" — ")
-            .map(|(topic, _)| topic)
-            .unwrap_or(topic)
-            .trim(),
-    )
-}
-
-pub(crate) fn response_topic_matches_queue_head(topic: &str, queue_head: &str) -> bool {
-    // Used by the Codex Stop-hook auto-close path, which has no closeout CLI flags
-    // to express completion explicitly. Two completion shapes count:
-    //  1. An exact topic match (`### Re: do [#foo]` vs head `do [#foo]`).
-    //  2. A topic that resolves to EXACTLY the head id (`### Re: #fix1` vs head
-    //     `do #fix1`) — the Codex auto-loop titles a clean completion with the
-    //     head's `#id` (#queue-head-consume-on-topic-id-regression).
-    // A heading topic that merely contains the head id with trailing modifiers —
-    // `### Re: #id halt`, `### Re: #id deferred` — must NOT count as completion
-    // (#queue-strike-on-halt); `topic_resolves_to_exact_id` rejects those.
-    if queue_prompt_text_matches(topic, queue_head) {
-        return true;
-    }
-    queue_prompt_done_id(queue_head)
-        .is_some_and(|head_id| topic_resolves_to_exact_id(topic, &head_id))
 }
 
 /// True when this cycle's captured response heading targets EXACTLY the active
@@ -1932,81 +1907,6 @@ pub(crate) fn queue_consumption_allowed_for_response(
     Ok(false)
 }
 
-/// True when `topic` resolves to exactly `#<head_id>` (optionally `do `-prefixed
-/// or `[#id]` bracketed) with no trailing modifiers. Case-insensitive; `head_id`
-/// is already normalized lowercase by [`queue_prompt_done_id`].
-pub(crate) fn topic_resolves_to_exact_id(topic: &str, head_id: &str) -> bool {
-    let norm = topic.trim().trim_start_matches('❯').trim();
-    let norm = norm.strip_prefix("do ").unwrap_or(norm).trim();
-    let inner = norm
-        .strip_prefix("[#")
-        .and_then(|rest| rest.strip_suffix(']'))
-        .or_else(|| norm.strip_prefix('#'));
-    matches!(inner, Some(id) if id.eq_ignore_ascii_case(head_id))
-}
-
-/// The `#id` directive tokens a head resolves to **when the entire head is
-/// composed of nothing but `do` + one or more id directives** (`[#id]` / `#id`,
-/// whitespace-separated; pin / `❯` / bullet markers already stripped by
-/// normalization). Returns `None` the moment any token is not a bare id — i.e.
-/// the head carries free-text prose (`do [#foo] then ship it`, `re [#id]`,
-/// `Approve [#shoptiers]. What next?`), which makes it a free-text head that
-/// completes on being answered rather than on reaping its ids.
-///
-/// `#qmultiidstrike`: the single-id `topic_resolves_to_exact_id` check missed
-/// **multi-id** directive heads (`do [#a] [#b]`): they resolve to more than one
-/// id, so the exact-id test failed and the head fell through to "free text",
-/// letting the positional repair strike (`strike_recovered_free_text_queue_head`)
-/// and the finalize blockquote-echo strike consume the head before its ids were
-/// ever done. A directive head is id-backed regardless of id *count* — it is
-/// struck only once every referenced id is reaped (`--done`/`--pending-gate`/
-/// `queue consume`).
-pub(crate) fn topic_resolves_to_only_id_directives(topic: &str) -> Option<Vec<String>> {
-    let norm = topic.trim().trim_start_matches('❯').trim();
-    let norm = norm.strip_prefix("do ").unwrap_or(norm).trim();
-    if norm.is_empty() {
-        return None;
-    }
-    let mut ids = Vec::new();
-    for token in norm.split_whitespace() {
-        let inner = token
-            .strip_prefix("[#")
-            .and_then(|rest| rest.strip_suffix(']'))
-            .or_else(|| token.strip_prefix('#'))?;
-        if inner.is_empty()
-            || !inner
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
-        {
-            return None;
-        }
-        ids.push(inner.to_ascii_lowercase());
-    }
-    Some(ids)
-}
-
-pub(crate) fn queue_prompt_done_id(text: &str) -> Option<String> {
-    let marker = text.find('#')?;
-    let tail = &text[marker + 1..];
-    let id = tail
-        .chars()
-        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
-        .collect::<String>();
-    if id.is_empty() {
-        None
-    } else {
-        Some(id.to_ascii_lowercase())
-    }
-}
-
-pub(crate) fn normalize_done_id(id: &str) -> String {
-    id.trim()
-        .trim_start_matches('[')
-        .trim_start_matches('#')
-        .trim_end_matches(']')
-        .to_ascii_lowercase()
-}
-
 pub(crate) fn first_n_queue_prompt_texts(
     entries: &[agent_doc_queue::document_queue::QueueEntry],
     count: usize,
@@ -2377,23 +2277,6 @@ fn strip_in_progress_marker_from_struck_queue_items(content: &str) -> String {
     } else {
         queue.replace_content(content, &updated_body)
     }
-}
-
-pub(crate) fn normalize_queue_prompt_text(text: &str) -> String {
-    display_queue_prompt_text(text).to_ascii_lowercase()
-}
-
-pub(crate) fn display_queue_prompt_text(text: &str) -> String {
-    text.lines()
-        .map(|line| {
-            let line = line.trim().trim_start_matches('❯').trim();
-            agent_doc_queue::document_queue::strip_priority_markers(line)
-                .replace("[#", "#")
-                .replace(']', "")
-        })
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 /// First non-empty, trimmed line of `text`, or `None` when blank.
@@ -4915,24 +4798,6 @@ Old.
         assert!(free_text_message.contains("`> **Queue prompt:**` echo"));
     }
     #[test]
-    fn heading_topic_matches_head_exactly_or_by_exact_id() {
-        // Codex Stop-hook path: exact-topic match, or a topic that resolves to
-        // EXACTLY the head id (#queue-head-consume-on-topic-id-regression).
-        assert!(response_topic_matches_queue_head("do [#foo]", "do [#foo]"));
-        assert!(response_topic_matches_queue_head(
-            "do [#foo]",
-            ":pushpin: do [#foo]"
-        ));
-        assert!(response_topic_matches_queue_head("#fix1", "do #fix1"));
-        assert!(response_topic_matches_queue_head("#foo", "do [#foo]"));
-        // Halt/modifier headings must NOT count as completion (#queue-strike-on-halt).
-        assert!(!response_topic_matches_queue_head("#foo halt", "do [#foo]"));
-        assert!(!response_topic_matches_queue_head(
-            "#foo deferred",
-            "do [#foo]"
-        ));
-    }
-    #[test]
     fn bare_do_directive_detection() {
         // Queue parser strips the `- ` bullet, so heads arrive as `do [#id]`.
         assert!(queue_head_is_bare_do_directive("do [#foo]"));
@@ -4950,47 +4815,7 @@ Old.
         ));
     }
     #[test]
-    fn topic_resolves_to_exact_id_rejects_modifiers() {
-        assert!(topic_resolves_to_exact_id(
-            "#spec-test-build-install-commit-push",
-            "spec-test-build-install-commit-push"
-        ));
-        assert!(topic_resolves_to_exact_id("do [#foo]", "foo"));
-        assert!(topic_resolves_to_exact_id("#Foo", "foo")); // case-insensitive
-        // Trailing modifiers (#queue-strike-on-halt) must never resolve to the id.
-        assert!(!topic_resolves_to_exact_id("#foo halt", "foo"));
-        assert!(!topic_resolves_to_exact_id("#foo deferred", "foo"));
-        assert!(!topic_resolves_to_exact_id("#other", "foo"));
-    }
-
-    #[test]
     fn multi_id_directive_head_is_id_backed_not_free_text() {
-        // #qmultiidstrike: the incident — `do [#syncbarrier] [#crdtsvdom]` was
-        // struck by the positional repair strike because the single-id classifier
-        // missed multi-id directive heads, classifying them as free text. A head
-        // composed solely of id directives is id-backed regardless of id count.
-        assert_eq!(
-            topic_resolves_to_only_id_directives("do #syncbarrier #crdtsvdom"),
-            Some(vec!["syncbarrier".to_string(), "crdtsvdom".to_string()])
-        );
-        // Bracketed form (pre-normalization) and single-id stay recognized.
-        assert_eq!(
-            topic_resolves_to_only_id_directives("do [#a] [#b]"),
-            Some(vec!["a".to_string(), "b".to_string()])
-        );
-        assert_eq!(
-            topic_resolves_to_only_id_directives("#foo"),
-            Some(vec!["foo".to_string()])
-        );
-        // Any free-text prose token makes the head free text (returns None).
-        assert_eq!(
-            topic_resolves_to_only_id_directives("do #foo then ship it"),
-            None
-        );
-        assert_eq!(topic_resolves_to_only_id_directives("re [#id]"), None);
-        assert_eq!(topic_resolves_to_only_id_directives("just prose"), None);
-        assert_eq!(topic_resolves_to_only_id_directives(""), None);
-
         // End-to-end through both public classifiers. No `prompt_presets`
         // frontmatter, so these ids have a `--done` reap path (not presets).
         let content = concat!(

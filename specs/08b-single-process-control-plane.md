@@ -107,18 +107,20 @@ such as `ReexecSupervisor`, `InjectQueueDrainTrigger`,
 such as turn-boundary, queue-head identity, response-body hash, capture record,
 supersession proof, live-buffer hash/provenance, or editor-idle proof.
 
-The first implementation is mirror-mode in
-`flow::workflow_state`: existing route, idle-queue, closeout, and write paths
-still gather evidence and perform I/O, but the transition rows are now typed and
-unit-covered. Later controller cutover work must replace ad hoc guard branching
-with calls to this kernel before adding more route-edge guards.
+The first implementation is mirror-mode in `agent_doc_workflow`: existing
+route, idle-queue, closeout, and write paths still gather evidence and perform
+I/O, but the transition rows are now typed and unit-covered. Later controller
+cutover work must replace ad hoc guard branching with calls to this kernel
+before adding more route-edge guards.
 
 ## Workflow invariant catalog
 
-`flow::workflow_invariants` owns the machine-readable invariant catalog used by
-doctor/autofix work. Catalog entries have stable ids, severity, declared fact
-sources, an `ok_predicate`, disproof markers, safe remediation, operator-gated
-remediation, and SimWorld/regression coverage. The initial catalog covers:
+`agent_doc_workflow::invariants` owns the machine-readable invariant catalog
+used by doctor/autofix work. Catalog entries have stable ids, severity,
+declared fact sources, an `ok_predicate`, disproof markers, safe remediation,
+operator-gated remediation, and SimWorld/regression coverage. Orchestration
+doctor/autofix commands consume the focused catalog directly. The initial
+catalog covers:
 
 - `queue_continuation`
 - `stale_supervisor`

@@ -2434,7 +2434,7 @@ fn strike_done_queue_head_prompts(
     let mut struck: Vec<agent_doc_queue::document_queue::QueuePrompt> = Vec::new();
     for entry in entries {
         if let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry
-            && let Some(id) = queue_prompt_done_id(&prompt.text)
+            && let Some(id) = agent_doc_queue::queue_response::queue_prompt_done_id(&prompt.text)
             && done_ids.contains(&id)
         {
             let mut completed = prompt.clone();
@@ -2452,22 +2452,6 @@ fn strike_done_queue_head_prompts(
         None
     } else {
         Some((rewritten, struck))
-    }
-}
-
-/// Extract the `#id` from a queue prompt text like `do [#abcd]` or
-/// `do #abcd ...`. Returns the lower-cased id without `#` / brackets.
-fn queue_prompt_done_id(text: &str) -> Option<String> {
-    let marker = text.find('#')?;
-    let tail = &text[marker + 1..];
-    let id = tail
-        .chars()
-        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
-        .collect::<String>();
-    if id.is_empty() {
-        None
-    } else {
-        Some(id.to_ascii_lowercase())
     }
 }
 
@@ -3715,18 +3699,6 @@ mod tests {
         // Without the root, the archive path cannot be resolved → empty.
         let ids_no_root = super::collect_agent_done_ids(&content);
         assert!(ids_no_root.is_empty());
-    }
-    #[test]
-    fn queue_prompt_done_id_parses_canonical_bracket_form() {
-        assert_eq!(
-            super::queue_prompt_done_id("do [#jbrsrbusyint]"),
-            Some("jbrsrbusyint".to_string())
-        );
-        assert_eq!(
-            super::queue_prompt_done_id("do #jbrsrbusyint more text"),
-            Some("jbrsrbusyint".to_string())
-        );
-        assert_eq!(super::queue_prompt_done_id("plain prompt"), None);
     }
     #[test]
     fn preflight_detects_diff() {

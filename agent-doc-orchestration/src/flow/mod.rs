@@ -16,7 +16,6 @@ pub mod proof_ledger;
 pub mod routed_reopen;
 pub mod session_cycle;
 pub mod types;
-pub mod workflow_invariants;
 
 #[cfg(test)]
 mod tests {

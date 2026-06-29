@@ -5,6 +5,8 @@
 //! is deliberately side-effect free so those paths can converge on a single
 //! evidence -> decision -> mutation -> proof boundary.
 
+pub mod invariants;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum WorkflowEvidenceKind {
     StaleSupervisor,

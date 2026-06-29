@@ -1304,7 +1304,10 @@ pub(crate) fn source_newer_than_installed_binary(
     newest_source_secs: u64,
     installed_binary_secs: u64,
 ) -> bool {
-    newest_source_secs > installed_binary_secs
+    agent_doc_supervisor::config::source_newer_than_installed_binary(
+        newest_source_secs,
+        installed_binary_secs,
+    )
 }
 
 /// `#supautoinstall` — pure precedence for the supervisor auto-install opt-in, mirroring
@@ -1322,14 +1325,7 @@ pub(crate) fn resolve_supervisor_auto_install(
     frontmatter: Option<bool>,
     project: Option<bool>,
 ) -> bool {
-    if let Some(raw) = env {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => return true,
-            "0" | "false" | "no" | "off" => return false,
-            _ => {}
-        }
-    }
-    frontmatter.or(project).unwrap_or(true)
+    agent_doc_supervisor::config::resolve_supervisor_auto_install(env, frontmatter, project)
 }
 
 /// `#supautoinstall` — is supervisor auto-install enabled for the supervisor hosting `doc`?
@@ -1479,7 +1475,7 @@ const AUTO_INSTALL_RETRY_BACKOFF_SECS: u64 = 20;
 /// `#autoinstallretry` — should the auto-install retry after a failed attempt?
 /// Pure + testable: retry while attempts remain. (`attempt` is 1-based.)
 pub(crate) fn auto_install_should_retry(attempt: u32, max_attempts: u32) -> bool {
-    attempt < max_attempts
+    agent_doc_supervisor::config::auto_install_should_retry(attempt, max_attempts)
 }
 
 /// Run the auto-install sequence ONCE through `make install`. The Makefile owns

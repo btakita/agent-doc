@@ -37,6 +37,25 @@ pub fn resolve_agent_change_restart(
     resolve_default_on_bool(env, frontmatter, project)
 }
 
+pub fn resolve_supervisor_auto_install(
+    env: Option<&str>,
+    frontmatter: Option<bool>,
+    project: Option<bool>,
+) -> bool {
+    resolve_default_on_bool(env, frontmatter, project)
+}
+
+pub fn source_newer_than_installed_binary(
+    newest_source_secs: u64,
+    installed_binary_secs: u64,
+) -> bool {
+    newest_source_secs > installed_binary_secs
+}
+
+pub fn auto_install_should_retry(attempt: u32, max_attempts: u32) -> bool {
+    attempt < max_attempts
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,6 +84,7 @@ mod tests {
     fn named_supervisor_knobs_share_default_on_precedence() {
         assert!(resolve_supervisor_auto_recycle(None, None, None));
         assert!(resolve_agent_change_restart(None, None, None));
+        assert!(resolve_supervisor_auto_install(None, None, None));
         assert!(!resolve_supervisor_auto_recycle(
             Some("off"),
             Some(true),
@@ -75,5 +95,26 @@ mod tests {
             Some(true),
             Some(true)
         ));
+        assert!(!resolve_supervisor_auto_install(
+            Some("off"),
+            Some(true),
+            Some(true)
+        ));
+    }
+
+    #[test]
+    fn source_newer_than_installed_binary_is_strict() {
+        assert!(source_newer_than_installed_binary(101, 100));
+        assert!(!source_newer_than_installed_binary(100, 100));
+        assert!(!source_newer_than_installed_binary(99, 100));
+    }
+
+    #[test]
+    fn auto_install_retries_until_final_attempt() {
+        assert!(auto_install_should_retry(1, 3));
+        assert!(auto_install_should_retry(2, 3));
+        assert!(!auto_install_should_retry(3, 3));
+        assert!(!auto_install_should_retry(4, 3));
+        assert!(!auto_install_should_retry(1, 1));
     }
 }

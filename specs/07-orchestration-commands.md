@@ -23,7 +23,7 @@ This file covers binary-owned planning/orchestration and the queue surface that 
   - `risk`
   - `parallelizable`
   - `suggested_parent_tier`
-  - `model_tier`
+  - `agent-doc-model-tier`
   - `dispatch_mode`
   - `context_budget_tokens`
   - `job_packet_budget_tokens`

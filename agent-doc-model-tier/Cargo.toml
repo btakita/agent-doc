@@ -1,0 +1,15 @@
+[package]
+name = "agent-doc-model-tier"
+version = "0.34.65"
+edition = "2024"
+description = "Harness-agnostic model tier resolution for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_model_tier"
+
+[dependencies]
+anyhow = "1"
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.65" }
+serde = { version = "1", features = ["derive"] }

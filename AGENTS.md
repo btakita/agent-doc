@@ -130,7 +130,7 @@ src/
   cycle_state.rs    # Persisted per-document cycle phase/hash state for interrupted-cycle enforcement
   sync.rs           # Sync pane state between editor and tmux (reconciler always runs, no early exits, column memory)
   preflight.rs      # Pre-agent checks: layout check, repair, commit, claims, diff, document read → JSON
-  model_tier.rs     # Harness-agnostic model tier selection (Tier enum, config, heuristic, scanner, composition)
+  model_tier.rs     # Re-export shim for agent-doc-model-tier (tier selection and model switch scanning)
   agent/
     mod.rs          # Agent trait
     claude.rs       # Claude backend (Agent + StreamingAgent)

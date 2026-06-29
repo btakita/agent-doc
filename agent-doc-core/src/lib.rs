@@ -18,7 +18,6 @@ pub mod gate_verify;
 pub mod heuristics;
 pub mod id;
 pub mod log_time;
-pub mod model_tier;
 pub mod op_log;
 pub mod pending;
 pub mod project_config;
@@ -29,6 +28,7 @@ pub mod template;
 pub mod topic;
 pub mod turn_scope;
 
+pub use agent_doc_model_tier as model_tier;
 pub use component::Component;
 pub use crdt::CrdtDoc;
 pub use diff::{

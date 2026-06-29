@@ -11,7 +11,7 @@ Plan for supporting both Claude Code and Codex (OpenAI) as agent-doc harnesses.
 | `agent-kit/detect.rs` | Done | Detects Codex via `CODEX_CLI`/`CODEX` env vars |
 | `agent-kit/skill.rs` | Done | `install_for(Codex)` writes to `.codex/AGENTS.md` |
 | `agent/mod.rs` | Done | `Agent` trait + `resolve()` dispatches by name |
-| `model_tier.rs` | Done | Harness-agnostic tier selection |
+| `agent-doc-model-tier` | Done | Harness-agnostic tier selection |
 | `config.toml` | Done | `[agents.codex]` section can override command/args |
 
 ### Shared Response Persistence

@@ -1,4 +1,4 @@
-//! # Module: model_tier
+//! # Crate: agent-doc-model-tier
 //!
 //! ## Spec
 //! - Defines `Tier`: a harness-agnostic complexity bucket (`Auto`, `Low`, `Med`, `High`)
@@ -320,12 +320,19 @@ pub fn tier_from_model_name(
 /// Extract the value inside a `<!-- agent:model -->...<!-- /agent:model -->` component.
 ///
 /// Returns the trimmed inner content if the component is present, `None` otherwise.
-/// This uses the existing component parser, so guards against fenced code blocks
-/// and inline code apply automatically.
+/// This uses the shared markdown overlay parser, so fenced/indented code blocks
+/// do not produce synthetic model components.
 pub fn extract_model_component(content: &str) -> Option<String> {
-    let comps = crate::component::parse(content).ok()?;
-    let comp = comps.into_iter().find(|c| c.name == "model")?;
-    let inner = &content[comp.open_end..comp.close_start];
+    let comp = agent_doc_markdown_ast::overlay::components(content)
+        .into_iter()
+        .find(|c| c.name == "model")?;
+    let open_end = content[comp.start_byte..].find('\n')? + comp.start_byte + 1;
+    let before_end = content[..comp.end_byte].trim_end_matches('\n');
+    let close_start = before_end.rfind('\n').map_or(comp.start_byte, |i| i + 1);
+    if close_start < open_end {
+        return None;
+    }
+    let inner = &content[open_end..close_start];
     let trimmed = inner.trim();
     if trimmed.is_empty() {
         None

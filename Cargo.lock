@@ -73,6 +73,7 @@ name = "agent-doc-core"
 version = "0.34.65"
 dependencies = [
  "agent-doc-element-queue",
+ "agent-doc-model-tier",
  "anyhow",
  "clap",
  "indexmap",
@@ -218,6 +219,15 @@ dependencies = [
  "agent-doc-core",
  "agent-doc-markdown-ast",
  "lazily 0.13.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde",
+]
+
+[[package]]
+name = "agent-doc-model-tier"
+version = "0.34.65"
+dependencies = [
+ "agent-doc-markdown-ast",
+ "anyhow",
  "serde",
 ]
 

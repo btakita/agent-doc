@@ -323,7 +323,9 @@ fn run_pending_maintenance_with_options(
     }
 
     if let Some(reconciled) =
-        crate::status_cmd::reconcile_top_backlog_status_content(&current_content)?
+        agent_doc_document::status_projection::reconcile_top_backlog_status_content(
+            &current_content,
+        )?
     {
         eprintln!("[preflight] status: reconciled stale top-backlog marker");
         current_content = reconciled;
@@ -331,7 +333,9 @@ fn run_pending_maintenance_with_options(
     }
     if let Some(ref mut snap_content) = snapshot_content
         && let Some(reconciled) =
-            crate::status_cmd::reconcile_top_backlog_status_content(snap_content)?
+            agent_doc_document::status_projection::reconcile_top_backlog_status_content(
+                snap_content,
+            )?
     {
         *snap_content = reconciled;
         snapshot_mutated = true;
@@ -346,10 +350,12 @@ fn run_pending_maintenance_with_options(
     // Idempotent: the marker is inserted once when stale and removed when fresh.
     let supervisor_binary_is_stale =
         crate::project_controller::stale_supervisor_warning_for_doc(file).is_some();
-    if let Some(reconciled) = crate::status_cmd::reconcile_stale_supervisor_status_content(
-        &current_content,
-        supervisor_binary_is_stale,
-    )? {
+    if let Some(reconciled) =
+        agent_doc_document::status_projection::reconcile_stale_supervisor_status_content(
+            &current_content,
+            supervisor_binary_is_stale,
+        )?
+    {
         if supervisor_binary_is_stale {
             eprintln!("[preflight] status: surfaced stale-supervisor marker");
         } else {
@@ -359,10 +365,11 @@ fn run_pending_maintenance_with_options(
         mutated = true;
     }
     if let Some(ref mut snap_content) = snapshot_content
-        && let Some(reconciled) = crate::status_cmd::reconcile_stale_supervisor_status_content(
-            snap_content,
-            supervisor_binary_is_stale,
-        )?
+        && let Some(reconciled) =
+            agent_doc_document::status_projection::reconcile_stale_supervisor_status_content(
+                snap_content,
+                supervisor_binary_is_stale,
+            )?
     {
         *snap_content = reconciled;
         snapshot_mutated = true;
@@ -6332,7 +6339,8 @@ mod tests {
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            !file_after.contains(crate::status_cmd::STALE_SUPERVISOR_STATUS_MARKER),
+            !file_after
+                .contains(agent_doc_document::status_projection::STALE_SUPERVISOR_STATUS_MARKER),
             "fresh supervisor must clear the stale marker from the file: {file_after}"
         );
         assert!(
@@ -6342,7 +6350,8 @@ mod tests {
 
         let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
         assert!(
-            !snapshot_after.contains(crate::status_cmd::STALE_SUPERVISOR_STATUS_MARKER),
+            !snapshot_after
+                .contains(agent_doc_document::status_projection::STALE_SUPERVISOR_STATUS_MARKER),
             "fresh supervisor must clear the stale marker from the snapshot: {snapshot_after}"
         );
     }

@@ -195,7 +195,7 @@ pub fn run(
         let mut compacted =
             build_compacted(&content, body, to_keep, &archive_path, to_archive.len());
         if let Some(reconciled) =
-            crate::status_cmd::reconcile_top_backlog_status_content(&compacted)?
+            agent_doc_document::status_projection::reconcile_top_backlog_status_content(&compacted)?
         {
             compacted = reconciled;
         }
@@ -617,7 +617,9 @@ fn run_component_compact_with_options(
     let compacted = comp.replace_content(content, &visible_content);
     let mut compacted = agent_doc_template::repair_conversation_tail_outside_exchange(&compacted)?
         .unwrap_or(compacted);
-    if let Some(reconciled) = crate::status_cmd::reconcile_top_backlog_status_content(&compacted)? {
+    if let Some(reconciled) =
+        agent_doc_document::status_projection::reconcile_top_backlog_status_content(&compacted)?
+    {
         compacted = reconciled;
     }
     let mut snapshot_compacted = if trailing.trim().is_empty() {
@@ -628,7 +630,9 @@ fn run_component_compact_with_options(
             .unwrap_or(snapshot_content)
     };
     if let Some(reconciled) =
-        crate::status_cmd::reconcile_top_backlog_status_content(&snapshot_compacted)?
+        agent_doc_document::status_projection::reconcile_top_backlog_status_content(
+            &snapshot_compacted,
+        )?
     {
         snapshot_compacted = reconciled;
     }
@@ -751,7 +755,9 @@ fn run_component_compact_partial(
     let compacted = comp.replace_content(content, &new_content);
     let mut compacted = agent_doc_template::repair_conversation_tail_outside_exchange(&compacted)?
         .unwrap_or(compacted);
-    if let Some(reconciled) = crate::status_cmd::reconcile_top_backlog_status_content(&compacted)? {
+    if let Some(reconciled) =
+        agent_doc_document::status_projection::reconcile_top_backlog_status_content(&compacted)?
+    {
         compacted = reconciled;
     }
     let mut snapshot_compacted = if trailing.trim().is_empty() {
@@ -762,7 +768,9 @@ fn run_component_compact_partial(
             .unwrap_or(snapshot_content)
     };
     if let Some(reconciled) =
-        crate::status_cmd::reconcile_top_backlog_status_content(&snapshot_compacted)?
+        agent_doc_document::status_projection::reconcile_top_backlog_status_content(
+            &snapshot_compacted,
+        )?
     {
         snapshot_compacted = reconciled;
     }

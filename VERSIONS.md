@@ -6,6 +6,22 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.65
 
+- **Executor capture-delta policy moved to `agent-doc-turn-executor`.** The
+  watch daemon now calls `agent_doc_turn_executor::capture` directly for pane
+  capture deltas and bounded line windows. Orchestration keeps only tmux
+  capture polling and document flush adapters.
+
+- **Prompt-target diff extraction moved to `agent-doc-workflow`.**
+  `prompt_context` now calls `agent_doc_workflow::session_cycle` directly for
+  prompt-bearing diff target extraction and imperative-directive fallback.
+  Orchestration keeps bounded prompt-pack rendering.
+
+- **Status projection policy moved to `agent-doc-document`.** Top-backlog
+  status reconciliation and stale-supervisor status-marker insert/remove now
+  live in `agent_doc_document::status_projection`. `status_cmd` remains only the
+  file/editor writeback adapter, and compact/repair/preflight callers import the
+  focused document policy directly.
+
 - **Prompt-cache policy moved to `agent-doc-prompt-cache`.** Stable-prefix
   boundary rendering, replay-key construction, prompt-cache effectiveness
   samples, miss-cause ranking, and trend checks now live in the focused pure

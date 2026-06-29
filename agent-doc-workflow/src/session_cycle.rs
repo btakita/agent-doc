@@ -29,6 +29,25 @@ pub fn prompt_targets_from_changes(changes: &[agent_doc_diff::PromptBearingChang
         .collect()
 }
 
+pub fn prompt_targets_from_diff(diff_text: &str) -> Vec<String> {
+    let mut targets: Vec<String> =
+        prompt_targets_from_changes(&agent_doc_diff::classify_prompt_bearing_changes(diff_text))
+            .into_iter()
+            .map(|text| text.trim().to_string())
+            .filter(|text| !text.is_empty())
+            .collect();
+
+    if targets.is_empty() {
+        for directive in agent_doc_diff::extract_imperative_directives(diff_text) {
+            if !targets.iter().any(|existing| existing == &directive) {
+                targets.push(directive);
+            }
+        }
+    }
+
+    targets
+}
+
 pub fn classify_execution_scope(
     prompt_targets: &[String],
     added_diff_lines: &[String],
@@ -255,6 +274,30 @@ mod tests {
         assert_eq!(
             prompt_targets_from_changes(&changes),
             vec!["first".to_string(), "second".to_string()]
+        );
+    }
+
+    #[test]
+    fn prompt_targets_from_diff_trims_and_drops_empty_targets() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\
+            The prior explanation was incomplete\n\
+            +  Why was the prompt prefix omitted here?  \n\
+            The rest of the response stays the same\n";
+
+        assert_eq!(
+            prompt_targets_from_diff(diff),
+            vec!["Why was the prompt prefix omitted here?".to_string()]
+        );
+    }
+
+    #[test]
+    fn prompt_targets_from_diff_includes_imperative_directives() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n\
+            +run benchmarks\n";
+
+        assert_eq!(
+            prompt_targets_from_diff(diff),
+            vec!["run benchmarks".to_string()]
         );
     }
 

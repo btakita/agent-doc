@@ -5,3 +5,4 @@
 
 pub mod element_models;
 pub mod queue_projection;
+pub mod status_projection;

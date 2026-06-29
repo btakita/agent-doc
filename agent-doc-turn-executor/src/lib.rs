@@ -8,6 +8,7 @@
 pub mod agent_stream;
 pub mod auto_trigger;
 pub mod capability_proof;
+pub mod capture;
 pub mod codex_launch;
 
 use serde::{Deserialize, Serialize};

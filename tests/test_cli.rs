@@ -3802,6 +3802,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "pub enum FinalizePendingMutationKind",
         "pub struct FinalizePendingMutation",
         "pub fn prompt_targets_from_changes",
+        "pub fn prompt_targets_from_diff",
         "pub fn classify_execution_scope",
         "pub fn finalize_command",
     ] {
@@ -3878,6 +3879,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "pub enum FinalizePendingMutationKind",
         "pub struct FinalizePendingMutation",
         "pub fn prompt_targets_from_changes",
+        "fn extract_prompt_targets(",
         "pub fn classify_execution_scope",
         "pub fn finalize_command",
         "pub use agent_doc_workflow::session_cycle",
@@ -3914,6 +3916,15 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     assert!(
         !prompt_contract.contains("pub fn prompt_targets_reference_preset"),
         "orchestration must not keep a public preset-reference facade for session-cycle policy"
+    );
+    let prompt_context =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt_context.rs"))
+            .unwrap();
+    assert!(
+        prompt_context.contains("use agent_doc_workflow::session_cycle::prompt_targets_from_diff;")
+            && prompt_context.contains("prompt_targets_from_diff(diff_text)")
+            && !prompt_context.contains("fn extract_prompt_targets("),
+        "prompt_context should call focused prompt-target extraction directly"
     );
     for relative_path in [
         "agent-doc-orchestration/src/doctor.rs",
@@ -5376,6 +5387,8 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     let executor_agent_stream =
         fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/agent_stream.rs"))
             .unwrap();
+    let executor_capture =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/capture.rs")).unwrap();
     for required_snippet in [
         "pub struct ManagedProofPolicy",
         "pub struct ManagedProofPolicyInputs",
@@ -5419,6 +5432,16 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         assert!(
             executor_agent_stream.contains(required_snippet),
             "agent-doc-turn-executor should own agent stream parsing directly: {required_snippet}"
+        );
+    }
+    for required_snippet in [
+        "pub fn capture_delta(",
+        "pub fn limit_capture_lines(",
+        "capture_delta_returns_from_first_modified_line",
+    ] {
+        assert!(
+            executor_capture.contains(required_snippet),
+            "agent-doc-turn-executor should own executor capture-delta policy directly: {required_snippet}"
         );
     }
 
@@ -5535,6 +5558,21 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             && codex.contains("parse_codex_line")
             && stream.contains("use agent_doc_turn_executor::agent_stream::StreamChunk;"),
         "orchestration should call focused agent stream parsing/chunk APIs directly"
+    );
+    let watch =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/watch.rs")).unwrap();
+    for forbidden_snippet in ["fn extract_new_lines(", "fn limit_lines("] {
+        assert!(
+            !watch.contains(forbidden_snippet),
+            "watch.rs must not re-own pure executor capture policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        watch.contains(
+            "use agent_doc_turn_executor::capture::{capture_delta, limit_capture_lines};"
+        ) && watch.contains("capture_delta(&ss.last_capture, &captured)")
+            && watch.contains("limit_capture_lines(&new_content, ss.max_lines)"),
+        "watch.rs should call focused executor capture policy directly"
     );
 
     let executor_manifest =
@@ -6422,6 +6460,60 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
         assert!(
             !dependencies.contains_key(forbidden),
             "agent-doc-tmux-commands submit policy must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_document_owns_status_projection_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let document_status =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/status_projection.rs"))
+            .unwrap();
+    for required in [
+        "pub const STALE_SUPERVISOR_STATUS_MARKER",
+        "pub fn reconcile_top_backlog_status_content",
+        "pub fn apply_stale_supervisor_marker",
+        "pub fn reconcile_stale_supervisor_status_content",
+    ] {
+        assert!(
+            document_status.contains(required),
+            "agent-doc-document must own pure status projection policy: {required}"
+        );
+    }
+
+    let status_cmd =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/status_cmd.rs")).unwrap();
+    for forbidden in [
+        "STALE_SUPERVISOR_STATUS_MARKER",
+        "fn first_live_backlog_id",
+        "fn extract_status_top_backlog_id",
+        "fn replace_top_backlog_sentence",
+        "fn reconcile_top_backlog_status_content",
+        "fn apply_stale_supervisor_marker",
+        "fn reconcile_stale_supervisor_status_content",
+    ] {
+        assert!(
+            !status_cmd.contains(forbidden),
+            "status_cmd must stay a writeback adapter, not a status projection facade: {forbidden}"
+        );
+    }
+
+    for relative in [
+        "agent-doc-orchestration/src/compact.rs",
+        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-orchestration/src/pending_cmd.rs",
+        "agent-doc-orchestration/src/preflight/maintenance.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_document::status_projection::"),
+            "{relative} should call focused document status projection directly"
+        );
+        assert!(
+            !source.contains("status_cmd::reconcile")
+                && !source.contains("status_cmd::STALE_SUPERVISOR_STATUS_MARKER"),
+            "{relative} must not route status projection through status_cmd"
         );
     }
 }

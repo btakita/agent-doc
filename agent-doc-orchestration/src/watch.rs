@@ -24,8 +24,8 @@
 //!   last run) increment a per-file cycle counter; hard cap at `max_cycles`. Content hash
 //!   equality stops the loop early (convergence detection).
 //! - Stream-capture path: every 500 ms poll tick, `sessions::capture_pane()` is called;
-//!   new lines (from `extract_new_lines()`) are flushed to the document via
-//!   `stream::flush_to_document()`.
+//!   new lines (from `agent_doc_turn_executor::capture::capture_delta`) are
+//!   flushed to the document via `stream::flush_to_document()`.
 //! - CRDT documents also get reactive file-watching with zero debounce (tracked in
 //!   `reactive_paths: HashSet<PathBuf>`).
 //! - Watched documents keep a previous markdown projection and log
@@ -35,15 +35,16 @@
 //! - Dead stream panes (pane no longer alive in tmux) are pruned on rescan.
 //! - Idle timeout: daemon exits automatically after 60 s with no active sessions.
 //! - PID file removal (external `stop` or daemon crash) triggers clean shutdown on next tick.
-//! - `extract_new_lines(old, new)` finds the first diverging line between two captures
-//!   and returns all new lines from that point onward.
+//! - `agent_doc_turn_executor::capture::capture_delta(old, new)` finds the first
+//!   diverging line between two captures and returns all new lines from that point
+//!   onward.
 //!
 //! ## Agentic Contracts
 //! - `start()`, `stop()`, `status()`, `is_running()`, and `ensure_running()` are the
 //!   public API surface; all loop internals are private.
 //! - `ensure_running()` is safe to call from any subcommand needing the daemon; it
 //!   is idempotent and returns promptly when the daemon is already live.
-//! - `extract_new_lines()` is pure and allocation-only; no I/O or side effects.
+//! - Capture-delta policy is pure and allocation-only; no I/O or side effects.
 //! - The daemon never panics on individual file submit errors; errors are logged to
 //!   stderr and the loop continues.
 //!
@@ -56,11 +57,11 @@
 //! - hash_changes_with_content: file content changed → different hash
 //! - loop_prevention_counter: increment then reset cycle_count → correct values
 //! - convergence_detection: last_hash set → value preserved in state
-//! - extract_new_lines_appended: new has extra lines at end → returns only new lines
-//! - extract_new_lines_modified: diverges at line 2 → returns from divergence point onward
-//! - extract_new_lines_identical: same content → empty string
-//! - extract_new_lines_empty_old: old empty → all new lines returned
-//! - extract_new_lines_empty_new: new empty → empty string
+//! - capture_delta_appended: new has extra lines at end → returns only new lines
+//! - capture_delta_modified: diverges at line 2 → returns from divergence point onward
+//! - capture_delta_identical: same content → empty string
+//! - capture_delta_empty_old: old empty → all new lines returned
+//! - capture_delta_empty_new: new empty → empty string
 //! - stream_state_tracks_capture: two captures → incremental new content extracted correctly
 //! - doc_mode_eq: FileWatch == FileWatch; StreamCapture != FileWatch
 
@@ -75,6 +76,7 @@ use notify::{EventKind, RecursiveMode, Watcher};
 
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_markdown_ast::events::DocumentNodeEvent;
+use agent_doc_turn_executor::capture::{capture_delta, limit_capture_lines};
 
 use crate::{
     config::Config,
@@ -158,15 +160,6 @@ fn hash_content(path: &Path) -> Option<u64> {
     let mut hasher = DefaultHasher::new();
     content.hash(&mut hasher);
     Some(hasher.finish())
-}
-
-/// Limit content to the last N lines to prevent indefinite growth.
-fn limit_lines(content: &str, max_lines: usize) -> String {
-    let lines: Vec<&str> = content.lines().collect();
-    if lines.len() <= max_lines {
-        return content.to_string();
-    }
-    lines[lines.len() - max_lines..].join("\n")
 }
 
 /// Strip boundary markers from content for hash comparison.
@@ -596,8 +589,8 @@ fn run_event_loop(
                     if captured != ss.last_capture {
                         // Extract new lines since last capture, limited to last 50 lines
                         // to prevent the console component from growing indefinitely
-                        let new_content = extract_new_lines(&ss.last_capture, &captured);
-                        let limited = limit_lines(&new_content, ss.max_lines);
+                        let new_content = capture_delta(&ss.last_capture, &captured);
+                        let limited = limit_capture_lines(&new_content, ss.max_lines);
                         if !limited.is_empty() {
                             match stream::flush_to_document(path, &limited, &ss.target, "") {
                                 Ok(()) => {
@@ -867,29 +860,6 @@ fn discover_files_in(base_dir: &Path) -> Result<Vec<PathBuf>> {
         .collect())
 }
 
-/// Extract new lines from a pane capture by diffing against the previous capture.
-///
-/// Compares line-by-line: finds the first divergence point and returns
-/// all lines from that point onward in the new capture.
-fn extract_new_lines(old: &str, new: &str) -> String {
-    let old_lines: Vec<&str> = old.lines().collect();
-    let new_lines: Vec<&str> = new.lines().collect();
-
-    // Find the first line that differs
-    let common_prefix = old_lines
-        .iter()
-        .zip(new_lines.iter())
-        .take_while(|(a, b)| a == b)
-        .count();
-
-    // Everything after the common prefix in the new capture is new content
-    if common_prefix < new_lines.len() {
-        new_lines[common_prefix..].join("\n")
-    } else {
-        String::new()
-    }
-}
-
 /// Stop the watch daemon by removing the PID file.
 pub fn stop() -> Result<()> {
     match read_pid() {
@@ -1119,47 +1089,6 @@ mod tests {
     }
 
     #[test]
-    fn extract_new_lines_appended() {
-        let old = "line 1\nline 2\nline 3";
-        let new = "line 1\nline 2\nline 3\nline 4\nline 5";
-        let result = extract_new_lines(old, new);
-        assert_eq!(result, "line 4\nline 5");
-    }
-
-    #[test]
-    fn extract_new_lines_modified() {
-        let old = "line 1\nline 2\nline 3";
-        let new = "line 1\nchanged\nline 3\nline 4";
-        let result = extract_new_lines(old, new);
-        // Diverges at line 2; returns from there onward
-        assert_eq!(result, "changed\nline 3\nline 4");
-    }
-
-    #[test]
-    fn extract_new_lines_identical() {
-        let old = "line 1\nline 2";
-        let new = "line 1\nline 2";
-        let result = extract_new_lines(old, new);
-        assert_eq!(result, "");
-    }
-
-    #[test]
-    fn extract_new_lines_empty_old() {
-        let old = "";
-        let new = "line 1\nline 2";
-        let result = extract_new_lines(old, new);
-        assert_eq!(result, "line 1\nline 2");
-    }
-
-    #[test]
-    fn extract_new_lines_empty_new() {
-        let old = "line 1\nline 2";
-        let new = "";
-        let result = extract_new_lines(old, new);
-        assert_eq!(result, "");
-    }
-
-    #[test]
     fn stream_state_tracks_capture() {
         let mut ss = StreamState {
             pane: "%42".to_string(),
@@ -1168,14 +1097,14 @@ mod tests {
             max_lines: 50,
         };
         let capture = "claude output line 1\nclaude output line 2".to_string();
-        let new_content = extract_new_lines(&ss.last_capture, &capture);
+        let new_content = capture_delta(&ss.last_capture, &capture);
         assert_eq!(new_content, "claude output line 1\nclaude output line 2");
         ss.last_capture = capture;
 
         // Second capture with more lines
         let capture2 =
             "claude output line 1\nclaude output line 2\nclaude output line 3".to_string();
-        let new_content2 = extract_new_lines(&ss.last_capture, &capture2);
+        let new_content2 = capture_delta(&ss.last_capture, &capture2);
         assert_eq!(new_content2, "claude output line 3");
         ss.last_capture = capture2;
     }

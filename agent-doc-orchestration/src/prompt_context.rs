@@ -1,8 +1,8 @@
 use agent_doc_element::element;
 
-use agent_doc_diff as diff;
 use agent_doc_element_backlog::backlog;
 use agent_doc_frontmatter::frontmatter;
+use agent_doc_workflow::session_cycle::prompt_targets_from_diff;
 
 use crate::{frontmatter_io, session_accretion};
 use std::path::Path;
@@ -23,7 +23,7 @@ pub fn build_document_section(
     doc: &str,
     report: Option<&session_accretion::SessionAccretionReport>,
 ) -> String {
-    let prompt_targets = extract_prompt_targets(diff_text);
+    let prompt_targets = prompt_targets_from_diff(diff_text);
     let remote_host_scope = render_remote_host_scope(file, doc);
     let Some(report) = report else {
         return full_document_section(doc, &remote_host_scope);
@@ -116,25 +116,6 @@ fn render_remote_host_scope(file: &Path, doc: &str) -> String {
          Globally approved SSH commands, ambient SSH config, and unrelated project history are not evidence that a named remote host belongs to this document's project. Use a named remote host only when the current user prompt, this session document/frontmatter, project-local `.agent-doc/config.toml`, or project-local runbooks explicitly identify it; otherwise ask or record a follow-up to confirm the intended host.\n\
          </remote_host_scope>\n\n",
     )
-}
-
-fn extract_prompt_targets(diff_text: &str) -> Vec<String> {
-    let mut targets: Vec<String> = diff::classify_prompt_bearing_changes(diff_text)
-        .into_iter()
-        .filter(|change| change.kind == diff::PromptBearingChangeKind::PromptTarget)
-        .map(|change| change.text.trim().to_string())
-        .filter(|text| !text.is_empty())
-        .collect();
-
-    if targets.is_empty() {
-        for directive in diff::extract_imperative_directives(diff_text) {
-            if !targets.iter().any(|existing| existing == &directive) {
-                targets.push(directive);
-            }
-        }
-    }
-
-    targets
 }
 
 fn render_prompt_targets(prompt_targets: &[String]) -> String {

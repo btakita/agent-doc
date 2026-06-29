@@ -812,7 +812,8 @@ fn reap_list(file: &Path, list: TrackedList) -> Result<()> {
         new_doc = archived;
     }
     if matches!(list, TrackedList::Backlog)
-        && let Some(reconciled) = crate::status_cmd::reconcile_top_backlog_status_content(&new_doc)?
+        && let Some(reconciled) =
+            agent_doc_document::status_projection::reconcile_top_backlog_status_content(&new_doc)?
     {
         new_doc = reconciled;
     }

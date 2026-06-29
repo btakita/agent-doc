@@ -2533,7 +2533,7 @@ impl SimWorld {
                 agent_doc_element::element::is_tracked_work_component(&component.name)
             })
             .flat_map(|component| {
-                agent_doc_orchestration::pending::detect_malformed_item_lines(
+                agent_doc_element_backlog::backlog::detect_malformed_item_lines(
                     component.content(&self.doc),
                 )
             })

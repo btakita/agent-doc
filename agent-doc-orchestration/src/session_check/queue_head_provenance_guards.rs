@@ -42,7 +42,7 @@ pub(crate) fn check_expect_done_or_gate_guard(
         .iter()
         .chain(state.pending_kept_open_ids.iter())
         .chain(state.reaped_pending_ids.iter())
-        .map(|id| crate::pending::normalize_pending_id(id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .filter(|id| !id.is_empty())
         .collect();
 
@@ -53,7 +53,7 @@ pub(crate) fn check_expect_done_or_gate_guard(
     for id in state
         .expect_done_or_gate_ids
         .iter()
-        .map(|id| crate::pending::normalize_pending_id(id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .filter(|id| !id.is_empty())
     {
         if resolved.contains(&id) {
@@ -188,7 +188,7 @@ pub(crate) fn check_queue_head_removal_guard(
 
     let still_queued: std::collections::HashSet<String> = committed_queue_head_ids(&content)
         .into_iter()
-        .map(|id| crate::pending::normalize_pending_id(&id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(&id))
         .collect();
     let open_backlog: std::collections::HashSet<String> =
         open_backlog_ids(file)?.into_iter().collect();
@@ -202,7 +202,7 @@ pub(crate) fn check_queue_head_removal_guard(
             .pending_gated_ids
             .iter()
             .chain(state.pending_kept_open_ids.iter())
-            .map(|id| crate::pending::normalize_pending_id(id)),
+            .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id)),
     );
     // This cycle's `do [#id]` directive targets are owned by the
     // `expect_done_or_gate` guard, which reports the open-target class with a
@@ -210,13 +210,13 @@ pub(crate) fn check_queue_head_removal_guard(
     let directive_targets: std::collections::HashSet<String> = state
         .expect_done_or_gate_ids
         .iter()
-        .map(|id| crate::pending::normalize_pending_id(id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .collect();
 
     let mut lost: Vec<String> = Vec::new();
     let mut removal_proofs: Vec<(String, &'static str)> = Vec::new();
     for id in recorded_ids {
-        let norm = crate::pending::normalize_pending_id(&id);
+        let norm = agent_doc_element_backlog::backlog::normalize_pending_id(&id);
         if norm.is_empty() {
             continue;
         }
@@ -638,11 +638,12 @@ pub(crate) fn open_review_ids(file: &Path) -> Result<std::collections::HashSet<S
         .into_iter()
         .filter(|component| agent_doc_element::element::is_review_component(&component.name))
         .flat_map(|component| {
-            let (_, items, _) = crate::pending::parse_items(component.content(&content));
+            let (_, items, _) =
+                agent_doc_element_backlog::backlog::parse_items(component.content(&content));
             items
         })
         .filter(|item| !item.is_done())
-        .map(|item| crate::pending::normalize_pending_id(&item.id))
+        .map(|item| agent_doc_element_backlog::backlog::normalize_pending_id(&item.id))
         .filter(|id| !id.is_empty())
         .collect())
 }

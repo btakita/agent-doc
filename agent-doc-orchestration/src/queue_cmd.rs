@@ -16,10 +16,10 @@
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 
-use crate::pending;
 use crate::queue;
 use crate::snapshot;
 use agent_doc_element::element;
+use agent_doc_element_backlog::backlog;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ConsumeOptions {
@@ -185,7 +185,7 @@ pub fn consume_with_options(file: &Path, count: usize, options: ConsumeOptions) 
 /// Delegates to the write-layer striker, which guards against desyncing live
 /// open backlog work and keeps the document and snapshot in sync.
 pub fn consume_orphan_id(file: &Path, id: &str) -> Result<()> {
-    let normalized = pending::normalize_pending_id(id);
+    let normalized = backlog::normalize_pending_id(id);
     if crate::write::strike_orphan_id_backed_queue_head(file, id)? {
         println!(
             "{}: struck orphaned id-backed queue head [#{}] (#orphanqhead).",
@@ -203,7 +203,7 @@ pub fn consume_orphan_id(file: &Path, id: &str) -> Result<()> {
 }
 
 pub fn acknowledge_open_id(file: &Path, id: &str) -> Result<()> {
-    let normalized = pending::normalize_pending_id(id);
+    let normalized = backlog::normalize_pending_id(id);
     if crate::write::acknowledge_open_id_backed_queue_head(file, id)? {
         println!(
             "{}: acknowledged id-backed correction head [#{}] while preserving the open backlog item (#freshqueueauth).",
@@ -280,7 +280,7 @@ pub fn sync(file: &Path) -> Result<()> {
             continue;
         }
         let body = &content[comp.open_end..comp.close_start];
-        enqueue_ids.extend(pending::active_enqueue_item_ids(body));
+        enqueue_ids.extend(backlog::active_enqueue_item_ids(body));
         let Some(value) = comp.attrs.get("queue") else {
             continue;
         };
@@ -290,7 +290,7 @@ pub fn sync(file: &Path) -> Result<()> {
         if mode.is_none() {
             mode = Some(comp_mode);
         }
-        ids.extend(pending::active_item_ids(body));
+        ids.extend(backlog::active_item_ids(body));
     }
     if mode.is_none() && !enqueue_ids.is_empty() {
         mode = Some(queue::BacklogQueueSyncMode::Append);

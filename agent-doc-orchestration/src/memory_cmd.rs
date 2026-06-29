@@ -16,9 +16,9 @@ use tsift_memory::{
 };
 
 use crate::fs_util;
-use crate::pending::{self, PendingItem, PendingListMarker, PendingState};
 use crate::snapshot;
 use agent_doc_element::element;
+use agent_doc_element_backlog::backlog::{self, PendingItem, PendingListMarker, PendingState};
 
 const TRACKED_WORK_IMPORT_SOURCE: &str = "agent-doc:tracked-work";
 const EXCHANGE_IMPORT_SOURCE: &str = "agent-doc:exchange";
@@ -499,7 +499,7 @@ fn collect_completion_candidates(file: &Path) -> Result<Vec<CompletionCandidate>
     for comp in &components {
         let body = comp.content(&content);
         if element::is_backlog_component(&comp.name) || element::is_review_component(&comp.name) {
-            let (_, items, _) = pending::parse_items(body);
+            let (_, items, _) = backlog::parse_items(body);
             for item in items {
                 if item.state == PendingState::Done || item.text.trim().is_empty() {
                     continue;
@@ -652,7 +652,7 @@ fn tracked_work_events(
     body: &str,
     state_override: Option<PendingState>,
 ) -> Vec<MemoryEvent> {
-    let (_, items, _) = pending::parse_items(body);
+    let (_, items, _) = backlog::parse_items(body);
     items
         .into_iter()
         .filter(|item| !item.id.is_empty() || !item.text.trim().is_empty())

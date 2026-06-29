@@ -416,7 +416,7 @@ pub(crate) fn check_completed_pending_reap_guard(
     // Phase 6 (#lr-content-6): cached content + parsed components.
     let content = rc.doc_content();
     let components = rc.components();
-    let completed: Vec<crate::pending::PendingItem> = components
+    let completed: Vec<agent_doc_element_backlog::backlog::PendingItem> = components
         .iter()
         .filter(|component| is_tracked_work_component(&component.name))
         .flat_map(|component| completed_pending_items(component.content(&content)))
@@ -445,11 +445,13 @@ pub(crate) fn check_completed_pending_reap_guard(
     )))
 }
 
-pub(crate) fn completed_pending_items(body: &str) -> Vec<crate::pending::PendingItem> {
-    let (_, items, _) = crate::pending::parse_items(body);
+pub(crate) fn completed_pending_items(
+    body: &str,
+) -> Vec<agent_doc_element_backlog::backlog::PendingItem> {
+    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
     items
         .into_iter()
-        .filter(crate::pending::PendingItem::is_done)
+        .filter(agent_doc_element_backlog::backlog::PendingItem::is_done)
         .collect()
 }
 

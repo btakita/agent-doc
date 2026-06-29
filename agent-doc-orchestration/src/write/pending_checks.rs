@@ -57,7 +57,7 @@ pub(crate) fn normalize_pending_id(id: &str) -> String {
 }
 
 pub(crate) fn tracked_work_ids_from_component_body(body: &str) -> HashSet<String> {
-    let (_, items, _) = crate::pending::parse_items(body);
+    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
     items
         .into_iter()
         .filter(|item| !item.is_done())
@@ -98,7 +98,7 @@ pub(crate) fn promised_backlog_item_ids_from_response(
         .flat_map(|target| target.baseline_item_ids.iter())
         .map(|id| normalize_pending_id(id))
         .collect();
-    let (_, items, _) = crate::pending::parse_items(response_text);
+    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(response_text);
     let mut promised = Vec::new();
     for item in items.into_iter().filter(|item| !item.is_done()) {
         let id = normalize_pending_id(&item.id);
@@ -915,7 +915,8 @@ fn closeout_pending_maintenance_required(file: &Path) -> Result<bool> {
         .iter()
         .filter(|component| agent_doc_element::element::is_tracked_work_component(&component.name))
         .any(|component| {
-            let (_, items, _) = crate::pending::parse_items(component.content(&content));
+            let (_, items, _) =
+                agent_doc_element_backlog::backlog::parse_items(component.content(&content));
             items.iter().any(|item| item.is_done())
         }))
 }

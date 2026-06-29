@@ -896,10 +896,10 @@ fn route_owned_file_dirty_after_commit(
 }
 
 fn route_owned_backlog_has_live_items(body: &str) -> bool {
-    let (_, items, _) = crate::pending::parse_items(body);
+    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
     items
         .iter()
-        .any(|item| item.state != crate::pending::PendingState::Done)
+        .any(|item| item.state != agent_doc_element_backlog::backlog::PendingState::Done)
 }
 
 fn route_owned_queue_has_prompts(body: &str) -> bool {

@@ -892,7 +892,8 @@ pub(crate) fn head_id_names_tracked_directive_item(content: &str, head_id: &str)
         .iter()
         .filter(|c| c.name == "backlog" || c.name == "review" || c.name == "pending")
         .any(|comp| {
-            let (_, items, _) = crate::pending::parse_items(comp.content(content));
+            let (_, items, _) =
+                agent_doc_element_backlog::backlog::parse_items(comp.content(content));
             items
                 .iter()
                 .any(|item| !item.id.is_empty() && item.id.eq_ignore_ascii_case(head_id))
@@ -1700,7 +1701,8 @@ pub fn strike_orphan_id_backed_queue_head(file: &Path, id: &str) -> Result<bool>
     let _lock = acquire_doc_lock(file)?;
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("orphan strike: failed to read {}", file.display()))?;
-    let target_id = crate::pending::normalize_pending_id(id).to_ascii_lowercase();
+    let target_id =
+        agent_doc_element_backlog::backlog::normalize_pending_id(id).to_ascii_lowercase();
     if target_id.is_empty() {
         anyhow::bail!("orphan strike: empty id");
     }
@@ -1775,7 +1777,8 @@ pub fn acknowledge_open_id_backed_queue_head(file: &Path, id: &str) -> Result<bo
     let _lock = acquire_doc_lock(file)?;
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("open-id ack: failed to read {}", file.display()))?;
-    let target_id = crate::pending::normalize_pending_id(id).to_ascii_lowercase();
+    let target_id =
+        agent_doc_element_backlog::backlog::normalize_pending_id(id).to_ascii_lowercase();
     if target_id.is_empty() {
         anyhow::bail!("open-id ack: empty id");
     }
@@ -1870,7 +1873,8 @@ fn head_id_names_open_backlog_item(content: &str, target_id: &str) -> bool {
         .iter()
         .filter(|c| agent_doc_element::element::is_backlog_component(&c.name))
         .any(|comp| {
-            let (_, items, _) = crate::pending::parse_items(comp.content(content));
+            let (_, items, _) =
+                agent_doc_element_backlog::backlog::parse_items(comp.content(content));
             items.iter().any(|item| {
                 !item.is_done() && !item.id.is_empty() && item.id.eq_ignore_ascii_case(target_id)
             })

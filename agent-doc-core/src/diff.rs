@@ -2278,7 +2278,7 @@ fn normalize_imperative_candidate(line: &str) -> Option<String> {
         && let Some(close) = rest.find(']')
     {
         let id = &rest[..close];
-        if crate::pending::is_valid_pending_id(id) {
+        if agent_doc_element_backlog::backlog::is_valid_pending_id(id) {
             trimmed = rest[close + 1..].trim_start();
         }
     }

@@ -47,8 +47,9 @@ use std::path::Path;
 use std::process::Command;
 
 use agent_doc_element::element::{self, is_backlog_component};
+use agent_doc_element_backlog::backlog;
 use agent_doc_orchestration::graph::RunContext;
-use agent_doc_orchestration::{pending, pending_cmd, snapshot};
+use agent_doc_orchestration::{pending_cmd, snapshot};
 
 /// Format an ISO-8601 timestamp using the system `date` command.
 fn iso_timestamp() -> String {
@@ -285,7 +286,7 @@ fn add_pending_item(file: &Path, item: &str, doc_id: &str, gated: bool) -> Resul
         .find(|c| is_backlog_component(&c.name))
         .context("document has no backlog/pending component")?;
     let existing = &content[comp.open_end..comp.close_start];
-    let (new_content, id) = pending::op_add(existing, item, doc_id, gated)?;
+    let (new_content, id) = backlog::op_add(existing, item, doc_id, gated)?;
     let new_doc = comp.replace_content(&content, &new_content);
     std::fs::write(file, &new_doc)?;
     Ok(id)

@@ -358,12 +358,12 @@ pub fn detect_missing_pending_done_ids(
 
     let recorded_done: std::collections::HashSet<String> = recorded_done_ids
         .iter()
-        .map(|id| crate::pending::normalize_pending_id(id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .filter(|id| !id.is_empty())
         .collect();
     let kept_open: std::collections::HashSet<String> = kept_open_ids
         .iter()
-        .map(|id| crate::pending::normalize_pending_id(id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .filter(|id| !id.is_empty())
         .collect();
 

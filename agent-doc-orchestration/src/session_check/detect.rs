@@ -75,7 +75,7 @@ pub(crate) fn content_has_re_heading_for_id(content: &str, id: &str) -> bool {
 /// ([`reaped_directive_ids_without_response`], `#z2jy` bkx9-pure-detector).
 ///
 /// All ids are normalized (no leading `#`, lowercased — the caller passes them
-/// through [`crate::pending::normalize_pending_id`]). The detector performs no
+/// through [`agent_doc_element_backlog::backlog::normalize_pending_id`]). The detector performs no
 /// I/O: the caller resolves `content` (the live committed exchange) and
 /// `archives` (the HEAD-referenced compact-archive bodies) up front, so the core
 /// logic stays deterministically unit-testable.

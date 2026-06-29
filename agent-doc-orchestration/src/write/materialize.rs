@@ -558,25 +558,31 @@ pub fn normalize_backlog_patch_response(
             )
         })?;
     let current_body = backlog_component.content(current_content);
-    let (_, current_items, _) = crate::pending::parse_items(current_body);
+    let (_, current_items, _) = agent_doc_element_backlog::backlog::parse_items(current_body);
     let current_ids: HashSet<String> = current_items
         .iter()
         .filter(|item| !item.id.is_empty())
         .map(|item| item.id.clone())
         .collect();
-    let current_states: HashMap<String, crate::pending::PendingState> = current_items
-        .iter()
-        .map(|item| (item.id.clone(), item.state))
-        .collect();
+    let current_states: HashMap<String, agent_doc_element_backlog::backlog::PendingState> =
+        current_items
+            .iter()
+            .map(|item| (item.id.clone(), item.state))
+            .collect();
 
     let backlog_index = backlog_indexes[0];
     let doc_id = crate::pending_cmd::doc_id_for(file);
-    let (mut target_body, _) =
-        crate::pending::backfill(&patches[backlog_index].content, &doc_id, &current_ids);
-    if !crate::pending::preserves_non_item_structure(current_body, &target_body) {
-        if let Some(merged_body) =
-            crate::pending::merge_partial_backlog_prefix(current_body, &target_body)
-        {
+    let (mut target_body, _) = agent_doc_element_backlog::backlog::backfill(
+        &patches[backlog_index].content,
+        &doc_id,
+        &current_ids,
+    );
+    if !agent_doc_element_backlog::backlog::preserves_non_item_structure(current_body, &target_body)
+    {
+        if let Some(merged_body) = agent_doc_element_backlog::backlog::merge_partial_backlog_prefix(
+            current_body,
+            &target_body,
+        ) {
             target_body = merged_body;
         } else {
             anyhow::bail!(
@@ -584,8 +590,9 @@ pub fn normalize_backlog_patch_response(
             );
         }
     }
-    let (_, target_items, _) = crate::pending::parse_items(&target_body);
-    let rendered_target = crate::pending::canonicalize_preserving_non_item_lines(&target_body);
+    let (_, target_items, _) = agent_doc_element_backlog::backlog::parse_items(&target_body);
+    let rendered_target =
+        agent_doc_element_backlog::backlog::canonicalize_preserving_non_item_lines(&target_body);
     if !same_ignoring_trailing_newlines(&rendered_target, &target_body) {
         anyhow::bail!(
             "ERR: pending/backlog patch could not be normalized into supported --pending-* operations"
@@ -598,7 +605,7 @@ pub fn normalize_backlog_patch_response(
         let mut pending_done_ids = Vec::new();
 
         for item in &target_items {
-            crate::pending::ensure_no_new_leading_custom_id_prefix(
+            agent_doc_element_backlog::backlog::ensure_no_new_leading_custom_id_prefix(
                 &item.id,
                 &item.text,
                 &current_ids,
@@ -607,8 +614,9 @@ pub fn normalize_backlog_patch_response(
             if !current_ids.contains(&item.id) {
                 saw_pending_add = true;
             }
-            if item.state == crate::pending::PendingState::Done
-                && current_states.get(&item.id).copied() != Some(crate::pending::PendingState::Done)
+            if item.state == agent_doc_element_backlog::backlog::PendingState::Done
+                && current_states.get(&item.id).copied()
+                    != Some(agent_doc_element_backlog::backlog::PendingState::Done)
             {
                 pending_done_ids.push(item.id.clone());
             }

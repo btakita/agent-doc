@@ -1617,7 +1617,7 @@ fn enforce_review_done_guard(file: &Path, id: &str) -> Result<()> {
         return Ok(());
     }
 
-    let normalized = crate::pending::normalize_pending_id(id);
+    let normalized = agent_doc_element_backlog::backlog::normalize_pending_id(id);
     let message = format!(
         "review_done_guard: --done #{} resolved from agent:{} instead of agent:review; run --backlog-gate {} first or set review_done_guard = \"off\"",
         normalized, component_name, normalized

@@ -21,7 +21,9 @@ agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.65" }
 agent-doc-document = { path = "../agent-doc-document", version = "0.34.65" }
 agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.65" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.65" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.65" }
 agent-doc-element-queue = { path = "../agent-doc-element-queue", version = "0.34.65" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.65" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.65" }
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.65" }
 agent-doc-secret-redact = { path = "../agent-doc-secret-redact", version = "0.34.65" }

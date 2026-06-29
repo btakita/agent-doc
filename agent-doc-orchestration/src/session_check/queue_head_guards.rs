@@ -35,7 +35,7 @@ pub(crate) fn check_no_response_active_queue_head(
     let current_head_ids: std::collections::HashSet<String> =
         committed_current_queue_head_ids(&content)
             .into_iter()
-            .map(|id| crate::pending::normalize_pending_id(&id))
+            .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(&id))
             .collect();
     let open_backlog: std::collections::HashSet<String> =
         open_backlog_ids(file)?.into_iter().collect();
@@ -45,7 +45,7 @@ pub(crate) fn check_no_response_active_queue_head(
             .pending_gated_ids
             .iter()
             .chain(state.pending_kept_open_ids.iter())
-            .map(|id| crate::pending::normalize_pending_id(id)),
+            .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id)),
     );
     // #goqueuestall/#qcontdrain: a queue head whose backlog id is DEFERRED (never
     // agent-drainable — `[operator-verify]` only) is not a "runnable" head that a
@@ -56,12 +56,12 @@ pub(crate) fn check_no_response_active_queue_head(
     let deferred: std::collections::HashSet<String> =
         crate::queue_continuation::deferred_backlog_ids(&content)
             .into_iter()
-            .map(|id| crate::pending::normalize_pending_id(&id))
+            .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(&id))
             .collect();
 
     let mut live: Vec<String> = Vec::new();
     for id in recorded_ids {
-        let norm = crate::pending::normalize_pending_id(&id);
+        let norm = agent_doc_element_backlog::backlog::normalize_pending_id(&id);
         if norm.is_empty() {
             continue;
         }
@@ -157,7 +157,7 @@ pub(crate) fn check_reaped_queue_head_without_response(
     let directive_ids: std::collections::HashSet<String> =
         do_directive_target_ids(&state.active_queue_heads)
             .into_iter()
-            .map(|id| crate::pending::normalize_pending_id(&id))
+            .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(&id))
             .filter(|id| !id.is_empty())
             .collect();
     if directive_ids.is_empty() {
@@ -166,7 +166,7 @@ pub(crate) fn check_reaped_queue_head_without_response(
     let reaped: std::collections::HashSet<String> = state
         .reaped_pending_ids
         .iter()
-        .map(|id| crate::pending::normalize_pending_id(id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .filter(|id| !id.is_empty())
         .collect();
 

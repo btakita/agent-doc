@@ -1189,8 +1189,9 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                             agent_doc_element::element::is_backlog_component(&component.name)
                         })
                         .flat_map(|component| {
-                            let (_, items, _) =
-                                crate::pending::parse_items(component.content(content));
+                            let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(
+                                component.content(content),
+                            );
                             items
                         })
                         .filter(|item| !item.is_done())
@@ -1631,7 +1632,7 @@ fn realign_component_when_only_in_progress_marker_changed(
 
 fn pending_body_without_in_progress_markers(body: &str) -> String {
     let ids = std::collections::HashSet::new();
-    crate::pending::set_in_progress_item_ids(body, &ids).0
+    agent_doc_element_backlog::backlog::set_in_progress_item_ids(body, &ids).0
 }
 
 #[cfg(test)]
@@ -4431,7 +4432,7 @@ mod tests {
             "<!-- agent:backlog -->\n",
             "- [x] [#scopeid] completed item\n",
             "Commands:\n",
-            "  cargo test -p agent-doc pending::\n",
+            "  cargo test -p agent-doc backlog::\n",
             "Diff:\n",
             "@@ -1 +1 @@\n",
             "<!-- /agent:backlog -->\n\n",
@@ -4462,7 +4463,7 @@ mod tests {
             "<!-- agent:backlog -->\n",
             "- [x] [#scopeid] completed item\n",
             "Commands:\n",
-            "  cargo test -p agent-doc pending::\n",
+            "  cargo test -p agent-doc backlog::\n",
             "Diff:\n",
             "@@ -1 +1 @@\n",
             "<!-- /agent:backlog -->\n\n",

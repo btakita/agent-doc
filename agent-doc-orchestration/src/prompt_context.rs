@@ -1,6 +1,8 @@
 use agent_doc_element::element;
 
-use crate::{diff, frontmatter, pending, session_accretion};
+use agent_doc_element_backlog::backlog;
+
+use crate::{diff, frontmatter, session_accretion};
 use std::path::Path;
 
 const BACKLOG_HEAD_LIMIT: usize = 3;
@@ -171,8 +173,8 @@ fn render_backlog_head(components: &[element::Component], doc: &str) -> Option<S
     let backlog = components
         .iter()
         .find(|comp| element::is_backlog_component(&comp.name))?;
-    let (_, items, _) = pending::parse_items(backlog.content(doc));
-    let active: Vec<&pending::PendingItem> = items.iter().filter(|item| !item.is_done()).collect();
+    let (_, items, _) = backlog::parse_items(backlog.content(doc));
+    let active: Vec<&backlog::PendingItem> = items.iter().filter(|item| !item.is_done()).collect();
     if active.is_empty() {
         return None;
     }
@@ -191,9 +193,9 @@ fn render_backlog_head(components: &[element::Component], doc: &str) -> Option<S
     Some(lines.join("\n"))
 }
 
-fn format_pending_head(item: &pending::PendingItem) -> String {
+fn format_pending_head(item: &backlog::PendingItem) -> String {
     let checkbox = match (&item.state, &item.gate_type) {
-        (pending::PendingState::Gated, Some(gt)) => format!("[/{}]", gt),
+        (backlog::PendingState::Gated, Some(gt)) => format!("[/{}]", gt),
         _ => format!("[{}]", item.state.box_char()),
     };
     format!("- {} [#{}] {}", checkbox, item.id, item.text)

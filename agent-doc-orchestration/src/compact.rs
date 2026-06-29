@@ -344,7 +344,7 @@ fn non_exchange_list_item_counts(content: &str) -> BTreeMap<String, usize> {
         if comp.name == "exchange" {
             continue;
         }
-        let (_, items, _) = crate::pending::parse_items(comp.content(content));
+        let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(comp.content(content));
         if !items.is_empty() {
             counts.insert(comp.name.clone(), items.len());
         }

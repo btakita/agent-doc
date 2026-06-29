@@ -630,7 +630,7 @@ fn tracked_work_component_fingerprint(
         component.name.clone()
     };
     let hash = crate::ops_log::content_hash(component.content(content));
-    let (_, items, _) = crate::pending::parse_items(component.content(content));
+    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(component.content(content));
     let item_ids = items
         .into_iter()
         .filter(|item| !item.is_done())
@@ -844,7 +844,8 @@ pub fn document_active_identities(
             } else {
                 continue;
             };
-            let (_, items, _) = crate::pending::parse_items(component.content(content));
+            let (_, items, _) =
+                agent_doc_element_backlog::backlog::parse_items(component.content(content));
             for item in items.iter().filter(|item| !item.is_done()) {
                 if !item.id.is_empty() {
                     sources
@@ -2452,7 +2453,9 @@ fn collect_agent_done_ids_with_root(
         // #donemirrorreap: collect only each done item's OWN leading id, not every
         // bracketed id cited in its prose — otherwise a `[#other]` mentioned inside
         // one entry's body falsely marks `#other` done and reaps its open mirror.
-        for id in crate::pending::extract_done_item_own_ids(comp.content(content)) {
+        for id in
+            agent_doc_element_backlog::backlog::extract_done_item_own_ids(comp.content(content))
+        {
             ids.insert(id);
         }
         if let Some(archive) = comp.attrs.get("archive")
@@ -2460,7 +2463,9 @@ fn collect_agent_done_ids_with_root(
         {
             let archive_path = root.join(archive);
             if let Ok(archive_content) = std::fs::read_to_string(&archive_path) {
-                for id in crate::pending::extract_done_item_own_ids(&archive_content) {
+                for id in
+                    agent_doc_element_backlog::backlog::extract_done_item_own_ids(&archive_content)
+                {
                     ids.insert(id);
                 }
             }
@@ -2613,7 +2618,7 @@ fn snapshot_proves_queue_was_active(file: &Path) -> bool {
 pub fn archive_pending_done(
     file: &Path,
     content: &str,
-    removed: &[crate::pending::PendingItem],
+    removed: &[agent_doc_element_backlog::backlog::PendingItem],
 ) -> Result<Option<String>> {
     if removed.is_empty() {
         return Ok(None);
@@ -2712,9 +2717,9 @@ pub fn external_done_archive_ids(file: &Path, content: &str) -> Result<HashSet<S
                     .with_context(|| format!("failed to read done archive {}", target.display()));
             }
         };
-        ids.extend(crate::pending::extract_pending_ids_from_text(
-            &archive_content,
-        ));
+        ids.extend(
+            agent_doc_element_backlog::backlog::extract_pending_ids_from_text(&archive_content),
+        );
     }
     Ok(ids)
 }
@@ -2780,7 +2785,7 @@ fn resolve_done_archive_target(file: &Path, archive_path: &str) -> Result<PathBu
 fn append_external_done_archive(
     target: &Path,
     today: &str,
-    removed: &[crate::pending::PendingItem],
+    removed: &[agent_doc_element_backlog::backlog::PendingItem],
 ) -> Result<()> {
     let mut existing = match std::fs::read_to_string(target) {
         Ok(content) => content,
@@ -2820,7 +2825,10 @@ fn append_external_done_archive(
     Ok(())
 }
 
-fn render_done_archive_entry(today: &str, item: &crate::pending::PendingItem) -> String {
+fn render_done_archive_entry(
+    today: &str,
+    item: &agent_doc_element_backlog::backlog::PendingItem,
+) -> String {
     let mut entry = format!("- {} [#{}] {}", today, item.id, item.text);
     if item.continuation.is_empty() {
         entry.push('\n');
@@ -4292,10 +4300,10 @@ mod tests {
         let archived = archive_pending_done(
             &file,
             content,
-            &[crate::pending::PendingItem {
-                marker: crate::pending::PendingListMarker::Bullet,
+            &[agent_doc_element_backlog::backlog::PendingItem {
+                marker: agent_doc_element_backlog::backlog::PendingListMarker::Bullet,
                 id: "done1".to_string(),
-                state: crate::pending::PendingState::Done,
+                state: agent_doc_element_backlog::backlog::PendingState::Done,
                 gate_type: None,
                 in_progress: false,
                 text: "completed item".to_string(),
@@ -4326,10 +4334,10 @@ mod tests {
         let archived = archive_pending_done(
             &file,
             content,
-            &[crate::pending::PendingItem {
-                marker: crate::pending::PendingListMarker::Bullet,
+            &[agent_doc_element_backlog::backlog::PendingItem {
+                marker: agent_doc_element_backlog::backlog::PendingListMarker::Bullet,
                 id: "done1".to_string(),
-                state: crate::pending::PendingState::Done,
+                state: agent_doc_element_backlog::backlog::PendingState::Done,
                 gate_type: None,
                 in_progress: false,
                 text: "completed item".to_string(),
@@ -4361,10 +4369,10 @@ mod tests {
         let archived = archive_pending_done(
             &file,
             content,
-            &[crate::pending::PendingItem {
-                marker: crate::pending::PendingListMarker::Bullet,
+            &[agent_doc_element_backlog::backlog::PendingItem {
+                marker: agent_doc_element_backlog::backlog::PendingListMarker::Bullet,
                 id: "done1".to_string(),
-                state: crate::pending::PendingState::Done,
+                state: agent_doc_element_backlog::backlog::PendingState::Done,
                 gate_type: None,
                 in_progress: false,
                 text: "completed externally".to_string(),
@@ -4382,10 +4390,10 @@ mod tests {
         archive_pending_done(
             &file,
             &archived,
-            &[crate::pending::PendingItem {
-                marker: crate::pending::PendingListMarker::Bullet,
+            &[agent_doc_element_backlog::backlog::PendingItem {
+                marker: agent_doc_element_backlog::backlog::PendingListMarker::Bullet,
                 id: "done1".to_string(),
-                state: crate::pending::PendingState::Done,
+                state: agent_doc_element_backlog::backlog::PendingState::Done,
                 gate_type: None,
                 in_progress: false,
                 text: "completed externally".to_string(),
@@ -4402,10 +4410,10 @@ mod tests {
     fn archive_pending_done_rejects_invalid_external_archive_paths() {
         let dir = setup_project();
         let file = dir.path().join("session.md");
-        let item = crate::pending::PendingItem {
-            marker: crate::pending::PendingListMarker::Bullet,
+        let item = agent_doc_element_backlog::backlog::PendingItem {
+            marker: agent_doc_element_backlog::backlog::PendingListMarker::Bullet,
             id: "done1".to_string(),
-            state: crate::pending::PendingState::Done,
+            state: agent_doc_element_backlog::backlog::PendingState::Done,
             gate_type: None,
             in_progress: false,
             text: "completed item".to_string(),
@@ -4454,13 +4462,14 @@ mod tests {
         std::fs::write(&file, current).unwrap();
 
         let external_ids = external_done_archive_ids(&file, current).unwrap();
-        let report = crate::pending::detect_dropped_from_history_with_extra_current_ids(
-            current,
-            baseline,
-            &HashSet::new(),
-            &external_ids,
-        )
-        .unwrap();
+        let report =
+            agent_doc_element_backlog::backlog::detect_dropped_from_history_with_extra_current_ids(
+                current,
+                baseline,
+                &HashSet::new(),
+                &external_ids,
+            )
+            .unwrap();
 
         assert!(report.dropped.is_empty());
     }

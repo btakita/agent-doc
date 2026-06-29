@@ -9,7 +9,8 @@ pub(crate) fn open_tracked_work_ids(file: &Path) -> Result<Vec<String>> {
         .into_iter()
         .filter(|component| is_tracked_work_component(&component.name))
         .flat_map(|component| {
-            let (_, items, _) = crate::pending::parse_items(component.content(&content));
+            let (_, items, _) =
+                agent_doc_element_backlog::backlog::parse_items(component.content(&content));
             items
         })
         .filter(|item| !item.is_done())
@@ -241,7 +242,7 @@ pub(crate) fn extract_pending_hash_ids(text: &str) -> Vec<String> {
         }
 
         if end > start {
-            let id = crate::pending::normalize_pending_id(&text[start..end]);
+            let id = agent_doc_element_backlog::backlog::normalize_pending_id(&text[start..end]);
             if !ids.iter().any(|existing| existing == &id) {
                 ids.push(id);
             }
@@ -361,7 +362,8 @@ pub(crate) fn open_backlog_ids(file: &Path) -> Result<Vec<String>> {
         .into_iter()
         .filter(|component| is_backlog_component(&component.name))
         .flat_map(|component| {
-            let (_, items, _) = crate::pending::parse_items(component.content(&content));
+            let (_, items, _) =
+                agent_doc_element_backlog::backlog::parse_items(component.content(&content));
             items
         })
         .filter(|item| !item.is_done())

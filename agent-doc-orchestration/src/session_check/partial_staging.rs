@@ -35,7 +35,7 @@ pub(crate) fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardRes
         .pending_done_ids
         .iter()
         .chain(state.reaped_pending_ids.iter())
-        .map(|id| crate::pending::normalize_pending_id(id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .filter(|id| !id.is_empty())
         .collect();
     let open_backlog: std::collections::HashSet<String> =
@@ -45,7 +45,7 @@ pub(crate) fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardRes
     for id in state
         .expect_done_or_gate_ids
         .iter()
-        .map(|id| crate::pending::normalize_pending_id(id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .filter(|id| !id.is_empty())
     {
         if resolved.contains(&id) || !open_backlog.contains(&id) {

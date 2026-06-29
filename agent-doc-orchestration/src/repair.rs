@@ -756,9 +756,12 @@ fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
     };
 
     let doc_id = crate::pending_cmd::doc_id_for(file);
-    let (canonical_body, _) =
-        crate::pending::backfill(backlog.content(&content), &doc_id, &HashSet::new());
-    let (new_body, removed) = crate::pending::reap_with_items(&canonical_body)?;
+    let (canonical_body, _) = agent_doc_element_backlog::backlog::backfill(
+        backlog.content(&content),
+        &doc_id,
+        &HashSet::new(),
+    );
+    let (new_body, removed) = agent_doc_element_backlog::backlog::reap_with_items(&canonical_body)?;
     if removed.is_empty() {
         return Ok(RepairOutcome::Noop);
     }

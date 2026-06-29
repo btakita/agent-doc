@@ -200,7 +200,7 @@ pub fn project_active_queue_prompts(
         if let Some(id) = id {
             id_to_text.entry(id.clone()).or_insert_with(|| text.clone());
             let mut merged = after_deps.get(id).cloned().unwrap_or_default();
-            for inline in agent_doc_core::pending::item_after_deps(text) {
+            for inline in agent_doc_element_backlog::backlog::item_after_deps(text) {
                 if !merged.contains(&inline) {
                     merged.push(inline);
                 }

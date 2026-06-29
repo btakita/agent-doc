@@ -168,7 +168,7 @@ fn git_head_hash(file: &Path) -> Option<String> {
 /// Human-readable log timestamp helpers (`#opslogts`) live in `agent-doc-core`
 /// so both this crate's writers and `agent-doc-core::gate_verify`'s ops.log
 /// scanner share one implementation.
-pub use agent_doc_core::log_time::{format_log_timestamp, parse_log_timestamp};
+pub use agent_doc_log_time::{format_log_timestamp, parse_log_timestamp};
 
 /// Get the current timestamp in ISO 8601 (UTC) format.
 fn iso_timestamp() -> String {

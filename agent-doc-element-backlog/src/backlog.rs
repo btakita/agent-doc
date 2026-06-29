@@ -1,6 +1,6 @@
-//! # Module: pending
+//! # Module: backlog
 //!
-//! Pure functions for parsing and mutating the `agent:pending` component body.
+//! Pure functions for parsing and mutating the `agent:backlog` component body.
 //!
 //! Each pending item carries:
 //! - a GFM task-list checkbox (`- [ ]` / `1. [ ]` or `- [x]` / `1. [x]`)
@@ -3703,7 +3703,7 @@ mod tests {
         let body = concat!(
             "- [x] [#b1c4] drop\n",
             "Commands:\n",
-            "  cargo test -p agent-doc pending::\n",
+            "  cargo test -p agent-doc backlog::\n",
             "Diff:\n",
             "@@ -1 +1 @@\n",
             "- [ ] [#c5d6] keep\n"
@@ -3755,14 +3755,14 @@ mod tests {
         let body = concat!(
             "- [x] [#b1c4] drop\n",
             "Commands:\n",
-            "  cargo test -p agent-doc pending::\n"
+            "  cargo test -p agent-doc backlog::\n"
         );
         let (_new_body, removed) = reap_with_items(body).unwrap();
         assert_eq!(removed.len(), 1);
         assert_eq!(removed[0].id, "b1c4");
         assert_eq!(
             removed[0].continuation,
-            "Commands:\n  cargo test -p agent-doc pending::\n"
+            "Commands:\n  cargo test -p agent-doc backlog::\n"
         );
     }
 

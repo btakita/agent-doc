@@ -54,19 +54,19 @@ pub(crate) fn check_blocked_closeout_followup_guard(
     let kept_open: std::collections::HashSet<String> = state
         .pending_kept_open_ids
         .iter()
-        .map(|id| crate::pending::normalize_pending_id(id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .filter(|id| !id.is_empty())
         .collect();
     let done: std::collections::HashSet<String> = state
         .pending_done_ids
         .iter()
-        .map(|id| crate::pending::normalize_pending_id(id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .filter(|id| !id.is_empty())
         .collect();
     let gated: std::collections::HashSet<String> = state
         .pending_gated_ids
         .iter()
-        .map(|id| crate::pending::normalize_pending_id(id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .filter(|id| !id.is_empty())
         .collect();
     let still_gated = open_review_ids(file)?;
@@ -75,7 +75,7 @@ pub(crate) fn check_blocked_closeout_followup_guard(
     for id in state
         .expect_done_or_gate_ids
         .iter()
-        .map(|id| crate::pending::normalize_pending_id(id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .filter(|id| !id.is_empty())
     {
         if kept_open.contains(&id) || done.contains(&id) {
@@ -192,7 +192,7 @@ pub(crate) fn check_gated_phase_split_guard(
     let kept_open: std::collections::HashSet<String> = state
         .pending_kept_open_ids
         .iter()
-        .map(|id| crate::pending::normalize_pending_id(id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .filter(|id| !id.is_empty())
         .collect();
     if kept_open.is_empty() {
@@ -201,7 +201,7 @@ pub(crate) fn check_gated_phase_split_guard(
     let directed: std::collections::HashSet<String> = state
         .expect_done_or_gate_ids
         .iter()
-        .map(|id| crate::pending::normalize_pending_id(id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .filter(|id| !id.is_empty())
         .collect();
 
@@ -215,12 +215,13 @@ pub(crate) fn check_gated_phase_split_guard(
         if !trackable {
             continue;
         }
-        let (_, items, _) = crate::pending::parse_items(component.content(&content));
+        let (_, items, _) =
+            agent_doc_element_backlog::backlog::parse_items(component.content(&content));
         for item in items {
             if item.is_done() {
                 continue;
             }
-            let id = crate::pending::normalize_pending_id(&item.id);
+            let id = agent_doc_element_backlog::backlog::normalize_pending_id(&item.id);
             if id.is_empty() || !kept_open.contains(&id) || !directed.contains(&id) {
                 continue;
             }
@@ -315,7 +316,7 @@ pub(crate) fn body_already_split_into_child_ids(body: &str, own_id: &str) -> boo
         std::sync::LazyLock::new(|| regex::Regex::new(r"#([a-z0-9][a-z0-9-]*)").unwrap());
     let mut others = std::collections::HashSet::new();
     for cap in ID_REF.captures_iter(body) {
-        let id = crate::pending::normalize_pending_id(&cap[1]);
+        let id = agent_doc_element_backlog::backlog::normalize_pending_id(&cap[1]);
         if !id.is_empty() && id != own_id && id != "agent-doc-bug" {
             others.insert(id);
         }
@@ -440,7 +441,8 @@ pub(crate) fn single_open_review_item_id(file: &Path) -> Result<Option<String>> 
         .into_iter()
         .filter(|component| agent_doc_element::element::is_review_component(&component.name))
         .flat_map(|component| {
-            let (_, items, _) = crate::pending::parse_items(component.content(&content));
+            let (_, items, _) =
+                agent_doc_element_backlog::backlog::parse_items(component.content(&content));
             items
         })
         .filter(|item| !item.is_done())

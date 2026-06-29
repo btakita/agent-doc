@@ -365,7 +365,7 @@ fn deferred_backlog_ids_scoped(
             continue;
         }
         let body = &content[comp.open_end..comp.close_start];
-        for (id, ctx) in crate::pending::active_item_execution_contexts(body) {
+        for (id, ctx) in agent_doc_element_backlog::backlog::active_item_execution_contexts(body) {
             let undrainable = match scope {
                 // `[operator-verify]` needs a human; `[focused-cycle]` needs a
                 // freshly-cleared cycle the in-session loop cannot provide.
@@ -396,7 +396,7 @@ pub fn clean_session_backlog_ids(content: &str) -> std::collections::HashSet<Str
             continue;
         }
         let body = &content[comp.open_end..comp.close_start];
-        for (id, ctx) in crate::pending::active_item_execution_contexts(body) {
+        for (id, ctx) in agent_doc_element_backlog::backlog::active_item_execution_contexts(body) {
             if ctx.clean_session_required {
                 ids.insert(id.to_ascii_lowercase());
             }
@@ -418,7 +418,7 @@ pub fn focused_cycle_backlog_ids(content: &str) -> std::collections::HashSet<Str
             continue;
         }
         let body = &content[comp.open_end..comp.close_start];
-        for (id, ctx) in crate::pending::active_item_execution_contexts(body) {
+        for (id, ctx) in agent_doc_element_backlog::backlog::active_item_execution_contexts(body) {
             if ctx.focused_cycle_required {
                 ids.insert(id.to_ascii_lowercase());
             }
@@ -488,7 +488,7 @@ pub fn context_reset_backlog_ids(content: &str) -> std::collections::HashSet<Str
             continue;
         }
         let body = &content[comp.open_end..comp.close_start];
-        for (id, ctx) in crate::pending::active_item_execution_contexts(body) {
+        for (id, ctx) in agent_doc_element_backlog::backlog::active_item_execution_contexts(body) {
             if ctx.clean_session_required || ctx.focused_cycle_required {
                 ids.insert(id.to_ascii_lowercase());
             }
@@ -678,7 +678,7 @@ fn open_backlog_ids_from_content(content: &str) -> Option<std::collections::Hash
         }
         found_backlog = true;
         let body = &content[comp.open_end..comp.close_start];
-        let (_, items, _) = crate::pending::parse_items(body);
+        let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
         for item in items {
             if !item.is_done() && !item.id.is_empty() {
                 ids.insert(item.id.to_ascii_lowercase());
@@ -702,7 +702,7 @@ fn open_review_item_count(content: &str) -> usize {
         .find(|comp| agent_doc_element::element::is_review_component(&comp.name))
         .map(|comp| {
             let body = &content[comp.open_end..comp.close_start];
-            let (_, items, _) = crate::pending::parse_items(body);
+            let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
             items.into_iter().filter(|item| !item.is_done()).count()
         })
         .unwrap_or(0)

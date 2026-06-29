@@ -122,13 +122,9 @@ pub mod hooks;
 // realtime-document forensic detector). Re-exported so
 // `crate::ipc_corruption::*` call sites resolve.
 pub use agent_doc_document_realtime::ipc_corruption;
-// Relocated to `agent-doc-core` (#optverify — pure gate-verify predicate scan).
-// Re-exported so `crate::gate_verify::*` call sites resolve unchanged.
-pub use agent_doc_core::gate_verify;
 pub mod auto_dag;
 pub mod lint_gate;
 pub mod memory_cmd;
-pub mod pending;
 pub mod pending_cmd;
 pub mod preflight;
 pub mod project_controller;

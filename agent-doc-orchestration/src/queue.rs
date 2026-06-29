@@ -1221,7 +1221,7 @@ pub fn sort_prompts_by_dag_with_operator_authored(
             dep_ids.extend(d.iter().cloned());
         }
         if let QueueEntry::Prompt(p) | QueueEntry::Completed(p) = e {
-            dep_ids.extend(agent_doc_core::pending::item_after_deps(&p.text));
+            dep_ids.extend(agent_doc_element_backlog::backlog::item_after_deps(&p.text));
         }
         for dep in dep_ids {
             if let Some(&j) = id_to_idx.get(&dep)
@@ -3218,15 +3218,15 @@ mod tests {
     #[test]
     fn item_after_deps_parses_tokens() {
         assert_eq!(
-            agent_doc_core::pending::item_after_deps("do the thing after=#a"),
+            agent_doc_element_backlog::backlog::item_after_deps("do the thing after=#a"),
             vec!["a".to_string()]
         );
         assert_eq!(
-            agent_doc_core::pending::item_after_deps("x after=#a,#b more"),
+            agent_doc_element_backlog::backlog::item_after_deps("x after=#a,#b more"),
             vec!["a".to_string(), "b".to_string()]
         );
         // word-boundary guard: `hereafter=` must not match.
-        assert!(agent_doc_core::pending::item_after_deps("hereafter=#a").is_empty());
+        assert!(agent_doc_element_backlog::backlog::item_after_deps("hereafter=#a").is_empty());
     }
 
     #[test]

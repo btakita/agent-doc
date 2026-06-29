@@ -1,5 +1,8 @@
 //! Backlog element descriptor.
 
+pub mod backlog;
+pub mod gate_verify;
+
 use agent_doc_element::{
     ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,
     ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy,

@@ -705,7 +705,7 @@ fn route_dispatch_bug_report_item(facts: RouteDispatchBugReportFacts<'_>) -> Res
     let component = format!("route/{}", route_snapshot_field(facts.phase));
     let content_hash =
         crate::ops_log::content_hash(&format!("{}:{}:{}", doc_id, facts.phase, facts.issue));
-    let symptom_key = crate::pending::SymptomDedupeKey::new(
+    let symptom_key = agent_doc_element_backlog::backlog::SymptomDedupeKey::new(
         "run_agent_doc_route_dispatch_failure",
         doc_id,
         component,

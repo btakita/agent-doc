@@ -67,7 +67,7 @@ fn first_live_backlog_id(content: &str) -> Result<Option<String>> {
         if !is_backlog_component(&comp.name) {
             continue;
         }
-        let (_, items, _) = crate::pending::parse_items(comp.content(content));
+        let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(comp.content(content));
         if let Some(item) = items
             .into_iter()
             .find(|item| !item.id.is_empty() && !item.is_done())

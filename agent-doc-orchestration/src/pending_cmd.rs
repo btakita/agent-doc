@@ -16,12 +16,12 @@ use std::cell::Cell;
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::pending;
 use crate::snapshot;
 use agent_doc_element::element;
 use agent_doc_element::element::{
     is_backlog_component, is_icebox_component, is_review_component, is_tracked_work_component,
 };
+use agent_doc_element_backlog::backlog;
 
 thread_local! {
     static FORCE_DISK_PENDING_WRITE: Cell<bool> = const { Cell::new(false) };
@@ -167,7 +167,7 @@ fn find_component_containing_open_id(
     file: &Path,
     id: &str,
 ) -> Result<(String, element::Component)> {
-    let id = pending::normalize_pending_id(id);
+    let id = backlog::normalize_pending_id(id);
     let content = std::fs::read_to_string(file).context("failed to read document")?;
     let components = element::parse(&content).context("failed to parse components")?;
     let comp = components
@@ -176,27 +176,27 @@ fn find_component_containing_open_id(
             if !is_tracked_work_component(&c.name) {
                 return false;
             }
-            let (_, items, _) = pending::parse_items(c.content(&content));
+            let (_, items, _) = backlog::parse_items(c.content(&content));
             items
                 .into_iter()
-                .any(|item| item.id == id && item.state != pending::PendingState::Done)
+                .any(|item| item.id == id && item.state != backlog::PendingState::Done)
         })
         .with_context(|| format!("id not found in backlog/icebox: {}", id))?;
     Ok((content, comp))
 }
 
 pub fn open_item_component_name(file: &Path, id: &str) -> Result<Option<String>> {
-    let id = pending::normalize_pending_id(id);
+    let id = backlog::normalize_pending_id(id);
     let content = std::fs::read_to_string(file).context("failed to read document")?;
     let components = element::parse(&content).context("failed to parse components")?;
     for comp in components {
         if !is_tracked_work_component(&comp.name) {
             continue;
         }
-        let (_, items, _) = pending::parse_items(comp.content(&content));
+        let (_, items, _) = backlog::parse_items(comp.content(&content));
         if items
             .into_iter()
-            .any(|item| item.id == id && item.state != pending::PendingState::Done)
+            .any(|item| item.id == id && item.state != backlog::PendingState::Done)
         {
             return Ok(Some(comp.name));
         }
@@ -205,7 +205,7 @@ pub fn open_item_component_name(file: &Path, id: &str) -> Result<Option<String>>
 }
 
 fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
-    let id = pending::normalize_pending_id(id);
+    let id = backlog::normalize_pending_id(id);
     if id.is_empty() {
         return Ok(false);
     }
@@ -226,10 +226,10 @@ fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
             return Ok(true);
         }
         if is_tracked_work_component(&comp.name) {
-            let (_, items, _) = pending::parse_items(body);
+            let (_, items, _) = backlog::parse_items(body);
             if items
                 .into_iter()
-                .any(|item| item.id == id && item.state == pending::PendingState::Done)
+                .any(|item| item.id == id && item.state == backlog::PendingState::Done)
             {
                 return Ok(true);
             }
@@ -247,7 +247,7 @@ pub fn doc_id_for(file: &Path) -> String {
 
 fn canonicalize_component_content(file: &Path, content: &str) -> String {
     let doc_id = doc_id_for(file);
-    let (canonical, _) = pending::backfill(content, &doc_id, &HashSet::new());
+    let (canonical, _) = backlog::backfill(content, &doc_id, &HashSet::new());
     canonical
 }
 
@@ -258,14 +258,14 @@ fn canonicalize_tracked_list_content(file: &Path, list: TrackedList, content: &s
     }
 }
 
-fn log_symptom_dedupe(file: &Path, surface: &str, id: &str, key: &pending::SymptomDedupeKey) {
+fn log_symptom_dedupe(file: &Path, surface: &str, id: &str, key: &backlog::SymptomDedupeKey) {
     crate::ops_log::log_op(
         file,
         &format!(
             "symptom_dedupe_attached file={} surface={} id={} {}",
             file.display(),
             surface,
-            pending::normalize_pending_id(id),
+            backlog::normalize_pending_id(id),
             key.log_fields()
         ),
     );
@@ -283,7 +283,7 @@ fn log_symptom_dedupe(file: &Path, surface: &str, id: &str, key: &pending::Sympt
 /// explicit prefix) are unaffected, so ordinary `--pending-add "text"` is never
 /// blocked.
 fn reject_colliding_explicit_id(full_content: &str, item: &str) -> Result<()> {
-    let Some(candidate) = pending::explicit_custom_id(item) else {
+    let Some(candidate) = backlog::explicit_custom_id(item) else {
         return Ok(());
     };
     if let Some(sources) = crate::preflight::identity_collision_for_new_id(full_content, &candidate)
@@ -301,7 +301,7 @@ pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     reject_colliding_explicit_id(&full_content, item)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
-    let outcome = pending::op_add_with_outcome(existing, item, &doc_id, gated)?;
+    let outcome = backlog::op_add_with_outcome(existing, item, &doc_id, gated)?;
     let canonical = canonicalize_component_content(file, &outcome.body);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
@@ -335,7 +335,7 @@ fn add_many_to_list(
         reject_colliding_explicit_id(&full_content, item)?;
         let existing = &full_content[comp.open_end..comp.close_start];
         let doc_id = doc_id_for(file);
-        let outcome = pending::op_add_with_outcome(existing, item, &doc_id, gated)?;
+        let outcome = backlog::op_add_with_outcome(existing, item, &doc_id, gated)?;
         let canonical = canonicalize_component_content(file, &outcome.body);
         let new_doc = comp.replace_content(&full_content, &canonical);
         persist_pending_write(file, &full_content, &new_doc)?;
@@ -363,14 +363,14 @@ pub fn icebox_add_many(file: &Path, items: &[String]) -> Result<Vec<String>> {
 fn add_at_to_list(
     file: &Path,
     item: &str,
-    position: pending::AddPosition<'_>,
+    position: backlog::AddPosition<'_>,
     list: TrackedList,
 ) -> Result<String> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     reject_colliding_explicit_id(&full_content, item)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
-    let outcome = pending::op_add_at_with_outcome(existing, item, &doc_id, false, position)?;
+    let outcome = backlog::op_add_at_with_outcome(existing, item, &doc_id, false, position)?;
     let canonical = canonicalize_component_content(file, &outcome.body);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
@@ -380,31 +380,31 @@ fn add_at_to_list(
     Ok(outcome.id)
 }
 
-fn add_at(file: &Path, item: &str, position: pending::AddPosition<'_>) -> Result<String> {
+fn add_at(file: &Path, item: &str, position: backlog::AddPosition<'_>) -> Result<String> {
     add_at_to_list(file, item, position, TrackedList::Backlog)
 }
 
 /// `#ah0s`: `--pending-add-after <id> "<text>"`. Repeatable; chaining
 /// after A "B" then after B "C" builds A→B→C deterministically.
 pub fn add_after(file: &Path, anchor_id: &str, item: &str) -> Result<String> {
-    add_at(file, item, pending::AddPosition::After(anchor_id))
+    add_at(file, item, backlog::AddPosition::After(anchor_id))
 }
 
 /// `#ah0s`: `--pending-add-before <id> "<text>"`.
 pub fn add_before(file: &Path, anchor_id: &str, item: &str) -> Result<String> {
-    add_at(file, item, pending::AddPosition::Before(anchor_id))
+    add_at(file, item, backlog::AddPosition::Before(anchor_id))
 }
 
 /// `#ah0s`: `--pending-add-back "<text>"` (alias `--pending-append`) — tail insert.
 pub fn add_back(file: &Path, item: &str) -> Result<String> {
-    add_at(file, item, pending::AddPosition::Last)
+    add_at(file, item, backlog::AddPosition::Last)
 }
 
 pub fn icebox_add_after(file: &Path, anchor_id: &str, item: &str) -> Result<String> {
     add_at_to_list(
         file,
         item,
-        pending::AddPosition::After(anchor_id),
+        backlog::AddPosition::After(anchor_id),
         TrackedList::Icebox,
     )
 }
@@ -413,13 +413,13 @@ pub fn icebox_add_before(file: &Path, anchor_id: &str, item: &str) -> Result<Str
     add_at_to_list(
         file,
         item,
-        pending::AddPosition::Before(anchor_id),
+        backlog::AddPosition::Before(anchor_id),
         TrackedList::Icebox,
     )
 }
 
 pub fn icebox_add_back(file: &Path, item: &str) -> Result<String> {
-    add_at_to_list(file, item, pending::AddPosition::Last, TrackedList::Icebox)
+    add_at_to_list(file, item, backlog::AddPosition::Last, TrackedList::Icebox)
 }
 
 /// Summary of an `agent-doc review ungate-tasks` run.
@@ -517,12 +517,12 @@ pub fn list_review_items(file: &Path, filter: &ReviewListFilter) -> Result<Vec<R
         .iter()
         .filter(|c| agent_doc_element::element::is_review_component(&c.name))
     {
-        let (_, items, _) = pending::parse_items(c.content(&content));
+        let (_, items, _) = backlog::parse_items(c.content(&content));
         for item in items
             .into_iter()
-            .filter(|i| i.state == pending::PendingState::Gated)
+            .filter(|i| i.state == backlog::PendingState::Gated)
         {
-            let id = pending::normalize_pending_id(&item.id);
+            let id = backlog::normalize_pending_id(&item.id);
             if id.is_empty() {
                 continue;
             }
@@ -568,11 +568,11 @@ pub fn add_ungate_tasks_for_review(file: &Path) -> Result<UngateTasksReport> {
         .iter()
         .filter(|c| agent_doc_element::element::is_review_component(&c.name))
         .flat_map(|c| {
-            let (_, items, _) = pending::parse_items(c.content(&content));
+            let (_, items, _) = backlog::parse_items(c.content(&content));
             items
         })
-        .filter(|item| item.state == pending::PendingState::Gated)
-        .map(|item| pending::normalize_pending_id(&item.id))
+        .filter(|item| item.state == backlog::PendingState::Gated)
+        .map(|item| backlog::normalize_pending_id(&item.id))
         .filter(|id| !id.is_empty())
         .collect();
 
@@ -620,7 +620,7 @@ fn backfill_list(file: &Path, list: TrackedList) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
-    let (new_content, changed) = pending::backfill(existing, &doc_id, &HashSet::new());
+    let (new_content, changed) = backlog::backfill(existing, &doc_id, &HashSet::new());
     if !changed {
         eprintln!("[{}] already canonical — no changes", list.label());
         return Ok(());
@@ -646,14 +646,14 @@ pub fn done(file: &Path, id: &str) -> Result<()> {
         Err(_) if tracked_work_id_already_resolved(file, id)? => {
             eprintln!(
                 "[pending] done: id [#{}] is already resolved; leaving backlog unchanged",
-                pending::normalize_pending_id(id)
+                backlog::normalize_pending_id(id)
             );
             return Ok(());
         }
         Err(err) => return Err(err),
     };
     let existing = &full_content[comp.open_end..comp.close_start];
-    let new_content = pending::op_done(existing, id)?;
+    let new_content = backlog::op_done(existing, id)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
@@ -665,12 +665,12 @@ pub fn done(file: &Path, id: &str) -> Result<()> {
 pub fn gate(file: &Path, id: &str) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let (new_backlog, mut item) = match pending::op_take_item(existing, id) {
+    let (new_backlog, mut item) = match backlog::op_take_item(existing, id) {
         Ok(found) => found,
         Err(_) => {
             if let Some(review_comp) = find_review_component_in_content(&full_content)? {
-                let (_, review_items, _) = pending::parse_items(review_comp.content(&full_content));
-                let normalized = pending::normalize_pending_id(id);
+                let (_, review_items, _) = backlog::parse_items(review_comp.content(&full_content));
+                let normalized = backlog::normalize_pending_id(id);
                 if review_items
                     .into_iter()
                     .any(|item| item.id == normalized && !item.is_done())
@@ -682,9 +682,9 @@ pub fn gate(file: &Path, id: &str) -> Result<()> {
         }
     };
 
-    match pending::validate_transition(item.state, pending::PendingOp::Gate)? {
-        pending::TransitionResult::Transition(state) => item.state = state,
-        pending::TransitionResult::NoOp => {}
+    match backlog::validate_transition(item.state, backlog::PendingOp::Gate)? {
+        backlog::TransitionResult::Transition(state) => item.state = state,
+        backlog::TransitionResult::NoOp => {}
     }
     item.gate_type = None;
 
@@ -695,7 +695,7 @@ pub fn gate(file: &Path, id: &str) -> Result<()> {
     let (content_with_review, review_comp) = ensure_review_component(&new_doc)?;
     new_doc = content_with_review;
     let review_body = review_comp.content(&new_doc);
-    let new_review = pending::op_insert_item_first(review_body, item);
+    let new_review = backlog::op_insert_item_first(review_body, item);
     let review_comp = find_review_component_in_content(&new_doc)?
         .context("document has no review component after insertion")?;
     let new_doc =
@@ -712,7 +712,7 @@ pub fn review_add(file: &Path, item: &str) -> Result<Option<String>> {
     let (full_content, comp) = ensure_review_component(&full_content)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
-    let outcome = pending::op_add_with_outcome(existing, item, &doc_id, true)?;
+    let outcome = backlog::op_add_with_outcome(existing, item, &doc_id, true)?;
     let canonical = canonicalize_component_content(file, &outcome.body);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
@@ -728,7 +728,7 @@ pub fn review_edit(file: &Path, id: &str, text: &str) -> Result<()> {
     let comp = find_review_component_in_content(&full_content)?
         .context("document has no review component")?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let new_content = pending::op_edit(existing, id, text)?;
+    let new_content = backlog::op_edit(existing, id, text)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
@@ -747,11 +747,11 @@ pub fn review_remove(file: &Path, id: &str) -> Result<()> {
     let comp = find_review_component_in_content(&full_content)?
         .context("document has no review component")?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let (new_content, removed) = pending::op_take_all_by_id(existing, id);
+    let (new_content, removed) = backlog::op_take_all_by_id(existing, id);
     if removed.is_empty() {
         anyhow::bail!(
             "review item not found: #{}",
-            pending::normalize_pending_id(id)
+            backlog::normalize_pending_id(id)
         );
     }
     let canonical = canonicalize_component_content(file, &new_content);
@@ -761,7 +761,7 @@ pub fn review_remove(file: &Path, id: &str) -> Result<()> {
         "[pending] review-remove: removed {} entr{} for #{}",
         removed.len(),
         if removed.len() == 1 { "y" } else { "ies" },
-        pending::normalize_pending_id(id)
+        backlog::normalize_pending_id(id)
     );
     Ok(())
 }
@@ -776,17 +776,17 @@ pub fn review_resolve(file: &Path, id: &str) -> Result<()> {
     let comp = find_review_component_in_content(&full_content)?
         .context("document has no review component")?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let (new_content, mut removed) = pending::op_take_all_by_id(existing, id);
+    let (new_content, mut removed) = backlog::op_take_all_by_id(existing, id);
     if removed.is_empty() {
         anyhow::bail!(
             "review item not found: #{}",
-            pending::normalize_pending_id(id)
+            backlog::normalize_pending_id(id)
         );
     }
     // Archive as Done so the canonical agent:done entry renders `[x]`, regardless
     // of the review item's prior gated/open state.
     for item in &mut removed {
-        item.state = pending::PendingState::Done;
+        item.state = backlog::PendingState::Done;
         item.gate_type = None;
     }
     let canonical = canonicalize_component_content(file, &new_content);
@@ -799,7 +799,7 @@ pub fn review_resolve(file: &Path, id: &str) -> Result<()> {
         "[pending] review-resolve: archived {} entr{} for #{} to agent:done",
         removed.len(),
         if removed.len() == 1 { "y" } else { "ies" },
-        pending::normalize_pending_id(id)
+        backlog::normalize_pending_id(id)
     );
     Ok(())
 }
@@ -811,19 +811,19 @@ pub fn ungate(file: &Path, id: &str) -> Result<()> {
     let Some(review_comp) = find_review_component_in_content(&full_content)? else {
         let (full_content, comp) = find_pending_component(file)?;
         let existing = &full_content[comp.open_end..comp.close_start];
-        let new_content = pending::op_ungate(existing, id)?;
+        let new_content = backlog::op_ungate(existing, id)?;
         let canonical = canonicalize_component_content(file, &new_content);
         let new_doc = comp.replace_content(&full_content, &canonical);
         persist_pending_write(file, &full_content, &new_doc)?;
         return Ok(());
     };
     let review_body = review_comp.content(&full_content);
-    let (new_review, mut item) = match pending::op_take_item(review_body, id) {
+    let (new_review, mut item) = match backlog::op_take_item(review_body, id) {
         Ok(found) => found,
         Err(_) => {
             let (full_content, comp) = find_pending_component(file)?;
             let existing = &full_content[comp.open_end..comp.close_start];
-            let new_content = pending::op_ungate(existing, id)?;
+            let new_content = backlog::op_ungate(existing, id)?;
             let canonical = canonicalize_component_content(file, &new_content);
             let new_doc = comp.replace_content(&full_content, &canonical);
             persist_pending_write(file, &full_content, &new_doc)?;
@@ -831,9 +831,9 @@ pub fn ungate(file: &Path, id: &str) -> Result<()> {
         }
     };
 
-    match pending::validate_transition(item.state, pending::PendingOp::Ungate)? {
-        pending::TransitionResult::Transition(state) => item.state = state,
-        pending::TransitionResult::NoOp => {}
+    match backlog::validate_transition(item.state, backlog::PendingOp::Ungate)? {
+        backlog::TransitionResult::Transition(state) => item.state = state,
+        backlog::TransitionResult::NoOp => {}
     }
     item.gate_type = None;
 
@@ -847,7 +847,7 @@ pub fn ungate(file: &Path, id: &str) -> Result<()> {
         .find(|c| is_backlog_component(&c.name))
         .context("document has no backlog/pending component")?;
     let backlog_body = backlog_comp.content(&new_doc);
-    let new_backlog = pending::op_insert_item_first(backlog_body, item);
+    let new_backlog = backlog::op_insert_item_first(backlog_body, item);
     let new_doc = backlog_comp.replace_content(
         &new_doc,
         &canonicalize_component_content(file, &new_backlog),
@@ -861,7 +861,7 @@ pub fn ungate(file: &Path, id: &str) -> Result<()> {
 fn gate_in_place(file: &Path, id: &str) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let new_content = pending::op_gate(existing, id)?;
+    let new_content = backlog::op_gate(existing, id)?;
     if new_content == existing {
         return Ok(());
     }
@@ -875,7 +875,7 @@ fn gate_in_place(file: &Path, id: &str) -> Result<()> {
 fn edit_list(file: &Path, list: TrackedList, id: &str, text: &str) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let new_content = pending::op_edit(existing, id, text)?;
+    let new_content = backlog::op_edit(existing, id, text)?;
     let canonical = canonicalize_tracked_list_content(file, list, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
@@ -890,7 +890,7 @@ fn edit_many_list(file: &Path, list: TrackedList, edits: &[(String, String)]) ->
     let existing = &full_content[comp.open_end..comp.close_start];
     let mut new_content = existing.to_string();
     for (id, text) in edits {
-        new_content = pending::op_edit(&new_content, id, text)?;
+        new_content = backlog::op_edit(&new_content, id, text)?;
     }
     if new_content == existing {
         return Ok(());
@@ -922,7 +922,7 @@ pub fn icebox_edit_many(file: &Path, edits: &[(String, String)]) -> Result<()> {
 fn clear_list(file: &Path, list: TrackedList) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let new_content = pending::op_clear(existing)?;
+    let new_content = backlog::op_clear(existing)?;
     let new_doc = comp.replace_content(&full_content, &new_content);
     persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
@@ -940,7 +940,7 @@ pub fn icebox_clear(file: &Path) -> Result<()> {
 fn reorder_list(file: &Path, list: TrackedList, ids: &[String]) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let new_content = pending::op_reorder(existing, ids)?;
+    let new_content = backlog::op_reorder(existing, ids)?;
     let canonical = canonicalize_tracked_list_content(file, list, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
@@ -960,8 +960,8 @@ fn reap_list(file: &Path, list: TrackedList) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
-    let (canonical_content, changed) = pending::backfill(existing, &doc_id, &HashSet::new());
-    let (new_content, removed_items) = pending::reap_with_items(&canonical_content)?;
+    let (canonical_content, changed) = backlog::backfill(existing, &doc_id, &HashSet::new());
+    let (new_content, removed_items) = backlog::reap_with_items(&canonical_content)?;
     let removed: Vec<String> = removed_items.iter().map(|item| item.id.clone()).collect();
     let final_content = if removed.is_empty() {
         canonical_content
@@ -1085,7 +1085,7 @@ pub fn prune(file: &Path) -> Result<()> {
 pub fn resolve_gate(file: &Path, gate_type: &str) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let (new_content, resolved) = pending::op_resolve_gate(existing, gate_type);
+    let (new_content, resolved) = backlog::op_resolve_gate(existing, gate_type);
     if resolved.is_empty() {
         eprintln!(
             "[pending] no [/{}] items to resolve in {}",
@@ -1113,7 +1113,7 @@ pub fn resolve_gate(file: &Path, gate_type: &str) -> Result<()> {
 pub fn set_gate_type(file: &Path, id: &str, gate_type: &str) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let new_content = pending::op_set_gate_type(existing, id, gate_type)?;
+    let new_content = backlog::op_set_gate_type(existing, id, gate_type)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
@@ -1131,7 +1131,7 @@ pub fn set_gate_verify(file: &Path, id: &str, spec: &str) -> Result<()> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let new_content = pending::op_set_gate_verify(existing, id, spec, set_at)?;
+    let new_content = backlog::op_set_gate_verify(existing, id, spec, set_at)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
@@ -1187,7 +1187,7 @@ pub fn resolve_gate_scan(gate_type: &str, scope: &Path) -> Result<usize> {
                 None => continue,
             };
             let existing = &content[comp.open_end..comp.close_start];
-            let (new_content, resolved) = pending::op_resolve_gate(existing, gate_type);
+            let (new_content, resolved) = backlog::op_resolve_gate(existing, gate_type);
             if !resolved.is_empty() {
                 let new_doc = comp.replace_content(&content, &new_content);
                 std::fs::write(&path, &new_doc)?;

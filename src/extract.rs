@@ -549,7 +549,7 @@ fn transfer_pending_items(
     }
 
     let (remaining_body, matched_body, matched_ids) =
-        agent_doc_orchestration::pending::extract_items_by_id(pending_content, ids)?;
+        agent_doc_element_backlog::backlog::extract_items_by_id(pending_content, ids)?;
 
     if matched_ids.is_empty() {
         let id_list: Vec<String> = ids.iter().map(|id| format!("#{}", id)).collect();

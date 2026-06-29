@@ -110,8 +110,11 @@ fn run_pending_maintenance_with_options(
         let surface_label = maintenance_surface_label(surface);
         saw_completed_before |= !completed_pending_items(&current_body).is_empty();
 
-        let (after_backfill, changed) =
-            crate::pending::backfill(&current_body, &doc_id, &std::collections::HashSet::new());
+        let (after_backfill, changed) = agent_doc_element_backlog::backlog::backfill(
+            &current_body,
+            &doc_id,
+            &std::collections::HashSet::new(),
+        );
         if changed {
             eprintln!(
                 "[preflight] {}: backfilled missing hash ids / checkboxes",
@@ -126,7 +129,8 @@ fn run_pending_maintenance_with_options(
         // preset_item_id_collision). Only exact duplicates are removed; distinct
         // items that merely share an id are preserved so the ambiguity warning
         // still surfaces.
-        let (after_dedupe, deduped_ids) = crate::pending::op_dedupe_identical_items(&current_body);
+        let (after_dedupe, deduped_ids) =
+            agent_doc_element_backlog::backlog::op_dedupe_identical_items(&current_body);
         if !deduped_ids.is_empty() {
             eprintln!(
                 "[preflight] {}: deduped {} duplicate same-id entr{}: {}",
@@ -141,7 +145,10 @@ fn run_pending_maintenance_with_options(
 
         if should_reap_already_done_mirrors(surface) && !already_done_ids.is_empty() {
             let (after_mirror_reap, mirror_items) =
-                crate::pending::op_take_active_items_by_ids(&current_body, &already_done_ids);
+                agent_doc_element_backlog::backlog::op_take_active_items_by_ids(
+                    &current_body,
+                    &already_done_ids,
+                );
             if !mirror_items.is_empty() {
                 let removed_ids: Vec<String> = mirror_items.iter().map(|i| i.id.clone()).collect();
                 eprintln!(
@@ -194,12 +201,15 @@ fn run_pending_maintenance_with_options(
                     .map(|candidate| candidate.id.clone())
                     .collect();
                 let (after_ops_proof_reap, mut ops_proof_items) =
-                    crate::pending::op_take_active_items_by_ids(&current_body, &ids);
+                    agent_doc_element_backlog::backlog::op_take_active_items_by_ids(
+                        &current_body,
+                        &ids,
+                    );
                 if !ops_proof_items.is_empty() {
                     let removed_ids: Vec<String> =
                         ops_proof_items.iter().map(|i| i.id.clone()).collect();
                     for item in &mut ops_proof_items {
-                        item.state = crate::pending::PendingState::Done;
+                        item.state = agent_doc_element_backlog::backlog::PendingState::Done;
                         item.gate_type = None;
                     }
                     eprintln!(
@@ -234,7 +244,8 @@ fn run_pending_maintenance_with_options(
             }
         }
 
-        let (after_reap, reaped_items) = crate::pending::reap_with_items(&current_body)?;
+        let (after_reap, reaped_items) =
+            agent_doc_element_backlog::backlog::reap_with_items(&current_body)?;
         if !reaped_items.is_empty() {
             let removed_ids: Vec<String> = reaped_items.iter().map(|i| i.id.clone()).collect();
             eprintln!(
@@ -254,7 +265,8 @@ fn run_pending_maintenance_with_options(
         // token (1 = highest; absent = lowest) so a downstream `agent:queue` sync
         // inherits the prioritized order.
         if comp.attrs.contains_key("priority")
-            && let Some(sorted) = crate::pending::sort_by_priority(&current_body)
+            && let Some(sorted) =
+                agent_doc_element_backlog::backlog::sort_by_priority(&current_body)
         {
             eprintln!("[preflight] {}: sorted by priority", surface_label);
             current_body = sorted;
@@ -415,7 +427,8 @@ fn run_pending_maintenance_with_options(
                 .and_then(|comps| comps.into_iter().find(|c| is_backlog_component(&c.name)));
             if let (Some(sc), Some(current_body)) = (snap_comp, current_body) {
                 let snap_body = &snap[sc.open_end..sc.close_start];
-                crate::pending::detect_reorder(snap_body, current_body).is_some()
+                agent_doc_element_backlog::backlog::detect_reorder(snap_body, current_body)
+                    .is_some()
             } else {
                 false
             }
@@ -429,10 +442,15 @@ fn run_pending_maintenance_with_options(
     // 5. Count legacy gated items in backlog and review items in review.
     let pending_gated_count = current_body
         .map(|body| {
-            let (_, items, _) = crate::pending::parse_items(body);
+            let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
             items
                 .iter()
-                .filter(|i| matches!(i.state, crate::pending::PendingState::Gated))
+                .filter(|i| {
+                    matches!(
+                        i.state,
+                        agent_doc_element_backlog::backlog::PendingState::Gated
+                    )
+                })
                 .count()
         })
         .unwrap_or(0);
@@ -527,7 +545,8 @@ pub(crate) fn surface_pending_ids(content: &str, surface: &str) -> HashSet<Strin
                 .find(|c| component_matches_tracked_surface(&c.name, surface))
         })
         .map(|comp| {
-            let (_, items, _) = crate::pending::parse_items(comp.content(content));
+            let (_, items, _) =
+                agent_doc_element_backlog::backlog::parse_items(comp.content(content));
             items
                 .into_iter()
                 .map(|item| item.id)
@@ -538,10 +557,15 @@ pub(crate) fn surface_pending_ids(content: &str, surface: &str) -> HashSet<Strin
 }
 
 pub(crate) fn ops_proof_completion_candidates(body: &str) -> Vec<OpsProofCompletion> {
-    let (_, items, _) = crate::pending::parse_items(body);
+    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
     items
         .iter()
-        .filter(|item| !matches!(item.state, crate::pending::PendingState::Done))
+        .filter(|item| {
+            !matches!(
+                item.state,
+                agent_doc_element_backlog::backlog::PendingState::Done
+            )
+        })
         .filter_map(|item| {
             classify_ops_proof_completion(item).map(|evidence| OpsProofCompletion {
                 id: item.id.clone(),
@@ -551,7 +575,9 @@ pub(crate) fn ops_proof_completion_candidates(body: &str) -> Vec<OpsProofComplet
         .collect()
 }
 
-pub(crate) fn classify_ops_proof_completion(item: &crate::pending::PendingItem) -> Option<String> {
+pub(crate) fn classify_ops_proof_completion(
+    item: &agent_doc_element_backlog::backlog::PendingItem,
+) -> Option<String> {
     if item.id.is_empty() {
         return None;
     }
@@ -577,7 +603,10 @@ pub(crate) fn classify_ops_proof_completion(item: &crate::pending::PendingItem) 
     // already shipped in abc1234"). The completion marker must be the item's own
     // leading status verb. Gated items were deliberately code-completed by the
     // agent, so a proven marker anywhere in their text legitimately closes them.
-    let is_gated = matches!(item.state, crate::pending::PendingState::Gated);
+    let is_gated = matches!(
+        item.state,
+        agent_doc_element_backlog::backlog::PendingState::Gated
+    );
     if !is_gated && !marker_is_leading_status(&upper) {
         return None;
     }
@@ -740,11 +769,16 @@ pub(crate) fn review_counts(content: &str) -> (usize, usize) {
     else {
         return (0, 0);
     };
-    let (_, items, _) = crate::pending::parse_items(&body);
+    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(&body);
     let review_items: Vec<_> = items.into_iter().filter(|item| !item.is_done()).collect();
     let gated = review_items
         .iter()
-        .filter(|item| matches!(item.state, crate::pending::PendingState::Gated))
+        .filter(|item| {
+            matches!(
+                item.state,
+                agent_doc_element_backlog::backlog::PendingState::Gated
+            )
+        })
         .count();
     (review_items.len(), gated)
 }
@@ -790,14 +824,22 @@ fn run_gate_verify_with_options(
         return Ok(Vec::new());
     };
     let body = review.content(&content).to_string();
-    let (_, items, _) = crate::pending::parse_items(&body);
+    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(&body);
 
     // Gather predicate-bearing gated items.
-    let predicates: Vec<(String, crate::gate_verify::GatePredicate)> = items
+    let predicates: Vec<(
+        String,
+        agent_doc_element_backlog::gate_verify::GatePredicate,
+    )> = items
         .iter()
-        .filter(|item| matches!(item.state, crate::pending::PendingState::Gated))
+        .filter(|item| {
+            matches!(
+                item.state,
+                agent_doc_element_backlog::backlog::PendingState::Gated
+            )
+        })
         .filter_map(|item| {
-            crate::gate_verify::parse_gate_predicate(&item.text)
+            agent_doc_element_backlog::gate_verify::parse_gate_predicate(&item.text)
                 .filter(|p| p.is_actionable())
                 .map(|p| (item.id.clone(), p))
         })
@@ -815,24 +857,27 @@ fn run_gate_verify_with_options(
     let mut results = Vec::new();
     let mut to_resolve: Vec<String> = Vec::new();
     for (id, predicate) in &predicates {
-        let outcome = crate::gate_verify::scan_ops_log(predicate, &ops_log);
+        let outcome = agent_doc_element_backlog::gate_verify::scan_ops_log(predicate, &ops_log);
         let (marker, at) = match &outcome {
-            crate::gate_verify::VerifyOutcome::Provable { marker, at } => {
+            agent_doc_element_backlog::gate_verify::VerifyOutcome::Provable { marker, at } => {
                 (Some(marker.clone()), Some(*at))
             }
-            crate::gate_verify::VerifyOutcome::Failed { marker, at } => {
+            agent_doc_element_backlog::gate_verify::VerifyOutcome::Failed { marker, at } => {
                 (Some(marker.clone()), Some(*at))
             }
-            crate::gate_verify::VerifyOutcome::Pending => (None, None),
+            agent_doc_element_backlog::gate_verify::VerifyOutcome::Pending => (None, None),
         };
         let status = outcome.status_str().to_string();
-        let provable = matches!(outcome, crate::gate_verify::VerifyOutcome::Provable { .. });
+        let provable = matches!(
+            outcome,
+            agent_doc_element_backlog::gate_verify::VerifyOutcome::Provable { .. }
+        );
         let auto_resolved = autoverify && provable;
         if auto_resolved {
             to_resolve.push(id.clone());
         }
         match &outcome {
-            crate::gate_verify::VerifyOutcome::Provable { marker, at } => {
+            agent_doc_element_backlog::gate_verify::VerifyOutcome::Provable { marker, at } => {
                 eprintln!(
                     "[preflight] optverify: review #{} provable (marker {:?} @ {})",
                     id, marker, at
@@ -845,7 +890,7 @@ fn run_gate_verify_with_options(
                     ),
                 );
             }
-            crate::gate_verify::VerifyOutcome::Failed { marker, at } => {
+            agent_doc_element_backlog::gate_verify::VerifyOutcome::Failed { marker, at } => {
                 eprintln!(
                     "[preflight] optverify: review #{} FAILED (disproof {:?} @ {}) — file a bug",
                     id, marker, at
@@ -858,7 +903,7 @@ fn run_gate_verify_with_options(
                     ),
                 );
             }
-            crate::gate_verify::VerifyOutcome::Pending => {}
+            agent_doc_element_backlog::gate_verify::VerifyOutcome::Pending => {}
         }
         results.push(GateVerifyResult {
             id: id.clone(),
@@ -874,7 +919,7 @@ fn run_gate_verify_with_options(
     if !to_resolve.is_empty() {
         let mut new_body = body.clone();
         for id in &to_resolve {
-            new_body = crate::pending::op_done(&new_body, id)?;
+            new_body = agent_doc_element_backlog::backlog::op_done(&new_body, id)?;
         }
         let new_content = review.replace_content(&content, &new_body);
         persist_pending_maintenance_doc(
@@ -906,7 +951,7 @@ pub(crate) fn ensure_no_completed_tracked_items(content: &str, surface: &str) ->
     let components = agent_doc_element::element::parse(content).with_context(|| {
         format!("failed to parse {surface} components during pending reap check")
     })?;
-    let completed: Vec<crate::pending::PendingItem> = components
+    let completed: Vec<agent_doc_element_backlog::backlog::PendingItem> = components
         .into_iter()
         .filter(|component| is_tracked_work_component(&component.name))
         .flat_map(|component| completed_pending_items(component.content(content)))
@@ -929,11 +974,13 @@ pub(crate) fn ensure_no_completed_tracked_items(content: &str, surface: &str) ->
     anyhow::bail!("pending maintenance left completed tracked items in the {surface}: {refs}");
 }
 
-pub(crate) fn completed_pending_items(body: &str) -> Vec<crate::pending::PendingItem> {
-    let (_, items, _) = crate::pending::parse_items(body);
+pub(crate) fn completed_pending_items(
+    body: &str,
+) -> Vec<agent_doc_element_backlog::backlog::PendingItem> {
+    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
     items
         .into_iter()
-        .filter(crate::pending::PendingItem::is_done)
+        .filter(agent_doc_element_backlog::backlog::PendingItem::is_done)
         .collect()
 }
 
@@ -944,7 +991,7 @@ pub(crate) fn enforce_no_shadow_open_backlog(file: &Path) -> Result<()> {
             file.display()
         )
     })?;
-    let report = crate::pending::detect_shadow_open_items(&content)?;
+    let report = agent_doc_element_backlog::backlog::detect_shadow_open_items(&content)?;
     if !report.duplicated_in_live_backlog.is_empty() {
         eprintln!(
             "[preflight] pending shadow warning: open backlog item(s) also appear outside live agent:backlog: {}",
@@ -960,10 +1007,12 @@ pub(crate) fn enforce_no_shadow_open_backlog(file: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn format_shadow_refs(items: &[crate::pending::ShadowPendingItem]) -> String {
+pub(crate) fn format_shadow_refs(
+    items: &[agent_doc_element_backlog::backlog::ShadowPendingItem],
+) -> String {
     items
         .iter()
-        .map(crate::pending::ShadowPendingItem::reference)
+        .map(agent_doc_element_backlog::backlog::ShadowPendingItem::reference)
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -982,17 +1031,18 @@ pub(crate) fn enforce_no_dropped_backlog(file: &Path, rc: &crate::graph::RunCont
     let resolved_ids = crate::cycle_state::resolved_pending_ids(file)?;
 
     let external_done_ids = external_done_archive_ids(file, &current_content)?;
-    let report = crate::pending::detect_dropped_from_history_with_extra_current_ids(
-        &current_content,
-        &head_content,
-        &resolved_ids,
-        &external_done_ids,
-    )?;
+    let report =
+        agent_doc_element_backlog::backlog::detect_dropped_from_history_with_extra_current_ids(
+            &current_content,
+            &head_content,
+            &resolved_ids,
+            &external_done_ids,
+        )?;
     if !report.dropped.is_empty() {
         let refs = report
             .dropped
             .iter()
-            .map(crate::pending::DroppedBacklogItem::reference)
+            .map(agent_doc_element_backlog::backlog::DroppedBacklogItem::reference)
             .collect::<Vec<_>>()
             .join(", ");
         anyhow::bail!(
@@ -1078,7 +1128,7 @@ pub(crate) fn filter_expect_done_or_gate_ids(
     let mut seen = std::collections::HashSet::new();
     directive_ids
         .iter()
-        .map(|id| crate::pending::normalize_pending_id(id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .filter(|id| open_backlog_ids.contains(id))
         .filter(|id| !synced_queue_ids.contains(id))
         .filter(|id| seen.insert(id.clone()))
@@ -1114,7 +1164,9 @@ pub(crate) fn collect_backlog_queue_sync(
             continue;
         }
         let body = &content[comp.open_end..comp.close_start];
-        enqueue_ids.extend(crate::pending::active_enqueue_item_ids(body));
+        enqueue_ids.extend(agent_doc_element_backlog::backlog::active_enqueue_item_ids(
+            body,
+        ));
         if comp.name == "icebox" {
             continue;
         }
@@ -1128,7 +1180,7 @@ pub(crate) fn collect_backlog_queue_sync(
         if mode.is_none() {
             mode = Some(comp_mode);
         }
-        ids.extend(crate::pending::active_item_ids(body));
+        ids.extend(agent_doc_element_backlog::backlog::active_item_ids(body));
     }
     if mode.is_none() && !enqueue_ids.is_empty() {
         mode = Some(crate::queue::BacklogQueueSyncMode::Append);
@@ -1155,7 +1207,7 @@ pub(crate) fn collect_backlog_priority_ranks(
             continue;
         }
         let body = &content[comp.open_end..comp.close_start];
-        for (id, r) in crate::pending::active_item_priorities(body) {
+        for (id, r) in agent_doc_element_backlog::backlog::active_item_priorities(body) {
             rank.entry(id).or_insert(r);
         }
     }
@@ -1176,7 +1228,7 @@ pub(crate) fn collect_after_deps(
             continue;
         }
         let body = &content[comp.open_end..comp.close_start];
-        for (id, d) in crate::pending::active_item_after_deps(body) {
+        for (id, d) in agent_doc_element_backlog::backlog::active_item_after_deps(body) {
             if !d.is_empty() {
                 deps.entry(id).or_insert(d);
             }
@@ -1263,7 +1315,7 @@ pub(crate) struct UndrainableSkip {
 /// Ids absent from `ctxs` (plain backlog items) are always kept. Pure + testable.
 pub(crate) fn partition_drainable_backlog_ids(
     backlog_ids: &[String],
-    ctxs: &std::collections::HashMap<String, crate::pending::ExecutionContext>,
+    ctxs: &std::collections::HashMap<String, agent_doc_element_backlog::backlog::ExecutionContext>,
 ) -> (Vec<String>, Vec<UndrainableSkip>) {
     let mut drainable = Vec::new();
     let mut skipped = Vec::new();
@@ -1297,14 +1349,14 @@ pub(crate) fn partition_drainable_backlog_ids(
 pub(crate) fn collect_backlog_execution_contexts(
     components: &[agent_doc_element::element::Component],
     content: &str,
-) -> std::collections::HashMap<String, crate::pending::ExecutionContext> {
+) -> std::collections::HashMap<String, agent_doc_element_backlog::backlog::ExecutionContext> {
     let mut ctxs = std::collections::HashMap::new();
     for comp in components {
         if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
             continue;
         }
         let body = &content[comp.open_end..comp.close_start];
-        for (id, ctx) in crate::pending::active_item_execution_contexts(body) {
+        for (id, ctx) in agent_doc_element_backlog::backlog::active_item_execution_contexts(body) {
             ctxs.entry(id.to_ascii_lowercase()).or_insert(ctx);
         }
     }
@@ -2272,7 +2324,11 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         let backlog_sourced: std::collections::HashSet<String> = components
             .iter()
             .filter(|c| matches!(c.name.as_str(), "backlog" | "pending"))
-            .flat_map(|c| crate::pending::active_item_ids(&content[c.open_end..c.close_start]))
+            .flat_map(|c| {
+                agent_doc_element_backlog::backlog::active_item_ids(
+                    &content[c.open_end..c.close_start],
+                )
+            })
             .map(|id| id.to_ascii_lowercase())
             .collect();
         // Auto-dag (#queue-auto-dag-priority): order by `after=#id` dependency
@@ -3427,8 +3483,10 @@ fn set_in_progress_work_item_markers(
         })
         .rev()
     {
-        let (new_body, body_changed) =
-            crate::pending::set_in_progress_item_ids(component.content(&updated), active_ids);
+        let (new_body, body_changed) = agent_doc_element_backlog::backlog::set_in_progress_item_ids(
+            component.content(&updated),
+            active_ids,
+        );
         if body_changed {
             updated = component.replace_content(&updated, &new_body);
             changed = true;
@@ -3532,13 +3590,13 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
     };
     let pending_norm: std::collections::HashSet<String> = added_this_cycle
         .into_iter()
-        .map(|id| crate::pending::normalize_pending_id(&id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(&id))
         .filter(|id| !id.is_empty())
         .collect();
     let mut backlog_ids: Vec<String> = sync_request
         .ids
         .into_iter()
-        .map(|id| crate::pending::normalize_pending_id(&id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(&id))
         .filter(|id| pending_norm.contains(id))
         .collect();
     if backlog_ids.is_empty() {
@@ -6780,11 +6838,13 @@ mod tests {
     #[test]
     fn gate_verify_surfaces_provable_without_flipping_when_optin_off() {
         let dir = setup_project();
-        let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
-            verify: Some("early_ack_pending".to_string()),
-            disproof: Some("false ack-timeout".to_string()),
-            set_at: Some(100),
-        });
+        let pred = agent_doc_element_backlog::gate_verify::render_annotation(
+            &agent_doc_element_backlog::gate_verify::GatePredicate {
+                verify: Some("early_ack_pending".to_string()),
+                disproof: Some("false ack-timeout".to_string()),
+                set_at: Some(100),
+            },
+        );
         let doc = write_optverify_doc(&dir, &pred);
         write_ops_log(&dir, "[150] early_ack_pending emitted ok\n");
 
@@ -6804,11 +6864,13 @@ mod tests {
     #[test]
     fn gate_verify_auto_resolves_provable_when_optin_on() {
         let dir = setup_project();
-        let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
-            verify: Some("early_ack_pending".to_string()),
-            disproof: None,
-            set_at: Some(100),
-        });
+        let pred = agent_doc_element_backlog::gate_verify::render_annotation(
+            &agent_doc_element_backlog::gate_verify::GatePredicate {
+                verify: Some("early_ack_pending".to_string()),
+                disproof: None,
+                set_at: Some(100),
+            },
+        );
         let doc = write_optverify_doc(&dir, &pred);
         write_ops_log(&dir, "[150] early_ack_pending emitted ok\n");
 
@@ -6832,11 +6894,13 @@ mod tests {
     #[test]
     fn gate_verify_failed_never_auto_resolves_even_with_optin() {
         let dir = setup_project();
-        let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
-            verify: Some("early_ack_pending".to_string()),
-            disproof: Some("manual cleanup".to_string()),
-            set_at: Some(100),
-        });
+        let pred = agent_doc_element_backlog::gate_verify::render_annotation(
+            &agent_doc_element_backlog::gate_verify::GatePredicate {
+                verify: Some("early_ack_pending".to_string()),
+                disproof: Some("manual cleanup".to_string()),
+                set_at: Some(100),
+            },
+        );
         let doc = write_optverify_doc(&dir, &pred);
         write_ops_log(
             &dir,
@@ -6865,11 +6929,13 @@ mod tests {
         // #gng8: queue_diff_active_prompt_differs embeds document prose via
         // {:?}; a gate must not auto-prove from its own backlog description.
         let dir = setup_project();
-        let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
-            verify: Some("early_ack_pending".to_string()),
-            disproof: None,
-            set_at: Some(100),
-        });
+        let pred = agent_doc_element_backlog::gate_verify::render_annotation(
+            &agent_doc_element_backlog::gate_verify::GatePredicate {
+                verify: Some("early_ack_pending".to_string()),
+                disproof: None,
+                set_at: Some(100),
+            },
+        );
         let doc = write_optverify_doc(&dir, &pred);
         write_ops_log(
             &dir,
@@ -6888,11 +6954,16 @@ mod tests {
         // #ktw8: the destructive clear gate is proven only by an anchored
         // structured [s760] line, never by prose embedded in queue_diff logs.
         let dir = setup_project();
-        let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
-            verify: Some(crate::gate_verify::S760_CLEAR_DECISION_CLEAR_TRUE_MARKER.to_string()),
-            disproof: None,
-            set_at: Some(100),
-        });
+        let pred = agent_doc_element_backlog::gate_verify::render_annotation(
+            &agent_doc_element_backlog::gate_verify::GatePredicate {
+                verify: Some(
+                    agent_doc_element_backlog::gate_verify::S760_CLEAR_DECISION_CLEAR_TRUE_MARKER
+                        .to_string(),
+                ),
+                disproof: None,
+                set_at: Some(100),
+            },
+        );
         let doc = write_optverify_doc(&dir, &pred);
         write_ops_log(
             &dir,
@@ -6909,11 +6980,16 @@ mod tests {
     #[test]
     fn gate_verify_s760_builtin_auto_resolves_on_anchored_clear_true() {
         let dir = setup_project();
-        let pred = crate::gate_verify::render_annotation(&crate::gate_verify::GatePredicate {
-            verify: Some(crate::gate_verify::S760_CLEAR_DECISION_CLEAR_TRUE_MARKER.to_string()),
-            disproof: None,
-            set_at: Some(100),
-        });
+        let pred = agent_doc_element_backlog::gate_verify::render_annotation(
+            &agent_doc_element_backlog::gate_verify::GatePredicate {
+                verify: Some(
+                    agent_doc_element_backlog::gate_verify::S760_CLEAR_DECISION_CLEAR_TRUE_MARKER
+                        .to_string(),
+                ),
+                disproof: None,
+                set_at: Some(100),
+            },
+        );
         let doc = write_optverify_doc(&dir, &pred);
         write_ops_log(
             &dir,
@@ -7160,10 +7236,11 @@ mod tests {
         // live editor-IPC state no longer changes the partition. Plain ids stay
         // drainable.
         use std::collections::HashMap;
-        let mut ctxs: HashMap<String, crate::pending::ExecutionContext> = HashMap::new();
+        let mut ctxs: HashMap<String, agent_doc_element_backlog::backlog::ExecutionContext> =
+            HashMap::new();
         ctxs.insert(
             "fcc0".into(),
-            crate::pending::ExecutionContext {
+            agent_doc_element_backlog::backlog::ExecutionContext {
                 clean_session_required: true,
                 operator_verify_required: false,
                 focused_cycle_required: false,
@@ -7171,7 +7248,7 @@ mod tests {
         );
         ctxs.insert(
             "qflood2".into(),
-            crate::pending::ExecutionContext {
+            agent_doc_element_backlog::backlog::ExecutionContext {
                 clean_session_required: false,
                 operator_verify_required: true,
                 focused_cycle_required: false,

@@ -185,8 +185,10 @@ pub(crate) fn is_safe_out_of_band_pending_mutation(
     snapshot_content: &str,
     file_content: &str,
 ) -> bool {
-    let (snap_prelude, snap_items, snap_postlude) = crate::pending::parse_items(snapshot_content);
-    let (file_prelude, file_items, file_postlude) = crate::pending::parse_items(file_content);
+    let (snap_prelude, snap_items, snap_postlude) =
+        agent_doc_element_backlog::backlog::parse_items(snapshot_content);
+    let (file_prelude, file_items, file_postlude) =
+        agent_doc_element_backlog::backlog::parse_items(file_content);
 
     if snap_prelude.trim() != file_prelude.trim() || snap_postlude.trim() != file_postlude.trim() {
         return false;
@@ -225,7 +227,7 @@ pub(crate) fn detect_reintroduced_reaped_pending_ids(
         .iter()
         .filter(|component| agent_doc_element::element::is_tracked_work_component(&component.name))
     {
-        let (_, items, _) = crate::pending::parse_items(component.content(doc));
+        let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(component.content(doc));
         for item in items {
             if !item.id.is_empty() && reaped_ids.contains(&item.id) && seen.insert(item.id.clone())
             {

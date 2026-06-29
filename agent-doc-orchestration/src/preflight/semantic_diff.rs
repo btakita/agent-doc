@@ -256,7 +256,7 @@ pub(crate) fn extract_target_id(target: &str) -> Option<String> {
         let rest = &target[start + 2..];
         if let Some(close) = rest.find(']') {
             let id = &rest[..close];
-            if agent_doc_core::pending::is_valid_pending_id(id) {
+            if agent_doc_element_backlog::backlog::is_valid_pending_id(id) {
                 return Some(id.to_string());
             }
         }
@@ -267,7 +267,7 @@ pub(crate) fn extract_target_id(target: &str) -> Option<String> {
             .chars()
             .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
             .collect();
-        if !id.is_empty() && agent_doc_core::pending::is_valid_pending_id(&id) {
+        if !id.is_empty() && agent_doc_element_backlog::backlog::is_valid_pending_id(&id) {
             return Some(id);
         }
     }

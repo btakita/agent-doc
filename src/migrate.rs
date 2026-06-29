@@ -135,9 +135,9 @@ fn migrate_legacy_gated_backlog_items(content: &str) -> Result<String> {
         return Ok(content.to_string());
     };
     let backlog_body = backlog.content(content);
-    let (new_backlog, gated_items) = agent_doc_orchestration::pending::op_take_items_by_state(
+    let (new_backlog, gated_items) = agent_doc_element_backlog::backlog::op_take_items_by_state(
         backlog_body,
-        agent_doc_orchestration::pending::PendingState::Gated,
+        agent_doc_element_backlog::backlog::PendingState::Gated,
     );
     if gated_items.is_empty() {
         return Ok(content.to_string());
@@ -164,7 +164,7 @@ fn migrate_legacy_gated_backlog_items(content: &str) -> Result<String> {
         .find(|c| element::is_review_component(&c.name))
         .context("review missing after gated-item migration")?;
     let review_body = review.content(&result);
-    let new_review = agent_doc_orchestration::pending::op_append_items(review_body, &gated_items);
+    let new_review = agent_doc_element_backlog::backlog::op_append_items(review_body, &gated_items);
     Ok(review.replace_content(&result, &new_review))
 }
 

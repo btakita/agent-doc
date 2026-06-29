@@ -46,9 +46,10 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use agent_doc_element::element::{self, is_backlog_component, is_tracked_work_component};
+use agent_doc_element_backlog::backlog;
 
 use crate::frontmatter;
-use agent_doc_orchestration::{diff, pending, security};
+use agent_doc_orchestration::{diff, security};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -814,11 +815,11 @@ fn pending_mutations_for_doc(
         return Ok(Vec::new());
     }
 
-    let items: Vec<pending::PendingItem> = components
+    let items: Vec<backlog::PendingItem> = components
         .iter()
         .filter(|component| is_tracked_work_component(&component.name))
         .flat_map(|component| {
-            let (_, items, _) = pending::parse_items(component.content(content));
+            let (_, items, _) = backlog::parse_items(component.content(content));
             items
         })
         .collect();
@@ -912,12 +913,12 @@ fn pending_mutations_for_doc(
 
 fn push_resolve_existing_mutation(
     pending_mutations: &mut Vec<PendingMutationPlan>,
-    items: &[pending::PendingItem],
+    items: &[backlog::PendingItem],
     id: &str,
 ) {
     let Some(item) = items
         .iter()
-        .find(|item| item.id.eq_ignore_ascii_case(id) && item.state != pending::PendingState::Done)
+        .find(|item| item.id.eq_ignore_ascii_case(id) && item.state != backlog::PendingState::Done)
     else {
         return;
     };

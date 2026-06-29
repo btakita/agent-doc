@@ -3,7 +3,7 @@
 //! This module is document-text in, typed graph/string renderings out. It does
 //! not read files, write documents, inspect git, dispatch agents, or commit.
 
-use agent_doc_core::pending::{self, PendingItem, PendingState};
+use agent_doc_element_backlog::backlog::{self, PendingItem, PendingState};
 use anyhow::{Context, Result};
 use serde::Serialize;
 
@@ -138,7 +138,7 @@ pub fn analyze(content: &str) -> Result<AutoDag> {
             continue;
         }
         let body = &content[comp.open_end..comp.close_start];
-        let (_, parsed, _) = pending::parse_items(body);
+        let (_, parsed, _) = backlog::parse_items(body);
         for item in &parsed {
             if matches!(item.state, PendingState::Done) {
                 continue;

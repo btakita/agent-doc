@@ -9,7 +9,11 @@ use agent_doc_orchestration::sessions::{
 };
 use agent_doc_orchestration::startup_miss::{SessionLogStatus, StartupMiss};
 use agent_doc_orchestration::supervisor::ipc::IpcMethod;
-use agent_doc_sqlite::state_store::{ActorRecord, ActorState};
+#[cfg(test)]
+use agent_doc_sqlite::state_store::SupervisorLeaseStatus;
+use agent_doc_sqlite::state_store::{
+    ActorRecord, ActorState, ActorTransitionStatus, SessionOperatorStatus,
+};
 
 const SUPERVISOR_INJECT_SUBMIT_MODE: &str = "supervisor_normalized_submit";
 const CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -141,7 +145,7 @@ struct SessionContext {
     session_id: String,
     harness: String,
     actor_record: Option<ActorRecord>,
-    operator_status: agent_doc_orchestration::project_controller::SessionOperatorStatus,
+    operator_status: SessionOperatorStatus,
     registry_entry: Option<SessionEntry>,
     startup_miss: Option<StartupMiss>,
     log_status: Option<SessionLogStatus>,
@@ -3450,9 +3454,9 @@ fn reconcile_controller_lease_with_supervisor_runtime(
     base_dir: &Path,
     canonical_file: &Path,
     supervisor_socket: &Path,
-    operator_status: agent_doc_orchestration::project_controller::SessionOperatorStatus,
+    operator_status: SessionOperatorStatus,
     runtime: &SupervisorRuntime,
-) -> Result<agent_doc_orchestration::project_controller::SessionOperatorStatus> {
+) -> Result<SessionOperatorStatus> {
     if matches!(
         runtime.health,
         SupervisorHealth::NoSocket | SupervisorHealth::Unreachable
@@ -3499,9 +3503,7 @@ fn parse_actor_state(raw: &str) -> Option<ActorState> {
     }
 }
 
-fn format_controller_transition(
-    transition: &agent_doc_orchestration::project_controller::ActorTransitionStatus,
-) -> String {
+fn format_controller_transition(transition: &ActorTransitionStatus) -> String {
     agent_doc_orchestration::session_actor::format_transition_event(
         agent_doc_orchestration::session_actor::OwnershipTransitionEvent {
             caller: &transition.caller,
@@ -3876,8 +3878,8 @@ mod tests {
 
     fn empty_operator_status(
         record: Option<agent_doc_sqlite::state_store::ActorRecord>,
-    ) -> agent_doc_orchestration::project_controller::SessionOperatorStatus {
-        agent_doc_orchestration::project_controller::SessionOperatorStatus {
+    ) -> SessionOperatorStatus {
+        SessionOperatorStatus {
             record,
             transitions: Vec::new(),
             supervisor_lease: None,
@@ -4081,14 +4083,12 @@ mod tests {
         runtime: SupervisorRuntime,
         lease_state: Option<&str>,
     ) -> SessionContext {
-        let lease = lease_state.map(|state| {
-            agent_doc_orchestration::project_controller::SupervisorLeaseStatus {
-                generation: 7,
-                supervisor_pid: Some(100),
-                supervisor_socket: Some("/tmp/supervisor.sock".to_string()),
-                last_heartbeat: Some(1),
-                runtime_state: Some(state.to_string()),
-            }
+        let lease = lease_state.map(|state| SupervisorLeaseStatus {
+            generation: 7,
+            supervisor_pid: Some(100),
+            supervisor_socket: Some("/tmp/supervisor.sock".to_string()),
+            last_heartbeat: Some(1),
+            runtime_state: Some(state.to_string()),
         });
         SessionContext {
             canonical_file: PathBuf::from("/tmp/doc.md"),
@@ -4096,7 +4096,7 @@ mod tests {
             session_id: "session-1".to_string(),
             harness: "codex".to_string(),
             actor_record: Some(record.clone()),
-            operator_status: agent_doc_orchestration::project_controller::SessionOperatorStatus {
+            operator_status: SessionOperatorStatus {
                 record: Some(record),
                 transitions: Vec::new(),
                 supervisor_lease: lease,
@@ -5017,18 +5017,16 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             session_id: "session-1".to_string(),
             harness: "codex".to_string(),
             actor_record: Some(record.clone()),
-            operator_status: agent_doc_orchestration::project_controller::SessionOperatorStatus {
+            operator_status: SessionOperatorStatus {
                 record: Some(record),
                 transitions: Vec::new(),
-                supervisor_lease: Some(
-                    agent_doc_orchestration::project_controller::SupervisorLeaseStatus {
-                        generation: 7,
-                        supervisor_pid: Some(100),
-                        supervisor_socket: Some("/tmp/supervisor.sock".to_string()),
-                        last_heartbeat: Some(1),
-                        runtime_state: Some("busy".to_string()),
-                    },
-                ),
+                supervisor_lease: Some(SupervisorLeaseStatus {
+                    generation: 7,
+                    supervisor_pid: Some(100),
+                    supervisor_socket: Some("/tmp/supervisor.sock".to_string()),
+                    last_heartbeat: Some(1),
+                    runtime_state: Some("busy".to_string()),
+                }),
                 dispatch_attempts: Vec::new(),
                 projection_diagnostics: Vec::new(),
             },

@@ -15,14 +15,15 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 // The SQLite state layer (the only `rusqlite::Connection` surface) lives in
-// `agent-doc-sqlite::state_store`. The status types are re-exported here so the
-// IPC/serde call sites that name `project_controller::SessionOperatorStatus`,
-// etc. stay unchanged, and the helpers used by the SQL-glue functions below are
-// imported by their original names.
-pub use state_store::{
-    ActorTransitionStatus, AdminOperationStatus, DispatchAttemptStatus, ProjectionDiagnosticStatus,
+// `agent-doc-sqlite::state_store`. Keep its storage/status types private to
+// this orchestration module; callers that need to name them should import the
+// focused crate directly.
+#[cfg(test)]
+use state_store::state_db_path;
+use state_store::{
+    AdminOperationStatus, DispatchAttemptStatus, ProjectionDiagnosticStatus,
     QueueBackpressureStatus, QueueControlStatus, QueueHeadStatus, SessionOperatorStatus,
-    SupervisorLeaseStatus, state_db_path,
+    SupervisorLeaseStatus,
 };
 use state_store::{
     Connection, ProjectionDiagnosticInsert, insert_projection_diagnostic,
@@ -1068,11 +1069,9 @@ pub struct ControllerActorInspection {
     pub projection_diagnostics: Vec<ProjectionDiagnosticStatus>,
 }
 
-// `ActorTransitionStatus`, `SupervisorLeaseStatus`, `DispatchAttemptStatus`,
-// `ProjectionDiagnosticStatus`, and `SessionOperatorStatus` now live in
-// `agent-doc-sqlite::state_store` (they depend on the storage types stored
-// there) and are re-exported at the top of this module so the IPC/serde call
-// sites stay unchanged.
+// Controller status records now live in `agent-doc-sqlite::state_store`; this
+// module imports them privately while callers that need to name them import the
+// focused crate directly.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

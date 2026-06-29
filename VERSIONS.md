@@ -24,6 +24,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Session actor storage types no longer route through `session_actor`.** `ActorState`, `ActorRecord`, and `ActorLastTransition` are imported directly from `agent_doc_sqlite::state_store`; `session_actor` now keeps only ownership-transition lifecycle helpers. Added a guard so the SQLite actor-type facade does not return.
 
+- **Project controller status types no longer route through `project_controller`.** Controller/operator status records and SQLite state helpers are imported directly from `agent_doc_sqlite::state_store`; `project_controller` keeps only controller lifecycle, socket, and projection glue. Added a guard so the SQLite controller-status facade does not return.
+
 ## 0.34.64
 
 - **`#suprestassoc` — `restart-supervisor` registry re-association is scoped to the requested document, not just the reused session id.** The CLI restart path now resolves registry entries by exact canonical document path first and only keeps the legacy session-id fallback for fileless registry rows; registry keys that explicitly name another document are rejected, so restarting `sampleportal.md` cannot adopt a stale `agent-doc-bugs2.md` pane/session projection that happens to carry the same session id. Coverage: deterministic registry lookup regressions for rejecting a foreign same-session entry and preferring the exact target document entry. Live editor/pane confirmation remains an `[operator-verify]` follow-up.

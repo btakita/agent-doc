@@ -2721,6 +2721,61 @@ fn test_session_actor_has_no_sqlite_state_facade() {
 }
 
 #[test]
+fn test_project_controller_has_no_sqlite_status_facade() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let project_controller_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
+            .unwrap();
+    assert!(
+        !project_controller_source.contains("pub use state_store::{"),
+        "project_controller.rs must not re-export SQLite status/storage types"
+    );
+    assert!(
+        project_controller_source.contains("use state_store::{"),
+        "project_controller.rs should import SQLite status/storage types privately"
+    );
+
+    fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect_rs_files(&path, out);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    let mut source_files = Vec::new();
+    collect_rs_files(
+        &manifest_dir.join("agent-doc-orchestration/src"),
+        &mut source_files,
+    );
+    collect_rs_files(&manifest_dir.join("src"), &mut source_files);
+    for path in source_files {
+        let source = fs::read_to_string(&path).unwrap();
+        let relative = path.strip_prefix(manifest_dir).unwrap().display();
+        for forbidden_snippet in [
+            "project_controller::ActorTransitionStatus",
+            "project_controller::AdminOperationStatus",
+            "project_controller::DispatchAttemptStatus",
+            "project_controller::ProjectionDiagnosticStatus",
+            "project_controller::QueueBackpressureStatus",
+            "project_controller::QueueControlStatus",
+            "project_controller::QueueHeadStatus",
+            "project_controller::SessionOperatorStatus",
+            "project_controller::SupervisorLeaseStatus",
+            "project_controller::state_db_path",
+        ] {
+            assert!(
+                !source.contains(forbidden_snippet),
+                "{relative} must import controller storage/status types from agent_doc_sqlite::state_store directly: {forbidden_snippet}"
+            );
+        }
+    }
+}
+
+#[test]
 fn test_agent_doc_merge_is_pure_workspace_boundary() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();

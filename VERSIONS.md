@@ -12,6 +12,11 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Template patchback policy moved to `agent-doc-template`.** Patchback shape vocabulary/classification, marker/component counting, pure parse-plan construction, and the orchestrate patchback contract now live in `agent_doc_template::patchback`. `flow::document_mutation` keeps only file-scoped ops-log and FlowEvent adaptation, while write and orchestration-batch callers use the focused template API directly.
 
+- **Child template patchback normalization moved to `agent-doc-template`.** The
+  child-orchestrate plain-response wrapper and explicit/rejected/unparseable
+  normalization decision now live in `agent_doc_template::patchback`.
+  `flow::orchestration_batch` keeps only the FlowEvent adapter.
+
 - **Append response heading normalization moved to `agent-doc-turn`.** The helper
   that strips echoed `## Assistant` / trailing `## User` headings before append
   writes now lives in `agent_doc_turn::response_text`; orchestration calls the

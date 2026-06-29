@@ -5652,6 +5652,9 @@ fn test_agent_doc_template_owns_patchback_policy() {
         "pub fn classify_orchestrate_patchback",
         "pub fn classify_orchestrate_plain_response",
         "pub fn enforce_orchestrate_patchback_contract",
+        "pub enum ChildPatchbackNormalizationDecision",
+        "pub struct ChildPatchbackNormalization",
+        "pub fn normalize_child_template_response",
     ] {
         assert!(
             template_patchback.contains(required_snippet),
@@ -5679,6 +5682,10 @@ fn test_agent_doc_template_owns_patchback_policy() {
     let write_materialize =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/materialize.rs"))
             .unwrap();
+    let orchestration_batch = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/flow/orchestration_batch.rs"),
+    )
+    .unwrap();
     let orchestration_sources = [
         (
             "agent-doc-orchestration/src/flow/types.rs",
@@ -5691,6 +5698,10 @@ fn test_agent_doc_template_owns_patchback_policy() {
         (
             "agent-doc-orchestration/src/write/materialize.rs",
             write_materialize.as_str(),
+        ),
+        (
+            "agent-doc-orchestration/src/flow/orchestration_batch.rs",
+            orchestration_batch.as_str(),
         ),
     ];
     for (source, content) in orchestration_sources {
@@ -5705,6 +5716,9 @@ fn test_agent_doc_template_owns_patchback_policy() {
             "pub fn classify_orchestrate_patchback",
             "pub fn classify_orchestrate_plain_response",
             "pub fn enforce_orchestrate_patchback_contract",
+            "pub enum ChildPatchbackNormalizationDecision",
+            "pub struct ChildPatchbackNormalization",
+            "pub fn normalize_child_template_response",
         ] {
             assert!(
                 !content.contains(forbidden_snippet),
@@ -5713,13 +5727,9 @@ fn test_agent_doc_template_owns_patchback_policy() {
         }
     }
 
-    let orchestration_batch = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/flow/orchestration_batch.rs"),
-    )
-    .unwrap();
     assert!(
-        orchestration_batch.contains("agent_doc_template::patchback"),
-        "orchestration batch normalization should call the focused template patchback policy directly"
+        orchestration_batch.contains("patchback::ChildPatchbackNormalization"),
+        "orchestration batch events should accept focused template patchback normalization results directly"
     );
     let write_run_entry =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))

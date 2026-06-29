@@ -312,6 +312,65 @@ pub fn enforce_orchestrate_patchback_contract(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildPatchbackNormalizationDecision {
+    WrappedPlainResponse,
+    KeptExplicitPatch,
+    KeptRejectedPlainResponse,
+    KeptUnparseable,
+}
+
+impl ChildPatchbackNormalizationDecision {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::WrappedPlainResponse => "wrapped_plain_response",
+            Self::KeptExplicitPatch => "kept_explicit_patch",
+            Self::KeptRejectedPlainResponse => "kept_rejected_plain_response",
+            Self::KeptUnparseable => "kept_unparseable",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChildPatchbackNormalization {
+    pub response: String,
+    pub decision: ChildPatchbackNormalizationDecision,
+}
+
+pub fn normalize_child_template_response(response: String) -> ChildPatchbackNormalization {
+    let Ok((patches, unmatched)) = parse_patches(&response) else {
+        return ChildPatchbackNormalization {
+            response,
+            decision: ChildPatchbackNormalizationDecision::KeptUnparseable,
+        };
+    };
+    if patches.is_empty() && !unmatched.trim().is_empty() {
+        if classify_orchestrate_plain_response(unmatched.trim()).is_accepted() {
+            return ChildPatchbackNormalization {
+                response: format!(
+                    "<!-- patch:exchange -->\n{}\n<!-- /patch:exchange -->\n",
+                    unmatched.trim_end()
+                ),
+                decision: ChildPatchbackNormalizationDecision::WrappedPlainResponse,
+            };
+        }
+        return ChildPatchbackNormalization {
+            response,
+            decision: ChildPatchbackNormalizationDecision::KeptRejectedPlainResponse,
+        };
+    }
+
+    let decision = if matches!(
+        classify_orchestrate_patchback(&patches, &unmatched),
+        OrchestratePatchbackDecision::AcceptExplicitPatch
+    ) {
+        ChildPatchbackNormalizationDecision::KeptExplicitPatch
+    } else {
+        ChildPatchbackNormalizationDecision::KeptRejectedPlainResponse
+    };
+    ChildPatchbackNormalization { response, decision }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -420,5 +479,30 @@ mod tests {
                 OrchestratePatchbackRejectReason::MissingExchangePatch
             )
         );
+    }
+
+    #[test]
+    fn child_plain_response_is_wrapped_as_exchange_patch() {
+        let normalized =
+            normalize_child_template_response("### Re: child — gpt-5\n\nImplemented.".to_string());
+
+        assert_eq!(
+            normalized.decision,
+            ChildPatchbackNormalizationDecision::WrappedPlainResponse
+        );
+        assert!(normalized.response.starts_with("<!-- patch:exchange -->"));
+        assert!(normalized.response.contains("### Re: child"));
+    }
+
+    #[test]
+    fn transcript_shaped_child_response_is_not_normalized() {
+        let transcript = "❯ do #next\n### Re: malformed — gpt-5\nBody";
+        let normalized = normalize_child_template_response(transcript.to_string());
+
+        assert_eq!(
+            normalized.decision,
+            ChildPatchbackNormalizationDecision::KeptRejectedPlainResponse
+        );
+        assert_eq!(normalized.response, transcript);
     }
 }

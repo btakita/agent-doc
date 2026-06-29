@@ -55,12 +55,12 @@ mod tests {
         assert_eq!(closeout_event.stage, FlowStage::SessionCheck);
         assert_eq!(closeout_event.outcome, FlowOutcome::FailedClosed);
 
-        let child_patchback = orchestration_batch::normalize_child_template_response(
+        let child_patchback = agent_doc_template::patchback::normalize_child_template_response(
             "### Re: child - gpt-5\n\nImplemented.".to_string(),
         );
         assert_eq!(
             child_patchback.decision,
-            orchestration_batch::ChildPatchbackNormalizationDecision::WrappedPlainResponse
+            agent_doc_template::patchback::ChildPatchbackNormalizationDecision::WrappedPlainResponse
         );
         let child_event =
             orchestration_batch::child_patchback_normalization_event(&child_patchback);

@@ -1,5 +1,5 @@
 use super::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
-use agent_doc_template::patchback::{self, OrchestratePatchbackDecision};
+use agent_doc_template::patchback;
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,73 +147,18 @@ pub fn log_auto_dag_schedule_event(
     );
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChildPatchbackNormalizationDecision {
-    WrappedPlainResponse,
-    KeptExplicitPatch,
-    KeptRejectedPlainResponse,
-    KeptUnparseable,
-}
-
-impl ChildPatchbackNormalizationDecision {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::WrappedPlainResponse => "wrapped_plain_response",
-            Self::KeptExplicitPatch => "kept_explicit_patch",
-            Self::KeptRejectedPlainResponse => "kept_rejected_plain_response",
-            Self::KeptUnparseable => "kept_unparseable",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChildPatchbackNormalization {
-    pub response: String,
-    pub decision: ChildPatchbackNormalizationDecision,
-}
-
-pub fn normalize_child_template_response(response: String) -> ChildPatchbackNormalization {
-    let Ok((patches, unmatched)) = agent_doc_template::parse_patches(&response) else {
-        return ChildPatchbackNormalization {
-            response,
-            decision: ChildPatchbackNormalizationDecision::KeptUnparseable,
-        };
-    };
-    if patches.is_empty() && !unmatched.trim().is_empty() {
-        if patchback::classify_orchestrate_plain_response(unmatched.trim()).is_accepted() {
-            return ChildPatchbackNormalization {
-                response: format!(
-                    "<!-- patch:exchange -->\n{}\n<!-- /patch:exchange -->\n",
-                    unmatched.trim_end()
-                ),
-                decision: ChildPatchbackNormalizationDecision::WrappedPlainResponse,
-            };
-        }
-        return ChildPatchbackNormalization {
-            response,
-            decision: ChildPatchbackNormalizationDecision::KeptRejectedPlainResponse,
-        };
-    }
-
-    let decision = if matches!(
-        patchback::classify_orchestrate_patchback(&patches, &unmatched),
-        OrchestratePatchbackDecision::AcceptExplicitPatch
-    ) {
-        ChildPatchbackNormalizationDecision::KeptExplicitPatch
-    } else {
-        ChildPatchbackNormalizationDecision::KeptRejectedPlainResponse
-    };
-    ChildPatchbackNormalization { response, decision }
-}
-
 pub fn child_patchback_normalization_event(
-    normalization: &ChildPatchbackNormalization,
+    normalization: &patchback::ChildPatchbackNormalization,
 ) -> FlowEvent {
     let outcome = match normalization.decision {
-        ChildPatchbackNormalizationDecision::WrappedPlainResponse
-        | ChildPatchbackNormalizationDecision::KeptExplicitPatch => FlowOutcome::Completed,
-        ChildPatchbackNormalizationDecision::KeptRejectedPlainResponse
-        | ChildPatchbackNormalizationDecision::KeptUnparseable => FlowOutcome::FailedClosed,
+        patchback::ChildPatchbackNormalizationDecision::WrappedPlainResponse
+        | patchback::ChildPatchbackNormalizationDecision::KeptExplicitPatch => {
+            FlowOutcome::Completed
+        }
+        patchback::ChildPatchbackNormalizationDecision::KeptRejectedPlainResponse
+        | patchback::ChildPatchbackNormalizationDecision::KeptUnparseable => {
+            FlowOutcome::FailedClosed
+        }
     };
     FlowEvent::new(
         FlowName::OrchestrationBatch,
@@ -228,7 +173,7 @@ pub fn child_patchback_normalization_event(
 
 pub fn log_child_patchback_normalization_event(
     file: &Path,
-    normalization: &ChildPatchbackNormalization,
+    normalization: &patchback::ChildPatchbackNormalization,
 ) {
     super::proof::log_flow_event(file, child_patchback_normalization_event(normalization));
 }
@@ -250,30 +195,5 @@ mod tests {
             BatchProgressDecision::StopSourceChanged
         );
         assert!(!batch_should_continue(true, &child));
-    }
-
-    #[test]
-    fn child_plain_response_is_wrapped_as_exchange_patch() {
-        let normalized =
-            normalize_child_template_response("### Re: child — gpt-5\n\nImplemented.".to_string());
-
-        assert_eq!(
-            normalized.decision,
-            ChildPatchbackNormalizationDecision::WrappedPlainResponse
-        );
-        assert!(normalized.response.starts_with("<!-- patch:exchange -->"));
-        assert!(normalized.response.contains("### Re: child"));
-    }
-
-    #[test]
-    fn transcript_shaped_child_response_is_not_normalized() {
-        let transcript = "❯ do #next\n### Re: malformed — gpt-5\nBody";
-        let normalized = normalize_child_template_response(transcript.to_string());
-
-        assert_eq!(
-            normalized.decision,
-            ChildPatchbackNormalizationDecision::KeptRejectedPlainResponse
-        );
-        assert_eq!(normalized.response, transcript);
     }
 }

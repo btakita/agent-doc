@@ -507,8 +507,7 @@ pub(crate) use dispatch::*;
 
 #[cfg(test)]
 fn orchestrate_finalize_text_for_template(response: String) -> String {
-    agent_doc_orchestration::flow::orchestration_batch::normalize_child_template_response(response)
-        .response
+    agent_doc_template::patchback::normalize_child_template_response(response).response
 }
 
 fn should_stream_exchange_patch(response: &str) -> bool {

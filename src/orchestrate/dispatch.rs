@@ -200,9 +200,7 @@ pub(crate) fn run_ordered_task_step(
     };
     let finalize_text = if mode.is_template() {
         let normalization =
-            agent_doc_orchestration::flow::orchestration_batch::normalize_child_template_response(
-                finalize_response,
-            );
+            agent_doc_template::patchback::normalize_child_template_response(finalize_response);
         agent_doc_orchestration::flow::orchestration_batch::log_child_patchback_normalization_event(
             file,
             &normalization,

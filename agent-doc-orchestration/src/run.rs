@@ -1871,7 +1871,9 @@ fn apply_template_response(
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
     }
-    write::ensure_template_response_write_proof(&patches, &unmatched)?;
+    agent_doc_template::response_materialization::ensure_template_response_write_proof(
+        &patches, &unmatched,
+    )?;
 
     let doc_lock = acquire_doc_lock(file)?;
     snapshot::save_pre_response(file, baseline)?;

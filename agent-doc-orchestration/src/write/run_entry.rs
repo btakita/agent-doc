@@ -229,7 +229,9 @@ pub fn run_template(
         anyhow::bail!("no patch blocks or content found in response");
     }
     if !flags.allow_replace_pending && !pending_replace_escape_hatch_enabled() {
-        ensure_template_response_write_proof(&patches, &unmatched)?;
+        agent_doc_template::response_materialization::ensure_template_response_write_proof(
+            &patches, &unmatched,
+        )?;
     }
     if flags.strict_closeout {
         ensure_strict_template_response_heading_for_current_doc(
@@ -537,7 +539,9 @@ pub fn run_stream(
         anyhow::bail!("no patch blocks or content found in response");
     }
     if !flags.allow_replace_pending && !pending_replace_escape_hatch_enabled() {
-        ensure_template_response_write_proof(&patches, &unmatched)?;
+        agent_doc_template::response_materialization::ensure_template_response_write_proof(
+            &patches, &unmatched,
+        )?;
     }
     if flags.strict_closeout {
         ensure_strict_template_response_heading_for_current_doc(
@@ -550,7 +554,10 @@ pub fn run_stream(
     auto_apply_pending_done_if_enabled(file, &response, &flags, &mut current_content)?;
     prewrite_pending_done_check(file, &response, &flags)?;
 
-    reject_marker_response_with_zero_patches(parsed_marker_count, patches.len())?;
+    agent_doc_template::response_materialization::reject_marker_response_with_zero_patches(
+        parsed_marker_count,
+        patches.len(),
+    )?;
 
     if patches.is_empty() {
         eprintln!(
@@ -1182,7 +1189,9 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         anyhow::bail!("no patch blocks or content found in response");
     }
     if !flags.allow_replace_pending && !pending_replace_escape_hatch_enabled() {
-        ensure_template_response_write_proof(&patches, &unmatched)?;
+        agent_doc_template::response_materialization::ensure_template_response_write_proof(
+            &patches, &unmatched,
+        )?;
     }
     if flags.strict_closeout {
         ensure_strict_template_response_heading_for_current_doc(
@@ -1291,7 +1300,10 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
             // Plugin consumed the patch — update snapshot from current file
             let content = std::fs::read_to_string(file)
                 .with_context(|| format!("failed to read {} after IPC", file.display()))?;
-            let expected_response = response_materialization_probe(&patches, &unmatched);
+            let expected_response =
+                agent_doc_template::response_materialization::response_materialization_probe(
+                    &patches, &unmatched,
+                );
             if !ipc_response_materialized_or_fallback(
                 file,
                 "explicit_file_ipc",

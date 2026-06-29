@@ -29,6 +29,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   normalization decision now live in `agent_doc_template::patchback`.
   `flow::orchestration_batch` keeps only the FlowEvent adapter.
 
+- **Template response materialization moved to `agent-doc-template`.** Response
+  write-proof detection, canonical patch serialization, response
+  materialization probes, trailing-newline equality, materialization segment
+  appending, and zero-patch marker rejection now live in
+  `agent_doc_template::response_materialization`. Orchestration keeps only
+  template parsing, IPC payload, file, and log adapters.
+
 - **Auto-DAG schedule decision vocabulary moved to `agent-doc-work-graph`.** The
   ready/session-review-blocked schedule decision and stable reason labels now
   live beside the source-agnostic Auto-DAG model. Orchestration batch flow keeps

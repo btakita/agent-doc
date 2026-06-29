@@ -11,6 +11,7 @@ mod template;
 
 pub mod patchback;
 pub mod replay_guard;
+pub mod response_materialization;
 pub mod sanitize;
 
 pub use template::*;

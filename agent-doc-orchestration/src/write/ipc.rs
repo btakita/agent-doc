@@ -1328,7 +1328,10 @@ pub fn materialize_response_in_current_exchange(
         .iter()
         .find(|component| component.name == "exchange")?;
     let mut exchange_body = exchange.content(current).to_string();
-    push_materialization_segment(&mut exchange_body, &response);
+    agent_doc_template::response_materialization::push_materialization_segment(
+        &mut exchange_body,
+        &response,
+    );
     Some(exchange.replace_content(current, &exchange_body))
 }
 

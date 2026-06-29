@@ -1,54 +1,14 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_template::response_materialization::{
+    response_materialization_probe, same_ignoring_trailing_newlines, serialize_template_response,
+};
 
 pub struct NormalizedTemplateResponse {
     pub response_for_capture: Option<String>,
     pub patches: Vec<template::PatchBlock>,
     pub unmatched: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TemplateResponseWriteProof {
-    pub(crate) explicit_components: Vec<String>,
-    pub(crate) unmatched_len: usize,
-}
-
-impl TemplateResponseWriteProof {
-    pub(crate) fn has_real_body(&self) -> bool {
-        !self.explicit_components.is_empty() || self.unmatched_len > 0
-    }
-}
-
-pub(crate) fn template_response_write_proof(
-    patches: &[template::PatchBlock],
-    unmatched: &str,
-) -> TemplateResponseWriteProof {
-    TemplateResponseWriteProof {
-        explicit_components: patches
-            .iter()
-            .filter(|patch| patch.name != "frontmatter")
-            .filter(|patch| !is_backlog_component(&patch.name))
-            .filter(|patch| !agent_doc_element::element::is_review_component(&patch.name))
-            .filter(|patch| !patch.content.trim().is_empty())
-            .map(|patch| patch.name.clone())
-            .collect(),
-        unmatched_len: unmatched.trim().len(),
-    }
-}
-
-pub fn ensure_template_response_write_proof(
-    patches: &[template::PatchBlock],
-    unmatched: &str,
-) -> Result<()> {
-    let proof = template_response_write_proof(patches, unmatched);
-    if proof.has_real_body() {
-        return Ok(());
-    }
-
-    anyhow::bail!(
-        "template response contains no real response-body write — include at least one non-empty response patch or non-empty unmatched response body"
-    );
 }
 
 pub fn ensure_strict_template_response_heading(
@@ -162,95 +122,6 @@ pub(crate) fn pending_replace_escape_hatch_enabled() -> bool {
             .unwrap_or(false)
 }
 
-pub(crate) fn same_ignoring_trailing_newlines(left: &str, right: &str) -> bool {
-    left.trim_end_matches('\n') == right.trim_end_matches('\n')
-}
-
-pub(crate) fn serialize_template_response(
-    patches: &[template::PatchBlock],
-    unmatched: &str,
-) -> String {
-    let mut out = String::new();
-    for patch in patches {
-        out.push_str("<!-- patch:");
-        out.push_str(&patch.name);
-        if !patch.attrs.is_empty() {
-            let mut attrs: Vec<_> = patch.attrs.iter().collect();
-            attrs.sort_by_key(|(left, _)| *left);
-            for (key, value) in attrs {
-                out.push(' ');
-                out.push_str(key);
-                out.push_str("=\"");
-                out.push_str(&value.replace('"', "&quot;"));
-                out.push('"');
-            }
-        }
-        out.push_str(" -->\n");
-        out.push_str(&patch.content);
-        if !patch.content.ends_with('\n') {
-            out.push('\n');
-        }
-        out.push_str("<!-- /patch:");
-        out.push_str(&patch.name);
-        out.push_str(" -->\n");
-    }
-    if !unmatched.trim().is_empty() {
-        if !out.is_empty() && !out.ends_with('\n') {
-            out.push('\n');
-        }
-        out.push_str(unmatched.trim());
-        out.push('\n');
-    }
-    out
-}
-
-pub(crate) fn response_materialization_probe(
-    patches: &[template::PatchBlock],
-    unmatched: &str,
-) -> String {
-    let mut selected = patches
-        .iter()
-        .filter(|patch| patch.name == "exchange")
-        .cloned()
-        .collect::<Vec<_>>();
-    let selected_exchange = !selected.is_empty();
-    if selected.is_empty() && unmatched.trim().is_empty() {
-        selected = patches
-            .iter()
-            .filter(|patch| patch.name != "frontmatter")
-            .filter(|patch| !is_backlog_component(&patch.name))
-            .filter(|patch| !agent_doc_element::element::is_review_component(&patch.name))
-            .cloned()
-            .collect();
-    }
-    let probe_unmatched = if selected_exchange { "" } else { unmatched };
-    materialized_template_response(&selected, probe_unmatched)
-}
-
-pub(crate) fn materialized_template_response(
-    patches: &[template::PatchBlock],
-    unmatched: &str,
-) -> String {
-    let mut out = String::new();
-    for patch in patches {
-        push_materialization_segment(&mut out, &patch.content);
-    }
-    push_materialization_segment(&mut out, unmatched);
-    out
-}
-
-pub(crate) fn push_materialization_segment(out: &mut String, segment: &str) {
-    let segment = segment.trim_matches(|c| c == '\n' || c == '\r');
-    if segment.trim().is_empty() {
-        return;
-    }
-    if !out.is_empty() && !out.ends_with('\n') {
-        out.push('\n');
-    }
-    out.push_str(segment);
-    out.push('\n');
-}
-
 pub fn response_materialization_probe_from_response(response: &str) -> String {
     let probe = match template::parse_patches(response) {
         Ok((patches, unmatched)) => response_materialization_probe(&patches, &unmatched),
@@ -284,18 +155,6 @@ pub fn response_materialized_in_content(response: &str, content: &str) -> bool {
 
 fn strip_ephemeral_markers(content: &str) -> String {
     crate::git::strip_guard_markers(content)
-}
-
-pub(crate) fn reject_marker_response_with_zero_patches(
-    marker_count: usize,
-    patch_count: usize,
-) -> Result<()> {
-    if patch_count == 0 && marker_count > 0 {
-        anyhow::bail!(
-            "template patchback parsed zero patches despite {marker_count} patch marker(s); refusing to capture a malformed response"
-        );
-    }
-    Ok(())
 }
 
 pub(crate) fn ipc_response_materialized_or_fallback(
@@ -1020,16 +879,5 @@ mod core_tests {
         );
 
         assert!(response_materialized_in_content(response, content));
-    }
-    #[test]
-    fn marker_bearing_zero_patch_parse_is_rejected_before_capture() {
-        let err = reject_marker_response_with_zero_patches(1, 0).unwrap_err();
-
-        assert!(
-            err.to_string()
-                .contains("parsed zero patches despite 1 patch marker")
-        );
-        assert!(reject_marker_response_with_zero_patches(0, 0).is_ok());
-        assert!(reject_marker_response_with_zero_patches(2, 1).is_ok());
     }
 }

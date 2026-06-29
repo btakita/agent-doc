@@ -1282,7 +1282,10 @@ mod verify_sidecar_normalization_tests {
 
     #[test]
     fn template_response_write_proof_accepts_nonempty_unmatched_body() {
-        let proof = super::template_response_write_proof(&[], "### Re: topic — gpt-5\nbody\n");
+        let proof = agent_doc_template::response_materialization::template_response_write_proof(
+            &[],
+            "### Re: topic — gpt-5\nbody\n",
+        );
         assert!(proof.has_real_body());
         assert_eq!(proof.unmatched_len, "### Re: topic — gpt-5\nbody".len());
     }
@@ -1293,7 +1296,11 @@ mod verify_sidecar_normalization_tests {
             agent_doc_template::PatchBlock::new("exchange", ""),
             agent_doc_template::PatchBlock::new("frontmatter", "agent: codex"),
         ];
-        let err = super::ensure_template_response_write_proof(&patches, "").unwrap_err();
+        let err =
+            agent_doc_template::response_materialization::ensure_template_response_write_proof(
+                &patches, "",
+            )
+            .unwrap_err();
         assert!(err.to_string().contains("no real response-body write"));
     }
 

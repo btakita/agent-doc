@@ -6019,6 +6019,90 @@ fn test_agent_doc_template_owns_patchback_policy() {
 }
 
 #[test]
+fn test_agent_doc_template_owns_response_materialization_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let template_response_materialization =
+        fs::read_to_string(manifest_dir.join("agent-doc-template/src/response_materialization.rs"))
+            .unwrap();
+    for required_snippet in [
+        "pub struct TemplateResponseWriteProof",
+        "pub fn template_response_write_proof",
+        "pub fn ensure_template_response_write_proof",
+        "pub fn same_ignoring_trailing_newlines",
+        "pub fn serialize_template_response",
+        "pub fn response_materialization_probe",
+        "pub fn materialized_template_response",
+        "pub fn push_materialization_segment",
+        "pub fn reject_marker_response_with_zero_patches",
+    ] {
+        assert!(
+            template_response_materialization.contains(required_snippet),
+            "agent-doc-template must own template response materialization policy: {required_snippet}"
+        );
+    }
+
+    let template_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-template/src/lib.rs")).unwrap();
+    assert!(
+        template_lib.contains("pub mod response_materialization;"),
+        "agent-doc-template should expose response materialization through its owning module"
+    );
+    assert!(
+        !template_lib.contains("pub use response_materialization"),
+        "agent-doc-template should not add a response materialization root facade"
+    );
+
+    let write_materialize =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/materialize.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub struct TemplateResponseWriteProof",
+        "pub(crate) struct TemplateResponseWriteProof",
+        "pub fn template_response_write_proof",
+        "pub(crate) fn template_response_write_proof",
+        "pub fn ensure_template_response_write_proof",
+        "pub(crate) fn ensure_template_response_write_proof",
+        "pub fn same_ignoring_trailing_newlines",
+        "pub(crate) fn same_ignoring_trailing_newlines",
+        "pub fn serialize_template_response",
+        "pub(crate) fn serialize_template_response",
+        "pub fn response_materialization_probe(",
+        "pub(crate) fn response_materialization_probe(",
+        "pub fn materialized_template_response",
+        "pub(crate) fn materialized_template_response",
+        "pub fn push_materialization_segment",
+        "pub(crate) fn push_materialization_segment",
+        "pub fn reject_marker_response_with_zero_patches",
+        "pub(crate) fn reject_marker_response_with_zero_patches",
+    ] {
+        assert!(
+            !write_materialize.contains(forbidden_snippet),
+            "orchestration must not re-own or facade template response materialization policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        write_materialize.contains("use agent_doc_template::response_materialization::{"),
+        "write materialization adapters should import the focused response materialization API directly"
+    );
+
+    let focused_callers = [
+        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-orchestration/src/write/ipc/transport.rs",
+        "agent-doc-orchestration/src/write/ipc.rs",
+        "agent-doc-orchestration/src/write/converge.rs",
+        "agent-doc-orchestration/src/write/normalize.rs",
+    ];
+    for relative_path in focused_callers {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            source.contains("agent_doc_template::response_materialization::"),
+            "{relative_path} should call the focused response materialization API directly"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_template_owns_patch_sanitization_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let template_sanitize =

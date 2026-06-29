@@ -474,7 +474,10 @@ pub fn try_ipc(
                         &ipcfullprompt_candidate,
                     );
 
-                    let expected_response = response_materialization_probe(patches, unmatched);
+                    let expected_response =
+                        agent_doc_template::response_materialization::response_materialization_probe(
+                            patches, unmatched,
+                        );
                     if !ipc_response_materialized_or_fallback(
                         file,
                         "socket_ack_content",
@@ -671,7 +674,10 @@ pub fn try_ipc(
                         patch_id
                     ),
                 );
-                let expected_response = response_materialization_probe(patches, unmatched);
+                let expected_response =
+                    agent_doc_template::response_materialization::response_materialization_probe(
+                        patches, unmatched,
+                    );
                 if persist_already_applied_socket_content_ours_snapshot(
                     file,
                     &patch_id,

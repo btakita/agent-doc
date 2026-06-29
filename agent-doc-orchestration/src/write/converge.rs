@@ -418,7 +418,10 @@ fn live_prompt_drift_recovery_target(snapshot: &str, file_content: &str) -> Opti
         .iter()
         .find(|component| component.name == AGENT_RESPONSE_COMPONENT)?;
     let mut exchange_body = exchange.content(file_content).to_string();
-    push_materialization_segment(&mut exchange_body, &response_block);
+    agent_doc_template::response_materialization::push_materialization_segment(
+        &mut exchange_body,
+        &response_block,
+    );
     let recovered = exchange.replace_content(file_content, &exchange_body);
     (normalize_visible_recovery_compare(&recovered)
         != normalize_visible_recovery_compare(file_content))

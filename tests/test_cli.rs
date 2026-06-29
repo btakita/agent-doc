@@ -2559,9 +2559,44 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             .exists(),
         "closeout response and done-signal policy should live in the focused turn crate"
     );
+    assert!(
+        manifest_dir
+            .join("agent-doc-turn/src/closeout_recovery.rs")
+            .exists(),
+        "pure closeout recovery policy should live in the focused turn crate"
+    );
 
     let turn_source =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_signal.rs")).unwrap();
+    let recovery_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_recovery.rs")).unwrap();
+    for required in [
+        "pub enum MetadataDriftAuthority",
+        "pub fn metadata_drift_authority",
+    ] {
+        assert!(
+            recovery_source.contains(required),
+            "agent-doc-turn must own metadata-drift recovery policy: {required}"
+        );
+    }
+    let closeout_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/closeout.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub enum MetadataDriftAuthority",
+        "pub fn metadata_drift_authority",
+    ] {
+        assert!(
+            !closeout_source.contains(forbidden),
+            "orchestration must not re-own or facade metadata-drift recovery policy: {forbidden}"
+        );
+    }
+    assert!(
+        closeout_source.contains(
+            "agent_doc_turn::closeout_recovery::{MetadataDriftAuthority, metadata_drift_authority}"
+        ),
+        "orchestration closeout recovery should call focused turn policy directly"
+    );
     for required in [
         "pub enum ResponseSource",
         "pub struct ReapedResponseLossInput",

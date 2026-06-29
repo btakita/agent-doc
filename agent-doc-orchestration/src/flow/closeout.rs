@@ -1,4 +1,5 @@
 use super::types::{CloseoutState, FlowEvent, FlowName, FlowOutcome, FlowStage};
+use agent_doc_turn::closeout_recovery::{MetadataDriftAuthority, metadata_drift_authority};
 use anyhow::{Context, Result};
 use std::path::Path;
 
@@ -1294,20 +1295,6 @@ pub fn apply_closeout_recovery(file: &Path) -> Result<RecoveryApplication> {
     }
 }
 
-/// Which side of a metadata-only drift is authoritative for recovery.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MetadataDriftAuthority {
-    /// The local side (snapshot for `QueueMetadataDrift`, the visible file for
-    /// `SidecarVisibleDrift`) is authoritative — commit it forward.
-    Local,
-    /// HEAD (committed) is authoritative — restore the local side from HEAD,
-    /// discarding the spurious local metadata drift.
-    Head,
-    /// Neither side is provably authoritative (both carry distinct live queue
-    /// continuation heads with no consuming response) — fail closed.
-    Ambiguous,
-}
-
 /// Why the closeout recovery mutation primitive is changing durable state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloseoutRecoveryMutationReason {
@@ -1460,36 +1447,6 @@ fn log_closeout_recovery_mutation(
             reason.as_str()
         ),
     );
-}
-
-/// Decide the authoritative side of a content-equal metadata-only drift between a
-/// `local` document string (the candidate to commit) and the committed `head`.
-///
-/// The decision turns on the live auto-queue continuation signal
-/// (`#recovery-drift-authoritative-side`). Because the caller has already proven
-/// the *content* components (exchange / backlog / review / icebox / done) are
-/// byte-identical, the only durable state the diff can destroy is an active queue
-/// continuation. Legitimate consumption of a queue head always shows up as
-/// response/content drift, so a continuation that exists in HEAD but is gone (or
-/// re-headed) in a metadata-only local drift cannot have been legitimately
-/// consumed — HEAD is authoritative and the local drift is spurious.
-pub fn metadata_drift_authority(local: &str, head: &str) -> MetadataDriftAuthority {
-    let local_head = agent_doc_queue::queue_continuation::live_continuation_head(local);
-    let head_head = agent_doc_queue::queue_continuation::live_continuation_head(head);
-    match (local_head, head_head) {
-        // HEAD carries a live continuation that the local side dropped entirely
-        // (deactivated / drained / fenced) with no consuming response → HEAD is
-        // authoritative; committing the local side would silently lose it. This
-        // is the live-observed `queue_active:false` spurious-drift bug.
-        (None, Some(_)) => MetadataDriftAuthority::Head,
-        // Both sides carry a live continuation but with different ready heads, and
-        // (content-equal) no response consumed the old head → the next prompt
-        // diverged without proof. Genuinely ambiguous → fail closed.
-        (Some(local_id), Some(head_id)) if local_id != head_id => MetadataDriftAuthority::Ambiguous,
-        // Same live head, HEAD has no live continuation at risk, or neither side
-        // does → committing the local side forward loses no continuation.
-        _ => MetadataDriftAuthority::Local,
-    }
 }
 
 /// Apply the provably-safe recovery for `QueueMetadataDrift` / `SidecarVisibleDrift`.
@@ -2707,52 +2664,6 @@ mod tests {
         assert_eq!(
             classify_closeout_recovery_state(&doc),
             CloseoutRecoveryState::Clean
-        );
-    }
-
-    #[test]
-    fn metadata_drift_authority_head_when_local_drops_live_continuation() {
-        // `#recovery-drift-authoritative-side`: HEAD carries a live `queue_active`
-        // continuation that the local (snapshot) side deactivated → HEAD is
-        // authoritative (the spurious `queue_active:false` working-drift bug).
-        let head = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
-            "<!-- agent:queue -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n",
-        );
-        let local = head.replace("queue_active: true", "queue_active: false");
-        assert_eq!(
-            metadata_drift_authority(&local, head),
-            MetadataDriftAuthority::Head
-        );
-    }
-
-    #[test]
-    fn metadata_drift_authority_local_when_no_live_head_continuation() {
-        // Neither side has a live continuation → committing the local side forward
-        // loses no continuation → local is authoritative.
-        let head = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
-        );
-        let local = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
-        assert_eq!(
-            metadata_drift_authority(&local, head),
-            MetadataDriftAuthority::Local
-        );
-    }
-
-    #[test]
-    fn metadata_drift_authority_ambiguous_when_live_heads_diverge() {
-        // Both sides carry a live continuation but with different ready heads and
-        // (content-equal) no consuming response → genuinely ambiguous.
-        let head = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
-            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
-        );
-        let local = head.replace("- do [#a]", "- do [#z]");
-        assert_eq!(
-            metadata_drift_authority(&local, head),
-            MetadataDriftAuthority::Ambiguous
         );
     }
 

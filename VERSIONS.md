@@ -45,6 +45,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   heading exemptions also moved there; session-check keeps only file/cycle/ops-log
   guard adapters.
 
+- **Closeout metadata-drift authority moved to `agent-doc-turn`.** The
+  `QueueMetadataDrift` / `SidecarVisibleDrift` authoritative-side classifier now
+  lives in `agent_doc_turn::closeout_recovery`. Orchestration keeps only HEAD,
+  snapshot, visible-file loading, git/sidecar mutations, and calls the focused
+  recovery policy directly.
+
 - **Bare prompt-prefix diff slicing moved to `agent-doc-diff`.** The
   marker-scoped helper that scans a unified diff before an inserted response
   heading now lives beside the prompt-bearing diff classifier. Session-check

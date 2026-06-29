@@ -361,20 +361,21 @@ pub(crate) enum SupervisorHealth {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SupervisorRuntime {
     health: SupervisorHealth,
-    actor_state: Option<crate::session_actor::ActorState>,
+    actor_state: Option<agent_doc_sqlite::state_store::ActorState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AuthoritativeActorDispatchTarget {
-    record: crate::session_actor::ActorRecord,
+    record: agent_doc_sqlite::state_store::ActorRecord,
     runtime: SupervisorRuntime,
 }
 
 impl AuthoritativeActorDispatchTarget {
-    fn actor_state(&self) -> crate::session_actor::ActorState {
+    fn actor_state(&self) -> agent_doc_sqlite::state_store::ActorState {
         if matches!(
             self.record.state,
-            crate::session_actor::ActorState::Blocked | crate::session_actor::ActorState::Closed
+            agent_doc_sqlite::state_store::ActorState::Blocked
+                | agent_doc_sqlite::state_store::ActorState::Closed
         ) {
             return self.record.state;
         }
@@ -383,7 +384,7 @@ impl AuthoritativeActorDispatchTarget {
 }
 
 fn actor_blocked_by_starting_timeout(actor: &AuthoritativeActorDispatchTarget) -> bool {
-    actor.record.state == crate::session_actor::ActorState::Blocked
+    actor.record.state == agent_doc_sqlite::state_store::ActorState::Blocked
         && actor.record.last_transition.reason == "starting_actor_timeout"
 }
 
@@ -1310,26 +1311,26 @@ fn format_duplicate_pane_policy_error(
     lines.join("\n")
 }
 
-fn parse_actor_state(raw: &str) -> Option<crate::session_actor::ActorState> {
+fn parse_actor_state(raw: &str) -> Option<agent_doc_sqlite::state_store::ActorState> {
     match raw.trim() {
-        "starting" => Some(crate::session_actor::ActorState::Starting),
-        "ready" => Some(crate::session_actor::ActorState::Ready),
-        "busy" => Some(crate::session_actor::ActorState::Busy),
-        "waiting_input" => Some(crate::session_actor::ActorState::WaitingInput),
-        "closed" => Some(crate::session_actor::ActorState::Closed),
-        "blocked" => Some(crate::session_actor::ActorState::Blocked),
+        "starting" => Some(agent_doc_sqlite::state_store::ActorState::Starting),
+        "ready" => Some(agent_doc_sqlite::state_store::ActorState::Ready),
+        "busy" => Some(agent_doc_sqlite::state_store::ActorState::Busy),
+        "waiting_input" => Some(agent_doc_sqlite::state_store::ActorState::WaitingInput),
+        "closed" => Some(agent_doc_sqlite::state_store::ActorState::Closed),
+        "blocked" => Some(agent_doc_sqlite::state_store::ActorState::Blocked),
         _ => None,
     }
 }
 
-fn actor_dispatch_state(state: crate::session_actor::ActorState) -> ActorDispatchState {
+fn actor_dispatch_state(state: agent_doc_sqlite::state_store::ActorState) -> ActorDispatchState {
     match state {
-        crate::session_actor::ActorState::Ready => ActorDispatchState::Ready,
-        crate::session_actor::ActorState::Starting => ActorDispatchState::Starting,
-        crate::session_actor::ActorState::Busy => ActorDispatchState::Busy,
-        crate::session_actor::ActorState::WaitingInput => ActorDispatchState::WaitingInput,
-        crate::session_actor::ActorState::Blocked => ActorDispatchState::Blocked,
-        crate::session_actor::ActorState::Closed => ActorDispatchState::Closed,
+        agent_doc_sqlite::state_store::ActorState::Ready => ActorDispatchState::Ready,
+        agent_doc_sqlite::state_store::ActorState::Starting => ActorDispatchState::Starting,
+        agent_doc_sqlite::state_store::ActorState::Busy => ActorDispatchState::Busy,
+        agent_doc_sqlite::state_store::ActorState::WaitingInput => ActorDispatchState::WaitingInput,
+        agent_doc_sqlite::state_store::ActorState::Blocked => ActorDispatchState::Blocked,
+        agent_doc_sqlite::state_store::ActorState::Closed => ActorDispatchState::Closed,
     }
 }
 
@@ -1350,7 +1351,7 @@ fn supervisor_health_label(health: SupervisorHealth) -> String {
 fn runtime_actor_state_label(runtime: &SupervisorRuntime) -> &'static str {
     runtime
         .actor_state
-        .map(crate::session_actor::ActorState::as_str)
+        .map(agent_doc_sqlite::state_store::ActorState::as_str)
         .unwrap_or("missing")
 }
 
@@ -3386,12 +3387,12 @@ pub(crate) use authoritative_actor::*;
 /// no queue fallback (where route would otherwise have to bail).
 fn busy_dispatch_only_should_wait_for_ready(
     dispatch_only: bool,
-    actor_state: crate::session_actor::ActorState,
+    actor_state: agent_doc_sqlite::state_store::ActorState,
     has_queue_fallback: bool,
     pane_active_turn_busy: bool,
 ) -> bool {
     dispatch_only
-        && actor_state == crate::session_actor::ActorState::Busy
+        && actor_state == agent_doc_sqlite::state_store::ActorState::Busy
         && !has_queue_fallback
         // #jb-run-agent-doc-busy-active-turn-stall: when the live pane proves a
         // genuine active turn (working spinner / `esc to interrupt`), the actor
@@ -3406,7 +3407,7 @@ fn busy_dispatch_only_should_wait_for_ready(
 
 fn dispatch_only_should_probe_active_turn_cue(
     dispatch_only: bool,
-    actor_state: crate::session_actor::ActorState,
+    actor_state: agent_doc_sqlite::state_store::ActorState,
     prompt_context_present: bool,
     has_existing_inactive_queue_fallback: bool,
 ) -> bool {
@@ -3414,8 +3415,8 @@ fn dispatch_only_should_probe_active_turn_cue(
         return false;
     }
     match actor_state {
-        crate::session_actor::ActorState::Ready => true,
-        crate::session_actor::ActorState::Busy => {
+        agent_doc_sqlite::state_store::ActorState::Ready => true,
+        agent_doc_sqlite::state_store::ActorState::Busy => {
             !prompt_context_present && !has_existing_inactive_queue_fallback
         }
         _ => false,
@@ -3434,7 +3435,7 @@ fn dispatch_only_busy_refusal_message(
     dispatch_pane: &str,
     reason: &str,
     active_turn_busy_cue: Option<&str>,
-    actor_state: crate::session_actor::ActorState,
+    actor_state: agent_doc_sqlite::state_store::ActorState,
 ) -> String {
     match active_turn_busy_cue {
         Some(cue) => format!(
@@ -3774,7 +3775,7 @@ fn route_via_authoritative_actor(
         );
         return Ok(dispatch_pane);
     }
-    if actor_state == crate::session_actor::ActorState::Starting
+    if actor_state == agent_doc_sqlite::state_store::ActorState::Starting
         && let Some(refreshed) =
             wait_for_authoritative_actor_ready(tmux, file, session_id, file_path, harness, &actor)?
     {
@@ -3802,7 +3803,7 @@ fn route_via_authoritative_actor(
         actor_state = actor.actor_state();
     }
     let has_existing_inactive_queue_fallback = if dispatch_only
-        && actor_state == crate::session_actor::ActorState::Busy
+        && actor_state == agent_doc_sqlite::state_store::ActorState::Busy
         && prompt_context.is_none()
     {
         inactive_route_queue_head(file)?.is_some()
@@ -3826,7 +3827,7 @@ fn route_via_authoritative_actor(
     } else {
         None
     };
-    if actor_state == crate::session_actor::ActorState::Ready
+    if actor_state == agent_doc_sqlite::state_store::ActorState::Ready
         && let Some(cue) = active_turn_busy_cue.as_deref()
     {
         crate::ops_log::log_op(
@@ -3847,7 +3848,7 @@ fn route_via_authoritative_actor(
             harness.binary,
             cue
         );
-        actor_state = crate::session_actor::ActorState::Busy;
+        actor_state = agent_doc_sqlite::state_store::ActorState::Busy;
     }
     if let Some(cue) = active_turn_busy_cue.as_deref() {
         crate::ops_log::log_op(
@@ -3964,7 +3965,7 @@ fn route_via_authoritative_actor(
     // time. The pre-rescue Starting wait (line ~2952) may have timed out while the
     // pane was still parked. Re-promote and, if still Starting, re-attempt the
     // ready wait once on the freshly-visible pane before bailing out.
-    if rescued_from_stash && actor_state == crate::session_actor::ActorState::Starting {
+    if rescued_from_stash && actor_state == agent_doc_sqlite::state_store::ActorState::Starting {
         let runtime = query_supervisor_runtime(file, session_id);
         let (refreshed_record, refreshed_runtime) =
             promote_starting_authoritative_actor_if_dispatch_ready(
@@ -3979,7 +3980,7 @@ fn route_via_authoritative_actor(
             record: refreshed_record,
             runtime: refreshed_runtime,
         };
-        if refreshed.actor_state() == crate::session_actor::ActorState::Ready {
+        if refreshed.actor_state() == agent_doc_sqlite::state_store::ActorState::Ready {
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -4025,7 +4026,7 @@ fn route_via_authoritative_actor(
     }
 
     let prompt_ready = active_turn_busy_cue.is_none()
-        && (actor_state == crate::session_actor::ActorState::Ready
+        && (actor_state == agent_doc_sqlite::state_store::ActorState::Ready
             || current_generation_ready_prompt_proven(tmux, &actor, harness));
 
     // Direct pane evidence repairs a stale busy projection (#snrun). The actor
@@ -4052,7 +4053,7 @@ fn route_via_authoritative_actor(
                 actor_state.as_str()
             ),
         );
-        actor_state = crate::session_actor::ActorState::Ready;
+        actor_state = agent_doc_sqlite::state_store::ActorState::Ready;
     }
 
     // Timeout-idle recovery: the wait loop exhausted its budget without finding
@@ -4092,7 +4093,7 @@ fn route_via_authoritative_actor(
                         .join(" | ")
                 ),
             );
-            actor_state = crate::session_actor::ActorState::Ready;
+            actor_state = agent_doc_sqlite::state_store::ActorState::Ready;
         } else {
             crate::ops_log::log_op(
                 file,
@@ -4149,7 +4150,7 @@ fn route_via_authoritative_actor(
                     .join(" | ")
             ),
         );
-        actor_state = crate::session_actor::ActorState::Ready;
+        actor_state = agent_doc_sqlite::state_store::ActorState::Ready;
     }
 
     let reopen_mode = if dispatch_only {
@@ -5228,16 +5229,16 @@ pub(crate) fn wait_for_process_pid(pattern: &str, timeout: std::time::Duration) 
 // --- Stash rescue tests ---
 // --- split_before positional target tests ---
 #[cfg(test)]
-pub(crate) fn test_actor_record(pane_id: &str) -> crate::session_actor::ActorRecord {
-    crate::session_actor::ActorRecord {
+pub(crate) fn test_actor_record(pane_id: &str) -> agent_doc_sqlite::state_store::ActorRecord {
+    agent_doc_sqlite::state_store::ActorRecord {
         document_id: "test-doc".to_string(),
         session_id: "test-session".to_string(),
         generation: 1,
         pane_id: pane_id.to_string(),
         window_id: "@1".to_string(),
         harness: "codex".to_string(),
-        state: crate::session_actor::ActorState::Ready,
-        last_transition: crate::session_actor::ActorLastTransition {
+        state: agent_doc_sqlite::state_store::ActorState::Ready,
+        last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
             caller: "test".to_string(),
             reason: "test".to_string(),
             timestamp: 0,
@@ -5388,13 +5389,13 @@ mod tests {
     fn authoritative_actor_optimistic_queue_excludes_starting_state() {
         assert!(
             authoritative_actor_dispatch_can_queue_optimistically(
-                crate::session_actor::ActorState::Busy
+                agent_doc_sqlite::state_store::ActorState::Busy
             ),
             "busy actors may still accept a supervisor-owned queued reopen"
         );
         assert!(
             !authoritative_actor_dispatch_can_queue_optimistically(
-                crate::session_actor::ActorState::Starting
+                agent_doc_sqlite::state_store::ActorState::Starting
             ),
             "starting actors must become ready before route submits a reopen"
         );
@@ -5402,27 +5403,27 @@ mod tests {
     #[test]
     fn authoritative_actor_start_wait_terminal_state_only_for_terminal_states() {
         assert!(authoritative_actor_start_wait_terminal_state(
-            crate::session_actor::ActorState::Closed
+            agent_doc_sqlite::state_store::ActorState::Closed
         ));
         assert!(authoritative_actor_start_wait_terminal_state(
-            crate::session_actor::ActorState::Blocked
+            agent_doc_sqlite::state_store::ActorState::Blocked
         ));
         assert!(!authoritative_actor_start_wait_terminal_state(
-            crate::session_actor::ActorState::Starting
+            agent_doc_sqlite::state_store::ActorState::Starting
         ));
         assert!(!authoritative_actor_start_wait_terminal_state(
-            crate::session_actor::ActorState::Busy
+            agent_doc_sqlite::state_store::ActorState::Busy
         ));
         assert!(!authoritative_actor_start_wait_terminal_state(
-            crate::session_actor::ActorState::WaitingInput
+            agent_doc_sqlite::state_store::ActorState::WaitingInput
         ));
         assert!(!authoritative_actor_start_wait_terminal_state(
-            crate::session_actor::ActorState::Ready
+            agent_doc_sqlite::state_store::ActorState::Ready
         ));
     }
     #[test]
     fn authoritative_actor_ready_poll_requires_ready_state_and_prompt_proof() {
-        use crate::session_actor::ActorState;
+        use agent_doc_sqlite::state_store::ActorState;
 
         let schedule = [
             (ActorState::Starting, false, true),
@@ -5462,7 +5463,7 @@ mod tests {
     }
     #[test]
     fn authoritative_actor_ready_poll_surfaces_terminal_states() {
-        use crate::session_actor::ActorState;
+        use agent_doc_sqlite::state_store::ActorState;
 
         assert_eq!(
             classify_prompt_ready_barrier(PromptReadyBarrierFacts {
@@ -6935,7 +6936,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     }
     #[test]
     fn busy_dispatch_only_skips_ready_wait_when_queue_fallback_exists() {
-        use crate::session_actor::ActorState;
+        use agent_doc_sqlite::state_store::ActorState;
         // Busy + dispatch-only + a queue prompt available → do NOT wait (queue now).
         assert!(
             !busy_dispatch_only_should_wait_for_ready(true, ActorState::Busy, true, false),
@@ -6963,7 +6964,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     }
     #[test]
     fn dispatch_only_probes_active_turn_cue_for_stale_ready_actor() {
-        use crate::session_actor::ActorState;
+        use agent_doc_sqlite::state_store::ActorState;
         assert!(
             dispatch_only_should_probe_active_turn_cue(true, ActorState::Ready, false, false),
             "ready actor records still need a live pane active-turn probe before direct dispatch"
@@ -6987,7 +6988,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     }
     #[test]
     fn busy_dispatch_only_skips_ready_wait_on_proven_active_turn() {
-        use crate::session_actor::ActorState;
+        use agent_doc_sqlite::state_store::ActorState;
         // Busy + dispatch-only + no queue fallback + a live active-turn cue → skip
         // the wait (immediate refusal), instead of stalling for the full budget.
         assert!(
@@ -6997,7 +6998,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     }
     #[test]
     fn dispatch_only_busy_refusal_message_distinguishes_active_turn_from_cold_wait() {
-        use crate::session_actor::ActorState;
+        use agent_doc_sqlite::state_store::ActorState;
         let harness = HarnessConfig::claude();
         let file = std::path::Path::new("/tmp/sampleorders.md");
 
@@ -8322,18 +8323,18 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     #[test]
     fn authoritative_actor_state_preserves_terminal_record_over_runtime_starting() {
         let mut blocked_record = test_actor_record("%42");
-        blocked_record.state = crate::session_actor::ActorState::Blocked;
+        blocked_record.state = agent_doc_sqlite::state_store::ActorState::Blocked;
         blocked_record.last_transition.reason = "starting_actor_timeout".to_string();
         let blocked_actor = AuthoritativeActorDispatchTarget {
             record: blocked_record,
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
-                actor_state: Some(crate::session_actor::ActorState::Starting),
+                actor_state: Some(agent_doc_sqlite::state_store::ActorState::Starting),
             },
         };
         assert_eq!(
             blocked_actor.actor_state(),
-            crate::session_actor::ActorState::Blocked,
+            agent_doc_sqlite::state_store::ActorState::Blocked,
             "a route-owned blocked record should remain a durable terminal gate even if stale supervisor IPC still reports starting"
         );
         assert!(
@@ -8342,30 +8343,30 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         );
 
         let mut starting_record = test_actor_record("%43");
-        starting_record.state = crate::session_actor::ActorState::Starting;
+        starting_record.state = agent_doc_sqlite::state_store::ActorState::Starting;
         let ready_actor = AuthoritativeActorDispatchTarget {
             record: starting_record,
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
-                actor_state: Some(crate::session_actor::ActorState::Ready),
+                actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
             },
         };
         assert_eq!(
             ready_actor.actor_state(),
-            crate::session_actor::ActorState::Ready,
+            agent_doc_sqlite::state_store::ActorState::Ready,
             "non-terminal records should still accept fresher supervisor runtime state"
         );
     }
     #[test]
     fn starting_timeout_blocked_actor_recovery_requires_prompt_ready_proof() {
         let mut blocked_record = test_actor_record("%42");
-        blocked_record.state = crate::session_actor::ActorState::Blocked;
+        blocked_record.state = agent_doc_sqlite::state_store::ActorState::Blocked;
         blocked_record.last_transition.reason = "starting_actor_timeout".to_string();
         let blocked_actor = AuthoritativeActorDispatchTarget {
             record: blocked_record,
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
-                actor_state: Some(crate::session_actor::ActorState::Starting),
+                actor_state: Some(agent_doc_sqlite::state_store::ActorState::Starting),
             },
         };
 
@@ -8386,7 +8387,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     fn authoritative_actor_dispatch_guard_reason_returns_none_for_healthy_with_state() {
         let runtime = SupervisorRuntime {
             health: SupervisorHealth::Healthy,
-            actor_state: Some(crate::session_actor::ActorState::Ready),
+            actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
         };
         assert!(authoritative_actor_dispatch_guard_reason(&runtime).is_none());
     }
@@ -8394,7 +8395,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     fn authoritative_actor_dispatch_guard_reason_returns_reason_for_restartable() {
         let runtime = SupervisorRuntime {
             health: SupervisorHealth::Restartable,
-            actor_state: Some(crate::session_actor::ActorState::Ready),
+            actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
         };
         let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
         assert!(
@@ -8406,7 +8407,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     fn authoritative_actor_dispatch_guard_reason_returns_reason_for_halted() {
         let runtime = SupervisorRuntime {
             health: SupervisorHealth::Halted { restart_count: 3 },
-            actor_state: Some(crate::session_actor::ActorState::Ready),
+            actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
         };
         let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
         assert!(
@@ -8418,7 +8419,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     fn authoritative_actor_dispatch_guard_reason_returns_reason_for_unreachable() {
         let runtime = SupervisorRuntime {
             health: SupervisorHealth::Unreachable,
-            actor_state: Some(crate::session_actor::ActorState::Ready),
+            actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
         };
         let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
         assert!(
@@ -8430,7 +8431,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     fn authoritative_actor_dispatch_guard_reason_returns_reason_for_no_socket() {
         let runtime = SupervisorRuntime {
             health: SupervisorHealth::NoSocket,
-            actor_state: Some(crate::session_actor::ActorState::Ready),
+            actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
         };
         let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
         assert!(
@@ -8456,7 +8457,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             record: test_actor_record("%1"),
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
-                actor_state: Some(crate::session_actor::ActorState::Ready),
+                actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
             },
         };
         assert!(authoritative_actor_dispatch_target_eligible(&healthy));

@@ -1025,7 +1025,7 @@ fn route_owned_live_pane_busy_reason(
         .actor_state
         .lock()
         .unwrap()
-        .is_some_and(|state| state == crate::session_actor::ActorState::Ready)
+        .is_some_and(|state| state == agent_doc_sqlite::state_store::ActorState::Ready)
     {
         return None;
     }
@@ -1397,7 +1397,7 @@ fn auto_trigger_inject_command(
         return AutoTriggerOutcome::SendFailed;
     }
     shared.transition_actor_state(
-        crate::session_actor::ActorState::Busy,
+        agent_doc_sqlite::state_store::ActorState::Busy,
         "dispatch",
         "auto_trigger_inject",
     );
@@ -1462,7 +1462,7 @@ fn auto_trigger_clear_command(
         return AutoTriggerOutcome::Cancelled;
     }
     shared.transition_actor_state(
-        crate::session_actor::ActorState::Busy,
+        agent_doc_sqlite::state_store::ActorState::Busy,
         "operator",
         "auto_trigger_clear",
     );
@@ -2065,7 +2065,7 @@ fn spawn_managed_capability_proof_thread(
                                     return;
                                 }
                                 shared.transition_actor_state(
-                                    crate::session_actor::ActorState::Blocked,
+                                    agent_doc_sqlite::state_store::ActorState::Blocked,
                                     "supervisor",
                                     &format!("{}_capability_proof_failed", harness_binary),
                                 );
@@ -2384,10 +2384,10 @@ struct SessionActorRuntime {
 impl SessionActorRuntime {
     fn transition(
         &self,
-        state: crate::session_actor::ActorState,
+        state: agent_doc_sqlite::state_store::ActorState,
         caller: &str,
         reason: &str,
-    ) -> Result<crate::session_actor::ActorRecord> {
+    ) -> Result<agent_doc_sqlite::state_store::ActorRecord> {
         crate::project_controller::mark_lifecycle(
             &self.project_root,
             crate::project_controller::LifecycleRequest {
@@ -2410,7 +2410,7 @@ pub(crate) struct SupervisorShared {
     /// Authoritative actor lifecycle context for this pane generation.
     actor_runtime: Option<SessionActorRuntime>,
     /// Best-known actor lifecycle state for IPC `state` responses.
-    actor_state: Mutex<Option<crate::session_actor::ActorState>>,
+    actor_state: Mutex<Option<agent_doc_sqlite::state_store::ActorState>>,
     /// PID of the long-lived `agent-doc start` supervisor process.
     supervisor_pid: u32,
     /// Stable identity for this supervisor process across child restarts.
@@ -2493,7 +2493,7 @@ impl SupervisorShared {
         supervisor_instance_id: String,
         harness_binary: &str,
         actor_runtime: Option<SessionActorRuntime>,
-        actor_state: Option<crate::session_actor::ActorState>,
+        actor_state: Option<agent_doc_sqlite::state_store::ActorState>,
         inject_pane: Option<String>,
     ) -> Self {
         Self {
@@ -2589,7 +2589,7 @@ impl SupervisorShared {
 
     fn transition_actor_state(
         &self,
-        state: crate::session_actor::ActorState,
+        state: agent_doc_sqlite::state_store::ActorState,
         caller: &str,
         reason: &str,
     ) {
@@ -3657,7 +3657,7 @@ Done.
             "test-instance".to_string(),
             "claude",
             None,
-            Some(crate::session_actor::ActorState::Ready),
+            Some(agent_doc_sqlite::state_store::ActorState::Ready),
             Some("%owner".to_string()),
         );
         assert!(!turn_active_for_owned_pane(&doc, &shared));
@@ -3725,7 +3725,7 @@ Done.
             "test-instance".to_string(),
             "codex",
             None,
-            Some(crate::session_actor::ActorState::Ready),
+            Some(agent_doc_sqlite::state_store::ActorState::Ready),
             Some("%owner".to_string()),
         );
 
@@ -3741,7 +3741,7 @@ Done.
             "test-instance".to_string(),
             "codex",
             None,
-            Some(crate::session_actor::ActorState::Ready),
+            Some(agent_doc_sqlite::state_store::ActorState::Ready),
             None,
         );
 

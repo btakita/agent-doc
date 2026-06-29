@@ -50,7 +50,7 @@ fn dispatch_only_starting_pane_actor_ready_gate(
     if actor.record.pane_id != pane {
         return false;
     }
-    if actor.actor_state() != crate::session_actor::ActorState::Ready {
+    if actor.actor_state() != agent_doc_sqlite::state_store::ActorState::Ready {
         return false;
     }
     matches!(
@@ -973,7 +973,7 @@ mod tests {
     #[test]
     fn dispatch_only_starting_pane_actor_ready_gate_requires_same_ready_prompt_proven_actor() {
         let mut record = test_actor_record("%42");
-        record.state = crate::session_actor::ActorState::Ready;
+        record.state = agent_doc_sqlite::state_store::ActorState::Ready;
         record.generation = 9;
         record.last_transition.reason = "prompt_ready".to_string();
         record.last_transition.new_generation = 9;
@@ -981,7 +981,7 @@ mod tests {
             record,
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
-                actor_state: Some(crate::session_actor::ActorState::Ready),
+                actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
             },
         };
 
@@ -999,7 +999,7 @@ mod tests {
         );
 
         let mut busy_actor = ready_actor.clone();
-        busy_actor.runtime.actor_state = Some(crate::session_actor::ActorState::Busy);
+        busy_actor.runtime.actor_state = Some(agent_doc_sqlite::state_store::ActorState::Busy);
         assert!(
             !dispatch_only_starting_pane_actor_ready_gate(&busy_actor, "%42", true),
             "non-Ready runtime state must not bypass the startup probe"

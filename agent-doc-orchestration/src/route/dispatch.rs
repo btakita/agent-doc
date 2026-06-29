@@ -1268,7 +1268,7 @@ pub(crate) fn dispatch_via_supervisor_ipc(
 }
 
 pub(crate) fn authoritative_actor_dispatch_recovery_hint(
-    state: crate::session_actor::ActorState,
+    state: agent_doc_sqlite::state_store::ActorState,
     file: &Path,
 ) -> String {
     actor_recovery_hint(actor_dispatch_state(state), &file.display().to_string())
@@ -1276,7 +1276,7 @@ pub(crate) fn authoritative_actor_dispatch_recovery_hint(
 
 #[cfg(test)]
 pub(crate) fn authoritative_actor_dispatch_can_queue_optimistically(
-    state: crate::session_actor::ActorState,
+    state: agent_doc_sqlite::state_store::ActorState,
 ) -> bool {
     crate::flow::routed_reopen::actor_can_queue_optimistically(actor_dispatch_state(state))
 }
@@ -1918,7 +1918,7 @@ mod tests {
     fn authoritative_actor_starting_hint_names_reroute_and_restart() {
         let file = std::path::Path::new("/tmp/session.md");
         let hint = authoritative_actor_dispatch_recovery_hint(
-            crate::session_actor::ActorState::Starting,
+            agent_doc_sqlite::state_store::ActorState::Starting,
             file,
         );
         assert!(

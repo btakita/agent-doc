@@ -129,7 +129,7 @@ pub(crate) fn decode_controller_response<T: DeserializeOwned>(
 pub fn start_session(
     project_root: &Path,
     request: StartSessionRequest,
-) -> Result<crate::session_actor::ActorRecord> {
+) -> Result<agent_doc_sqlite::state_store::ActorRecord> {
     request_controller(
         project_root,
         ControllerRequest {
@@ -153,7 +153,7 @@ pub fn start_session(
 pub fn register_supervisor(
     project_root: &Path,
     registration: SupervisorRegistration,
-) -> Result<crate::session_actor::ActorRecord> {
+) -> Result<agent_doc_sqlite::state_store::ActorRecord> {
     request_controller(
         project_root,
         ControllerRequest {
@@ -177,7 +177,7 @@ pub fn register_supervisor(
 pub fn mark_lifecycle(
     project_root: &Path,
     request: LifecycleRequest,
-) -> Result<crate::session_actor::ActorRecord> {
+) -> Result<agent_doc_sqlite::state_store::ActorRecord> {
     #[cfg(any(test, feature = "test-support"))]
     {
         let bootstrap = ControllerBootstrap {
@@ -297,7 +297,7 @@ pub fn refresh_supervisor_lease(
 pub fn authoritative_actor_binding(
     project_root: &Path,
     file: &Path,
-) -> Result<Option<crate::session_actor::ActorRecord>> {
+) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>> {
     #[cfg(any(test, feature = "test-support"))]
     {
         let document_id =
@@ -864,7 +864,7 @@ pub fn repair_projection(
 pub fn attach_pane(
     project_root: &Path,
     request: AttachPaneRequest,
-) -> Result<crate::session_actor::ActorRecord> {
+) -> Result<agent_doc_sqlite::state_store::ActorRecord> {
     request_controller(
         project_root,
         ControllerRequest {
@@ -1504,7 +1504,7 @@ fn clear_superseded_stale_supervisor_pause(
     project_root: &Path,
     file: &Path,
     document_id: &str,
-    record: &crate::session_actor::ActorRecord,
+    record: &agent_doc_sqlite::state_store::ActorRecord,
     control: &QueueControlStatus,
 ) -> Result<bool> {
     if control.scope_kind != "document"
@@ -1521,7 +1521,8 @@ fn clear_superseded_stale_supervisor_pause(
     }
     if matches!(
         record.state,
-        crate::session_actor::ActorState::Blocked | crate::session_actor::ActorState::Closed
+        agent_doc_sqlite::state_store::ActorState::Blocked
+            | agent_doc_sqlite::state_store::ActorState::Closed
     ) {
         return Ok(false);
     }
@@ -2715,7 +2716,7 @@ pub(crate) fn actor_record_from_authority(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
     document_id: &str,
-) -> Result<Option<crate::session_actor::ActorRecord>> {
+) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>> {
     if let Some(runtime) = runtime {
         runtime.actor_record(document_id)
     } else {
@@ -2839,7 +2840,7 @@ pub(crate) fn handle_start_session(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
     request: ControllerRequest,
-) -> Result<crate::session_actor::ActorRecord> {
+) -> Result<agent_doc_sqlite::state_store::ActorRecord> {
     let file = request_file(&request)?;
     let session_id = request_string(&request.session_id, "session_id")?;
     let pane_id = request_string(&request.pane_id, "pane_id")?;
@@ -2851,15 +2852,15 @@ pub(crate) fn handle_start_session(
     );
     let harness =
         crate::session_actor::detect_document_harness_in(&bootstrap.project_root, &document_id);
-    let record = crate::session_actor::ActorRecord {
+    let record = agent_doc_sqlite::state_store::ActorRecord {
         document_id: document_id.clone(),
         session_id: session_id.clone(),
         generation,
         pane_id: pane_id.clone(),
         window_id: window_id.clone(),
         harness,
-        state: crate::session_actor::ActorState::Starting,
-        last_transition: crate::session_actor::ActorLastTransition {
+        state: agent_doc_sqlite::state_store::ActorState::Starting,
+        last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
             caller: "start".to_string(),
             reason: "session_start".to_string(),
             timestamp: timestamp_secs(),
@@ -2895,7 +2896,7 @@ pub(crate) fn handle_start_session(
 
 fn supervisor_report_matches_existing_lease(
     project_root: &Path,
-    current: &crate::session_actor::ActorRecord,
+    current: &agent_doc_sqlite::state_store::ActorRecord,
     request: &ControllerRequest,
 ) -> Result<bool> {
     let conn = open_state_db(project_root)?;
@@ -2915,26 +2916,26 @@ fn replace_closed_actor_from_same_supervisor_report(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
     file: &Path,
-    current: &crate::session_actor::ActorRecord,
+    current: &agent_doc_sqlite::state_store::ActorRecord,
     request: &ControllerRequest,
-) -> Result<Option<crate::session_actor::ActorRecord>> {
+) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>> {
     let session_id = request_string(&request.session_id, "session_id")?;
     let pane_id = request_string(&request.pane_id, "pane_id")?;
     let generation = request_u64(request.generation, "generation")?;
     let runtime_state = request
         .state
         .as_deref()
-        .unwrap_or(crate::session_actor::ActorState::Starting.as_str());
-    if current.state != crate::session_actor::ActorState::Closed
+        .unwrap_or(agent_doc_sqlite::state_store::ActorState::Starting.as_str());
+    if current.state != agent_doc_sqlite::state_store::ActorState::Closed
         || generation <= current.generation
         || current.pane_id != pane_id
         || !supervisor_report_matches_existing_lease(&bootstrap.project_root, current, request)?
     {
         return Ok(None);
     }
-    let state = crate::session_actor::ActorState::parse(runtime_state)
+    let state = agent_doc_sqlite::state_store::ActorState::parse(runtime_state)
         .with_context(|| format!("unknown supervisor runtime state: {runtime_state}"))?;
-    let replacement = crate::session_actor::ActorRecord {
+    let replacement = agent_doc_sqlite::state_store::ActorRecord {
         document_id: current.document_id.clone(),
         session_id,
         generation,
@@ -2945,7 +2946,7 @@ fn replace_closed_actor_from_same_supervisor_report(
             &current.document_id,
         ),
         state,
-        last_transition: crate::session_actor::ActorLastTransition {
+        last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
             caller: "supervisor".to_string(),
             reason: "same_supervisor_session_replaced".to_string(),
             timestamp: timestamp_secs(),
@@ -2981,7 +2982,7 @@ pub(crate) fn handle_register_supervisor(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
     request: ControllerRequest,
-) -> Result<crate::session_actor::ActorRecord> {
+) -> Result<agent_doc_sqlite::state_store::ActorRecord> {
     let file = request_file(&request)?;
     let session_id = request_string(&request.session_id, "session_id")?;
     let pane_id = request_string(&request.pane_id, "pane_id")?;
@@ -2989,7 +2990,7 @@ pub(crate) fn handle_register_supervisor(
     let runtime_state = request
         .state
         .as_deref()
-        .unwrap_or(crate::session_actor::ActorState::Starting.as_str());
+        .unwrap_or(agent_doc_sqlite::state_store::ActorState::Starting.as_str());
     let document_id = crate::session_actor::canonical_document_id_in(
         &bootstrap.project_root,
         &file.to_string_lossy(),
@@ -3050,13 +3051,13 @@ pub(crate) fn handle_mark_lifecycle(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
     request: ControllerRequest,
-) -> Result<crate::session_actor::ActorRecord> {
+) -> Result<agent_doc_sqlite::state_store::ActorRecord> {
     let file = request_file(&request)?;
     let session_id = request_string(&request.session_id, "session_id")?;
     let pane_id = request_string(&request.pane_id, "pane_id")?;
     let generation = request_u64(request.generation, "generation")?;
     let state_raw = request_string(&request.state, "state")?;
-    let state = crate::session_actor::ActorState::parse(&state_raw)
+    let state = agent_doc_sqlite::state_store::ActorState::parse(&state_raw)
         .with_context(|| format!("unknown lifecycle state: {state_raw}"))?;
     let caller = request_string(&request.caller, "caller")?;
     let reason = request_string(&request.reason, "reason")?;
@@ -3096,7 +3097,7 @@ pub(crate) fn handle_mark_lifecycle(
     }
     let mut record = current.clone();
     record.state = state;
-    record.last_transition = crate::session_actor::ActorLastTransition {
+    record.last_transition = agent_doc_sqlite::state_store::ActorLastTransition {
         caller: caller.clone(),
         reason: reason.clone(),
         timestamp: timestamp_secs(),
@@ -3109,7 +3110,7 @@ pub(crate) fn handle_mark_lifecycle(
     // open-dispatch set stays accurate for the next busy episode's coalescing and for
     // restart recovery. Stall-safety does not depend on this (a turn always starts
     // from a Ready dispatch, which never coalesces); it keeps the table honest.
-    if matches!(state, crate::session_actor::ActorState::Ready) {
+    if matches!(state, agent_doc_sqlite::state_store::ActorState::Ready) {
         match open_state_db(&bootstrap.project_root)
             .and_then(|conn| state_store::mark_open_dispatches_consumed(&conn, &document_id))
         {
@@ -3161,7 +3162,7 @@ pub(crate) fn handle_supervisor_heartbeat(
     let runtime_state = request
         .state
         .as_deref()
-        .unwrap_or(crate::session_actor::ActorState::Starting.as_str());
+        .unwrap_or(agent_doc_sqlite::state_store::ActorState::Starting.as_str());
     let document_id = crate::session_actor::canonical_document_id_in(
         &bootstrap.project_root,
         &file.to_string_lossy(),
@@ -3397,7 +3398,7 @@ pub(crate) fn handle_dispatch(
                 Some("queue_paused")
             }
         } else if control.state == "draining"
-            && record.state != crate::session_actor::ActorState::Ready
+            && record.state != agent_doc_sqlite::state_store::ActorState::Ready
         {
             Some("actor_busy_draining")
         } else {
@@ -3531,7 +3532,8 @@ pub(crate) fn handle_dispatch(
         // redirect marker. `authorize_dispatch` consumes the marker and retries once.
         let current_dispatchable = !matches!(
             record.state,
-            crate::session_actor::ActorState::Blocked | crate::session_actor::ActorState::Closed
+            agent_doc_sqlite::state_store::ActorState::Blocked
+                | agent_doc_sqlite::state_store::ActorState::Closed
         );
         if current_dispatchable {
             crate::ops_log::log_op(
@@ -3559,7 +3561,8 @@ pub(crate) fn handle_dispatch(
         }
     } else if matches!(
         record.state,
-        crate::session_actor::ActorState::Blocked | crate::session_actor::ActorState::Closed
+        agent_doc_sqlite::state_store::ActorState::Blocked
+            | agent_doc_sqlite::state_store::ActorState::Closed
     ) {
         failed_stage = Some(record.state.as_str());
         failure_status = ControllerDispatchResultStatus::Blocked;
@@ -3598,7 +3601,10 @@ pub(crate) fn handle_dispatch(
     // actor and is never coalesced, so this can never stall the queue — it only
     // suppresses the redundant re-fire; the next dispatch once the actor is Ready
     // submits cleanly. Backpressure, never a queue stop.
-    if matches!(record.state, crate::session_actor::ActorState::Busy) {
+    if matches!(
+        record.state,
+        agent_doc_sqlite::state_store::ActorState::Busy
+    ) {
         let conn = open_state_db(&bootstrap.project_root)?;
         let in_flight =
             state_store::has_open_in_flight_dispatch(&conn, &document_id, record.generation)?;
@@ -3640,20 +3646,26 @@ pub(crate) fn handle_dispatch(
     }
 
     let accepted_stage = match record.state {
-        crate::session_actor::ActorState::Ready => "ready",
-        crate::session_actor::ActorState::Starting => "starting_queue",
-        crate::session_actor::ActorState::Busy => "busy_queue",
-        crate::session_actor::ActorState::WaitingInput => "waiting_input_recovery",
-        crate::session_actor::ActorState::Blocked | crate::session_actor::ActorState::Closed => {
+        agent_doc_sqlite::state_store::ActorState::Ready => "ready",
+        agent_doc_sqlite::state_store::ActorState::Starting => "starting_queue",
+        agent_doc_sqlite::state_store::ActorState::Busy => "busy_queue",
+        agent_doc_sqlite::state_store::ActorState::WaitingInput => "waiting_input_recovery",
+        agent_doc_sqlite::state_store::ActorState::Blocked
+        | agent_doc_sqlite::state_store::ActorState::Closed => {
             unreachable!("blocked/closed dispatch rejected above")
         }
     };
     let result_status = match record.state {
-        crate::session_actor::ActorState::Ready => ControllerDispatchResultStatus::Accepted,
-        crate::session_actor::ActorState::Starting
-        | crate::session_actor::ActorState::Busy
-        | crate::session_actor::ActorState::WaitingInput => ControllerDispatchResultStatus::Queued,
-        crate::session_actor::ActorState::Blocked | crate::session_actor::ActorState::Closed => {
+        agent_doc_sqlite::state_store::ActorState::Ready => {
+            ControllerDispatchResultStatus::Accepted
+        }
+        agent_doc_sqlite::state_store::ActorState::Starting
+        | agent_doc_sqlite::state_store::ActorState::Busy
+        | agent_doc_sqlite::state_store::ActorState::WaitingInput => {
+            ControllerDispatchResultStatus::Queued
+        }
+        agent_doc_sqlite::state_store::ActorState::Blocked
+        | agent_doc_sqlite::state_store::ActorState::Closed => {
             unreachable!("blocked/closed dispatch rejected above")
         }
     };
@@ -3712,7 +3724,7 @@ pub(crate) fn admin_target_record(
 ) -> Result<(
     String,
     Option<String>,
-    Option<crate::session_actor::ActorRecord>,
+    Option<agent_doc_sqlite::state_store::ActorRecord>,
 )> {
     let mut conn = open_state_db(&bootstrap.project_root)?;
     migrate_legacy_actor_projection(&bootstrap.project_root, &mut conn)?;
@@ -3839,7 +3851,7 @@ pub(crate) fn require_observed_generation(
     bootstrap: &ControllerBootstrap,
     operation_kind: &str,
     document_id: Option<&str>,
-    record: Option<&crate::session_actor::ActorRecord>,
+    record: Option<&agent_doc_sqlite::state_store::ActorRecord>,
     observed_generation: Option<u64>,
     diagnostic_payload: &str,
 ) -> Result<Option<ControllerAdminReceipt>> {
@@ -3983,10 +3995,10 @@ pub(crate) fn handle_admin_control(
     let mut next = record.clone();
     match action.as_str() {
         "reap" => {
-            next.state = crate::session_actor::ActorState::Closed;
+            next.state = agent_doc_sqlite::state_store::ActorState::Closed;
             next.pane_id.clear();
             next.window_id.clear();
-            next.last_transition = crate::session_actor::ActorLastTransition {
+            next.last_transition = agent_doc_sqlite::state_store::ActorLastTransition {
                 caller: "admin".to_string(),
                 reason: format!("manual_reap {reason} receipt_id={}", receipt.receipt_id),
                 timestamp: timestamp_secs(),
@@ -3998,8 +4010,8 @@ pub(crate) fn handle_admin_control(
             let to_pane = request_string(&request.pane_id, "to pane")?;
             next.generation = record.generation.saturating_add(1);
             next.pane_id = to_pane;
-            next.state = crate::session_actor::ActorState::Ready;
-            next.last_transition = crate::session_actor::ActorLastTransition {
+            next.state = agent_doc_sqlite::state_store::ActorState::Ready;
+            next.last_transition = agent_doc_sqlite::state_store::ActorLastTransition {
                 caller: "admin".to_string(),
                 reason: format!("manual_handoff {reason} receipt_id={}", receipt.receipt_id),
                 timestamp: timestamp_secs(),
@@ -4103,7 +4115,7 @@ pub(crate) fn handle_attach_pane(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
     request: ControllerRequest,
-) -> Result<crate::session_actor::ActorRecord> {
+) -> Result<agent_doc_sqlite::state_store::ActorRecord> {
     let file = request_file(&request)?;
     let session_id = request_string(&request.session_id, "session_id")?;
     let pane_id = request_string(&request.pane_id, "pane_id")?;
@@ -4126,15 +4138,15 @@ pub(crate) fn handle_attach_pane(
         .unwrap_or_else(|| {
             crate::session_actor::detect_document_harness_in(&bootstrap.project_root, &document_id)
         });
-    let record = crate::session_actor::ActorRecord {
+    let record = agent_doc_sqlite::state_store::ActorRecord {
         document_id: document_id.clone(),
         session_id: session_id.clone(),
         generation,
         pane_id: pane_id.clone(),
         window_id: window_id.clone(),
         harness,
-        state: crate::session_actor::ActorState::Ready,
-        last_transition: crate::session_actor::ActorLastTransition {
+        state: agent_doc_sqlite::state_store::ActorState::Ready,
+        last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
             caller: request.caller.as_deref().unwrap_or("session").to_string(),
             reason: request
                 .reason
@@ -4210,9 +4222,13 @@ pub(crate) fn handle_operator_command(
     let recovers_closed_actor = matches!(
         command_kind.as_str(),
         "session_clear" | "session_interrupt_clear" | "session_restart"
-    ) && record.state == crate::session_actor::ActorState::Closed;
-    if matches!(record.state, crate::session_actor::ActorState::Blocked)
-        || (record.state == crate::session_actor::ActorState::Closed && !recovers_closed_actor)
+    ) && record.state
+        == agent_doc_sqlite::state_store::ActorState::Closed;
+    if matches!(
+        record.state,
+        agent_doc_sqlite::state_store::ActorState::Blocked
+    ) || (record.state == agent_doc_sqlite::state_store::ActorState::Closed
+        && !recovers_closed_actor)
     {
         let failed_stage = record.state.as_str();
         let receipt = insert_dispatch_attempt_record(
@@ -4271,7 +4287,8 @@ pub(crate) fn handle_operator_command(
     // generation and the next generation the restart drains toward so racing
     // dispatch / log forensics can see the "superseded -> retry against N+1"
     // redirect instead of the old `generation N is closed` hard reject.
-    if command_kind == "session_restart" && record.state == crate::session_actor::ActorState::Closed
+    if command_kind == "session_restart"
+        && record.state == agent_doc_sqlite::state_store::ActorState::Closed
     {
         crate::ops_log::log_op(
             &file,
@@ -4661,7 +4678,7 @@ mod tests {
             "session-operator",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Ready,
+            agent_doc_sqlite::state_store::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -4730,7 +4747,7 @@ mod tests {
         let status = envelope.data.unwrap();
         assert_eq!(
             status.record.unwrap().state,
-            crate::session_actor::ActorState::Ready
+            agent_doc_sqlite::state_store::ActorState::Ready
         );
         assert_eq!(status.transitions.len(), 2);
         let attempt = status.dispatch_attempts.last().unwrap();
@@ -4888,7 +4905,7 @@ mod tests {
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
 
@@ -4913,7 +4930,7 @@ mod tests {
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
 
@@ -5136,7 +5153,7 @@ mod tests {
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
 
@@ -5360,7 +5377,7 @@ mod tests {
             "session-qf",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Busy,
+            agent_doc_sqlite::state_store::ActorState::Busy,
             "supervisor",
             "turn_started",
         )
@@ -5515,7 +5532,7 @@ mod tests {
             "session-anw0",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Ready,
+            agent_doc_sqlite::state_store::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -5536,7 +5553,7 @@ mod tests {
             "session-anw0",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Closed,
+            agent_doc_sqlite::state_store::ActorState::Closed,
             "supervisor",
             "superseded",
         )
@@ -5568,7 +5585,7 @@ mod tests {
             "session-anw0h",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Ready,
+            agent_doc_sqlite::state_store::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -6034,7 +6051,7 @@ mod tests {
 
         // Seed an up-to-date controller actor at generation 83 on the OLD pane
         // %33 (mirrors the migrated-but-registry-lagging live state).
-        let seeded = crate::session_actor::ActorRecord {
+        let seeded = agent_doc_sqlite::state_store::ActorRecord {
             document_id: doc_id.clone(),
             session_id: "efs".to_string(),
             generation: 83,
@@ -6044,8 +6061,8 @@ mod tests {
                 &bootstrap.project_root,
                 &doc_id,
             ),
-            state: crate::session_actor::ActorState::Ready,
-            last_transition: crate::session_actor::ActorLastTransition {
+            state: agent_doc_sqlite::state_store::ActorState::Ready,
+            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
                 caller: "supervisor".to_string(),
                 reason: "idle_pane_reconcile".to_string(),
                 timestamp: 1,

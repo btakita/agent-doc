@@ -23,10 +23,10 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::session_actor::ActorState;
 use crate::sessions::{self, SessionRegistry, Tmux};
+use agent_doc_sqlite::state_store::ActorState;
 
-type ActorStore = BTreeMap<String, crate::session_actor::ActorRecord>;
+type ActorStore = BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>;
 
 /// One enumerated actor row (`admin list`).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -472,7 +472,7 @@ pub fn repair_projection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session_actor::{ActorLastTransition, ActorRecord};
+    use agent_doc_sqlite::state_store::{ActorLastTransition, ActorRecord};
 
     fn record(document_id: &str, session_id: &str, pane: &str, state: ActorState) -> ActorRecord {
         ActorRecord {

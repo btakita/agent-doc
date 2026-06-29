@@ -133,7 +133,8 @@ pub fn local_actor_projection_pane_for_document(
     if record.session_id != session_id
         || matches!(
             record.state,
-            crate::session_actor::ActorState::Closed | crate::session_actor::ActorState::Blocked
+            agent_doc_sqlite::state_store::ActorState::Closed
+                | agent_doc_sqlite::state_store::ActorState::Blocked
         )
         || !tmux.pane_alive(&record.pane_id)
     {
@@ -471,7 +472,7 @@ mod tests {
             "focus-closed",
             &actor_pane,
             None,
-            crate::session_actor::ActorState::Closed,
+            agent_doc_sqlite::state_store::ActorState::Closed,
             "test",
             "closed_projection",
         )

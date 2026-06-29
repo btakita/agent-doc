@@ -570,7 +570,7 @@ fn load_live_authoritative_actor_record_uncached(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
-) -> Option<crate::session_actor::ActorRecord> {
+) -> Option<agent_doc_sqlite::state_store::ActorRecord> {
     let canonical = file
         .canonicalize()
         .ok()
@@ -590,7 +590,7 @@ fn load_live_authoritative_actor_record_cached(
     file: &Path,
     session_id: &str,
     proof_cache: &SyncProofCache,
-) -> Option<crate::session_actor::ActorRecord> {
+) -> Option<agent_doc_sqlite::state_store::ActorRecord> {
     let key = (sync_proof_file_key(file), session_id.to_string());
     if let Some(record) = proof_cache.actor_records.borrow().get(&key) {
         return record.clone();
@@ -7364,7 +7364,7 @@ mod tests {
         crate::project_controller::store_actor_record(
             root,
             Some(0),
-            &crate::session_actor::ActorRecord {
+            &agent_doc_sqlite::state_store::ActorRecord {
                 document_id: crate::session_actor::canonical_document_id_in(
                     root,
                     &stale_doc.to_string_lossy(),
@@ -7374,8 +7374,8 @@ mod tests {
                 pane_id: stale_pane.clone(),
                 window_id: active_window.clone(),
                 harness: "codex".to_string(),
-                state: crate::session_actor::ActorState::Starting,
-                last_transition: crate::session_actor::ActorLastTransition {
+                state: agent_doc_sqlite::state_store::ActorState::Starting,
+                last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
                     caller: "sync".to_string(),
                     reason: "stale_starting_sibling_test".to_string(),
                     timestamp: 1,

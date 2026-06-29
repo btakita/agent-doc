@@ -119,7 +119,7 @@ pub(crate) fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcRes
             match deliver_ipc_inject(shared, &bytes, "ipc_inject") {
                 Ok(()) => {
                     shared.transition_actor_state(
-                        crate::session_actor::ActorState::Busy,
+                        agent_doc_sqlite::state_store::ActorState::Busy,
                         "dispatch",
                         "ipc_inject",
                     );
@@ -135,7 +135,7 @@ pub(crate) fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcRes
             match deliver_ipc_inject(shared, &bytes, "ipc_clear") {
                 Ok(()) => {
                     shared.transition_actor_state(
-                        crate::session_actor::ActorState::Busy,
+                        agent_doc_sqlite::state_store::ActorState::Busy,
                         "operator",
                         "ipc_clear",
                     );
@@ -146,7 +146,7 @@ pub(crate) fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcRes
         }
         IpcMethod::Restart { mode } => {
             shared.transition_actor_state(
-                crate::session_actor::ActorState::Busy,
+                agent_doc_sqlite::state_store::ActorState::Busy,
                 "supervisor",
                 "ipc_restart_requested",
             );
@@ -180,7 +180,7 @@ pub(crate) fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcRes
             // lands on the restart-or-quit keepalive prompt so the operator can
             // restart manually.
             shared.transition_actor_state(
-                crate::session_actor::ActorState::WaitingInput,
+                agent_doc_sqlite::state_store::ActorState::WaitingInput,
                 "supervisor",
                 "ipc_stop_agent_requested",
             );
@@ -423,7 +423,7 @@ pub(crate) fn spawn_reader_thread(
                         if current_child_prompt_visible(&shared, &harness) {
                             if prompt_visible_requires_ready_transition(&shared) {
                                 shared.transition_actor_state(
-                                    crate::session_actor::ActorState::Ready,
+                                    agent_doc_sqlite::state_store::ActorState::Ready,
                                     "supervisor",
                                     "prompt_ready",
                                 );
@@ -968,7 +968,7 @@ mod tests {
             "state-instance".to_string(),
             "claude",
             Some(runtime),
-            Some(crate::session_actor::ActorState::Ready),
+            Some(agent_doc_sqlite::state_store::ActorState::Ready),
             None,
         ));
 

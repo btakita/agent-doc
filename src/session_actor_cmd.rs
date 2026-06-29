@@ -4,12 +4,12 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use agent_doc_orchestration::flow::operator_clear::OperatorClearInputState;
-use agent_doc_orchestration::session_actor::{ActorRecord, ActorState};
 use agent_doc_orchestration::sessions::{
     SessionEntry, SessionRegistry, Tmux, tmux_submit_mode_for_harness,
 };
 use agent_doc_orchestration::startup_miss::{SessionLogStatus, StartupMiss};
 use agent_doc_orchestration::supervisor::ipc::IpcMethod;
+use agent_doc_sqlite::state_store::{ActorRecord, ActorState};
 
 const SUPERVISOR_INJECT_SUBMIT_MODE: &str = "supervisor_normalized_submit";
 const CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -2728,7 +2728,7 @@ fn clear_closed_actor_pane_projection(ctx: &SessionContext) -> Result<Option<Str
     let mut cleared = record.clone();
     cleared.pane_id.clear();
     cleared.window_id.clear();
-    cleared.last_transition = agent_doc_orchestration::session_actor::ActorLastTransition {
+    cleared.last_transition = agent_doc_sqlite::state_store::ActorLastTransition {
         caller: "session_doctor".to_string(),
         reason: format!(
             "cleared_closed_actor_pane old_pane={} old_window={}",
@@ -3875,7 +3875,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     fn empty_operator_status(
-        record: Option<agent_doc_orchestration::session_actor::ActorRecord>,
+        record: Option<agent_doc_sqlite::state_store::ActorRecord>,
     ) -> agent_doc_orchestration::project_controller::SessionOperatorStatus {
         agent_doc_orchestration::project_controller::SessionOperatorStatus {
             record,
@@ -4041,8 +4041,8 @@ mod tests {
         }
     }
 
-    fn test_actor_record(state: ActorState) -> agent_doc_orchestration::session_actor::ActorRecord {
-        agent_doc_orchestration::session_actor::ActorRecord {
+    fn test_actor_record(state: ActorState) -> agent_doc_sqlite::state_store::ActorRecord {
+        agent_doc_sqlite::state_store::ActorRecord {
             document_id: "/tmp/doc.md".to_string(),
             session_id: "session-1".to_string(),
             generation: 7,
@@ -4050,7 +4050,7 @@ mod tests {
             window_id: "@1".to_string(),
             harness: "codex".to_string(),
             state,
-            last_transition: agent_doc_orchestration::session_actor::ActorLastTransition {
+            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
                 caller: "test".to_string(),
                 reason: "test".to_string(),
                 timestamp: 1,
@@ -4077,7 +4077,7 @@ mod tests {
     }
 
     fn test_session_context(
-        record: agent_doc_orchestration::session_actor::ActorRecord,
+        record: agent_doc_sqlite::state_store::ActorRecord,
         runtime: SupervisorRuntime,
         lease_state: Option<&str>,
     ) -> SessionContext {
@@ -4995,7 +4995,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
     #[test]
     fn idle_direct_pane_evidence_supersedes_stale_busy_projection() {
-        let record = agent_doc_orchestration::session_actor::ActorRecord {
+        let record = agent_doc_sqlite::state_store::ActorRecord {
             document_id: "/tmp/doc.md".to_string(),
             session_id: "session-1".to_string(),
             generation: 7,
@@ -5003,7 +5003,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             window_id: "@1".to_string(),
             harness: "codex".to_string(),
             state: ActorState::Busy,
-            last_transition: agent_doc_orchestration::session_actor::ActorLastTransition {
+            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
                 caller: "supervisor".to_string(),
                 reason: "work_started".to_string(),
                 timestamp: 1,
@@ -5562,7 +5562,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         let iso = tmux_router::IsolatedTmux::new("session-clear-pane-select-actor");
         let actor_pane = iso.new_session("test", dir.path()).unwrap();
         let registry_pane = iso.new_window("test", dir.path()).unwrap();
-        let actor_record = agent_doc_orchestration::session_actor::ActorRecord {
+        let actor_record = agent_doc_sqlite::state_store::ActorRecord {
             document_id: "doc".to_string(),
             session_id: "session-clear".to_string(),
             generation: 3,
@@ -5570,7 +5570,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             window_id: iso.pane_window(&actor_pane).unwrap(),
             harness: "codex".to_string(),
             state: ActorState::Ready,
-            last_transition: agent_doc_orchestration::session_actor::ActorLastTransition {
+            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
                 caller: "test".to_string(),
                 reason: "actor".to_string(),
                 timestamp: 1,
@@ -5625,7 +5625,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         let dir = tempfile::tempdir().unwrap();
         let iso = tmux_router::IsolatedTmux::new("session-clear-pane-select-registry");
         let registry_pane = iso.new_session("test", dir.path()).unwrap();
-        let actor_record = agent_doc_orchestration::session_actor::ActorRecord {
+        let actor_record = agent_doc_sqlite::state_store::ActorRecord {
             document_id: "doc".to_string(),
             session_id: "session-clear".to_string(),
             generation: 3,
@@ -5633,7 +5633,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             window_id: "@9999".to_string(),
             harness: "codex".to_string(),
             state: ActorState::Ready,
-            last_transition: agent_doc_orchestration::session_actor::ActorLastTransition {
+            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
                 caller: "test".to_string(),
                 reason: "actor".to_string(),
                 timestamp: 1,

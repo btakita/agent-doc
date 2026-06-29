@@ -51,12 +51,7 @@ pub struct OwnershipTransitionEvent<'a> {
     pub new_window: Option<&'a str>,
 }
 
-// The durable storage types live in `agent-doc-sqlite` (the only crate that
-// links the bundled SQLite C build). They are re-exported here so every
-// existing `crate::session_actor::{ActorState, ActorRecord, ActorLastTransition}`
-// call site stays unchanged. `OwnershipGeneration`, `OwnershipTransitionEvent`,
-// and the lifecycle logic below operate on these re-exported types.
-pub use agent_doc_sqlite::state_store::{ActorLastTransition, ActorRecord, ActorState};
+use agent_doc_sqlite::state_store::{ActorLastTransition, ActorRecord, ActorState};
 
 type ActorStore = std::collections::BTreeMap<String, ActorRecord>;
 

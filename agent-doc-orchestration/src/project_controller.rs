@@ -272,7 +272,7 @@ pub struct ControlPlaneActorStatus {
 
 #[derive(Debug)]
 struct ControllerMemoryState {
-    actor_store: BTreeMap<String, crate::session_actor::ActorRecord>,
+    actor_store: BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>,
     state_projection: crate::state_backbone::StateBackboneProjection,
     map_backend: &'static str,
 }
@@ -346,7 +346,10 @@ impl ControllerRuntime {
             .map(|guard| guard.clone())
     }
 
-    fn actor_record(&self, document_id: &str) -> Result<Option<crate::session_actor::ActorRecord>> {
+    fn actor_record(
+        &self,
+        document_id: &str,
+    ) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>> {
         self.memory
             .lock()
             .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))
@@ -483,12 +486,12 @@ fn recover_controller_after_restart(bootstrap: &ControllerBootstrap) -> Result<C
 
 fn reconcile_supervisor_leases_after_restart(
     conn: &Connection,
-    store: &BTreeMap<String, crate::session_actor::ActorRecord>,
+    store: &BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>,
     stats: &mut CrashRecoveryStats,
 ) -> Result<()> {
     let now = timestamp_secs();
     for record in store.values() {
-        if record.state == crate::session_actor::ActorState::Closed {
+        if record.state == agent_doc_sqlite::state_store::ActorState::Closed {
             continue;
         }
         let Some(lease) =
@@ -936,7 +939,7 @@ pub struct LifecycleRequest {
     pub session_id: String,
     pub pane_id: String,
     pub generation: u64,
-    pub state: crate::session_actor::ActorState,
+    pub state: agent_doc_sqlite::state_store::ActorState,
     pub caller: String,
     pub reason: String,
 }
@@ -1018,7 +1021,7 @@ pub struct ControllerDispatchReceipt {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DispatchAuthorization {
-    pub record: crate::session_actor::ActorRecord,
+    pub record: agent_doc_sqlite::state_store::ActorRecord,
     pub accepted_stage: String,
     pub receipt: ControllerDispatchReceipt,
 }
@@ -1048,7 +1051,7 @@ pub struct ControllerActorInspection {
     #[serde(default)]
     pub document_id: Option<String>,
     #[serde(default)]
-    pub record: Option<crate::session_actor::ActorRecord>,
+    pub record: Option<agent_doc_sqlite::state_store::ActorRecord>,
     #[serde(default)]
     pub supervisor_lease: Option<SupervisorLeaseStatus>,
     #[serde(default)]
@@ -1082,7 +1085,7 @@ pub enum ActorBindingStatus {
 pub struct ActorBindingResponse {
     pub status: ActorBindingStatus,
     #[serde(default)]
-    pub record: Option<crate::session_actor::ActorRecord>,
+    pub record: Option<agent_doc_sqlite::state_store::ActorRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1390,7 +1393,7 @@ fn actor_document_bootstrap_columns(project_root: &Path) -> Result<(Option<Strin
 
 fn legacy_actor_projection(
     project_root: &Path,
-) -> Result<Option<BTreeMap<String, crate::session_actor::ActorRecord>>> {
+) -> Result<Option<BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>>> {
     let path = actor_projection_path(project_root);
     let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(None);
@@ -1419,7 +1422,7 @@ fn migrate_legacy_actor_projection(project_root: &Path, conn: &mut Connection) -
 
 fn upsert_supervisor_lease(
     project_root: &Path,
-    record: &crate::session_actor::ActorRecord,
+    record: &agent_doc_sqlite::state_store::ActorRecord,
     supervisor_pid: Option<u32>,
     supervisor_socket: Option<&str>,
     runtime_state: &str,
@@ -1693,7 +1696,7 @@ pub(crate) fn state_fact_label(fact: &crate::state_backbone::StateFact) -> &'sta
 
 pub fn load_actor_store(
     project_root: &Path,
-) -> Result<BTreeMap<String, crate::session_actor::ActorRecord>> {
+) -> Result<BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>> {
     let mut conn = open_state_db(project_root)?;
     migrate_legacy_actor_projection(project_root, &mut conn)?;
     load_actor_store_from_db(&conn)
@@ -1702,7 +1705,7 @@ pub fn load_actor_store(
 pub fn load_actor_record(
     project_root: &Path,
     document_id: &str,
-) -> Result<Option<crate::session_actor::ActorRecord>> {
+) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>> {
     let mut conn = open_state_db(project_root)?;
     migrate_legacy_actor_projection(project_root, &mut conn)?;
     load_actor_record_from_db(&conn, document_id)
@@ -1711,8 +1714,8 @@ pub fn load_actor_record(
 pub fn store_actor_record(
     project_root: &Path,
     expected_prior_generation: Option<u64>,
-    record: &crate::session_actor::ActorRecord,
-) -> Result<crate::session_actor::ActorRecord> {
+    record: &agent_doc_sqlite::state_store::ActorRecord,
+) -> Result<agent_doc_sqlite::state_store::ActorRecord> {
     let mut conn = open_state_db(project_root)?;
     migrate_legacy_actor_projection(project_root, &mut conn)?;
     let (launch_mode, controller_epoch) = actor_document_bootstrap_columns(project_root)?;
@@ -1832,7 +1835,7 @@ pub fn close_stale_starting_actors_for_caller(
     let mut kept = 0;
 
     for record in store.values() {
-        if record.state != crate::session_actor::ActorState::Starting {
+        if record.state != agent_doc_sqlite::state_store::ActorState::Starting {
             continue;
         }
         let age = now.saturating_sub(record.last_transition.timestamp);
@@ -1865,8 +1868,8 @@ pub fn close_stale_starting_actors_for_caller(
         }
 
         let mut next = record.clone();
-        next.state = crate::session_actor::ActorState::Closed;
-        next.last_transition = crate::session_actor::ActorLastTransition {
+        next.state = agent_doc_sqlite::state_store::ActorState::Closed;
+        next.last_transition = agent_doc_sqlite::state_store::ActorLastTransition {
             caller: caller.to_string(),
             reason: "stale_starting_actor".to_string(),
             timestamp: now,
@@ -1926,7 +1929,9 @@ where
     let mut kept = 0;
 
     for record in store.values() {
-        if record.state == crate::session_actor::ActorState::Closed || record.pane_id.is_empty() {
+        if record.state == agent_doc_sqlite::state_store::ActorState::Closed
+            || record.pane_id.is_empty()
+        {
             continue;
         }
         if pane_alive(&record.pane_id) {
@@ -1950,10 +1955,10 @@ where
         }
 
         let mut next = record.clone();
-        next.state = crate::session_actor::ActorState::Closed;
+        next.state = agent_doc_sqlite::state_store::ActorState::Closed;
         next.pane_id.clear();
         next.window_id.clear();
-        next.last_transition = crate::session_actor::ActorLastTransition {
+        next.last_transition = agent_doc_sqlite::state_store::ActorLastTransition {
             caller: caller.to_string(),
             reason: reason.to_string(),
             timestamp: now,
@@ -2057,7 +2062,7 @@ pub fn prune_dead_actors_for_caller(
     let mut kept = 0;
 
     for record in store.values() {
-        if record.state != crate::session_actor::ActorState::Closed {
+        if record.state != agent_doc_sqlite::state_store::ActorState::Closed {
             kept += 1;
             continue;
         }
@@ -2537,10 +2542,10 @@ pub fn evict_cross_document_pane_bindings(
             continue;
         }
         let mut next = record.clone();
-        next.state = crate::session_actor::ActorState::Closed;
+        next.state = agent_doc_sqlite::state_store::ActorState::Closed;
         next.pane_id.clear();
         next.window_id.clear();
-        next.last_transition = crate::session_actor::ActorLastTransition {
+        next.last_transition = agent_doc_sqlite::state_store::ActorLastTransition {
             caller: caller.to_string(),
             reason: format!("evicted_cross_document_pane owner={owner_document_id} pane={pane_id}"),
             timestamp: now,
@@ -2588,7 +2593,7 @@ fn emit_actor_projection(project_root: &Path) -> Result<()> {
         .with_context(|| format!("failed to write {}", path.display()))?;
     let written = std::fs::read_to_string(&path)
         .with_context(|| format!("failed to read {}", path.display()))?;
-    let projected: BTreeMap<String, crate::session_actor::ActorRecord> =
+    let projected: BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord> =
         serde_json::from_str(&written)
             .with_context(|| format!("failed to parse {}", path.display()))?;
     if projected != store {
@@ -2690,7 +2695,7 @@ pub fn project_sessions_projection_for_actor_with_hint(
 
 fn emit_sessions_projection(
     project_root: &Path,
-    focused_record: &crate::session_actor::ActorRecord,
+    focused_record: &agent_doc_sqlite::state_store::ActorRecord,
     hint: Option<&SessionsProjectionHint>,
 ) -> Result<()> {
     let conn = open_state_db(project_root)?;
@@ -2713,7 +2718,8 @@ fn emit_sessions_projection(
     let live_actor_panes: BTreeSet<String> = store
         .values()
         .filter(|record| {
-            record.state != crate::session_actor::ActorState::Closed && !record.pane_id.is_empty()
+            record.state != agent_doc_sqlite::state_store::ActorState::Closed
+                && !record.pane_id.is_empty()
         })
         .map(|record| record.pane_id.clone())
         .collect();
@@ -2721,7 +2727,9 @@ fn emit_sessions_projection(
         .retain(|key, entry| store.contains_key(key) || !live_actor_panes.contains(&entry.pane));
 
     for record in store.values() {
-        if record.state == crate::session_actor::ActorState::Closed || record.pane_id.is_empty() {
+        if record.state == agent_doc_sqlite::state_store::ActorState::Closed
+            || record.pane_id.is_empty()
+        {
             registry.remove(&record.document_id);
             continue;
         }
@@ -2765,7 +2773,7 @@ fn emit_sessions_projection(
             return Ok(());
         }
     };
-    if focused_record.state == crate::session_actor::ActorState::Closed
+    if focused_record.state == agent_doc_sqlite::state_store::ActorState::Closed
         || focused_record.pane_id.is_empty()
     {
         if projected.contains_key(&focused_record.document_id) {
@@ -2802,7 +2810,7 @@ fn emit_sessions_projection(
 
 fn sessions_projection_entry(
     project_root: &Path,
-    record: &crate::session_actor::ActorRecord,
+    record: &agent_doc_sqlite::state_store::ActorRecord,
     prior: Option<&crate::sessions::SessionEntry>,
     hint: Option<&SessionsProjectionHint>,
     lease: Option<SupervisorLeaseStatus>,
@@ -3085,16 +3093,16 @@ mod tests {
         document_id: &str,
         pane: &str,
         window: &str,
-    ) -> crate::session_actor::ActorRecord {
-        crate::session_actor::ActorRecord {
+    ) -> agent_doc_sqlite::state_store::ActorRecord {
+        agent_doc_sqlite::state_store::ActorRecord {
             document_id: document_id.to_string(),
             session_id: "session-1".to_string(),
             generation: 1,
             pane_id: pane.to_string(),
             window_id: window.to_string(),
             harness: "codex".to_string(),
-            state: crate::session_actor::ActorState::Starting,
-            last_transition: crate::session_actor::ActorLastTransition {
+            state: agent_doc_sqlite::state_store::ActorState::Starting,
+            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
                 caller: "start".to_string(),
                 reason: "session_start".to_string(),
                 timestamp: 10,
@@ -3103,16 +3111,19 @@ mod tests {
             },
         }
     }
-    fn closed_actor_record(document_id: &str, timestamp: u64) -> crate::session_actor::ActorRecord {
-        crate::session_actor::ActorRecord {
+    fn closed_actor_record(
+        document_id: &str,
+        timestamp: u64,
+    ) -> agent_doc_sqlite::state_store::ActorRecord {
+        agent_doc_sqlite::state_store::ActorRecord {
             document_id: document_id.to_string(),
             session_id: "session-clear".to_string(),
             generation: 1,
             pane_id: String::new(),
             window_id: String::new(),
             harness: "codex".to_string(),
-            state: crate::session_actor::ActorState::Closed,
-            last_transition: crate::session_actor::ActorLastTransition {
+            state: agent_doc_sqlite::state_store::ActorState::Closed,
+            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
                 caller: "session".to_string(),
                 reason: "session-clear".to_string(),
                 timestamp,
@@ -3249,9 +3260,9 @@ mod tests {
         let dead_id = dead_doc.to_string_lossy().to_string();
         let live_id = live_doc.to_string_lossy().to_string();
         let mut dead = actor_record(&dead_id, "%dead", "@1");
-        dead.state = crate::session_actor::ActorState::Ready;
+        dead.state = agent_doc_sqlite::state_store::ActorState::Ready;
         let mut live = actor_record(&live_id, "%live", "@1");
-        live.state = crate::session_actor::ActorState::Busy;
+        live.state = agent_doc_sqlite::state_store::ActorState::Busy;
         store_actor_record(dir.path(), Some(0), &dead).unwrap();
         store_actor_record(dir.path(), Some(0), &live).unwrap();
 
@@ -3269,7 +3280,7 @@ mod tests {
         let closed_record = load_actor_record(dir.path(), &dead_id).unwrap().unwrap();
         assert_eq!(
             closed_record.state,
-            crate::session_actor::ActorState::Closed
+            agent_doc_sqlite::state_store::ActorState::Closed
         );
         assert_eq!(closed_record.pane_id, "");
         assert_eq!(closed_record.window_id, "");
@@ -3280,7 +3291,10 @@ mod tests {
         );
 
         let live_record = load_actor_record(dir.path(), &live_id).unwrap().unwrap();
-        assert_eq!(live_record.state, crate::session_actor::ActorState::Busy);
+        assert_eq!(
+            live_record.state,
+            agent_doc_sqlite::state_store::ActorState::Busy
+        );
         assert_eq!(live_record.pane_id, "%live");
     }
 
@@ -3292,7 +3306,7 @@ mod tests {
         std::fs::write(&doc, "body").unwrap();
         let document_id = doc.to_string_lossy().to_string();
         let mut record = actor_record(&document_id, "%dead", "@1");
-        record.state = crate::session_actor::ActorState::Ready;
+        record.state = agent_doc_sqlite::state_store::ActorState::Ready;
         store_actor_record(dir.path(), Some(0), &record).unwrap();
 
         let (closed, kept) = close_stale_dead_pane_actors_for_caller(
@@ -3309,7 +3323,10 @@ mod tests {
         let current = load_actor_record(dir.path(), &document_id)
             .unwrap()
             .unwrap();
-        assert_eq!(current.state, crate::session_actor::ActorState::Ready);
+        assert_eq!(
+            current.state,
+            agent_doc_sqlite::state_store::ActorState::Ready
+        );
         assert_eq!(current.pane_id, "%dead");
     }
 
@@ -3334,10 +3351,11 @@ mod tests {
             .unwrap();
         assert_eq!(stored, "%41");
 
-        let projection: BTreeMap<String, crate::session_actor::ActorRecord> = serde_json::from_str(
-            &std::fs::read_to_string(actor_projection_path(dir.path())).unwrap(),
-        )
-        .unwrap();
+        let projection: BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord> =
+            serde_json::from_str(
+                &std::fs::read_to_string(actor_projection_path(dir.path())).unwrap(),
+            )
+            .unwrap();
         assert_eq!(projection.get(&record.document_id).unwrap(), &record);
     }
     #[test]
@@ -3806,11 +3824,14 @@ mod tests {
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
         let record = envelope.data.unwrap();
-        assert_eq!(record.state, crate::session_actor::ActorState::Starting);
+        assert_eq!(
+            record.state,
+            agent_doc_sqlite::state_store::ActorState::Starting
+        );
 
         let register = ControllerRequest {
             command: "register_supervisor".to_string(),
@@ -3833,7 +3854,7 @@ mod tests {
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
 
@@ -3858,11 +3879,14 @@ mod tests {
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
         let record = envelope.data.unwrap();
-        assert_eq!(record.state, crate::session_actor::ActorState::Ready);
+        assert_eq!(
+            record.state,
+            agent_doc_sqlite::state_store::ActorState::Ready
+        );
         assert_eq!(record.last_transition.reason, "prompt_ready");
 
         let conn = Connection::open(state_db_path(dir.path())).unwrap();
@@ -3903,7 +3927,7 @@ mod tests {
             "session-heartbeat",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Ready,
+            agent_doc_sqlite::state_store::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -3969,7 +3993,7 @@ mod tests {
             "session-old",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Ready,
+            agent_doc_sqlite::state_store::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -4001,7 +4025,7 @@ mod tests {
             "session-old",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Closed,
+            agent_doc_sqlite::state_store::ActorState::Closed,
             "supervisor",
             "user_quit_clean_exit",
         )
@@ -4032,7 +4056,10 @@ mod tests {
         assert_eq!(record.session_id, "session-new");
         assert_eq!(record.generation, 2);
         assert_eq!(record.pane_id, "%41");
-        assert_eq!(record.state, crate::session_actor::ActorState::Ready);
+        assert_eq!(
+            record.state,
+            agent_doc_sqlite::state_store::ActorState::Ready
+        );
 
         let conn = open_state_db(dir.path()).unwrap();
         let effective = state_store::load_effective_queue_control_from_db(
@@ -4070,7 +4097,7 @@ mod tests {
             "session-old",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Closed,
+            agent_doc_sqlite::state_store::ActorState::Closed,
             "supervisor",
             "user_quit_clean_exit",
         )
@@ -4173,7 +4200,7 @@ mod tests {
             "session-reboot",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Ready,
+            agent_doc_sqlite::state_store::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -4292,7 +4319,10 @@ mod tests {
         let updated = load_actor_record(dir.path(), &record.document_id)
             .unwrap()
             .unwrap();
-        assert_eq!(updated.state, crate::session_actor::ActorState::Closed);
+        assert_eq!(
+            updated.state,
+            agent_doc_sqlite::state_store::ActorState::Closed
+        );
         assert_eq!(updated.last_transition.caller, "gc");
         assert_eq!(updated.last_transition.reason, "stale_starting_actor");
     }
@@ -4340,7 +4370,10 @@ mod tests {
         let updated = load_actor_record(dir.path(), &record.document_id)
             .unwrap()
             .unwrap();
-        assert_eq!(updated.state, crate::session_actor::ActorState::Starting);
+        assert_eq!(
+            updated.state,
+            agent_doc_sqlite::state_store::ActorState::Starting
+        );
     }
     #[test]
     fn gc_closes_stale_starting_actor_with_stale_heartbeat_even_when_pid_is_alive() {
@@ -4393,7 +4426,10 @@ mod tests {
         let updated = load_actor_record(dir.path(), &record.document_id)
             .unwrap()
             .unwrap();
-        assert_eq!(updated.state, crate::session_actor::ActorState::Closed);
+        assert_eq!(
+            updated.state,
+            agent_doc_sqlite::state_store::ActorState::Closed
+        );
         assert_eq!(updated.last_transition.reason, "stale_starting_actor");
     }
     #[test]
@@ -4437,7 +4473,10 @@ mod tests {
         let updated = load_actor_record(dir.path(), &record.document_id)
             .unwrap()
             .unwrap();
-        assert_eq!(updated.state, crate::session_actor::ActorState::Closed);
+        assert_eq!(
+            updated.state,
+            agent_doc_sqlite::state_store::ActorState::Closed
+        );
         assert_eq!(updated.last_transition.caller, "preflight");
         assert_eq!(updated.last_transition.reason, "stale_starting_actor");
     }
@@ -4488,7 +4527,7 @@ mod tests {
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(!envelope.ok);
         assert!(envelope.error.unwrap().contains("no longer current"));
@@ -4532,7 +4571,7 @@ mod tests {
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(
             envelope.ok,
@@ -4541,7 +4580,7 @@ mod tests {
         );
         assert_eq!(
             envelope.data.unwrap().state,
-            crate::session_actor::ActorState::Ready
+            agent_doc_sqlite::state_store::ActorState::Ready
         );
     }
     #[test]
@@ -4564,7 +4603,7 @@ mod tests {
             "session-route",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Ready,
+            agent_doc_sqlite::state_store::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -4815,7 +4854,7 @@ mod tests {
             "session-queue",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Ready,
+            agent_doc_sqlite::state_store::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -5053,7 +5092,7 @@ mod tests {
             "session-reopen",
             "%42",
             Some(1),
-            crate::session_actor::ActorState::Ready,
+            agent_doc_sqlite::state_store::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -5185,7 +5224,7 @@ mod tests {
             "session-preset",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Ready,
+            agent_doc_sqlite::state_store::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -5291,7 +5330,7 @@ mod tests {
             "session-preset",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Ready,
+            agent_doc_sqlite::state_store::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -5406,7 +5445,7 @@ mod tests {
             "session-preset",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Ready,
+            agent_doc_sqlite::state_store::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -5514,7 +5553,7 @@ mod tests {
                 "session-jbr",
                 "%52",
                 Some(1),
-                crate::session_actor::ActorState::Ready,
+                agent_doc_sqlite::state_store::ActorState::Ready,
                 "supervisor",
                 "prompt_ready",
             )
@@ -5654,7 +5693,7 @@ mod tests {
             "session-admin-control",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Ready,
+            agent_doc_sqlite::state_store::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -5741,7 +5780,10 @@ mod tests {
         let record = load_actor_record(dir.path(), &document_id)
             .unwrap()
             .unwrap();
-        assert_eq!(record.state, crate::session_actor::ActorState::Closed);
+        assert_eq!(
+            record.state,
+            agent_doc_sqlite::state_store::ActorState::Closed
+        );
         assert!(record.pane_id.is_empty());
     }
     #[test]
@@ -5890,7 +5932,7 @@ agent:queue\n\
         assert_eq!(memory_record.pane_id, "%88");
         assert_eq!(memory_record.session_id, "session-restart");
 
-        let actor_projection: BTreeMap<String, crate::session_actor::ActorRecord> =
+        let actor_projection: BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord> =
             serde_json::from_str(
                 &std::fs::read_to_string(actor_projection_path(dir.path())).unwrap(),
             )
@@ -5957,7 +5999,7 @@ agent:queue\n\
             "session-closed-clear",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Closed,
+            agent_doc_sqlite::state_store::ActorState::Closed,
             "supervisor",
             "cycle_committed",
         )
@@ -6062,7 +6104,7 @@ agent:queue\n\
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
         let record = envelope.data.unwrap();
@@ -6118,7 +6160,7 @@ agent:queue\n\
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
 
@@ -6144,12 +6186,12 @@ agent:queue\n\
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok, "mark_lifecycle with relative path failed");
         assert_eq!(
             envelope.data.unwrap().state,
-            crate::session_actor::ActorState::Ready
+            agent_doc_sqlite::state_store::ActorState::Ready
         );
     }
     // ── Stuck-`Preparing` controller reaper (#kqr6 / #sjwm / #stuckhandoff) ──
@@ -6580,7 +6622,7 @@ agent:queue\n\
             "session-m2",
             "%41",
             Some(1),
-            crate::session_actor::ActorState::Ready,
+            agent_doc_sqlite::state_store::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -6668,7 +6710,7 @@ agent:queue\n\
             "session-idle",
             "%61",
             Some(1),
-            crate::session_actor::ActorState::Ready,
+            agent_doc_sqlite::state_store::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -6740,7 +6782,7 @@ agent:queue\n\
             "session-sb",
             "%51",
             Some(1),
-            crate::session_actor::ActorState::Ready,
+            agent_doc_sqlite::state_store::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )

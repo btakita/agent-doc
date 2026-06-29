@@ -178,11 +178,11 @@ pub(crate) fn load_authoritative_actor_binding(
 
 pub(crate) fn mismatched_authoritative_actor_can_be_replaced(
     runtime: &SupervisorRuntime,
-    actor_state: crate::session_actor::ActorState,
+    actor_state: agent_doc_sqlite::state_store::ActorState,
     _frontmatter_harness_changed: bool,
 ) -> bool {
     runtime.health != SupervisorHealth::Healthy
-        || actor_state == crate::session_actor::ActorState::Closed
+        || actor_state == agent_doc_sqlite::state_store::ActorState::Closed
 }
 
 /// Build the operator-actionable recovery suffix for the `defer_to_boundary_restart`
@@ -190,7 +190,7 @@ pub(crate) fn mismatched_authoritative_actor_can_be_replaced(
 /// and actor state to produce the correct recovery path instead of a dead-end bail.
 fn defer_recovery_hint(
     runtime: &SupervisorRuntime,
-    actor_state: crate::session_actor::ActorState,
+    actor_state: agent_doc_sqlite::state_store::ActorState,
     queue_paused: bool,
     file: &Path,
 ) -> String {
@@ -208,8 +208,8 @@ fn defer_recovery_hint(
             ". {} — the boundary restart will not fire until it is healthy and resumed. Run: {}",
             blocker, recovery_cmd
         )
-    } else if actor_state == crate::session_actor::ActorState::Busy
-        || actor_state == crate::session_actor::ActorState::Starting
+    } else if actor_state == agent_doc_sqlite::state_store::ActorState::Busy
+        || actor_state == agent_doc_sqlite::state_store::ActorState::Starting
     {
         format!(
             ". pane is {} (not dispatch-ready) — run: {} --force",
@@ -241,13 +241,16 @@ pub(crate) fn promote_starting_authoritative_actor_if_dispatch_ready(
     tmux: &Tmux,
     file: &Path,
     file_path: &str,
-    record: crate::session_actor::ActorRecord,
+    record: agent_doc_sqlite::state_store::ActorRecord,
     mut runtime: SupervisorRuntime,
     harness: &HarnessConfig,
-) -> (crate::session_actor::ActorRecord, SupervisorRuntime) {
+) -> (
+    agent_doc_sqlite::state_store::ActorRecord,
+    SupervisorRuntime,
+) {
     let effective_state = runtime.actor_state.unwrap_or(record.state);
     if runtime.health != SupervisorHealth::Healthy
-        || effective_state != crate::session_actor::ActorState::Starting
+        || effective_state != agent_doc_sqlite::state_store::ActorState::Starting
     {
         return (record, runtime);
     }
@@ -270,13 +273,13 @@ pub(crate) fn promote_starting_authoritative_actor_if_dispatch_ready(
             session_id: record.session_id.clone(),
             pane_id: record.pane_id.clone(),
             generation: record.generation,
-            state: crate::session_actor::ActorState::Ready,
+            state: agent_doc_sqlite::state_store::ActorState::Ready,
             caller: "route".to_string(),
             reason: "dispatch_ready_prompt".to_string(),
         },
     ) {
         Ok(updated) => {
-            runtime.actor_state = Some(crate::session_actor::ActorState::Ready);
+            runtime.actor_state = Some(agent_doc_sqlite::state_store::ActorState::Ready);
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -356,7 +359,7 @@ pub(crate) fn recover_starting_timeout_blocked_actor_if_dispatch_ready(
             session_id: actor.record.session_id.clone(),
             pane_id: actor.record.pane_id.clone(),
             generation: actor.record.generation,
-            state: crate::session_actor::ActorState::Ready,
+            state: agent_doc_sqlite::state_store::ActorState::Ready,
             caller: "route".to_string(),
             reason: "dispatch_ready_prompt".to_string(),
         },
@@ -364,7 +367,7 @@ pub(crate) fn recover_starting_timeout_blocked_actor_if_dispatch_ready(
         Ok(updated) => {
             clear_starting_actor_timeout_record(file_path);
             let mut runtime = actor.runtime.clone();
-            runtime.actor_state = Some(crate::session_actor::ActorState::Ready);
+            runtime.actor_state = Some(agent_doc_sqlite::state_store::ActorState::Ready);
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -425,7 +428,7 @@ fn transition_proves_current_generation_ready(target: &AuthoritativeActorDispatc
             target.record.last_transition.reason.as_str(),
             "prompt_ready" | "dispatch_ready_prompt" | "idle_pane_reconcile"
         )
-        && target.actor_state() == crate::session_actor::ActorState::Ready
+        && target.actor_state() == agent_doc_sqlite::state_store::ActorState::Ready
 }
 
 /// Outcome of a route-side controller dispatch authorization.
@@ -646,7 +649,7 @@ pub(crate) fn dispatch_only_can_use_degraded_authoritative_actor(
 
 #[cfg(test)]
 pub(crate) fn authoritative_actor_start_wait_terminal_state(
-    state: crate::session_actor::ActorState,
+    state: agent_doc_sqlite::state_store::ActorState,
 ) -> bool {
     crate::flow::routed_reopen::actor_start_wait_terminal_state(actor_dispatch_state(state))
 }
@@ -785,7 +788,7 @@ pub(crate) fn mark_starting_actor_timeout_blocked(
             session_id: session_id.to_string(),
             pane_id: facts.pane_id.clone(),
             generation: facts.generation,
-            state: crate::session_actor::ActorState::Blocked,
+            state: agent_doc_sqlite::state_store::ActorState::Blocked,
             caller: "route".to_string(),
             reason: "starting_actor_timeout".to_string(),
         },
@@ -935,12 +938,12 @@ mod tests {
     fn mismatched_authoritative_actor_can_be_replaced_only_when_not_live_authority() {
         let healthy_ready = SupervisorRuntime {
             health: SupervisorHealth::Healthy,
-            actor_state: Some(crate::session_actor::ActorState::Ready),
+            actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
         };
         assert!(
             !mismatched_authoritative_actor_can_be_replaced(
                 &healthy_ready,
-                crate::session_actor::ActorState::Ready,
+                agent_doc_sqlite::state_store::ActorState::Ready,
                 false,
             ),
             "a healthy ready actor from another harness is still authoritative and must block"
@@ -948,7 +951,7 @@ mod tests {
         assert!(
             !mismatched_authoritative_actor_can_be_replaced(
                 &healthy_ready,
-                crate::session_actor::ActorState::Ready,
+                agent_doc_sqlite::state_store::ActorState::Ready,
                 true,
             ),
             "an explicit frontmatter harness switch must defer to the boundary restart guard while the old-harness actor is healthy"
@@ -956,12 +959,12 @@ mod tests {
 
         let healthy_closed = SupervisorRuntime {
             health: SupervisorHealth::Healthy,
-            actor_state: Some(crate::session_actor::ActorState::Closed),
+            actor_state: Some(agent_doc_sqlite::state_store::ActorState::Closed),
         };
         assert!(
             mismatched_authoritative_actor_can_be_replaced(
                 &healthy_closed,
-                crate::session_actor::ActorState::Closed,
+                agent_doc_sqlite::state_store::ActorState::Closed,
                 false,
             ),
             "a closed actor from another harness should not strand a fresh harness start"
@@ -974,7 +977,7 @@ mod tests {
         assert!(
             mismatched_authoritative_actor_can_be_replaced(
                 &unreachable,
-                crate::session_actor::ActorState::Ready,
+                agent_doc_sqlite::state_store::ActorState::Ready,
                 false,
             ),
             "an unreachable supervisor cannot prove live cross-harness ownership"
@@ -992,15 +995,15 @@ mod tests {
 
     fn ready_target_with_reason(reason: &str) -> AuthoritativeActorDispatchTarget {
         AuthoritativeActorDispatchTarget {
-            record: crate::session_actor::ActorRecord {
+            record: agent_doc_sqlite::state_store::ActorRecord {
                 document_id: "test-doc".to_string(),
                 session_id: "test-session".to_string(),
                 generation: 5,
                 pane_id: "%7".to_string(),
                 window_id: "@1".to_string(),
                 harness: "codex".to_string(),
-                state: crate::session_actor::ActorState::Ready,
-                last_transition: crate::session_actor::ActorLastTransition {
+                state: agent_doc_sqlite::state_store::ActorState::Ready,
+                last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
                     caller: "supervisor".to_string(),
                     reason: reason.to_string(),
                     timestamp: 0,
@@ -1010,7 +1013,7 @@ mod tests {
             },
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
-                actor_state: Some(crate::session_actor::ActorState::Ready),
+                actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
             },
         }
     }
@@ -1057,8 +1060,8 @@ mod tests {
     #[test]
     fn transition_proves_ready_rejects_non_ready_actor() {
         let mut target = ready_target_with_reason("idle_pane_reconcile");
-        target.record.state = crate::session_actor::ActorState::Busy;
-        target.runtime.actor_state = Some(crate::session_actor::ActorState::Busy);
+        target.record.state = agent_doc_sqlite::state_store::ActorState::Busy;
+        target.runtime.actor_state = Some(agent_doc_sqlite::state_store::ActorState::Busy);
         assert!(
             !transition_proves_current_generation_ready(&target),
             "a non-Ready actor must not satisfy the ready barrier even with a matching reason"

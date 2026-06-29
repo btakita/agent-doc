@@ -20,7 +20,7 @@ pub(crate) fn auto_start_candidate_files(col_args: &[String]) -> Vec<PathBuf> {
 #[derive(Default)]
 pub(crate) struct SyncProofCache {
     pub(crate) actor_records:
-        RefCell<HashMap<(PathBuf, String), Option<crate::session_actor::ActorRecord>>>,
+        RefCell<HashMap<(PathBuf, String), Option<agent_doc_sqlite::state_store::ActorRecord>>>,
     pub(crate) live_owner_matches: RefCell<HashMap<(PathBuf, String, String), bool>>,
 }
 
@@ -1000,15 +1000,15 @@ mod tests {
         let proof_cache = SyncProofCache::default();
         let file = Path::new("/tmp/agent-doc-cache-hit.md");
         let session_id = "cache-session";
-        let record = crate::session_actor::ActorRecord {
+        let record = agent_doc_sqlite::state_store::ActorRecord {
             document_id: file.display().to_string(),
             session_id: session_id.to_string(),
             generation: 42,
             pane_id: "%cached".to_string(),
             window_id: "@cached".to_string(),
             harness: "codex".to_string(),
-            state: crate::session_actor::ActorState::Ready,
-            last_transition: crate::session_actor::ActorLastTransition {
+            state: agent_doc_sqlite::state_store::ActorState::Ready,
+            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
                 caller: "test".to_string(),
                 reason: "prefilled_cache".to_string(),
                 timestamp: 0,

@@ -164,7 +164,7 @@ fn test_cli_admin_json_receipts_and_inspection_cover_controller_paths() {
         "session-cli-admin",
         "%51",
         Some(1),
-        agent_doc_orchestration::session_actor::ActorState::Ready,
+        agent_doc_sqlite::state_store::ActorState::Ready,
         "supervisor",
         "prompt_ready",
     )
@@ -357,7 +357,7 @@ fn test_cli_admin_reap_all_stale_reports_summary_and_guards_tmux_unavailable() {
         "session-cli-bulk-reap",
         "%999999",
         Some(1),
-        agent_doc_orchestration::session_actor::ActorState::Ready,
+        agent_doc_sqlite::state_store::ActorState::Ready,
         "supervisor",
         "prompt_ready",
     )
@@ -394,14 +394,14 @@ fn test_cli_admin_reap_all_stale_reports_summary_and_guards_tmux_unavailable() {
     if reaped == 1 {
         assert_eq!(
             current.state,
-            agent_doc_orchestration::session_actor::ActorState::Closed
+            agent_doc_sqlite::state_store::ActorState::Closed
         );
         assert_eq!(current.pane_id, "");
         assert_eq!(current.window_id, "");
     } else {
         assert_eq!(
             current.state,
-            agent_doc_orchestration::session_actor::ActorState::Ready
+            agent_doc_sqlite::state_store::ActorState::Ready
         );
         assert_eq!(current.pane_id, "%999999");
     }
@@ -2665,6 +2665,56 @@ fn test_snapshot_has_no_find_project_root_facade() {
             assert!(
                 !source.contains(forbidden_snippet),
                 "{relative} must call agent_doc_fs::find_project_root directly: {forbidden_snippet}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_session_actor_has_no_sqlite_state_facade() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let session_actor_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_actor.rs"))
+            .unwrap();
+    assert!(
+        !session_actor_source.contains("pub use agent_doc_sqlite::state_store"),
+        "session_actor.rs must not re-export SQLite actor storage types"
+    );
+    assert!(
+        session_actor_source.contains(
+            "use agent_doc_sqlite::state_store::{ActorLastTransition, ActorRecord, ActorState};"
+        ),
+        "session_actor.rs should import SQLite actor storage types privately"
+    );
+
+    fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect_rs_files(&path, out);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    let mut source_files = Vec::new();
+    collect_rs_files(
+        &manifest_dir.join("agent-doc-orchestration/src"),
+        &mut source_files,
+    );
+    collect_rs_files(&manifest_dir.join("src"), &mut source_files);
+    for path in source_files {
+        let source = fs::read_to_string(&path).unwrap();
+        let relative = path.strip_prefix(manifest_dir).unwrap().display();
+        for forbidden_snippet in [
+            "session_actor::ActorState",
+            "session_actor::ActorRecord",
+            "session_actor::ActorLastTransition",
+        ] {
+            assert!(
+                !source.contains(forbidden_snippet),
+                "{relative} must import actor storage types from agent_doc_sqlite::state_store directly: {forbidden_snippet}"
             );
         }
     }

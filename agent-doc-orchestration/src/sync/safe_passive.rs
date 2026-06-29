@@ -25,7 +25,7 @@ pub(crate) fn safe_passive_focus_path_and_session(
 
 pub(crate) fn safe_passive_local_actor_record_state(
     focus_path: &Path,
-) -> Option<Option<crate::session_actor::ActorRecord>> {
+) -> Option<Option<agent_doc_sqlite::state_store::ActorRecord>> {
     let canonical = focus_path
         .canonicalize()
         .ok()

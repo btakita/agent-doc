@@ -3385,15 +3385,15 @@ mod tests {
         crate::project_controller::store_actor_record(
             dir.path(),
             None,
-            &crate::session_actor::ActorRecord {
+            &agent_doc_sqlite::state_store::ActorRecord {
                 document_id: crate::session_actor::canonical_document_id_in(dir.path(), &file_path),
                 session_id: session_id.to_string(),
                 generation: 1,
                 pane_id: actor_pane.clone(),
                 window_id: window.clone(),
                 harness: "codex".to_string(),
-                state: crate::session_actor::ActorState::Starting,
-                last_transition: crate::session_actor::ActorLastTransition {
+                state: agent_doc_sqlite::state_store::ActorState::Starting,
+                last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
                     caller: "start".to_string(),
                     reason: "session_start".to_string(),
                     timestamp: 1,

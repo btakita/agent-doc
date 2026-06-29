@@ -44,7 +44,7 @@ pub(crate) fn prompt_visible_requires_ready_transition(shared: &SupervisorShared
         .actor_state
         .lock()
         .unwrap()
-        .is_some_and(|state| state != crate::session_actor::ActorState::Ready)
+        .is_some_and(|state| state != agent_doc_sqlite::state_store::ActorState::Ready)
 }
 
 pub(crate) fn current_child_prompt_visible(
@@ -91,7 +91,7 @@ pub(crate) fn idle_queue_prompt_visible(
         .actor_state
         .lock()
         .unwrap()
-        .is_some_and(|state| state == crate::session_actor::ActorState::Ready)
+        .is_some_and(|state| state == agent_doc_sqlite::state_store::ActorState::Ready)
     {
         return true;
     }
@@ -125,7 +125,7 @@ pub(crate) fn actor_state_is_ready(shared: &SupervisorShared) -> bool {
         .actor_state
         .lock()
         .unwrap()
-        .is_some_and(|state| state == crate::session_actor::ActorState::Ready)
+        .is_some_and(|state| state == agent_doc_sqlite::state_store::ActorState::Ready)
 }
 
 pub(crate) fn recoverable_ready_busy_blocker_reason(reason: &str) -> bool {
@@ -184,7 +184,8 @@ pub(crate) fn actor_state_is_busy_or_starting(shared: &SupervisorShared) -> bool
     shared.actor_state.lock().unwrap().is_some_and(|state| {
         matches!(
             state,
-            crate::session_actor::ActorState::Busy | crate::session_actor::ActorState::Starting
+            agent_doc_sqlite::state_store::ActorState::Busy
+                | agent_doc_sqlite::state_store::ActorState::Starting
         )
     })
 }
@@ -794,7 +795,8 @@ cargo install — installed agent-doc 0.34.0
     fn idle_queue_prompt_visible_trusts_ready_actor_over_stale_renderer_tail() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = crate::harness::HarnessConfig::claude();
-        *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Ready);
+        *shared.actor_state.lock().unwrap() =
+            Some(agent_doc_sqlite::state_store::ActorState::Ready);
         record_recent_output(&shared, b"turn committed, renderer tail has no composer\n");
 
         assert!(
@@ -810,7 +812,8 @@ cargo install — installed agent-doc 0.34.0
     fn idle_queue_prompt_visible_keeps_blocker_over_ready_actor() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = crate::harness::HarnessConfig::claude();
-        *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Ready);
+        *shared.actor_state.lock().unwrap() =
+            Some(agent_doc_sqlite::state_store::ActorState::Ready);
         record_recent_output(
             &shared,
             concat!(
@@ -845,7 +848,8 @@ cargo install — installed agent-doc 0.34.0
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = crate::harness::HarnessConfig::codex();
         shared.running.store(true, Ordering::Relaxed);
-        *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Ready);
+        *shared.actor_state.lock().unwrap() =
+            Some(agent_doc_sqlite::state_store::ActorState::Ready);
         record_recent_output(&shared, "›\n".as_bytes());
         record_recent_output(&shared, b"Working...\n");
         record_recent_output(
@@ -860,7 +864,8 @@ cargo install — installed agent-doc 0.34.0
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = crate::harness::HarnessConfig::codex();
         shared.running.store(true, Ordering::Relaxed);
-        *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Ready);
+        *shared.actor_state.lock().unwrap() =
+            Some(agent_doc_sqlite::state_store::ActorState::Ready);
         record_recent_output(&shared, "›\n".as_bytes());
         record_recent_output(&shared, b"tab to queue message\n");
         record_recent_output(
@@ -985,7 +990,7 @@ cargo install — installed agent-doc 0.34.0
     fn prompt_visible_requires_ready_transition_after_busy_dispatch() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         shared.prompt_visible_once.store(true, Ordering::Relaxed);
-        *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Busy);
+        *shared.actor_state.lock().unwrap() = Some(agent_doc_sqlite::state_store::ActorState::Busy);
         assert!(
             prompt_visible_requires_ready_transition(&shared),
             "a busy actor that surfaces the prompt again must return to ready"

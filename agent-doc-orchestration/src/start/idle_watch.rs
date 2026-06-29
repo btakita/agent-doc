@@ -705,7 +705,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     idle_busy_ticks,
                 ) {
                     shared.transition_actor_state(
-                        crate::session_actor::ActorState::Ready,
+                        agent_doc_sqlite::state_store::ActorState::Ready,
                         "supervisor",
                         "idle_pane_reconcile",
                     );

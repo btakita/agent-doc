@@ -574,7 +574,7 @@ pub fn record_requested_head(file: &Path, head_prompt: &str) -> Result<()> {
 fn is_foreign_owned_marker(root: &Path, doc: &Path, current_pane: &str) -> bool {
     match crate::project_controller::authoritative_actor_binding(root, doc) {
         Ok(Some(record))
-            if record.state != crate::session_actor::ActorState::Closed
+            if record.state != agent_doc_sqlite::state_store::ActorState::Closed
                 && !record.pane_id.trim().is_empty() =>
         {
             record.pane_id != current_pane

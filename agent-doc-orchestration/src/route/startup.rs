@@ -395,12 +395,12 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
             Err(e) => {
                 anyhow::bail!(
                     "{}",
-                    format_duplicate_pane_policy_error(
+                    duplicate_pane_policy_error_message(DuplicatePanePolicyErrorFacts {
                         session_name,
                         file_path,
-                        Some(target),
-                        &format!("split-window failed alongside pane {} ({})", target, e)
-                    )
+                        anchor_pane: Some(target),
+                        cause: &format!("split-window failed alongside pane {} ({})", target, e),
+                    })
                 );
             }
         }
@@ -409,12 +409,12 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
         if has_agent_doc_window {
             anyhow::bail!(
                 "{}",
-                format_duplicate_pane_policy_error(
+                duplicate_pane_policy_error_message(DuplicatePanePolicyErrorFacts {
                     session_name,
                     file_path,
-                    None,
-                    "the target session already has an 'agent-doc' window but no safe registered anchor pane was found"
-                )
+                    anchor_pane: None,
+                    cause: "the target session already has an 'agent-doc' window but no safe registered anchor pane was found",
+                })
             );
         } else {
             eprintln!(

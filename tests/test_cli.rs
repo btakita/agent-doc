@@ -3702,6 +3702,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     let route_dispatch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
             .unwrap();
+    let route_startup_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/startup.rs"))
+            .unwrap();
     let route_pane_resolution_source = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/route/pane_resolution.rs"),
     )
@@ -3796,6 +3799,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn route_busy_diagnostic_message(",
         "pub struct RouteBusyQueuedDiagnosticFacts",
         "pub fn route_busy_queued_diagnostic_message(",
+        "pub struct DuplicatePanePolicyErrorFacts",
+        "pub fn duplicate_pane_policy_error_message(",
         "pub struct DispatchOnlyBusyRefusalFacts",
         "pub fn dispatch_only_busy_refusal_message(",
     ] {
@@ -3838,6 +3843,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn startup_miss_diagnostic_message(",
         "fn busy_route_diagnostic_message(",
         "fn busy_route_queued_diagnostic_message(",
+        "fn format_duplicate_pane_policy_error(",
         "fn dispatch_only_busy_refusal_message(",
     ] {
         assert!(
@@ -4009,6 +4015,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_pane_resolution_source.contains("startup_miss_should_restart_live_owner(")
             && route_pane_resolution_source.contains("startup_miss_should_fail_closed("),
         "route pane resolution should adapt startup-miss sidecars into focused controller policy"
+    );
+    assert!(
+        route_startup_source.contains("DuplicatePanePolicyErrorFacts")
+            && route_startup_source.contains("duplicate_pane_policy_error_message("),
+        "route startup should adapt tmux/session facts into focused duplicate-pane diagnostic policy"
     );
     for forbidden_snippet in [
         "pub(crate) fn should_require_routed_cycle_ack(",

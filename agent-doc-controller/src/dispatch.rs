@@ -420,6 +420,43 @@ pub fn route_busy_queued_diagnostic_message(facts: RouteBusyQueuedDiagnosticFact
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DuplicatePanePolicyErrorFacts<'a> {
+    pub session_name: &'a str,
+    pub file_path: &'a str,
+    pub anchor_pane: Option<&'a str>,
+    pub cause: &'a str,
+}
+
+pub fn duplicate_pane_policy_error_message(facts: DuplicatePanePolicyErrorFacts<'_>) -> String {
+    let mut lines = vec![
+        format!(
+            "refusing to provision a duplicate tmux pane for {} in session '{}': {}",
+            facts.file_path, facts.session_name, facts.cause
+        ),
+        "Inspect the existing panes first:".to_string(),
+        format!(
+            "  tmux list-panes -t {}:agent-doc -F '#{{pane_id}} #{{window_name}} #{{pane_current_command}} #{{pane_current_path}}'",
+            facts.session_name
+        ),
+        format!(
+            "  tmux list-panes -a -F '#{{session_name}} #{{window_name}} #{{pane_id}} #{{pane_current_command}} #{{pane_current_path}}' | grep ' {}$'",
+            facts.file_path
+        ),
+    ];
+    if let Some(anchor_pane) = facts.anchor_pane {
+        lines.push(format!(
+            "  tmux capture-pane -pt {} | tail -n 80",
+            anchor_pane
+        ));
+        lines.push(format!("  tmux kill-pane -t {}", anchor_pane));
+    } else {
+        lines.push("  tmux kill-pane -t <pane_id>".to_string());
+    }
+    lines.push(format!("Then rerun: agent-doc {}", facts.file_path));
+    lines.join("\n")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DispatchOnlyBusyRefusalFacts<'a> {
     pub generation: u64,
     pub file_display: &'a str,
@@ -1608,6 +1645,20 @@ mod tests {
         );
         assert!(message.contains("No need to rerun"), "{message}");
         assert!(!message.contains("rerun `Run Agent Doc`"), "{message}");
+    }
+
+    #[test]
+    fn duplicate_pane_policy_error_includes_manual_tmux_commands() {
+        let rendered = duplicate_pane_policy_error_message(DuplicatePanePolicyErrorFacts {
+            session_name: "test",
+            file_path: "tasks/agent-doc/agent-doc-bugs2.md",
+            anchor_pane: Some("%42"),
+            cause: "split-window failed alongside pane %42 (too small)",
+        });
+        assert!(rendered.contains("tmux list-panes -t test:agent-doc"));
+        assert!(rendered.contains("tmux kill-pane -t %42"));
+        assert!(rendered.contains("agent-doc tasks/agent-doc/agent-doc-bugs2.md"));
+        assert!(rendered.contains("split-window failed alongside pane %42"));
     }
 
     #[test]

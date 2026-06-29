@@ -190,8 +190,9 @@ use agent_doc_controller::dispatch::{
     DirectPaneResubmitProofFacts, DirectPaneSubmitStatus as CommandDispatchStatus,
     DispatchActorState, DispatchDrainRetryDecision, DispatchOnlyBusyRefusalFacts,
     DispatchRuntimeHealth, DispatchStartProofDecision, DispatchStartProofFacts,
-    MissingCycleAckFacts, RetryBudget, RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts,
-    RouteLatencyFacts, RouteLatencyStatus, RouteStartupMissDiagnosticFacts, RouteSubmitObservation,
+    DuplicatePanePolicyErrorFacts, MissingCycleAckFacts, RetryBudget, RouteBusyDiagnosticFacts,
+    RouteBusyQueuedDiagnosticFacts, RouteLatencyFacts, RouteLatencyStatus,
+    RouteStartupMissDiagnosticFacts, RouteSubmitObservation,
     RouteSubmitObservationFacts as ControllerRouteSubmitObservationFacts, RoutedCycleAckFacts,
     RoutedDispatchStartProof, RoutedTriggerPayloadFacts, STARTING_ACTOR_TIMEOUT_REASON,
     StartingTimeoutActorFacts, StartupMissRouteFacts, actor_blocked_by_starting_timeout,
@@ -208,9 +209,10 @@ use agent_doc_controller::dispatch::{
     dispatch_only_should_probe_active_turn_cue,
     dispatch_only_starting_pane_ready_timeout_for_binary,
     dispatch_only_starting_pane_recovery_retry_budget,
-    dispatch_only_starting_pane_recovery_timeout_for_binary, effective_authoritative_actor_state,
-    route_busy_diagnostic_message, route_busy_queued_diagnostic_message, route_latency_message,
-    route_latency_status, route_startup_miss_diagnostic_message, route_submit_issue_message,
+    dispatch_only_starting_pane_recovery_timeout_for_binary, duplicate_pane_policy_error_message,
+    effective_authoritative_actor_state, route_busy_diagnostic_message,
+    route_busy_queued_diagnostic_message, route_latency_message, route_latency_status,
+    route_startup_miss_diagnostic_message, route_submit_issue_message,
     route_submit_observation_message, routed_trigger_payload_rejection,
     should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
     starting_timeout_blocked_actor_can_recover, startup_miss_requires_fresh_start,
@@ -1199,40 +1201,6 @@ fn format_associated_pane_selected_error(
             candidate.source_summary()
         ));
     }
-    lines.join("\n")
-}
-
-fn format_duplicate_pane_policy_error(
-    session_name: &str,
-    file_path: &str,
-    anchor_pane: Option<&str>,
-    cause: &str,
-) -> String {
-    let mut lines = vec![
-        format!(
-            "refusing to provision a duplicate tmux pane for {} in session '{}': {}",
-            file_path, session_name, cause
-        ),
-        "Inspect the existing panes first:".to_string(),
-        format!(
-            "  tmux list-panes -t {}:agent-doc -F '#{{pane_id}} #{{window_name}} #{{pane_current_command}} #{{pane_current_path}}'",
-            session_name
-        ),
-        format!(
-            "  tmux list-panes -a -F '#{{session_name}} #{{window_name}} #{{pane_id}} #{{pane_current_command}} #{{pane_current_path}}' | grep ' {}$'",
-            file_path
-        ),
-    ];
-    if let Some(anchor_pane) = anchor_pane {
-        lines.push(format!(
-            "  tmux capture-pane -pt {} | tail -n 80",
-            anchor_pane
-        ));
-        lines.push(format!("  tmux kill-pane -t {}", anchor_pane));
-    } else {
-        lines.push("  tmux kill-pane -t <pane_id>".to_string());
-    }
-    lines.push(format!("Then rerun: agent-doc {}", file_path));
     lines.join("\n")
 }
 
@@ -7350,23 +7318,6 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             .find(|entry| entry.session_id == session_id)
             .expect("fresh pane should be registered after the blocked handoff is ignored");
         assert_eq!(entry.pane, new_pane);
-    }
-    #[test]
-    #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn duplicate_pane_policy_error_includes_manual_tmux_commands() {
-        let iso = IsolatedTmux::new("route-test-duplicate-policy");
-        let session = "test";
-        let rendered = format_duplicate_pane_policy_error(
-            session,
-            "tasks/agent-doc/agent-doc-bugs2.md",
-            Some("%42"),
-            "split-window failed alongside pane %42 (too small)",
-        );
-        assert!(rendered.contains("tmux list-panes -t test:agent-doc"));
-        assert!(rendered.contains("tmux kill-pane -t %42"));
-        assert!(rendered.contains("agent-doc tasks/agent-doc/agent-doc-bugs2.md"));
-        assert!(rendered.contains("split-window failed alongside pane %42"));
-        let _ = iso;
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]

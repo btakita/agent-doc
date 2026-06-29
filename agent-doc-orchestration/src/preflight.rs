@@ -909,35 +909,6 @@ fn preset_item_id_collision_warning(content: &str) -> Option<PreflightWarning> {
     })
 }
 
-/// Grace window (seconds) so an artifact built effectively at the same time as
-/// the latest source edit is not flagged. `#supstaledetect`: the staleness basis
-/// is now the newest source-FILE mtime, which a successful build always touches
-/// the binary mtime to AFTER, so a fresh install is exact (no build→commit skew
-/// to absorb). The grace just tolerates coarse mtime resolution / a source file
-/// touched moments after the build started; 5 minutes still comfortably catches
-/// genuine staleness (forgotten reinstalls leave sessions on hours-old code).
-const STALE_INSTALL_GRACE_SECS: u64 = 300;
-
-/// Pure classifier for `#install-stale-guard`: given the unix timestamp of the
-/// latest source edit (`#supstaledetect`: the newest source-FILE mtime, not the
-/// HEAD commit timestamp) and a set of `(label, mtime)` installed artifacts
-/// (`None` mtime = artifact absent), return the labels whose mtime predates the
-/// source by more than `grace_secs`. Extracted so the staleness rule is
-/// deterministically unit-testable without touching git or the filesystem.
-fn classify_stale_install_artifacts(
-    source_ts: u64,
-    artifacts: &[(&'static str, Option<u64>)],
-    grace_secs: u64,
-) -> Vec<&'static str> {
-    artifacts
-        .iter()
-        .filter_map(|(label, mtime)| match mtime {
-            Some(m) if m.saturating_add(grace_secs) < source_ts => Some(*label),
-            _ => None,
-        })
-        .collect()
-}
-
 /// Unix mtime (seconds) of `path`, following symlinks. `None` when
 /// missing/unreadable.
 fn artifact_mtime_secs(path: &Path) -> Option<u64> {
@@ -1050,7 +1021,11 @@ fn stale_install_warning(doc_git_root: &Path) -> Option<PreflightWarning> {
         ),
     ];
 
-    let stale = classify_stale_install_artifacts(source_ts, &artifacts, STALE_INSTALL_GRACE_SECS);
+    let stale = agent_doc_supervisor::config::classify_stale_install_artifacts(
+        source_ts,
+        &artifacts,
+        agent_doc_supervisor::config::STALE_INSTALL_GRACE_SECS,
+    );
     if stale.is_empty() {
         return None;
     }
@@ -3406,91 +3381,6 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
-    #[test]
-    fn stale_install_classifier_flags_only_artifacts_older_than_source_edit() {
-        // `#supstaledetect`: the timestamp passed in is the newest source-FILE
-        // mtime (not a commit timestamp), but the classifier rule is unchanged.
-        let source = 10_000u64;
-        let grace = 60u64;
-
-        // All artifacts newer than the source edit → nothing stale.
-        assert!(
-            classify_stale_install_artifacts(
-                source,
-                &[("bin", Some(source + 5)), ("cdylib", Some(source + 1))],
-                grace,
-            )
-            .is_empty()
-        );
-
-        // One artifact older than the source edit by more than the grace → flagged.
-        let stale = classify_stale_install_artifacts(
-            source,
-            &[("bin", Some(source - 600)), ("cdylib", Some(source + 1))],
-            grace,
-        );
-        assert_eq!(stale, vec!["bin"]);
-
-        // Built just inside the grace window (mtime resolution / a source file
-        // touched moments after the build) → not flagged; older than grace → flagged.
-        assert!(
-            classify_stale_install_artifacts(source, &[("bin", Some(source - 30))], grace)
-                .is_empty()
-        );
-        assert_eq!(
-            classify_stale_install_artifacts(source, &[("bin", Some(source - 61))], grace),
-            vec!["bin"]
-        );
-
-        // Absent artifacts (not installed) never fire.
-        assert!(
-            classify_stale_install_artifacts(source, &[("bin", None), ("cdylib", None)], grace)
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn stale_install_uses_source_file_mtime_not_commit_time_so_build_before_commit_is_not_stale() {
-        // `#supstaledetect` regression: the dogfood flow is
-        // edit → build → install → verify → THEN commit, so a freshly built
-        // binary's mtime is AFTER the newest source-FILE mtime but BEFORE the
-        // commit object that covers it. With the staleness basis unified onto the
-        // source-FILE mtime, such a binary must NOT classify as stale — even when
-        // the build→commit gap (a hypothetical later commit timestamp) exceeds the
-        // grace. This is the exact false-positive the old commit-timestamp basis
-        // produced (binary built 03:16, commit created 03:27, no source edits).
-        let source_ts = 10_000u64;
-        let grace = STALE_INSTALL_GRACE_SECS;
-
-        // Binary built 10s after the newest source file (well inside grace).
-        assert!(
-            classify_stale_install_artifacts(source_ts, &[("bin", Some(source_ts + 10))], grace)
-                .is_empty(),
-            "a binary built just after the source edit must not be stale"
-        );
-
-        // Binary built far AFTER the source edit (e.g. an ~11-minute build→commit
-        // gap's worth of slack) is even more clearly fresh — the old basis would
-        // have compared this binary to the later commit timestamp and flagged it.
-        assert!(
-            classify_stale_install_artifacts(source_ts, &[("bin", Some(source_ts + 660))], grace)
-                .is_empty(),
-            "a binary newer than the source edit is fresh regardless of any later commit time"
-        );
-
-        // Genuine staleness still flags: a binary built well before the newest
-        // source edit (beyond grace) means live sessions run pre-edit code.
-        assert_eq!(
-            classify_stale_install_artifacts(
-                source_ts,
-                &[("bin", Some(source_ts - grace - 1))],
-                grace,
-            ),
-            vec!["bin"],
-            "a binary older than the source edit beyond the grace must still flag"
-        );
-    }
-
     #[test]
     fn newest_artifact_mtime_uses_freshest_existing_path() {
         let dir = TempDir::new().unwrap();

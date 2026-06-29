@@ -56,6 +56,28 @@ pub fn auto_install_should_retry(attempt: u32, max_attempts: u32) -> bool {
     attempt < max_attempts
 }
 
+/// Grace window (seconds) so an artifact built effectively at the same time as
+/// the latest source edit is not flagged. This tolerates coarse mtime
+/// resolution and source files touched moments after a build starts.
+pub const STALE_INSTALL_GRACE_SECS: u64 = 300;
+
+/// Classify installed artifacts whose mtimes predate the latest source edit by
+/// more than `grace_secs`. `None` mtime means the artifact is absent and is not
+/// itself stale.
+pub fn classify_stale_install_artifacts<'a>(
+    source_ts: u64,
+    artifacts: &[(&'a str, Option<u64>)],
+    grace_secs: u64,
+) -> Vec<&'a str> {
+    artifacts
+        .iter()
+        .filter_map(|(label, mtime)| match mtime {
+            Some(m) if m.saturating_add(grace_secs) < source_ts => Some(*label),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Route-owned host supervisor staleness is binary identity, not process start time.
 ///
 /// A supervisor that re-exec'd in place keeps its old start time but maps the installed
@@ -130,6 +152,70 @@ mod tests {
         assert!(!auto_install_should_retry(3, 3));
         assert!(!auto_install_should_retry(4, 3));
         assert!(!auto_install_should_retry(1, 1));
+    }
+
+    #[test]
+    fn stale_install_classifier_flags_only_artifacts_older_than_source_edit() {
+        let source = 10_000u64;
+        let grace = 60u64;
+
+        assert!(
+            classify_stale_install_artifacts(
+                source,
+                &[("bin", Some(source + 5)), ("cdylib", Some(source + 1))],
+                grace,
+            )
+            .is_empty()
+        );
+
+        let stale = classify_stale_install_artifacts(
+            source,
+            &[("bin", Some(source - 600)), ("cdylib", Some(source + 1))],
+            grace,
+        );
+        assert_eq!(stale, vec!["bin"]);
+
+        assert!(
+            classify_stale_install_artifacts(source, &[("bin", Some(source - 30))], grace)
+                .is_empty()
+        );
+        assert_eq!(
+            classify_stale_install_artifacts(source, &[("bin", Some(source - 61))], grace),
+            vec!["bin"]
+        );
+
+        assert!(
+            classify_stale_install_artifacts(source, &[("bin", None), ("cdylib", None)], grace)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn stale_install_uses_source_file_mtime_not_commit_time_so_build_before_commit_is_not_stale() {
+        let source_ts = 10_000u64;
+        let grace = STALE_INSTALL_GRACE_SECS;
+
+        assert!(
+            classify_stale_install_artifacts(source_ts, &[("bin", Some(source_ts + 10))], grace)
+                .is_empty(),
+            "a binary built just after the source edit must not be stale"
+        );
+
+        assert!(
+            classify_stale_install_artifacts(source_ts, &[("bin", Some(source_ts + 660))], grace)
+                .is_empty(),
+            "a binary newer than the source edit is fresh regardless of any later commit time"
+        );
+
+        assert_eq!(
+            classify_stale_install_artifacts(
+                source_ts,
+                &[("bin", Some(source_ts - grace - 1))],
+                grace,
+            ),
+            vec!["bin"],
+            "a binary older than the source edit beyond the grace must still flag"
+        );
     }
 
     #[test]

@@ -3730,6 +3730,17 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
     )
     .unwrap();
+    let supervisor_config =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/config.rs")).unwrap();
+    for required_snippet in [
+        "pub const STALE_INSTALL_GRACE_SECS",
+        "pub fn classify_stale_install_artifacts",
+    ] {
+        assert!(
+            supervisor_config.contains(required_snippet),
+            "agent-doc-supervisor config should own stale-install policy directly: {required_snippet}"
+        );
+    }
     for forbidden_snippet in [
         "pub(crate) fn resolve_supervisor_auto_recycle",
         "pub(crate) fn resolve_agent_change_restart",
@@ -3752,6 +3763,22 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             "project_controller::rpc should call focused supervisor config helpers directly: {required_snippet}"
         );
     }
+    let preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    for forbidden_snippet in [
+        "const STALE_INSTALL_GRACE_SECS",
+        "fn classify_stale_install_artifacts",
+    ] {
+        assert!(
+            !preflight.contains(forbidden_snippet),
+            "preflight must not re-own pure stale-install policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        preflight.contains("agent_doc_supervisor::config::classify_stale_install_artifacts")
+            && preflight.contains("agent_doc_supervisor::config::STALE_INSTALL_GRACE_SECS"),
+        "preflight should call focused stale-install policy directly"
+    );
 
     for relative in [
         "agent-doc-orchestration/src/start.rs",
